@@ -5,6 +5,7 @@ import {
   collapseToOneLine,
   registerEditorCommands,
   truncateToOneLine,
+  workspaceFolderPath,
 } from "../src/commands/editor-commands";
 import { fakeClient, ok } from "./test-helpers";
 
@@ -52,17 +53,37 @@ describe("editor-commands: buildCitation", () => {
     expect(citation).toEqual({ file: "src/a.ts", line: 5, repo: "/repo" });
   });
 
-  it("drops the file when the document is outside the workspace folder", () => {
+  it("cites the absolute path, with no repo, when the document is outside the folder", () => {
     const citation = buildCitation(
       { fsPath: "/elsewhere/a.ts" },
       { start: { line: 0 } },
       "/repo",
     );
-    expect(citation).toEqual({ line: 1, repo: "/repo" });
+    expect(citation).toEqual({ file: "/elsewhere/a.ts", line: 1 });
   });
 
-  it("keeps only the line when there is no workspace folder", () => {
-    expect(buildCitation({ fsPath: "/repo/a.ts" }, { start: { line: 2 } })).toEqual({ line: 3 });
+  it("cites the absolute path, with no repo, when there is no workspace folder", () => {
+    expect(buildCitation({ fsPath: "/repo/a.ts" }, { start: { line: 2 } })).toEqual({ file: "/repo/a.ts", line: 3 });
+  });
+
+  it("yields no citation for an unsaved (untitled) document", () => {
+    expect(
+      buildCitation({ fsPath: "Untitled-1", scheme: "untitled" }, { start: { line: 0 } }, "/repo"),
+    ).toBeUndefined();
+  });
+});
+
+describe("editor-commands: workspaceFolderPath", () => {
+  it("returns the folder containing the document", () => {
+    vscode.workspace.workspaceFolders = [{ uri: { fsPath: "/repo" } }];
+    const document = { uri: vscode.Uri.file("/repo/src/a.ts") } as unknown as vscode.TextDocument;
+    expect(workspaceFolderPath(document)).toBe("/repo");
+  });
+
+  it("returns undefined when the document is outside every folder, not the first folder", () => {
+    vscode.workspace.workspaceFolders = [{ uri: { fsPath: "/repo" } }];
+    const document = { uri: vscode.Uri.file("/elsewhere/a.ts") } as unknown as vscode.TextDocument;
+    expect(workspaceFolderPath(document)).toBeUndefined();
   });
 });
 

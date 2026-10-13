@@ -55,6 +55,43 @@ export function parseTruths(raw: unknown): string[] {
   return texts;
 }
 
+export interface ProjectTaskCounts {
+  active?: number;
+  queue?: number;
+  open?: number;
+}
+
+function firstFiniteNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * get_tasks reports per-project counts computed from the full task document, so
+ * they are not cut by the row cap. Prefer explicit Active/Queue counts; when the
+ * tool only breaks tasks down by responsibility, each open task is in exactly
+ * one bucket, so their sum is the uncapped open total.
+ */
+export function parseReportedTaskCounts(value: unknown): ProjectTaskCounts | undefined {
+  const counts = asRecord(value);
+  if (!counts) return undefined;
+  const sections = asRecord(counts.sections);
+  const active = firstFiniteNumber(counts.Active, counts.active, sections?.Active, sections?.active);
+  const queue = firstFiniteNumber(counts.Queue, counts.queue, sections?.Queue, sections?.queue);
+  if (active !== undefined || queue !== undefined) {
+    return { active: active ?? 0, queue: queue ?? 0 };
+  }
+  const buckets = ["human", "agentReady", "agentWaitingOnHuman", "agentWaitingOnTask"]
+    .map((key) => counts[key])
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+  if (buckets.length > 0) {
+    return { open: buckets.reduce((sum, n) => sum + n, 0) };
+  }
+  return undefined;
+}
+
 export class TreeDataSource {
   private cache = new Map<string, unknown>();
   private cacheGeneration = 0;
@@ -223,16 +260,27 @@ export class TreeDataSource {
 
   // --- Tasks ---
 
-  private fetchAllTasks(): Promise<{ projectName: string; task: TaskSummary }[]> {
+  // One get_tasks call powers both the task board's rows and the project rows'
+  // counts. The response's per-project `counts` are computed from the full task
+  // document, so they stay accurate even when the returned rows are capped.
+  private fetchGlobalTasks(): Promise<{
+    tasks: { projectName: string; task: TaskSummary }[];
+    reportedCounts: Map<string, ProjectTaskCounts>;
+  }> {
     return this.cachedFetch("globalTasks:all", async () => {
       const raw = await this.client.getAllTasks({ status: "active+queue", limit: 100 });
       const data = responseData(raw);
       const projects = asArray(data?.projects);
 
-      const allTasks: { projectName: string; task: TaskSummary }[] = [];
+      const tasks: { projectName: string; task: TaskSummary }[] = [];
+      const reportedCounts = new Map<string, ProjectTaskCounts>();
       for (const proj of projects) {
         const record = asRecord(proj);
         const projectName = asString(record?.project) ?? "unknown";
+        const reported = parseReportedTaskCounts(record?.counts);
+        if (reported) {
+          reportedCounts.set(projectName.toLowerCase(), reported);
+        }
         const items = asRecord(record?.items);
         for (const section of ["Active", "Queue"] as TaskSection[]) {
           const sectionItems = asArray(items?.[section]);
@@ -240,10 +288,10 @@ export class TreeDataSource {
             const taskRecord = asRecord(entry);
             const line = asString(taskRecord?.line);
             if (!line) continue;
-            allTasks.push({
+            tasks.push({
               projectName,
               task: {
-                id: asString(taskRecord?.id) ?? `${section}-${allTasks.length + 1}`,
+                id: asString(taskRecord?.id) ?? `${section}-${tasks.length + 1}`,
                 line,
                 section,
                 checked: asBoolean(taskRecord?.checked) ?? false,
@@ -256,8 +304,12 @@ export class TreeDataSource {
           }
         }
       }
-      return allTasks;
+      return { tasks, reportedCounts };
     });
+  }
+
+  private async fetchAllTasks(): Promise<{ projectName: string; task: TaskSummary }[]> {
+    return (await this.fetchGlobalTasks()).tasks;
   }
 
   async getGlobalTaskBoard(): Promise<PhrenNode[]> {
@@ -857,7 +909,7 @@ export class TreeDataSource {
     projects: ProjectSummary[],
     activeProjectName: string | undefined,
     reviewCounts?: Map<string, { review: number; conflicts: number }>,
-    taskCounts?: Map<string, { active: number; queue: number }>,
+    taskCounts?: Map<string, ProjectTaskCounts>,
   ): ProjectNode[] {
     const nodes: ProjectNode[] = projects.map((project) => {
       const key = project.name.toLowerCase();
@@ -872,6 +924,7 @@ export class TreeDataSource {
         conflictCount: counts?.conflicts,
         activeCount: tasks?.active,
         queueCount: tasks?.queue,
+        openCount: tasks?.open,
       };
     });
     if (activeProjectName) {
@@ -1216,17 +1269,23 @@ export class TreeDataSource {
 
   // Per-project open-task counts for the project row description. One global
   // call covers every project, so expanding the projects list never fans out
-  // into a get_tasks call per project.
-  private async fetchTaskCountsByProject(): Promise<Map<string, { active: number; queue: number }>> {
-    const counts = new Map<string, { active: number; queue: number }>();
+  // into a get_tasks call per project. Reported counts win because the returned
+  // rows are capped; row counting is only the fallback for a response without
+  // counts.
+  private async fetchTaskCountsByProject(): Promise<Map<string, ProjectTaskCounts>> {
+    const counts = new Map<string, ProjectTaskCounts>();
     try {
-      const allTasks = await this.fetchAllTasks();
-      for (const { projectName, task } of allTasks) {
+      const { tasks, reportedCounts } = await this.fetchGlobalTasks();
+      for (const { projectName, task } of tasks) {
         const key = projectName.toLowerCase();
-        if (!counts.has(key)) counts.set(key, { active: 0, queue: 0 });
-        const entry = counts.get(key)!;
-        if (task.section === "Active") entry.active++;
-        else if (task.section === "Queue") entry.queue++;
+        if (reportedCounts.has(key)) continue;
+        const entry = counts.get(key) ?? { active: 0, queue: 0 };
+        if (task.section === "Active") entry.active = (entry.active ?? 0) + 1;
+        else if (task.section === "Queue") entry.queue = (entry.queue ?? 0) + 1;
+        counts.set(key, entry);
+      }
+      for (const [key, value] of reportedCounts) {
+        counts.set(key, value);
       }
     } catch {
       // Best-effort: project rows simply omit task counts.

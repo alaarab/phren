@@ -44,6 +44,8 @@ export interface ProjectNode {
   conflictCount?: number;
   activeCount?: number;
   queueCount?: number;
+  /** Open tasks (Active + Queue) when the source gives a total but no split. */
+  openCount?: number;
 }
 
 export interface CategoryNode {

@@ -41,12 +41,19 @@ export class PhrenStatusBar implements vscode.Disposable {
   }
 
   async initialize(prefetchedProjectsRaw?: unknown): Promise<void> {
-    const projectNames = prefetchedProjectsRaw !== undefined
-      ? this.parseProjects(prefetchedProjectsRaw).map((p) => p.name)
-      : await this.fetchProjectNames();
-    this.activeProjectName = this.activeProjectName && projectNames.includes(this.activeProjectName)
-      ? this.activeProjectName
-      : projectNames[0];
+    try {
+      const projectNames = prefetchedProjectsRaw !== undefined
+        ? this.parseProjects(prefetchedProjectsRaw).map((p) => p.name)
+        : await this.fetchProjectNames();
+      this.activeProjectName = this.activeProjectName && projectNames.includes(this.activeProjectName)
+        ? this.activeProjectName
+        : projectNames[0];
+    } catch (error) {
+      // Project discovery failing (server unreachable) must not stop health
+      // polling. Show the disconnected state with the reason now; a later
+      // successful poll clears it and restores the normal item.
+      this.disconnectedReason = error instanceof Error ? error.message : String(error);
+    }
     this.render();
 
     // Start health polling (clear any existing timer to prevent stacking)

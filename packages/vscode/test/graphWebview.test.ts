@@ -439,6 +439,50 @@ describe("loadGraphData: empty and partial states", () => {
     expect(data.nodes.some((n) => n.projectName === "broken")).toBe(false);
     expect(data.emptyReason).toBeUndefined();
   });
+
+  it("reports a load failure (not an empty store) when every project fails and no entities remain", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "broken" }] })),
+      getFindings: vi.fn(async (project: string) => {
+        throw new Error(`boom-${project}`);
+      }),
+      readGraph: vi.fn(async () => ok({ fragments: [] })),
+    });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    // Names the count, the store, the log channel, and the first error in
+    // project order (app), not whichever parallel fetch rejected first.
+    expect(data.emptyReason).toContain("Could not load memory for 2 projects");
+    expect(data.emptyReason).toContain("phren-graphwebview-test-home/.phren");
+    expect(data.emptyReason).toContain("Phren: Show Log");
+    expect(data.emptyReason).toContain("boom-app");
+  });
+
+  it("says some projects failed when the loaded ones are all empty", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "broken" }] })),
+      getProjectSummary: vi.fn(async () => ok({ name: "app", summary: "the app" })),
+      getFindings: vi.fn(async (project: string) => {
+        if (project === "broken") throw new Error("boom");
+        return ok({ findings: [] });
+      }),
+      getTasks: vi.fn(async () => ok({ items: {} })),
+      getTopicConfig: vi.fn(async () => ok({ topics: [] })),
+      readGraph: vi.fn(async () => ok({ fragments: [] })),
+    });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    expect(data.emptyReason).toContain("Could not load memory for 1 of 2 projects");
+    expect(data.emptyReason).toContain("the rest have no findings or tasks");
+    expect(data.emptyReason).toContain("Phren: Show Log");
+  });
+
+  it("keeps the plain empty-store wording when every project loaded successfully", async () => {
+    const client = fakeClient({ listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }] })) });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    expect(data.emptyReason).toBe("No findings or tasks yet for the 1 project in /nonexistent/phren-graphwebview-test-home/.phren.");
+  });
 });
 
 describe("renderGraphHtmlForTests: empty state", () => {

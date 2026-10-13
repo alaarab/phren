@@ -25,27 +25,29 @@ export function truncateToOneLine(text: string, maxLength: number): string {
 
 /**
  * The citation for a finding saved from the editor: the 1-based line the
- * selection starts on, the document's path relative to its workspace folder,
- * and that folder's path.
+ * selection starts on, plus the document's path. Inside a workspace folder the
+ * path is relative and the folder travels as `repo`; a file outside every
+ * folder is cited by absolute path with no `repo`. An unsaved (untitled)
+ * document has no file to cite, so it yields no citation at all.
  */
 export function buildCitation(
-  documentUri: { fsPath: string },
+  documentUri: { fsPath: string; scheme?: string },
   selection: { start: { line: number } },
   workspaceFolderPath?: string,
-): Citation {
-  const citation: Citation = { line: selection.start.line + 1 };
-  if (!workspaceFolderPath) {
-    return citation;
+): Citation | undefined {
+  if (documentUri.scheme === "untitled") {
+    return undefined;
   }
 
-  citation.repo = workspaceFolderPath;
-  const relative = path.relative(workspaceFolderPath, documentUri.fsPath);
-  // A document outside the folder (or on another root) has no meaningful
-  // relative path, so the citation keeps only the line and the folder.
-  if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
-    citation.file = relative;
+  const line = selection.start.line + 1;
+  if (workspaceFolderPath) {
+    const relative = path.relative(workspaceFolderPath, documentUri.fsPath);
+    if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+      return { file: relative, line, repo: workspaceFolderPath };
+    }
   }
-  return citation;
+
+  return { file: documentUri.fsPath, line };
 }
 
 /** The selected text, or the word under the cursor when nothing is selected. */
@@ -57,7 +59,7 @@ function activeSelectionText(editor: vscode.TextEditor): string {
   return wordRange ? editor.document.getText(wordRange) : "";
 }
 
-/** The workspace folder holding the document, preferring an exact container in multi-root workspaces. */
+/** The workspace folder holding the document, or undefined when no folder contains it. */
 export function workspaceFolderPath(document: vscode.TextDocument): string | undefined {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
@@ -67,7 +69,7 @@ export function workspaceFolderPath(document: vscode.TextDocument): string | und
     const relative = path.relative(folder.uri.fsPath, document.uri.fsPath);
     return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
   });
-  return (containing ?? folders[0]).uri.fsPath;
+  return containing?.uri.fsPath;
 }
 
 export function registerEditorCommands(context: vscode.ExtensionContext, client: PhrenClient): void {

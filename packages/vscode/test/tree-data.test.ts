@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
-import { TreeDataSource, parseTruths } from "../src/providers/tree-data";
+import { TreeDataSource, parseTruths, parseReportedTaskCounts } from "../src/providers/tree-data";
 import { fakeClient, ok, deviceContext } from "./test-helpers";
 
 // tree-data.ts imports readDeviceContext from ../profileConfig, which — for
@@ -522,7 +522,13 @@ describe("TreeDataSource.sortWithActiveFirst (pure)", () => {
 });
 
 describe("TreeDataSource.fetchTaskCountsByProject", () => {
-  it("counts Active and Queue tasks per project from the single global tasks call", async () => {
+  function projectNode(nodes: Awaited<ReturnType<TreeDataSource["getProjectNodes"]>>, name: string) {
+    const node = nodes.find((n) => n.kind === "project" && n.projectName === name);
+    if (!node || node.kind !== "project") throw new Error(`no project node for ${name}`);
+    return node;
+  }
+
+  it("falls back to counting returned rows when the response carries no counts", async () => {
     const getAllTasks = vi.fn(async () => ok({
       projects: [
         { project: "app", items: { Active: [{ id: "1", line: "a" }, { id: "2", line: "b" }], Queue: [{ id: "3", line: "c" }] } },
@@ -533,9 +539,60 @@ describe("TreeDataSource.fetchTaskCountsByProject", () => {
     const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
     const nodes = await data.getProjectNodes(); // no workspace, single store → flat list
     expect(getAllTasks).toHaveBeenCalledTimes(1);
-    const app = nodes.find((n) => n.kind === "project" && n.projectName === "app");
-    expect(app && app.kind === "project" ? app.activeCount : undefined).toBe(2);
-    expect(app && app.kind === "project" ? app.queueCount : undefined).toBe(1);
+    expect(projectNode(nodes, "app").activeCount).toBe(2);
+    expect(projectNode(nodes, "app").queueCount).toBe(1);
+  });
+
+  it("uses the response's uncapped section counts even when they exceed the returned rows", async () => {
+    const getAllTasks = vi.fn(async () => ok({
+      projects: [
+        {
+          project: "big",
+          counts: { Active: 150, Queue: 320, done: 40 },
+          // Only one row per section made it into the capped response.
+          items: { Active: [{ id: "1", line: "a" }], Queue: [{ id: "2", line: "b" }] },
+        },
+      ],
+    }));
+    const listProjects = vi.fn(async () => ok({ projects: [{ name: "big" }] }));
+    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
+    const nodes = await data.getProjectNodes();
+    expect(projectNode(nodes, "big").activeCount).toBe(150);
+    expect(projectNode(nodes, "big").queueCount).toBe(320);
+    expect(projectNode(nodes, "big").openCount).toBeUndefined();
+  });
+
+  it("sums the responsibility buckets into an uncapped open count when there is no section split", async () => {
+    const getAllTasks = vi.fn(async () => ok({
+      projects: [
+        {
+          project: "big",
+          counts: { human: 4, agentReady: 3, agentWaitingOnHuman: 1, agentWaitingOnTask: 2, done: 40 },
+          items: { Active: [{ id: "1", line: "a" }] },
+        },
+      ],
+    }));
+    const listProjects = vi.fn(async () => ok({ projects: [{ name: "big" }] }));
+    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
+    const nodes = await data.getProjectNodes();
+    expect(projectNode(nodes, "big").openCount).toBe(10);
+    expect(projectNode(nodes, "big").activeCount).toBeUndefined();
+    expect(projectNode(nodes, "big").queueCount).toBeUndefined();
+  });
+});
+
+describe("parseReportedTaskCounts", () => {
+  it("reads section counts in several spellings", () => {
+    expect(parseReportedTaskCounts({ Active: 5, Queue: 6 })).toEqual({ active: 5, queue: 6 });
+    expect(parseReportedTaskCounts({ active: 5, queue: 6 })).toEqual({ active: 5, queue: 6 });
+    expect(parseReportedTaskCounts({ sections: { Active: 5, Queue: 6 } })).toEqual({ active: 5, queue: 6 });
+  });
+
+  it("falls back to the responsibility-bucket total, and returns undefined without usable numbers", () => {
+    expect(parseReportedTaskCounts({ human: 1, agentReady: 2, agentWaitingOnHuman: 3, agentWaitingOnTask: 4, done: 9 }))
+      .toEqual({ open: 10 });
+    expect(parseReportedTaskCounts({ done: 9 })).toBeUndefined();
+    expect(parseReportedTaskCounts("nonsense")).toBeUndefined();
   });
 });
 
