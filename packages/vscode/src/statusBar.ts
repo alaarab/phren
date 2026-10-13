@@ -12,6 +12,7 @@ export class PhrenStatusBar implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private activeProjectName?: string;
   private healthOk: boolean | undefined;
+  private disconnectedReason?: string;
   private syncStatus?: "synced" | "local-only" | "broken";
   private syncBrokenWarned = false;
   private healthTimer?: ReturnType<typeof setInterval>;
@@ -120,6 +121,7 @@ export class PhrenStatusBar implements vscode.Disposable {
       const ok = data !== undefined;
       const changed = this.healthOk !== ok;
       this.healthOk = ok;
+      this.disconnectedReason = undefined;
 
       // Extract sync status from health check response
       const rawSync = asString(data?.syncStatus);
@@ -148,9 +150,10 @@ export class PhrenStatusBar implements vscode.Disposable {
           }
         });
       }
-    } catch {
+    } catch (error) {
       const changed = this.healthOk !== false;
       this.healthOk = false;
+      this.disconnectedReason = error instanceof Error ? error.message : String(error);
       this.render();
       if (changed && this.onHealthChanged) {
         this.onHealthChanged(false);
@@ -185,6 +188,19 @@ export class PhrenStatusBar implements vscode.Disposable {
   private render(): void {
     // Don't overwrite an in-flight lookup flash; it reverts via its own timer.
     if (this.flashTimer) return;
+
+    // A client that never answered is a different failure from an unhealthy
+    // store: say so plainly, point at the log, and use the theme's warning
+    // colour. A later successful poll clears this and restores the normal item.
+    if (this.disconnectedReason) {
+      this.statusItem.text = "$(warning) Phren: not connected";
+      this.statusItem.tooltip = `Phren is not connected: ${this.disconnectedReason}\nClick to open the Phren log.`;
+      this.statusItem.command = "phren.showLog";
+      this.statusItem.color = new vscode.ThemeColor("statusBarItem.warningForeground");
+      return;
+    }
+
+    this.statusItem.command = "phren.doctor";
     const projectName = this.activeProjectName ?? "No project";
     const healthIcon = this.healthOk === true ? "$(pass-filled)" : this.healthOk === false ? "$(error)" : "$(loading~spin)";
     const syncIcon = this.syncStatus === "synced" ? " $(cloud)"

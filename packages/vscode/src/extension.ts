@@ -6,7 +6,8 @@ import { PhrenClient } from "./phrenClient";
 import { PhrenTreeProvider } from "./providers/PhrenTreeProvider";
 import { PhrenActivityProvider } from "./providers/PhrenActivityProvider";
 import { PhrenStatusBar } from "./statusBar";
-import { resolveRuntimeConfig } from "./runtimeConfig";
+import { resolveRuntimeConfig, checkRuntimePaths } from "./runtimeConfig";
+import { phrenLog } from "./log";
 import { type ExtensionContext as PhrenExtCtx, toErrorMessage, asRecord, asArraySafe } from "./extensionContext";
 import { runOnboardingIfNeeded, registerOnboardingCommands, handleWalkthroughChecks } from "./onboarding";
 import { registerFindingCommands } from "./commands/finding-commands";
@@ -14,29 +15,42 @@ import { registerTaskCommands } from "./commands/task-commands";
 import { registerProjectCommands } from "./commands/project-commands";
 import { registerMachineCommands } from "./commands/machine-commands";
 import { registerNoteCommands } from "./commands/note-commands";
+import { registerEditorCommands } from "./commands/editor-commands";
 
 let client: PhrenClient | undefined;
 let outputChannel: vscode.OutputChannel;
 let hooksOutputChannel: vscode.OutputChannel;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  outputChannel = vscode.window.createOutputChannel("Phren");
+  // The log channel is also the extension's general output channel: one place
+  // to look, opened by "Phren: Show Log".
+  outputChannel = phrenLog;
   context.subscriptions.push(outputChannel);
   hooksOutputChannel = vscode.window.createOutputChannel("Phren Hooks");
   context.subscriptions.push(hooksOutputChannel);
-  outputChannel.appendLine("Phren extension activating...");
+  phrenLog.info("Phren extension activating...");
+
+  // Available before any backend check, so a failed start-up can always point here.
+  context.subscriptions.push(vscode.commands.registerCommand("phren.showLog", () => phrenLog.show()));
+
   const config = vscode.workspace.getConfiguration("phren");
   await runOnboardingIfNeeded(config, outputChannel);
   const runtimeConfig = resolveRuntimeConfig(vscode.workspace.getConfiguration("phren"));
 
-  outputChannel.appendLine(`Phren store path: ${runtimeConfig.storePath}`);
-  outputChannel.appendLine(`Node path: ${runtimeConfig.nodePath}`);
-  outputChannel.appendLine(
+  phrenLog.info(`Phren store path: ${runtimeConfig.storePath}`);
+  phrenLog.info(`Node path: ${runtimeConfig.nodePath}`);
+  phrenLog.info(
     `MCP server path: ${runtimeConfig.mcpServerPath ?? "(not found; run 'npx @phren/cli init' or configure phren.mcpServerPath)"}`,
   );
 
   // --- Register onboarding commands (available even without backend) ---
   context.subscriptions.push(...registerOnboardingCommands(config, outputChannel));
+
+  // --- Diagnose the paths we are about to spawn against ---
+  // The walkthrough checks below show the one notification; the exact reason
+  // (what is missing, where it looked, the WSL/Remote side) goes to the log.
+  const startupCheck = checkRuntimePaths(runtimeConfig, { remote: Boolean(vscode.env.remoteName) });
+  if (!startupCheck.ok) phrenLog.error(`Phren startup check: ${startupCheck.message}`);
 
   // --- Check walkthrough state; bail if backend/store not ready ---
   const ready = await handleWalkthroughChecks(runtimeConfig, outputChannel);
@@ -117,6 +131,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ...registerProjectCommands(extCtx),
     ...registerMachineCommands(extCtx),
   );
+  registerEditorCommands(context, phrenClient);
 
   // --- Sync VS Code settings to phren preference files ---
   syncSettingsToPreferences(runtimeConfig.storePath, config);

@@ -15,11 +15,23 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   private readonly data: TreeDataSource;
 
+  private readonly openTruthCommand: vscode.Disposable;
+
   constructor(
     client: PhrenClient,
     storePath: string,
   ) {
     this.data = new TreeDataSource(client, storePath);
+    // Truths have no editor of their own, so clicking one opens its text in an
+    // untitled document (read-only in practice — there is nowhere to save it).
+    this.openTruthCommand = vscode.commands.registerCommand(
+      "phren.openTruth",
+      async (truth?: { text?: string }) => {
+        const text = typeof truth?.text === "string" ? truth.text : "";
+        const document = await vscode.workspace.openTextDocument({ content: text, language: "markdown" });
+        await vscode.window.showTextDocument(document, { preview: false });
+      },
+    );
   }
 
   setDateFilter(filter: DateFilter | undefined): void {
@@ -33,6 +45,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
   }
 
   dispose(): void {
+    this.openTruthCommand.dispose();
     this.onDidChangeTreeDataEmitter.dispose();
   }
 
@@ -99,7 +112,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       return await this.getChildrenInner(element);
     } catch (error) {
       console.error(`[phren-tree] getChildren crash:`, error, `element:`, JSON.stringify(element));
-      return [{ kind: "message", label: `Error: ${error instanceof Error ? error.message : String(error)}`, iconId: "warning" }];
+      return [{ kind: "message", label: `Error: ${error instanceof Error ? error.message : String(error)}`, tooltip: "Phren: Show Log", iconId: "warning" }];
     }
   }
 
@@ -142,10 +155,11 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     }
 
     if (element.kind === "project") {
+      const truthCount = await this.data.getTruthCount(element.projectName);
       return [
         { kind: "category", projectName: element.projectName, category: "findings" },
         { kind: "category", projectName: element.projectName, category: "notes" },
-        { kind: "category", projectName: element.projectName, category: "truths" },
+        { kind: "category", projectName: element.projectName, category: "truths", count: truthCount },
         { kind: "category", projectName: element.projectName, category: "sessions" },
         { kind: "category", projectName: element.projectName, category: "task" },
         { kind: "category", projectName: element.projectName, category: "queue" },

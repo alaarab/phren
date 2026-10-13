@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
-import { TreeDataSource } from "../src/providers/tree-data";
+import { TreeDataSource, parseTruths } from "../src/providers/tree-data";
 import { fakeClient, ok, deviceContext } from "./test-helpers";
 
 // tree-data.ts imports readDeviceContext from ../profileConfig, which — for
@@ -136,7 +136,7 @@ describe("TreeDataSource findings", () => {
     const client = fakeClient({ getFindings: vi.fn(async () => { throw new Error("network down"); }) });
     const data = new TreeDataSource(client, STORE_PATH);
     const groups = await data.getFindingDateGroups("app", undefined);
-    expect(groups).toEqual([{ kind: "message", label: "Failed to load findings", description: "network down", iconId: "warning" }]);
+    expect(groups).toEqual([{ kind: "message", label: "Failed to load findings", description: "network down", tooltip: "Phren: Show Log", iconId: "warning" }]);
   });
 
   it("drops findings missing an id or text instead of crashing on malformed entries", async () => {
@@ -359,6 +359,44 @@ describe("TreeDataSource truths and reference docs", () => {
     expect(nodes).toEqual([{ kind: "truth", projectName: "app", text: "real truth" }]);
   });
 
+  it("getTruthNodes accepts `{ text }` objects and the array-under-data shape", async () => {
+    const objects = new TreeDataSource(
+      fakeClient({ getTruths: vi.fn(async () => ok({ truths: [{ text: "from object" }, { truth: "from truth key" }, { nope: true }] })) }),
+      STORE_PATH,
+    );
+    expect(await objects.getTruthNodes("app")).toEqual([
+      { kind: "truth", projectName: "app", text: "from object" },
+      { kind: "truth", projectName: "app", text: "from truth key" },
+    ]);
+
+    const bareArray = new TreeDataSource(
+      fakeClient({ getTruths: vi.fn(async () => ok(["plain one", " plain two "])) }),
+      STORE_PATH,
+    );
+    expect(await bareArray.getTruthNodes("app")).toEqual([
+      { kind: "truth", projectName: "app", text: "plain one" },
+      { kind: "truth", projectName: "app", text: "plain two" },
+    ]);
+  });
+
+  it('getTruthNodes reports "No truths pinned" when the list is empty, and getTruthCount returns 0', async () => {
+    const data = new TreeDataSource(fakeClient(), STORE_PATH);
+    expect(await data.getTruthNodes("app")).toEqual([{ kind: "message", label: "No truths pinned", iconId: "pin" }]);
+    expect(await data.getTruthCount("app")).toBe(0);
+  });
+
+  it("getTruthCount returns undefined when the call fails so the category omits a count", async () => {
+    const client = fakeClient({ getTruths: vi.fn(async () => { throw new Error("boom"); }) });
+    const data = new TreeDataSource(client, STORE_PATH);
+    expect(await data.getTruthCount("app")).toBeUndefined();
+  });
+
+  it("parseTruths tolerates malformed envelopes without throwing", () => {
+    expect(parseTruths(undefined)).toEqual([]);
+    expect(parseTruths({ data: { truths: "not an array" } })).toEqual([]);
+    expect(parseTruths({ data: [null, 7, "  ", { text: " kept " }] })).toEqual(["kept"]);
+  });
+
   it("getReferenceNodes only surfaces files under reference/ (either slash style) and strips the prefix", async () => {
     const client = fakeClient({
       getProjectSummary: vi.fn(async () => ok({
@@ -471,6 +509,33 @@ describe("TreeDataSource.sortWithActiveFirst (pure)", () => {
     const nodes = data.sortWithActiveFirst(projects, undefined, undefined);
     expect(nodes.map((n) => n.projectName)).toEqual(["a", "b"]);
     expect(nodes.every((n) => !n.active)).toBe(true);
+  });
+
+  it("attaches per-project open-task counts, matching by case-insensitive name", () => {
+    const data = new TreeDataSource(fakeClient(), STORE_PATH);
+    const projects = [{ name: "App" }];
+    const taskCounts = new Map([["app", { active: 3, queue: 5 }]]);
+    const nodes = data.sortWithActiveFirst(projects, undefined, undefined, taskCounts);
+    expect(nodes[0].activeCount).toBe(3);
+    expect(nodes[0].queueCount).toBe(5);
+  });
+});
+
+describe("TreeDataSource.fetchTaskCountsByProject", () => {
+  it("counts Active and Queue tasks per project from the single global tasks call", async () => {
+    const getAllTasks = vi.fn(async () => ok({
+      projects: [
+        { project: "app", items: { Active: [{ id: "1", line: "a" }, { id: "2", line: "b" }], Queue: [{ id: "3", line: "c" }] } },
+        { project: "other", items: { Active: [{ id: "4", line: "d" }] } },
+      ],
+    }));
+    const listProjects = vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "other" }] }));
+    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
+    const nodes = await data.getProjectNodes(); // no workspace, single store → flat list
+    expect(getAllTasks).toHaveBeenCalledTimes(1);
+    const app = nodes.find((n) => n.kind === "project" && n.projectName === "app");
+    expect(app && app.kind === "project" ? app.activeCount : undefined).toBe(2);
+    expect(app && app.kind === "project" ? app.queueCount : undefined).toBe(1);
   });
 });
 

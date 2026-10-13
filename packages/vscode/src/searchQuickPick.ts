@@ -27,11 +27,19 @@ interface HistoryQuickPickItem extends vscode.QuickPickItem {
 
 type AnyQuickPickItem = SearchQuickPickItem | HistoryQuickPickItem;
 
-export async function showSearchQuickPick(client: PhrenClient): Promise<void> {
+export async function showSearchQuickPick(client: PhrenClient, initialQuery?: string): Promise<void> {
   const quickPick = vscode.window.createQuickPick<AnyQuickPickItem>();
   quickPick.placeholder = "Search phren knowledge...";
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
+
+  // An initial query (the editor selection) opens the picker prefilled. Set it
+  // before wiring onDidChangeValue below so the programmatic assignment does
+  // not queue a second, debounced search on top of the immediate one.
+  const seedQuery = initialQuery?.trim() ? initialQuery : undefined;
+  if (seedQuery) {
+    quickPick.value = seedQuery;
+  }
 
   let requestToken = 0;
 
@@ -158,7 +166,11 @@ export async function showSearchQuickPick(client: PhrenClient): Promise<void> {
   });
 
   quickPick.show();
-  showHistory();
+  if (seedQuery) {
+    void runSearch(seedQuery);
+  } else {
+    showHistory();
+  }
 }
 
 async function resolveFullContent(client: PhrenClient, result: SearchResult): Promise<string> {

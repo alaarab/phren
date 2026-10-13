@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as crypto from "crypto";
 import { PhrenClient } from "./phrenClient";
+import { phrenLog } from "./log";
 
 /**
  * Validate a project name from webview messages.
@@ -155,6 +156,8 @@ interface GraphPayload {
   summaries: Record<string, ProjectSummaryData>;
   scores: MemoryScores;
   topics: TopicMeta[];
+  /** Why there is nothing to draw. Only set when `nodes` is empty. */
+  emptyReason?: string;
 }
 
 /* ── Main entry ──────────────────────────────────────────── */
@@ -221,6 +224,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
     }
     panel.webview.html = renderGraphHtml(panel.webview, graphData);
   } catch (error) {
+    logGraphError(`Could not load the fragment graph: ${toErrorMessage(error)}`);
     panel.webview.html = renderErrorHtml(panel.webview, toErrorMessage(error));
     return;
   }
@@ -583,8 +587,8 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
             graphCache = { key: computeMtimeKey(storePath), payload: graphData };
             void panel.webview.postMessage({ type: "graphData", payload: graphData });
           } catch (err) {
-            // Surface silently — user still sees the last-known graph.
-            console.error("phren: failed to refresh graph on external change", err);
+            // Surface in the log channel — the user still sees the last-known graph.
+            logGraphError(`Failed to refresh the fragment graph: ${toErrorMessage(err)}`);
           }
         })();
       }, 300);
@@ -605,26 +609,53 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
 /* ── Data loading ────────────────────────────────────────── */
 
 export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
-  const projects = await fetchProjects(client);
+  const scores = loadMemoryScores();
 
-  // Parallel per-project fetches (including topic configs)
-  const perProjectResults = await Promise.all(
-    projects.map(async (p) => {
-      const topicConfig = await fetchTopicConfig(client, p.name);
-      const [summary, findings, tasks] = await Promise.all([
-        fetchProjectSummary(client, p.name),
-        fetchFindings(client, p.name, topicConfig),
-        fetchTasks(client, p.name),
-      ]);
-      return { projectName: p.name, summary, findings, tasks, topicConfig, store: p.store };
-    }),
-  );
+  // A failed or empty list is an empty graph with a reason, not an error page —
+  // the webview shows it as a calm empty state.
+  let projects: { name: string; brief?: string; store?: string }[];
+  try {
+    projects = await fetchProjects(client);
+  } catch (error) {
+    const reason = `Could not list projects: ${toErrorMessage(error)}`;
+    logGraphError(reason);
+    return { nodes: [], edges: [], summaries: {}, scores, topics: [], emptyReason: reason };
+  }
+  if (projects.length === 0) {
+    return {
+      nodes: [],
+      edges: [],
+      summaries: {},
+      scores,
+      topics: [],
+      emptyReason: `No projects found in the Phren store at ${resolveStorePath()}.`,
+    };
+  }
+
+  // Parallel per-project fetches (including topic configs). A project whose
+  // calls fail is logged and dropped so it cannot blank every other project.
+  const perProjectResults = (
+    await Promise.all(
+      projects.map(async (p) => {
+        try {
+          const topicConfig = await fetchTopicConfig(client, p.name);
+          const [summary, findings, tasks] = await Promise.all([
+            fetchProjectSummary(client, p.name),
+            fetchFindings(client, p.name, topicConfig),
+            fetchTasks(client, p.name),
+          ]);
+          return { projectName: p.name, summary, findings, tasks, topicConfig, store: p.store };
+        } catch (error) {
+          logGraphError(`Could not load project ${p.name}: ${toErrorMessage(error)}`);
+          return null;
+        }
+      }),
+    )
+  ).filter((result): result is NonNullable<typeof result> => result !== null);
 
   // Fragment graph
   const entities = await fetchEntities(client);
 
-  // Memory scores
-  const scores = loadMemoryScores();
   const scoreLookup = buildScoreLookup(scores);
 
   // Merge all project topics into a deduplicated list
@@ -805,7 +836,11 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
     }
   }
 
-  return { nodes, edges: uniqueEdges, summaries: summaryMap, scores, topics: allTopics };
+  const payload: GraphPayload = { nodes, edges: uniqueEdges, summaries: summaryMap, scores, topics: allTopics };
+  if (nodes.length === 0) {
+    payload.emptyReason = `No findings or tasks yet for the ${projects.length} project${projects.length === 1 ? "" : "s"} in ${resolveStorePath()}.`;
+  }
+  return payload;
 }
 
 /* ── Fetch helpers ───────────────────────────────────────── */
@@ -1098,7 +1133,7 @@ function renderErrorHtml(webview: vscode.Webview, errorMessage: string): string 
     .panel { max-width:720px; border:1px solid; border-radius:10px; padding:16px; }
   </style>
 </head>
-<body><div class="panel"><div style="text-align:center;margin-bottom:12px">${PHREN_INLINE_SVG_SMALL}</div>Failed to render fragment graph: ${escapeHtml(errorMessage)}</div></body>
+<body><div class="panel"><div style="text-align:center;margin-bottom:12px">${PHREN_INLINE_SVG_SMALL}</div>Failed to render fragment graph: ${escapeHtml(errorMessage)}<div style="margin-top:8px;font-size:12px;opacity:.75">Open the <b>Phren: Show Log</b> output for details.</div></div></body>
 </html>`;
 }
 
@@ -1544,11 +1579,45 @@ ${graphScript}
     return counts;
   }
 
+  // Calm empty state for a store with nothing to draw. It lives in an overlay
+  // (not in #graph-canvas) so a later non-empty refresh can mount the renderer
+  // onto the still-attached canvas instead of a detached one.
+  function renderEmptyState() {
+    var container = document.querySelector('.graph-container');
+    if (!container) return;
+    var empty = document.getElementById('graph-empty');
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.id = 'graph-empty';
+      empty.style.cssText = 'position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;background:var(--vscode-editor-background);z-index:10;';
+      container.appendChild(empty);
+    }
+    var reason = payload.emptyReason ? esc(payload.emptyReason) : '';
+    empty.innerHTML = '<div style="max-width:520px">'
+      + '<div style="font-size:16px;font-weight:600;margin-bottom:8px">No memory to show yet</div>'
+      + (reason ? '<div style="font-size:12px;opacity:.82;margin-bottom:12px">' + reason + '</div>' : '')
+      + '<div style="font-size:12px;line-height:1.7;opacity:.72">'
+      + 'Run <code>phren doctor</code> in a terminal to check your store,'
+      + ' confirm the <code>phren.storePath</code> setting points at the right folder,'
+      + ' or open the <b>Phren: Show Log</b> output for details.'
+      + '</div></div>';
+  }
+
+  function hideEmptyState() {
+    var empty = document.getElementById('graph-empty');
+    if (empty) empty.remove();
+  }
+
   // Maps the extension payload to the shared renderer's shape and (re)mounts.
   // Re-runs on 'graphData' messages so external refreshes swap data in place —
   // the renderer preserves the camera pose on remount, where the old
   // full-HTML replacement reset the whole scene.
   function mapAndMountGraph() {
+  if (!payload.nodes || payload.nodes.length === 0) {
+    renderEmptyState();
+    return;
+  }
+  hideEmptyState();
   var graphNodes = [];
   var topicMap = {};
   for (var index = 0; index < payload.nodes.length; index++) {
@@ -1647,7 +1716,8 @@ ${graphScript}
     if (graphCanvas) {
       graphCanvas.innerHTML = '<div style="display:grid;place-items:center;height:100%;padding:24px;text-align:center;color:var(--danger)">'
         + '<div><div style="font-size:16px;font-weight:600;margin-bottom:8px">Graph failed to load</div>'
-        + '<div style="font-size:12px;opacity:.82">' + esc(graphMountError.message || graphMountError) + '</div></div></div>';
+        + '<div style="font-size:12px;opacity:.82">' + esc(graphMountError.message || graphMountError) + '</div>'
+        + '<div style="font-size:12px;opacity:.72;margin-top:8px">Open <b>Phren: Show Log</b> for details.</div></div></div>';
     }
   }
   }
@@ -2405,4 +2475,13 @@ function escapeHtml(value: string): string {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Best-effort logging: a broken log channel must never blank the graph. */
+function logGraphError(message: string): void {
+  try {
+    phrenLog.error(message);
+  } catch {
+    // ignore — logging is not load-bearing
+  }
 }

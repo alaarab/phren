@@ -34,6 +34,27 @@ import {
   responseData,
 } from "./tree-utils";
 
+/**
+ * get_truths answers a list that may be plain strings, `{ text }` objects, or
+ * an array directly under `data` (the tool shape has changed before). Accept
+ * every form and drop anything without usable text rather than showing blanks.
+ */
+export function parseTruths(raw: unknown): string[] {
+  const response = asRecord(raw);
+  const data = response?.data;
+  const record = asRecord(data);
+  const list = Array.isArray(data) ? data : asArray(record?.truths ?? record?.items);
+  const texts: string[] = [];
+  for (const entry of list) {
+    const text = typeof entry === "string"
+      ? entry
+      : asString(asRecord(entry)?.text) ?? asString(asRecord(entry)?.truth);
+    const trimmed = text?.trim();
+    if (trimmed) texts.push(trimmed);
+  }
+  return texts;
+}
+
 export class TreeDataSource {
   private cache = new Map<string, unknown>();
   private cacheGeneration = 0;
@@ -613,18 +634,31 @@ export class TreeDataSource {
 
   async getTruthNodes(projectName: string): Promise<PhrenNode[]> {
     try {
-      const raw = await this.client.getTruths(projectName);
-      const data = responseData(raw);
-      const truths = asArray(data?.truths);
+      const truths = await this.fetchTruths(projectName);
       if (truths.length === 0) {
-        return [{ kind: "message", label: "No truths pinned yet", iconId: "pin" }];
+        return [{ kind: "message", label: "No truths pinned", iconId: "pin" }];
       }
-      return truths
-        .filter((t): t is string => typeof t === "string")
-        .map((text) => ({ kind: "truth" as const, projectName, text }));
+      return truths.map((text) => ({ kind: "truth" as const, projectName, text }));
     } catch (error) {
       return [this.errorNode("Failed to load truths", error)];
     }
+  }
+
+  // The category row shows its child count while collapsed, so the provider
+  // asks for the count without expanding the category.
+  async getTruthCount(projectName: string): Promise<number | undefined> {
+    try {
+      return (await this.fetchTruths(projectName)).length;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private fetchTruths(projectName: string): Promise<string[]> {
+    return this.cachedFetch(`truths:${projectName}`, async () => {
+      const raw = await this.client.getTruths(projectName);
+      return parseTruths(raw);
+    });
   }
 
   // --- Reference ---
@@ -823,9 +857,12 @@ export class TreeDataSource {
     projects: ProjectSummary[],
     activeProjectName: string | undefined,
     reviewCounts?: Map<string, { review: number; conflicts: number }>,
+    taskCounts?: Map<string, { active: number; queue: number }>,
   ): ProjectNode[] {
     const nodes: ProjectNode[] = projects.map((project) => {
-      const counts = reviewCounts?.get(project.name.toLowerCase());
+      const key = project.name.toLowerCase();
+      const counts = reviewCounts?.get(key);
+      const tasks = taskCounts?.get(key);
       return {
         kind: "project" as const,
         projectName: project.name,
@@ -833,6 +870,8 @@ export class TreeDataSource {
         active: activeProjectName !== undefined && project.name === activeProjectName,
         reviewCount: counts?.review,
         conflictCount: counts?.conflicts,
+        activeCount: tasks?.active,
+        queueCount: tasks?.queue,
       };
     });
     if (activeProjectName) {
@@ -877,9 +916,12 @@ export class TreeDataSource {
 
       const ctx = this.readDeviceContext();
       const activeProjectName = this.detectActiveProject(projects);
-      const reviewCounts = await this.fetchReviewCountsByProject();
+      const [reviewCounts, taskCounts] = await Promise.all([
+        this.fetchReviewCountsByProject(),
+        this.fetchTaskCountsByProject(),
+      ]);
       if (ctx.activeProjects.size === 0) {
-        return this.sortWithActiveFirst(projects, activeProjectName, reviewCounts);
+        return this.sortWithActiveFirst(projects, activeProjectName, reviewCounts, taskCounts);
       }
       const deviceProjects = projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()));
       const otherProjects = projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
@@ -898,15 +940,16 @@ export class TreeDataSource {
 
   async getProjectNodesForStore(storeName: string): Promise<PhrenNode[]> {
     try {
-      const [projects, stores, reviewCounts] = await Promise.all([
+      const [projects, stores, reviewCounts, taskCounts] = await Promise.all([
         this.fetchProjects(),
         this.fetchStores(),
         this.fetchReviewCountsByProject(),
+        this.fetchTaskCountsByProject(),
       ]);
       const primaryStoreName = stores.find((s) => s.role === "primary")?.name ?? "personal";
       const filtered = projects.filter((p) => (p.store ?? primaryStoreName) === storeName);
       const activeProjectName = this.detectActiveProject(filtered);
-      return this.sortWithActiveFirst(filtered, activeProjectName, reviewCounts);
+      return this.sortWithActiveFirst(filtered, activeProjectName, reviewCounts, taskCounts);
     } catch (error) {
       return [this.errorNode("Failed to load projects", error)];
     }
@@ -914,16 +957,17 @@ export class TreeDataSource {
 
   async getProjectNodesForGroup(group: "device" | "other"): Promise<PhrenNode[]> {
     try {
-      const [allProjects, reviewCounts] = await Promise.all([
+      const [allProjects, reviewCounts, taskCounts] = await Promise.all([
         this.fetchProjects(),
         this.fetchReviewCountsByProject(),
+        this.fetchTaskCountsByProject(),
       ]);
       const ctx = this.readDeviceContext();
       const filtered = group === "device"
         ? allProjects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()))
         : allProjects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
       const activeProjectName = this.detectActiveProject(allProjects);
-      return this.sortWithActiveFirst(filtered, activeProjectName, reviewCounts);
+      return this.sortWithActiveFirst(filtered, activeProjectName, reviewCounts, taskCounts);
     } catch (error) {
       return [this.errorNode("Failed to load projects", error)];
     }
@@ -1170,6 +1214,26 @@ export class TreeDataSource {
     return counts;
   }
 
+  // Per-project open-task counts for the project row description. One global
+  // call covers every project, so expanding the projects list never fans out
+  // into a get_tasks call per project.
+  private async fetchTaskCountsByProject(): Promise<Map<string, { active: number; queue: number }>> {
+    const counts = new Map<string, { active: number; queue: number }>();
+    try {
+      const allTasks = await this.fetchAllTasks();
+      for (const { projectName, task } of allTasks) {
+        const key = projectName.toLowerCase();
+        if (!counts.has(key)) counts.set(key, { active: 0, queue: 0 });
+        const entry = counts.get(key)!;
+        if (task.section === "Active") entry.active++;
+        else if (task.section === "Queue") entry.queue++;
+      }
+    } catch {
+      // Best-effort: project rows simply omit task counts.
+    }
+    return counts;
+  }
+
   private async fetchReviewCountsByStore(
     projects: ProjectSummary[],
     resolvedStore: (p: ProjectSummary) => string,
@@ -1330,6 +1394,6 @@ export class TreeDataSource {
 
   private errorNode(label: string, error: unknown): MessageNode {
     const description = error instanceof Error ? error.message : String(error);
-    return { kind: "message", label, description, iconId: "warning" };
+    return { kind: "message", label, description, tooltip: "Phren: Show Log", iconId: "warning" };
   }
 }

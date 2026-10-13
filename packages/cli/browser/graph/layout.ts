@@ -33,6 +33,11 @@ function storeTint(name: string, idx: number): string {
  * fgNode.x/y/z and pins via fx/fy/fz so 3d-force-graph leaves them alone.
  */
 export function computeHierarchicalLayout(fgNodes: FGNode[]): CageSpec[] {
+  // Zero nodes is a real, drawable state (a store with no projects yet, or a
+  // graph load that produced nothing). Grouping would leave `stores` empty,
+  // `storeNames[0]` undefined, and shellRadiusOf would throw on `stores.get(undefined)!`.
+  if (fgNodes.length === 0) return [];
+
   // group: store -> project -> members
   const stores = new Map<string, Map<string, FGNode[]>>();
   const projectHub = new Map<string, FGNode>(); // "store project" -> the project node
