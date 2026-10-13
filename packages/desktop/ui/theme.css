@@ -373,6 +373,14 @@ button.home-row:hover { background: var(--card); }
 .settings-keylabel { color: var(--text-2); font-size: 13px; }
 .settings-caps { display: flex; gap: 6px; align-items: center; flex: none; }
 .settings-kbd { font: 12px var(--mono); color: var(--accent); background: var(--raised); border-radius: 6px; padding: 2px 7px; white-space: pre; }
+.settings-summon { margin-bottom: 16px; padding: 10px 12px; background: var(--surface); border-radius: 10px; }
+.settings-summon .settings-keyrow { border-bottom: 0; }
+.settings-summon .settings-keylabel { display: grid; gap: 2px; color: var(--text); }
+.settings-summon-sub { color: var(--muted); font-size: 12px; }
+button.settings-summon-key { border: 1px solid transparent; cursor: pointer; padding: 4px 10px; font-size: 13px; }
+button.settings-summon-key:hover { border-color: var(--border); }
+button.settings-summon-key.recording { color: var(--text); border-color: var(--accent); }
+.settings-summon .settings-notice { margin-top: 6px; }
 .settings-unbound { color: var(--dim); font-size: 12px; }
 .settings-prefix { display: flex; align-items: center; gap: 10px; margin: 4px 0 12px; }
 .settings-themes { margin-bottom: 8px; }

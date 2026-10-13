@@ -133,7 +133,9 @@ active) session's branch turns failing or passing. It asks each project's Hook
 every two minutes, at most six projects. Turn it off in Settings ›
 Notifications.
 
-⌘K opens the palette (sessions, files, commands). The launch sheet
+⌘K opens the palette (sessions, files, commands). From any other app,
+⌘⇧Space (Ctrl+Shift+Space on Linux and Windows) brings Phren forward with the
+palette open; change or turn off that key in Settings › Keys. The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles

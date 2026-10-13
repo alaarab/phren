@@ -7,6 +7,7 @@ import { openExtensions } from "../extensions.js";
 import { applyTheme, currentTheme, themes as themeList } from "../shell/theme.js";
 import { registerPauseCommand } from "../shell/pause-all.js";
 import { hookGet, hookPost } from "../api.js";
+import { DEFAULT_SUMMON, acceleratorFromEvent, formatAccelerator, setSummonKey, summonAvailable, summonKey } from "../shell/summon.js";
 
 // The "Pause all agents" palette command is app-wide: register it once, at
 // import, so it is there before the Computers page is ever opened.
@@ -816,7 +817,9 @@ function buildKeys(page) {
   toolbar.append(el("div", "settings-note", "Shortcut bindings the desktop reads at startup."), reload);
   const notice = noticeLine();
   const content = el("div", "settings-keys");
-  page.append(head, toolbar, notice, content);
+  page.append(head, toolbar, notice);
+  if (summonAvailable()) page.append(summonRow());
+  page.append(content);
 
   function fileLine(label, path) {
     const line = el("div", "settings-note");
@@ -889,6 +892,56 @@ function buildKeys(page) {
 
   load();
   return load;
+}
+
+/** Settings › Keys: the system-wide key that brings Phren forward with ⌘K open.
+ * Click the key to record a new one; Esc cancels. */
+function summonRow() {
+  const platform = window.phrenDesktop?.platform;
+  const wrap = el("div", "settings-summon");
+  const row = el("div", "settings-keyrow");
+  const text = el("span", "settings-keylabel");
+  text.append(el("span", "", "Summon Phren from any app"), el("span", "settings-summon-sub", "Brings the window forward with ⌘K open"));
+  const caps = el("span", "settings-caps");
+  const key = button("");
+  key.className = "settings-kbd settings-summon-key";
+  const off = button("Turn off");
+  const reset = button("Reset");
+  caps.append(key, off, reset);
+  row.append(text, caps);
+  const note = noticeLine();
+  wrap.append(row, note);
+
+  let recording = false;
+  function paint() {
+    const accel = summonKey();
+    key.textContent = recording ? "Press a shortcut…" : formatAccelerator(accel, platform);
+    key.classList.toggle("recording", recording);
+    key.setAttribute("aria-label", recording ? "Press the new shortcut, Esc to cancel" : `Summon shortcut: ${formatAccelerator(accel, platform)}. Click to change.`);
+    off.hidden = !accel;
+    reset.hidden = accel === DEFAULT_SUMMON;
+  }
+  async function save(accel) {
+    recording = false;
+    const ok = await setSummonKey(accel);
+    paint();
+    showNotice(note, ok ? "" : `${formatAccelerator(accel, platform)} is taken by another app or the system. Pick another.`, !ok);
+  }
+  key.addEventListener("click", () => { recording = !recording; paint(); });
+  key.addEventListener("blur", () => { if (recording) { recording = false; paint(); } });
+  key.addEventListener("keydown", (ev) => {
+    if (!recording) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.key === "Escape") { recording = false; paint(); return; }
+    const accel = acceleratorFromEvent(ev, platform);
+    if (accel) void save(accel);
+    else if (!["Shift", "Control", "Alt", "Meta"].includes(ev.key)) showNotice(note, "Use ⌘ or Ctrl (or ⌥/Alt) with a letter, number, Space or F-key.", true);
+  });
+  off.addEventListener("click", () => void save(""));
+  reset.addEventListener("click", () => void save(DEFAULT_SUMMON));
+  paint();
+  return wrap;
 }
 
 // ------------------------------------------------------------ page: Extensions

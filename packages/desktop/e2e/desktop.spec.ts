@@ -428,3 +428,43 @@ test("CI watch notifies once when the working session's pull request checks fail
   await page.waitForTimeout(300);
   expect(await notes()).toHaveLength(1);
 });
+
+test("the summon hotkey is set in Settings › Keys and opens ⌘K when it fires", async ({ page }) => {
+  // The Electron preload's shell: records the accelerators it is asked to register.
+  await page.addInitScript(() => {
+    const keys: string[] = [];
+    const shell = {
+      platform: "darwin", notify() {}, setBadge() {},
+      setSummonKey: async (accel: string) => { keys.push(accel); return accel !== "CommandOrControl+Alt+T"; },
+      onSummon: (fn: () => void) => { Object.assign(window, { __summon: fn }); },
+    };
+    Object.assign(window, { __keys: keys, phrenDesktop: shell });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.summon"));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const keys = () => page.evaluate(() => (window as unknown as { __keys: string[] }).__keys);
+  await expect.poll(keys).toEqual(["CommandOrControl+Shift+Space"]);
+
+  await page.locator('.section-pill[data-section="settings"]').click();
+  await page.locator(".settings-tab", { hasText: "Keys" }).click();
+  const key = page.locator(".settings-summon-key");
+  await expect(key).toHaveText("⌘⇧Space");
+  await page.locator(".settings-summon").screenshot({ path: test.info().outputPath("desktop-summon.png") });
+
+  // Record a new key; one the system refuses is reported.
+  await key.click();
+  await expect(key).toHaveText("Press a shortcut…");
+  await page.keyboard.press("Meta+Alt+KeyT");
+  await expect(page.locator(".settings-summon .settings-notice")).toContainText("taken by another app");
+  await key.click();
+  await page.keyboard.press("Meta+Shift+KeyP");
+  await expect(key).toHaveText("⌘⇧P");
+  await expect(page.locator(".settings-summon .settings-notice")).toBeHidden();
+  expect((await keys()).at(-1)).toBe("CommandOrControl+Shift+P");
+
+  // The shell reports the key: the palette opens.
+  await page.evaluate(() => (window as unknown as { __summon: () => void }).__summon());
+  await expect(page.locator(".palette-input")).toBeFocused();
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.summon"));
+});
