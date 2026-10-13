@@ -676,3 +676,34 @@ test("a sidebar row waiting on you shows what the agent said last", async ({ pag
   const box = (await page.locator("#sidebar").boundingBox())!;
   await page.screenshot({ path: test.info().outputPath("desktop-sidebar-reply.png"), clip: { x: box.x, y: box.y, width: box.width, height: 320 } });
 });
+
+test("the menu bar answers an approval Home is watching", async ({ page }) => {
+  await page.addInitScript(() => {
+    const trays: unknown[] = [];
+    const shell = {
+      platform: "darwin", notify() {}, setBadge() {},
+      setTray: (state: unknown) => { trays.push(state); },
+      onOpenSession() {},
+      onTrayAnswer: (fn: (a: { key: string; decision: string }) => void) => { Object.assign(window, { __trayAnswer: fn }); },
+    };
+    Object.assign(window, { __trays: trays, phrenDesktop: shell });
+  });
+  // The approval session's status socket reports what it asks.
+  await page.routeWebSocket(/\/v1\/status\?/, (ws) => {
+    ws.send(JSON.stringify({ agentStatus: { status: "blocked", pendingApproval: { actionId: "a1", title: "Run pnpm test in phren-release" } } }));
+  });
+  const answers: unknown[] = [];
+  await page.route("**/v1/approvals/answer", async (route) => {
+    answers.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.tray"));
+  type Tray = { rows?: Array<{ key: string; approval?: string }> };
+  const last = () => page.evaluate(() => (window as unknown as { __trays: Tray[] }).__trays.at(-1));
+  await expect.poll(async () => (await last())?.rows?.find((r) => r.approval)?.approval).toBe("Run pnpm test in phren-release");
+  const key = (await last())!.rows!.find((r) => r.approval)!.key;
+  await page.evaluate((k) => (window as unknown as { __trayAnswer: (a: { key: string; decision: string }) => void }).__trayAnswer({ key: k, decision: "approve" }), key);
+  await expect.poll(() => answers.length).toBe(1);
+  expect(answers[0]).toMatchObject({ actionId: "a1", target: { session: "sess-release" } });
+});

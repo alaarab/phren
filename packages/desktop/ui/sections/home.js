@@ -476,6 +476,8 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       if (approval?.actionId) approvals.set(row.key, { actionId: String(approval.actionId), summary: summaryOf(approval) });
       else approvals.delete(row.key);
       renderNeeds();
+      // The menu bar icon offers Allow / Deny for the approvals known here.
+      document.dispatchEvent(new CustomEvent("phren:approvals-changed"));
     });
     ws.addEventListener("close", () => {
       if (watchers.get(row.key) === ws) { watchers.delete(row.key); approvals.delete(row.key); }
@@ -607,6 +609,13 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   followPulls();
 
   return {
+    /** The pending approval Home is watching for a session key: `{ actionId, summary }` or undefined. */
+    approval(key) { return approvals.get(key); },
+    /** Answer a session's pending approval by key (the menu bar's Allow / Deny). */
+    answerKey(key, decision) {
+      const row = needsYou(merged).find((r) => r.key === key);
+      return row ? answer(row, decision) : Promise.resolve();
+    },
     show() { visible = true; startPolling(); followPulls(); },
     hide() { visible = false; stopPolling(); unfollowPulls(); },
     destroy() {
