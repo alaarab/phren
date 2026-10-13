@@ -47,17 +47,20 @@ export type RunGit = RunStoreGit;
 export type { GitResult };
 const execAsync = promisify(execFile);
 
-export const runPollGit: RunGit = async (cwd, args) => {
+export const runPollGit: RunGit = (cwd, args) => runGitWithin(10_000, cwd, args);
+
+/** One Git command with its output, or its error once it fails or `timeout` passes. */
+export async function runGitWithin(timeout: number, cwd: string, args: string[]): Promise<GitResult> {
   try {
     const { stdout } = await execAsync("git", args, {
-      cwd, encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024,
+      cwd, encoding: "utf8", timeout, maxBuffer: 64 * 1024 * 1024,
       env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0" }),
     });
     return { ok: true, output: stdout.trim() };
   } catch (err: unknown) {
     return { ok: false, output: "", error: errorMessage(err) };
   }
-};
+}
 
 interface PollState { checkedAt?: number; failures?: number; status?: string; detail?: string }
 export interface PullResult { status: "unchanged" | "updated" | "deferred" | "error" | "not-due"; detail: string }

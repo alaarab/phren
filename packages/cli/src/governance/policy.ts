@@ -132,6 +132,9 @@ export interface RuntimeHealth {
     /** Commits ahead of and behind the upstream tracking ref at the last sync outcome. */
     ahead?: number;
     behind?: number;
+    /** The last failure of a store sync in plain words, cleared by the next full success. */
+    lastError?: string;
+    lastErrorAt?: string;
   };
 }
 
@@ -404,6 +407,8 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
     if (typeof data.lastSync.lastSuccessfulPushAt === "string") normalized.lastSync.lastSuccessfulPushAt = data.lastSync.lastSuccessfulPushAt;
     if (isFiniteNumber(data.lastSync.ahead)) normalized.lastSync.ahead = data.lastSync.ahead;
     if (isFiniteNumber(data.lastSync.behind)) normalized.lastSync.behind = data.lastSync.behind;
+    if (typeof data.lastSync.lastError === "string") normalized.lastSync.lastError = data.lastSync.lastError;
+    if (typeof data.lastSync.lastErrorAt === "string") normalized.lastSync.lastErrorAt = data.lastSync.lastErrorAt;
   }
   return normalized;
 }

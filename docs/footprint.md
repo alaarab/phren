@@ -38,6 +38,13 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 - `~/.phren/`, the store: projects, `global/`, `profiles/`, `.config/`,
   `.runtime/`, `.sessions/`, `.env` (feature flags), `machines.yaml`,
   `phren.root.yaml`, `phren.SKILL.md`.
+- Inside each store's Git repository, from sync: `refs/phren/backup/<ms>` (the
+  pre-merge HEAD whenever local and remote history had both moved, deleted
+  after 14 days), `.config/maintenance-writer.json` (which computer rewrites
+  generated files), and, when GitHub refuses this computer's SSH key but `gh` is
+  signed in, `remote.<name>.url` switched to HTTPS with
+  `credential.https://github.com.helper` set to `gh auth git-credential` in the
+  store's own `.git/config`.
 
 ### Agent settings (all presets: when MCP/hooks enabled)
 - `~/.claude/settings.json`, `~/.claude.json`, `mcpServers.phren` and the

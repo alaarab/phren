@@ -58,6 +58,8 @@ export interface HookOverview {
   groups: OverviewGroup[];
   mux?: { id: string; kind: string; session: string };
   phren?: { computer?: { id: string; name: string }; version?: string; capabilities?: Record<string, unknown> };
+  /** One line per store on that computer that is diverged, unsynced for over an hour or failing. */
+  storeWarnings?: string[];
   [key: string]: unknown;
 }
 

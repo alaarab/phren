@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Stores no longer stay diverged from their remote. A store merge refused any `tasks.md` that held one task id twice, and a duplicate that reached the remote made every later sync on every computer abort; a task archive past 1 MiB was read through a 1 MiB buffer and left the merge unresolved too. Repeated ids now collapse to the completed, then Active, then longest record, conflict sides are read whole, and a knowledge file whose smarter merge refuses falls back to a lossless line union. The pre-merge HEAD is kept as `refs/phren/backup/<ms>` for 14 days.
+- A failed store sync is said at session start (at most daily) with its real reason and `phren doctor --fix`, instead of once ever and only with `syncIntent: sync`. A failed session-start pull no longer erases the last successful pull time, and a Stop with unpushed commits and a clean tree retries the push (at most every ten minutes).
+
+### Added
+
+- The Phren Hook syncs every store with its remote every five minutes (`PHREN_STORE_SYNC_SECONDS`), cleaning up abandoned merge/rebase state, index and Phren locks, old backup refs and missing worktrees first. `/v1/health/details` stores carry `lastSuccessfulPullAt`, `lastSyncedAt`, `diverged`, `stale` (no sync for over an hour) and a `warning` line; the overview carries `storeWarnings`, which the desktop's computer list shows as "Store out of sync". `phren doctor` reports each store's sync and repeated task ids; `--fix` collapses them and reconciles.
+- A GitHub SSH remote whose key GitHub refuses switches to HTTPS with `gh` as its credential helper when `gh` is signed in, or the store's health says what to do.
+- Background maintenance rewrites generated files (topic `## Now` blocks, summary.md's "What phren knows", task archives, pruning) on one computer at a time, the holder of `.config/maintenance-writer.json`.
+
 ## [0.3.40] - 2026-10-12
 
 ### Added

@@ -710,6 +710,53 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       isRecord(runtime?.["lastSync"]) ? runtime["lastSync"] as { ahead?: number; behind?: number } : undefined,
     ),
   });
+  // Each store against its remote: diverged, unsynced for over an hour, or
+  // failing. --fix first collapses repeated task ids (the data layer refuses
+  // to edit them), then runs one full reconcile.
+  try {
+    const { resolveAllStores } = await import("../store-registry.js");
+    const { syncStore, storeSyncState } = await import("../sync/store-sync.js");
+    const { dedupeTaskIds } = await import("../sync/task-merge.js");
+    for (const store of resolveAllStores(phrenPath).filter((entry) => entry.available !== false && fs.existsSync(path.join(entry.path, ".git")))) {
+      const repeated: string[] = [];
+      for (const dir of fs.readdirSync(store.path, { withFileTypes: true })) {
+        if (!dir.isDirectory() || dir.name.startsWith(".")) continue;
+        const file = path.join(store.path, dir.name, "tasks.md");
+        let text: string;
+        try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+        const result = dedupeTaskIds(text);
+        if (!result.dropped) continue;
+        if (fix) fs.writeFileSync(file, result.content);
+        repeated.push(`${dir.name}/tasks.md (${result.dropped})`);
+      }
+      if (repeated.length) {
+        checks.push({
+          name: `task-ids:${store.name}`,
+          ok: fix,
+          detail: fix ? `collapsed repeated task ids in ${repeated.join(", ")}` : `repeated task ids in ${repeated.join(", ")}; edits to those tasks are refused. Run \`phren doctor --fix\`.`,
+        });
+      }
+      let synced = "";
+      if (fix) {
+        const outcome = await syncStore(store.path, { push: store.role !== "readonly" && store.sync !== "pull-only", source: "doctor" });
+        synced = `${outcome.status}: ${outcome.detail}${outcome.cleaned.length ? ` (${outcome.cleaned.join("; ")})` : ""}`;
+      }
+      const state = await storeSyncState(store.name, store.path);
+      if (!state.upstream && !synced) continue;
+      const healthy = !state.diverged && !state.stale && !state.error;
+      checks.push({
+        name: `store-sync:${store.name}`,
+        ok: healthy,
+        detail: [
+          healthy ? `in sync${state.lastSyncedAt ? `, last synced ${state.lastSyncedAt}` : ""}` : state.warning ?? "not in sync",
+          synced && `doctor --fix: ${synced}`,
+          !healthy && !fix ? "run `phren doctor --fix` to reconcile" : "",
+        ].filter(Boolean).join("; "),
+      });
+    }
+  } catch (err: unknown) {
+    checks.push({ name: "store-sync", ok: false, detail: `could not check store sync: ${errorMessage(err)}` });
+  }
   checks.push({
     name: "runtime-prompt",
     ok: Boolean(runtime?.["lastPromptAt"]),
