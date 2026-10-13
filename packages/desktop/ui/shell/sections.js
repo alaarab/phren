@@ -93,8 +93,6 @@ export function showSection(id, ctx = {}) {
   return def.handle;
 }
 
-export function currentSection() { return current; }
-
 /** The mounted handle of a section, mounting it hidden if needed. */
 export function sectionHandle(id) {
   const def = sections.get(id);
