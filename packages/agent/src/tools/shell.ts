@@ -172,8 +172,11 @@ class OutputCapture {
 
   private writeSpill(text: string): void {
     if (this.spillFd === null || this.capped) return;
+    // Write only what the caps leave, so a file never overshoots by a pipe chunk.
+    const room = Math.min(MAX_SPILL_BYTES - this.spilled, sessionSpillLimit() - sessionSpilled);
+    const bytes = Buffer.from(text);
     try {
-      const written = fs.writeSync(this.spillFd, text);
+      const written = fs.writeSync(this.spillFd, bytes, 0, Math.min(bytes.length, room));
       this.spilled += written;
       sessionSpilled += written;
     } catch { /* best effort */ }
