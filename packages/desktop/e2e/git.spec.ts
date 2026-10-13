@@ -30,7 +30,15 @@ const FINDINGS = [
   { id: "fid:a3", text: "startApp() retries once before failing.", type: "pattern", status: "active", created: "2026-09-02", citation: { file: null, line: null, commit: null, name: "startApp" }, match: "symbol" },
 ];
 let memoryPaths: string[][] = [];
+let searches: string[] = [];
 const MEMORY_ROUTES = {
+  "GET /v1/projects/phren/memory/search": (_req: unknown, _body: unknown, url: URL) => {
+    const q = url.searchParams.get("q") ?? "";
+    searches.push(q);
+    return { status: 200, json: { project: "phren", query: q, results: q.includes("unit (ubuntu)") ? [
+      { kind: "finding", score: 0.82, matched: 3, text: "unit (ubuntu) fails when TZ is unset: the date tests assume UTC. Set TZ=UTC in the job.", finding: { ...FINDINGS[0], text: "unit (ubuntu) fails when TZ is unset: the date tests assume UTC. Set TZ=UTC in the job.", type: "pitfall", citation: { file: "test/dates.test.ts", line: 8, commit: null, name: null } } },
+    ] : [] } };
+  },
   "GET /v1/projects/phren/memory/files": (_req: unknown, _body: unknown, url: URL) => {
     const paths = url.searchParams.getAll("path");
     memoryPaths.push(paths);
@@ -49,6 +57,7 @@ test.beforeEach(async ({}, info) => {
   if (!existsSync(UI_LINK)) { symlinkSync(UI_SOURCE, UI_LINK, "dir"); linkedUi = true; }
   dir = await mkdtemp(path.join(tmpdir(), "desktop-git-"));
   memoryPaths = [];
+  searches = [];
   process.env.PHREN_BRIDGE_HOME = dir;
   // A test titled "on GitLab" runs against a GitLab remote, not yet connected.
   git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github" });
@@ -304,5 +313,27 @@ test("Phren remembers lists the findings about the changed files, and a file's b
   await expect(page.locator(".doc-tab.selected")).toContainText("app.ts");
   // Opening and filtering the card never asks the Hook again.
   expect(memoryPaths).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("a failing check shows what Phren has seen before, and Ask the agent puts it in the chat", async ({ page }) => {
+  const errors = await openSession(page);
+  await page.locator(".chg-seg", { hasText: "Branches" }).click();
+  await page.locator('.chg-branch-row[data-branch="feat/login"]').click();
+  await page.locator(".chg-confirm").getByRole("button", { name: "Switch" }).click();
+  await page.locator(".chg-confirm").getByRole("button", { name: "Switch with changes" }).click();
+  await page.locator(".chg-bb-pr").click();
+  const seen = page.locator(".chg-req .chg-seen");
+  await expect(seen).toContainText("Seen this before");
+  await expect(seen.locator(".chg-seen-item")).toHaveCount(1);
+  await expect(seen).toContainText("dates.test.ts:8");
+  // Only the failing check is asked about, once.
+  expect(searches).toEqual(["unit (ubuntu)"]);
+  await shot(page, "seen-before.png");
+  await seen.getByRole("button", { name: "Ask the agent" }).click();
+  const composer = page.locator(".pc-input").first();
+  await expect(composer).toHaveValue(/CI is failing on this branch: unit \(ubuntu\)\./);
+  await expect(composer).toHaveValue(/Phren remembers: unit \(ubuntu\) fails when TZ is unset/);
+  expect(searches).toHaveLength(1);
   expect(errors).toEqual([]);
 });
