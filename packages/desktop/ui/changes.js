@@ -1631,7 +1631,7 @@ function injectStyle() {
 // ---- helpers ---------------------------------------------------------------
 /** A small mark for the remote's host: GitHub's pull-request glyph, GitLab's
  * fox, gitboy's handheld, or a neutral branch for an unknown host. */
-function hostMark(kind, size = 18) {
+export function hostMark(kind, size = 18) {
   const paths = {
     github: '<circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M6 8.4v7.2M18 15.6V10a3 3 0 0 0-3-3h-4m0 0 2.5-2.5M11 7l2.5 2.5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
     gitlab: '<path d="M12 21.2 3.3 13.6l1.6-7.9 2.6 6.1h9l2.6-6.1 1.6 7.9z" stroke="none"/>',
