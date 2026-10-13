@@ -233,6 +233,8 @@ button.home-row:hover { background: var(--card); }
 .home-project { color: var(--accent); font-family: var(--mono); }
 .home-why { color: var(--waiting); }
 .home-passed { color: var(--done); }
+.home-failed { color: var(--danger); }
+.home-row.tone-failed { box-shadow: inset 3px 0 0 var(--danger); }
 /* Since you left: turns that ended while the window was away. */
 .home-row.tone-done { box-shadow: inset 3px 0 0 var(--done); }
 button.home-row:disabled { cursor: default; opacity: .6; }

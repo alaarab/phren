@@ -9,6 +9,7 @@ import { hookGet, hookPost, targetQuery } from "../api.js";
 import { sectionHandle, sectionIds, sectionLabel, showSection } from "./sections.js";
 import { projectOf, store } from "./store.js";
 import { checksStrip, lastChecks } from "./ci-watch.js";
+import { checksWord } from "../git-review.js";
 
 // ------------------------------------------------------------ commands
 const commands = new Map(); // id -> { id, title, keys?, run, group?, meta? }
@@ -23,7 +24,6 @@ export function registerCommand(cmd) {
 const PROVIDER = { claude: "C", codex: "X", opencode: "O", copilot: "G", phren: "P" };
 const GROUP_ORDER = { Sessions: 0, "Pull requests": 1, Projects: 2, "Go to": 3, Commands: 4, Files: 5 };
 const CHECK_ICON = { failing: "✕", pending: "●", passing: "✓" };
-const CHECK_WORD = { failing: "Checks failing", pending: "Checks running", passing: "Checks passing" };
 const MAX_ROWS = 200;
 const MEMORY_LIMIT = 20;
 const MEMORY_DEBOUNCE_MS = 180;
@@ -104,7 +104,7 @@ export function pullItems(pulls, openPulls) {
     boost: pull.checks === "failing" ? 400 : 0,
     icon: CHECK_ICON[pull.checks] ?? "#",
     title: `${pull.ref}${pull.number} ${pull.title}`,
-    meta: [CHECK_WORD[pull.checks] ?? "No checks", pull.project, pull.computer].filter(Boolean).join(" · "),
+    meta: [checksWord(pull.checks) || "No checks", pull.project, pull.computer].filter(Boolean).join(" · "),
     run() { openPulls(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child); },
   }));
 }
