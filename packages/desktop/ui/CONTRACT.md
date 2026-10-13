@@ -19,7 +19,7 @@ store.subscribe(fn)          // fn(merged) now and on every change; returns unsu
 store.needsYou()             // [{ key, computer, group, child }] blocked, waiting or approval pending
 store.sessions()             // every agent row across computers, same shape
 store.find(computer, childId)
-await store.capabilities(computer) // the Hook's /v1/health `capabilities`, cached 5 min, reset on reconnect
+await store.capabilities(computer) // the Hook's `capabilities`: seeded from each overview frame's `phren` block, else `/v1/health` (one read in flight per computer), cached 5 min
 store.can(computer, "fileWrite")   // sync: true | false | undefined (not fetched yet)
 store.version(computer)            // Hook version string when known
 ```
