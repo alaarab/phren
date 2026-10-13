@@ -274,6 +274,8 @@ function validateSchedule(schedule) {
 }
 
 const POLL_MS = 30_000;
+// A read started by hovering the pill this recently is what the click shows.
+const PREFETCH_FRESH_MS = 5_000;
 const TONIGHT_HOURS = 24;
 const TONIGHT_COUNT = 6;
 
@@ -1042,20 +1044,23 @@ export function mountSchedules(root) {
     const sig = (merged?.computers ?? []).map((c) => `${c.computer}:${c.state}`).join(",");
     if (sig === onlineSig) return;
     onlineSig = sig;
-    void loadAll();
+    // Hidden, the next show() reads; this one only follows computers coming and going while open.
+    if (state.visible) void loadAll();
   });
 
   let timer = null;
+  let prefetchedAt = 0;
   function startPoll() { if (!timer) timer = setInterval(() => { void loadAll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
 
-  state.visible = true;
+  // The section shell calls show() right after mounting a visible section,
+  // and a section mounted hidden waits for it, so the first read happens there.
   render();
-  void loadAll();
-  startPoll();
 
   return {
-    show() { state.visible = true; startPoll(); void loadAll(); },
+    // Hovering the pill reads ahead; the click then shows that read instead of starting another.
+    prefetch() { prefetchedAt = Date.now(); void loadAll(); },
+    show() { state.visible = true; startPoll(); if (Date.now() - prefetchedAt > PREFETCH_FRESH_MS) void loadAll(); prefetchedAt = 0; },
     hide() { state.visible = false; stopPoll(); },
     destroy() { stopPoll(); unsubscribe(); },
   };

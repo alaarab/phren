@@ -11,6 +11,8 @@ import { mountTrains } from "./trains.js";
 
 const CSS_ID = "review-css";
 const POLL_MS = 15_000;
+// A read started by hovering the pill this recently is what the click shows.
+const PREFETCH_FRESH_MS = 5_000;
 const MAX_ITEMS = 100;
 const PREFETCH = 3;
 const RECENT_MS = 3 * 86_400_000;
@@ -958,6 +960,7 @@ export function mountReview(root) {
   let timer = null;
   function startPoll() { if (!timer) timer = setInterval(() => { void poll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
+  let prefetchedAt = 0;
 
   let onlineSig = "";
   const unsubscribe = store.subscribe(() => {
@@ -969,7 +972,15 @@ export function mountReview(root) {
   document.addEventListener("keydown", onKeydown);
 
   return {
-    show() { state.visible = true; startPoll(); if (state.mode === "trains") state.trains?.show?.(); else void poll(); },
+    // Hovering the pill reads ahead; the click then shows that read instead of starting another.
+    prefetch() { if (state.mode !== "trains") { prefetchedAt = Date.now(); void poll(); } },
+    show() {
+      state.visible = true;
+      startPoll();
+      if (state.mode === "trains") state.trains?.show?.();
+      else if (Date.now() - prefetchedAt > PREFETCH_FRESH_MS) void poll();
+      prefetchedAt = 0;
+    },
     hide() { state.visible = false; stopPoll(); closeComment(); state.trains?.hide?.(); },
     focus() { if (state.mode === "trains") state.trains?.focus?.(); else queueEl.querySelector(".review-row.selected")?.focus(); },
     destroy() { stopPoll(); unsubscribe(); document.removeEventListener("keydown", onKeydown); closeComment(); clearTimeout(state.hintTimer); state.trains?.destroy?.(); },
