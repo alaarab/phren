@@ -37,7 +37,7 @@ import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit } from "./project-git.js";
-import { liveBackground, markBackground, paneRecord, recordTitle } from "./session-activity.js";
+import { liveBackground, markBackground, paneRecord, recordTitle, replyExcerpt } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -271,6 +271,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       if (expired) return;
       Object.assign(tab, stall);
       tab.title = title;
+      // What a finished turn said last; a row still working (background work) has no last word yet.
+      const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
+      if (reply) tab.lastReply = reply;
     }));
     // Separate bounded queues: a stalled git/model/step read cannot prevent
     // the child tree from reaching the phone. Apply each answer as it arrives.

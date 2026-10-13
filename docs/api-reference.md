@@ -1705,7 +1705,10 @@ clients must accept legacy discovery aliases during upgrades. A typed tmux
 selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 
 Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
-`agentStatus` and `title`. A session whose main turn ended while background
+`agentStatus` and `title`. A tab whose turn ended carries `lastReply`: the
+agent's last message from its Stop hook (Claude and Codex), as one plain line
+of at most 240 characters with markdown dropped. It is absent while a turn or
+its background work runs, and when the Stop carried no message. A session whose main turn ended while background
 work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
 where Herdr or tmux say idle or done. `n` counts the work the session is
 waiting on: its running Codex or Claude sub-agents, teammates, workflow agents

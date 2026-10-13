@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Overview rows (`/v1/workspaces`, `WS /v1/overview`) carry `lastReply`, a one-line excerpt of what a finished turn said last, so a waiting session can say what it waits for.
+
 ## [0.3.44] - 2026-10-13
 
 ### Added
