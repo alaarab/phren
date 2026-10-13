@@ -303,9 +303,9 @@ test("projects section renders", async ({ page }) => {
   await tasks.getByRole("button", { name: "Done" }).click();
   await expect(tasks.locator(".bt-item.done")).toHaveCount(1);
   expect(completed).toEqual(["bid:1a2b3c4d"]);
-  // Launch agent opens the shared launch sheet on this project.
-  await page.getByRole("button", { name: "Launch agent" }).click();
-  await expect(page.locator(".launch-title")).toHaveText("Launch an agent in phren");
+  // New agent opens the shared launch sheet on this project.
+  await page.getByRole("button", { name: "New agent" }).click();
+  await expect(page.locator(".launch-title")).toHaveText("New agent in phren");
   await expect(page.locator(".launch-input").first()).toHaveValue("phren");
   await page.locator(".launch-close").click();
   // Fix it on the failing request opens the launch sheet with its failures as the first prompt.
@@ -752,14 +752,14 @@ test("Since you left lists pull requests whose checks settled while away", async
   ciChecks = "pending";
 });
 
-test("quiet hours and the stuck-agent toggle are set in Settings › Notifications", async ({ page }) => {
+test("quiet hours and the stalled-agent toggle are set in Settings › Notifications", async ({ page }) => {
   await page.addInitScript(() => { Object.assign(window, { phrenDesktop: { platform: "darwin", notify() {}, setBadge() {}, setTray() {}, onOpenSession() {} } }); });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => { localStorage.removeItem("phren.desktop.quiet"); localStorage.removeItem("phren.desktop.notify-stalled"); });
   await page.locator('.section-pill[data-section="settings"]').click();
   await page.locator(".settings-tab", { hasText: "Notifications" }).click();
   const list = page.locator(".settings-page-notifications .settings-list");
-  await expect(list.locator(".settings-toggle", { hasText: "looks stuck" }).locator("input")).toBeChecked();
+  await expect(list.locator(".settings-toggle", { hasText: "when an agent stalls" }).locator("input")).toBeChecked();
   const quiet = list.locator(".settings-quiet");
   await expect(quiet.locator("input[type=checkbox]")).not.toBeChecked();
   await quiet.locator(".settings-switch").click();
@@ -780,7 +780,7 @@ test("the menu bar's New agent opens the launch sheet", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator("#needs-pill").waitFor();
   await page.evaluate(() => (window as unknown as { __newAgent: () => void }).__newAgent());
-  await expect(page.locator(".launch-sheet .launch-title")).toHaveText("Launch an agent");
+  await expect(page.locator(".launch-sheet .launch-title")).toHaveText("New agent");
 });
 
 test("a session continues in another agent from the sidebar menu", async ({ page }) => {

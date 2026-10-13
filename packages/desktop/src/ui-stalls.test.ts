@@ -22,7 +22,7 @@ describe("stalled sessions", () => {
     const rows = [{ key: "mini/7", computer: "mini", child: child({ stalled: true, stalledSince: "2026-10-13T11:53:00Z" }) }, { key: "mini/8", computer: "mini", child: child({ id: "8" }) }];
     expect(newlyStalled(rows, new Set()).map((r) => r.key)).toEqual(["mini/7"]);
     expect(newlyStalled(rows, new Set(["mini/7"]))).toEqual([]);
-    expect(stalledNotice(rows[0]).title).toBe("phren looks stuck");
+    expect(stalledNotice(rows[0]).title).toBe("phren stalled");
   });
 });
 

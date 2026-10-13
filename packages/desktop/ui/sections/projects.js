@@ -432,8 +432,8 @@ export function mountProjects(root) {
       const title = el("h1", "pj-title", state.detail.name);
       const host = el("span", "pj-host", state.detail.computer);
       const spacer = el("span", "pj-spacer");
-      const launch = el("button", "pj-btn accent", "Launch agent");
-      launch.addEventListener("click", () => openLaunchSheet({ project: state.detail.name, computer: state.detail.computer, title: `Launch an agent in ${state.detail.name}` }));
+      const launch = el("button", "pj-btn accent", "New agent");
+      launch.addEventListener("click", () => openLaunchSheet({ project: state.detail.name, computer: state.detail.computer, title: `New agent in ${state.detail.name}` }));
       header.append(back, title, host, spacer);
       const knobsBtn = el("button", "pj-btn", "Knobs");
       knobsBtn.addEventListener("click", () => openKnobs(state.detail));
@@ -664,7 +664,7 @@ export function mountProjects(root) {
     const failing = (res.current?.checkRuns || []).filter((run) => run.state === "failing");
     if (res.current?.checks === "failing" && res.branch) {
       const fix = el("button", "pj-btn pj-fixit", "Fix it");
-      fix.title = "Launch an agent on this branch with the failing checks";
+      fix.title = "Start a new agent on this branch with the failing checks";
       const pull = res.current;
       fix.addEventListener("click", () => openLaunchSheet({
         project: project.name, computer: state.detail.computer, title: `Fix ${terms.ref}${pull.number}`, label: `Fix ${terms.ref}${pull.number}`,

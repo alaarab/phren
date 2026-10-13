@@ -1457,8 +1457,8 @@ export function openChanges(el, ctx) {
         prompt: fixItPrompt({ ref: t.ref, number: p.number, title: p.title, head: p.head, url: p.url, failing, remembered: state.seen.results }),
       });
     });
-    go.title = "Launch an agent on this branch with the failing checks";
-    row.append(go, span("chg-fixit-sub", `Launch an agent on ${p.head} with ${failing.length === 1 ? "the failure" : `the ${failing.length} failures`}${state.seen.results.length ? " and what Phren remembers" : ""}`));
+    go.title = "Start a new agent on this branch with the failing checks";
+    row.append(go, span("chg-fixit-sub", `Start a new agent on ${p.head} with ${failing.length === 1 ? "the failure" : `the ${failing.length} failures`}${state.seen.results.length ? " and what Phren remembers" : ""}`));
     return row;
   }
 

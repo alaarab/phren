@@ -12,7 +12,7 @@ export function buildNotifications(page) {
   list.append(toggleRow("Notify when an agent needs me", notifyEnabled(), (on) => writeFlag(NOTIFY_KEY, on)));
   list.append(toggleRow("Show the needs-you count on the dock icon", badgeEnabled(), (on) => writeFlag(BADGE_KEY, on)));
   list.append(toggleRow("Notify when a session's pull request checks pass or fail", ciNotifyEnabled(), (on) => writeFlag(CI_KEY, on)));
-  list.append(toggleRow("Notify when an agent looks stuck", stallNotifyEnabled(), (on) => writeFlag(STALL_KEY, on)));
+  list.append(toggleRow("Notify when an agent stalls", stallNotifyEnabled(), (on) => writeFlag(STALL_KEY, on)));
   list.append(quietRow());
   if (trayAvailable()) {
     const where = window.phrenDesktop.platform === "darwin" ? "menu bar" : "system tray";
