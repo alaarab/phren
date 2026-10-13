@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { codexHome } from "../home-paths.js";
 import { logger } from "../logger.js";
+import { AppServerUnsupportedError } from "./codex-app-server.js";
 import { object } from "./protocol.js";
 
 /**
@@ -57,6 +58,9 @@ export class CodexAuthKeeper {
     try {
       await this.refresher.refreshAuth();
     } catch (error) {
+      // An old codex cannot run the server the refresh needs; that is a fact about this
+      // computer, not a failure to repeat in the log every hour.
+      if (error instanceof AppServerUnsupportedError) { logger.debug("codex-auth", `Sign-in refresh skipped: ${error.message}`); return false; }
       logger.warn("codex-auth", `Could not refresh the Codex sign-in ahead of its workers: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
