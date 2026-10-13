@@ -1,41 +1,24 @@
 # Phren for VS Code
 
-Phren inside the editor, where it belongs.
+Phren is a local memory layer for AI coding agents: projects, findings, daily notes, tasks, skills, hooks and reference docs, all on your machine. This extension connects VS Code to that store and its MCP server so you can inspect and maintain memory without leaving the editor.
 
-This extension connects VS Code to your local Phren store and MCP server so you can inspect projects, capture daily notes, search memory, review findings, work through tasks, and edit skills without leaving the editor.
-
-## What It Does
-
-- Adds a dedicated **Phren** view in the activity bar.
-- Lists tracked Phren projects with drill-down sections for findings, daily notes, tasks, sessions, review queue, and reference docs.
-- Shows **priority, pinned, and GitHub issue badges** on task tree items. At a glance you can see task priority (`high`/`medium`/`low`), whether a task is pinned, and which tasks are linked to a GitHub issue.
-- Shows **type and confidence badges** on finding tree items. Each finding displays its type tag (`[decision]`, `[pitfall]`, etc.) and a confidence indicator when confidence is below threshold.
-- Theme-aware **status bar** that uses VS Code color tokens for seamless integration with any installed theme.
-- Fragment graph webview with **animated characters and keyboard navigation**: arrow keys move between nodes, Enter selects a node, Escape clears focus.
-- Updated **review queue viewer** with a contextual notice explaining what each queue section contains.
-- Opens findings, skills, reference files, queue items, and sessions in read-only or editable panels directly in VS Code.
-- Lets you add a finding from the editor context menu by selecting text and running **Phren: Add Finding**.
-- Lets you add lightweight notes from the Notes category or selected editor text, then edit, remove, or promote them to findings.
-- **Finding lifecycle commands**: supersede, retract, and resolve contradictions between findings directly from the sidebar.
-- **GitHub issue integration**: link tasks to existing issues or create new issues from tasks, all from the sidebar.
-- Syncs your Phren store (`git push`) without leaving VS Code.
-
-## Who This Is For
-
-This extension is for people already using Phren locally. If you keep project memory, findings, tasks, and skills in Phren, this gives you a faster way to inspect and maintain that data while you work in VS Code.
+The extension talks to your existing local Phren install over stdio — it does not provision Phren for you.
 
 ## Requirements
 
-- Phren initialized (`npx @phren/cli init` — no global install needed).
-- Node.js available on your machine.
+- **Phren installed and initialized.** Run `npx @phren/cli init` (no global install needed). This is the same step that registers phren with your coding agents.
+- **Node.js on the machine that runs the extension.** The extension spawns the MCP server with a real `node` binary; VS Code's built-in Electron binary will not work.
+- **A store**, at `~/.phren` by default or wherever `phren.storePath` points.
+
+If the sidebar or graph is empty, check that these are set up first (see [Troubleshooting](#troubleshooting)).
 
 ## Setup
 
-Open VS Code settings and configure:
+The extension auto-detects the MCP server, the `node` binary and `~/.phren`. Configure any of them explicitly in VS Code settings if detection misses:
 
 | Setting | Description |
 |---------|-------------|
-| `phren.mcpServerPath` | Absolute path to the Phren MCP server entrypoint (`index.js`). Leave blank to auto-detect. |
+| `phren.mcpServerPath` | Absolute path to the Phren MCP server entrypoint (`index.js`). Leave blank to auto-detect (MCP config, npx cache, and PATH). |
 | `phren.nodePath` | Path to the Node.js binary. Default: `node`. |
 | `phren.storePath` | Path to your Phren store. Leave blank to use `~/.phren`. |
 
@@ -45,92 +28,122 @@ Example `phren.mcpServerPath`:
 /home/you/.nvm/versions/node/v24.13.0/lib/node_modules/@phren/cli/mcp/dist/index.js
 ```
 
-Once set, open the Phren activity bar item and the extension loads your projects, skills, hooks, and graph.
+Open the Phren icon in the activity bar and the extension loads your projects, skills, hooks and graph. A **Get Started with Phren** walkthrough appears on first run, and **Phren: Install Backend** / **Phren: Initialize Store** can set up phren from inside the editor.
+
+## What You Get
+
+The Phren activity bar container has two views:
+
+### Explorer
+
+The main view, structured around real Phren objects:
+
+- **Projects** — expands into Findings and Notes (both grouped by date), Tasks (Queue / Active / Done), Sessions, Review Queue, and Reference docs.
+- **Skills** — grouped by scope, project-local and global shown separately.
+- **Hooks** — current hook state for each registered tool.
+
+Tree items carry badges: tasks show priority (`high` / `medium` / `low`), a pin indicator, and the GitHub issue number when linked; findings show their type tag (`[decision]`, `[pitfall]`, …) and a confidence indicator when it is below threshold. Clicks open detail panels directly — findings, tasks, skills, queue items, sessions, and project files. Inline hover actions cover the common edits (complete, delete, pin, update a task; remove a finding; promote a note).
+
+### Activity
+
+A live feed of phren's memory lookups as they happen, tailed from the store's lookup log. Each row shows the project/file that was recalled, the query that found it, and the snippet, so you can watch what the agent actually pulls into context.
+
+### Status bar
+
+A theme-aware Phren item shows health and sync state. Click it to run **Phren: Doctor**.
+
+### Fragment graph
+
+**Phren: Show Fragment Graph** opens the shared 3D memory viewer in a webview: animated nodes for projects, findings, tasks and topics, with filter, zoom and layout-reset controls and keyboard navigation. Arrow keys move between nodes, Enter selects, Escape clears focus.
+
+### Editor integration
+
+- Select text in any editor, right-click, and pick **Phren: Add Finding** or **Phren: Add Note**.
+- Notes can be edited, removed, or promoted to findings from the sidebar.
 
 ## Commands
 
 ### Command Palette
 
-These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
+Available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 
 | Command | Keybinding | Description |
 |---------|-----------|-------------|
-| `Phren: Search Knowledge` | `Ctrl+Shift+K` / `Cmd+Shift+K` | Full-text search across your Phren store. Results open in a side panel. |
-| `Phren: Show Fragment Graph` | — | Open the fragment graph in a webview with animated nodes and keyboard navigation. |
-| `Phren: Refresh` | — | Reload all data from the Phren MCP server. |
-| `Phren: Add Finding` | — | Save a finding to the active project (also available in the editor context menu when text is selected). |
-| `Phren: Add Note` | — | Add a lightweight daily note to the active project or selected project category. |
+| `Phren: Search Knowledge` | `Ctrl+Shift+K` / `Cmd+Shift+K` | Full-text search across the store; results open in a side panel. |
+| `Phren: Show Fragment Graph` | — | Open the 3D fragment graph in a webview. |
+| `Phren: Refresh` | — | Reload all data from the MCP server. |
+| `Phren: Add Finding` | — | Save a finding to the active project (also in the editor context menu with a selection). |
+| `Phren: Add Note` | — | Add a lightweight note to the active project. |
+| `Phren: Add Task` | — | Add a task to the active project. |
+| `Phren: Add Project` | — | Track a folder as a Phren project (also in the Explorer context menu). |
 | `Phren: Set Active Project` | — | Switch the active project context. |
-| `Phren: Sync` | — | Commit and push all Phren changes to remote. |
-| `Phren: Doctor` | — | Run health checks and report any issues. |
-| `Phren: Add Task` | — | Add a new task to the active project. |
 | `Phren: Pin Memory` | — | Pin a canonical memory entry that never decays. |
+| `Phren: Sync` | — | Commit and push store changes to the configured remote. |
+| `Phren: Doctor` | — | Run health checks and report issues. |
+| `Phren: Doctor Fix` | — | Apply fixes for the issues Doctor found. |
 | `Phren: Hooks Status` | — | Show hook enable/disable status for all registered tools. |
 | `Phren: Toggle Hooks` | — | Enable or disable all phren hooks globally. |
-| `Phren: Add Project` | — | Track a folder as a Phren project. Also available in the Explorer context menu. |
-| `Phren: Uninstall Phren` | — | Remove Phren config and hooks from this machine. |
 | `Phren: Set This Machine's Profile` | — | Switch the active profile for this machine. |
 | `Phren: Set Machine Alias` | — | Set a friendly name for this machine in `machines.yaml`. |
-| `Phren: Open machines.yaml` | — | Open the machines config file directly. |
-| `Phren: Project Config` | — | View and edit project-level configuration. |
+| `Phren: Open machines.yaml` | — | Open the machines config file. |
+| `Phren: Open Machines Config` | — | Open and edit machine configuration. |
+| `Phren: Configure Machine` | — | Walk through machine configuration. |
+| `Phren: Project Config (Quick Edit)` | — | View and edit project-level configuration. |
+| `Phren: Open Settings Dashboard` | — | Open the Phren settings dashboard. |
+| `Phren: Show Log` | — | Open the "Phren" output channel, where the extension logs what it does. |
+| `Phren: Install Backend` | — | Install and initialize phren via `npx`. |
+| `Phren: Initialize Store` | — | Create a new store. |
+| `Phren: Advanced Setup` | — | Open the setup wizard. |
+| `Phren: Getting Started` | — | Open the getting-started walkthrough. |
+| `Phren: Start Session` | — | Start a phren session for the active project. |
+| `Phren: End Session` | — | End the current phren session. |
+| `Phren: Uninstall Phren and Delete Store` | — | Remove phren config and hooks from this machine and delete the store. |
 
 ### Sidebar and Context Menu
 
-These commands fire from the Phren sidebar or editor context menu. They are not shown in the command palette by default:
+These fire from the Phren sidebar, a tree item, or the editor context menu:
 
 | Command | Where it appears | Description |
 |---------|-----------------|-------------|
 | `Phren: Toggle Skill` | Skill context menu | Enable or disable a skill without deleting it. |
 | `Phren: Toggle Hook` | Hook item context menu | Toggle a specific hook from the sidebar. |
-| `Phren: Open Session Overview` | Session item inline action | Open a session overview panel showing findings and tasks from that session. |
-| `Phren: Copy Session ID` | Session item context menu | Copy the session ID to clipboard. |
-| `Phren: Filter Findings by Date` | Findings category inline action | Filter the findings list to a specific date range. |
-| `Phren: Complete Task` | Active task inline action | Mark a task as done. |
+| `Phren: Toggle Project Hook` | Project hook item inline action | Toggle a hook for one project. |
+| `Phren: Open Session Overview` | Session item inline action | Open a panel of the findings and tasks captured in that session. |
+| `Phren: Copy Session ID` | Session item context menu | Copy the session ID to the clipboard. |
+| `Phren: Filter Findings by Date` | Findings category inline action | Filter the findings list to a date range. |
+| `Phren: Complete Task` | Active task inline action | Mark a task done. |
 | `Phren: Delete Task` | Task item inline action | Remove a task permanently. |
-| `Phren: Pin Task` | Active task inline action | Pin a task so it stays visible across sessions. |
+| `Phren: Pin / Unpin Task` | Active task inline action | Pin or unpin a task so it stays visible. |
 | `Phren: Update Task` | Active task inline action | Edit a task's text or priority. |
 | `Phren: Remove Finding` | Finding item inline action | Remove a finding by match. |
+| `Phren: Supersede Finding` | Finding item context menu | Mark a finding superseded by a newer one. |
+| `Phren: Retract Finding` | Finding item context menu | Retract a finding with a reason. |
+| `Phren: Resolve Contradiction` | Finding item context menu | Resolve a contradiction between two findings. |
 | `Phren: Open Note` | Note item click | Open a Markdown preview of the note. |
 | `Phren: Edit Note` | Note item context menu | Edit the note text. |
 | `Phren: Remove Note` | Note item context menu | Remove the note. |
-| `Phren: Promote Note to Finding` | Note item inline action | Copy a note to durable findings while keeping its daily source. |
-| `Phren: Supersede Finding` | Finding item context menu | Mark a finding as superseded by a newer one. |
-| `Phren: Retract Finding` | Finding item context menu | Retract a finding with a reason. |
-| `Phren: Resolve Contradiction` | Finding item context menu | Resolve a contradiction between two conflicting findings. |
+| `Phren: Promote Note to Finding` | Note item inline action | Copy a note into durable findings while keeping its daily source. |
 | `Phren: Link GitHub Issue` | Task item inline action | Link or unlink an existing GitHub issue on a task. |
-| `Phren: Create GitHub Issue` | Task item inline action | Create a GitHub issue from a task item and link it back. |
+| `Phren: Create GitHub Issue` | Task item inline action | Create a GitHub issue from a task and link it back. |
 | `Phren: Toggle Project` | Project item context menu | Archive or restore a project. |
 
-Tree item clicks (findings, tasks, skills, queue items, project files) open detail panels directly — no separate command needed.
+## WSL and Remote
 
-## Core Workflows
+The extension declares `extensionKind: workspace`, so it always runs on the **workspace side**, not on your local UI machine. In a WSL window (or an SSH / Dev Container / Remote window) that means the extension runs inside the remote environment, and the phren CLI and the store must both live there too:
 
-### Browse Phren Data
+- Install and initialize phren **inside WSL** (or on the remote host), in the same environment VS Code connects to. `phren` from your Windows or macOS shell is not visible to the extension.
+- The store must be reachable at that environment's `~/.phren`, or point `phren.storePath` at a path inside the environment.
+- `phren.nodePath` must be a `node` binary inside that environment.
 
-The sidebar is structured around real Phren objects:
+This is deliberate: the extension spawns `node` and reads the store directly, so running on the workspace side avoids shipping your store over the wire and keeps file paths valid.
 
-- **Projects**: expands into Findings and Notes (both grouped by date), Tasks (Queue/Active/Done), Sessions, Review Queue, and Reference.
-- **Skills**: grouped by scope, project-local and global skills shown separately.
-- **Hooks**: current hook state for each registered tool.
-- **Fragment Graph**: one-click entry into the graph view.
+## Troubleshooting
 
-### Add Findings Without Leaving the Editor
-
-Select text in any editor → right-click → **Phren: Add Finding**. The finding is added to the active project and synced on the next Stop hook.
-
-### Work With Tasks
-
-Tasks in the sidebar show priority badges, a pin indicator for pinned tasks, and issue numbers for tasks linked to GitHub issues. Inline actions (complete, delete, pin, update) appear on hover. Click any task to open its detail panel.
-
-### Edit Skills
-
-Skills open in an editor-like webview with inline save and enable/disable controls, useful for iterating on prompt instructions without dropping into the Phren store manually.
-
-## Notes
-
-- This extension does not provision Phren for you. It connects to an existing local install.
-- If the sidebar appears empty, check `phren.mcpServerPath`, `phren.nodePath`, and `phren.storePath` first.
-- The extension talks to your local Phren MCP server over stdio; behavior depends on that server being installed and reachable.
+- **Open the log first.** Run **Phren: Show Log** to open the **"Phren"** output channel. It records the resolved MCP server path, store path, spawn failures, tool errors and other detail the extension hits.
+- **Health checks.** Run **Phren: Doctor** for a report on the install, store and hooks; **Phren: Doctor Fix** applies the safe fixes. The status bar item also links to Doctor.
+- **Empty sidebar or graph.** Usually the extension cannot find phren or the store. Confirm `npx @phren/cli init` has run in the environment where the extension is active, then check `phren.mcpServerPath`, `phren.nodePath`, and `phren.storePath`.
+- **Empty fragment graph.** When there is nothing to draw, the graph says so in place of the nodes — for example no projects tracked yet, or no findings captured. Add a project (**Phren: Add Project**) or select the right active project, then refresh.
+- **In WSL or Remote**, remember everything above must be installed in the remote environment, not just locally.
 
 ## Development
 

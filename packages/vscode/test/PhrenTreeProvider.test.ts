@@ -35,6 +35,14 @@ describe("PhrenTreeProvider.getChildren: delegates to TreeDataSource", () => {
     ]);
   });
 
+  it("shows the truths count on the project's Truths category", async () => {
+    const getTruths = vi.fn(async () => ok({ truths: ["one", { text: "two" }] }));
+    const provider = new PhrenTreeProvider(fakeClient({ getTruths }), STORE_PATH);
+    const children = await provider.getChildren({ kind: "project", projectName: "app" });
+    const truths = children.find((c) => c.kind === "category" && c.category === "truths");
+    expect(truths && truths.kind === "category" ? truths.count : undefined).toBe(2);
+  });
+
   it("a findings category passes the provider's current date filter through to TreeDataSource", async () => {
     const getFindings = vi.fn(async () => ok({
       findings: [
@@ -122,6 +130,32 @@ describe("PhrenTreeProvider.getParent: multi-hop navigation", () => {
     expect(await provider.getParent({ kind: "rootSection", section: "projects" })).toBeUndefined();
     expect(await provider.getParent({ kind: "projectGroup", group: "device", count: 1 })).toEqual({ kind: "rootSection", section: "projects" });
     expect(await provider.getParent({ kind: "storeGroup", storeName: "team", role: "team", count: 1 })).toEqual({ kind: "rootSection", section: "projects" });
+  });
+});
+
+describe("PhrenTreeProvider: openTruth command", () => {
+  it("registers phren.openTruth and opens the truth text in an untitled document", async () => {
+    const provider = new PhrenTreeProvider(fakeClient(), STORE_PATH);
+    const registration = vscode.commands.registerCommand.mock.calls.find(([id]) => id === "phren.openTruth");
+    expect(registration).toBeDefined();
+
+    const handler = registration![1] as (truth?: { text?: string }) => Promise<void>;
+    await handler({ text: "The API is read-only" });
+
+    expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith({ content: "The API is read-only", language: "markdown" });
+    expect(vscode.window.showTextDocument).toHaveBeenCalled();
+    provider.dispose();
+  });
+
+  it("opens an empty document when invoked with no truth payload", async () => {
+    const provider = new PhrenTreeProvider(fakeClient(), STORE_PATH);
+    const registration = vscode.commands.registerCommand.mock.calls.find(([id]) => id === "phren.openTruth");
+    const handler = registration![1] as (truth?: { text?: string }) => Promise<void>;
+    vi.mocked(vscode.workspace.openTextDocument).mockClear();
+
+    await handler(undefined);
+    expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith({ content: "", language: "markdown" });
+    provider.dispose();
   });
 });
 

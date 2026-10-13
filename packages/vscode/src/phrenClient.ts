@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import { phrenLog } from "./log";
 
 interface JsonRpcSuccess<T> {
   jsonrpc: "2.0";
@@ -52,6 +53,12 @@ export interface PhrenClientOptions {
   requestTimeoutMs?: number;
 }
 
+export interface FindingCitation {
+  file?: string;
+  line?: number;
+  repo?: string;
+}
+
 export interface GetTasksOptions {
   status?: "all" | "active" | "queue" | "done" | "active+queue";
   limit?: number;
@@ -88,6 +95,10 @@ export class PhrenClient {
     this.options = options;
     this.timeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
+    phrenLog.info(
+      `Starting phren MCP: node=${options.nodePath ?? process.execPath}, server=${options.mcpServerPath}, store=${options.storePath}`,
+    );
+
     this.process = this.spawnProcess();
   }
 
@@ -107,7 +118,7 @@ export class PhrenClient {
 
     child.stderr.on("data", (chunk: Buffer | string) => {
       const message = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
-      console.error(`[phren-mcp] ${message.trim()}`);
+      phrenLog.warn(`[phren-mcp] ${message.trim()}`);
     });
 
     child.on("exit", (code, signal) => {
@@ -115,11 +126,13 @@ export class PhrenClient {
         return;
       }
       const exitError = new Error(`phren MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+      phrenLog.error(`[phren-mcp] ${exitError.message}`);
       this.rejectPending(exitError);
       this.scheduleReconnect();
     });
 
     child.on("error", (error: Error) => {
+      phrenLog.error(`[phren-mcp] process error: ${error.message}`);
       this.rejectPending(error);
       // A spawn failure (e.g. ENOENT/EACCES on mcpServerPath or nodePath) can
       // fire "error" without ever firing "exit", since the process never
@@ -140,13 +153,13 @@ export class PhrenClient {
       return;
     }
     if (this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
-      console.error(`[phren-mcp] All ${PhrenClient.MAX_RECONNECT_RETRIES} reconnect retries exhausted.`);
+      phrenLog.error(`[phren-mcp] All ${PhrenClient.MAX_RECONNECT_RETRIES} reconnect retries exhausted.`);
       return;
     }
     this.reconnecting = true;
     this.reconnectRetries++;
     const attempt = this.reconnectRetries;
-    console.error(`[phren-mcp] Scheduling reconnect attempt ${attempt}/${PhrenClient.MAX_RECONNECT_RETRIES} in ${PhrenClient.RECONNECT_DELAY_MS}ms...`);
+    phrenLog.info(`[phren-mcp] Scheduling reconnect attempt ${attempt}/${PhrenClient.MAX_RECONNECT_RETRIES} in ${PhrenClient.RECONNECT_DELAY_MS}ms...`);
 
     this.reconnectPromise = new Promise<void>((resolve) => {
       setTimeout(() => {
@@ -160,11 +173,11 @@ export class PhrenClient {
           this.initializePromise = undefined;
           this.process = this.spawnProcess();
           this.reconnecting = false;
-          console.error(`[phren-mcp] Reconnect attempt ${attempt} spawned successfully.`);
+          phrenLog.info(`[phren-mcp] Reconnect attempt ${attempt} spawned successfully.`);
           resolve();
         } catch (error) {
           this.reconnecting = false;
-          console.error(`[phren-mcp] Reconnect attempt ${attempt} failed to spawn: ${String(error)}`);
+          phrenLog.error(`[phren-mcp] Reconnect attempt ${attempt} failed to spawn: ${String(error)}`);
           resolve();
         }
       }, PhrenClient.RECONNECT_DELAY_MS);
@@ -217,8 +230,12 @@ export class PhrenClient {
     return this.callTool("session_history", { ...options });
   }
 
-  async addFinding(project: string, insight: string): Promise<unknown> {
-    return this.callTool("add_finding", { project, finding: insight });
+  async addFinding(project: string, insight: string, citation?: FindingCitation): Promise<unknown> {
+    const args: Record<string, unknown> = { project, finding: insight };
+    if (citation) {
+      args.citation = citation;
+    }
+    return this.callTool("add_finding", args);
   }
 
   async listProjects(): Promise<unknown> {
@@ -427,18 +444,27 @@ export class PhrenClient {
   }
 
   private async callTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
-    if (this.reconnecting && this.reconnectPromise) {
-      await this.reconnectPromise;
+    try {
+      if (this.reconnecting && this.reconnectPromise) {
+        await this.reconnectPromise;
+      }
+      if (!this.disposed && !this.reconnecting && this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
+        throw new Error("Phren MCP process exited and all reconnect attempts failed.");
+      }
+      await this.ensureInitialized();
+      const result = await this.sendRequest<McpToolCallResult>("tools/call", {
+        name: toolName,
+        arguments: args,
+      });
+      return this.parseToolCallResult(result);
+    } catch (error) {
+      // Every tool failure lands in the log with the tool's name, so a silently
+      // empty tree section or graph can be traced to the call that failed.
+      phrenLog.error(
+        `phren tool call failed: ${toolName} — ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
     }
-    if (!this.disposed && !this.reconnecting && this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
-      throw new Error("Phren MCP process exited and all reconnect attempts failed.");
-    }
-    await this.ensureInitialized();
-    const result = await this.sendRequest<McpToolCallResult>("tools/call", {
-      name: toolName,
-      arguments: args,
-    });
-    return this.parseToolCallResult(result);
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -560,7 +586,7 @@ export class PhrenClient {
         const message = JSON.parse(line) as JsonRpcResponse<unknown>;
         this.handleMessage(message);
       } catch (error) {
-        console.error(`[phren-mcp] Failed to parse JSON-RPC line: ${String(error)}`);
+        phrenLog.error(`[phren-mcp] Failed to parse JSON-RPC line: ${String(error)}`);
       }
     }
   }

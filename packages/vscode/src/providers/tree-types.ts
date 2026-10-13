@@ -42,12 +42,16 @@ export interface ProjectNode {
   active?: boolean;
   reviewCount?: number;
   conflictCount?: number;
+  activeCount?: number;
+  queueCount?: number;
 }
 
 export interface CategoryNode {
   kind: "category";
   projectName: string;
   category: PhrenCategory;
+  /** Present for categories whose child count is known up front (truths). */
+  count?: number;
 }
 
 export interface FindingDateGroupNode {
@@ -234,6 +238,7 @@ export interface MessageNode {
   kind: "message";
   label: string;
   description?: string;
+  tooltip?: string;
   iconId?: string;
 }
 
