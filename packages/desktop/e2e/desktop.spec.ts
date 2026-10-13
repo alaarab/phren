@@ -706,4 +706,26 @@ test("the menu bar answers an approval Home is watching", async ({ page }) => {
   await page.evaluate((k) => (window as unknown as { __trayAnswer: (a: { key: string; decision: string }) => void }).__trayAnswer({ key: k, decision: "approve" }), key);
   await expect.poll(() => answers.length).toBe(1);
   expect(answers[0]).toMatchObject({ actionId: "a1", target: { session: "sess-release" } });
+
+test("a stalled working session reads 'stalled' on Home and in the sidebar", async ({ page }) => {
+  const since = new Date(Date.now() - 7 * 60_000).toISOString();
+  await page.routeWebSocket(/\/api\/overview$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      const msg = JSON.parse(String(message));
+      for (const c of msg.merged?.computers ?? []) for (const g of c.overview?.groups ?? []) for (const child of g.children ?? []) {
+        if (child.id === "sess-fix-login") Object.assign(child, { stalled: true, stalledSince: since, stallFor: 420 });
+      }
+      ws.send(JSON.stringify(msg));
+    });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const row = page.locator('[data-block="working"] .home-row', { hasText: "Fix login" });
+  await expect(row).toHaveClass(/tone-stalled/);
+  await expect(row.locator(".home-stalled")).toHaveText("stalled 7m");
+  await page.waitForTimeout(300);
+  const block = (await page.locator('[data-block="working"]').boundingBox())!;
+  await page.screenshot({ path: test.info().outputPath("desktop-stalled-home.png"), clip: { x: block.x - 8, y: block.y - 8, width: block.width + 16, height: block.height + 16 } });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(page.locator(".sb-row", { hasText: "Fix login" }).locator(".sb-stalled")).toHaveText("stalled 7m");
 });

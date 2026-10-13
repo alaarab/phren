@@ -8,6 +8,7 @@ import { showSection } from "../shell/sections.js";
 import { checksStrip, followChecks } from "../shell/ci-watch.js";
 import { away } from "../shell/away.js";
 import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
+import { stallLabel, stalledMinutes } from "../shell/stalls.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
@@ -133,6 +134,8 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     const metaEl = el("span", "home-row-meta");
     metaEl.append(el("span", "home-project", projectOf(child)), el("span", "home-host", row.computer));
     if (child.approvalPending || child.agentStatus === "blocked") metaEl.append(el("span", "home-why", child.approvalPending ? "Approval" : "Blocked"));
+    const stalled = stalledMinutes(child);
+    if (stalled !== null) metaEl.append(el("span", "home-stalled", stallLabel(stalled)));
     const age = elapsed(child);
     if (age) metaEl.append(el("span", "home-age", age));
     shell.button.append(metaEl);
@@ -167,7 +170,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       // The overview's current step is the agent's activity verb ("Editing server.ts").
       const activity = row.child.currentStep || row.child.activity || row.child.activityVerb;
       const sub = activity ? el("span", "home-row-sub activity", String(activity)) : undefined;
-      return sessionRow(row, { tone: "working", sub });
+      return sessionRow(row, { tone: stalledMinutes(row.child) !== null ? "stalled" : "working", sub });
     }), "No agent is working.");
   }
 
