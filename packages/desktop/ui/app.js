@@ -2,7 +2,7 @@
 // overview store. Sections live in ./sections, shared plumbing in ./shell.
 import { installKeys } from "./keys.js";
 import { connectStore, store } from "./shell/store.js";
-import { canGoBack, canGoForward, goBack, goForward, installSections, onTrailChange, registerSection, sectionHandle, setSectionBadge, showSection } from "./shell/sections.js";
+import { canGoBack, canGoForward, goBack, goForward, installSections, onTrailChange, registerSection, sectionHandle, setSectionBadge, showPillAt, showSection } from "./shell/sections.js";
 import { openLaunchSheet } from "./shell/launch.js";
 import { mountAgents } from "./sections/agents.js";
 import { mountHome } from "./sections/home.js";
@@ -150,6 +150,14 @@ window.addEventListener("keydown", (ev) => {
   if (ev.target instanceof Element && ev.target.closest("input, textarea, [contenteditable], .monaco-editor, .xterm, iframe")) return;
   ev.preventDefault();
   if (ev.key === "[") goBack(); else goForward();
+});
+
+// ⌘1–⌘9 (Ctrl+1–9 elsewhere) open the titlebar's pills in order. Editors and
+// terminals keep the keys while they have focus.
+window.addEventListener("keydown", (ev) => {
+  if (!(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey || !/^[1-9]$/.test(ev.key)) return;
+  if (ev.target instanceof Element && ev.target.closest(".monaco-editor, .xterm, iframe")) return;
+  if (showPillAt(Number(ev.key) - 1)) ev.preventDefault();
 });
 
 // Desk first: while the owner types or moves the mouse here, approval alerts
