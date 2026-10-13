@@ -365,7 +365,8 @@ function updateTray(state) {
     });
   }
   if (more) items.push({ label: `and ${more} more`, enabled: false });
-  items.push({ type: "separator" }, { label: "Open Phren", click: showWindow }, { label: "Quit Phren", role: "quit" });
+  const newAgent = () => { if (showWindow()) mainWindow.webContents.send("phren:new-agent"); };
+  items.push({ type: "separator" }, { label: "New agent…", click: newAgent }, { label: "Open Phren", click: showWindow }, { label: "Quit Phren", role: "quit" });
   tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 
