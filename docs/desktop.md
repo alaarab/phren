@@ -155,7 +155,8 @@ hours, when no notifications are shown (the badge and the menu bar still count).
 A session's sidebar menu has Continue in…, which hands it to another harness or
 Claude account in the same pane with a written hand-off (Hook `sessionMove`).
 Quick chat (a project's page, or ⌘K) starts phren's own agent with no tools, to
-ask about a project from its memory (Hook `quickChat`). The launch sheet
+ask about a project from its memory (Hook `quickChat`). A Needs you row on Home
+whose agent is simply waiting has a reply box that sends its next prompt. The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles

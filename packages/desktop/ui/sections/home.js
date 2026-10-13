@@ -9,6 +9,7 @@ import { checksStrip, followChecks } from "../shell/ci-watch.js";
 import { away } from "../shell/away.js";
 import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
 import { stallLabel, stalledMinutes } from "../shell/stalls.js";
+import { sendReply } from "../shell/needs-notify.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
@@ -153,12 +154,63 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     if (!rows.length) list.append(el("div", "home-empty", empty));
   }
 
+  // Reply boxes under rows that simply wait: drafts survive re-renders, and the
+  // block does not redraw while one is focused (it redraws on blur).
+  const drafts = new Map(); // row key -> text
+  const replyNotes = new Map(); // row key -> { text, error } after a send
+  let needsDirty = false;
+  function typingReply() {
+    return document.activeElement instanceof HTMLElement && !!document.activeElement.closest('[data-block="needs"] .home-reply');
+  }
+
+  function replyBox(row) {
+    const form = el("form", "home-reply");
+    const input = el("input", "home-reply-input");
+    input.type = "text";
+    input.placeholder = `Reply to ${row.child.title || row.child.label || "the agent"}…`;
+    input.setAttribute("aria-label", `Reply to ${row.child.title || row.child.label || "the agent"}`);
+    input.value = drafts.get(row.key) ?? "";
+    input.addEventListener("input", () => { drafts.set(row.key, input.value); replyNotes.delete(row.key); });
+    input.addEventListener("blur", () => { if (needsDirty) setTimeout(() => { if (!typingReply()) renderNeeds(); }, 0); });
+    const shown = replyNotes.get(row.key);
+    const note = el("span", `home-reply-note${shown?.error ? " error" : ""}`, shown?.text ?? "");
+    form.append(input, note);
+    const say = (text, error = false) => {
+      replyNotes.set(row.key, { text, error });
+      note.textContent = text;
+      note.classList.toggle("error", error);
+    };
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.readOnly = true;
+      say("Sending…");
+      const error = await sendReply(row.key, text);
+      input.readOnly = false;
+      if (error) { say(error, true); return; }
+      drafts.delete(row.key);
+      input.value = "";
+      say("Sent");
+    });
+    return form;
+  }
+
+  function needsRow(row, index) {
+    const button = sessionRow(row, { tone: "waiting", selected: index === selected, sub: needsSub(row) });
+    const waiting = row.child.agentStatus === "waiting" && !row.child.approvalPending && row.child.target;
+    if (!waiting) return button;
+    const wrap = el("div", "home-reply-row");
+    wrap.append(button, replyBox(row));
+    return wrap;
+  }
+
   function renderNeeds() {
     const rows = needsYou(merged);
+    if (typingReply()) { needsDirty = true; return; }
+    needsDirty = false;
     if (selected >= rows.length) selected = Math.max(0, rows.length - 1);
-    fill("needs", rows.map((row, index) => sessionRow(row, {
-      tone: "waiting", selected: index === selected, sub: needsSub(row),
-    })), "Nothing needs you.");
+    fill("needs", rows.map(needsRow), "Nothing needs you.");
     block("needs").querySelector(".home-keys").hidden = !rows.length;
     syncWatchers(rows);
   }
