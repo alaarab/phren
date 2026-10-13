@@ -30,6 +30,8 @@ let hook: FakeHook;
 let hub: OverviewHub;
 let closeServer: (() => Promise<void>) | undefined;
 let url: string;
+// What the fake Hook says about the working session's pull request checks.
+let ciChecks = "pending";
 
 test.beforeAll(async () => {
   if (!existsSync(UI_LINK)) {
@@ -55,6 +57,8 @@ test.beforeAll(async () => {
       "POST /v1/git/status": () => ({ status: 200, json: gitStatus }),
       "POST /v1/diff": () => ({ status: 200, json: diff }),
       "GET /v1/transcripts/blob": () => ({ status: 200, body: TINY_PNG, contentType: "application/octet-stream" }),
+      "POST /v1/git/pulls": () => ({ status: 200, json: { available: true, branch: "feat/login", pulls: [], host: { kind: "github", name: "GitHub", terms: { ref: "#" } },
+        current: { number: 42, title: "Keep the session through the guard", state: "OPEN", checks: ciChecks } } }),
       "GET /v1/projects/repos": () => ({ status: 200, json: { repos: [{ name: "phren", directory: "/Users/you/phren", source: "activity", registered: true }] } }),
       "GET /v1/projects/phren/git": () => ({ status: 200, json: FORGE }),
     },
@@ -369,4 +373,34 @@ test("an image in a transcript shows as a thumbnail that opens full size", async
   await expect(page.locator(".ct-lightbox img")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".ct-lightbox")).toHaveCount(0);
+});
+
+test("CI watch notifies once when the working session's pull request checks fail", async ({ page }) => {
+  ciChecks = "pending";
+  await page.clock.install();
+  // The Electron preload's shell, recording notifications.
+  await page.addInitScript(() => {
+    const notes: string[][] = [];
+    Object.assign(window, { __notes: notes, phrenDesktop: { notify: (title: string, body: string) => notes.push([title, body]), setBadge() {} } });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(page.locator(".sb-row", { hasText: "Fix login" })).toBeVisible();
+  const pullCalls = () => hook.calls.filter((c) => c.path === "/v1/git/pulls").length;
+  const notes = () => page.evaluate(() => (window as unknown as { __notes: string[][] }).__notes);
+  // One tick with the session loaded sees the checks pending: the baseline, no notice.
+  let before = pullCalls();
+  await page.clock.fastForward(121_000);
+  await expect.poll(pullCalls).toBeGreaterThan(before);
+  await page.waitForTimeout(300); // that tick's reply lands
+  expect(await notes()).toEqual([]);
+  ciChecks = "failing";
+  await page.clock.fastForward(121_000);
+  await expect.poll(notes).toEqual([["phren: checks failed", "#42 Keep the session through the guard \u00b7 This computer"]]);
+  // No change, no second notification.
+  before = pullCalls();
+  await page.clock.fastForward(121_000);
+  await expect.poll(pullCalls).toBeGreaterThan(before);
+  await page.waitForTimeout(300);
+  expect(await notes()).toHaveLength(1);
 });

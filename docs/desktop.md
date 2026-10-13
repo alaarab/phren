@@ -122,6 +122,11 @@ that line. A failing check on the branch's pull request shows **Seen this
 before**: the findings and truths that match it, with **Ask the agent** to
 put the failure and the finding in the chat.
 
+The desktop also notifies you when the pull request of a working (or recently
+active) session's branch turns failing or passing. It asks each project's Hook
+every two minutes, at most six projects. Turn it off in Settings ›
+Notifications.
+
 ⌘K opens the palette (sessions, files, commands). The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 

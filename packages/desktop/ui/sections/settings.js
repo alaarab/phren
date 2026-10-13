@@ -16,6 +16,7 @@ const TRANSCRIPT_KEY = "phren.desktop.transcriptSize";
 const SIDEBAR_ROWS_KEY = "phren.desktop.sidebarRows";
 const NOTIFY_KEY = "phren.desktop.notify";
 const BADGE_KEY = "phren.desktop.badge";
+const CI_KEY = "phren.desktop.notify-ci";
 const SIZES = [12, 13, 14];
 
 // ------------------------------------------------------------ preferences
@@ -30,6 +31,7 @@ function writeFlag(key, on) {
 
 export function notifyEnabled() { return readFlag(NOTIFY_KEY); }
 export function badgeEnabled() { return readFlag(BADGE_KEY); }
+export function ciNotifyEnabled() { return readFlag(CI_KEY); }
 
 function readTranscriptSize() {
   try { const value = Number(localStorage.getItem(TRANSCRIPT_KEY)); return SIZES.includes(value) ? value : 13; }
@@ -991,6 +993,7 @@ function buildNotifications(page) {
   const list = el("div", "settings-list");
   list.append(toggleRow("Notify when an agent needs me", notifyEnabled(), (on) => writeFlag(NOTIFY_KEY, on)));
   list.append(toggleRow("Show the needs-you count on the dock icon", badgeEnabled(), (on) => writeFlag(BADGE_KEY, on)));
+  list.append(toggleRow("Notify when a session's pull request checks pass or fail", ciNotifyEnabled(), (on) => writeFlag(CI_KEY, on)));
   page.append(head, list);
   return null;
 }
