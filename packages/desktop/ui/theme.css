@@ -562,6 +562,8 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .home-row { align-items: flex-start; }
 .home-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .home-row-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+/* What the agent said last: up to two lines. */
+.home-row-sub.reply { display: -webkit-box; white-space: normal; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--text-2); }
 .home-row-sub.activity { color: var(--text-2); font-family: "JetBrains Mono", ui-monospace, monospace; }
 .home-row.selected { background: var(--card); box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px var(--accent); }
 .home-age { color: var(--dim); font-family: "JetBrains Mono", ui-monospace, monospace; }

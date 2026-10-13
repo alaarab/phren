@@ -12,6 +12,10 @@ describe("needsNotice", () => {
     expect(needsNotice(row({ approvalPending: true })).reply).toBe(false);
     expect(needsNotice(row({ agentStatus: "blocked" })).reply).toBe(false);
   });
+
+  it("adds what the agent said last when the Hook sends it", () => {
+    expect(needsNotice(row({ lastReply: "Tests pass. Merge it?" })).body).toBe("Ship it · mini\nTests pass. Merge it?");
+  });
 });
 
 describe("sendReply", () => {

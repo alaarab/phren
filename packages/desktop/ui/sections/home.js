@@ -114,10 +114,15 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     return { button, title };
   }
 
+  /** What the agent said last before it stopped (Hook `lastReply`, 0.3.45+). */
+  function replySub(child) {
+    return child?.lastReply ? el("span", "home-row-sub reply", child.lastReply) : undefined;
+  }
+
   function needsSub(row) {
     const info = approvals.get(row.key);
     if (info?.summary) return el("span", "home-row-sub", info.summary);
-    return undefined;
+    return replySub(row.child);
   }
 
   function sessionRow(row, { tone, selected: on, sub }) {
@@ -178,7 +183,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       // The row as it is now, when the session is still there.
       const live = store.find(entry.computer, entry.child.id);
       const child = live?.child ?? entry.child;
-      const shell = rowShell({ tone: "done" });
+      const shell = rowShell({ tone: "done", sub: replySub(child) });
       shell.title.textContent = child.title || child.label || projectOf(child);
       const meta = el("span", "home-row-meta");
       meta.append(el("span", "home-project", projectOf(child)), el("span", "home-host", entry.computer));

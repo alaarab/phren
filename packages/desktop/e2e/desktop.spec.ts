@@ -535,7 +535,7 @@ test("Home lists the turns that ended since you left", async ({ page }) => {
   await expect(page.locator('[data-block="working"] .home-row', { hasText: "Fix login" })).toBeVisible();
   const overview = await fixture("overview.json") as { groups: Array<{ children: Array<{ title: string; agentStatus: string }> }> };
   const idle = structuredClone(overview);
-  for (const g of idle.groups) for (const c of g.children) if (c.title === "Fix login") c.agentStatus = "idle";
+  for (const g of idle.groups) for (const c of g.children) if (c.title === "Fix login") Object.assign(c, { agentStatus: "idle", lastReply: "Login keeps the session through the guard now. Tests pass; want me to open a PR?" });
 
   // Leave, the agent finishes, come back two minutes later.
   await page.evaluate(() => { document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); });
@@ -549,6 +549,7 @@ test("Home lists the turns that ended since you left", async ({ page }) => {
   await expect(awayBlock.locator(".home-away-for")).toHaveText(" · away 2m");
   const row = awayBlock.locator(".home-row", { hasText: "Fix login" });
   await expect(row).toContainText("done 2m");
+  await expect(row.locator(".home-row-sub.reply")).toHaveText("Login keeps the session through the guard now. Tests pass; want me to open a PR?");
   await page.waitForTimeout(300);
   await page.locator(".home").screenshot({ path: test.info().outputPath("desktop-since-you-left.png") });
 
