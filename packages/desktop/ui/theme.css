@@ -226,6 +226,7 @@ button.home-row:hover { background: var(--card); }
 .home-row.tone-working { box-shadow: inset 3px 0 0 var(--working); }
 /* A working session the Hook sees no output from (stalled). */
 .home-row.tone-stalled { box-shadow: inset 3px 0 0 var(--danger); }
+.sb-background { flex: none; color: var(--working); font-size: 11px; white-space: nowrap; }
 .home-stalled, .sb-stalled { color: var(--danger); font-size: 12px; white-space: nowrap; }
 .home-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-row-meta { display: flex; gap: 8px; flex: none; color: var(--muted); font-size: 12px; }

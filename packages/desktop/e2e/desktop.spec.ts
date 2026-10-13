@@ -881,3 +881,24 @@ test("⌘K's ? search offers to ask the question in a quick chat", async ({ page
   await expect(page.locator(".launch-sheet .launch-title")).toHaveText("Quick chat about phren");
   await expect(page.getByRole("textbox", { name: "First prompt" })).toHaveValue("why does login drop the session");
 });
+
+test("a session working on background tasks says so on Home and in the sidebar", async ({ page }) => {
+  await page.routeWebSocket(/\/api\/overview$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      const msg = JSON.parse(String(message));
+      for (const c of msg.merged?.computers ?? []) for (const g of c.overview?.groups ?? []) for (const child of g.children ?? []) {
+        if (child.id === "sess-fix-login") Object.assign(child, { agentStatus: "working", backgroundTasks: 3, currentStep: undefined });
+      }
+      ws.send(JSON.stringify(msg));
+    });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const row = page.locator('[data-block="working"] .home-row', { hasText: "Fix login" });
+  await expect(row.locator(".home-row-sub")).toHaveText("3 background tasks");
+  await page.waitForTimeout(300);
+  const block = (await page.locator('[data-block="working"]').boundingBox())!;
+  await page.screenshot({ path: test.info().outputPath("desktop-background-home.png"), clip: { x: block.x - 8, y: block.y - 8, width: block.width + 16, height: block.height + 16 } });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(page.locator(".sb-row", { hasText: "Fix login" }).locator(".sb-background")).toHaveText("3 background tasks");
+});
