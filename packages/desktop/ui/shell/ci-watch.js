@@ -59,6 +59,9 @@ const listeners = new Set();
 let interest = 0;
 let wake = null;
 
+/** The last look without following it (no extra polling); `null` before the first. */
+export function lastChecks() { return lastLook; }
+
 /** Follow the last look: `fn(pulls)` now and after each tick. While anyone
  *  follows, the watch polls even with notifications off. Returns the stop. */
 export function followChecks(fn) {

@@ -133,7 +133,8 @@ active) session's branch turns failing or passing. It asks each project's Hook
 every two minutes, at most six projects. Turn it off in Settings ›
 Notifications.
 
-⌘K opens the palette (sessions, files, commands). From any other app,
+⌘K opens the palette (sessions, the open pull requests on watched sessions,
+files, commands). From any other app,
 ⌘⇧Space (Ctrl+Shift+Space on Linux and Windows) brings Phren forward with the
 palette open; change or turn off that key in Settings › Keys. A menu bar icon
 (system tray on Linux and Windows) shows how many sessions need you and lists
