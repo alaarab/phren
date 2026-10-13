@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
-import { TreeDataSource } from "../src/providers/tree-data";
+import { TreeDataSource, parseTruths, parseReportedTaskCounts } from "../src/providers/tree-data";
 import { fakeClient, ok, deviceContext } from "./test-helpers";
 
 // tree-data.ts imports readDeviceContext from ../profileConfig, which — for
@@ -136,7 +136,7 @@ describe("TreeDataSource findings", () => {
     const client = fakeClient({ getFindings: vi.fn(async () => { throw new Error("network down"); }) });
     const data = new TreeDataSource(client, STORE_PATH);
     const groups = await data.getFindingDateGroups("app", undefined);
-    expect(groups).toEqual([{ kind: "message", label: "Failed to load findings", description: "network down", iconId: "warning" }]);
+    expect(groups).toEqual([{ kind: "message", label: "Failed to load findings", description: "network down", tooltip: "Phren: Show Log", iconId: "warning" }]);
   });
 
   it("drops findings missing an id or text instead of crashing on malformed entries", async () => {
@@ -359,6 +359,44 @@ describe("TreeDataSource truths and reference docs", () => {
     expect(nodes).toEqual([{ kind: "truth", projectName: "app", text: "real truth" }]);
   });
 
+  it("getTruthNodes accepts `{ text }` objects and the array-under-data shape", async () => {
+    const objects = new TreeDataSource(
+      fakeClient({ getTruths: vi.fn(async () => ok({ truths: [{ text: "from object" }, { truth: "from truth key" }, { nope: true }] })) }),
+      STORE_PATH,
+    );
+    expect(await objects.getTruthNodes("app")).toEqual([
+      { kind: "truth", projectName: "app", text: "from object" },
+      { kind: "truth", projectName: "app", text: "from truth key" },
+    ]);
+
+    const bareArray = new TreeDataSource(
+      fakeClient({ getTruths: vi.fn(async () => ok(["plain one", " plain two "])) }),
+      STORE_PATH,
+    );
+    expect(await bareArray.getTruthNodes("app")).toEqual([
+      { kind: "truth", projectName: "app", text: "plain one" },
+      { kind: "truth", projectName: "app", text: "plain two" },
+    ]);
+  });
+
+  it('getTruthNodes reports "No truths pinned" when the list is empty, and getTruthCount returns 0', async () => {
+    const data = new TreeDataSource(fakeClient(), STORE_PATH);
+    expect(await data.getTruthNodes("app")).toEqual([{ kind: "message", label: "No truths pinned", iconId: "pin" }]);
+    expect(await data.getTruthCount("app")).toBe(0);
+  });
+
+  it("getTruthCount returns undefined when the call fails so the category omits a count", async () => {
+    const client = fakeClient({ getTruths: vi.fn(async () => { throw new Error("boom"); }) });
+    const data = new TreeDataSource(client, STORE_PATH);
+    expect(await data.getTruthCount("app")).toBeUndefined();
+  });
+
+  it("parseTruths tolerates malformed envelopes without throwing", () => {
+    expect(parseTruths(undefined)).toEqual([]);
+    expect(parseTruths({ data: { truths: "not an array" } })).toEqual([]);
+    expect(parseTruths({ data: [null, 7, "  ", { text: " kept " }] })).toEqual(["kept"]);
+  });
+
   it("getReferenceNodes only surfaces files under reference/ (either slash style) and strips the prefix", async () => {
     const client = fakeClient({
       getProjectSummary: vi.fn(async () => ok({
@@ -471,6 +509,90 @@ describe("TreeDataSource.sortWithActiveFirst (pure)", () => {
     const nodes = data.sortWithActiveFirst(projects, undefined, undefined);
     expect(nodes.map((n) => n.projectName)).toEqual(["a", "b"]);
     expect(nodes.every((n) => !n.active)).toBe(true);
+  });
+
+  it("attaches per-project open-task counts, matching by case-insensitive name", () => {
+    const data = new TreeDataSource(fakeClient(), STORE_PATH);
+    const projects = [{ name: "App" }];
+    const taskCounts = new Map([["app", { active: 3, queue: 5 }]]);
+    const nodes = data.sortWithActiveFirst(projects, undefined, undefined, taskCounts);
+    expect(nodes[0].activeCount).toBe(3);
+    expect(nodes[0].queueCount).toBe(5);
+  });
+});
+
+describe("TreeDataSource.fetchTaskCountsByProject", () => {
+  function projectNode(nodes: Awaited<ReturnType<TreeDataSource["getProjectNodes"]>>, name: string) {
+    const node = nodes.find((n) => n.kind === "project" && n.projectName === name);
+    if (!node || node.kind !== "project") throw new Error(`no project node for ${name}`);
+    return node;
+  }
+
+  it("falls back to counting returned rows when the response carries no counts", async () => {
+    const getAllTasks = vi.fn(async () => ok({
+      projects: [
+        { project: "app", items: { Active: [{ id: "1", line: "a" }, { id: "2", line: "b" }], Queue: [{ id: "3", line: "c" }] } },
+        { project: "other", items: { Active: [{ id: "4", line: "d" }] } },
+      ],
+    }));
+    const listProjects = vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "other" }] }));
+    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
+    const nodes = await data.getProjectNodes(); // no workspace, single store → flat list
+    expect(getAllTasks).toHaveBeenCalledTimes(1);
+    expect(projectNode(nodes, "app").activeCount).toBe(2);
+    expect(projectNode(nodes, "app").queueCount).toBe(1);
+  });
+
+  it("uses the response's uncapped section counts even when they exceed the returned rows", async () => {
+    const getAllTasks = vi.fn(async () => ok({
+      projects: [
+        {
+          project: "big",
+          counts: { Active: 150, Queue: 320, done: 40 },
+          // Only one row per section made it into the capped response.
+          items: { Active: [{ id: "1", line: "a" }], Queue: [{ id: "2", line: "b" }] },
+        },
+      ],
+    }));
+    const listProjects = vi.fn(async () => ok({ projects: [{ name: "big" }] }));
+    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
+    const nodes = await data.getProjectNodes();
+    expect(projectNode(nodes, "big").activeCount).toBe(150);
+    expect(projectNode(nodes, "big").queueCount).toBe(320);
+    expect(projectNode(nodes, "big").openCount).toBeUndefined();
+  });
+
+  it("sums the responsibility buckets into an uncapped open count when there is no section split", async () => {
+    const getAllTasks = vi.fn(async () => ok({
+      projects: [
+        {
+          project: "big",
+          counts: { human: 4, agentReady: 3, agentWaitingOnHuman: 1, agentWaitingOnTask: 2, done: 40 },
+          items: { Active: [{ id: "1", line: "a" }] },
+        },
+      ],
+    }));
+    const listProjects = vi.fn(async () => ok({ projects: [{ name: "big" }] }));
+    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
+    const nodes = await data.getProjectNodes();
+    expect(projectNode(nodes, "big").openCount).toBe(10);
+    expect(projectNode(nodes, "big").activeCount).toBeUndefined();
+    expect(projectNode(nodes, "big").queueCount).toBeUndefined();
+  });
+});
+
+describe("parseReportedTaskCounts", () => {
+  it("reads section counts in several spellings", () => {
+    expect(parseReportedTaskCounts({ Active: 5, Queue: 6 })).toEqual({ active: 5, queue: 6 });
+    expect(parseReportedTaskCounts({ active: 5, queue: 6 })).toEqual({ active: 5, queue: 6 });
+    expect(parseReportedTaskCounts({ sections: { Active: 5, Queue: 6 } })).toEqual({ active: 5, queue: 6 });
+  });
+
+  it("falls back to the responsibility-bucket total, and returns undefined without usable numbers", () => {
+    expect(parseReportedTaskCounts({ human: 1, agentReady: 2, agentWaitingOnHuman: 3, agentWaitingOnTask: 4, done: 9 }))
+      .toEqual({ open: 10 });
+    expect(parseReportedTaskCounts({ done: 9 })).toBeUndefined();
+    expect(parseReportedTaskCounts("nonsense")).toBeUndefined();
   });
 });
 

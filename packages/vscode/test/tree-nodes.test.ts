@@ -70,6 +70,35 @@ describe("buildTreeItem: project", () => {
     expect(item.description).toHaveLength(72);
     expect(item.description).toMatch(/^a+\.\.\.$/);
   });
+
+  it("shows open task counts and combines them with a review badge", () => {
+    const tasksOnly = buildTreeItem(
+      { kind: "project", projectName: "app", activeCount: 3, queueCount: 5 },
+      undefined,
+    );
+    expect(tasksOnly.description).toBe("3 active · 5 queued");
+
+    const withReview = buildTreeItem(
+      { kind: "project", projectName: "app", activeCount: 3, reviewCount: 2 },
+      undefined,
+    );
+    expect(withReview.description).toBe("2 review · 3 active");
+  });
+
+  it("shows an open total when the source gives no active/queue split", () => {
+    const item = buildTreeItem({ kind: "project", projectName: "app", openCount: 12 }, undefined);
+    expect(item.description).toBe("12 open");
+  });
+
+  it("prefers the active/queue split over an open total", () => {
+    const item = buildTreeItem({ kind: "project", projectName: "app", activeCount: 3, queueCount: 5, openCount: 8 }, undefined);
+    expect(item.description).toBe("3 active · 5 queued");
+  });
+
+  it("omits zero-valued task counts so an empty project stays clean", () => {
+    const item = buildTreeItem({ kind: "project", projectName: "app", activeCount: 0, queueCount: 0, openCount: 0, brief: "app" }, undefined);
+    expect(item.description).toBe("app");
+  });
 });
 
 describe("buildTreeItem: category", () => {
@@ -87,6 +116,15 @@ describe("buildTreeItem: category", () => {
       { label: "Jan" },
     );
     expect(item.label).toBe("Notes");
+  });
+
+  it("shows a description count when the category carries one", () => {
+    const counted = buildTreeItem({ kind: "category", projectName: "app", category: "truths", count: 4 }, undefined);
+    expect(counted.description).toBe("4");
+    expect(icon(counted)).toBe("pin");
+
+    const uncounted = buildTreeItem({ kind: "category", projectName: "app", category: "truths" }, undefined);
+    expect(uncounted.description).toBeUndefined();
   });
 });
 
@@ -289,6 +327,16 @@ describe("buildTreeItem: storeGroup and manageItem", () => {
   });
 });
 
+describe("buildTreeItem: truth", () => {
+  it("uses a pin and issues the openTruth command with the full node", () => {
+    const node = { kind: "truth" as const, projectName: "app", text: "The API is read-only" };
+    const item = buildTreeItem(node, undefined);
+    expect(icon(item)).toBe("pin");
+    expect(item.command?.command).toBe("phren.openTruth");
+    expect(item.command?.arguments).toEqual([node]);
+  });
+});
+
 describe("buildTreeItem: message", () => {
   it("defaults to the info icon when no iconId is given", () => {
     const item = buildTreeItem({ kind: "message", label: "No findings" }, undefined);
@@ -299,5 +347,10 @@ describe("buildTreeItem: message", () => {
     const item = buildTreeItem({ kind: "message", label: "Failed to load", description: "boom", iconId: "warning" }, undefined);
     expect(icon(item)).toBe("warning");
     expect(item.description).toBe("boom");
+  });
+
+  it("surfaces the tooltip hint when given (error rows)", () => {
+    const item = buildTreeItem({ kind: "message", label: "Failed to load findings", description: "timeout", tooltip: "Phren: Show Log", iconId: "warning" }, undefined);
+    expect(item.tooltip).toBe("Phren: Show Log");
   });
 });

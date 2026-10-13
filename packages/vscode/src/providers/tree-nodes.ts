@@ -40,6 +40,11 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       const reviewBadge: string[] = [];
       if (element.conflictCount && element.conflictCount > 0) reviewBadge.push(`⚠ ${element.conflictCount}`);
       else if (element.reviewCount && element.reviewCount > 0) reviewBadge.push(`${element.reviewCount} review`);
+      const taskBadge: string[] = [];
+      if (element.activeCount && element.activeCount > 0) taskBadge.push(`${element.activeCount} active`);
+      if (element.queueCount && element.queueCount > 0) taskBadge.push(`${element.queueCount} queued`);
+      if (taskBadge.length === 0 && element.openCount && element.openCount > 0) taskBadge.push(`${element.openCount} open`);
+      if (taskBadge.length > 0) reviewBadge.push(taskBadge.join(" · "));
       const reviewBadgeText = reviewBadge.join(" · ");
       if (element.active) {
         // Two-space gap sets the badge off from the star; only meaningful when
@@ -63,6 +68,7 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
         categoryLabel += ` [${dateFilter.label}]`;
       }
       const item = new vscode.TreeItem(categoryLabel, vscode.TreeItemCollapsibleState.Collapsed);
+      if (element.count !== undefined) item.description = `${element.count}`;
       item.iconPath = themeIcon(categoryIconId(cat as PhrenCategory));
       item.id = `phren.category.${element.projectName}.${cat}`;
       if (cat === "findings") {
@@ -293,6 +299,11 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       item.iconPath = themeIcon("pin");
       item.id = `phren.truth.${element.projectName}.${element.text.slice(0, 40).replace(/\W/g, "_")}`;
       item.contextValue = "phren.truthItem";
+      item.command = {
+        command: "phren.openTruth",
+        title: "Open Truth",
+        arguments: [element],
+      };
       return item;
     }
     case "referenceFile": {
@@ -391,6 +402,7 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
       item.description = element.description;
       item.iconPath = themeIcon(element.iconId ?? "info");
+      if (element.tooltip) item.tooltip = element.tooltip;
       return item;
     }
   }

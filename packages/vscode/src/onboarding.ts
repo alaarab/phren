@@ -240,19 +240,10 @@ export async function handleWalkthroughChecks(
   await vscode.commands.executeCommand("setContext", "phren.storeInitialized", storeInitialized);
 
   if (!runtimeConfig.mcpServerPath) {
-    const choice = await vscode.window.showErrorMessage(
-      "Phren not detected. Run init to set up.",
-      "Run Init",
-      "Run Doctor",
-      "Open Settings",
-    );
-    if (choice === "Run Init") {
-      await vscode.commands.executeCommand("phren.installBackend");
-    } else if (choice === "Run Doctor") {
-      await vscode.commands.executeCommand("phren.initStore");
-    } else if (choice === "Open Settings") {
-      await vscode.commands.executeCommand("workbench.action.openSettings", "phren.mcpServerPath");
-    }
+    offerSetupActions("Phren not detected. Run init to set up.", {
+      "Run Init": "phren.installBackend",
+      "Run Doctor": "phren.initStore",
+    });
     await vscode.commands.executeCommand(
       "workbench.action.openWalkthrough",
       "alaarab.phren-vscode#phren.gettingStarted",
@@ -263,19 +254,10 @@ export async function handleWalkthroughChecks(
 
   if (!pathExists(runtimeConfig.mcpServerPath)) {
     const basename = path.basename(runtimeConfig.mcpServerPath!);
-    const choice = await vscode.window.showErrorMessage(
-      `Phren entrypoint not found: ${basename}. Try re-running init.`,
-      "Re-run Init",
-      "Run Doctor",
-      "Open Settings",
-    );
-    if (choice === "Re-run Init") {
-      await vscode.commands.executeCommand("phren.installBackend");
-    } else if (choice === "Run Doctor") {
-      await vscode.commands.executeCommand("phren.initStore");
-    } else if (choice === "Open Settings") {
-      await vscode.commands.executeCommand("workbench.action.openSettings", "phren.mcpServerPath");
-    }
+    offerSetupActions(`Phren entrypoint not found: ${basename}. Try re-running init.`, {
+      "Re-run Init": "phren.installBackend",
+      "Run Doctor": "phren.initStore",
+    });
     return false;
   }
 
@@ -292,6 +274,17 @@ export async function handleWalkthroughChecks(
 }
 
 // ── Internal helpers ────────────────────────────────────────────────────────
+
+/** A setup problem's one notification. Not awaited: activation must not wait on
+ * the user, and "Show Log" holds the full reason (paths, the WSL/Remote side). */
+function offerSetupActions(message: string, actions: Record<string, string>): void {
+  void vscode.window.showErrorMessage(message, ...Object.keys(actions), "Open Settings", "Show Log").then(async (choice) => {
+    if (!choice) return;
+    if (choice === "Open Settings") await vscode.commands.executeCommand("workbench.action.openSettings", "phren.mcpServerPath");
+    else if (choice === "Show Log") await vscode.commands.executeCommand("phren.showLog");
+    else await vscode.commands.executeCommand(actions[choice]);
+  });
+}
 
 export function hasPhrenMcpEntry(outputChannel?: vscode.OutputChannel): boolean {
   const configFiles = [

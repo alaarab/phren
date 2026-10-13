@@ -40,10 +40,21 @@ import {
   isValidProjectName,
   loadGraphData,
   qualityMultiplierFromEntry,
+  renderGraphHtmlForTests,
   showGraphWebview,
 } from "../src/graphWebview";
 import type { PhrenClient } from "../src/phrenClient";
+import { computeHierarchicalLayout } from "../../cli/browser/graph/layout.js";
 import { fakeClient, ok } from "./test-helpers";
+
+describe("computeHierarchicalLayout", () => {
+  // The renderer used to throw on a zero-node payload: with no nodes there are
+  // no stores, so storeNames[0] was undefined and shellRadiusOf ran
+  // stores.get(undefined)!.size. An empty store is a valid thing to draw.
+  it("returns no cages and does not throw for a graph with zero nodes", () => {
+    expect(computeHierarchicalLayout([])).toEqual([]);
+  });
+});
 
 describe("isValidProjectName", () => {
   it("accepts lowercase alphanumeric names with hyphens/underscores", () => {
@@ -385,6 +396,109 @@ describe("loadGraphData: orchestration", () => {
         (e.source === "project:other" && e.target === "project:app"),
     );
     expect(crossEdges).toHaveLength(1);
+  });
+});
+
+describe("loadGraphData: empty and partial states", () => {
+  it("returns an empty payload naming the store path when no projects are found", async () => {
+    const client = fakeClient({ listProjects: vi.fn(async () => ok({ projects: [] })) });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    // os.homedir() is mocked to the sentinel home, so resolveStorePath() is
+    // <sentinel>/.phren — the reason must name the store it looked in.
+    expect(data.emptyReason).toBeDefined();
+    expect(data.emptyReason).toContain("phren-graphwebview-test-home");
+    expect(data.emptyReason).toContain(".phren");
+  });
+
+  it("puts the project list failure message in emptyReason instead of throwing", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:1");
+      }),
+    });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    expect(data.emptyReason).toContain("connect ECONNREFUSED 127.0.0.1:1");
+  });
+
+  it("keeps the projects that load when one project's fetch fails", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "broken" }] })),
+      getProjectSummary: vi.fn(async () => ok({ name: "app", summary: "the app" })),
+      getFindings: vi.fn(async (project: string) => {
+        if (project === "broken") throw new Error("boom");
+        return ok({ findings: [{ id: "f1", text: "a finding", date: "2026-01-01" }] });
+      }),
+      getTasks: vi.fn(async () => ok({ items: {} })),
+      getTopicConfig: vi.fn(async () => ok({ topics: [] })),
+      readGraph: vi.fn(async () => ok({ fragments: [] })),
+    });
+    const data = await loadGraphData(client);
+    expect(data.nodes.some((n) => n.projectName === "app")).toBe(true);
+    expect(data.nodes.some((n) => n.projectName === "broken")).toBe(false);
+    expect(data.emptyReason).toBeUndefined();
+  });
+
+  it("reports a load failure (not an empty store) when every project fails and no entities remain", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "broken" }] })),
+      getFindings: vi.fn(async (project: string) => {
+        throw new Error(`boom-${project}`);
+      }),
+      readGraph: vi.fn(async () => ok({ fragments: [] })),
+    });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    // Names the count, the store, the log channel, and the first error in
+    // project order (app), not whichever parallel fetch rejected first.
+    expect(data.emptyReason).toContain("Could not load memory for 2 projects");
+    expect(data.emptyReason).toContain("phren-graphwebview-test-home/.phren");
+    expect(data.emptyReason).toContain("Phren: Show Log");
+    expect(data.emptyReason).toContain("boom-app");
+  });
+
+  it("says some projects failed when the loaded ones are all empty", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "broken" }] })),
+      getProjectSummary: vi.fn(async () => ok({ name: "app", summary: "the app" })),
+      getFindings: vi.fn(async (project: string) => {
+        if (project === "broken") throw new Error("boom");
+        return ok({ findings: [] });
+      }),
+      getTasks: vi.fn(async () => ok({ items: {} })),
+      getTopicConfig: vi.fn(async () => ok({ topics: [] })),
+      readGraph: vi.fn(async () => ok({ fragments: [] })),
+    });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    expect(data.emptyReason).toContain("Could not load memory for 1 of 2 projects");
+    expect(data.emptyReason).toContain("the rest have no findings or tasks");
+    expect(data.emptyReason).toContain("Phren: Show Log");
+  });
+
+  it("keeps the plain empty-store wording when every project loaded successfully", async () => {
+    const client = fakeClient({ listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }] })) });
+    const data = await loadGraphData(client);
+    expect(data.nodes).toEqual([]);
+    expect(data.emptyReason).toBe("No findings or tasks yet for the 1 project in /nonexistent/phren-graphwebview-test-home/.phren.");
+  });
+});
+
+describe("renderGraphHtmlForTests: empty state", () => {
+  it("shows a calm empty state with the reason and next steps when there are no nodes", () => {
+    const html = renderGraphHtmlForTests({
+      nodes: [],
+      edges: [],
+      summaries: {},
+      scores: { entries: {} },
+      topics: [],
+      emptyReason: "No projects found in the Phren store at /home/me/.phren.",
+    });
+    expect(html).toContain("No memory to show yet");
+    expect(html).toContain("No projects found in the Phren store at /home/me/.phren.");
+    expect(html).toContain("phren.storePath");
+    expect(html).toContain("Phren: Show Log");
   });
 });
 

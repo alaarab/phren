@@ -13,6 +13,7 @@ vi.mock("node:child_process", () => ({ spawn: spawnMock }));
 
 // eslint-disable-next-line import/order -- must come after vi.mock for hoisting to apply
 import { PhrenClient } from "../src/phrenClient";
+import { phrenLog } from "../src/log";
 
 interface JsonRpcRequestSeen {
   id?: number;
@@ -114,10 +115,12 @@ beforeEach(() => {
     createdProcesses.push(proc);
     return proc;
   });
-  // PhrenClient logs stderr/reconnect activity via console.error; quiet it in
-  // test output (still inspectable via vi.mocked(console.error) where a test
-  // cares, e.g. the malformed-line test below).
-  vi.spyOn(console, "error").mockImplementation(() => {});
+  // PhrenClient logs stderr/reconnect/failure activity through phrenLog; quiet
+  // it in test output (still inspectable via vi.mocked(phrenLog.error) where a
+  // test cares, e.g. the malformed-line and failed-tool-call tests below).
+  vi.spyOn(phrenLog, "info").mockImplementation(() => {});
+  vi.spyOn(phrenLog, "warn").mockImplementation(() => {});
+  vi.spyOn(phrenLog, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -135,6 +138,14 @@ describe("PhrenClient: process spawning", () => {
   it("uses the configured nodePath instead of the current process's executable when given", () => {
     new PhrenClient({ mcpServerPath: "/mcp/server.js", storePath: "/store", nodePath: "/custom/node" });
     expect(spawnMock).toHaveBeenCalledWith("/custom/node", ["/mcp/server.js", "/store"], expect.objectContaining({ stdio: "pipe" }));
+  });
+
+  it("logs the node, server and store paths it is about to spawn", () => {
+    new PhrenClient({ mcpServerPath: "/mcp/server.js", storePath: "/store", nodePath: "/custom/node" });
+    const logged = vi.mocked(phrenLog.info).mock.calls.map(([message]) => String(message)).join("\n");
+    expect(logged).toContain("/custom/node");
+    expect(logged).toContain("/mcp/server.js");
+    expect(logged).toContain("/store");
   });
 });
 
@@ -205,6 +216,25 @@ describe("PhrenClient: request shaping (pins what changed recently)", () => {
   it("getFindings requests limit:200 so the extension never mistakes the MCP tool's default page for the whole project (recent change)", async () => {
     const call = await callAndCapture((c) => c.getFindings("app"));
     expect(call.params).toEqual({ name: "get_findings", arguments: { project: "app", limit: 200 } });
+  });
+
+  it("getTruths calls get_truths with the project", async () => {
+    const call = await callAndCapture((c) => c.getTruths("app"));
+    expect(call.params).toEqual({ name: "get_truths", arguments: { project: "app" } });
+  });
+
+  it("addFinding adds a citation argument only when one is passed", async () => {
+    const without = await callAndCapture((c) => c.addFinding("app", "insight"));
+    expect(without.params!.arguments).toStrictEqual({ project: "app", finding: "insight" });
+
+    const withCitation = await callAndCapture((c) =>
+      c.addFinding("app", "insight", { file: "src/a.ts", line: 12, repo: "phren" }),
+    );
+    expect(withCitation.params!.arguments).toStrictEqual({
+      project: "app",
+      finding: "insight",
+      citation: { file: "src/a.ts", line: 12, repo: "phren" },
+    });
   });
 
   it("getNotes omits the date key entirely when no date is given, and includes it when one is", async () => {
@@ -360,7 +390,24 @@ describe("PhrenClient: stdout framing", () => {
     });
 
     await expect(client.healthCheck()).resolves.toEqual({ ok: true, data: {} });
-    expect(console.error).toHaveBeenCalled();
+    expect(phrenLog.error).toHaveBeenCalledWith(expect.stringContaining("Failed to parse JSON-RPC line"));
+  });
+
+  it("logs a failed tool call with the tool name and the server's message", async () => {
+    const client = new PhrenClient({ mcpServerPath: "mcp.js", storePath: "/store" });
+    const proc = lastProcess();
+    proc.stdin.write = vi.fn((data: string) => {
+      const msg = JSON.parse(String(data).trim());
+      if (msg.method === "initialize") {
+        queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, result: {} }));
+      } else if (msg.method === "tools/call") {
+        queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, result: textResult({ ok: false, error: "boom" }) }));
+      }
+      return true;
+    });
+
+    await expect(client.healthCheck()).rejects.toThrow("boom");
+    expect(phrenLog.error).toHaveBeenCalledWith(expect.stringMatching(/health_check[\s\S]*boom/));
   });
 });
 
