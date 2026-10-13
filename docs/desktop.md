@@ -120,6 +120,11 @@ gitboy's pull request card: the findings that cite those files or a function
 in them, with a count on each file that has some. A citation opens the file at
 that line.
 
+The desktop also notifies you when the pull request of a working (or recently
+active) session's branch turns failing or passing. It asks each project's Hook
+every two minutes, at most six projects. Turn it off in Settings ›
+Notifications.
+
 ⌘K opens the palette (sessions, files, commands). The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
