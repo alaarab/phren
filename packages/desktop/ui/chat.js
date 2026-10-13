@@ -111,7 +111,7 @@ export function openChat(el, computerName, child, opts = {}) {
 
   // ---- composer ----
   const composer = createComposer({
-    computer: computerName, target, provider: source, branch: child && child.branch,
+    computer: computerName, target, provider: source, branch: child && child.branch, project: projectOf(child),
     onConsole: typeof opts.onConsole === "function" ? opts.onConsole : undefined,
     onAgents: () => openWork("agents"),
     onWorkers: () => openWork("workers"),
