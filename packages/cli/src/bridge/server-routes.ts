@@ -35,7 +35,7 @@ import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
-import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch } from "./project-memory.js";
+import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit } from "./project-git.js";
 import { liveBackground, markBackground, paneRecord, recordTitle } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
@@ -360,13 +360,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       const memoryRoute = PROJECT_MEMORY_ROUTE.exec(url.pathname);
       if (memoryRoute) {
         const [, project, route] = memoryRoute;
-        if (request.method !== (route === "findings" ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
+        if (request.method !== (route === "findings" || route === "tasks/complete" ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
         if (!modules.has("memory")) throw new BridgeError(404, disabledHint("memory"));
-        if (route === "tasks" && !modules.has("tasks")) throw new BridgeError(404, disabledHint("tasks"));
+        if ((route === "tasks" || route === "tasks/complete") && !modules.has("tasks")) throw new BridgeError(404, disabledHint("tasks"));
         if (route === "memory") result = projectMemory(modules.store, project);
         else if (route === "memory/files") result = await memoryForFiles(modules.store, project, url.searchParams.getAll("path"));
         else if (route === "memory/search") result = memorySearch(modules.store, project, url.searchParams.get("q") ?? "", Number(url.searchParams.get("limit") ?? "5"));
         else if (route === "tasks") result = tasksForBranch(modules.store, project, url.searchParams.get("branch") ?? "");
+        else if (route === "tasks/complete") result = completeProjectTask(modules.store, project, await body(request));
         else result = await saveFinding(modules.store, project, await body(request));
       } else if (PROJECT_GIT_ROUTE.test(url.pathname)) {
         if (request.method !== "GET") throw new BridgeError(405, "Unsupported request method.");

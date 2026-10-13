@@ -48,4 +48,7 @@ export const findingWriteSchema = z.object({
     name: z.string().min(1).max(200).refine(value => !/[\x00-\x1f\x7f]/.test(value)).optional(),
   }).strict().optional(),
 }).strict();
+/** Complete one task by its stable id (`bid:` plus 8 hex digits), as `/tasks?branch=` lists it. */
+export const taskCompleteSchema = z.object({ id: z.string().regex(/^bid:[0-9a-f]{8}$/) }).strict();
+export type TaskComplete = z.infer<typeof taskCompleteSchema>;
 export type FindingWrite = z.infer<typeof findingWriteSchema>;
