@@ -1,11 +1,12 @@
 // Home: the cockpit. Top to bottom, the conductor card, who needs you (with
-// keyboard answers), what is working (with each agent's activity line), the
+// keyboard answers), the turns that ended since you left, what is working (with each agent's activity line), the
 // checks on those sessions' pull requests, recent returns from dispatched
 // workers, and how every computer is doing.
 import { hookGet, hookPost, targetQuery } from "../api.js";
 import { needsYou, projectOf, sessions, store } from "../shell/store.js";
 import { showSection } from "../shell/sections.js";
 import { checksStrip, followChecks } from "../shell/ci-watch.js";
+import { away } from "../shell/away.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
@@ -64,6 +65,11 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       <section class="home-block" data-block="needs">
         <h2 class="section-label">Needs you <span class="count"></span></h2>
         <p class="home-keys">Up/Down select &middot; <kbd>Enter</kbd> approve &middot; <kbd>P</kbd> allow for this project &middot; <kbd>D</kbd> deny &middot; <kbd>O</kbd> open</p>
+        <div class="home-list"></div>
+      </section>
+      <section class="home-block" data-block="away" hidden>
+        <h2 class="section-label">Since you left <span class="count"></span><span class="home-away-for"></span></h2>
+        <button class="home-away-dismiss" type="button">Dismiss</button>
         <div class="home-list"></div>
       </section>
       <section class="home-block" data-block="working">
@@ -158,6 +164,35 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       return sessionRow(row, { tone: "working", sub });
     }), "No agent is working.");
   }
+
+  // ---- since you left -------------------------------------------------
+
+  const NOW_WORD = { working: "working again", waiting: "waiting", blocked: "blocked" };
+  function renderAway() {
+    const scope = block("away");
+    const summary = away.current();
+    scope.hidden = !summary;
+    if (!summary) return;
+    scope.querySelector(".home-away-for").textContent = ` · away ${age(new Date(summary.since).toISOString())}`;
+    fill("away", summary.rows.map((entry) => {
+      // The row as it is now, when the session is still there.
+      const live = store.find(entry.computer, entry.child.id);
+      const child = live?.child ?? entry.child;
+      const shell = rowShell({ tone: "done" });
+      shell.title.textContent = child.title || child.label || projectOf(child);
+      const meta = el("span", "home-row-meta");
+      meta.append(el("span", "home-project", projectOf(child)), el("span", "home-host", entry.computer));
+      const now = !live ? "closed" : child.approvalPending ? "approval" : NOW_WORD[child.agentStatus];
+      if (now) meta.append(el("span", "home-why", now));
+      meta.append(el("span", "home-age", `done ${age(new Date(entry.at).toISOString())}`));
+      shell.button.append(meta);
+      shell.button.disabled = !live;
+      shell.button.addEventListener("click", () => { if (live) open(entry.computer, live.child); });
+      return shell.button;
+    }), "");
+  }
+  block("away").querySelector(".home-away-dismiss").addEventListener("click", () => away.dismiss());
+  const unsubscribeAway = away.subscribe(renderAway);
 
   // ---- recent returns -------------------------------------------------
 
@@ -500,6 +535,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   function render() {
     renderConductor();
     renderNeeds();
+    renderAway();
     renderWorking();
     renderChecks();
     renderReturns();
@@ -550,6 +586,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       stopPolling();
       unfollowPulls();
       unsubscribe();
+      unsubscribeAway();
       document.removeEventListener("keydown", onKeydown);
       for (const ws of watchers.values()) { try { ws.close(); } catch { /* already closing */ } }
       watchers.clear();

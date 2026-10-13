@@ -216,6 +216,13 @@ button.home-row:hover { background: var(--card); }
 .home-row-meta { display: flex; gap: 8px; flex: none; color: var(--muted); font-size: 12px; }
 .home-project { color: var(--accent); font-family: var(--mono); }
 .home-why { color: var(--waiting); }
+/* Since you left: turns that ended while the window was away. */
+.home-row.tone-done { box-shadow: inset 3px 0 0 var(--done); }
+button.home-row:disabled { cursor: default; opacity: .6; }
+.home-block[data-block="away"] { position: relative; }
+.home-away-for { color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.home-away-dismiss { position: absolute; top: -3px; right: 0; padding: 2px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.home-away-dismiss:hover { background: var(--raised); color: var(--text); }
 .home-computer.state-online .home-row-meta { color: var(--done); }
 .home-empty { padding: 10px 12px; color: var(--muted); }
 /* Checks: the open pull requests of working and recent sessions, failing first. */
