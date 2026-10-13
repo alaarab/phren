@@ -68,6 +68,9 @@ function projectCounts(doc) {
   return { active, queue, done };
 }
 
+// A read this recent is shown as is when the section is opened again.
+const FRESH_MS = 30_000;
+
 let toastHost = null;
 function toast(text, kind = "") {
   if (!toastHost) {
@@ -111,6 +114,7 @@ export function mountTasks(root) {
     doneOpen: false,
     loading: false,
     createDraft: "",
+    loadedAt: 0,              // when the active store's tasks were last read in full
   };
 
   const activeSource = () => state.sources.find((s) => sourceKey(s) === state.activeKey) ?? null;
@@ -192,6 +196,7 @@ export function mountTasks(root) {
     if (!current()) return;
     state.docs = new Map(entries.filter(([, doc]) => doc));
     state.loading = false;
+    state.loadedAt = Date.now();
     if (state.selectedProject && !source.projects.includes(state.selectedProject)) state.selectedProject = null;
     // Open on something: the project an agent is working in, else the busiest.
     if (!state.selectedProject) {
@@ -845,7 +850,8 @@ export function mountTasks(root) {
   window.addEventListener("keydown", onKey);
 
   return {
-    show() { if (state.activeKey) void loadDocs(); },
+    // Re-read on show unless the last read is fresh (warmed while idle, or a quick switch back).
+    show() { if (state.activeKey && !(Date.now() - (state.loadedAt ?? 0) < FRESH_MS)) void loadDocs(); },
     hide() { closeMenu(); },
     focus() { /* the create field owns first focus */ },
     reload() { void loadStores(); },
