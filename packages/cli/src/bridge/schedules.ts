@@ -4,10 +4,11 @@ import { localNames, stableComputerName } from "./computer-names.js";
 import path from "node:path";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
 import { BridgeError } from "./protocol.js";
+import { scheduleProblems } from "./schedule-problems.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { getProjectDirs } from "../shared.js";
 import {
-  computerMatches, latestScheduleBatch, nextRun, readScheduleDocument, readScheduleRuns, reusableLaunch, runningStatuses, scheduleNotifications, scheduleSessionRoute,
+  computerMatches, latestScheduleBatch, nextRun, readScheduleDocument, readScheduleRuns, reusableLaunches, runningStatuses, scheduleNotifications, scheduleSessionRoute,
   writeScheduleDocument, writeScheduleRuns,
   type Schedule, type ScheduleLauncher, type ScheduleNotify, type ScheduleRun, type ScheduleRunOutcome, type SchedulePushSender, type ScheduleStatus,
 } from "./schedule-format.js";
@@ -27,6 +28,7 @@ export class Scheduler {
   private readonly locateProject: (project: string) => Promise<string | undefined>;
   private readonly push?: SchedulePushSender;
   private readonly log: (message: string) => void;
+  private readonly revisionWaitMs: number;
   private serial: Promise<void> = Promise.resolve();
   private ticking = false;
   private readonly dispatching = new Set<string>();
@@ -39,7 +41,10 @@ export class Scheduler {
   constructor(options: { now: () => Date; store: string; launch: ScheduleLauncher; runsFile: string; computer?: string | (() => string);
     /** Further names this computer answers to, such as its Hook computer id. */
     aliases?: string[];
-    locateProject?: (project: string) => Promise<string | undefined>; push?: SchedulePushSender; log?: (message: string) => void }) {
+    locateProject?: (project: string) => Promise<string | undefined>; push?: SchedulePushSender; log?: (message: string) => void;
+    /** How long Run now waits for the store to catch up with the revision the app saw (default 30 s). */
+    revisionWaitMs?: number }) {
+    this.revisionWaitMs = options.revisionWaitMs ?? 30_000;
     this.now = options.now; this.store = options.store; this.launch = options.launch; this.runsFile = options.runsFile;
     if (typeof options.computer === "function") this.computer = options.computer;
     else { const computer = options.computer; this.computer = () => computer ?? stableComputerName(); }
@@ -82,7 +87,8 @@ export class Scheduler {
         const running = matching.some(run => runningStatuses.has(run.status));
         const due = this.owns(schedule, names) ? nextRun(schedule, last) : null;
         const owned = this.owns(schedule, names);
-        result.push({ ...schedule, project, lastRuns, owned, nextRun: due?.toISOString() ?? null,
+        const problems = await scheduleProblems(schedule, project, { store: this.store, owned, locate: this.locateProject });
+        result.push({ ...schedule, project, lastRuns, owned, ...(problems.length ? { problems } : {}), nextRun: due?.toISOString() ?? null,
           lastRun: last ? { startedAt: last.startedAt, ...(last.finishedAt ? { finishedAt: last.finishedAt } : {}), status: last.status,
             ...(last.batchId ? { batchId: last.batchId, scheduleProject: last.scheduleProject } : {}),
             ...(last.reason ? { reason: last.reason } : {}),
@@ -103,8 +109,23 @@ export class Scheduler {
     const key = `${projectName.toLowerCase()}/${id}`;
     if (this.dispatching.has(key)) throw new BridgeError(409, "This schedule is already launching.");
     this.dispatching.add(key);
-    try { return await this.prepareAndLaunch(projectName, id, onlyIfDue, expectedUpdatedAt); }
+    try {
+      if (expectedUpdatedAt !== undefined) await this.awaitRevision(projectName, id, expectedUpdatedAt);
+      return await this.prepareAndLaunch(projectName, id, onlyIfDue, expectedUpdatedAt); }
     finally { this.dispatching.delete(key); }
+  }
+
+  /** An edit made on another computer reaches this one with the store's sync. A Run now right after it waits for the
+   * schedule to arrive (or catch up) rather than failing; a copy newer than the app's, or none after the wait, is
+   * left to `prepareAndLaunch`'s revision check. */
+  private async awaitRevision(projectName: string, id: string, expectedUpdatedAt: string): Promise<void> {
+    const expected = Date.parse(expectedUpdatedAt), deadline = Date.now() + this.revisionWaitMs;
+    for (;;) {
+      const found = await readScheduleDocument(this.projectDirectory(projectName)).then(file => file.schedules.find(item => item.id === id), () => undefined);
+      if (found && Date.parse(found.updatedAt) >= expected) return;
+      if (Date.now() >= deadline) return;
+      await new Promise(resolve => setTimeout(resolve, Math.min(1_000, Math.max(10, this.revisionWaitMs / 10))));
+    }
   }
 
   private async prepareAndLaunch(projectName: string, id: string, onlyIfDue: boolean, expectedUpdatedAt?: string): Promise<ScheduleRun[]> {
@@ -137,7 +158,7 @@ export class Scheduler {
       }
       const batchId = randomUUID(), startedAt = this.now().toISOString();
       const children = targets.map(target => ({ ...target,
-        ...(schedule.session === "reuse" ? { reuse: reusableLaunch(matching.filter(run => run.project === target.project)) } : {}), run: {
+        ...(schedule.session === "reuse" ? { reuse: reusableLaunches(matching.filter(run => run.project === target.project)) } : {}), run: {
         id: randomUUID(), scheduleId: id, project: target.project, scheduleProject: project, batchId,
         startedAt, status: "launched", launch: { mode: "headless" },
       } as ScheduleRun }));

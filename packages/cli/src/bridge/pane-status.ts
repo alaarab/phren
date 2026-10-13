@@ -86,6 +86,11 @@ export async function paneStatus(server: string, pane: string, terminal: string)
   } catch { return undefined; }
 }
 
+/** Claude's optional "Teach auto mode about your environment?" dialog. */
+export function claudeTeachAutoModeDialog(screen: string): boolean {
+  return /Teach auto mode about your environment/i.test(stripTerminal(screen));
+}
+
 /** Whether `screen` (a pane's visible lines, with or without colors) shows a
  * dialog waiting for `agent`'s owner. Stricter than the readers that answer
  * a dialog, because it runs while the agent is still writing: Claude's and
@@ -95,7 +100,7 @@ export function screenDialog(agent: string, screen: string): boolean {
   const text = stripTerminal(screen);
   if (agent === "opencode") return !!opencodePermissionDialog(screen);
   if (agent === "codex" || agent === "copilot") return !!visibleTerminalChoice(text);
-  if (agent === "claude" && claudeQuestionDialog(text)) return true;
+  if (agent === "claude" && (claudeQuestionDialog(text) || claudeTeachAutoModeDialog(text))) return true;
   return /Esc to cancel/i.test(text) && !!numberedDialog(text);
 }
 
