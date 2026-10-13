@@ -148,7 +148,9 @@ notification opens that session; on a Mac, one for an agent that finished and
 waits on you takes a typed reply, sent as its next prompt. Come back after a
 minute or more away and Home's "Since you left" lists the turns agents
 finished meanwhile. Home's Computers rows show each Hook's version and flag
-one older than the newest seen, with its update command to copy. The launch sheet
+one older than the newest seen, with its update command to copy. A working
+session that has shown no output for five minutes reads "stalled" on Home and
+in the sidebar, with a notification. The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles

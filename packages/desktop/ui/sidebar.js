@@ -1,6 +1,7 @@
 // Sessions sidebar: the phone's Live sessions list at desktop density.
 // See CONTRACT.md: export renderSidebar(el, merged, handlers). The row keeps
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
+import { stallLabel, stalledMinutes } from "./shell/stalls.js";
 import { showSection } from "./shell/sections.js";
 import { hookPost, targetQuery } from "./api.js";
 import { store, projectOf } from "./shell/store.js";
@@ -459,7 +460,7 @@ function makeRow(sb, desc) {
 function rowSig(sb, desc) {
   const c = desc.child;
   const approval = sb.approvals.get(keyOf(desc.computer, c));
-  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "",
+  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "", c.stalled ? c.stalledSince : "",
     c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : ""].join("|");
@@ -492,7 +493,8 @@ function rowContent(sb, node, desc) {
   top.append(el("span", "sb-project", basename(child.cwd) || child.label || ""));
   const chip = el("span", "sb-computer", computer);
   chip.style.setProperty("--host-color", hostColor(computer));
-  top.append(chip, el("span", "sb-age", relativeAge(child.lastChangedAt)));
+  const stalled = stalledMinutes(child);
+  top.append(chip, stalled !== null ? el("span", "sb-stalled", stallLabel(stalled)) : el("span", "sb-age", relativeAge(child.lastChangedAt)));
   if (unread) top.append(el("span", "sb-unread"));
   main.append(top);
 
