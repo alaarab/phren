@@ -6,6 +6,7 @@
 import { hookGet, hookPost } from "../api.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { store } from "../shell/store.js";
+import { readAhead } from "../shell/read-ahead.js";
 
 const CSS_HREF = "./sections/schedules.css";
 const MAX_NAME = 80;
@@ -1042,20 +1043,22 @@ export function mountSchedules(root) {
     const sig = (merged?.computers ?? []).map((c) => `${c.computer}:${c.state}`).join(",");
     if (sig === onlineSig) return;
     onlineSig = sig;
-    void loadAll();
+    // Hidden, the next show() reads; this one only follows computers coming and going while open.
+    if (state.visible) void loadAll();
   });
 
   let timer = null;
   function startPoll() { if (!timer) timer = setInterval(() => { void loadAll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
 
-  state.visible = true;
+  // The section shell calls show() right after mounting a visible section,
+  // and a section mounted hidden waits for it, so the first read happens there.
   render();
-  void loadAll();
-  startPoll();
+  const ahead = readAhead(loadAll);
 
   return {
-    show() { state.visible = true; startPoll(); void loadAll(); },
+    prefetch: ahead.prefetch,
+    show() { state.visible = true; startPoll(); ahead.show(); },
     hide() { state.visible = false; stopPoll(); },
     destroy() { stopPoll(); unsubscribe(); },
   };

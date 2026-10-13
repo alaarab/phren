@@ -47,13 +47,13 @@ registerSection("home", { label: "Home", order: 10, badge: true, mount: (el) => 
   openPulls(computer, child) { showSection("agents"); agents().openPulls(computer, child); },
 }) });
 registerSection("agents", { label: "Agents", order: 20, mount: (el) => mountAgents(el) });
-registerSection("review", { label: "Review", order: 22, mount: (el) => mountReview(el) });
-registerSection("conductor", { label: "Conductor", order: 70, group: "fleet", groupLabel: "Fleet", mount: (el) => mountConductor(el) });
-registerSection("projects", { label: "Projects", order: 30, group: "work", groupLabel: "Projects", mount: (el) => mountProjects(el) });
-registerSection("tasks", { label: "Tasks", order: 40, group: "work", mount: (el) => mountTasks(el) });
-registerSection("memory", { label: "Memory", order: 45, group: "work", mount: (el) => mountMemory(el) });
-registerSection("code", { label: "Code", order: 47, group: "work", mount: (el) => mountCode(el) });
-registerSection("schedules", { label: "Schedules", order: 72, group: "fleet", mount: (el) => mountSchedules(el) });
+registerSection("review", { label: "Review", order: 22, readAhead: true, mount: (el) => mountReview(el) });
+registerSection("conductor", { label: "Conductor", order: 70, group: "fleet", groupLabel: "Fleet", readAhead: true, mount: (el) => mountConductor(el) });
+registerSection("projects", { label: "Projects", order: 30, group: "work", groupLabel: "Projects", readAhead: true, mount: (el) => mountProjects(el) });
+registerSection("tasks", { label: "Tasks", order: 40, group: "work", readAhead: true, mount: (el) => mountTasks(el) });
+registerSection("memory", { label: "Memory", order: 45, group: "work", readAhead: true, mount: (el) => mountMemory(el) });
+registerSection("code", { label: "Code", order: 47, group: "work", readAhead: true, mount: (el) => mountCode(el) });
+registerSection("schedules", { label: "Schedules", order: 72, group: "fleet", readAhead: true, mount: (el) => mountSchedules(el) });
 registerSection("previews", { label: "Previews", order: 74, group: "fleet", mount: (el) => mountPreviews(el) });
 registerSection("settings", { label: "Settings", order: 90, icon: GEAR, mount: (el) => mountSettings(el) });
 

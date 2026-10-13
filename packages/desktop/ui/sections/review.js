@@ -8,6 +8,7 @@ import { sectionHandle, showSection } from "../shell/sections.js";
 import { additionHunks, parsePatch } from "../patch.js";
 import { renderMarkdown } from "../chat/markdown.js";
 import { mountTrains } from "./trains.js";
+import { readAhead } from "../shell/read-ahead.js";
 
 const CSS_ID = "review-css";
 const POLL_MS = 15_000;
@@ -309,12 +310,16 @@ export function mountReview(root) {
 
   // ---- data -----------------------------------------------------------
 
+  // Polls overlap (timer, hover read-ahead, computers changing); only the latest one started may land.
+  let pollGeneration = 0;
   async function poll() {
     if (state.mode !== "queue") return;
+    const mine = ++pollGeneration;
     const results = await Promise.all(onlineComputers().map(async (c) => {
       const body = await hookGet(c.computer, "/v1/dispatch").catch(() => null);
       return [c.computer, Array.isArray(body?.dispatches) ? body.dispatches : []];
     }));
+    if (mine !== pollGeneration) return;
     state.receipts = new Map(results.map(([computer, list]) =>
       [computer, list.map((receipt) => ({ receipt, computer: receipt.computer || computer }))]));
     render();
@@ -958,6 +963,7 @@ export function mountReview(root) {
   let timer = null;
   function startPoll() { if (!timer) timer = setInterval(() => { void poll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
+  const ahead = readAhead(poll);
 
   let onlineSig = "";
   const unsubscribe = store.subscribe(() => {
@@ -969,7 +975,13 @@ export function mountReview(root) {
   document.addEventListener("keydown", onKeydown);
 
   return {
-    show() { state.visible = true; startPoll(); if (state.mode === "trains") state.trains?.show?.(); else void poll(); },
+    prefetch() { if (state.mode !== "trains") ahead.prefetch(); },
+    show() {
+      state.visible = true;
+      startPoll();
+      if (state.mode === "trains") state.trains?.show?.();
+      else ahead.show();
+    },
     hide() { state.visible = false; stopPoll(); closeComment(); state.trains?.hide?.(); },
     focus() { if (state.mode === "trains") state.trains?.focus?.(); else queueEl.querySelector(".review-row.selected")?.focus(); },
     destroy() { stopPoll(); unsubscribe(); document.removeEventListener("keydown", onKeydown); closeComment(); clearTimeout(state.hintTimer); state.trains?.destroy?.(); },

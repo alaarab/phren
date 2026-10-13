@@ -5,6 +5,7 @@
 import { hookGet, hookPost } from "../api.js";
 import { sessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
+import { readAhead } from "../shell/read-ahead.js";
 
 const CSS_ID = "conductor-css";
 const POLL_MS = 15_000;
@@ -935,11 +936,13 @@ export function mountConductor(root) {
   const unsubscribe = store.subscribe(() => { conductorCard(); });
 
   selectTab("dispatches");
-  // A section first shown starts polling here; one mounted hidden waits for show().
-  if (!root.hidden) { startPoll(); void poll(); }
+  const ahead = readAhead(poll);
+  // The first poll comes from show(), which the section shell calls right after
+  // mounting a visible section (and a hidden one waits for it).
 
   return {
-    show() { startPoll(); void poll(); },
+    prefetch: ahead.prefetch,
+    show() { startPoll(); ahead.show(); },
     hide() { stopPoll(); },
     destroy() { stopPoll(); unsubscribe(); },
   };
