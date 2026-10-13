@@ -133,12 +133,14 @@ const PREFETCH_HOVER_MS = 120;
 let hoverTimer = null;
 
 /**
- * Read a section ahead of opening it: mount it hidden (its mount starts the
- * reads it always makes) and call its `prefetch()` when it has one. Nothing
- * for the open section.
+ * Read a section ahead of opening it. Only sections registered with
+ * `readAhead: true` are mounted for it (hidden; their mount starts the reads
+ * they always make) and their `prefetch()` called; mounting any other
+ * section hidden could start its timers or keys. Nothing for the open one.
  */
 export function prefetchSection(id) {
-  if (!sections.has(id) || id === current) return;
+  const def = sections.get(id);
+  if (!def?.readAhead || id === current) return;
   sectionHandle(id)?.prefetch?.();
 }
 

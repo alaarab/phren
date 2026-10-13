@@ -6,6 +6,7 @@
 import { hookGet, hookPost } from "../api.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { store } from "../shell/store.js";
+import { readAhead } from "../shell/read-ahead.js";
 
 const CSS_HREF = "./sections/schedules.css";
 const MAX_NAME = 80;
@@ -274,8 +275,6 @@ function validateSchedule(schedule) {
 }
 
 const POLL_MS = 30_000;
-// A read started by hovering the pill this recently is what the click shows.
-const PREFETCH_FRESH_MS = 5_000;
 const TONIGHT_HOURS = 24;
 const TONIGHT_COUNT = 6;
 
@@ -1049,18 +1048,17 @@ export function mountSchedules(root) {
   });
 
   let timer = null;
-  let prefetchedAt = 0;
   function startPoll() { if (!timer) timer = setInterval(() => { void loadAll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
 
   // The section shell calls show() right after mounting a visible section,
   // and a section mounted hidden waits for it, so the first read happens there.
   render();
+  const ahead = readAhead(loadAll);
 
   return {
-    // Hovering the pill reads ahead; the click then shows that read instead of starting another.
-    prefetch() { prefetchedAt = Date.now(); void loadAll(); },
-    show() { state.visible = true; startPoll(); if (Date.now() - prefetchedAt > PREFETCH_FRESH_MS) void loadAll(); prefetchedAt = 0; },
+    prefetch: ahead.prefetch,
+    show() { state.visible = true; startPoll(); ahead.show(); },
     hide() { state.visible = false; stopPoll(); },
     destroy() { stopPoll(); unsubscribe(); },
   };

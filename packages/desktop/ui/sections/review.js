@@ -8,11 +8,10 @@ import { sectionHandle, showSection } from "../shell/sections.js";
 import { additionHunks, parsePatch } from "../patch.js";
 import { renderMarkdown } from "../chat/markdown.js";
 import { mountTrains } from "./trains.js";
+import { readAhead } from "../shell/read-ahead.js";
 
 const CSS_ID = "review-css";
 const POLL_MS = 15_000;
-// A read started by hovering the pill this recently is what the click shows.
-const PREFETCH_FRESH_MS = 5_000;
 const MAX_ITEMS = 100;
 const PREFETCH = 3;
 const RECENT_MS = 3 * 86_400_000;
@@ -960,7 +959,7 @@ export function mountReview(root) {
   let timer = null;
   function startPoll() { if (!timer) timer = setInterval(() => { void poll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
-  let prefetchedAt = 0;
+  const ahead = readAhead(poll);
 
   let onlineSig = "";
   const unsubscribe = store.subscribe(() => {
@@ -972,14 +971,12 @@ export function mountReview(root) {
   document.addEventListener("keydown", onKeydown);
 
   return {
-    // Hovering the pill reads ahead; the click then shows that read instead of starting another.
-    prefetch() { if (state.mode !== "trains") { prefetchedAt = Date.now(); void poll(); } },
+    prefetch() { if (state.mode !== "trains") ahead.prefetch(); },
     show() {
       state.visible = true;
       startPoll();
       if (state.mode === "trains") state.trains?.show?.();
-      else if (Date.now() - prefetchedAt > PREFETCH_FRESH_MS) void poll();
-      prefetchedAt = 0;
+      else ahead.show();
     },
     hide() { state.visible = false; stopPoll(); closeComment(); state.trains?.hide?.(); },
     focus() { if (state.mode === "trains") state.trains?.focus?.(); else queueEl.querySelector(".review-row.selected")?.focus(); },
