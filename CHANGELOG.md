@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- A schedule can continue one session instead of starting a new one each firing: `session: reuse` in `schedules.yaml`, `phren schedule add ... --session reuse`, or "Continue the same session" in the desktop editor. A firing types its prompt into the session the target's last run used, through the Hook's hand-off queue, and follows that turn to its own history row; a session that is still working or waiting on you skips the firing with the reason, and a closed one is replaced by a new session that later firings continue. The default stays `new`.
+
 ## [0.3.41] - 2026-10-12
 
 ### Fixed
