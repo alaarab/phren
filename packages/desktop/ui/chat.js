@@ -192,8 +192,10 @@ export function openChat(el, computerName, child, opts = {}) {
   let harnessVerb = null;
   let agentsTree = [];
   let cardsHandle = null;
+  let cardsSignature = null;
   let sideHandle = null;
   let sudoHandle = null;
+  let sudoSignature = null;
   let workPopover = null;
   let workNeedsNewer = false;
   let workMessagesTimer = null;
@@ -392,7 +394,32 @@ export function openChat(el, computerName, child, opts = {}) {
     interactions.classList.toggle("has-cards", has);
   }
 
+  // The status fields renderInteractions reads to build its cards. A status
+  // frame arrives about every 1.5 s, so rebuilding identical cards would wipe
+  // an answer the owner is typing into a question or password card.
+  function cardsSignatureOf(status) {
+    const s = status || {};
+    const approval = s.pendingApproval;
+    return JSON.stringify({
+      computer: computerName,
+      target,
+      approval: approval ? {
+        actionId: approval.actionId, toolName: approval.toolName, message: approval.message,
+        title: approval.title, choice: approval.choice, request: approval.request,
+        details: approval.details, options: approval.options,
+      } : null,
+      questions: (Array.isArray(s.pendingQuestions) ? s.pendingQuestions : []).map((prompt) => ({
+        id: prompt && (prompt.toolUseId ?? prompt.id),
+        questions: prompt && prompt.questions,
+      })),
+      password: !!s.passwordPrompt,
+    });
+  }
+
   function renderCards() {
+    const signature = cardsSignatureOf(agentStatus);
+    if (signature === cardsSignature) return;
+    cardsSignature = signature;
     cardsHandle?.destroy?.();
     cardsHandle = renderInteractions(cardsArea, agentStatus, {
       computer: computerName, target, onAnswered: () => maybeFetchSudo(true),
@@ -406,7 +433,19 @@ export function openChat(el, computerName, child, opts = {}) {
     updateInteractionsFrame();
   }
 
+  // The sudo poll runs every 3 s; only its content decides the cards, so an
+  // unchanged set must not rebuild a card the owner is typing into.
+  function sudoSignatureOf(requests) {
+    return JSON.stringify((Array.isArray(requests) ? requests : []).map((request) => request && {
+      id: request.id, computer: request.computer, command: request.command, user: request.user,
+      cwd: request.cwd, session: request.session, expiresAt: request.expiresAt,
+    }));
+  }
+
   function renderSudo(requests) {
+    const signature = sudoSignatureOf(requests);
+    if (signature === sudoSignature) return;
+    sudoSignature = signature;
     sudoHandle?.destroy?.();
     sudoHandle = renderSudoRequests(sudoArea, requests, { computer: computerName, onAnswered: () => maybeFetchSudo(true) });
     updateInteractionsFrame();
