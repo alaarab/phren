@@ -1,5 +1,6 @@
 // ⌘K command palette: one ranked list across sessions (every computer), the
-// open pull requests the CI watch last saw, the active session's repository files, registered commands and top-level
+// open pull requests the CI watch last saw, the projects on every computer, the
+// active session's repository files, registered commands and top-level
 // sections, operated entirely by keyboard; `?` asks the active session's
 // project memory instead. Opened by the `palette` action in keys.js. Plain DOM
 // only, never innerHTML with data.
@@ -20,7 +21,7 @@ export function registerCommand(cmd) {
 }
 
 const PROVIDER = { claude: "C", codex: "X", opencode: "O", copilot: "G", phren: "P" };
-const GROUP_ORDER = { Sessions: 0, "Pull requests": 1, "Go to": 2, Commands: 3, Files: 4 };
+const GROUP_ORDER = { Sessions: 0, "Pull requests": 1, Projects: 2, "Go to": 3, Commands: 4, Files: 5 };
 const CHECK_ICON = { failing: "✕", pending: "●", passing: "✓" };
 const CHECK_WORD = { failing: "Checks failing", pending: "Checks running", passing: "Checks passing" };
 const MAX_ROWS = 200;
@@ -106,6 +107,25 @@ export function pullItems(pulls, openPulls) {
     meta: [CHECK_WORD[pull.checks] ?? "No checks", pull.project, pull.computer].filter(Boolean).join(" · "),
     run() { openPulls(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child); },
   }));
+}
+
+/** Palette rows for the projects the Projects section has loaded; Enter opens
+ * that project's page (its Code block, tasks and memory). */
+export function projectItems(projects, openProject) {
+  return (projects ?? []).map((p) => ({
+    id: `project:${p.computer}:${p.name}`,
+    group: "Projects",
+    kind: "idle",
+    icon: "▣",
+    title: p.name,
+    meta: `Project · ${p.computer}`,
+    run() { openProject(p); },
+  }));
+}
+
+function openProjectPage(project) {
+  showSection("projects");
+  sectionHandle("projects")?.open?.(project);
 }
 
 function openPullsTab(computer, child) {
@@ -320,6 +340,10 @@ export function openPalette({ sources = [] } = {}) {
   render(sources);
   inputEl.focus();
 
+  // Projects come from the Projects section; the first open loads them, then the list fills in.
+  const projects = sectionHandle("projects");
+  if (projects?.load) void projects.load().then(() => { if (overlayEl) render(sources); });
+
   if (session?.child?.target) {
     loadFiles(session).then((files) => {
       if (overlayEl && session === activeSession()) { filePool = files; render(sources); }
@@ -337,7 +361,10 @@ export function closePalette() {
 
 function collect(sources, query, commandsOnly) {
   const all = [];
-  if (!commandsOnly) all.push(...sessionItems(), ...pullItems(lastChecks(), openPullsTab), ...sectionItems());
+  if (!commandsOnly) {
+    all.push(...sessionItems(), ...pullItems(lastChecks(), openPullsTab));
+    all.push(...projectItems(sectionHandle("projects")?.projects?.() ?? [], openProjectPage), ...sectionItems());
+  }
   all.push(...commandItems());
   for (const src of sources) {
     if (!src || typeof src.items !== "function") continue;

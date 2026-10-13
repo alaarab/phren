@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memoryItems, paletteMode, pullItems } from "../ui/shell/palette.js";
+import { memoryItems, paletteMode, projectItems, pullItems } from "../ui/shell/palette.js";
 
 describe("paletteMode", () => {
   it("reads > as commands, ? as the project's memory, anything else as everything", () => {
@@ -41,5 +41,15 @@ describe("pullItems", () => {
 
   it("is empty before the watch has looked", () => {
     expect(pullItems(null, () => {})).toEqual([]);
+  });
+});
+
+describe("projectItems", () => {
+  it("lists each computer's projects and opens the chosen one", () => {
+    const opened: unknown[] = [];
+    const items = projectItems([{ computer: "mini", name: "phren" }, { computer: "jets", name: "gitboy" }], (p: unknown) => opened.push(p));
+    expect(items.map((i) => [i.group, i.title, i.meta])).toEqual([["Projects", "phren", "Project · mini"], ["Projects", "gitboy", "Project · jets"]]);
+    items[1].run();
+    expect(opened).toEqual([{ computer: "jets", name: "gitboy" }]);
   });
 });
