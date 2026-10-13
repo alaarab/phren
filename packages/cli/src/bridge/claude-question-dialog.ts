@@ -30,6 +30,19 @@ const TAB_BAR = /^\s*(?:←\s+)?((?:[☐☒]\s+\S[^☐☒✔→]*?\s*)+)(?:✔\s
 const ROW = /^\s*(❯)?\s*(\d)\.\s+(?:\[([ ✔])\]\s+)?(.*?)\s*$/;
 const NEXT = /^\s*(❯)?\s+(?:Next|Submit)\s*$/;
 const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+/** Claude cuts a question at 2000 characters with "…" while the phone may send
+ * more, so the pane's title matches when it is the question's own head. */
+export const sameTitle = (shown: string, asked: string) => {
+  const want = normalize(asked);
+  if (shown === want) return true;
+  return shown.endsWith("…") && shown.length > 200 && want.startsWith(shown.slice(0, -1).trimEnd());
+};
+/** Claude collapses runs of whitespace in a label, and the Hook reads only the
+ * first line of one it wraps, so a long label matches by its head. */
+export const sameLabel = (shown: string, asked: string) => {
+  const want = normalize(asked);
+  return shown === want || (shown.length >= 30 && want.startsWith(shown));
+};
 /** Claude Code (2.1.284) draws a question that has a line break or is wider
  * than 80 columns inside a dimmed left border, "│ " before each line, on its
  * tab and in the review. The border is not part of the question. */
@@ -112,7 +125,7 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
   io = { ...io, keys: async keys => { sent = true; await realKeys(keys); } };
   const sleep = io.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const matches = (screen: ClaudeDialogScreen | undefined, index: number): screen is ClaudeQuestionScreen =>
-    screen?.kind === "question" && screen.title === normalize(questions[index].question);
+    screen?.kind === "question" && sameTitle(screen.title, questions[index].question);
   // Claude redraws a moment after a key; poll until the expected screen shows.
   const settle = async <T>(check: (screen: ClaudeDialogScreen | undefined) => T | undefined, ms = 2_000): Promise<T | undefined> => {
     for (let waited = 0; ; waited += 120) {
@@ -133,9 +146,9 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
 
   const reach = async (index: number): Promise<ClaudeQuestionScreen> => {
     const screen = await settle(value => value);
-    if (screen?.kind === "question" && screen.title === normalize(questions[index].question)) return screen;
+    if (screen?.kind === "question" && sameTitle(screen.title, questions[index].question)) return screen;
     const at = screen?.kind === "review" ? questions.length
-      : screen?.kind === "question" ? questions.findIndex(question => normalize(question.question) === screen.title) : -1;
+      : screen?.kind === "question" ? questions.findIndex(question => sameTitle(screen.title, question.question)) : -1;
     if (at < 0) throw changed("The terminal is showing a different question.");
     // Arrow keys would edit a typed answer; step off that row first.
     if (screen?.kind === "question" && screen.other && screen.cursor === screen.other.number) await io.keys(["up"]);
@@ -153,7 +166,7 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
     const typed = answer.text?.trim() ?? "";
     let screen: ClaudeQuestionScreen = await reach(index);
     if (screen.multiSelect !== !!question.multiSelect || screen.options.length !== question.options.length
-      || screen.options.some((row, position) => row.label !== question.options[position].label.trim())) {
+      || screen.options.some((row, position) => !sameLabel(row.label, question.options[position].label))) {
       throw changed("The terminal's options differ from the question being answered.");
     }
     if (!screen.multiSelect) {
@@ -211,8 +224,7 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
   // A lone single-select question submits on its digit.
   if (review === "gone") return;
   if (!review) throw changed("The terminal did not reach the review of the answers.");
-  const expected = questions.map(question => normalize(question.question));
-  if (review.answers.length !== questions.length || review.answers.some((row, position) => normalize(row.question) !== expected[position] || !row.answer)) {
+  if (review.answers.length !== questions.length || review.answers.some((row, position) => !sameTitle(normalize(row.question), questions[position].question) || !row.answer)) {
     throw changed("Not every question has an answer in the terminal.");
   }
   await io.keys(["1"]);
