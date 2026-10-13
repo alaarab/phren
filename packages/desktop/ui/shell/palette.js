@@ -12,9 +12,10 @@ import { checksStrip, lastChecks } from "./ci-watch.js";
 import { checksWord } from "../git-review.js";
 
 // ------------------------------------------------------------ commands
-const commands = new Map(); // id -> { id, title, keys?, run, group?, meta? }
+const commands = new Map(); // id -> { id, title, keys?, run, group?, meta?, when? }
 
-/** Register a command for the palette. Returns an unregister function. */
+/** Register a command for the palette. Returns an unregister function.
+ * `when()` hides it while false; `meta` may be a function, read on open. */
 export function registerCommand(cmd) {
   if (!cmd || !cmd.id || typeof cmd.run !== "function") throw new Error("registerCommand needs { id, run }");
   commands.set(cmd.id, cmd);
@@ -146,13 +147,13 @@ function sectionItems() {
 }
 
 function commandItems() {
-  return [...commands.values()].map((cmd) => ({
+  return [...commands.values()].filter((cmd) => !cmd.when || cmd.when()).map((cmd) => ({
     id: `command:${cmd.id}`,
     group: cmd.group || "Commands",
     kind: "idle",
     icon: "⌘",
     title: cmd.title,
-    meta: cmd.meta || "",
+    meta: (typeof cmd.meta === "function" ? cmd.meta() : cmd.meta) || "",
     shortcut: cmd.keys || "",
     run: () => cmd.run(),
   }));
