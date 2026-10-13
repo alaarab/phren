@@ -295,3 +295,13 @@ button.pj-row:hover { background: var(--card); }
 .pj-toggle { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
 .pj-notice { color: var(--muted); font-size: 12.5px; }
 .pj-notice.danger { color: var(--danger); }
+.pj-forge .section-label .chg-mark { display: inline-flex; color: var(--text); }
+.pj-forge .section-label .chg-mark.gitlab { color: #FC6D26; }
+.pj-forge .section-label .chg-mark.gitboy { color: var(--accent); }
+.pj-forge-host { text-transform: none; letter-spacing: 0; color: var(--text-2); }
+.pj-forge-branch { display: flex; align-items: center; gap: 8px; padding: 4px 2px 6px; }
+.pj-checks { padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+.pj-checks.passing { background: rgba(138,200,172,.16); color: var(--done); }
+.pj-checks.failing { background: rgba(239,152,152,.16); color: var(--danger); }
+.pj-checks.pending { background: rgba(224,188,127,.16); color: var(--waiting); }
+.pj-empty.danger { color: var(--danger); }
