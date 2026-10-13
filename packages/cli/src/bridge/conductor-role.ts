@@ -85,6 +85,12 @@ function recordFor(server: string, pane: Json, by: ConductorRecord["by"], sessio
   };
 }
 
+/** The one pane in a snapshot whose agent reports this session; none when it is absent or ambiguous. */
+function sessionPane(session: string, s: Json): Json | undefined {
+  const found = objects(s.panes).filter(p => runsAgent(p) && objects([p.agent_session])[0]?.value === session);
+  return found.length === 1 ? found[0] : undefined;
+}
+
 /** The recorded pane in a snapshot of its server, when it is still the same terminal. */
 function recordedPane(record: ConductorRecord, s: Json): Json | undefined {
   const pane = objects(s.panes).find(p => p.pane_id === record.pane);
@@ -110,8 +116,15 @@ export function conductorPane(server: string, s: Json): Promise<Json | undefined
     }
     const record = state.conductor;
     if (!record || record.server !== server) return undefined;
-    const pane = recordedPane(record, s);
-    if (!pane) { await writeRoleState({ ...state, conductor: null }); return undefined; }
+    let pane = recordedPane(record, s);
+    if (!pane) {
+      // The pane went away or was recreated (a moved tab, a Herdr restart): the
+      // role follows the session, so a pane running it takes the role over.
+      const adopted = record.session ? sessionPane(record.session, s) : undefined;
+      if (!adopted) { await writeRoleState({ ...state, conductor: null }); return undefined; }
+      await writeRoleState({ ...state, conductor: { ...recordFor(server, adopted, record.by, record.session), since: record.since } });
+      return adopted;
+    }
     // Keep the place current: a pane moved to another tab or workspace is the same pane.
     const moved = (id.safeParse(pane.workspace_id).success && pane.workspace_id !== record.workspace) || (id.safeParse(pane.tab_id).success && pane.tab_id !== record.tab)
       || (provider.safeParse(pane.agent).success && pane.agent !== record.source);
