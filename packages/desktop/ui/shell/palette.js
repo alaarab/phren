@@ -196,6 +196,24 @@ export function memoryItems(results, { computer, project }) {
   });
 }
 
+/** The row under `?` results that asks the typed question in a quick chat on
+ * that project (phren's agent with no tools, answering from its memory). */
+export function askItem(query, scope, openChat) {
+  if (!query || !scope) return null;
+  return {
+    id: "ask-quick-chat",
+    group: "Ask",
+    kind: "idle",
+    icon: "✦",
+    title: `Ask in a quick chat: ${query}`,
+    meta: `${scope.project} · ${scope.computer}`,
+    run() { openChat({ chat: true, project: scope.project, computer: scope.computer, prompt: query, title: `Quick chat about ${scope.project}` }); },
+  };
+}
+
+// launch.js registers its commands here at load, so it is imported only when used.
+const openQuickChat = (options) => { void import("./launch.js").then((m) => m.openLaunchSheet(options)); };
+
 // The last memory answer: `key` is computer, project and query.
 let memory = { key: "", state: "idle", items: [], timer: null };
 
@@ -380,7 +398,8 @@ function render(sources) {
   lastQuery = query;
   if (mode === "memory") {
     askMemory(sources, query);
-    items = memory.items;
+    const ask = memory.state === "loading" ? null : askItem(query, memoryScope(), openQuickChat);
+    items = ask ? [...memory.items, ask] : memory.items;
     if (selected >= items.length) selected = Math.max(0, items.length - 1);
     paint(memoryNote(query));
     return;

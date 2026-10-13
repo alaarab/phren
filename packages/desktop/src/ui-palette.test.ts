@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memoryItems, paletteMode, projectItems, pullItems } from "../ui/shell/palette.js";
+import { askItem, memoryItems, paletteMode, projectItems, pullItems } from "../ui/shell/palette.js";
 
 describe("paletteMode", () => {
   it("reads > as commands, ? as the project's memory, anything else as everything", () => {
@@ -51,5 +51,17 @@ describe("projectItems", () => {
     expect(items.map((i) => [i.group, i.title, i.meta])).toEqual([["Projects", "phren", "Project · mini"], ["Projects", "gitboy", "Project · jets"]]);
     items[1].run();
     expect(opened).toEqual([{ computer: "jets", name: "gitboy" }]);
+  });
+});
+
+describe("askItem", () => {
+  it("offers to ask the typed question in a quick chat on the active project", () => {
+    const opened: unknown[] = [];
+    const item = askItem("why did login break?", { computer: "mini", project: "phren" }, (o: unknown) => opened.push(o))!;
+    expect([item.title, item.meta]).toEqual(["Ask in a quick chat: why did login break?", "phren · mini"]);
+    item.run();
+    expect(opened).toEqual([{ chat: true, project: "phren", computer: "mini", prompt: "why did login break?", title: "Quick chat about phren" }]);
+    expect(askItem("", { computer: "mini", project: "phren" }, () => {})).toBeNull();
+    expect(askItem("hi", null, () => {})).toBeNull();
   });
 });
