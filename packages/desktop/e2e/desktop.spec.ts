@@ -32,6 +32,7 @@ let closeServer: (() => Promise<void>) | undefined;
 let url: string;
 // What the fake Hook says about the working session's pull request checks.
 let ciChecks = "pending";
+const completed: string[] = [];
 
 test.beforeAll(async () => {
   if (!existsSync(UI_LINK)) {
@@ -61,6 +62,10 @@ test.beforeAll(async () => {
         current: { number: 42, title: "Keep the session through the guard", state: "OPEN", checks: ciChecks } } }),
       "GET /v1/projects/repos": () => ({ status: 200, json: { repos: [{ name: "phren", directory: "/Users/you/phren", source: "activity", registered: true }] } }),
       "GET /v1/projects/phren/git": () => ({ status: 200, json: FORGE }),
+      "GET /v1/projects/phren/tasks": (_req: unknown, _body: unknown, url: URL) => ({ status: 200, json: { project: "phren", branch: url.searchParams.get("branch"), truncated: false, tasks: [
+        { id: "bid:1a2b3c4d", text: "Keep the signed-in user through feat/login's session guard", created: "2026-10-12", context: null, section: "active", match: "branch" },
+      ] } }),
+      "POST /v1/projects/phren/tasks/complete": (_req: unknown, body: unknown) => { completed.push((body as { id: string }).id); return { status: 200, json: { project: "phren", id: (body as { id: string }).id, status: "completed" } }; },
     },
   });
 
@@ -289,7 +294,14 @@ test("projects section renders", async ({ page }) => {
   await expect(forge.locator(".pj-forge-branch .pj-checks.failing")).toBeVisible();
   await expect(forge.locator(".pj-row")).toHaveCount(2);
   await expect(forge.locator(".pj-row", { hasText: "#41 Faster store sync" })).toContainText("Checks pass");
+  // The open tasks naming the checkout's branch, with Done.
+  const tasks = forge.locator(".bt");
+  await expect(tasks).toContainText("1 task for this branch");
+  await expect(tasks.locator(".bt-item")).toContainText("session guard");
   await page.screenshot({ path: test.info().outputPath("project-forge.png") });
+  await tasks.getByRole("button", { name: "Done" }).click();
+  await expect(tasks.locator(".bt-item.done")).toHaveCount(1);
+  expect(completed).toEqual(["bid:1a2b3c4d"]);
   expect(errors).toEqual([]);
 });
 

@@ -31,6 +31,7 @@ const FINDINGS = [
 ];
 let memoryPaths: string[][] = [];
 let searches: string[] = [];
+let taskBranches: string[] = [];
 const MEMORY_ROUTES = {
   "GET /v1/projects/phren/memory/search": (_req: unknown, _body: unknown, url: URL) => {
     const q = url.searchParams.get("q") ?? "";
@@ -43,6 +44,13 @@ const MEMORY_ROUTES = {
     const paths = url.searchParams.getAll("path");
     memoryPaths.push(paths);
     return { status: 200, json: { project: "phren", store_id: null, symbols: "indexed", truncated: false, findings: paths.includes("src/app.ts") ? FINDINGS : [] } };
+  },
+  "GET /v1/projects/phren/tasks": (_req: unknown, _body: unknown, url: URL) => {
+    const branch = url.searchParams.get("branch") ?? "";
+    taskBranches.push(branch);
+    return { status: 200, json: { project: "phren", branch, truncated: false, tasks: branch === "feat/login" ? [
+      { id: "bid:5e6f7a8b", text: "Login keeps the user through a store reload (feat/login)", created: "2026-10-11", context: null, section: "queue", match: "branch" },
+    ] : [] } };
   },
 };
 
@@ -58,6 +66,7 @@ test.beforeEach(async ({}, info) => {
   dir = await mkdtemp(path.join(tmpdir(), "desktop-git-"));
   memoryPaths = [];
   searches = [];
+  taskBranches = [];
   process.env.PHREN_BRIDGE_HOME = dir;
   // A test titled "on GitLab" runs against a GitLab remote, not yet connected.
   git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github" });
@@ -327,6 +336,9 @@ test("a failing check shows what Phren has seen before, and Ask the agent puts i
   await expect(seen).toContainText("Seen this before");
   await expect(seen.locator(".chg-seen-item")).toHaveCount(1);
   await expect(seen).toContainText("dates.test.ts:8");
+  // The open tasks naming the request's branch sit on its card, asked once.
+  await expect(page.locator(".chg-req .bt")).toContainText("Login keeps the user through a store reload");
+  expect(taskBranches).toEqual(["feat/login"]);
   // Only the failing check is asked about, once.
   expect(searches).toEqual(["unit (ubuntu)"]);
   await shot(page, "seen-before.png");
