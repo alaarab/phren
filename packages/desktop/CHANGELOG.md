@@ -21,6 +21,7 @@ GitHub release notes, and the app shows them when that version is available.
 - Launching Phren again brings back a window the menu bar icon hid.
 - Projects opens faster: cards show as soon as the list is known, and a store file shared by several computers is read once (78 Hook requests down to 32 with three computers).
 - Sections no longer wait on a Hook health check before their first read, and Tasks shows the project you were on (or the one an agent is working in) as soon as its tasks arrive, with the rest filling in.
+- Previews and Review's trains no longer re-read every computer on each agent update, only on their own timer or when a computer comes or goes.
 
 ## [0.1.6] - 2026-10-13
 
