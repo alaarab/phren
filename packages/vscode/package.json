@@ -1,7 +1,7 @@
 {
   "name": "phren-vscode",
   "displayName": "Phren",
-  "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
+  "description": "Browse, search, and manage your Phren memory layer for AI coding agents directly from VS Code.",
   "version": "0.6.3",
   "publisher": "alaarab",
   "author": "Ala Arab",
@@ -19,20 +19,31 @@
     "vscode": "^1.140.0"
   },
   "categories": [
+    "AI",
     "Other"
   ],
+  "extensionKind": [
+    "workspace"
+  ],
   "activationEvents": [
-    "onView:phren.explorer",
     "onStartupFinished"
   ],
   "keywords": [
     "phren",
-    "knowledge",
     "memory",
+    "knowledge",
+    "agent",
+    "ai",
     "mcp",
-    "agent"
+    "findings",
+    "context",
+    "notes"
   ],
   "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#12122a",
+    "theme": "dark"
+  },
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -262,6 +273,21 @@
       {
         "command": "phren.sessionEnd",
         "title": "Phren: End Session"
+      },
+      {
+        "command": "phren.showLog",
+        "title": "Phren: Show Log",
+        "icon": "$(output)"
+      },
+      {
+        "command": "phren.openTruth",
+        "title": "Phren: Open Truth",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "phren.searchSelection",
+        "title": "Phren: Search Memory for Selection",
+        "icon": "$(search)"
       }
     ],
     "keybindings": [
@@ -368,9 +394,21 @@
         {
           "command": "phren.openMachinesConfig",
           "when": "false"
+        },
+        {
+          "command": "phren.searchSelection",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "phren.openTruth",
+          "when": "false"
         }
       ],
       "editor/context": [
+        {
+          "command": "phren.searchSelection",
+          "group": "phren@0"
+        },
         {
           "command": "phren.addNote",
           "when": "editorHasSelection",

@@ -1,6 +1,23 @@
+# The VSIX ships only what the running extension needs: out/ (compiled JS plus
+# the bundled graph asset copied there by scripts/prepare-graph-asset.mjs),
+# media/, and the manifest files vsce always includes (README.md, CHANGELOG.md,
+# LICENSE, package.json). Everything below is source or build tooling.
 .vscode/**
 .vscode-test/**
-node_modules/**
-src/**
+.gitignore
+.vscodeignore
+
+# Repo tooling and scratch
+.turbo/**
+scripts/**
+test/**
 scratch/**
+.scratch/**
 tsconfig.json
+node_modules/**
+
+# TypeScript sources compile to out/; source maps and .ts are never loaded at
+# runtime (no runtime .d.ts either).
+src/**
+**/*.ts
+**/*.map

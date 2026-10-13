@@ -1,3 +1,4 @@
+import { FINDING_MAX_CHARS, buildCitation, truncateToOneLine, workspaceFolderPath } from "./editor-commands";
 import * as vscode from "vscode";
 import { type ExtensionContext, toErrorMessage, asRecord, asArraySafe } from "../extensionContext";
 import { showFindingDetail } from "../findingViewer";
@@ -30,9 +31,14 @@ export function registerFindingCommands(ctx: ExtensionContext): vscode.Disposabl
     }
 
     const editor = vscode.window.activeTextEditor;
-    const selectedText = editor && !editor.selection.isEmpty
-      ? editor.document.getText(editor.selection).trim()
+    const hasSelection = Boolean(editor && !editor.selection.isEmpty);
+    // A finding is one line; a selection prefills it, and its file and line travel as the citation.
+    const selectedText = editor && hasSelection
+      ? truncateToOneLine(editor.document.getText(editor.selection), FINDING_MAX_CHARS)
       : "";
+    const citation = editor && hasSelection
+      ? buildCitation(editor.document.uri, editor.selection, workspaceFolderPath(editor.document))
+      : undefined;
     const findingText = await vscode.window.showInputBox({
       prompt: "Record durable knowledge worth carrying into future work",
       placeHolder: "Decision, pattern, pitfall, workaround, or other reusable insight",
@@ -44,9 +50,11 @@ export function registerFindingCommands(ctx: ExtensionContext): vscode.Disposabl
     }
 
     try {
-      await phrenClient.addFinding(project, trimmedFindingText);
+      if (citation) await phrenClient.addFinding(project, trimmedFindingText, citation);
+      else await phrenClient.addFinding(project, trimmedFindingText);
       treeDataProvider.refresh();
-      await vscode.window.showInformationMessage(`Finding added to ${project}`);
+      const location = citation?.file ? ` (${citation.file}:${citation.line})` : "";
+      await vscode.window.showInformationMessage(`Finding added to ${project}${location}`);
     } catch (error) {
       await vscode.window.showErrorMessage(`Failed to add finding: ${toErrorMessage(error)}`);
     }

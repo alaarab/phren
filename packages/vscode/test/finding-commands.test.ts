@@ -16,9 +16,56 @@ function handlerFor(commandId: string): (...args: unknown[]) => unknown {
 beforeEach(() => {
   vi.clearAllMocks();
   vscode.window.activeTextEditor = undefined;
+  vscode.workspace.workspaceFolders = undefined;
 });
 
 describe("finding-commands: addFinding", () => {
+  it("prefills a selection as one line and saves its file and line as the citation", async () => {
+    const client = fakeClient();
+    registerFindingCommands(fakeExtensionContext({ phrenClient: client }));
+    vscode.workspace.workspaceFolders = [{ uri: { fsPath: "/repo" } }];
+    vscode.window.activeTextEditor = {
+      selection: { isEmpty: false, start: { line: 4 } },
+      document: { uri: { fsPath: "/repo/src/a.ts" }, getText: () => "Guard runs\n  after the token" },
+    } as unknown as vscode.TextEditor;
+    vi.mocked(vscode.window.showInputBox).mockImplementation(async (options) => options?.value);
+
+    await handlerFor("phren.addFinding")({ projectName: "app" });
+
+    expect(vscode.window.showInputBox).toHaveBeenCalledWith(expect.objectContaining({ value: "Guard runs after the token" }));
+    expect(client.addFinding).toHaveBeenCalledWith("app", "Guard runs after the token", { file: "src/a.ts", line: 5, repo: "/repo" });
+    vscode.workspace.workspaceFolders = undefined;
+  });
+
+  it("cites the absolute path, with no repo, when the file is outside every workspace folder", async () => {
+    const client = fakeClient();
+    registerFindingCommands(fakeExtensionContext({ phrenClient: client, activeProjectName: "app" }));
+    vscode.window.activeTextEditor = {
+      selection: { isEmpty: false, start: { line: 2 } },
+      document: { uri: { fsPath: "/tmp/notes.txt" }, getText: () => "note" },
+    } as unknown as vscode.TextEditor;
+    vi.mocked(vscode.window.showInputBox).mockResolvedValue("note");
+
+    await handlerFor("phren.addFinding")();
+
+    expect(client.addFinding).toHaveBeenCalledWith("app", "note", { file: "/tmp/notes.txt", line: 3 });
+  });
+
+  it("saves an untitled file's finding without a citation", async () => {
+    const client = fakeClient();
+    registerFindingCommands(fakeExtensionContext({ phrenClient: client, activeProjectName: "app" }));
+    vscode.workspace.workspaceFolders = [{ uri: { fsPath: "/repo" } }];
+    vscode.window.activeTextEditor = {
+      selection: { isEmpty: false, start: { line: 0 } },
+      document: { uri: { fsPath: "Untitled-1", scheme: "untitled" }, getText: () => "scratch" },
+    } as unknown as vscode.TextEditor;
+    vi.mocked(vscode.window.showInputBox).mockResolvedValue("scratch");
+
+    await handlerFor("phren.addFinding")();
+
+    expect(client.addFinding).toHaveBeenCalledWith("app", "scratch");
+  });
+
   it("uses the node's projectName directly, skipping project resolution entirely", async () => {
     const client = fakeClient();
     const ctx = fakeExtensionContext({ phrenClient: client });
@@ -83,9 +130,9 @@ describe("finding-commands: addFinding", () => {
     const ctx = fakeExtensionContext({ phrenClient: client, activeProjectName: "app" });
     registerFindingCommands(ctx);
     vscode.window.activeTextEditor = {
-      selection: { isEmpty: false },
-      document: { getText: () => "  selected snippet  " },
-    };
+      selection: { isEmpty: false, start: { line: 0 } },
+      document: { uri: { fsPath: "/elsewhere/notes.txt" }, getText: () => "  selected snippet  " },
+    } as unknown as vscode.TextEditor;
     vi.mocked(vscode.window.showInputBox).mockResolvedValue("selected snippet");
 
     await handlerFor("phren.addFinding")();
