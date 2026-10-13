@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeHeadlessThread, codexForeignThread, foreignMeta, headlessEntrypoint } from "./codex-thread-origin.js";
+import { claudeHeadlessThread, codexForeignThread, foreignMeta, headlessEntrypoint } from "./thread-origin.js";
 
 const meta = (fields: string) => `{"timestamp":"2026-10-04T18:38:33Z","type":"session_meta","payload":{"id":"01a10973","cwd":"/tmp/x",${fields},"base_instructions":"${"x".repeat(8000)}"}}\n`;
 
