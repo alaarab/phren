@@ -928,3 +928,24 @@ test("a session working on background tasks says so on Home and in the sidebar",
   await page.locator('.section-pill[data-section="agents"]').click();
   await expect(page.locator(".sb-row", { hasText: "Fix login" }).locator(".sb-background")).toHaveText("3 background tasks");
 });
+
+test("⌘K continues the open session in another agent", async ({ page }) => {
+  await page.route("**/v1/harnesses", (route) => route.fulfill({ json: { harnesses: [
+    { source: "claude", installed: true, usable: true }, { source: "codex", installed: true, usable: true },
+  ] } }));
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator("#needs-pill").waitFor();
+  // No session open: the command is not offered.
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type(">continue");
+  await expect(page.locator(".palette-row", { hasText: "Continue this session in" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type(">continue");
+  const row = page.locator(".palette-row", { hasText: "Continue this session in" });
+  await expect(row).toContainText("Fix login");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".move-sheet .launch-seg.selected")).toHaveText("Codex");
+});
