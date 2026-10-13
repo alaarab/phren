@@ -20,6 +20,7 @@ registerPauseCommand();
 import { initTheme } from "./shell/theme.js";
 import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled } from "./sections/settings.js";
 import { startCiWatch } from "./shell/ci-watch.js";
+import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
@@ -90,6 +91,7 @@ store.subscribe(() => {
 // Native notifications when a session branch's pull request checks settle,
 // and the last look behind Home's Checks strip.
 startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() });
+startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
 
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the

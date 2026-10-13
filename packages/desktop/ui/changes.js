@@ -9,6 +9,7 @@ import { branchProblem, capitalize, checksSummary, durationText, fixItPrompt, gr
 import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
 import { openLaunchSheet } from "./shell/launch.js";
+import { armMerge, disarmMerge, isArmed, onArmedChange } from "./shell/merge-when-green.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
 // "Session" is what this agent changed, from the Hook's per-call capture.
@@ -246,6 +247,8 @@ const CSS = `
 .chg-merge{margin-top:10px}
 .chg-merge-row{display:flex;gap:8px;align-items:center}
 .chg-merge-method{flex:1;min-width:0;background:var(--sunken);color:var(--text);border:1px solid var(--border-strong);border-radius:10px;padding:8px;font:12.5px system-ui,sans-serif}
+.chg-merge-later{width:100%;margin-top:8px}
+.chg-merge-armed{flex:1;font-size:12.5px;color:var(--text)}
 .chg-merge-ask{margin-bottom:8px;font-size:12.5px;color:var(--text)}
 .chg-btn.merge{background:var(--raised);color:var(--text)}
 .chg-btn.merge.ready{background:var(--done);color:var(--bg);box-shadow:0 0 0 0 rgba(138,200,172,.5);animation:chg-ready 2.4s ease-out infinite}
@@ -1500,14 +1503,22 @@ export function openChanges(el, ctx) {
     const m = state.merge && state.merge.number === p.number ? state.merge : (state.merge = { number: p.number, method: mergeMethods(host)[0][0], confirm: false });
     const bar = div("chg-merge");
     if (!avail.enabled) { bar.appendChild(div("chg-log-meta", avail.why)); return bar; }
+    const methodLabel = (mergeMethods(host).find(([k]) => k === m.method) || [, "Merge"])[1];
     if (m.confirm) {
       const sha = p.headSha ? p.headSha.slice(0, 7) : "";
-      const label = (mergeMethods(host).find(([k]) => k === m.method) || [, "Merge"])[1];
-      bar.appendChild(div("chg-merge-ask", `${label} ${terms().ref}${p.number}${sha ? ` at ${sha}` : ""} into ${p.base || "its base"}?`));
+      bar.appendChild(div("chg-merge-ask", `${methodLabel} ${terms().ref}${p.number}${sha ? ` at ${sha}` : ""} into ${p.base || "its base"}?`));
       const row = div("chg-merge-row");
       row.appendChild(button("Cancel", "chg-btn stage", () => { m.confirm = false; render(); }));
       row.appendChild(button(state.busy === "merge" ? "Merging…" : "Confirm merge", "chg-btn merge", () => doMerge(p)));
       bar.appendChild(row);
+      return bar;
+    }
+    if (isArmed(computer, repo(), p.number)) {
+      const row = div("chg-merge-row");
+      row.appendChild(div("chg-merge-armed", `${methodLabel} when checks pass`));
+      row.appendChild(button("Cancel", "chg-btn stage", () => disarmMerge(computer, repo(), p.number)));
+      bar.appendChild(row);
+      bar.appendChild(div("chg-log-meta", "While this app is open. New commits or a failing check cancel it."));
       return bar;
     }
     const row = div("chg-merge-row");
@@ -1518,6 +1529,12 @@ export function openChanges(el, ctx) {
     row.appendChild(select);
     row.appendChild(button(avail.ready ? "Merge" : "Merge…", "chg-btn merge" + (avail.ready ? " ready" : ""), () => { m.confirm = true; render(); }));
     bar.appendChild(row);
+    if (!avail.ready && p.checks !== "failing" && state.pulls?.current?.number === p.number) {
+      bar.appendChild(button("Merge when checks pass", "chg-btn stage chg-merge-later", () => armMerge({
+        computer, scope: scopeBody(), number: p.number, method: m.method, headSha: p.headSha, repository: repo(),
+        ref: terms().ref, title: p.title || "", project: projectOf(ctx.child),
+      })));
+    }
     if (!avail.ready) bar.appendChild(div("chg-log-meta", `${host && host.kind ? host.name : "The host"} decides; it will refuse while checks or reviews block it.`));
     return bar;
   }
@@ -1711,6 +1728,8 @@ export function openChanges(el, ctx) {
     if (e.detail?.computer === computer && e.detail?.session === target?.session && !state.busy) refresh();
   };
   window.addEventListener("phren:git-changed", onGitChanged);
+  // Arming re-draws the merge bar; a merge or disarm by the watch re-reads.
+  const stopArmedChange = onArmedChange(() => { if (state.view === "pulls" && !state.busy) refresh(); });
 
   startTimer();
   refresh();
@@ -1718,7 +1737,7 @@ export function openChanges(el, ctx) {
   return {
     refresh,
     showView: selectView,
-    close() { visible = false; stopTimer(); stopWatchingShown(); window.removeEventListener("phren:git-changed", onGitChanged); el.innerHTML = ""; },
+    close() { visible = false; stopTimer(); stopWatchingShown(); window.removeEventListener("phren:git-changed", onGitChanged); stopArmedChange(); el.innerHTML = ""; },
   };
 }
 

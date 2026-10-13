@@ -296,6 +296,28 @@ test("on GitLab, Connect checks the token, then the merge request shows its pipe
   expect(errors).toEqual([]);
 });
 
+test("on GitLab, When checks pass arms the merge request while its pipeline runs, and Cancel disarms it", async ({ page }) => {
+  const errors = await openSession(page);
+  await page.locator('.chg-seg[data-view="pulls"]').click();
+  const connect = page.locator(".chg-connect");
+  await connect.locator("input").fill("glpat-good");
+  await connect.getByRole("button", { name: "Connect" }).click();
+
+  const card = page.locator(".chg-req");
+  await expect(card.locator(".chg-pipe-word")).toHaveText("Pipeline running");
+  await shot(page, "merge-when-green-before.png");
+  await card.locator(".chg-merge-method").selectOption("squash");
+  await card.getByRole("button", { name: "Merge when checks pass" }).click();
+  await expect(card.locator(".chg-merge-armed")).toHaveText("Squash and merge when checks pass");
+  await shot(page, "merge-when-green-armed.png");
+  // Running checks wait; nothing is merged yet.
+  expect(git.calls.some((c) => c.route === "pr/merge")).toBe(false);
+
+  await card.getByRole("button", { name: "Cancel" }).click();
+  await expect(card.getByRole("button", { name: "Merge when checks pass" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("on GitHub the pull request chip and links name the host's own terms", async ({ page }) => {
   await openSession(page);
   await expect(page.locator('.chg-seg[data-view="pulls"]')).toHaveText("PRs");
