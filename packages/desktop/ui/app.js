@@ -24,6 +24,7 @@ import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
 import { startSummon } from "./shell/summon.js";
 import { startTray } from "./shell/tray.js";
+import { startNeedsNotify } from "./shell/needs-notify.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
 const shell = window.phrenDesktop;
@@ -73,21 +74,11 @@ needsEl.addEventListener("click", () => {
   if (first) { showSection("agents"); agents().openSession(first.computer, first.child); }
 });
 
-// Native badge and notifications for new needs-you rows.
-let notified = null; // keys already announced; null until the first frame
+// Native badge and the needs-you count in the window title.
 store.subscribe(() => {
   const rows = store.needsYou();
   shell?.setBadge(badgeEnabled() ? rows.length : 0);
   document.title = rows.length ? `(${rows.length}) Phren` : "Phren";
-  const keys = new Set(rows.map((r) => r.key));
-  if (notified && shell && notifyEnabled()) {
-    for (const r of rows) {
-      if (notified.has(r.key)) continue;
-      const project = (r.child.cwd ?? r.child.label ?? "").split("/").filter(Boolean).pop() ?? r.child.label;
-      shell.notify(`${project} needs you`, `${r.child.title ?? r.child.label} · ${r.computer}`);
-    }
-  }
-  notified = keys;
 });
 
 // Native notifications when a session branch's pull request checks settle,
@@ -95,7 +86,10 @@ store.subscribe(() => {
 startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() });
 startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
 startSummon(shell);
-startTray(shell, (computer, child) => { showSection("agents"); agents().openSession(computer, child); });
+// Notifications for new needs-you rows; they and the tray menu open sessions by key.
+const openSession = (computer, child) => { showSection("agents"); agents().openSession(computer, child); };
+startNeedsNotify(shell, { enabled: notifyEnabled, openSession });
+startTray(shell);
 
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the

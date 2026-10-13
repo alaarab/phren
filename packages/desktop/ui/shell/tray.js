@@ -1,5 +1,6 @@
 // The menu bar (tray) icon: the Electron shell draws it, this module feeds it
-// the sessions that need you and opens the one chosen from its menu. On a Mac,
+// the sessions that need you (a chosen row comes back as phren:open-session,
+// handled with notifications in needs-notify.js). On a Mac,
 // closing the window while the icon is on only hides it, so this keeps running.
 import { store } from "./store.js";
 
@@ -40,8 +41,8 @@ export function setTrayEnabled(on) {
 /** Whether this window has a shell that can draw the icon (Electron, not a browser). */
 export function trayAvailable() { return !!window.phrenDesktop?.setTray; }
 
-export function startTray(shell, openSession) {
-  if (!shell?.setTray || !shell.onOpenSession) return;
+export function startTray(shell) {
+  if (!shell?.setTray) return;
   let last = "";
   push = () => {
     const state = trayState(store.needsYou(), trayEnabled());
@@ -52,8 +53,4 @@ export function startTray(shell, openSession) {
   };
   store.subscribe(push);
   push();
-  shell.onOpenSession((key) => {
-    const row = store.sessions().find((s) => s.key === key);
-    if (row) openSession(row.computer, row.child);
-  });
 }

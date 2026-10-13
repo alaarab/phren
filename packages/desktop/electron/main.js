@@ -22,6 +22,8 @@ let daemonStderr = "";
 let quitting = false;
 let summonKey = null;
 let tray = null;
+// Shown notifications, kept until used so their handlers are not collected.
+const liveNotes = new Set();
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -270,13 +272,23 @@ function registerIpc() {
     if (!fromMainWindow(event)) return;
     const title = String(payload?.title ?? "").slice(0, 120);
     const body = String(payload?.body ?? "").slice(0, 300);
-    const note = new Notification({ title, body });
+    // A session's key: clicking opens it; a waiting agent's takes a reply (macOS only).
+    const key = typeof payload?.key === "string" ? payload.key.slice(0, 200) : "";
+    const reply = !!key && payload?.reply === true && process.platform === "darwin";
+    const note = new Notification({ title, body, ...(reply ? { hasReply: true, replyPlaceholder: "Reply to the agent" } : {}) });
+    const done = () => liveNotes.delete(note);
     note.on("click", () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.focus();
-      }
+      done();
+      if (showWindow() && key) mainWindow.webContents.send("phren:open-session", key);
     });
+    note.on("reply", (details, legacy) => {
+      done();
+      const text = String(details?.reply ?? legacy ?? "").trim().slice(0, 8000);
+      if (text && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("phren:reply", { key, text });
+    });
+    note.on("close", done);
+    liveNotes.add(note);
+    if (liveNotes.size > 50) liveNotes.delete(liveNotes.values().next().value);
     note.show();
   });
   ipcMain.on("phren:tray", (event, state) => {
