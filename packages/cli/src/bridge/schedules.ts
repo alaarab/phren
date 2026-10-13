@@ -7,7 +7,7 @@ import { BridgeError } from "./protocol.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { getProjectDirs } from "../shared.js";
 import {
-  computerMatches, latestScheduleBatch, nextRun, readScheduleDocument, readScheduleRuns, runningStatuses, scheduleNotifications, scheduleSessionRoute,
+  computerMatches, latestScheduleBatch, nextRun, readScheduleDocument, readScheduleRuns, reusableLaunch, runningStatuses, scheduleNotifications, scheduleSessionRoute,
   writeScheduleDocument, writeScheduleRuns,
   type Schedule, type ScheduleLauncher, type ScheduleNotify, type ScheduleRun, type ScheduleRunOutcome, type SchedulePushSender, type ScheduleStatus,
 } from "./schedule-format.js";
@@ -136,7 +136,8 @@ export class Scheduler {
         targets.push({ project: target, projectDir: targetDir, cwd });
       }
       const batchId = randomUUID(), startedAt = this.now().toISOString();
-      const children = targets.map(target => ({ ...target, run: {
+      const children = targets.map(target => ({ ...target,
+        ...(schedule.session === "reuse" ? { reuse: reusableLaunch(matching.filter(run => run.project === target.project)) } : {}), run: {
         id: randomUUID(), scheduleId: id, project: target.project, scheduleProject: project, batchId,
         startedAt, status: "launched", launch: { mode: "headless" },
       } as ScheduleRun }));
@@ -159,8 +160,12 @@ export class Scheduler {
     return Promise.all(prepared.children.map(async child => {
       try {
         const launched = await this.launch({ schedule: prepared.schedule, project: child.project, projectDir: child.projectDir,
-          cwd: child.cwd, runId: child.run.id,
+          cwd: child.cwd, runId: child.run.id, ...(child.reuse ? { reuse: child.reuse } : {}),
           blockedStartup: promptText => this.recordBlockedStartup(child.run.id, prepared.schedule, promptText) });
+        // A busy reused session keeps its turn; this firing is recorded and nothing is sent.
+        if (launched.skipped) {
+          return await this.updateRun(child.run.id, { status: "skipped", finishedAt: this.now().toISOString(), reason: launched.skipped, launch: launched.launch });
+        }
         const running = await this.updateRun(child.run.id, { status: "running", launch: launched.launch });
         const notified = this.notifyRun(running, prepared.schedule, "scheduleStarted");
         if (launched.completion) void launched.completion.then(async result => {

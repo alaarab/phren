@@ -10,10 +10,10 @@ import { fanoutRoot } from "./fanouts.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { findPane, paneIdentity, servers, snapshot } from "./herdr.js";
 import { agentNotReady, terminalProvider } from "./terminal.js";
-import { atomicInPrivateDir, BridgeError, type Json } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, object, objects, type Json, type Target } from "./protocol.js";
 import { defaultPhrenPath } from "../shared.js";
 import type { Schedule, ScheduleLauncher, ScheduleLaunchContext, ScheduleLaunchRecord, ScheduleLaunchResult, ScheduleRun, ScheduleRunOutcome } from "./schedule-format.js";
-import { watchHerdrRun } from "./schedule-watch.js";
+import { realTranscriptStamp, watchHerdrRun } from "./schedule-watch.js";
 
 /** Starting a scheduled run: in a Herdr pane when a server is live, otherwise
  * as a headless job under the fan-out root. */
@@ -21,10 +21,16 @@ import { watchHerdrRun } from "./schedule-watch.js";
 const CLAUDE_SCHEDULE_SETTINGS = JSON.stringify({ enableAllProjectMcpServers: true });
 
 type HerdrLauncher = (server: string, data: Json) => Promise<Json>;
+/** Types a prompt into a live session: the Hook's hand-off queue. */
+export type ScheduleDeliver = (target: Target, text: string, deliveryId: string) => Promise<Json>;
 
-export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defaultPhrenPath()): ScheduleLauncher {
+export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defaultPhrenPath(), deliver?: ScheduleDeliver): ScheduleLauncher {
   const abort = new AbortController(), children = new Set<ChildProcess>();
   const launcher: ScheduleLauncher = async context => {
+    if (context.reuse && deliver) {
+      const continued = await continueSession(context, context.reuse, deliver, abort.signal);
+      if (continued) return continued;
+    }
     const live = await servers();
     if (live.length) return launchInHerdr(String(live[0].session), context, launchHerdr, abort.signal);
     return launchHeadless(context, store, child => { children.add(child); child.once("exit", () => children.delete(child)); });
@@ -32,6 +38,55 @@ export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defau
   launcher.close = () => { abort.abort(); for (const child of children) child.kill("SIGTERM"); children.clear(); };
   launcher.resume = (run, schedule) => resumeScheduleRun(run, schedule, abort.signal);
   return launcher;
+}
+
+export interface ContinueEnv {
+  panes?: (server: string) => Promise<Json[]>;
+  transcriptStamp?: typeof realTranscriptStamp;
+  watch?: typeof watchHerdrRun;
+}
+
+function busyReason(status: string): string {
+  const state = status === "blocked" || status === "waiting" ? "is waiting for you" : status === "working" || status === "starting" ? "is still working" : `is ${status || "busy"}`;
+  return `The session this schedule continues ${state}, so this firing was skipped.`;
+}
+
+/**
+ * `session: reuse`: types the prompt into the session the target's last run
+ * used, while its pane still runs that harness. A busy session is skipped
+ * rather than given a second prompt. Undefined when the session is gone (the
+ * pane closed, its agent exited, its conversation was replaced), so the caller
+ * starts a new one, which the next firing continues.
+ */
+export async function continueSession(context: ScheduleLaunchContext, previous: ScheduleLaunchRecord, deliver: ScheduleDeliver, signal: AbortSignal,
+  env: ContinueEnv = {}): Promise<ScheduleLaunchResult | undefined> {
+  const { server, workspaceId, tabId, paneId, sessionId } = previous, source = context.schedule.harness;
+  if (!server || !workspaceId || !tabId || !paneId || !sessionId) return undefined;
+  const panes = env.panes ?? (async (name: string) => objects((await snapshot(name)).panes));
+  const pane = findPane({ panes: await panes(server).catch(() => []) }, { workspace: workspaceId, tab: tabId, pane: paneId, source });
+  if (!pane) return undefined;
+  const launch: ScheduleLaunchRecord = { mode: "herdr", server, workspaceId, tabId, paneId, sessionId, reused: true };
+  const status = String(pane.agent_status ?? "");
+  if (status !== "idle" && status !== "done") return { launch, skipped: busyReason(status) };
+  const transcript = await (env.transcriptStamp ?? realTranscriptStamp)(source, sessionId).catch(() => undefined);
+  let result: Json;
+  try {
+    result = await deliver({ server, workspace: workspaceId, tab: tabId, pane: paneId, source, session: sessionId },
+      context.schedule.prompt, `schedule-${context.runId.replaceAll("-", "")}`);
+  } catch (error) {
+    // The pane or its conversation went away between the look and the send.
+    if (error instanceof BridgeError && (error.status === 404 || error.status === 409)) return undefined;
+    throw error;
+  }
+  if (result.state === "failed") return undefined;
+  if (result.delivered !== true && result.queued !== true) {
+    throw new Error(`The prompt to the session this schedule continues was not confirmed${typeof result.error === "string" ? `: ${result.error}` : "."}`);
+  }
+  // A Claude /clear in the same terminal moves the delivery to the new conversation.
+  const session = typeof object(result.target).session === "string" ? String(object(result.target).session) : sessionId;
+  return { launch: { ...launch, sessionId: session },
+    completion: (env.watch ?? watchHerdrRun)(server, { workspaceId, tabId, paneId }, signal,
+      { source, startedAt: Date.now(), sessionId: session, continued: { transcript } }) };
 }
 
 /**

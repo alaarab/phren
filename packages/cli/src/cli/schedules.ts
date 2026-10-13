@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   SCHEDULE_EVERY,
   SCHEDULE_HARNESSES,
+  SCHEDULE_SESSIONS,
   WEEKDAYS,
   canonicalComputer,
   newScheduleId,
@@ -13,6 +14,7 @@ import {
   type Schedule,
   type ScheduleEvery,
   type ScheduleHarness,
+  type ScheduleSession,
   type Weekday,
 } from "../bridge/schedules.js";
 import { object, socketPath, type Json } from "../bridge/protocol.js";
@@ -50,7 +52,7 @@ async function list(store: string, projectName?: string): Promise<void> {
       count++;
       console.log(`${project}  ${schedule.id}  ${schedule.enabled ? "enabled " : "paused  "}  ${schedule.name}`);
       if (schedule.projects) console.log(`  targets: ${schedule.projects.join(", ")}`);
-      console.log(`  ${schedule.computer} · ${schedule.harness}${schedule.model ? `/${schedule.model}` : ""} · ${scheduleDescription(schedule)}`);
+      console.log(`  ${schedule.computer} · ${schedule.harness}${schedule.model ? `/${schedule.model}` : ""} · ${scheduleDescription(schedule)}${schedule.session === "reuse" ? " · continues one session" : ""}`);
     }
   }
   if (!count) console.log("No schedules.");
@@ -65,6 +67,8 @@ async function add(store: string, args: string[]): Promise<void> {
   if (!name || !harness || !requestedComputer || !every) throw new Error("--name, --harness, --computer, and --every are required.");
   if (!SCHEDULE_HARNESSES.includes(harness)) throw new Error(`--harness must be one of: ${SCHEDULE_HARNESSES.join(", ")}.`);
   if (!SCHEDULE_EVERY.includes(every)) throw new Error(`--every must be one of: ${SCHEDULE_EVERY.join(", ")}.`);
+  const session = option(args, "--session") as ScheduleSession | undefined;
+  if (session !== undefined && !SCHEDULE_SESSIONS.includes(session)) throw new Error(`--session must be one of: ${SCHEDULE_SESSIONS.join(", ")}.`);
   const machines = listMachines(store);
   if (!machines.ok) throw new Error(machines.error);
   const computer = Object.keys(machines.data).find(machine => canonicalComputer(machine) === canonicalComputer(requestedComputer));
@@ -77,7 +81,7 @@ async function add(store: string, args: string[]): Promise<void> {
     id: newScheduleId(file.schedules.map(item => item.id)), name, enabled: true, computer, harness,
     ...(option(args, "--projects") ? { projects: option(args, "--projects")!.split(",").map(project => project.trim()) } : {}),
     ...(option(args, "--model") ? { model: option(args, "--model") } : {}),
-    ...(option(args, "--account") ? { account: option(args, "--account") } : {}), every, prompt, createdAt: now, updatedAt: now,
+    ...(option(args, "--account") ? { account: option(args, "--account") } : {}), ...(session ? { session } : {}), every, prompt, createdAt: now, updatedAt: now,
     ...(option(args, "--at") ? { at: option(args, "--at") } : {}),
     ...(option(args, "--days") ? { days: option(args, "--days")!.split(",").map(day => day.trim().toLowerCase()) as Weekday[] } : {}),
     ...(option(args, "--interval") ? { interval: option(args, "--interval") } : {}),

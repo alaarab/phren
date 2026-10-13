@@ -43,7 +43,14 @@ interface StartupWatch {
   startedAt: number;
   sessionId?: string;
   onBlocked?: (promptText: string) => void | Promise<void>;
+  /** The prompt went to a session that was already idle, whose transcript
+   * looked like this beforehand. Idle ends the run only once the pane was
+   * seen busy or the transcript moved; otherwise it is the turn not started. */
+  continued?: { transcript?: { size: number; mtimeMs: number } };
 }
+
+/** How long a continued session may sit idle without taking up the prompt. */
+export const CONTINUED_TURN_START_MS = 120_000;
 
 export interface StartupWatchEnv {
   now?: () => number;
@@ -300,7 +307,7 @@ export function ownerQuestion(text: string): string | undefined {
   return plainLine(lines[first]) || last;
 }
 
-async function realTranscriptStamp(source: ScheduleHarness, sessionId: string | undefined): Promise<{ size: number; mtimeMs: number } | undefined> {
+export async function realTranscriptStamp(source: ScheduleHarness, sessionId: string | undefined): Promise<{ size: number; mtimeMs: number } | undefined> {
   if (!sessionId) return undefined;
   const file = await transcriptPath(source, sessionId).catch(() => undefined);
   const metadata = file ? await stat(file).catch(() => undefined) : undefined;
@@ -321,6 +328,7 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
   let stamp: { size: number; mtimeMs: number } | undefined;
   let recordedBlock = false;
   let paneReads = 0;
+  let turnStarted = !startup.continued;
   while (!signal.aborted) {
     await pause(1000);
     if (signal.aborted) break;
@@ -332,6 +340,15 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
       // at the pane. Either one is the agent stopping on its own.
       if (status === "idle" || status === "done") {
         if (!sessionId) sessionId = await resolveSession(server, pane);
+        if (!turnStarted) {
+          const moved = await transcriptStamp(startup.source, sessionId);
+          const before = startup.continued?.transcript;
+          turnStarted = !!moved && (!before || moved.size !== before.size || moved.mtimeMs !== before.mtimeMs);
+          if (!turnStarted) {
+            if (now() - startup.startedAt > CONTINUED_TURN_START_MS) return { status: "failed", reason: "The session this schedule continues never took up the prompt." };
+            continue;
+          }
+        }
         const turn = await finalTurn(startup.source, sessionId).catch(() => undefined);
         if (turn?.completed && turn.error) return { status: "failed", reason: turn.error };
         const question = turn?.completed && turn.lastAssistant ? ownerQuestion(turn.lastAssistant) : undefined;
@@ -340,6 +357,7 @@ export async function watchHerdrRun(server: string, target: { workspaceId: strin
       if (!["working", "starting", "blocked", "waiting", "unknown"].includes(status)) {
         return { status: "failed", reason: "The scheduled agent stopped before the prompt finished." };
       }
+      turnStarted = true;
       const elapsedMs = now() - startup.startedAt;
       const withinWindow = elapsedMs <= STARTUP_BLOCK_WINDOW_MS + STARTUP_BLOCK_WINDOW_OPEN_MS;
       if (!transcriptActive && startup.onBlocked && !recordedBlock && withinWindow) {
