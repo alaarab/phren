@@ -7,7 +7,8 @@ import { extractKnowsBlock } from "../chat/knows.js";
 import { hookGet, hookPost } from "../api.js";
 import { hostMark } from "../changes.js";
 import { loadBranchTasks, renderBranchTasks } from "../branch-tasks.js";
-import { capitalize, hostTerms } from "../git-review.js";
+import { capitalize, fixItPrompt, hostTerms } from "../git-review.js";
+import { openLaunchSheet } from "../shell/launch.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 
@@ -660,6 +661,17 @@ export function mountProjects(root) {
     const branch = el("div", "pj-forge-branch");
     branch.append(el("span", "pj-chip pj-mono", res.branch || "detached"));
     if (res.current) branch.append(el("span", "pj-row-sub", `${terms.ref}${res.current.number} ${res.current.state === "OPEN" || !res.current.state ? "open" : String(res.current.state).toLowerCase()}`), checksPill(res.current.checks));
+    const failing = (res.current?.checkRuns || []).filter((run) => run.state === "failing");
+    if (res.current?.checks === "failing" && res.branch) {
+      const fix = el("button", "pj-btn pj-fixit", "Fix it");
+      fix.title = "Launch an agent on this branch with the failing checks";
+      const pull = res.current;
+      fix.addEventListener("click", () => openLaunchSheet({
+        project: project.name, computer: state.detail.computer, title: `Fix ${terms.ref}${pull.number}`, label: `Fix ${terms.ref}${pull.number}`,
+        prompt: fixItPrompt({ ref: terms.ref, number: pull.number, title: pull.title, head: res.branch, url: pull.url, failing: failing.length ? failing : [{ name: "checks", url: pull.pipeline?.url }] }),
+      }));
+      branch.append(el("span", "pj-spacer"), fix);
+    }
     list.append(branch);
     if (forge.tasks) list.append(renderBranchTasks({ computer: state.detail.computer, project: project.name, branch: res.branch, state: forge.tasks, rerender: renderDetail }));
     if (res.available === false) {
