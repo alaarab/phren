@@ -93,7 +93,12 @@ export interface DialogIO {
   sleep?(ms: number): Promise<void>;
 }
 
-const changed = (message: string) => new BridgeError(409, `${message} Nothing else was sent; check the question and answer again, or cancel it.`);
+/** A 409 that says whether any key reached the terminal: `question-not-shown`
+ * (nothing typed, retrying is safe) or `question-unconfirmed` (keys were sent,
+ * so look at the terminal before answering again). */
+const refusal = (message: string, sent: boolean) => sent
+  ? new BridgeError(409, `${message} Some keys were already sent, so check the terminal before answering again, or cancel the question.`, { code: "question-unconfirmed" })
+  : new BridgeError(409, `${message} Nothing was sent; check the question and answer again, or cancel it.`, { code: "question-not-shown" });
 /** A typed answer, one key per character; herdr names the space bar. */
 const typedKeys = (text: string) => [...text].map(character => character === " " ? "space" : character);
 
@@ -101,6 +106,10 @@ const typedKeys = (text: string) => [...text].map(character => character === " "
  * `submit` is true. Each step is checked against a fresh read of the pane. */
 export async function answerClaudeQuestionDialog(io: DialogIO, questions: DialogQuestion[], answers: DialogAnswer[], options: { from?: number; submit?: boolean } = {}): Promise<void> {
   const from = options.from ?? 0, submit = options.submit ?? true;
+  let sent = false;
+  const changed = (message: string) => refusal(message, sent);
+  const realKeys = io.keys.bind(io);
+  io = { ...io, keys: async keys => { sent = true; await realKeys(keys); } };
   const sleep = io.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const matches = (screen: ClaudeDialogScreen | undefined, index: number): screen is ClaudeQuestionScreen =>
     screen?.kind === "question" && screen.title === normalize(questions[index].question);
