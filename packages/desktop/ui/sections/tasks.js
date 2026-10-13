@@ -167,15 +167,28 @@ export function mountTasks(root) {
     const key = state.activeKey;
     state.loading = true;
     renderProjects();
+    // The project to open first: the one already open, else one an agent is working in.
+    // Its tasks show as soon as they arrive; the rail fills in as the rest do.
+    const first = state.selectedProject ?? sessions().filter((r) => r.child.agentStatus === "working")
+      .map((r) => projectOf(r.child)).find((p) => source.projects.includes(p)) ?? null;
+    let railFrame = 0;
+    const current = () => mine === generation && state.activeKey === key;
     const entries = await Promise.all(source.projects.map(async (project) => {
-      try {
-        const doc = await hookGet(source.computer, "/v1/tasks", { storeId: source.id, project });
-        return [project, doc];
-      } catch {
-        return [project, null];
+      let doc = null;
+      try { doc = await hookGet(source.computer, "/v1/tasks", { storeId: source.id, project }); } catch { /* left out below */ }
+      if (doc && current()) {
+        state.docs.set(project, doc);
+        // Unless the owner picked another project meanwhile.
+        if (project === first && (state.selectedProject ?? first) === first) {
+          state.selectedProject = first;
+          renderMain();
+        }
+        railFrame ||= requestAnimationFrame(() => { railFrame = 0; if (current()) renderProjects(); });
       }
+      return [project, doc];
     }));
-    if (mine !== generation || state.activeKey !== key) return;
+    cancelAnimationFrame(railFrame);
+    if (!current()) return;
     state.docs = new Map(entries.filter(([, doc]) => doc));
     state.loading = false;
     if (state.selectedProject && !source.projects.includes(state.selectedProject)) state.selectedProject = null;
