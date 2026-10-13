@@ -96,6 +96,7 @@ jobs:
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-${{ runner.os }}
+          retention-days: 3
           path: |
             packages/desktop/release/*.dmg
             packages/desktop/release/*.zip
