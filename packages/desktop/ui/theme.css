@@ -584,6 +584,11 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .home-load-fill.stressed { background: var(--danger); }
 .home-load-text { flex: none; color: var(--muted); font-size: 11.5px; font-family: "JetBrains Mono", ui-monospace, monospace; }
 .home-error { color: var(--danger); font-size: 12px; }
+/* Hook version on a computer row; an older one than the newest seen offers its update command. */
+.home-hook { font-family: var(--mono); }
+.home-hook.behind, .settings-version.behind { color: var(--waiting); }
+.home-hook-update { padding: 1px 8px; border: 1px solid var(--waiting); border-radius: 999px; background: none; color: var(--waiting); font: inherit; font-size: 11px; cursor: pointer; }
+.home-hook-update:hover { background: var(--raised); }
 .home-start-note { color: var(--muted); font-size: 12px; }
 
 
