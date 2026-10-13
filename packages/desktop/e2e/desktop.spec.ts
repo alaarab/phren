@@ -730,3 +730,24 @@ test("a stalled working session reads 'stalled' on Home and in the sidebar", asy
   await page.locator('.section-pill[data-section="agents"]').click();
   await expect(page.locator(".sb-row", { hasText: "Fix login" }).locator(".sb-stalled")).toHaveText("stalled 7m");
 });
+
+test("Since you left lists pull requests whose checks settled while away", async ({ page }) => {
+  ciChecks = "pending";
+  await page.clock.install();
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  // Home follows the CI watch; its first look is the baseline.
+  await expect(page.locator(".home-check", { hasText: "#42" })).toBeVisible();
+  await page.evaluate(() => { document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); });
+  ciChecks = "failing";
+  await page.clock.fastForward(121_000);
+  await expect(page.locator(".home-check.failing", { hasText: "#42" })).toBeVisible();
+  await page.evaluate(() => { document.hasFocus = () => true; window.dispatchEvent(new Event("focus")); });
+  const awayBlock = page.locator('[data-block="away"]');
+  const row = awayBlock.locator(".home-row", { hasText: "#42 Keep the session through the guard" });
+  await expect(row).toContainText("checks failed");
+  await page.waitForTimeout(300);
+  await page.locator(".home").screenshot({ path: test.info().outputPath("desktop-away-checks.png") });
+  await row.click();
+  await expect(page.locator('.chg-seg.sel[data-view="pulls"]')).toBeVisible();
+  ciChecks = "pending";
+});
