@@ -603,3 +603,37 @@ test("Home flags a computer whose Hook is older than the newest seen", async ({ 
   await expect(box.locator(".home-hook-update")).toHaveText("command copied");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("npx --yes @phren/cli@0.3.45 bridge update");
 });
+
+test("an available update shows in the titlebar with What's new", async ({ page }) => {
+  await page.addInitScript(() => {
+    const actions: string[] = [];
+    const shell = {
+      platform: "darwin", notify() {}, setBadge() {},
+      onUpdate: (fn: (state: unknown) => void) => { Object.assign(window, { __offer: fn }); },
+      updateAction: (kind: string) => { actions.push(kind); },
+    };
+    Object.assign(window, { __actions: actions, phrenDesktop: shell });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.update-skipped"));
+  await page.evaluate(() => (window as unknown as { __offer: (s: unknown) => void }).__offer({
+    version: "0.1.7", current: "0.1.6", action: "download",
+    notes: ["- Summon Phren with ⌘K open from any app.", "- A menu bar icon shows who needs you.", "- Since you left on Home."],
+  }));
+  const chip = page.locator(".update-chip");
+  await expect(chip).toHaveText("Phren 0.1.7");
+  await chip.click();
+  const pop = page.locator(".update-pop");
+  await expect(pop.locator(".update-title")).toHaveText("What's new in 0.1.7");
+  await expect(pop.locator(".update-notes li")).toHaveCount(3);
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: test.info().outputPath("desktop-update-chip.png"), clip: { x: 640, y: 0, width: 800, height: 300 } });
+  await pop.locator(".update-go").click();
+  expect(await page.evaluate(() => (window as unknown as { __actions: string[] }).__actions)).toEqual(["download"]);
+
+  // Later hides it until the next version.
+  await chip.click();
+  await page.locator(".update-later").click();
+  await expect(chip).toBeHidden();
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.update-skipped"));
+});
