@@ -338,7 +338,16 @@ export function mountProjects(root) {
     return "";
   }
 
-  async function loadComputer(computer, { force = false } = {}) {
+  // The read in flight per computer, so a second caller (⌘K) waits for it instead of returning early.
+  const inflight = new Map();
+  function loadComputer(computer, options = {}) {
+    if (inflight.has(computer)) return inflight.get(computer);
+    const read = readComputer(computer, options).finally(() => inflight.delete(computer));
+    inflight.set(computer, read);
+    return read;
+  }
+
+  async function readComputer(computer, { force = false } = {}) {
     if (state.loading.has(computer)) return;
     if (state.data.has(computer) && !force) return;
     state.loading.add(computer);
@@ -984,6 +993,22 @@ export function mountProjects(root) {
   return {
     show() { ensureLoaded(); render(); },
     hide() {},
+    /** Every project loaded so far, across computers (⌘K lists them). */
+    projects() {
+      return [...state.data.values()].flatMap((entry) => [...entry.projects.values()].map((p) => ({ computer: p.computer, name: p.name })));
+    },
+    /** Load the online computers not loaded yet; resolves once those reads finish. */
+    load() {
+      return Promise.all(onlineComputers().filter((c) => !state.data.has(c.computer)).map((c) => loadComputer(c.computer)));
+    },
+    /** Open one project's page. */
+    open({ computer, name }) {
+      state.view = "detail";
+      state.detail = { computer, name };
+      loadDetailFiles();
+      loadForge();
+      render();
+    },
     destroy() { unsubscribe(); closeSheet(); },
   };
 }
