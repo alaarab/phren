@@ -5,9 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.45] - 2026-10-13
+
 ### Added
 
 - Overview rows (`/v1/workspaces`, `WS /v1/overview`) carry `lastReply`, a one-line excerpt of what a finished turn said last, so a waiting session can say what it waits for.
+
+### Fixed
+
+- `phren doctor --fix` replaces dangling symlinks into the retired `~/.cortex` store instead of keeping them as foreign links, so older machines stop failing the AGENTS.md symlink check.
 
 ## [0.3.44] - 2026-10-13
 
