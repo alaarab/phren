@@ -318,6 +318,21 @@ test("on GitLab, When checks pass arms the merge request while its pipeline runs
   expect(errors).toEqual([]);
 });
 
+test("the composer recalls what Phren knows about the prompt, and a chip adds it", async ({ page }) => {
+  const errors = await openSession(page);
+  const input = page.locator(".pc-input");
+  await input.fill("why does unit (ubuntu) keep failing");
+  const chip = page.locator(".pc-recall-chip");
+  await expect(chip).toHaveCount(1);
+  await expect(chip).toContainText("fails when TZ is unset");
+  await shot(page, "composer-recall.png");
+  await chip.click();
+  await expect(input).toHaveValue(/Phren remembers: unit \(ubuntu\) fails when TZ is unset/);
+  await expect(page.locator(".pc-recall")).toBeHidden();
+  expect(searches[0]).toBe("why does unit (ubuntu) keep failing");
+  expect(errors).toEqual([]);
+});
+
 test("on GitHub the pull request chip and links name the host's own terms", async ({ page }) => {
   await openSession(page);
   await expect(page.locator('.chg-seg[data-view="pulls"]')).toHaveText("PRs");
