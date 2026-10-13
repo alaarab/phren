@@ -129,6 +129,21 @@ function groups() {
   return [...out.values()];
 }
 
+const PREFETCH_HOVER_MS = 120;
+let hoverTimer = null;
+
+/**
+ * Read a section ahead of opening it. Only sections registered with
+ * `readAhead: true` are mounted for it (hidden; their mount starts the reads
+ * they always make) and their `prefetch()` called; mounting any other
+ * section hidden could start its timers or keys. Nothing for the open one.
+ */
+export function prefetchSection(id) {
+  const def = sections.get(id);
+  if (!def?.readAhead || id === current) return;
+  sectionHandle(id)?.prefetch?.();
+}
+
 /** Open the titlebar's pill at `index` (0-based), as a click would; false when there is none. */
 export function showPillAt(index) {
   const group = groups()[index];
@@ -169,6 +184,12 @@ function renderPills() {
       b.append(badge);
     }
     b.addEventListener("click", () => showSection(lastInGroup.get(group.key) ?? group.ids[0]));
+    // Resting on a pill starts the section's first read, so the click lands on data already coming.
+    b.addEventListener("pointerenter", () => {
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => prefetchSection(lastInGroup.get(group.key) ?? group.ids[0]), PREFETCH_HOVER_MS);
+    });
+    b.addEventListener("pointerleave", () => clearTimeout(hoverTimer));
     (group.icon && iconEl ? iconEl : pillsEl).append(b);
   }
   markSelected();
