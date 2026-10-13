@@ -55,8 +55,14 @@ export async function runDispatch(args: string[]): Promise<number> {
   } : undefined;
   const { "permission-mode": permissionMode, "keep-open": keepOpen, ...rest } = values;
   const ordinary = { ...Object.fromEntries(Object.entries(rest).filter(([key]) => !key.startsWith("parent-"))), ...(permissionMode !== undefined ? { permissionMode } : {}), ...(keepOpen ? { closeOnFinish: false } : {}) };
-  const input = dispatchSchema.parse({ computer: positionals[0], project: positionals[1], ...ordinary,
+  const parsed = dispatchSchema.safeParse({ computer: positionals[0], project: positionals[1], ...ordinary,
     ...(parent ? { parent, parentTarget } : {}) });
+  if (!parsed.success) {
+    // Name the flag, not a schema path: a missing --label or --prompt is the usual slip.
+    const flag = (path: PropertyKey[]) => path.length ? (["computer", "project"].includes(String(path[0])) ? `<${String(path[0])}>` : `--${String(path[0]).replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`) : "input";
+    throw new Error(`phren dispatch: ${parsed.error.issues.map(issue => `${flag(issue.path)} ${issue.code === "invalid_type" && /received undefined/.test(issue.message) ? "is required" : issue.message}`).join("; ")}. Run phren dispatch for usage.`);
+  }
+  const input = parsed.data;
   // Run inside an agent's pane, the dispatch remembers that pane for return notices.
   const origin = await terminalPaneFromEnv();
   const result = await hookRequest("/v1/dispatch", { ...input, ...(origin ? { origin } : {}) }, undefined, 180_000);
