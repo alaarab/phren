@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogQuestion } from "./claude-question-dialog.js";
+import { answerClaudeQuestionDialog, sameLabel, sameTitle, claudeQuestionDialog, type DialogQuestion } from "./claude-question-dialog.js";
 import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 
 // Panes captured from Claude Code 2.1 drawing AskUserQuestion in Herdr.
@@ -144,5 +144,15 @@ describe("answering Claude's question dialog", () => {
     await expect(answerClaudeQuestionDialog(after.io(), [set[0], { ...set[1], question: "Which tool?" }, set[2]], [{ options: [0] }, { options: [0] }]))
       .rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" }, message: expect.stringContaining("already sent") });
     expect(after.sent.length).toBeGreaterThan(0);
+  });
+
+  it("matches a question Claude cut at 2000 characters and a label it collapsed or wrapped", () => {
+    const long = "word ".repeat(600).trim();
+    expect(sameTitle(long.slice(0, 1999).trimEnd() + "…", long)).toBe(true);
+    expect(sameTitle("Short?…", "Short? Yes")).toBe(false);
+    expect(sameTitle("Which color?", "Which   color?")).toBe(true);
+    expect(sameLabel("Red", " Red ")).toBe(true);
+    expect(sameLabel("Use the new onboarding banner for", "Use the new onboarding banner for every  theme")).toBe(true);
+    expect(sameLabel("Red", "Redder")).toBe(false);
   });
 });
