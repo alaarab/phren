@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { AppServerRpcError, connectAppServer, spawnAppServer, type AppServerClient, type AppServerEvent, type Json } from "./codex-app-server.js";
+import { AppServerRpcError, AppServerUnsupportedError, connectAppServer, spawnAppServer, type AppServerClient, type AppServerEvent, type Json } from "./codex-app-server.js";
 
 /** Answers the client's requests the way `codex app-server` does, and lets a
  * test push server requests and notifications at it. */
@@ -251,6 +251,15 @@ describe.skipIf(process.platform === "win32")("spawnAppServer", () => {
     handles = handles.filter(other => other !== handle);
     expect(handle.child.exitCode !== null || handle.child.signalCode !== null).toBe(true);
     await rm(own, { recursive: true, force: true });
+  });
+
+  it("treats a codex that cannot listen on a unix socket as unsupported, and does not spawn it again", async () => {
+    const codex = path.join(root, "old-codex");
+    await writeFile(codex, `#!/bin/sh\necho x >> ${JSON.stringify(path.join(root, "old-runs"))}\necho "error: invalid value for '--listen <URL>': unsupported --listen URL \`unix:///x\`; expected \`stdio://\` or \`ws://IP:PORT\`" >&2\nexit 2\n`, { mode: 0o755 });
+    const socket = path.join(root, "old", "app.sock");
+    await expect(spawnAppServer({ codexBin: codex, socketPath: socket, cwd: root })).rejects.toBeInstanceOf(AppServerUnsupportedError);
+    await expect(spawnAppServer({ codexBin: codex, socketPath: socket, cwd: root })).rejects.toBeInstanceOf(AppServerUnsupportedError);
+    expect((await readFile(path.join(root, "old-runs"), "utf8")).trim().split("\n")).toHaveLength(1);
   });
 
   it("starts the server through systemd-run in its own scope, which execs it in place", async () => {
