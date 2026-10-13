@@ -13,7 +13,7 @@ describe.skipIf(!posix)("full-output session cap", () => {
       const result = await createShellTool().execute({ command: "seq 1 40000" });
       expect(result.output).toMatch(/file capped at \d+ bytes/);
       const file = /is in (\S+?\.log)/.exec(result.output)![1];
-      expect(fs.statSync(file).size).toBeLessThan(100_000);
+      expect(fs.statSync(file).size).toBe(50_000);
       const next = await createShellTool().execute({ command: "seq 1 40000" });
       expect(next.output).toMatch(/Full output was not saved/);
       expect(next.output).not.toMatch(/is in \S+\.log/);

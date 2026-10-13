@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - `phren doctor --fix` replaces dangling symlinks into the retired `~/.cortex` store instead of keeping them as foreign links, so older machines stop failing the AGENTS.md symlink check.
+- `phren agent`: a command's full-output file stops exactly at its size cap instead of overshooting by up to one pipe chunk.
 
 ## [0.3.44] - 2026-10-13
 
