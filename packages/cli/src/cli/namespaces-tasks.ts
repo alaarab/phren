@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getPhrenPath } from "../shared.js";
+import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { enableTaskFormat, taskFormatStatus, taskFormatMigrationHint, taskFormatCurrentWriters } from "../data/task-format.js";
 import { resolveAllStores, type StoreEntry } from "../store-registry.js";
 import { addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "../data/tasks.js";
@@ -8,7 +9,7 @@ import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, reso
 
 function printTaskUsage() {
   console.log("Usage:");
-  console.log('  phren task list [profile] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]');
+  console.log('  phren task list [profile|project] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]');
   console.log('  phren task format [--json | enable --all-writers-compatible]');
   console.log('  phren task add <project> "<text>"');
   console.log('  phren task complete <project> "<text>"');
@@ -45,7 +46,7 @@ export async function handleTaskNamespace(args: string[]) {
 
   if (subcommand === "list") {
     // Delegate to the cross-project task view (same as `phren tasks`)
-    return handleTaskListArgs(args.slice(1), "default");
+    return handleTaskListArgs(args.slice(1), resolveRuntimeProfile(getPhrenPath()));
   }
 
   if (subcommand === "format") {
@@ -424,6 +425,10 @@ export async function handleTaskListArgs(args: string[], defaultProfile: string)
   const { z } = await import("zod");
   const filter = z.object({ responsibility: z.enum(["human", "agent"]).optional(), readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional() }).strict().safeParse(Object.fromEntries(args.filter(a => a.startsWith("--")).map(a => a.slice(2).split("="))));
   if (!filter.success) throw new Error("Invalid task responsibility/readiness filter; use --responsibility=human|agent or --readiness=ready|waiting-on-human|waiting-on-task.");
-  const profiles = args.filter(a => !a.startsWith("--")); if (profiles.length > 1) throw new Error("Pass at most one task profile.");
-  return handleTaskView(profiles[0] || defaultProfile, filter.data);
+  const profiles = args.filter(a => !a.startsWith("--")); if (profiles.length > 1) throw new Error("Pass at most one task profile or project.");
+  // `phren task list phren` names a project as often as a profile: a name that is a
+  // project of the active profile lists just that project instead of an empty profile.
+  const { readTasksAcrossProjects } = await import("../data/access.js");
+  const project = profiles[0] && readTasksAcrossProjects(getPhrenPath(), defaultProfile).some(doc => doc.project.toLowerCase() === profiles[0].toLowerCase()) ? profiles[0] : undefined;
+  return handleTaskView(project ? defaultProfile : profiles[0] || defaultProfile, filter.data, project);
 }

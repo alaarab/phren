@@ -15,8 +15,8 @@ import { buildIndex, queryRows } from "../shared/index.js";
 import { resolveSubprocessArgs } from "./hooks.js";
 import { listAllSessions, getSessionArtifacts } from "../tools/session.js";
 
-export function handleTaskView(profile: string, filter: TaskFilter = {}) {
-  const docs = readTasksAcrossProjects(getPhrenPath(), profile);
+export function handleTaskView(profile: string, filter: TaskFilter = {}, project?: string) {
+  const docs = readTasksAcrossProjects(getPhrenPath(), profile).filter(doc => !project || doc.project.toLowerCase() === project.toLowerCase());
   if (!docs.length) {
     console.log("No tasks found.");
     return;
