@@ -268,6 +268,9 @@ const CSS = `
 .chg-knows-badge{flex:none;border:none;background:rgba(138,170,220,.14);color:var(--accent);font:600 11px system-ui,sans-serif;border-radius:999px;padding:2px 7px;cursor:pointer}
 .chg-knows-badge:hover{background:var(--raised)}
 @media (prefers-reduced-motion:reduce){.chg-knows-chev{transition:none}}
+.chg-seen{margin:8px 0 0;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden}
+.chg-seen-h{display:flex;align-items:center;gap:8px;padding:7px 10px;color:var(--text);font:600 12.5px system-ui,sans-serif}
+.chg-seen-item{padding:8px 10px;border-top:1px solid var(--border)}
 @media (prefers-reduced-motion:reduce){.chg-req.pending::before,.chg-pipe-seg.pending,.chg-check-state.pending::before,.chg-btn.merge.ready{animation:none}}
 `;
 
@@ -285,6 +288,8 @@ export function openChanges(el, ctx) {
     connect: null, merge: null,
     // Phren findings about the changed files: `key` is the project and paths asked for.
     knows: { key: "", findings: [], open: false, file: null, full: null },
+    // "Seen this before" for the current request's failing checks: `key` is the head and the failures asked about.
+    seen: { key: "", results: [] },
   };
   let timer = null;
   let commitBtn = null;
@@ -1383,8 +1388,60 @@ export function openChanges(el, ctx) {
       }
       box.appendChild(list);
     }
+    const failing = runs.filter((r) => r.state === "failing");
+    if (failing.length) {
+      void loadSeen(p, failing);
+      if (state.seen.results.length) box.appendChild(renderSeen(failing));
+    }
     return box;
   }
+
+  // gitboy's "Seen this before" on a failed job: the project's findings and
+  // truths that match the failing checks' names and messages. Asked once per
+  // head and set of failures; best effort.
+  async function loadSeen(p, failing) {
+    const project = ctx.child ? projectOf(ctx.child) : "";
+    const q = failing.map((r) => [r.name, r.detail].filter(Boolean).join(": ")).join("\n").slice(0, 1000);
+    const key = `${project}\u0000${p.number}\u0000${p.headSha || ""}\u0000${q}`;
+    if (!project || !q.trim() || key === state.seen.key) return;
+    state.seen = { key, results: [] };
+    let results = [];
+    try {
+      const body = await hookGet(computer, `/v1/projects/${encodeURIComponent(project)}/memory/search`, { q, limit: "3" });
+      results = Array.isArray(body?.results) ? body.results : [];
+    } catch { /* an older Hook or a project outside the store: nothing to show */ }
+    if (state.seen.key !== key) return;
+    state.seen.results = results;
+    if (results.length && !typing()) render();
+  }
+
+  function renderSeen(failing) {
+    const box = div("chg-seen");
+    const head = div("chg-seen-h");
+    head.append(span("chg-knows-mark", "◆"), span("", "Seen this before"), span("chg-knows-sub", "Phren remembers"));
+    box.appendChild(head);
+    for (const hit of state.seen.results) {
+      const row = div("chg-seen-item");
+      row.appendChild(div("chg-knows-text", hit.text || ""));
+      const meta = div("chg-knows-meta");
+      meta.appendChild(span("chg-chip", hit.kind === "truth" ? "truth" : (hit.finding && hit.finding.type) || "finding"));
+      const cite = hit.finding && hit.finding.citation;
+      if (cite && (cite.name || cite.file)) meta.appendChild(span("chg-pr-num", cite.name || basename(cite.file) + (cite.line ? `:${cite.line}` : "")));
+      const ask = button("Ask the agent", "chg-knows-cite", () => ctx.ask(seenPrompt(failing, hit)));
+      ask.title = "Put this failure and what Phren remembers in the chat";
+      meta.appendChild(ask);
+      row.appendChild(meta);
+      box.appendChild(row);
+    }
+    return box;
+  }
+
+  const seenPrompt = (failing, hit) => [
+    `CI is failing on this branch: ${failing.map((r) => r.detail ? `${r.name} (${r.detail})` : r.name).join(", ")}.`,
+    `Phren remembers: ${hit.text}`,
+    "Check whether this is the same problem and fix it.",
+    "",
+  ].join("\n");
 
   function renderMergeBanner(p) {
     const tone = p.mergeState === "CLEAN" ? "ok" : p.mergeState === "DIRTY" ? "bad" : p.mergeState === "UNKNOWN" ? "" : "wait";
