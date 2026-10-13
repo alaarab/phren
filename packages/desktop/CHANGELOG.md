@@ -14,7 +14,7 @@ GitHub release notes, and the app shows them when that version is available.
 - Allow or Deny an approval from the menu bar icon's menu, or start a new agent from it.
 - Since you left also lists the pull requests whose checks passed or failed while you were away.
 - Quiet hours in Settings › Notifications, and a separate switch for stalled-agent notifications.
-- Continue a session in another agent (Codex, Claude on another account, OpenCode, Copilot) from its sidebar menu: it writes a hand-off and the new agent picks up in the same folder.
+- Continue a session in another agent (Codex, Claude on another account, OpenCode, Copilot) from its sidebar menu or ⌘K: it writes a hand-off and the new agent picks up in the same folder.
 - Reply to an agent that is waiting on you right from Home.
 - Quick chat: ask phren about a project from its memory, without tools, from the project page or ⌘K; ⌘K's `?` search offers to ask the question in one.
 - One name for starting an agent everywhere: New agent (⌘K, project pages, the menu bar).

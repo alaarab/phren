@@ -4,6 +4,8 @@
 // the hand-off as its first prompt. Uncommitted work stays in the checkout.
 // The sheet follows the move (`GET /v1/sessions/move?id=`) until it lands.
 import { hookGet, hookPost } from "../api.js";
+import { registerCommand } from "./palette.js";
+import { sectionHandle } from "./sections.js";
 
 const HARNESSES = [["claude", "Claude"], ["codex", "Codex"], ["opencode", "OpenCode"], ["copilot", "Copilot"]];
 const STATE_WORDS = { "handing-off": "Writing a hand-off…", exiting: "Ending the old agent…", launching: "Starting the new agent…", moved: "Moved", failed: "The move failed" };
@@ -151,3 +153,16 @@ export async function openMoveSheet({ computer, child }) {
   try { state.inventory = (await hookGet(computer, "/v1/harnesses")).harnesses ?? null; } catch { /* offer every harness */ }
   if (openSheet?.backdrop === backdrop) render();
 }
+
+// ⌘K: the same sheet for the session open in Agents.
+const openSession = () => {
+  const session = sectionHandle("agents")?.currentSession?.();
+  return session?.child?.target ? session : null;
+};
+registerCommand({
+  id: "continue-in",
+  title: "Continue this session in\u2026",
+  meta: () => openSession()?.child.title || "Another harness or account",
+  when: () => !!openSession(),
+  run: () => { const session = openSession(); if (session) void openMoveSheet({ computer: session.computer, child: session.child }); },
+});
