@@ -2,7 +2,7 @@ import { listMoves, readMove, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
-import { closeFinishedWorker } from "./worker-close.js";
+import { closeFinishedWorker, closeOwnPane } from "./worker-close.js";
 import { reportWorker, readIntegrator, setIntegrator } from "./worker-reports.js";
 import { sessionStalls } from "./stalls.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
@@ -690,6 +690,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await reportWorker(data);
         } else if (url.pathname === "/v1/dispatch/close") {
           result = await closeFinishedWorker(data, ctx.handOffs);
+        } else if (url.pathname === "/v1/dispatch/close-self") {
+          result = await closeOwnPane(data);
         } else if (url.pathname === "/v1/hand-off") {
           result = await ctx.handOffs!.enqueue(data);
         } else if (url.pathname === "/v1/hand-off/status") {

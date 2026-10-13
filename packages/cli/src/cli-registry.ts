@@ -240,7 +240,8 @@ export const REGISTRY: Command[] = [
       { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" },
       { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" },
-      { name: "report", usage: "phren dispatch report --prs <JSON>", summary: "Record this worker turn's PR evidence for the integrator" }],
+      { name: "report", usage: "phren dispatch report --prs <JSON>", summary: "Record this worker turn's PR evidence for the integrator" },
+      { name: "close-self", usage: "phren dispatch close-self", summary: "Close the pane this agent runs in once its work is committed and reported (the sanctioned form of herdr pane close)" }],
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },
   {
