@@ -18,7 +18,8 @@ import "./shell/launch.js"; // registers "Launch an agent…" in the palette
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
 import { initTheme } from "./shell/theme.js";
-import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled } from "./sections/settings.js";
+import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, stallNotifyEnabled } from "./sections/settings.js";
+import { quietNow } from "./shell/quiet.js";
 import { startCiWatch } from "./shell/ci-watch.js";
 import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
@@ -86,11 +87,15 @@ store.subscribe(() => {
 
 // Native notifications when a session branch's pull request checks settle,
 // and the last look behind Home's Checks strip.
-startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() });
+startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() && !quietNow() });
 startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
 startSummon(shell);
 // Notifications for new needs-you rows; they and the tray menu open sessions by key.
-startNeedsNotify(shell, { enabled: notifyEnabled, openSession });
+startNeedsNotify(shell, {
+  enabled: () => notifyEnabled() && !quietNow(),
+  stallsEnabled: () => notifyEnabled() && stallNotifyEnabled() && !quietNow(),
+  openSession,
+});
 startTray(shell);
 
 startAway();
