@@ -200,7 +200,8 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(workNextTask(base, "core").ok).toBe(false);
     expect(updateTask(base, "core", "Q1", { text: "Must retain the duplicated IDs" }).ok).toBe(false);
     expect(taskIdentity(base, doc("core"), item("core", a.stableId!))).toBeUndefined();
-    expect(() => mergeTasksByBid(before, before, fs.readFileSync(file, "utf8"))).toThrow(/unique/);
+    // A sync merge collapses the repeat instead of refusing, so a duplicate never wedges the store.
+    expect(mergeTasksByBid(before, before, fs.readFileSync(file, "utf8")).match(new RegExp(`bid:${a.stableId}`, "g"))).toHaveLength(1);
   });
   it("defaults legacy tasks to agent without writing or relabeling them", () => {
     const file = path.join(base, "core/tasks.md"), source = "# tasks\n\n## Queue\n\n- [ ] Legacy\n";
