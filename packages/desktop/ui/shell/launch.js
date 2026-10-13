@@ -89,7 +89,7 @@ registerCommand({
 
 registerCommand({
   id: "launch-agent",
-  title: "Launch an agent\u2026",
+  title: "New agent\u2026",
   group: "Commands",
   meta: "Any computer",
   run: () => openLaunchSheet(),
@@ -148,7 +148,7 @@ async function open({ project = "", computer = "", role = "agent", prompt = "", 
     autoComputer: !computer,
     prompt: role === "conductor" ? "" : prompt,
     withPrompt: role !== "conductor" && !!prompt,
-    heading: heading || (chat ? "Quick chat" : "Launch an agent"),
+    heading: heading || (chat ? "Quick chat" : "New agent"),
     chat: Boolean(chat),
     label: (label ?? "").trim(),
   };
