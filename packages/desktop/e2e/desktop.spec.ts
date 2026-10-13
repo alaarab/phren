@@ -771,3 +771,39 @@ test("quiet hours and the stuck-agent toggle are set in Settings › Notificatio
   await list.screenshot({ path: test.info().outputPath("desktop-quiet-hours.png") });
   await page.evaluate(() => localStorage.removeItem("phren.desktop.quiet"));
 });
+
+test("a session continues in another agent from the sidebar menu", async ({ page }) => {
+  await page.route("**/v1/harnesses", (route) => route.fulfill({ json: { harnesses: [
+    { source: "claude", installed: true, usable: true, accounts: [{ id: "default", usable: true }, { id: "work", label: "Work", usable: true }] },
+    { source: "codex", installed: true, usable: true },
+    { source: "opencode", installed: false, usable: false, reason: "Not installed" },
+    { source: "copilot", installed: true, usable: true },
+  ] } }));
+  const moves: unknown[] = [];
+  let polls = 0;
+  await page.route("**/v1/sessions/move**", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON();
+      moves.push(body);
+      return route.fulfill({ json: { ok: true, move: { id: body.id, state: "handing-off" } } });
+    }
+    polls += 1;
+    return route.fulfill({ json: { move: { id: "x", state: polls < 2 ? "launching" : "moved", handoff: { source: "agent" } } } });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  const row = page.locator(".sb-row", { hasText: "Fix login" });
+  await row.hover();
+  await row.locator(".sb-more").click();
+  await row.locator(".sb-menu button", { hasText: "Continue in…" }).click();
+  const sheet = page.locator(".move-sheet");
+  await expect(sheet.locator(".launch-seg")).toHaveText(["Codex", "OpenCode", "Copilot"]);
+  await expect(sheet.locator(".launch-seg.selected")).toHaveText("Codex");
+  await expect(sheet.locator(".launch-seg", { hasText: "OpenCode" })).toBeDisabled();
+  await page.waitForTimeout(200);
+  await sheet.screenshot({ path: test.info().outputPath("desktop-continue-in.png") });
+  await sheet.getByRole("button", { name: "Continue" }).click();
+  await expect.poll(() => moves.length).toBe(1);
+  expect(moves[0]).toMatchObject({ target: { session: "sess-fix-login" }, to: { harness: "codex" } });
+  await expect(sheet.locator(".launch-status")).toHaveText("Moved", { timeout: 10_000 });
+});

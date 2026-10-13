@@ -2,6 +2,7 @@
 // See CONTRACT.md: export renderSidebar(el, merged, handlers). The row keeps
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
 import { stallLabel, stalledMinutes } from "./shell/stalls.js";
+import { openMoveSheet } from "./shell/move.js";
 import { showSection } from "./shell/sections.js";
 import { hookPost, targetQuery } from "./api.js";
 import { store, projectOf } from "./shell/store.js";
@@ -612,7 +613,15 @@ function rowMenu(sb, desc) {
     togglePin(sb, desc);
     requestRender(sb);
   });
-  menu.append(openTerminal, pin, rename, input);
+  // Hand the session to another harness or Claude account in the same pane (Hook sessionMove).
+  const move = el("button", null, "Continue in…");
+  move.type = "button";
+  move.addEventListener("click", (event) => {
+    event.stopPropagation();
+    hideMenus();
+    void openMoveSheet({ computer: desc.computer, child: desc.child });
+  });
+  menu.append(openTerminal, pin, rename, move, input);
   return menu;
 }
 
