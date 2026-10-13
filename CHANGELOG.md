@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.44] - 2026-10-13
+
+### Added
+
+- `phren dispatch close-self`: an agent closes the pane it runs in once its work is committed and reported, the sanctioned form of `herdr pane close`. Only the caller's own pane is closed.
+
+### Fixed
+
+- A schedule with `session: reuse` continues the newest live pane of its target instead of a stale one, and a firing dismisses Claude's "Teach auto mode" dialog rather than stalling behind it.
+- "Run now" on a schedule waits out a `409` while the store syncs instead of failing, and schedules that can never fire are flagged with the reason.
+
 ## [0.3.43] - 2026-10-13
 
 ### Added
