@@ -7,6 +7,7 @@ import { projectOf } from "./shell/store.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 import { branchProblem, capitalize, checksSummary, durationText, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
+import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
 // "Session" is what this agent changed, from the Hook's per-call capture.
@@ -290,6 +291,8 @@ export function openChanges(el, ctx) {
     knows: { key: "", findings: [], open: false, file: null, full: null },
     // "Seen this before" for the current request's failing checks: `key` is the head and the failures asked about.
     seen: { key: "", results: [] },
+    // Phren tasks naming the current request's branch: `key` is the project and branch asked about.
+    branchTasks: { key: "", tasks: [], done: new Set(), busy: null, error: "" },
   };
   let timer = null;
   let commitBtn = null;
@@ -1339,6 +1342,12 @@ export function openChanges(el, ctx) {
     if (p.conflicts) chips.appendChild(span("chg-pill bad", "Conflicts"));
     if (chips.childNodes.length) card.appendChild(chips);
 
+    void loadTasks(p);
+    const tasks = state.branchTasks;
+    if (tasks.tasks.length && tasks.key === tasksKey(p)) {
+      card.appendChild(renderBranchTasks({ computer, project: projectOf(ctx.child), branch: p.head, state: tasks, rerender: render }));
+    }
+
     const runs = p.checkRuns || [];
     if (runs.length || p.pipeline) card.appendChild(renderPipeline(p, runs));
     else if (p.checks == null) card.appendChild(div("chg-log-meta", `No checks reported for this ${t.long}.`));
@@ -1394,6 +1403,20 @@ export function openChanges(el, ctx) {
       if (state.seen.results.length) box.appendChild(renderSeen(failing));
     }
     return box;
+  }
+
+  const tasksKey = (p) => `${ctx.child ? projectOf(ctx.child) : ""}\u0000${p.head || ""}`;
+
+  // The project's open tasks that name this request's branch, asked once per
+  // branch; an older Hook shows nothing.
+  async function loadTasks(p) {
+    const key = tasksKey(p);
+    if (!ctx.child || !p.head || key === state.branchTasks.key) return;
+    state.branchTasks = { key, tasks: [], done: new Set(), busy: null, error: "" };
+    const tasks = await loadBranchTasks(computer, projectOf(ctx.child), p.head);
+    if (state.branchTasks.key !== key || !tasks || !tasks.length) return;
+    state.branchTasks.tasks = tasks;
+    if (!typing()) render();
   }
 
   // gitboy's "Seen this before" on a failed job: the project's findings and
