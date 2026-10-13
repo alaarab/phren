@@ -51,12 +51,15 @@ export function openTerminal(el, computerName, server, options = {}) {
     `&cols=${term.cols}&rows=${term.rows}`;
   const ws = new WebSocket(url);
 
+  // Set before the socket is closed so close() below can dispose the terminal
+  // without a late message or close event writing to it.
+  let closed = false;
   const encoder = new TextEncoder();
   term.onData((data) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(encoder.encode(data));
   });
-  ws.addEventListener("message", (ev) => term.write(ev.data));
-  ws.addEventListener("close", () => term.write("\r\n[disconnected]\r\n"));
+  ws.addEventListener("message", (ev) => { if (!closed) term.write(ev.data); });
+  ws.addEventListener("close", () => { if (!closed) term.write("\r\n[disconnected]\r\n"); });
 
   // Refit and tell the server the new size whenever the container resizes.
   function resize() {
@@ -72,6 +75,7 @@ export function openTerminal(el, computerName, server, options = {}) {
   window.addEventListener("resize", resize);
 
   function close() {
+    closed = true;
     observer.disconnect();
     window.removeEventListener("resize", resize);
     ws.close();
