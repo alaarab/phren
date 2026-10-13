@@ -303,6 +303,11 @@ test("projects section renders", async ({ page }) => {
   await tasks.getByRole("button", { name: "Done" }).click();
   await expect(tasks.locator(".bt-item.done")).toHaveCount(1);
   expect(completed).toEqual(["bid:1a2b3c4d"]);
+  // Launch agent opens the shared launch sheet on this project.
+  await page.getByRole("button", { name: "Launch agent" }).click();
+  await expect(page.locator(".launch-title")).toHaveText("Launch an agent in phren");
+  await expect(page.locator(".launch-input").first()).toHaveValue("phren");
+  await page.locator(".launch-close").click();
   // Fix it on the failing request opens the launch sheet with its failures as the first prompt.
   await forge.locator(".pj-fixit").click();
   await expect(page.locator(".launch-title")).toHaveText("Fix #42");
