@@ -61,6 +61,22 @@ describe("the conductor role on Herdr", () => {
     expect((await saved()).conductor).toBeNull();
   });
 
+  it("re-adopts a pane running the recorded session when the pane id or terminal changed", async () => {
+    const session = "aaaaaaaa-1111-4111-8111-111111111111";
+    await recordConductor("default", objects(herdr().panes)[0], "owner", session);
+    const recreated = herdr({ terminal: "term-9", session });
+    const pane = objects(recreated.panes)[0];
+    pane.pane_id = "w2:p7";
+    expect((await conductorPane("default", recreated))?.pane_id).toBe("w2:p7");
+    expect((await saved()).conductor).toMatchObject({ pane: "w2:p7", terminal: "term-9", session, by: "owner" });
+    // A different session in a new pane is not the conductor.
+    await recordConductor("default", objects(herdr().panes)[0], "owner", session);
+    const other = herdr({ terminal: "term-9", session: "bbbbbbbb-2222-4222-8222-222222222222" });
+    objects(other.panes)[0].pane_id = "w2:p7";
+    expect(await conductorPane("default", other)).toBeUndefined();
+    expect((await saved()).conductor).toBeNull();
+  });
+
   it("follows the pane to another tab", async () => {
     await recordConductor("default", objects(herdr().panes)[0], "launch");
     const moved = herdr();
