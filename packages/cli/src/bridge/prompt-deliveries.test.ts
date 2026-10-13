@@ -124,6 +124,32 @@ describe("a message the agent never takes fails loudly", () => {
   });
 });
 
+describe("a message the agent took into its running turn", () => {
+  it("is delivered while the agent still works, not left queued until its turn ends", async () => {
+    const store = deliveries();
+    await send(store, "mid-0001", "How long until it is all in?");
+    await store.observe("default", [pane("working")]);
+    expect(store.status("mid-0001", target).state).toBe("queued");
+    landed = true; clock += 3_000;
+    await store.observe("default", [pane("working")]);
+    expect(store.status("mid-0001", target).state).toBe("delivered");
+  });
+  it("is looked for in the transcript at most every few seconds", async () => {
+    const calls: number[] = [];
+    const store = new PromptDeliveries(undefined, () => clock, async () => { calls.push(clock); return false; });
+    await send(store, "mid-0002", "Anything yet?");
+    await store.observe("default", [pane("working")]);
+    clock += 1_000; await store.observe("default", [pane("working")]);
+    clock += 2_000; await store.observe("default", [pane("working")]);
+    expect(calls.length).toBe(2);
+  });
+  it("reads a dequeued-from-the-queue row as the user's words", () => {
+    expect(userTexts({ type: "queue-operation", operation: "remove", content: "from my phone" })).toEqual(["from my phone"]);
+    expect(userTexts({ type: "queue-operation", operation: "enqueue", content: "from my phone" })).toEqual([]);
+    expect(userTexts({ type: "queue-operation", operation: "dequeue" })).toEqual([]);
+  });
+});
+
 describe("a message held by a Codex thread the pane has left", () => {
   it("fails loudly, and still settles if the old thread takes it after all", async () => {
     const store = deliveries();
