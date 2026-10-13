@@ -11,12 +11,17 @@ import path from "node:path";
  * cannot be read counts as the pane's own. */
 export async function codexForeignThread(transcriptPath: unknown): Promise<boolean> {
   if (typeof transcriptPath !== "string" || !path.isAbsolute(transcriptPath) || !/^rollout-.*\.jsonl$/.test(path.basename(transcriptPath))) return false;
-  const file = await open(transcriptPath, "r").catch(() => undefined);
-  if (!file) return false;
+  return foreignMeta(await readHead(transcriptPath, 4096));
+}
+
+/** The first `bytes` of a transcript; "" when it cannot be read. */
+async function readHead(file: string, bytes: number): Promise<string> {
+  const handle = await open(file, "r").catch(() => undefined);
+  if (!handle) return "";
   try {
-    const buffer = Buffer.alloc(4096), { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    return foreignMeta(buffer.subarray(0, bytesRead).toString("utf8"));
-  } finally { await file.close(); }
+    const buffer = Buffer.alloc(bytes), { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally { await handle.close(); }
 }
 
 /** The session_meta fields come before its long instructions, so the head of
@@ -34,12 +39,7 @@ export function foreignMeta(head: string): boolean {
  * be read, or has a long first prompt, counts as the pane's own. */
 export async function claudeHeadlessThread(transcriptPath: unknown): Promise<boolean> {
   if (typeof transcriptPath !== "string" || !path.isAbsolute(transcriptPath) || !transcriptPath.endsWith(".jsonl")) return false;
-  const file = await open(transcriptPath, "r").catch(() => undefined);
-  if (!file) return false;
-  try {
-    const buffer = Buffer.alloc(32_768), { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    return headlessEntrypoint(buffer.subarray(0, bytesRead).toString("utf8"));
-  } finally { await file.close(); }
+  return headlessEntrypoint(await readHead(transcriptPath, 32_768));
 }
 
 export function headlessEntrypoint(head: string): boolean {
