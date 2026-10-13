@@ -751,3 +751,23 @@ test("Since you left lists pull requests whose checks settled while away", async
   await expect(page.locator('.chg-seg.sel[data-view="pulls"]')).toBeVisible();
   ciChecks = "pending";
 });
+
+test("quiet hours and the stuck-agent toggle are set in Settings › Notifications", async ({ page }) => {
+  await page.addInitScript(() => { Object.assign(window, { phrenDesktop: { platform: "darwin", notify() {}, setBadge() {}, setTray() {}, onOpenSession() {} } }); });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => { localStorage.removeItem("phren.desktop.quiet"); localStorage.removeItem("phren.desktop.notify-stalled"); });
+  await page.locator('.section-pill[data-section="settings"]').click();
+  await page.locator(".settings-tab", { hasText: "Notifications" }).click();
+  const list = page.locator(".settings-page-notifications .settings-list");
+  await expect(list.locator(".settings-toggle", { hasText: "looks stuck" }).locator("input")).toBeChecked();
+  const quiet = list.locator(".settings-quiet");
+  await expect(quiet.locator("input[type=checkbox]")).not.toBeChecked();
+  await quiet.locator(".settings-switch").click();
+  await quiet.getByLabel("Quiet from").fill("21:30");
+  await quiet.getByLabel("Quiet until").fill("06:45");
+  await expect(quiet.locator("input[type=checkbox]")).toBeChecked();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("phren.desktop.quiet") ?? "{}"))).toEqual({ on: true, from: "21:30", to: "06:45" });
+  await page.waitForTimeout(200);
+  await list.screenshot({ path: test.info().outputPath("desktop-quiet-hours.png") });
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.quiet"));
+});
