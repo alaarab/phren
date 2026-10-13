@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memoryItems, paletteMode } from "../ui/shell/palette.js";
+import { memoryItems, paletteMode, pullItems } from "../ui/shell/palette.js";
 
 describe("paletteMode", () => {
   it("reads > as commands, ? as the project's memory, anything else as everything", () => {
@@ -20,5 +20,26 @@ describe("memoryItems", () => {
       ["Never push to main.", "truth · 40%", "★"],
     ]);
     expect(new Set(rows.map((r) => r.id)).size).toBe(2);
+  });
+});
+
+describe("pullItems", () => {
+  const pull = (number: number, checks: string | null) => ({ key: `mini/${number}`, computer: "mini", project: "phren", child: { id: String(number) }, number, title: `Change ${number}`, checks, ref: "#" });
+
+  it("lists the watched requests failing first, each opening its session's PRs", () => {
+    const opened: unknown[] = [];
+    const items = pullItems([pull(7, "passing"), pull(9, "failing"), pull(8, "pending")], (computer: string, child: unknown) => opened.push([computer, child]));
+    expect(items.map((i) => [i.title, i.icon, i.meta])).toEqual([
+      ["#9 Change 9", "✕", "Checks failing · phren · mini"],
+      ["#8 Change 8", "●", "Checks running · phren · mini"],
+      ["#7 Change 7", "✓", "Checks passing · phren · mini"],
+    ]);
+    expect(items[0].boost).toBeGreaterThan(items[1].boost);
+    items[0].run();
+    expect(opened).toEqual([["mini", { id: "9" }]]);
+  });
+
+  it("is empty before the watch has looked", () => {
+    expect(pullItems(null, () => {})).toEqual([]);
   });
 });
