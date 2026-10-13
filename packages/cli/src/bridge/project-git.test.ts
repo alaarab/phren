@@ -26,7 +26,8 @@ function checkout(name: string): string {
   const git = (...args: string[]) => execFileSync("git", ["-C", dir, ...args], { stdio: "ignore" });
   git("init", "-q", "-b", "main");
   git("remote", "add", "origin", "https://git.example.com/me/forge.git");
-  return fs.realpathSync(dir);
+  // native: on Windows the plain realpath keeps 8.3 short names (RUNNER~1); git and the Hook give the long one.
+  return fs.realpathSync.native(dir);
 }
 
 function register(project: string, sourcePath: string) {
