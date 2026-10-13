@@ -26,4 +26,10 @@ describe("trayState", () => {
   it("sends nothing but off when the icon is turned off", () => {
     expect(trayState([row(1)], false)).toEqual({ enabled: false });
   });
+
+  it("offers Allow / Deny for an approval Home is watching, with what it asks", () => {
+    const rows = [row(1, { approvalPending: true }), row(2, { approvalPending: true }), row(3)];
+    const state = trayState(rows, true, (key: string) => (key === "mini/1" ? { actionId: "a1", summary: "Run pnpm test" } : undefined));
+    expect(state.rows!.map((r: { approval?: string }) => r.approval)).toEqual(["Run pnpm test", undefined, undefined]);
+  });
 });
