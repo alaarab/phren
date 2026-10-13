@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readFindings, type FindingItem } from "../data/access.js";
-import { readTasks, type TaskItem } from "../data/tasks.js";
+import { completeTask, readTasks, type TaskItem } from "../data/tasks.js";
 import { taskStores } from "../data/task-store-directory.js";
 import { FINDING_TAGS } from "../phren-core.js";
 import { getProjectRemote, readProjectConfig } from "../project-config.js";
@@ -12,7 +12,7 @@ import { BridgeError } from "./protocol.js";
 import { moduleEnabled } from "../modules/runtime.js";
 import { loadCodePackage } from "../modules/code-package.js";
 import { bestChunkMatch, tokenizeForOverlap } from "../shared/retrieval.js";
-import { findingWriteSchema, isBranchName, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, MAX_SEARCH_LIMIT } from "./gitboy-contract.js";
+import { findingWriteSchema, taskCompleteSchema, isBranchName, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, MAX_SEARCH_LIMIT } from "./gitboy-contract.js";
 
 // `GET /v1/projects/:project/memory`: one project's findings, truths and
 // tasks as a fixed read-only contract, for a client that renders them beside
@@ -20,7 +20,7 @@ import { findingWriteSchema, isBranchName, isRepoPath, isSearchText, MAX_FILE_PA
 // writes. The scoped `gitboy-read` SSH key reaches only this route
 // (scoped-gateway.ts). Contract: docs/phren-hook.md#gitboy-read-only-memory.
 
-export const PROJECT_MEMORY_ROUTE = /^\/v1\/projects\/([^/]+)\/(memory|memory\/files|memory\/search|tasks|findings)$/;
+export const PROJECT_MEMORY_ROUTE = /^\/v1\/projects\/([^/]+)\/(memory|memory\/files|memory\/search|tasks|tasks\/complete|findings)$/;
 export const MEMORY_LIMITS = { findings: 500, active: 200, queue: 200, done: 50 } as const;
 
 export interface MemoryFinding {
@@ -249,4 +249,26 @@ export async function saveFinding(base: string, rawProject: string, input: unkno
   const saved = status === "saved" ? sortedFindings(locate(base, rawProject).root, project)
     .find(item => item.text === (result.data?.finding ?? "").replace(/^-\s+/, "").trim()) : undefined;
   return { project, status, finding: saved ? finding(saved) : null };
+}
+
+// ── POST /tasks/complete ─────────────────────────────────────────────────────
+
+/** Mark one open task done, by the stable id `/tasks?branch=` gave gitboy when
+ *  its pull request merged. Exact ids only: no text matching, so a wrong guess
+ *  can never complete another task. A task already done answers `already-done`. */
+export function completeProjectTask(base: string, rawProject: string, input: unknown) {
+  const { project, root } = locate(base, rawProject);
+  if (Buffer.byteLength(JSON.stringify(input ?? null)) > 256) throw new BridgeError(413, "The body must be at most 256 bytes.");
+  const { id } = taskCompleteSchema.parse(input);
+  const doc = readTasks(root, project);
+  if (!doc.ok) throw new BridgeError(404, "No tasks for this project.");
+  const stable = id.slice(4);
+  const open = [...doc.data.items.Active, ...doc.data.items.Queue].find(item => item.stableId === stable);
+  if (!open) {
+    if (doc.data.items.Done.some(item => item.stableId === stable)) return { project, id, status: "already-done" as const };
+    throw new BridgeError(404, "No task with this id.");
+  }
+  const done = completeTask(root, project, id);
+  if (!done.ok) throw new BridgeError(400, safe(done.error));
+  return { project, id, status: "completed" as const };
 }

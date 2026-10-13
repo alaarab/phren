@@ -221,7 +221,7 @@ async function runScopedPair(args: string[], version: string): Promise<number> {
   else text = await readFile(key, "utf8");
   const line = await acceptScopedKey(scope, text);
   const fingerprint = await hostFingerprint();
-  console.log(`Authorized ${SCOPE_KEY_COMMENT[scope]} for ${scope}: ${scope === "gitboy-write" ? "POST /v1/projects/<project>/findings only" : "GET /v1/projects/<project>/memory, memory/files, memory/search and tasks only"}.`);
+  console.log(`Authorized ${SCOPE_KEY_COMMENT[scope]} for ${scope}: ${scope === "gitboy-write" ? "POST /v1/projects/<project>/findings and tasks/complete only" : "GET /v1/projects/<project>/memory, memory/files, memory/search and tasks only"}.`);
   console.log(`  ${line}`);
   console.log(`  SSH user: ${userInfo().username}   host key: ${fingerprint ?? "unknown (no /etc/ssh/ssh_host_ed25519_key.pub)"}`);
   console.log(`  Addresses: ${(await pairingHosts()).join(", ") || "none found"}`);
