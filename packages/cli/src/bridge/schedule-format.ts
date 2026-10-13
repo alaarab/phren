@@ -15,11 +15,14 @@ export const SCHEDULE_EVERY = ["interval", "daily", "weekly", "once", "cron"] as
 export const SCHEDULE_HARNESSES = ["claude", "codex", "opencode", "copilot"] as const;
 export const SCHEDULE_NOTIFY = ["start", "finish", "failure"] as const;
 export const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+/** `new` starts a session per firing; `reuse` types the prompt into the schedule's last session while it is still open. */
+export const SCHEDULE_SESSIONS = ["new", "reuse"] as const;
 
 export type ScheduleEvery = typeof SCHEDULE_EVERY[number];
 export type ScheduleHarness = typeof SCHEDULE_HARNESSES[number];
 export type ScheduleNotify = typeof SCHEDULE_NOTIFY[number];
 export type Weekday = typeof WEEKDAYS[number];
+export type ScheduleSession = typeof SCHEDULE_SESSIONS[number];
 export const SCHEDULE_RUN_STATUSES = ["launched", "running", "blocked", "finished", "needs-you", "failed", "skipped"] as const;
 export type ScheduleRunStatus = typeof SCHEDULE_RUN_STATUSES[number];
 /** How a run ended: done, done but waiting on the owner's answer, or not done. */
@@ -37,6 +40,8 @@ export interface Schedule {
   notify?: ScheduleNotify[];
   /** Explicit targets; absent means the directory owning this schedule. */
   projects?: string[];
+  /** Absent means `new`. */
+  session?: ScheduleSession;
   every: ScheduleEvery;
   at?: string;
   days?: Weekday[];
@@ -57,6 +62,8 @@ export interface ScheduleLaunchRecord {
   sessionId?: string;
   server?: string;
   jobDir?: string;
+  /** The prompt went to the schedule's earlier session instead of a new one. */
+  reused?: boolean;
 }
 
 export interface ScheduleRun {
@@ -79,6 +86,8 @@ export interface ScheduleRun {
 export interface ScheduleLaunchResult {
   launch: ScheduleLaunchRecord;
   completion?: Promise<ScheduleRunOutcome>;
+  /** Nothing was started: the reused session was busy, for this reason. */
+  skipped?: string;
 }
 
 export interface ScheduleLaunchContext {
@@ -87,6 +96,8 @@ export interface ScheduleLaunchContext {
   projectDir: string;
   cwd: string;
   runId: string;
+  /** With `session: reuse`, the session this target's last run used, to continue if it is still open. */
+  reuse?: ScheduleLaunchRecord;
   blockedStartup?: (promptText: string) => void | Promise<void>;
 }
 
@@ -163,6 +174,7 @@ export function parseSchedule(value: unknown): Schedule {
   };
   if (raw.projects !== undefined) schedule.projects = z.array(z.string().refine(isValidProjectName, "Invalid project slug."))
     .min(1).max(64).refine(projects => new Set(projects).size === projects.length, "Projects must be unique.").parse(raw.projects);
+  if (raw.session !== undefined) schedule.session = z.enum(SCHEDULE_SESSIONS).parse(raw.session);
   if (raw.model !== undefined) schedule.model = singleLine(200).parse(raw.model);
   if (raw.account !== undefined) schedule.account = z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(raw.account);
   if (raw.notify !== undefined) schedule.notify = z.array(z.enum(SCHEDULE_NOTIFY)).max(3).parse(raw.notify)
@@ -320,6 +332,15 @@ export function latestScheduleBatch(runs: ScheduleRun[]): { lastRun: ScheduleRun
   const finishedAt = lastRuns.some(run => runningStatuses.has(run.status)) ? undefined
     : lastRuns.map(run => run.finishedAt).filter((time): time is string => Boolean(time)).sort().at(-1);
   return { lastRun: { ...representative, finishedAt }, lastRuns };
+}
+
+/** The newest Herdr session among a target's runs, which `session: reuse` continues. */
+export function reusableLaunch(runs: readonly ScheduleRun[]): ScheduleLaunchRecord | undefined {
+  for (let index = runs.length - 1; index >= 0; index--) {
+    const launch = runs[index].launch;
+    if (launch.mode === "herdr" && launch.server && launch.workspaceId && launch.tabId && launch.paneId && launch.sessionId) return launch;
+  }
+  return undefined;
 }
 
 export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
