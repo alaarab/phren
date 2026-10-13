@@ -818,6 +818,12 @@ describe("CLI integration: tasks", () => {
     expect(stdout).toMatch(/(No tasks found|All tasks are empty)/);
   });
 
+  it("names an unknown project instead of saying no tasks", () => {
+    const { stderr, exitCode } = runCli(["task", "list", "no-such-project"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" });
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/"no-such-project" is neither a profile nor a project/);
+  });
+
   it("lists active and queued items", () => {
     const projDir = path.join(phrenDir, "task-proj");
     fs.mkdirSync(projDir, { recursive: true });
