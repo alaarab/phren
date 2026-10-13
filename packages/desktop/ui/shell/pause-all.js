@@ -5,7 +5,7 @@
 // success or failure. Ported from the phone's AgentFleetPause.
 import { hookPost } from "../api.js";
 import { registerCommand } from "./palette.js";
-import { store } from "./store.js";
+import { projectOf, store } from "./store.js";
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -22,8 +22,7 @@ export function workingSessions(rows) {
 /** What one row is called in the confirm and the result: "Fix login on Desk". */
 export function sessionLabel(row) {
   const { child, computer } = row;
-  const project = (child.cwd ?? "").split("/").filter(Boolean).pop();
-  const name = child.title || child.label || project || "session";
+  const name = child.title || child.label || projectOf(child) || "session";
   return `${name} on ${computer}`;
 }
 
