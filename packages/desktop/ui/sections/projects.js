@@ -12,6 +12,7 @@ import { openLaunchSheet } from "../shell/launch.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { storeBlobText, storeTree } from "../store-cache.js";
+import { skeleton } from "../shell/skeleton.js";
 
 // The five per-project knobs the CLI reads from <project>/phren.project.yaml,
 // under the file's top-level `config:` mapping (packages/cli/src/project-config.ts).
@@ -482,7 +483,9 @@ export function mountProjects(root) {
     const loading = onlineComputers().some((c) => state.loading.has(c.computer));
     const failures = [...state.failures.values()];
     if (!rows.length && (loading || !state.data.size)) {
-      body.append(el("div", "pj-empty", loading ? "Reading projects\u2026" : "No computers are online."));
+      body.append(loading
+        ? skeleton({ count: 6, wrapClass: "pj-grid", itemClass: "pj-card", widths: ["40%", "22%", "92%", "68%"], label: "Reading projects\u2026" })
+        : el("div", "pj-empty", "No computers are online."));
       return;
     }
     if (!rows.length) {
