@@ -652,3 +652,27 @@ test("⌘K lists projects and opens one's page", async ({ page }) => {
   await expect(page.locator(".section-pill.selected")).toHaveText(/Projects/);
   await expect(page.locator(".pj-forge")).toContainText("gitboy · git.example.com");
 });
+
+test("a sidebar row waiting on you shows what the agent said last", async ({ page }) => {
+  // The working session turns to waiting with a last reply, in the overview the page receives.
+  await page.routeWebSocket(/\/api\/overview$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      const msg = JSON.parse(String(message));
+      for (const c of msg.merged?.computers ?? []) for (const g of c.overview?.groups ?? []) for (const child of g.children ?? []) {
+        if (child.id === "sess-fix-login") Object.assign(child, { agentStatus: "waiting", lastReply: "Login keeps the session through the guard now. Tests pass; want me to open a PR?" });
+      }
+      ws.send(JSON.stringify(msg));
+    });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.sidebarRows"));
+  const row = page.locator(".sb-row", { hasText: "Fix login" });
+  await expect(row.locator(".sb-reply")).toHaveText("Login keeps the session through the guard now. Tests pass; want me to open a PR?");
+  // An approval row keeps its card instead.
+  await expect(page.locator(".sb-row", { hasText: "Ship release" }).locator(".sb-reply")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  const box = (await page.locator("#sidebar").boundingBox())!;
+  await page.screenshot({ path: test.info().outputPath("desktop-sidebar-reply.png"), clip: { x: box.x, y: box.y, width: box.width, height: 320 } });
+});
