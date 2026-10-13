@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.43] - 2026-10-13
+
+### Added
+
+- `GET /v1/projects/:project/git` on the Hook: a project's git host, branch and open pull requests with their checks, read from its checkout on that computer (this computer's recorded source folder, else the folders `/v1/projects/locate` finds), without a session running there; `404` with `code: "no-checkout"` when there is none. Phren desktop shows it as the project page's Code block.
+- `POST /v1/projects/:project/tasks/complete` with `{"id": "bid:xxxxxxxx"}`, on the `gitboy-write` scope only: gitboy can complete the tasks it listed for a branch when its pull request merges. Exact stable ids only; a retry answers `already-done`.
+
+### Fixed
+
+- A conductor keeps its role when its pane is recreated: before ending the role, the Hook re-adopts the one live pane whose agent reports the recorded session, so a resumed conductor no longer shows under "No project" with "Start a conductor" offered on the phone.
+
 ## [0.3.42] - 2026-10-12
 
 ### Added
