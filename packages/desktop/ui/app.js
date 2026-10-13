@@ -131,6 +131,8 @@ window.addEventListener("keydown", (ev) => {
 
 // The empty centre tile's New agent button.
 document.addEventListener("phren:new-agent", () => openLaunchSheet({ computer: agents().currentSession()?.computer }));
+// The menu bar icon's New agent… opens the same sheet.
+shell?.onNewAgent?.(() => document.dispatchEvent(new CustomEvent("phren:new-agent")));
 
 // Back and forward through visited sections: the titlebar arrows and ⌘[ / ⌘].
 const backBtn = document.getElementById("nav-back");

@@ -771,3 +771,14 @@ test("quiet hours and the stuck-agent toggle are set in Settings › Notificatio
   await list.screenshot({ path: test.info().outputPath("desktop-quiet-hours.png") });
   await page.evaluate(() => localStorage.removeItem("phren.desktop.quiet"));
 });
+
+test("the menu bar's New agent opens the launch sheet", async ({ page }) => {
+  await page.addInitScript(() => {
+    const shell = { platform: "darwin", notify() {}, setBadge() {}, setTray() {}, onOpenSession() {}, onNewAgent: (fn: () => void) => { Object.assign(window, { __newAgent: fn }); } };
+    Object.assign(window, { phrenDesktop: shell });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator("#needs-pill").waitFor();
+  await page.evaluate(() => (window as unknown as { __newAgent: () => void }).__newAgent());
+  await expect(page.locator(".launch-sheet .launch-title")).toHaveText("Launch an agent");
+});
