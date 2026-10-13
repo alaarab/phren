@@ -7,6 +7,7 @@ const listeners = new Set();
 let merged = null;
 const capabilities = new Map(); // computer -> { at, caps } | { at, error }
 const CAPS_TTL = 5 * 60_000;
+const healthReads = new Map(); // computer -> the /v1/health read in flight
 
 export const store = {
   /** The latest merged overview, or null before the first frame. */
@@ -35,16 +36,24 @@ export const store = {
   async capabilities(computer) {
     const hit = capabilities.get(computer);
     if (hit && Date.now() - hit.at < CAPS_TTL) return hit.caps ?? {};
-    try {
-      const res = await fetch(`/hosts/${encodeURIComponent(computer)}/v1/health`, { cache: "no-store" });
-      const body = res.ok ? await res.json() : {};
-      const caps = body.capabilities && typeof body.capabilities === "object" ? body.capabilities : {};
-      capabilities.set(computer, { at: Date.now(), caps, version: body.version });
-      return caps;
-    } catch {
-      capabilities.set(computer, { at: Date.now(), caps: {} });
-      return {};
+    // Callers that arrive while a read is in flight share it.
+    if (!healthReads.has(computer)) {
+      healthReads.set(computer, (async () => {
+        try {
+          const res = await fetch(`/hosts/${encodeURIComponent(computer)}/v1/health`, { cache: "no-store" });
+          const body = res.ok ? await res.json() : {};
+          const caps = body.capabilities && typeof body.capabilities === "object" ? body.capabilities : {};
+          capabilities.set(computer, { at: Date.now(), caps, version: body.version });
+          return caps;
+        } catch {
+          capabilities.set(computer, { at: Date.now(), caps: {} });
+          return {};
+        } finally {
+          healthReads.delete(computer);
+        }
+      })());
     }
+    return healthReads.get(computer);
   },
 
   /** Synchronous capability check from the cache: true, false, or undefined when not fetched yet. */
@@ -89,6 +98,12 @@ export function connectStore() {
     for (const c of merged?.computers ?? []) {
       if (c.state === "online" && states.get(c.computer) !== "online") capabilities.delete(c.computer);
       states.set(c.computer, c.state);
+      // The Hook's overview frames carry the same capabilities as /v1/health, so
+      // sections never wait on a health round trip before their first request.
+      const phren = c.overview?.phren;
+      if (c.state === "online" && phren?.capabilities && typeof phren.capabilities === "object") {
+        capabilities.set(c.computer, { at: Date.now(), caps: phren.capabilities, version: phren.version });
+      }
     }
     for (const fn of listeners) {
       try { fn(merged); } catch (err) { console.error(err); }
