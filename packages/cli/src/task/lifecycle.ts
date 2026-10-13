@@ -244,7 +244,8 @@ function normalizeTaskSummary(prompt: string): string {
   const stripped = withoutGithub.replace(ACTION_PREFIX_RE, "").trim();
   const withoutTaskPrefix = stripped.replace(EXPLICIT_TASK_PREFIX_RE, "").trim();
   const taskSource = withoutTaskPrefix || stripped;
-  const firstClause = taskSource.split(/[\n.!?]/)[0]?.trim() || taskSource;
+  // A sentence ends at ./!/? before whitespace or the end, not inside "0.3.44" or "task-lifecycle.ts".
+  const firstClause = taskSource.split(/\n|[.!?](?=\s|$)/)[0]?.trim() || taskSource;
   const cleaned = firstClause
     .replace(/^to\s+/i, "")
     .replace(/\s+/g, " ")

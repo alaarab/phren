@@ -83,6 +83,22 @@ describe("task lifecycle", () => {
     expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
 
+  it("keeps version numbers and file names whole when it shortens a prompt to a task title", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1, lowConfidenceThreshold: 0.7, riskySections: ["Stale", "Conflicts"], taskMode: "auto",
+    }, null, 2) + "\n");
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Update the packages/cli/src/bridge/agent-hooks.ts guard for codex 0.113.0 before the release. Then rerun CI.",
+      project, sessionId: "session-dots", intent: "build",
+    });
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Queue[0].line).toContain("agent-hooks.ts guard for codex 0.113.0 before the release");
+    expect(task.data.items.Queue[0].line).not.toContain("Then rerun CI");
+  });
+
   it("auto mode suggests instead of writing when discovery intent detected", () => {
     writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
