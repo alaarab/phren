@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.41] - 2026-10-12
+
 ### Fixed
 
 - Stores no longer stay diverged from their remote. A store merge refused any `tasks.md` that held one task id twice, and a duplicate that reached the remote made every later sync on every computer abort; a task archive past 1 MiB was read through a 1 MiB buffer and left the merge unresolved too. Repeated ids now collapse to the completed, then Active, then longest record, conflict sides are read whole, and a knowledge file whose smarter merge refuses falls back to a lossless line union. The pre-merge HEAD is kept as `refs/phren/backup/<ms>` for 14 days.
