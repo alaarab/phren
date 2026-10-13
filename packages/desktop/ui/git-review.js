@@ -261,3 +261,10 @@ export function relativeTime(iso, now = Date.now()) {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
+
+/** One wording for a request's checks everywhere (Home, ⌘K, project page,
+ * Changes): "Checks failing", "Checks running", "Checks passing"; `what` is the
+ * host's word ("Pipeline" on GitLab and gitboy). "" when there are no checks. */
+export function checksWord(checks, what = "Checks") {
+  return { failing: `${what} failing`, pending: `${what} running`, passing: `${what} passing` }[checks] ?? "";
+}

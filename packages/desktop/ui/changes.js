@@ -5,7 +5,7 @@ import { isShown, watchShown } from "./shown.js";
 import { hookGet, hookPost, readRepoFile } from "./api.js";
 import { projectOf } from "./shell/store.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
-import { branchProblem, capitalize, checksSummary, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
+import { branchProblem, capitalize, checksSummary, checksWord, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
 import { openLaunchSheet } from "./shell/launch.js";
@@ -1373,7 +1373,7 @@ export function openChanges(el, ctx) {
     const head = div("chg-pipe-h");
     // GitHub reports checks; GitLab and gitboy run a pipeline.
     const what = state.pulls && state.pulls.host && state.pulls.host.kind !== "github" ? "Pipeline" : "Checks";
-    const word = { failing: `${what} failing`, pending: `${what} running`, passing: `${what} passed` }[p.checks] || "Checks";
+    const word = checksWord(p.checks, what) || "Checks";
     const label = span("chg-pipe-word " + (p.checks || ""), word);
     if (p.pipeline && p.pipeline.url) { label.classList.add("link"); label.onclick = () => window.open(p.pipeline.url, "_blank", "noopener"); label.title = p.pipeline.url; }
     head.appendChild(label);

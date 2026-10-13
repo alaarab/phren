@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  branchProblem, checksSummary, diffModes, diffSides, hunkAt, hunkPatch, lineChangeTotals, localForRemote,
+  branchProblem, checksSummary, checksWord, diffModes, diffSides, hunkAt, hunkPatch, lineChangeTotals, localForRemote,
   capitalize, durationText, fixItPrompt, groupRuns, hostTerms, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, splitHunks, stepChange,
   syncAction, tokenPage, trackingText,
 // @ts-expect-error git-review.js is plain JavaScript without type declarations
@@ -191,5 +191,14 @@ describe("fixItPrompt", () => {
     expect(text).toContain("Phren remembers:\n- unit (ubuntu) fails when TZ is unset.\n\n");
     expect(text).toMatch(/push to feat\/login\./);
     expect(fixItPrompt({ number: 7, head: "fix/x", failing: [{ name: "ci" }] })).not.toContain("Phren remembers");
+  });
+});
+
+describe("checksWord", () => {
+  it("words a request's checks the same everywhere, in the host's own word", () => {
+    expect(checksWord("failing")).toBe("Checks failing");
+    expect(checksWord("pending")).toBe("Checks running");
+    expect(checksWord("passing", "Pipeline")).toBe("Pipeline passing");
+    expect(checksWord(null)).toBe("");
   });
 });
