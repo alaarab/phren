@@ -706,6 +706,7 @@ test("the menu bar answers an approval Home is watching", async ({ page }) => {
   await page.evaluate((k) => (window as unknown as { __trayAnswer: (a: { key: string; decision: string }) => void }).__trayAnswer({ key: k, decision: "approve" }), key);
   await expect.poll(() => answers.length).toBe(1);
   expect(answers[0]).toMatchObject({ actionId: "a1", target: { session: "sess-release" } });
+});
 
 test("a stalled working session reads 'stalled' on Home and in the sidebar", async ({ page }) => {
   const since = new Date(Date.now() - 7 * 60_000).toISOString();
