@@ -80,6 +80,14 @@ export function openLaunchSheet(options = {}) {
 }
 
 registerCommand({
+  id: "quick-chat",
+  title: "Quick chat…",
+  group: "Commands",
+  meta: "Ask phren from a project's memory",
+  run: () => openLaunchSheet({ chat: true }),
+});
+
+registerCommand({
   id: "launch-agent",
   title: "Launch an agent\u2026",
   group: "Commands",
@@ -111,11 +119,15 @@ function option(value, label) {
   return node;
 }
 
-async function open({ project = "", computer = "", role = "agent", prompt = "", title: heading = "", label = "" } = {}) {
+/** `chat: true` is a quick chat: phren's own agent with `mode: "chat"` (no
+ * tools; it answers from the project's memory), so the harness is fixed and
+ * the role, permission and worktree fields are hidden. */
+async function open({ project = "", computer = "", role = "agent", prompt = "", title: heading = "", label = "", chat = false } = {}) {
   const state = {
     project: (project ?? "").trim(),
     computer: computer ?? "",
-    harness: "",
+    // A quick chat's harness is fixed, so the recommendation looks for computers that run it.
+    harness: chat ? "phren" : "",
     model: "",
     effort: "medium",
     permission: "",
@@ -136,7 +148,8 @@ async function open({ project = "", computer = "", role = "agent", prompt = "", 
     autoComputer: !computer,
     prompt: role === "conductor" ? "" : prompt,
     withPrompt: role !== "conductor" && !!prompt,
-    heading: heading || "Launch an agent",
+    heading: heading || (chat ? "Quick chat" : "Launch an agent"),
+    chat: Boolean(chat),
     label: (label ?? "").trim(),
   };
 
@@ -377,13 +390,16 @@ function rolePresentation(ui, value) {
   ui.state.role = value;
   const conductor = value === "conductor";
   ui.title.textContent = conductor ? "Start the conductor" : ui.state.heading;
+  ui.roleField.hidden = ui.state.chat;
   ui.noteEl.textContent = conductor
     ? "Starts the store\u2019s conductor on the computer you choose; it sends work into any project from there."
-    : "Creates a workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute.";
+    : ui.state.chat
+      ? "Starts phren\u2019s agent with no tools: it answers from the project\u2019s memory (truths, summary, newest findings). /promote in the chat gives it tools."
+      : "Creates a workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute.";
 }
 
 function renderWorktree(ui) {
-  ui.worktreeField.hidden = ui.state.role === "conductor";
+  ui.worktreeField.hidden = ui.state.role === "conductor" || ui.state.chat;
   ui.promptField.hidden = !ui.state.withPrompt || ui.state.role === "conductor";
 }
 
@@ -396,7 +412,9 @@ function renderHarness(ui) {
     ui.harnessNote.textContent = "Reading this computer\u2019s harnesses\u2026";
     return;
   }
-  const kinds = HARNESS_ORDER.filter((kind) => (kind === "phren" ? harnessEntry(harnesses, kind) : true));
+  // A quick chat runs only on phren's own agent.
+  if (state.chat) state.harness = "phren";
+  const kinds = state.chat ? ["phren"] : HARNESS_ORDER.filter((kind) => (kind === "phren" ? harnessEntry(harnesses, kind) : true));
   let usable = 0;
   for (const kind of kinds) {
     const entry = harnessEntry(harnesses, kind);
@@ -414,7 +432,9 @@ function renderHarness(ui) {
     ui.harnessRow.append(btn);
   }
   if (!ui.harnessRow.childNodes.length) ui.harnessRow.append(el("span", "launch-note", "No harnesses listed."));
-  ui.harnessNote.textContent = harnesses && !usable ? `No signed-in harness on ${state.computer || "this computer"}.` : "";
+  ui.harnessNote.textContent = state.chat && harnesses && !usable
+    ? `phren agent is not installed on ${state.computer || "this computer"} (npm install -g @phren/agent).`
+    : harnesses && !usable ? `No signed-in harness on ${state.computer || "this computer"}.` : "";
 }
 
 function renderEffort(ui) {
@@ -513,12 +533,13 @@ function selectHarness(ui, kind) {
 
 function refreshLaunch(ui) {
   const state = ui.state;
-  ui.errorEl.textContent = state.error;
+  const noChat = state.chat && state.computer && store.can(state.computer, "quickChat") === false;
+  ui.errorEl.textContent = state.error || (noChat ? `${state.computer}'s Hook is older than quick chat; update it to start one.` : "");
   ui.statusEl.textContent = state.status;
   ui.launchBtn.disabled = !launchReady(ui);
   ui.launchBtn.textContent = state.launching ? "Launching\u2026"
     : state.role === "conductor" ? "Start the conductor"
-      : state.project ? `Open ${state.project}` : "Start chat";
+      : state.chat ? "Start quick chat" : state.project ? `Open ${state.project}` : "Start chat";
 }
 
 function launchReady(ui) {
@@ -528,6 +549,7 @@ function launchReady(ui) {
   const profile = state.profiles.get(state.computer);
   if (!profile || profile.loading || !harnessUsable(profile.harnesses, state.harness)) return false;
   if (state.role === "conductor" && state.harness === "phren") return false;
+  if (state.chat && (state.harness !== "phren" || store.can(state.computer, "quickChat") === false)) return false;
   if (state.role !== "conductor" && !state.project) return false;
   if (state.worktree && state.role !== "conductor" && !state.branch.trim()) return false;
   return true;
@@ -546,6 +568,7 @@ function accountRoom(usage) {
 }
 
 function firstUsable(ui, computer) {
+  if (ui.state.chat) return "phren";
   const profile = ui.state.profiles.get(computer);
   const harnesses = profile?.harnesses;
   const kinds = ui.state.role === "conductor" ? HARNESS_ORDER.filter((kind) => kind !== "phren") : HARNESS_ORDER;
@@ -611,7 +634,7 @@ function pickInitial(ui) {
   if (!state.harness || !harnessUsable(state.profiles.get(state.computer)?.harnesses, state.harness)) {
     state.harness = firstUsable(ui, state.computer);
   }
-  void store.capabilities(state.computer).then(() => renderPermission(ui));
+  void store.capabilities(state.computer).then(() => { renderPermission(ui); refreshLaunch(ui); });
 }
 
 // ---------------------------------------------------------------- loading
@@ -698,6 +721,7 @@ async function doLaunch(ui) {
   if (state.model && supportsModel(kind)) body.model = state.model;
   if (supportsEffort(kind)) body.effort = state.effort;
   if (PERMISSION_HARNESSES.has(kind) && state.permission) body.permissionMode = state.permission;
+  if (state.chat) body.mode = "chat";
   if (kind === "claude" && state.account) body.account = state.account;
   if (state.worktree && state.role !== "conductor") body.worktree = { branch: state.branch.trim() };
 
