@@ -468,3 +468,38 @@ test("the summon hotkey is set in Settings › Keys and opens ⌘K when it fires
   await expect(page.locator(".palette-input")).toBeFocused();
   await page.evaluate(() => localStorage.removeItem("phren.desktop.summon"));
 });
+
+test("the menu bar icon lists who needs you and opens the one chosen", async ({ page }) => {
+  // The Electron preload's shell: records what the icon is told to draw.
+  await page.addInitScript(() => {
+    const trays: unknown[] = [];
+    const shell = {
+      platform: "darwin", notify() {}, setBadge() {},
+      setTray: (state: unknown) => { trays.push(state); },
+      onOpenSession: (fn: (key: string) => void) => { Object.assign(window, { __openSession: fn }); },
+    };
+    Object.assign(window, { __trays: trays, phrenDesktop: shell });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.tray"));
+  type Tray = { enabled: boolean; rows?: Array<{ key: string; title: string; sub: string }> };
+  const last = () => page.evaluate(() => (window as unknown as { __trays: Tray[] }).__trays.at(-1));
+  await expect.poll(async () => (await last())?.rows?.map((r) => r.title)).toEqual([expect.stringContaining("Ship release 0.3.34")]);
+  const { key, sub } = (await last())!.rows![0];
+  expect(sub).toBe("This computer · wants approval");
+
+  // Choosing the row opens that session.
+  await page.evaluate((k) => (window as unknown as { __openSession: (k: string) => void }).__openSession(k), key);
+  await expect(page.locator(".section-pill.selected")).toHaveText("Agents");
+  await expect(page.locator(".doc-tab.selected")).toContainText("Ship release");
+
+  // Settings › Notifications turns it off.
+  await page.locator('.section-pill[data-section="settings"]').click();
+  await page.locator(".settings-tab", { hasText: "Notifications" }).click();
+  const toggle = page.locator(".settings-toggle", { hasText: "menu bar" });
+  await expect(toggle.locator("input")).toBeChecked();
+  await page.locator(".settings-page-notifications .settings-list").screenshot({ path: test.info().outputPath("desktop-tray-setting.png") });
+  await toggle.click();
+  await expect.poll(last).toEqual({ enabled: false });
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.tray"));
+});

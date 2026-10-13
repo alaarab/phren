@@ -2,7 +2,7 @@
 // a checkout the daemon runs on the system Node; the installed app runs it on
 // Electron's own Node (ELECTRON_RUN_AS_NODE), which loads node-pty's N-API
 // binary too, so an install needs no Node of its own.
-import { app, BrowserWindow, Menu, Notification, dialog, globalShortcut, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, ipcMain, nativeImage, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -21,6 +21,7 @@ let daemonExited = false;
 let daemonStderr = "";
 let quitting = false;
 let summonKey = null;
+let tray = null;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -54,6 +55,14 @@ function baseWindowOptions() {
 
 function showOnReady(win) {
   win.once("ready-to-show", () => win.show());
+  // With the menu bar icon on, closing the window on a Mac hides it: the UI
+  // keeps watching who needs you, and the icon or the Dock brings it back.
+  win.on("close", (event) => {
+    if (process.platform === "darwin" && tray && !quitting) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
@@ -270,20 +279,71 @@ function registerIpc() {
     });
     note.show();
   });
+  ipcMain.on("phren:tray", (event, state) => {
+    if (fromMainWindow(event)) updateTray(state);
+  });
   ipcMain.handle("phren:summon-key", (event, accel) => {
     if (!fromMainWindow(event) || typeof accel !== "string" || accel.length > 64) return false;
     return setSummon(accel);
   });
 }
 
-/** The summon hotkey: bring the window to the front and tell the UI to open ⌘K. */
-function summon() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+function showWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   app.focus({ steal: true });
   mainWindow.focus();
-  mainWindow.webContents.send("phren:summon");
+  return true;
+}
+
+/** The summon hotkey: bring the window to the front and tell the UI to open ⌘K. */
+function summon() {
+  if (showWindow()) mainWindow.webContents.send("phren:summon");
+}
+
+function trayIcon() {
+  const mac = process.platform === "darwin";
+  const image = nativeImage.createFromPath(path.join(here, "tray", mac ? "trayTemplate.png" : "tray.png"));
+  if (mac) image.setTemplateImage(true);
+  return image;
+}
+
+const text = (value, max) => String(value ?? "").slice(0, max);
+
+/** The menu bar icon: the needs-you count beside it and, in its menu, each
+ * session that needs you; choosing one opens it. The UI sends the rows. */
+function updateTray(state) {
+  if (!state?.enabled) {
+    tray?.destroy();
+    tray = null;
+    return;
+  }
+  const mac = process.platform === "darwin";
+  if (!tray) {
+    tray = new Tray(trayIcon());
+    if (!mac) tray.on("click", showWindow);
+  }
+  const rows = Array.isArray(state.rows) ? state.rows.slice(0, 12) : [];
+  const more = Number.isInteger(state.more) && state.more > 0 ? state.more : 0;
+  const count = rows.length + more;
+  const needs = `${count} need${count === 1 ? "s" : ""} you`;
+  if (mac) tray.setTitle(count ? String(count) : "");
+  tray.setToolTip(count ? `Phren: ${needs}` : "Phren");
+  const items = [{ label: count ? needs : "Nothing needs you", enabled: false }];
+  for (const row of rows) {
+    const key = text(row?.key, 200);
+    const title = text(row?.title, 80);
+    const sub = text(row?.sub, 80);
+    items.push({
+      label: mac ? title : `${title} · ${sub}`,
+      ...(mac ? { sublabel: sub } : {}),
+      click: () => { if (showWindow()) mainWindow.webContents.send("phren:open-session", key); },
+    });
+  }
+  if (more) items.push({ label: `and ${more} more`, enabled: false });
+  items.push({ type: "separator" }, { label: "Open Phren", click: showWindow }, { label: "Quit Phren", role: "quit" });
+  tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 
 /** Replace the summon accelerator; "" turns it off. False when the system refuses it (another app holds it). */
@@ -354,6 +414,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("window-all-closed", () => app.quit());
   app.on("will-quit", () => globalShortcut.unregisterAll());
+  app.on("activate", showWindow);
   app.on("before-quit", () => {
     quitting = true;
     killDaemon();
