@@ -498,7 +498,7 @@ test("the menu bar icon lists who needs you and opens the one chosen", async ({ 
   await page.locator(".settings-tab", { hasText: "Notifications" }).click();
   const toggle = page.locator(".settings-toggle", { hasText: "menu bar" });
   await expect(toggle.locator("input")).toBeChecked();
-  await page.locator(".settings-page-notifications .settings-list").screenshot({ path: test.info().outputPath("desktop-tray-setting.png") });
+  await page.locator(".settings-page-notifications").screenshot({ path: test.info().outputPath("desktop-tray-setting.png") });
   await toggle.click();
   await expect.poll(last).toEqual({ enabled: false });
   await page.evaluate(() => localStorage.removeItem("phren.desktop.tray"));
@@ -758,8 +758,8 @@ test("quiet hours and the stalled-agent toggle are set in Settings › Notificat
   await page.evaluate(() => { localStorage.removeItem("phren.desktop.quiet"); localStorage.removeItem("phren.desktop.notify-stalled"); });
   await page.locator('.section-pill[data-section="settings"]').click();
   await page.locator(".settings-tab", { hasText: "Notifications" }).click();
-  const list = page.locator(".settings-page-notifications .settings-list");
-  await expect(list.locator(".settings-toggle", { hasText: "when an agent stalls" }).locator("input")).toBeChecked();
+  const list = page.locator(".settings-page-notifications");
+  await expect(list.locator(".settings-toggle", { hasText: "An agent stalls" }).locator("input")).toBeChecked();
   const quiet = list.locator(".settings-quiet");
   await expect(quiet.locator("input[type=checkbox]")).not.toBeChecked();
   await quiet.locator(".settings-switch").click();
