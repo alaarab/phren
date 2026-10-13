@@ -503,3 +503,28 @@ test("the menu bar icon lists who needs you and opens the one chosen", async ({ 
   await expect.poll(last).toEqual({ enabled: false });
   await page.evaluate(() => localStorage.removeItem("phren.desktop.tray"));
 });
+
+test("a reply typed into a notification reaches the session as its next prompt", async ({ page }) => {
+  await page.addInitScript(() => {
+    const notes: unknown[] = [];
+    const shell = {
+      platform: "darwin", setBadge() {}, setTray() {},
+      notify: (...args: unknown[]) => { notes.push(args); },
+      onOpenSession() {},
+      onReply: (fn: (r: { key: string; text: string }) => void) => { Object.assign(window, { __reply: fn }); },
+    };
+    Object.assign(window, { __notes: notes, phrenDesktop: shell });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(page.locator(".sb-row", { hasText: "Fix login" })).toBeVisible();
+  const key = "This computer/sess-fix-login";
+  const before = hook.calls.filter((c) => c.path === "/v1/prompt").length;
+  await page.evaluate((k) => (window as unknown as { __reply: (r: { key: string; text: string }) => void }).__reply({ key: k, text: "yes, ship it" }), key);
+  await expect.poll(() => hook.calls.filter((c) => c.path === "/v1/prompt").length).toBe(before + 1);
+  expect(hook.calls.filter((c) => c.path === "/v1/prompt").at(-1)!.body).toMatchObject({ target: { session: "sess-fix-login" }, text: "yes, ship it" });
+
+  // A session that is gone is reported, not dropped.
+  await page.evaluate(() => (window as unknown as { __reply: (r: { key: string; text: string }) => void }).__reply({ key: "nowhere/0", text: "hi" }));
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __notes: unknown[][] }).__notes.at(-1))).toEqual(["Reply not sent", "That session is gone."]);
+});

@@ -138,7 +138,9 @@ Notifications.
 palette open; change or turn off that key in Settings › Keys. A menu bar icon
 (system tray on Linux and Windows) shows how many sessions need you and lists
 them; choose one to open it. On a Mac, closing the window while the icon is on
-keeps Phren running there. Turn it off in Settings › Notifications. The launch sheet
+keeps Phren running there. Turn it off in Settings › Notifications. Clicking a "needs you"
+notification opens that session; on a Mac, one for an agent that finished and
+waits on you takes a typed reply, sent as its next prompt. The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles
