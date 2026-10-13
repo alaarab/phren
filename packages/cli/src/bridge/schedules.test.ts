@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import {
   Scheduler,
   STARTUP_BLOCK_WINDOW_MS,
@@ -212,6 +212,10 @@ describe("scheduled startup prompts", () => {
     await mkdir(path.join(home, ".claude-work"));
     await writeFile(path.join(home, ".claude-work", ".claude.json"), "{}");
     const env = { HOME: home, PATH: "/bin" };
+    // headlessEnv adds SUDO_ASKPASS when this computer's Hook installed its helper; keep the test independent of that.
+    const bridge = process.env.PHREN_BRIDGE_HOME;
+    process.env.PHREN_BRIDGE_HOME = path.join(home, "bridge");
+    onTestFinished(() => { if (bridge === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = bridge; });
     const work = schedule({ harness: "claude", account: "work" });
     expect(parseSchedule({ ...work }).account).toBe("work");
     expect(() => parseSchedule({ ...work, account: "Bad Slug" })).toThrow();
