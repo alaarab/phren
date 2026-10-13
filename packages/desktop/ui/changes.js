@@ -1717,6 +1717,7 @@ export function openChanges(el, ctx) {
 
   return {
     refresh,
+    showView: selectView,
     close() { visible = false; stopTimer(); stopWatchingShown(); window.removeEventListener("phren:git-changed", onGitChanged); el.innerHTML = ""; },
   };
 }

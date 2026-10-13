@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ciTransitions, watchedSessions } from "../ui/shell/ci-watch.js";
+import { checksStrip, ciTransitions, watchedSessions } from "../ui/shell/ci-watch.js";
 
 const pull = (checks: string | null) => ({ project: "phren", computer: "This computer", number: 42, title: "Keep the session", checks });
 
@@ -28,5 +28,15 @@ describe("watchedSessions", () => {
     ], now);
     expect(picked.map((w) => `${w.computer}/${w.project}`)).toEqual(["mini/phren", "laptop/phren", "mini/old"]);
     expect(picked[0].target).toEqual({ id: "/home/you/phren" });
+  });
+});
+
+describe("checksStrip", () => {
+  it("puts failing requests first, then running, passing and unchecked, newest first within each", () => {
+    const pulls = [
+      { ...pull("passing"), number: 7 }, { ...pull(null), number: 9 }, { ...pull("failing"), number: 3 },
+      { ...pull("pending"), number: 5 }, { ...pull("failing"), number: 8 },
+    ];
+    expect(checksStrip(pulls).map((p) => `${p.checks}#${p.number}`)).toEqual(["failing#8", "failing#3", "pending#5", "passing#7", "null#9"]);
   });
 });
