@@ -10,7 +10,7 @@ export function needsNotice({ key, computer, child }) {
   const project = (child.cwd ?? child.label ?? "").split("/").filter(Boolean).pop() ?? child.label;
   return {
     title: `${project} needs you`,
-    body: `${child.title ?? child.label} · ${computer}`,
+    body: `${child.title ?? child.label} · ${computer}${child.lastReply ? `\n${child.lastReply}` : ""}`,
     key,
     reply: child.agentStatus === "waiting" && !child.approvalPending && !!child.target,
   };

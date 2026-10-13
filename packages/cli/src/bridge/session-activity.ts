@@ -122,6 +122,30 @@ export function markBackground(tab: Json, count: number | undefined): void {
   else if (typeof tab.backgroundTasks === "number") tab.backgroundTasks = Math.max(tab.backgroundTasks, count);
 }
 
+/** How much of a turn's last reply a session row carries. */
+export const REPLY_EXCERPT_CHARS = 240;
+
+/**
+ * The ended turn's last reply as one short line for a session row
+ * (`lastReply`): what the agent said before it stopped, so a waiting row can
+ * say what it waits for. Markdown emphasis, headings and code fences are
+ * dropped and whitespace collapsed. Undefined while a turn runs (its prompt
+ * is newer than the Stop) or when the Stop carried no reply.
+ */
+export function replyExcerpt(record: TurnRecord | undefined): string | undefined {
+  if (!record) return undefined;
+  const phase = turnPhase(record);
+  if (phase.phase !== "ended" || !phase.reply) return undefined;
+  const line = phase.reply
+    .replace(/```[\s\S]*?(```|$)/g, " ")
+    .replace(/(^|\n)\s*(#{1,6}|>|[-*+]|\d+\.)\s+/g, "$1")
+    .replace(/(\*\*|__|\*|`)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!line) return undefined;
+  return line.length > REPLY_EXCERPT_CHARS ? `${line.slice(0, REPLY_EXCERPT_CHARS - 1).trimEnd()}…` : line;
+}
+
 /** A tab or workspace label worth showing as a name: not empty, not Herdr's bare numbering, not an id. */
 export function meaningfulLabel(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
