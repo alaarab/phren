@@ -25,6 +25,7 @@ import { logger } from "../logger.js";
 import { compactFindingJournals } from "../finding/journal.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { summarizeProject } from "../content/summarize.js";
+import { claimMaintenanceWriter } from "../sync/maintenance-writer.js";
 import { tidyDoneTasks } from "../data/tasks.js";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
@@ -505,7 +506,10 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     // cheap; a model is only consulted from `phren maintain summarize --llm`.
     let tidied = 0;
     let summarized = 0;
-    for (const project of targetProjects(projectArg)) {
+    // Only the lease holder rewrites generated files; every computer still
+    // folds its own journal into the findings above (maintenance-writer.ts).
+    const lease = claimMaintenanceWriter(getPhrenPath());
+    for (const project of lease.writer ? targetProjects(projectArg) : []) {
       try {
         const tidy = tidyDoneTasks(getPhrenPath(), project, 30);
         if (tidy.ok && tidy.data.startsWith("Tidied")) tidied++;
@@ -515,7 +519,9 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
         if (summary.topics.some((t) => t.updated) || summary.summaryUpdated) summarized++;
       } catch (err: unknown) { logger.debug("maintenance", `summarize ${project}: ${errorMessage(err)}`); }
     }
-    const pruneResult = pruneDeadMemories(getPhrenPath(), projectArg);
+    const pruneResult = lease.writer
+      ? pruneDeadMemories(getPhrenPath(), projectArg)
+      : { ok: true as const, data: { message: `prune skipped: ${lease.holder} maintains generated files` } };
     const pruneMsg = pruneResult.ok ? pruneResult.data.message.replace(/\n+/g, " ") : pruneResult.error;
     if (!pruneResult.ok) {
       updateRuntimeHealth(getPhrenPath(), {

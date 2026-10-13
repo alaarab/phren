@@ -417,7 +417,10 @@ function updateComputer(node, desc) {
     const seen = relativeAge(co.updatedAt);
     state = offlineReason(co) + (seen ? ` \u00B7 ${seen}` : "");
   }
-  const sig = [co.computer, co.state, state].join("|");
+  // A diverged or long-unsynced store on that computer (the Hook's storeWarnings).
+  const warnings = co.state === "online" && Array.isArray(co.overview?.storeWarnings) ? co.overview.storeWarnings : [];
+  if (warnings.length) state = "Store out of sync";
+  const sig = [co.computer, co.state, state, warnings.join("\n")].join("|");
   if (node.__sig === sig) return;
   node.__sig = sig;
   node.children[0].className = "sb-dot " + co.state;
@@ -425,8 +428,9 @@ function updateComputer(node, desc) {
   name.textContent = co.computer;
   name.style.setProperty("--host-color", hostColor(co.computer));
   const meta = node.children[2];
-  meta.className = "sb-cstate " + co.state;
+  meta.className = "sb-cstate " + co.state + (warnings.length ? " sync-warn" : "");
   meta.textContent = state;
+  if (warnings.length) meta.title = warnings.join("\n"); else meta.removeAttribute("title");
 }
 
 // ---------------------------------------------------------------- rows

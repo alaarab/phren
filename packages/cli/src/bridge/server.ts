@@ -63,6 +63,7 @@ import { targetTranscriptPath } from "./transcripts.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.js";
 import { localNames } from "./computer-names.js";
+import { startStoreSyncLoop } from "../sync/store-sync.js";
 
 export { capabilities, capabilitiesForModules, requireRoute } from "./server-routes.js";
 export { streamCloseReason } from "./server-stream.js";
@@ -267,6 +268,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const codexAuth = codexAppServerEnabled() && codexAuthRefreshEnabled() ? new CodexAuthKeeper(codexServers) : undefined;
   const codexAuthTimer = codexAuth ? setInterval(() => { void codexAuth.tick().catch(() => {}); }, 60 * 60_000) : undefined;
   if (codexAuth) setTimeout(() => { void codexAuth.tick().catch(() => {}); }, 60_000).unref();
+  // Every store converges with its remote even when no agent session runs here (store-sync.ts).
+  const storeSync = startStoreSyncLoop(scheduleStore);
   const canaryTimer = setInterval(() => { countTick("canary"); void dailyCanaryDue().then(due => due ? canary("daily") : undefined).catch(() => {}); }, 10 * 60_000);
   let recording = false;
   const activityTimer = setInterval(() => {
@@ -312,7 +315,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

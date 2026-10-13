@@ -288,7 +288,7 @@ function healthChecks(health) {
     const counts = [item.branch ? `on ${item.branch}` : "",
       item.ahead !== undefined || item.behind !== undefined ? `${item.ahead ?? 0} ahead, ${item.behind ?? 0} behind` : ""].filter(Boolean).join(" · ");
     rows.push({ level: !item.available || item.degraded ? "fail" : item.error ? "warn" : "ok",
-      label: `Store ${item.name}`, detail: item.error || counts || (item.available ? "synced" : "folder missing") });
+      label: `Store ${item.name}`, detail: item.warning || item.error || counts || (item.available ? "synced" : "folder missing") });
   }
   const run = health.schedules?.lastRun;
   if (!run) rows.push({ level: "warn", label: "Schedules", detail: health.schedules?.running === false ? "scheduler stopped" : "no runs yet" });

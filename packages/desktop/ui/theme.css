@@ -495,6 +495,7 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .sb-cname { flex: none; font-size: 12.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-cstate { margin-left: auto; min-width: 0; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-cstate.offline, .sb-cstate.verify { color: var(--danger); }
+.sb-cstate.sync-warn { color: var(--danger); }
 .sb-add .sb-cname { color: var(--accent); }
 .sb-add .sb-dot { width: 9px; height: 9px; background: transparent; border: 1.5px dashed var(--muted); }
 .sb-add:hover .sb-cname { color: var(--accent-hover); }

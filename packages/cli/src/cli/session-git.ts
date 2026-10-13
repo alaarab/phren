@@ -60,6 +60,7 @@ async function runBestEffortGitCommand(args: string[], cwd: string): Promise<{ o
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: EXEC_TIMEOUT_MS,
+        maxBuffer: 64 * 1024 * 1024,
         env: nonInteractiveGitEnv(),
       }).trim();
       return { ok: true, output };
