@@ -55,6 +55,7 @@ export function mountSettings(root) {
   function select(id) {
     const pane = panes.get(id);
     if (!pane) return;
+    if (current && current !== id) panes.get(current)?.refresh?.hide?.();
     current = id;
     for (const [pid, p] of panes) {
       const on = pid === id;
@@ -73,7 +74,11 @@ export function mountSettings(root) {
   for (const def of PAGES) panes.get(def.id).tab.addEventListener("click", () => select(def.id));
   select("computers");
 
-  return { show() { if (current) panes.get(current)?.refresh?.(); } };
+  return {
+    show() { if (current) panes.get(current)?.refresh?.(); },
+    hide() { if (current) panes.get(current)?.refresh?.hide?.(); },
+    close() { for (const pane of panes.values()) pane.refresh?.close?.(); },
+  };
 }
 
 const BUILDERS = {
