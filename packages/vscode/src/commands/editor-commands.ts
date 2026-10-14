@@ -1,7 +1,7 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import { PhrenClient } from "../phrenClient";
 import { showSearchQuickPick } from "../searchQuickPick";
+import { containingFolder, relativeInside } from "../pathUtils";
 
 export const SEARCH_SELECTION_MAX_CHARS = 200;
 export const FINDING_MAX_CHARS = 500;
@@ -41,8 +41,8 @@ export function buildCitation(
 
   const line = selection.start.line + 1;
   if (workspaceFolderPath) {
-    const relative = path.relative(workspaceFolderPath, documentUri.fsPath);
-    if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+    const relative = relativeInside(workspaceFolderPath, documentUri.fsPath);
+    if (relative) {
       return { file: relative, line, repo: workspaceFolderPath };
     }
   }
@@ -65,11 +65,10 @@ export function workspaceFolderPath(document: vscode.TextDocument): string | und
   if (!folders || folders.length === 0) {
     return undefined;
   }
-  const containing = folders.find((folder) => {
-    const relative = path.relative(folder.uri.fsPath, document.uri.fsPath);
-    return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
-  });
-  return containing?.uri.fsPath;
+  return containingFolder(
+    folders.map((folder) => folder.uri.fsPath),
+    document.uri.fsPath,
+  );
 }
 
 export function registerEditorCommands(context: vscode.ExtensionContext, client: PhrenClient): void {
