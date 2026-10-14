@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.7] - unreleased
 
+- On macOS, Node extensions run in a sandbox that keeps them away from this desktop's key, its SSH connections and the Hook; everywhere, they start without the desktop's secrets in their environment.
 - Home reads once at startup instead of twice.
 - Settings › About shows the desktop and each computer's Hook version, with Copy for a bug report (computers numbered, not named).
 - Drop an image on a session in the Agents sidebar to open it with the image attached to its next prompt.

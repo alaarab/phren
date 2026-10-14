@@ -7,7 +7,7 @@
 //   phren-desktop list
 //   phren-desktop replay <trace.jsonl>   serve the UI against a recorded trace
 import { randomBytes } from "node:crypto";
-import { readFileSync, watch } from "node:fs";
+import { closeSync, readFileSync, watch } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -38,7 +38,10 @@ function tokenFromFd(): string | undefined {
   if (!raw) return undefined;
   const fd = Number(raw);
   if (!Number.isInteger(fd) || fd < 0) throw new Error("PHREN_DESKTOP_TOKEN_FD must be a file descriptor number.");
-  return readFileSync(fd, "utf8").trim();
+  const token = readFileSync(fd, "utf8").trim();
+  // Closed once read, so no child (the Node extension host among them) can inherit it.
+  try { closeSync(fd); } catch { /* already closed */ }
+  return token;
 }
 
 /** Best-effort ControlMaster teardown for every remote computer, bounded by a

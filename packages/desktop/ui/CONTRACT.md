@@ -296,7 +296,47 @@ Phren's own UI. The editor host (`packages/desktop-editor`, built by Vite to
 What runs: declarative contributions of any extension (themes, icon themes,
 grammars, language configurations, snippets) and the code of **web extensions**
 (manifest `browser` entry). Extensions with only a Node `main` contribute their
-declarative parts; their code needs a Node extension host, which is not built yet.
+declarative parts; their code runs in the Node extension host below, when the owner
+turns Node extensions on.
+
+## Node extension host (src/reh.ts, src/reh-sandbox.ts)
+
+VS Code's remote extension host (REH), built by `packages/desktop-editor/scripts/build-reh.sh`,
+runs Node extensions on this computer, bound to 127.0.0.1. It is off until the owner turns it on:
+
+- `GET /api/extensions/node` → `{enabled, isolation: "sandbox"|"environment"}`;
+  `POST {enabled: boolean}` turns it on or off (off stops a running host).
+- `GET /api/reh` → `{available, authority?: "localhost:<port>", connectionToken?, version?, isolation?, reason?}`,
+  starting the host lazily.
+
+The host's one channel is the loopback WebSocket the editor page opens to it with
+`connectionToken`, made fresh on every start (`<reh>/connection-token`, 0600). It holds no
+daemon credential: not the daemon token or cookie, not the Hook socket, not an SSH key or
+ControlMaster. Install and uninstall run the same launcher, isolated the same way. If a
+host feature ever needs the daemon, add it as a route reachable only with a per-start
+token scoped to an explicit allowlist of routes, never by handing over the daemon token,
+the Hook socket or the bridge folder.
+
+Isolation (`reh-sandbox.ts`):
+- Environment: drops `PHREN_*`, `SSH_*`, `TMUX*`, `HERDR_*`, `ELECTRON_*`, `VSCODE_*`, `npm_*`,
+  `NODE_OPTIONS`, `DBUS_SESSION_BUS_ADDRESS`, askpass helpers and any name that reads as a
+  credential (token, secret, password, API key, auth, cookie, `*_KEY`). `HOME` (also the
+  cwd) is `<reh>/home`; `TMPDIR` (and `XDG_RUNTIME_DIR` off macOS) is `/tmp/phren-reh-<uid>`
+  (0700). Toolchains that locate themselves through HOME (`CARGO_HOME`, `RUSTUP_HOME`,
+  `GOPATH`, `PYENV_ROOT`, `NVM_DIR`, `VOLTA_HOME`, `BUN_INSTALL`, `SDKMAN_DIR`,
+  `GIT_CONFIG_GLOBAL`) are pointed at the owner's real folders when they exist.
+- File descriptors: the daemon closes the token pipe (fd 3) once read; the host gets
+  stdin `/dev/null`, stdout and stderr only.
+- macOS: `sandbox-exec -p <HOST_PROFILE> -D NAME=path…` (paths as parameters, never
+  spliced into the profile). `(allow default)`, then denies: read/write of the bridge
+  folder, `/tmp/phren-desktop-<uid>` (ControlMasters), `~/.cache/phren/desktop-traces` and
+  `~/Library/Application Support/Phren`; writes to the desktop's extensions folder, the
+  installed app's own code and `~/Library/LaunchAgents`; unix-socket connects into the
+  bridge folder (`hook.sock`), the ControlMaster folder, Herdr's folder, tmux's
+  `tmux-<uid>` and launchd's SSH agent; AppleEvents, LaunchServices opens and running
+  `launchctl`, `crontab`, `at`, `osascript` and `open`. `PHREN_REH_SANDBOX=off` turns it
+  off for troubleshooting. `isolation` is `"sandbox"` only when it is applied.
+- Linux and Windows: environment and folders only (`isolation: "environment"`).
 
 ## Daemon (src/extensions.ts, routes in src/server.ts)
 

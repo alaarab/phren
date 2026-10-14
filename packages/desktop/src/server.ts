@@ -13,6 +13,7 @@ import type { MergedOverview, StartServer, TerminalSession } from "./contract.js
 import { ACTIONS, loadKeyConfig } from "./keys-config.js";
 import { linkComputer, revokeComputer } from "./keys.js";
 import { nodeExtensionsEnabled, rehStatus, setNodeExtensionsEnabled, stopReh } from "./reh.js";
+import { isolation } from "./reh-sandbox.js";
 import { collectUsage } from "./usage.js";
 import { listTraces, startTrace, stopTrace, traceStatus } from "./trace.js";
 import { closeAllPreviews, closePreview, listPreviews, openPreview } from "./web-preview.js";
@@ -719,13 +720,13 @@ export const startServer: StartServer = async (o) => {
           return;
         }
         if (pathname === "/api/extensions/node") {
-          // The Node extension host is opt-in: Node extensions run as the owner.
+          // The Node extension host is opt-in: Node extensions run code with the owner's file access.
           if (req.method === "POST") {
             const body = (await readJson(req)) as { enabled?: unknown };
             if (typeof body.enabled !== "boolean") throw new ExtensionError(400, "enabled must be a boolean.");
             await setNodeExtensionsEnabled(body.enabled);
           }
-          sendJson(res, { enabled: nodeExtensionsEnabled() });
+          sendJson(res, { enabled: nodeExtensionsEnabled(), isolation: isolation() });
           return;
         }
         if (pathname === "/api/extensions/search" && (req.method ?? "GET") === "GET") {
