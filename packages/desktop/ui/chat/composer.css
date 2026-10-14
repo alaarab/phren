@@ -31,6 +31,7 @@
 .pc-pending-state.failed { color: var(--danger); }
 .pc-pending-x { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0 2px; }
 .pc-pending-x:hover { color: var(--danger); }
+.pc-pending-retry { border: none; background: transparent; color: var(--accent, inherit); cursor: pointer; font-size: 12px; padding: 0 4px; text-decoration: underline; }
 
 /* Slash command menu. */
 .pc-slash { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }

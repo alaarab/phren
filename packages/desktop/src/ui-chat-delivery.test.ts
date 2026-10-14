@@ -316,6 +316,29 @@ describe("chat delivery reconciliation", () => {
     // Never handed back as a draft to send again under a new id.
     expect(input.value).toBe("");
   });
+
+  it("keeps an unanswered send after its retries, polling it and retrying it under the same id", async () => {
+    let answer = 502;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/v1/prompt") && answer === 502) return { ok: false, status: 502, text: async () => JSON.stringify({ error: "timed out" }) };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ state: "unknown" }) };
+    });
+    const c = chat();
+    const input = c.el.find("pc-input")!;
+    await c.send("ship it");
+    await vi.advanceTimersByTimeAsync(30_000);
+    const prompts = () => fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt")).map(([, options]) => JSON.parse(options.body).deliveryId);
+    expect(prompts()).toHaveLength(4);
+    expect(input.value).toBe("");
+    expect(c.el.find("pc-pending-state unknown")?.textContent).toMatch(/^Unknown/);
+    const polled = fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt/status")).map(([, options]) => JSON.parse(options.body).deliveryId);
+    expect(new Set(polled)).toEqual(new Set([prompts()[0]]));
+    answer = 200;
+    c.el.find("pc-pending-retry")!.fire("click");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prompts()).toHaveLength(5);
+    expect(new Set(prompts()).size).toBe(1);
+  });
 });
 
 it("applies preview changes and clears carried by append and backlog frames", () => {

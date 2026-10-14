@@ -66,6 +66,24 @@ it("writes only over the sha the phone last saw", async () => {
   await deleteStoreFile(store, { path: "demo/notes/new.md", sha: blobSha(Buffer.from("x")) });
 });
 
+it("writes and deletes only while holding the file's writers' lock", async () => {
+  const file = path.join(store, "demo", "FINDINGS.md");
+  const sha = blobSha(await readFile(file));
+  // A live process (our parent) is appending to it through the CLI's lock.
+  await writeFile(`${file}.lock`, `${process.ppid}\n${Date.now()}`);
+  const previous = process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+  process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "200";
+  try {
+    await expect(deleteStoreFile(store, { path: "demo/FINDINGS.md", sha })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/lock/) });
+    await expect(putStoreFile(store, { path: "demo/FINDINGS.md", content: "eA==", sha })).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/lock/) });
+    expect(await readFile(file, "utf8")).toBe("# demo\n- one\n");
+    await rm(`${file}.lock`);
+    await deleteStoreFile(store, { path: "demo/FINDINGS.md", sha });
+  } finally {
+    if (previous === undefined) delete process.env.PHREN_FILE_LOCK_MAX_WAIT_MS; else process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = previous;
+  }
+});
+
 it("rejects oversized blobs with an actionable size error before reading their contents", async () => {
   const content = Buffer.alloc(4 * 1024 * 1024 + 1, 120);
   await writeFile(path.join(store, "demo", "tasks.md"), content);

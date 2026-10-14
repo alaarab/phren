@@ -253,6 +253,19 @@ describe("git publish routes", () => {
     expect(checkRollup([{ __typename: "StatusContext", state: "ERROR" }])).toBe("failing");
   });
 
+  it.skipIf(process.platform === "win32")("kills a descendant that ignores SIGTERM even after git itself exits", async () => {
+    const pidFile = path.join(await mkdtemp(path.join(tmpdir(), "phren-kill-")), "pid");
+    // The grandchild stays in the group, holds no pipes and ignores SIGTERM.
+    const inner = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
+    const script = `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(inner)}], { stdio: 'ignore' }); setTimeout(() => {}, 30000);`;
+    const run = await runCombined(process.execPath, ["-e", script], tmpdir(), 500, {}, 150);
+    expect(run.timedOut).toBe(true);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 40 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 50));
+    try { expect(alive()).toBe(false); } finally { if (alive()) process.kill(pid, "SIGKILL"); }
+  });
+
   it.skipIf(process.platform === "win32")("answers at its deadline when a descendant outside its group keeps the pipes open", async () => {
     // The child starts a grandchild in its own group that inherits stdout and prints its pid.
     const script = "const c = require('child_process').spawn(process.execPath, ['-e', 'console.log(process.pid); setTimeout(() => {}, 30000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }); setTimeout(() => {}, 30000);";

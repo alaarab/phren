@@ -13,7 +13,7 @@ GitHub release notes, and the app shows them when that version is available.
 - A daemon that never reports ready is stopped and reaped instead of left running.
 - A bad WebSocket frame (a terminal paste over the size limit) closes that socket instead of crashing the daemon.
 - Push-to-talk shows its failure toast when the Hook refuses the message.
-- A send whose answer was lost (502, timeout) is retried under its own delivery id instead of failing and coming back as a draft, and attachments upload once across retries.
+- A send whose answer was lost (502, timeout) is retried under its own delivery id instead of failing and coming back as a draft, and attachments upload once across retries. If it still gets no answer, it stays as Unknown, keeps asking the Hook for its state, and offers Retry under the same id.
 - Responses proxied from a Hook are served with `nosniff` and a sandbox CSP, so repository files never run as a page on the app origin.
 
 - Removing a pending chat send hides it while keeping its place, so its transcript row cannot settle a later identical send or hide that send's failure.

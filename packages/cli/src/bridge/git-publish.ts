@@ -30,10 +30,12 @@ interface Run { code: number | null; output: string; missing: boolean; timedOut:
 export function runCombined(command: string, args: string[], cwd: string, timeout: number, extraEnv: NodeJS.ProcessEnv = {}, killGraceMs = KILL_GRACE_MS): Promise<Run> {
   return new Promise(resolve => {
     let output = "", truncated = false, timedOut = false, settled = false;
-    let escalate: NodeJS.Timeout | undefined, deadline: NodeJS.Timeout | undefined;
+    let deadline: NodeJS.Timeout | undefined;
     const finish = (run: Run) => {
       if (settled) return;
-      settled = true; clearTimeout(escalate); clearTimeout(deadline); resolve(run);
+      // The SIGKILL escalation is left to fire: git exiting on SIGTERM must
+      // not spare a hook's child that ignores it.
+      settled = true; clearTimeout(deadline); resolve(run);
     };
     // Its own process group, so a timeout reaches what a Git hook started too.
     const group = process.platform !== "win32";
@@ -52,10 +54,14 @@ export function runCombined(command: string, args: string[], cwd: string, timeou
       try { if (group && child.pid) process.kill(-child.pid, signal); else child.kill(signal); }
       catch { child.kill(signal); }
     };
+    // A timeout signals the group exactly twice: SIGTERM now, SIGKILL one
+    // grace later whether or not git has exited, then never again. A group id
+    // cannot be reused while any member lives, and the SIGKILL comes at most
+    // one grace after the leader could have exited.
     const timer = setTimeout(() => {
       timedOut = true;
       kill("SIGTERM");
-      escalate = setTimeout(() => kill("SIGKILL"), killGraceMs);
+      setTimeout(() => kill("SIGKILL"), killGraceMs).unref();
       // A descendant outside the group can hold the pipes open forever:
       // answer at the deadline whether or not 'close' ever comes.
       deadline = setTimeout(() => {

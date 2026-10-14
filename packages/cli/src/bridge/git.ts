@@ -539,7 +539,12 @@ export async function gitDiscard(cwd: string, paths: unknown): Promise<Json> {
     // A directory pathspec would revert or remove everything under it.
     for (const file of files) {
       const info = await lstat(path.join(root, file)).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
-      if (info?.isDirectory()) throw new BridgeError(409, "Discard the files in this directory one at a time.");
+      // A deleted folder is gone from disk but still a directory in the index,
+      // which is what `git checkout` restores from.
+      const indexed = info ? "" : await git(root, "ls-files", "-z", "--", `:(literal)${file}`);
+      if (info?.isDirectory() || indexed.split("\0").some(entry => entry.startsWith(`${file}/`))) {
+        throw new BridgeError(409, "Discard the files in this directory one at a time.");
+      }
     }
     const untracked = new Set((await git(root, "ls-files", "--others", "--exclude-standard", "-z")).split("\0").filter(Boolean));
     for (const file of files) {

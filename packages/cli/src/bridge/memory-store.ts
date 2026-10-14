@@ -1,9 +1,11 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { withFileLock } from "../governance/locks.js";
 import { BridgeError, bridgeRoot, type Json } from "./protocol.js";
 
 // The phone reads memory from a paired computer through these routes, in the
@@ -196,9 +198,18 @@ export async function storeFile(store: string, relative: string): Promise<string
   return file;
 }
 
-async function currentSha(file: string): Promise<string | null> {
-  const content = await readFile(file).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
-  return content === null ? null : blobSha(content);
+/** `withFileLock` on a store file, a held lock answered as a 409 to retry. */
+function lockedStoreFile(file: string, rel: string, work: () => void): void {
+  try { withFileLock(file, work); }
+  catch (error) {
+    if (error instanceof BridgeError || !/could not acquire lock/.test(String((error as Error)?.message))) throw error;
+    throw new BridgeError(409, `${rel} is being written on this computer (its lock is held). Try again.`);
+  }
+}
+
+function currentShaSync(file: string): string | null {
+  try { return blobSha(readFileSync(file)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
 }
 
 const putSchema = z.object({ path: z.string().max(1024), content: z.string(), sha: z.string().regex(SHA).nullable().optional() });
@@ -211,11 +222,16 @@ export function putStoreFile(store: string, data: Json): Promise<Json> {
   if (content.length > MAX_FILE) throw new BridgeError(413, "This file is too large for the phone to write.");
   return serialized(async () => {
     const file = await storeFile(store, input.path);
-    if (await currentSha(file) !== (input.sha ?? null)) throw new BridgeError(409, `${input.path} changed on this computer.`);
-    await mkdir(path.dirname(file), { recursive: true });
-    const temporary = `${file}.phren-${process.pid}-${Date.now()}`;
-    await writeFile(temporary, content, { flag: "wx" });
-    await rename(temporary, file);
+    // Under the lock the CLI's writers take (`<file>.lock`), so a write of
+    // theirs cannot land between the sha check and the swap. withFileLock
+    // waits synchronously, so the work inside it is synchronous too.
+    lockedStoreFile(file, input.path, () => {
+      if (currentShaSync(file) !== (input.sha ?? null)) throw new BridgeError(409, `${input.path} changed on this computer.`);
+      mkdirSync(path.dirname(file), { recursive: true });
+      const temporary = `${file}.phren-${process.pid}-${Date.now()}`;
+      writeFileSync(temporary, content, { flag: "wx" });
+      renameSync(temporary, file);
+    });
     return { content: { sha: blobSha(content), path: input.path }, commit: { sha: blobSha(content) } };
   });
 }
@@ -224,8 +240,11 @@ export function deleteStoreFile(store: string, data: Json): Promise<Json> {
   const input = deleteSchema.parse(data);
   return serialized(async () => {
     const file = await storeFile(store, input.path);
-    if (await currentSha(file) !== input.sha) throw new BridgeError(409, `${input.path} changed on this computer.`);
-    await rm(file);
+    // The writers' lock across check and delete, as in putStoreFile.
+    lockedStoreFile(file, input.path, () => {
+      if (currentShaSync(file) !== input.sha) throw new BridgeError(409, `${input.path} changed on this computer.`);
+      unlinkSync(file);
+    });
     return { ok: true };
   });
 }
