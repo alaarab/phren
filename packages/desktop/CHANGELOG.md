@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Released Claude questions and served OpenCode questions appear as answer cards in chat.
+- Answering a pending question from a chat card works for Claude and OpenCode as well as Codex.
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.
 
 ## [0.1.7] - 2026-10-14

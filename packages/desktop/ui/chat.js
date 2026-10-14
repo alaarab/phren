@@ -412,6 +412,7 @@ export function openChat(el, computerName, child, opts = {}) {
         id: prompt && (prompt.toolUseId ?? prompt.id),
         questions: prompt && prompt.questions,
       })),
+      terminalQuestions: s.terminalPrompt?.questions,
       password: !!s.passwordPrompt,
     });
   }
