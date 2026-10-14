@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -38,6 +40,49 @@ afterEach(async () => {
 });
 
 describe("connection replacement", () => {
+  it.skipIf(process.platform === "win32")("keeps a new master's pin intact when a queued old-pin request runs", async () => {
+    await mkdir(".scratch", { recursive: true });
+    dir = await mkdtemp(path.resolve(".scratch/connection-review-"));
+    vi.stubEnv("PHREN_BRIDGE_HOME", dir);
+    const keyFile = path.join(dir, "key");
+    await writeFile(keyFile, "private A");
+    const old: Computer = { name: "Desk", local: false, address: "box", username: "me", port: 2222, keyFile, hostKey: "ssh-ed25519 AAAAPINA", server: "default" };
+    const current = { ...old, hostKey: "ssh-ed25519 AAAAPINB" };
+    const option = (args: string[], name: string) => args.find(arg => arg.startsWith(`${name}=`))!.slice(name.length + 1);
+    const args = sshArgs(current, "phren-hook v1 pipe");
+    const pinFile = option(args, "UserKnownHostsFile");
+    // SSH reads its pin after launch; a queued request can run in between.
+    const queued = sshArgs(old, "phren-hook v1 pipe");
+    expect(readFileSync(pinFile, "utf8")).toBe(`box ${current.hostKey}\n[box]:2222 ${current.hostKey}\n`);
+    expect(option(queued, "UserKnownHostsFile")).not.toBe(pinFile);
+    expect(path.basename(pinFile)).toBe(`known_hosts-${path.basename(option(args, "ControlPath")).replace(/-\d+$/, "")}`);
+    expect(statSync(pinFile).mode & 0o777).toBe(0o600);
+    const alias = sshArgs({ ...current, name: "Alias" }, "x", { slot: 2 });
+    expect(option(alias, "UserKnownHostsFile")).toBe(pinFile);
+  });
+
+  it.skipIf(process.platform === "win32")("disables agent authentication after private-key rotation with a stale sidecar", async () => {
+    await mkdir(".scratch", { recursive: true });
+    dir = await mkdtemp(path.resolve(".scratch/connection-review-"));
+    vi.stubEnv("PHREN_BRIDGE_HOME", dir);
+    vi.stubEnv("SSH_AUTH_SOCK", path.join(dir, "inherited-agent.sock"));
+    const keyFile = path.join(dir, "key");
+    await writeFile(keyFile, "private A");
+    await writeFile(`${keyFile}.pub`, "ssh-ed25519 AAAAKEYA");
+    const computer: Computer = { name: "Desk", local: false, address: "box", username: "me", keyFile, hostKey: "ssh-ed25519 AAAAPIN", server: "default" };
+    const original = controlPath(sshArgs(computer, "x"));
+    await writeFile(keyFile, "private B");
+    const args = sshArgs(computer, "phren-hook v1 pipe");
+    expect(controlPath(args)).not.toBe(original);
+    // Ask OpenSSH for its effective policy, without contacting a host.
+    const config = execFileSync("ssh", ["-G", ...args], { encoding: "utf8" });
+    expect(config).toMatch(/^identityagent none$/m);
+    expect(config).toMatch(/^identitiesonly yes$/m);
+    expect(config).toContain(`identityfile ${keyFile}\n`);
+    await writeFile(`${keyFile}.pub`, "ssh-ed25519 AAAAKEYB");
+    expect(controlPath(sshArgs(computer, "x"))).toBe(controlPath(args));
+  });
+
   it.skipIf(process.platform === "win32")("isolates valid host pins that collided in the old 32-bit master tag", async () => {
     await mkdir(".scratch", { recursive: true });
     dir = await mkdtemp(path.resolve(".scratch/connection-review-"));

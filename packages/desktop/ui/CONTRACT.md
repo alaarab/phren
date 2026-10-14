@@ -18,7 +18,11 @@ overview's version and capabilities while retaining its sessions.
 acquisition (60 s by default); cancellation removes the waiter. HTTP's 60 s
 deadline includes acquisition. SSH masters use a 96-bit SHA-256 socket name over the private key identity,
 full pinned host key and destination (username, address, port), recomputed from the private file
-on each use without trusting its `.pub` sidecar. Relinking closes old masters before
+on each use without trusting its `.pub` sidecar. `knownHostsPath(masterKey(computer))`
+returns the identity's pin file under `desktop-cm`; it is written atomically before SSH
+starts and never reused for another pin. Desktop-key SSH uses `IdentityAgent=none`,
+`IdentitiesOnly=yes` and `StrictHostKeyChecking=yes`; the owner's enrollment and
+revocation login still uses their own SSH configuration. Relinking closes old masters before
 verification using the control paths retained when they were opened, including
 when a key rotates at the same path; enrollment keeps the public key beside the private key as `.pub`.
 

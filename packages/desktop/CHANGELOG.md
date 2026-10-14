@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- SSH masters verify their own atomically written host pin and authenticate only with the desktop private key, never an inherited SSH agent.
+
 - SSH master sockets cover the full host pin and current private key with 96-bit isolation; replaced connections cannot overwrite the new computer's overview or capabilities.
 
 - Replacing a connection discards pending handshakes; relinking after key rotation closes the original SSH masters and refreshes the overview.

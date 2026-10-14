@@ -96,9 +96,9 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
     const [, desk] = await loadComputers();
     sshArgs(desk, "x");
-    await rm(knownHostsPath("Desk"));
+    await rm(knownHostsPath(masterKey(desk)));
     sshArgs(desk, "x");
-    expect(existsSync(knownHostsPath("Desk"))).toBe(true);
+    expect(existsSync(knownHostsPath(masterKey(desk)))).toBe(true);
   });
 
   it("pools channels by identity and destination, not by name", async () => {

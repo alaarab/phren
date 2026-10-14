@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { dump, load } from "js-yaml";
 import type { Computer, EnrollDesktop, LinkComputer, RevokeComputer } from "./contract.js";
 import { hookRequest } from "./hook-client.js";
-import { bridgeRoot, closeMasters, desktopKeyPath, knownHostsPath, loadComputers } from "./hosts.js";
+import { bridgeRoot, closeMasters, desktopKeyPath, knownHostsPath, loadComputers, masterKey } from "./hosts.js";
 
 const exec = promisify(execFile);
 const forcedCommand = 'command="sh ~/.local/share/phren/bridge/dispatch"';
@@ -149,7 +149,11 @@ export const revokeComputer: RevokeComputer = async name => {
   }
 
   await updateDesktopYaml(doc => removePeer(doc, name));
-  await rm(knownHostsPath(name), { force: true });
+  try { await rm(knownHostsPath(masterKey(target)), { force: true }); }
+  catch (error) {
+    // Revocation still works if the private key has already been removed.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   // Drop any ControlMaster still holding the revoked key, so the connection
   // dies even when the remote authorized_keys step failed.
   await closeMasters(target);

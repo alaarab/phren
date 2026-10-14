@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
@@ -68,7 +68,6 @@ function number(value: unknown, where: string): number {
   return value;
 }
 
-const written = new Map<string, string>();
 // Retain the argv used to open masters: key files may rotate before teardown.
 const masters = new Map<string, Map<string, string[]>>();
 const masterOwner = (c: Computer): string => JSON.stringify([bridgeRoot(), c.name, c.address, c.username, c.port ?? 22, c.keyFile, c.hostKey]);
@@ -82,19 +81,22 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
   const root = bridgeRoot();
   const port = c.port ?? 22;
   const controlDir = path.join(root, "desktop-cm");
-  const knownHosts = knownHostsPath(c.name);
-  // Keep each computer's pinned known_hosts under the bridge folder.
+  // Compute once so the pin file and socket always have the same identity.
+  const identity = masterKey(c);
+  const knownHosts = knownHostsPath(identity);
   mkdirSync(controlDir, { recursive: true, mode: 0o700 });
-  // Revoke deletes the file without touching this cache, so a relink under the
-  // same name and host key must still rewrite it.
-  if (written.get(c.name) !== c.hostKey || !existsSync(knownHosts)) {
+  // Each identity has its own pin; a queued old Computer cannot overwrite it.
+  // Publish the complete file atomically before any SSH process can read it.
+  if (!existsSync(knownHosts)) {
     const lines = [`${c.address} ${c.hostKey}`];
     if (port !== 22) lines.push(`[${c.address}]:${port} ${c.hostKey}`);
-    writeFileSync(knownHosts, `${lines.join("\n")}\n`, { mode: 0o600 });
-    chmodSync(knownHosts, 0o600);
-    written.set(c.name, c.hostKey);
+    const temporary = `${knownHosts}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temporary, `${lines.join("\n")}\n`, { mode: 0o600, flag: "wx" });
+      renameSync(temporary, knownHosts);
+    } finally { rmSync(temporary, { force: true }); }
   }
-  const socketPath = WINDOWS ? undefined : controlPath(c, opts?.slot ?? 0);
+  const socketPath = WINDOWS ? undefined : path.join(controlSocketDir(), `${identity}-${opts?.slot ?? 0}`);
   if (socketPath) {
     const owner = masterOwner(c);
     const opened = masters.get(owner) ?? new Map<string, string[]>();
@@ -116,6 +118,7 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
     "-o", "UpdateHostKeys=no",
     "-i", c.keyFile,
     "-o", "IdentitiesOnly=yes",
+    "-o", "IdentityAgent=none",
     "-o", "BatchMode=yes",
     "-o", "ForwardAgent=no",
     "-o", "ClearAllForwardings=yes",
@@ -196,12 +199,8 @@ function controlSocketDir(): string {
   return dir;
 }
 
-/** A filesystem-safe fragment of a display name. */
-function safeName(name: string): string {
-  return name.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 100) || "computer";
-}
-
-/** Where this computer's pinned known_hosts lives (removed on revoke). */
-export function knownHostsPath(name: string): string {
-  return path.join(bridgeRoot(), "desktop-cm", `known_hosts-${safeName(name)}`);
+/** Where a master's pinned known_hosts lives (removed on revoke).
+ * Pass the identity returned by masterKey, never a computer display name. */
+export function knownHostsPath(identity: string): string {
+  return path.join(bridgeRoot(), "desktop-cm", `known_hosts-${identity}`);
 }
