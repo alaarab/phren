@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.9] - unreleased
 
+- Narrow schedule editors wrap conflict notices and timing controls inside the scrolling body; unchanged schedule refreshes preserve list buttons and focus.
+- Schedule edits and Pause/Resume use the Hook's merge route when supported, preserving newer fields and showing the latest version after a conflict; removed schedules close the editor and validation errors stay on the form.
 - Settings › Computers shows each Hook's git writes without a repository check, counted by client since the Hook started, and identifies Hooks too old to report. Reads refresh when the page opens.
 - Leaving Settings › Computers cancels pending health reads; reopening starts fresh without waiting for an old request to time out.
 - Narrow Computers cards put their buttons below the text and give git-write diagnostics the full row, keeping versions and actions from overlapping.

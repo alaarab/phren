@@ -66,14 +66,14 @@
 .sch-overlay { position: fixed; inset: 0; z-index: 80; display: flex; background: rgba(0, 0, 0, 0.5); }
 .sch-overlay.sheet { align-items: flex-start; justify-content: center; padding-top: 8vh; }
 .sch-overlay.drawer { justify-content: flex-end; }
-.sch-sheet { width: min(620px, 92vw); max-height: 84vh; overflow: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 18px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+.sch-sheet { display: flex; flex-direction: column; width: min(620px, 92vw); max-height: 84vh; overflow: hidden; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 18px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
 .sch-drawer { width: min(520px, 92vw); height: 100%; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border-strong); }
-.sch-sheet-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.sch-sheet-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .sch-sheet-title { font-size: 15px; font-weight: 600; color: var(--text); }
-.sch-sheet-body { display: grid; gap: 16px; padding: 16px 20px; }
+.sch-sheet-body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; overflow-y: auto; gap: 16px; padding: 16px 20px; }
 .sch-sheet-body.scroll { overflow-y: auto; }
 
-.sch-field { display: grid; gap: 6px; }
+.sch-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .sch-field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .sch-input, .sch-textarea, .sch-select { width: 100%; background: var(--sunken); border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text); font: inherit; font-size: 13px; padding: 8px 10px; }
 .sch-textarea { min-height: 120px; resize: vertical; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
@@ -81,9 +81,9 @@
 .sch-fields-2 { display: flex; gap: 12px; }
 .sch-fields-2 > * { flex: 1; min-width: 0; }
 .sch-hint { color: var(--muted); font-size: 12px; }
-.sch-invalid { color: var(--danger); font-size: 12px; }
+.sch-invalid { min-width: 0; white-space: normal; overflow-wrap: anywhere; color: var(--danger); font-size: 12px; line-height: 1.5; }
 
-.sch-segments { display: inline-flex; gap: 2px; padding: 3px; background: var(--raised); border-radius: 999px; }
+.sch-segments { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; background: var(--raised); border-radius: 999px; }
 .sch-segment { border: 0; background: transparent; color: var(--muted); font: 500 12.5px system-ui; padding: 5px 14px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
 .sch-segment:hover { color: var(--text-2); }
 .sch-segment.selected { background: var(--card); color: var(--accent); }

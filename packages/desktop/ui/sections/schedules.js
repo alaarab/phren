@@ -2,11 +2,12 @@
 // result, Run now, history and editor, plus a "Tonight" strip of the next
 // runs. Ports the phone's Schedules screen (Features/Schedules) and the Hook's
 // schedule-format.ts: the five timing forms, next-run maths, the small
-// schedules.yaml surface and the store compare-and-swap write.
+// schedules.yaml surface and capability-gated schedule merges.
 import { hookGet, hookPost } from "../api.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { store } from "../shell/store.js";
 import { readAhead } from "../shell/read-ahead.js";
+import { updateSchedule } from "../schedule-update.js";
 
 const CSS_HREF = "./sections/schedules.css";
 const MAX_NAME = 80;
@@ -360,11 +361,12 @@ export function mountSchedules(root) {
         const key = `${schedule.project}\u001f${schedule.id}`;
         let entry = entries.get(key);
         if (!entry) {
-          entry = { key, project: schedule.project, id: schedule.id, schedule, runtime: null, ownerOnline: false, known: false };
+          entry = { key, project: schedule.project, id: schedule.id, schedule, storeComputer: result.computer, runtime: null, ownerOnline: false, known: false };
           entries.set(key, entry);
         }
         if (schedule.owned) {
           entry.schedule = schedule;
+          entry.storeComputer = result.computer;
           entry.runtime = { nextRun: schedule.nextRun, lastRun: schedule.lastRun, lastRuns: schedule.lastRuns, running: schedule.running };
         }
       }
@@ -442,7 +444,25 @@ export function mountSchedules(root) {
     });
   }
 
+  let listSignature = null;
+  const timeLabels = new Map();
   function renderList() {
+    // Polls return fresh objects even when nothing changed. Keep action buttons
+    // attached (and focused) until schedule data or its computer label changes.
+    const signature = JSON.stringify([state.loadedOnce, [...state.entries.values()]
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map((entry) => [entry, displayName(ownerName(entry.schedule))])]);
+    if (signature === listSignature) {
+      // Relative times still age without detaching a row someone is using.
+      for (const [key, labels] of timeLabels) {
+        const entry = state.entries.get(key);
+        labels.next.textContent = nextText(entry).text;
+        if (labels.age) labels.age.textContent = relative(new Date(labels.when));
+      }
+      return;
+    }
+    listSignature = signature;
+    timeLabels.clear();
     if (!state.loadedOnce) { listEl.replaceChildren(el("div", "sch-empty", "Loading schedules…")); return; }
     if (!state.entries.size) {
       listEl.replaceChildren(el("div", "sch-empty", "No schedules yet. Create one with New schedule."));
@@ -535,12 +555,18 @@ export function mountSchedules(root) {
 
     const meta = el("div", "sch-row-meta");
     const next = nextText(entry);
-    meta.append(el("span", `sch-next${next.offline ? " offline" : ""}`, next.text));
+    const labels = { next: el("span", `sch-next${next.offline ? " offline" : ""}`, next.text) };
+    timeLabels.set(entry.key, labels);
+    meta.append(labels.next);
     const chip = chipFor(entry);
     if (chip) {
       meta.append(el("span", `sch-chip ${chip.cls}`, chip.label));
       const when = entry.runtime?.lastRun?.finishedAt ?? entry.runtime?.lastRun?.startedAt;
-      if (when && !entry.runtime?.running) meta.append(el("span", "sch-age", relative(new Date(when))));
+      if (when && !entry.runtime?.running) {
+        labels.when = when;
+        labels.age = el("span", "sch-age", relative(new Date(when)));
+        meta.append(labels.age);
+      }
     }
     row.append(meta);
 
@@ -575,7 +601,19 @@ export function mountSchedules(root) {
 
   async function toggleEnabled(entry) {
     const next = { ...entry.schedule, enabled: !entry.schedule.enabled, updatedAt: new Date().toISOString() };
+    const result = await mergeSchedule(entry, entry.schedule, next);
+    if (result) {
+      await loadAll();
+      if (result.latest) openEditor({ ...entry, schedule: result.latest }, result.error);
+      else if (result.error) setError(result.error);
+      return;
+    }
     if (await persistSchedule(entry.project, entry.id, next, ownerName(entry.schedule), entry.schedule)) await loadAll();
+  }
+
+  async function mergeSchedule(entry, before, after) {
+    if (!entry || !(await store.capabilities(entry.storeComputer)).scheduleUpdate) return null;
+    return updateSchedule(entry.storeComputer, entry.project, entry.schedule, before, after);
   }
 
   /** The computer to edit a project's store through: the preferred one when online. */
@@ -806,10 +844,12 @@ export function mountSchedules(root) {
     return base;
   }
 
-  function openEditor(entry) {
+  function openEditor(entry, notice = "") {
     form = defaultForm(entry);
-    // The entry as opened: the daemon refuses the save if the file's copy changed since.
+    // Keep the stored revision for merges and the full entry for legacy saves.
     form.original = entry ? JSON.parse(JSON.stringify(entry.schedule)) : null;
+    // Compare against the same form projection so defaults and formatting are not edits.
+    const before = formSchedule();
     const editing = Boolean(entry);
     const overlay = el("div", "sch-overlay sheet");
     const sheet = el("div", "sch-sheet");
@@ -896,8 +936,8 @@ export function mountSchedules(root) {
       const message = timing ?? (form.name.trim() ? null : "Name is required.")
         ?? (form.prompt.length > MAX_PROMPT ? `Prompt is too long (${form.prompt.length}/${MAX_PROMPT}).` : null)
         ?? (form.project ? null : "Choose a project.") ?? (form.computer ? null : "Choose a computer.");
-      error.hidden = !message;
-      error.textContent = message ?? "";
+      error.textContent = message ?? notice;
+      error.hidden = !error.textContent;
       save.disabled = Boolean(message) || !form.project || !form.computer;
     }
 
@@ -979,7 +1019,25 @@ export function mountSchedules(root) {
       const invalid = validateSchedule(schedule);
       if (invalid) { error.hidden = false; error.textContent = invalid; return; }
       void (async () => {
+        save.disabled = true;
+        const result = await mergeSchedule(entry, before, schedule);
+        if (result) {
+          if (result.latest) {
+            close();
+            openEditor({ ...entry, schedule: result.latest }, result.error);
+          } else if (result.saved || result.removed) {
+            close();
+            await loadAll();
+            if (result.error) setError(result.error);
+          } else {
+            error.hidden = false;
+            error.textContent = result.error;
+            save.disabled = false;
+          }
+          return;
+        }
         if (await persistSchedule(form.project, schedule.id, schedule, form.computer, form.original)) { close(); await loadAll(); }
+        else save.disabled = false;
       })();
     });
 
@@ -1040,7 +1098,7 @@ export function mountSchedules(root) {
 
   let onlineSig = "";
   const unsubscribe = store.subscribe((merged) => {
-    const sig = (merged?.computers ?? []).map((c) => `${c.computer}:${c.state}`).join(",");
+    const sig = (merged?.computers ?? []).map((c) => `${c.computer}:${c.state}`).sort().join(",");
     if (sig === onlineSig) return;
     onlineSig = sig;
     // Hidden, the next show() reads; this one only follows computers coming and going while open.
