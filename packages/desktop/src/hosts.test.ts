@@ -2,7 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadComputers, masterExitArgs, sshArgs } from "./hosts.js";
+import { existsSync } from "node:fs";
+import { knownHostsPath, loadComputers, masterExitArgs, masterKey, sshArgs } from "./hosts.js";
 
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 let root: string;
@@ -83,6 +84,23 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     // Teardown targets the exact master each identity's channels used.
     expect(controlPath(masterExitArgs(desk, 1))).toBe(controlPath(sshArgs(desk, "x", { slot: 1 })));
     expect(controlPath(masterExitArgs(other, 1))).toBe(controlPath(sshArgs(other, "x", { slot: 1 })));
+  });
+
+  it("rewrites the pinned known_hosts after revoke deleted it", async () => {
+    await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
+    const [, desk] = await loadComputers();
+    sshArgs(desk, "x");
+    await rm(knownHostsPath("Desk"));
+    sshArgs(desk, "x");
+    expect(existsSync(knownHostsPath("Desk"))).toBe(true);
+  });
+
+  it("pools channels by identity and destination, not by name", async () => {
+    await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
+    const [, desk] = await loadComputers();
+    expect(masterKey({ ...desk, name: "Alias" })).toBe(masterKey(desk));
+    expect(masterKey({ ...desk, keyFile: path.join(root, "other") })).not.toBe(masterKey(desk));
+    expect(masterKey({ ...desk, port: 22 })).not.toBe(masterKey(desk));
   });
 
   it("refuses the local computer", () => {

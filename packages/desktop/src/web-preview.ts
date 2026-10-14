@@ -11,6 +11,13 @@ import type { Computer } from "./contract.js";
 import { sshArgs } from "./hosts.js";
 
 const IDLE_MS = 30 * 60_000;
+const MAX_HEAD = 16 * 1024;
+
+/** Whether a request head names exactly `127.0.0.1:<port>` as its Host. Exported for tests. */
+export function hostMatches(head: string, port: number): boolean {
+  const hosts = head.split("\r\n").slice(1).filter((line) => /^host:/i.test(line));
+  return hosts.length === 1 && hosts[0].slice(5).trim().toLowerCase() === `127.0.0.1:${port}`;
+}
 const SWEEP_MS = 60_000;
 
 /** One open preview, the shape `/api/previews` answers with. */
@@ -31,6 +38,7 @@ class Relay {
   private active = 0;
   private readonly sockets = new Set<Socket>();
   private readonly server: Server;
+  private localPort = 0;
 
   constructor(readonly computer: Computer, readonly port: number) {
     this.server = createServer((socket) => this.handle(socket));
@@ -42,7 +50,8 @@ class Relay {
       this.server.listen(0, "127.0.0.1", () => {
         this.server.off("error", reject);
         const address = this.server.address();
-        resolve(typeof address === "object" && address ? address.port : 0);
+        this.localPort = typeof address === "object" && address ? address.port : 0;
+        resolve(this.localPort);
       });
     });
   }
@@ -51,24 +60,54 @@ class Relay {
     this.active += 1;
     this.lastActiveAt = Date.now();
     this.sockets.add(socket);
+    // Check the first request's Host before connecting anything: reached as
+    // localhost:<port>, the browser would send the app's localhost cookie, which
+    // must never be relayed to the previewed server. Browsers pool connections
+    // per host and port, so one connection never carries both names.
+    let head = Buffer.alloc(0);
+    const release = (): void => {
+      if (!this.sockets.delete(socket)) return;
+      this.active -= 1;
+      this.lastActiveAt = Date.now();
+    };
+    const onEarlyClose = (): void => release();
+    const onHead = (chunk: Buffer): void => {
+      head = Buffer.concat([head, chunk]);
+      const end = head.indexOf("\r\n\r\n");
+      if (end < 0 && head.length < MAX_HEAD) return;
+      socket.off("data", onHead);
+      socket.off("close", onEarlyClose);
+      socket.pause();
+      if (end < 0 || !hostMatches(head.subarray(0, end).toString("latin1"), this.localPort)) {
+        socket.end("HTTP/1.1 421 Misdirected Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        socket.on("close", release);
+        return;
+      }
+      this.relay(socket, head, release);
+    };
+    socket.on("error", () => socket.destroy());
+    socket.on("close", onEarlyClose);
+    socket.on("data", onHead);
+  }
+
+  private relay(socket: Socket, head: Buffer, release: () => void): void {
     let remote: Duplex;
     try {
       remote = this.connect();
     } catch {
-      this.sockets.delete(socket);
-      this.active -= 1;
+      release();
       socket.destroy();
       return;
     }
     socket.on("error", () => remote.destroy());
     remote.on("error", () => socket.destroy());
     socket.on("close", () => {
-      this.sockets.delete(socket);
-      this.active -= 1;
-      this.lastActiveAt = Date.now();
+      release();
       remote.destroy();
     });
+    remote.write(head);
     socket.pipe(remote).pipe(socket);
+    socket.resume();
   }
 
   private connect(): Duplex {

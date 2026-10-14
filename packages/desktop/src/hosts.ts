@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
@@ -82,7 +82,9 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
   const knownHosts = knownHostsPath(c.name);
   // The master socket and pinned known_hosts live together; %C hashes the connection tuple.
   mkdirSync(controlDir, { recursive: true, mode: 0o700 });
-  if (written.get(c.name) !== c.hostKey) {
+  // Revoke deletes the file without touching this cache, so a relink under the
+  // same name and host key must still rewrite it.
+  if (written.get(c.name) !== c.hostKey || !existsSync(knownHosts)) {
     const lines = [`${c.address} ${c.hostKey}`];
     if (port !== 22) lines.push(`[${c.address}]:${port} ${c.hostKey}`);
     writeFileSync(knownHosts, `${lines.join("\n")}\n`, { mode: 0o600 });
@@ -140,6 +142,14 @@ export async function closeMasters(c: Computer): Promise<void> {
   } catch {
     // A missing address or ssh must never fail teardown.
   }
+}
+
+/** What one set of ControlMaster slots is shared by: the identity and the
+ * destination, not the display name, so two names for one host and key share
+ * a channel pool just as they share masters. */
+export function masterKey(c: Computer): string {
+  if (c.local) return c.name;
+  return `${c.keyFile ?? ""}\n${c.username ?? ""}@${c.address ?? ""}:${c.port ?? 22}`;
 }
 
 /** The ControlMaster socket path for one slot. A hash of the key file path
