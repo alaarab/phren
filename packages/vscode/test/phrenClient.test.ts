@@ -614,6 +614,23 @@ describe("PhrenClient: large stores", () => {
     expect(raw.data.total).toBe(50_000);
   });
 
+  it("getFindings never returns more than the cap when pages are uneven", async () => {
+    const { client, proc } = await readyClient();
+    let calls = 0;
+    proc.stdin.write = vi.fn((data: string) => {
+      const msg = JSON.parse(String(data).trim());
+      if (msg.method !== "tools/call") return true;
+      const offset = (msg.params.arguments.offset as number | undefined) ?? 0;
+      const size = ++calls === 1 ? 12 : 200;
+      const findings = Array.from({ length: size }, (_, i) => ({ id: `F${offset + i}`, text: "x" }));
+      const result = textResult({ ok: true, data: { findings, total: 5000, next_offset: offset + size } });
+      queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, result }));
+      return true;
+    });
+    const raw = (await client.getFindings("big")) as { data: { findings: unknown[] } };
+    expect(raw.data.findings).toHaveLength(1000);
+  });
+
   it("getFindings makes a single call when the first page is the whole project", async () => {
     const { client, proc } = await readyClient();
     let calls = 0;

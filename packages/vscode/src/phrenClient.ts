@@ -83,7 +83,7 @@ export class PhrenClient {
   private static readonly RECONNECT_DELAY_MS = 2000;
   private static readonly FINDINGS_PAGE = 200;
   private static readonly MAX_FINDINGS = 1000;
-  private static readonly MAX_PROJECT_PAGES = 40;
+  private static readonly MAX_PROJECT_PAGES = 200;
 
   private buffer = Buffer.alloc(0);
   private nextId = 1;
@@ -229,7 +229,7 @@ export class PhrenClient {
       findings.push(...rows);
       next = typeof pageData?.next_offset === "number" && pageData.next_offset > next ? pageData.next_offset : null;
     }
-    return { ...asRecord(first), data: { ...firstData, findings } };
+    return { ...asRecord(first), data: { ...firstData, findings: findings.slice(0, PhrenClient.MAX_FINDINGS) } };
   }
 
   async getNotes(project: string, date?: string): Promise<unknown> {
