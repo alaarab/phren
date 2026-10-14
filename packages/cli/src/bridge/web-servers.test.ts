@@ -11,7 +11,7 @@ vi.mock("node:child_process", async importOriginal => ({
   execFile: (...args: unknown[]) => execFileMock(...args),
 }));
 
-const { webServers } = await import("./projects.js");
+let webServers: typeof import("./projects.js").webServers;
 
 type Answer = { stdout: string } | Error;
 function answer(byTool: Record<string, Answer>) {
@@ -62,6 +62,8 @@ describe("webServers", () => {
   let server: Server;
   let port = 0;
   beforeEach(async context => {
+    vi.resetModules();
+    ({ webServers } = await import("./projects.js"));
     const nonce = randomUUID();
     server = createServer((_req, res) => {
       res.setHeader("content-type", "text/html"); res.setHeader("x-test-nonce", nonce);
@@ -78,6 +80,7 @@ describe("webServers", () => {
   afterEach(async () => {
     if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
     execFileMock.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("reads listeners from ss when lsof is not installed", async () => {
@@ -100,6 +103,45 @@ describe("webServers", () => {
     answer({ ss: { stdout: listeners.join("\n") } });
     const found = await webServers();
     expect(found.map(server => server.port)).toContain(port);
+  });
+
+  it("shares cold scans and serves cached listeners while one stale refresh runs", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let complete!: (includeServer?: boolean) => void;
+    execFileMock.mockImplementation((file: string, _args: string[], _options: unknown, callback: (error: Error | null, result: { stdout: string; stderr: string }) => void) => {
+      complete = (includeServer = false) => callback(null, { stdout: includeServer
+        ? (file.endsWith("lsof") ? `p42\ncbun\nn*:${port}\n` : ssLine(port, "bun", 42)) : "", stderr: "" });
+      return { on() {} };
+    });
+    const cold = [webServers(), webServers()];
+    await vi.waitFor(() => expect(execFileMock).toHaveBeenCalledTimes(1));
+    complete();
+    expect(await Promise.all(cold)).toEqual([[], []]);
+    expect(await webServers()).toEqual([]);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+
+    now += 10_001;
+    expect(await webServers()).toEqual([]);
+    expect(await webServers()).toEqual([]);
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    complete(true);
+    await vi.waitFor(async () => expect(await webServers()).toMatchObject([{ port, name: "Acme & Co" }]));
+    now += 300_001;
+    let settled = false;
+    const expired = webServers().then(value => { settled = true; return value; });
+    await vi.waitFor(() => expect(execFileMock).toHaveBeenCalledTimes(3));
+    expect(settled).toBe(false);
+    complete();
+    expect(await expired).toEqual([]);
+  });
+
+  it("retries a failed scan without caching its error", async () => {
+    answer({});
+    await expect(webServers()).rejects.toThrow(/install lsof/);
+    answer({ ss: { stdout: "" }, lsof: { stdout: "" } });
+    expect(await webServers()).toEqual([]);
+    expect(execFileMock).toHaveBeenCalledTimes(3);
   });
 
   it("reports a clear error when neither tool exists", async () => {

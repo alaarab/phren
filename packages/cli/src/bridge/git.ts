@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
-import { git, gitHead, gitRoot, withGitReadDeadline } from "./projects.js";
+import { git, gitHead, gitRoot, withGitReadDeadline, withIndependentGitReadDeadline } from "./projects.js";
 import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
+import { LookupCache } from "./lookup-cache.js";
 export { checkRollup, checkRuns } from "./git-hosts.js";
 
 
@@ -239,6 +240,13 @@ export async function gitBranches(cwd: string): Promise<Json> {
   return { current, local, remote };
 }
 
+const pullsCache = new LookupCache<Json>(30_000, 300_000, 64, value => value.available === true);
+
+/** Invalidate every branch/host lookup for this checkout after a Hook write. */
+export function invalidatePulls(root: string): void {
+  pullsCache.invalidate(key => key.startsWith(root + "\0"));
+}
+
 /** Open pull or merge requests and the checked-out branch's own (any state)
  * with its checks, from whichever host the remote is on (git-hosts.ts). A
  * host that cannot answer (a missing CLI, a stubbed provider, an unknown
@@ -248,8 +256,11 @@ export async function gitPulls(cwd: string): Promise<Json> {
   const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
   const host = await detectHost(root, branch);
   const provider = providerFor(host);
-  const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
-  return { ...list, branch: branch || null, host };
+  const key = root + "\0" + JSON.stringify([branch, host]);
+  return pullsCache.get(key, () => withIndependentGitReadDeadline(async () => {
+    const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
+    return { ...list, branch: branch || null, host };
+  }));
 }
 
 /** A repo-relative tree path, or the repository root for `""`. */
@@ -282,7 +293,7 @@ type TreeEntry = { name: string; path: string; kind: "dir" | "file"; status?: st
 type TreeSnapshot = { version: string; levels: Map<string, TreeEntry[]> };
 const treeCache = new Map<string, { head: string; expires: number; snapshot: Promise<TreeSnapshot> }>();
 /** Drop the cached tree after a write (commit, push) outside this module. */
-export function invalidateTree(root: string): void { treeCache.delete(root); }
+export function invalidateTree(root: string): void { treeCache.delete(root); invalidatePulls(root); }
 const TREE_TTL_MS = 2_000;
 
 /** Build directory children once, without diff hunks, line counts or upstream walks. */
