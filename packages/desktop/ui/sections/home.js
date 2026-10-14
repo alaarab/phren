@@ -2,11 +2,12 @@
 // keyboard answers), the turns that ended since you left, what is working (with each agent's activity line), the
 // checks on those sessions' pull requests, recent returns from dispatched
 // workers, and how every computer is doing.
-import { hookGet, hookPost, targetQuery } from "../api.js";
+import { hookGet, hookPost } from "../api.js";
 import { needsYou, projectOf, sessions, store } from "../shell/store.js";
 import { showSection } from "../shell/sections.js";
 import { checksStrip, followChecks } from "../shell/ci-watch.js";
 import { checksWord } from "../git-review.js";
+import { approvals } from "../shell/approvals.js";
 import { away } from "../shell/away.js";
 import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
 import { backgroundLabel, stallLabel, stalledMinutes } from "../shell/stalls.js";
@@ -94,8 +95,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   let visible = false;
   let selected = 0;
   let pollTimer = null;
-  const approvals = new Map(); // row.key -> { actionId, summary }
-  const watchers = new Map(); // row.key -> WebSocket
   const receipts = new Map(); // computer -> [{ receipt, computer }]
   const runs = new Map(); // computer -> finished scheduled runs
   const seen = loadSeen();
@@ -119,7 +118,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   }
 
   function needsSub(row) {
-    const info = approvals.get(row.key);
+    const info = approvals.approval(row.key);
     if (info?.summary) return el("span", "home-row-sub", info.summary);
     return replySub(row.child);
   }
@@ -208,7 +207,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     if (selected >= rows.length) selected = Math.max(0, rows.length - 1);
     fill("needs", rows.map(needsRow), "Nothing needs you.");
     block("needs").querySelector(".home-keys").hidden = !rows.length;
-    syncWatchers(rows);
   }
 
   function renderWorking() {
@@ -536,52 +534,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     }
   }
 
-  // ---- approval watchers ---------------------------------------------
-
-  function summaryOf(approval) {
-    const text = approval.title || approval.command || approval.reason || approval.request || approval.tool;
-    return text ? String(text).slice(0, 160) : "Approval required";
-  }
-
-  function watchApproval(row) {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${location.host}/hosts/${encodeURIComponent(row.computer)}/v1/status?${targetQuery(row.child.target)}`);
-    ws.addEventListener("message", (event) => {
-      let frame;
-      try { frame = JSON.parse(event.data); } catch { return; }
-      const approval = frame?.agentStatus?.pendingApproval;
-      if (approval?.actionId) approvals.set(row.key, { actionId: String(approval.actionId), summary: summaryOf(approval) });
-      else approvals.delete(row.key);
-      renderNeeds();
-      // The menu bar icon offers Allow / Deny for the approvals known here.
-      document.dispatchEvent(new CustomEvent("phren:approvals-changed"));
-    });
-    ws.addEventListener("close", () => {
-      if (watchers.get(row.key) === ws) { watchers.delete(row.key); approvals.delete(row.key); }
-    });
-    return ws;
-  }
-
-  function syncWatchers(rows) {
-    const wanted = new Map();
-    for (const row of rows) if (row.child.approvalPending && row.child.target) wanted.set(row.key, row);
-    for (const [key, ws] of watchers) {
-      if (wanted.has(key)) continue;
-      try { ws.close(); } catch { /* already closing */ }
-      watchers.delete(key); approvals.delete(key);
-    }
-    for (const [key, row] of wanted) if (!watchers.has(key)) watchers.set(key, watchApproval(row));
-  }
-
-  async function answer(row, decision, scope) {
-    const info = approvals.get(row.key);
-    if (!info || !row.child.target) return;
-    try {
-      const mod = await import("../chat/answers.js");
-      await mod.answerApproval(row.computer, row.child.target, { actionId: info.actionId, decision, ...(scope ? { scope } : {}) });
-    } catch { /* the answers module is not mounted yet */ }
-  }
-
   // ---- receipts polling ----------------------------------------------
 
   async function pollReceipts() {
@@ -597,6 +549,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     }));
     receipts.clear();
     for (const [computer, list] of answers) receipts.set(computer, list);
+    if (!visible) return;
     // Finished runs of the schedules each computer owns.
     const scheduled = await Promise.all(online.map(async (c) => {
       try {
@@ -628,12 +581,13 @@ export function mountHome(root, { openSession, openPulls } = {}) {
 
   function startPolling() {
     if (pollTimer !== null) return;
+    polledFor = (merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
     void pollReceipts();
     pollTimer = setInterval(() => { void pollReceipts(); }, RETURN_POLL_MS);
   }
 
   function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
   }
 
   // ---- render and keys -----------------------------------------------
@@ -664,15 +618,14 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     }
     const row = rows[selected];
     if (!row) return;
-    const has = approvals.has(row.key);
-    if (event.key === "Enter" && has) { void answer(row, "approve"); event.preventDefault(); }
-    else if (event.key.toLowerCase() === "p" && has) { void answer(row, "approve", "project"); event.preventDefault(); }
-    else if (event.key.toLowerCase() === "d" && has) { void answer(row, "deny"); event.preventDefault(); }
+    const has = !!approvals.approval(row.key);
+    if (event.key === "Enter" && has) { void approvals.answerKey(row.key, "approve"); event.preventDefault(); }
+    else if (event.key.toLowerCase() === "p" && has) { void approvals.answerKey(row.key, "approve", "project"); event.preventDefault(); }
+    else if (event.key.toLowerCase() === "d" && has) { void approvals.answerKey(row.key, "deny"); event.preventDefault(); }
     else if (event.key.toLowerCase() === "o") { open(row.computer, row.child); event.preventDefault(); }
   }
 
-  // Poll as soon as the set of online computers changes (the first poll at mount
-  // usually runs before the overview has arrived and finds no computers).
+  // Poll when online computers change while visible; show() reads on every visit.
   let polledFor = "";
   const unsubscribe = store.subscribe((value) => {
     merged = value;
@@ -680,29 +633,30 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     const online = (value?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
     if (visible && online && online !== polledFor) { polledFor = online; void pollReceipts(); }
   });
-  document.addEventListener("keydown", onKeydown);
-  visible = true;
-  startPolling();
-  followPulls();
+  const unsubscribeApprovals = approvals.subscribe(renderNeeds);
 
   return {
-    /** The pending approval Home is watching for a session key: `{ actionId, summary }` or undefined. */
-    approval(key) { return approvals.get(key); },
-    /** Answer a session's pending approval by key (the menu bar's Allow / Deny). */
-    answerKey(key, decision) {
-      const row = needsYou(merged).find((r) => r.key === key);
-      return row ? answer(row, decision) : Promise.resolve();
+    show() {
+      if (visible) return;
+      visible = true;
+      startPolling();
+      followPulls();
+      document.addEventListener("keydown", onKeydown);
     },
-    show() { visible = true; startPolling(); followPulls(); },
-    hide() { visible = false; stopPolling(); unfollowPulls(); },
+    hide() {
+      visible = false;
+      stopPolling();
+      unfollowPulls();
+      document.removeEventListener("keydown", onKeydown);
+    },
     destroy() {
+      visible = false;
       stopPolling();
       unfollowPulls();
       unsubscribe();
       unsubscribeAway();
+      unsubscribeApprovals();
       document.removeEventListener("keydown", onKeydown);
-      for (const ws of watchers.values()) { try { ws.close(); } catch { /* already closing */ } }
-      watchers.clear();
     },
   };
 }
