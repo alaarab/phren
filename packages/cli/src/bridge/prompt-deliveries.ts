@@ -214,6 +214,8 @@ export class PromptDeliveries {
    * message settled with is not offered again. `pass` carries the entries still
    * unclaimed within one observe. */
   private async taken(record: Record, pass: Map<string, number[]>): Promise<boolean> {
+    // Only Claude's transcript says which entry a message settled with; Codex keeps the any-match check.
+    if (record.source !== "claude") return (await this.landed(record).catch(() => [] as number[])).length > 0;
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
     const open = this.records.filter(other => same(other) && (other.state === "typed" || other.state === "queued")).sort((a, b) => a.at - b.at);
     if (open[0] !== record) return false;
@@ -259,7 +261,7 @@ export class PromptDeliveries {
         record.idleSince = undefined;
         // A message the agent took into its running turn (Claude's mid-turn steer) never reaches
         // its UserPromptSubmit hook; its transcript is the only place that says so.
-        if (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS) {
+        if (record.source === "claude" && (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS)) {
           record.checkedAt = now;
           if (await this.taken(record, pass)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); }
         }
@@ -278,24 +280,31 @@ export class PromptDeliveries {
 /** The byte offsets of the user rows with these words that reached the conversation's transcript
  * after the message was typed: the agent took it without its hook saying so
  * (a mid-turn steer). Reads at most the last 512 KiB. */
+/** The byte offsets (in the file, `start` being the buffer's own offset) of the rows in `buffer`
+ * whose user text has `record`'s words, newest first. One offset per row. */
+export function matchingOffsets(buffer: Buffer, start: number, record: { hash: string; at: number }): number[] {
+  const entries: number[] = [];
+  const lines = buffer.toString("utf8").split("\n");
+  let offset = start + buffer.length;
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index];
+    offset -= Buffer.byteLength(line) + (index < lines.length - 1 ? 1 : 0);
+    let row: Json;
+    try { row = object(JSON.parse(line)); } catch { continue; }
+    const stamp = Date.parse(String(row.timestamp ?? ""));
+    if (Number.isFinite(stamp) && stamp < record.at - 5_000) break;
+    // One entry per row, even when its content repeats the words.
+    if (userTexts(row).some(text => promptHash(text) === record.hash)) entries.push(offset);
+  }
+  return entries;
+}
+
 async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<number[]> {
   const file = await open(await transcriptPath(record.source, record.session), "r");
   try {
     const size = (await file.stat()).size, start = Math.max(0, size - 524_288), buffer = Buffer.alloc(size - start);
     await file.read(buffer, 0, buffer.length, start);
-    const entries: number[] = [];
-    const lines = buffer.toString("utf8").split("\n");
-    let offset = start + buffer.length;
-    for (let index = lines.length - 1; index >= 0; index--) {
-      const line = lines[index];
-      offset -= Buffer.byteLength(line) + (index < lines.length - 1 ? 1 : 0);
-      let row: Json;
-      try { row = object(JSON.parse(line)); } catch { continue; }
-      const stamp = Date.parse(String(row.timestamp ?? ""));
-      if (Number.isFinite(stamp) && stamp < record.at - 5_000) break;
-      for (const text of userTexts(row)) if (promptHash(text) === record.hash) entries.push(offset);
-    }
-    return entries;
+    return matchingOffsets(buffer, start, record);
   } finally { await file.close(); }
 }
 
@@ -307,8 +316,6 @@ export function userTexts(row: Json): string[] {
     if (typeof content === "string") texts.push(content);
     else for (const block of objects(content)) if (typeof block.text === "string") texts.push(block.text);
   };
-  // Codex input the agent has not consumed yet (materialized as `phrenQueued`) is still waiting.
-  if (row.phrenQueued) return texts;
   if (row.type === "user" && !row.isMeta) blocks(object(row.message).content);
   // Claude Code takes a message typed mid-turn out of its queue into the running turn:
   // `enqueue` when typed, then `remove` (not `dequeue`, which starts a turn of its own) with the same words.
