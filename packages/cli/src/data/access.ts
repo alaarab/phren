@@ -220,10 +220,13 @@ function resolveDuplicateMatches(matches: FindingBulletLine[]): FindingBulletLin
   return matches.every(({ line }) => bulletContentKey(line) === first) ? matches[0] : null;
 }
 
+const withoutTypeTag = (text: string): string => text.replace(/^\[[a-z-]+\]\s*/i, "");
+
 function findMatchingFindingBullet(
   bulletLines: FindingBulletLine[],
   needle: string,
   match: string,
+  exactOnly = false,
 ): FindingBulletMatchResult {
   const fidNeedle = needle.replace(/^fid:/, "");
   const fidMatch = /^[a-z0-9]{8}$/.test(fidNeedle)
@@ -241,6 +244,15 @@ function findMatchingFindingBullet(
     const dup = resolveDuplicateMatches(exactMatches);
     if (dup) return { kind: "found", idx: dup.i };
     return { kind: "ambiguous", error: `"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.` };
+  }
+  if (exactOnly) {
+    // The whole text, allowing only a type tag one side lacks ("[pattern] ").
+    const bare = withoutTypeTag(needle);
+    const tagged = bulletLines.filter(({ line }) => withoutTypeTag(normalizeFindingText(line)) === bare);
+    if (tagged.length === 0) return { kind: "not_found" };
+    const dup = tagged.length === 1 ? tagged[0] : resolveDuplicateMatches(tagged);
+    if (dup) return { kind: "found", idx: dup.i };
+    return { kind: "ambiguous", error: `"${match}" is ambiguous (${tagged.length} matches). Use a more specific phrase.` };
   }
   if (partialMatches.length === 1) return { kind: "found", idx: partialMatches[0].i };
   if (partialMatches.length > 1) {
@@ -472,7 +484,12 @@ export function addFinding(phrenPath: string, project: string, learning: string)
   return addFindingToFile(phrenPath, project, learning);
 }
 
-export function removeFinding(phrenPath: string, project: string, match: string): PhrenResult<string> {
+/**
+ * `exactOnly` accepts only a fid or the whole normalized text (a type tag aside): a caller that
+ * holds a finding's full text (review-queue reject) must never delete a
+ * different finding that merely contains it.
+ */
+export function removeFinding(phrenPath: string, project: string, match: string, opts: { exactOnly?: boolean } = {}): PhrenResult<string> {
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
@@ -487,12 +504,12 @@ export function removeFinding(phrenPath: string, project: string, match: string)
     const lines = fs.readFileSync(filePath, "utf8").split("\n");
     const needle = normalizeFindingText(match);
     const bulletLines = collectFindingBulletLines(lines);
-    const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, match);
+    const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, match, opts.exactOnly);
     if (activeMatch.kind === "ambiguous") {
       return phrenErr(activeMatch.error, PhrenError.AMBIGUOUS_MATCH);
     }
     if (activeMatch.kind === "not_found") {
-      const archivedMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => archived), needle, match);
+      const archivedMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => archived), needle, match, opts.exactOnly);
       if (archivedMatch.kind === "ambiguous" || archivedMatch.kind === "found") {
         return phrenErr(`Finding "${match}" is archived and read-only. Restore or re-add it before mutating history.`, PhrenError.VALIDATION_ERROR);
       }
@@ -784,7 +801,7 @@ interface ArchivedReferenceMatch {
  * the review queue lines that point at them. Those queue items are the reason
  * approve and reject used to be no-ops, so both verbs have to look here.
  */
-function findArchivedReferenceMatches(phrenPath: string, project: string, text: string): ArchivedReferenceMatch[] {
+function findArchivedReferenceMatches(phrenPath: string, project: string, text: string, exactOnly = false): ArchivedReferenceMatch[] {
   const referenceDir = safeProjectPath(phrenPath, project, "reference");
   if (!referenceDir || !fs.existsSync(referenceDir)) return [];
 
@@ -806,11 +823,11 @@ function findArchivedReferenceMatches(phrenPath: string, project: string, text: 
         idx: i,
         line: lines[i],
       };
-      if (normalized === needle) exact.push(hit);
+      if (normalized === needle || (exactOnly && withoutTypeTag(normalized) === withoutTypeTag(needle))) exact.push(hit);
       else if (normalized.includes(needle)) partial.push(hit);
     }
   }
-  return exact.length > 0 ? exact : partial;
+  return exact.length > 0 || exactOnly ? exact : partial;
 }
 
 /** Bullet content of archived matches, ignoring metadata — used to detect true ambiguity. */
@@ -973,7 +990,8 @@ export function rejectQueueItemDetailed(
 
   if (!text) return finish("discarded", `Rejected queue item from ${project} (empty entry)`);
 
-  const removed = removeFinding(phrenPath, project, text);
+  // Only this exact finding: a partial match would delete an unrelated one.
+  const removed = removeFinding(phrenPath, project, text, { exactOnly: true });
   if (removed.ok) {
     return finish("removed", `Rejected and removed finding from ${FINDINGS_FILENAME} in ${project}`);
   }
@@ -984,7 +1002,7 @@ export function rejectQueueItemDetailed(
     return forwardErr(removed);
   }
 
-  const matches = findArchivedReferenceMatches(phrenPath, project, text);
+  const matches = findArchivedReferenceMatches(phrenPath, project, text, true);
   if (matches.length === 0) {
     return finish(
       "discarded",
