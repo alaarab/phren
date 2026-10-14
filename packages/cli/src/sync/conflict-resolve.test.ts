@@ -64,7 +64,7 @@ describe("conflictStrategy", () => {
     expect(conflictStrategy("demo/reference/topics/sync.md")).toBe("topic");
     expect(conflictStrategy("demo/summary.md")).toBe("summary");
     expect(conflictStrategy("demo/review.md")).toBe("union");
-    expect(conflictStrategy("demo/notes/2026-09-24.md")).toBe("union");
+    expect(conflictStrategy("demo/notes/2026-09-24.md")).toBe("notes");
     expect(conflictStrategy("demo/journal/2026-09-24-sam.md")).toBe("union");
     expect(conflictStrategy("demo/settings.yaml")).toBeNull();
   });
@@ -167,6 +167,20 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
     const merged = read(local, "demo/FINDINGS.md");
     for (const text of ["Keep this one", "Local finding", "Remote finding"]) expect(merged).toContain(text);
     expect(merged).not.toContain("Archived on the laptop");
+  });
+
+  it("merges notes by note id, so an edited note does not keep its old body too", async () => {
+    const note = (id: string, text: string) => [`## 10:00 <!-- nid:${id} -->`, "", text];
+    const notes = (...entries: string[][]) => ["# demo Notes — 2026-09-24", "", ...entries.map((e) => e.join("\n")).join("\n\n").split("\n"), ""].join("\n");
+    const { local, writer, commit } = fixture({ "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Base body")) });
+    commit(local, { "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Edited body")) }, "local edit");
+    commit(writer, { "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Base body"), note("aaaa0003", "Remote note")) }, "remote add");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    expect(read(local, "demo/notes/2026-09-24.md")).toBe(notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Edited body"), note("aaaa0003", "Remote note")));
   });
 
   it("heals a topic whose block an earlier union merge left with two start lines", async () => {

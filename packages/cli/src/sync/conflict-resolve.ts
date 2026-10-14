@@ -1,9 +1,10 @@
 /**
  * Resolves the content conflicts a store merge can settle without a person:
- * tasks.md per task id against the merge base, generated summaries from the
- * incoming side, and the append-only record files (findings, notes, journal,
- * review queue, topic archives) as a union of both sides. Everything else
- * stays conflicted so the caller aborts and names it.
+ * tasks.md per task id against the merge base, daily notes per note id
+ * against the base, generated summaries from the incoming side, and the
+ * append-only record files (findings, journal, review queue, topic archives)
+ * as a union of both sides. Everything else stays conflicted so the caller
+ * aborts and names it.
  *
  * Any file left unresolved aborts the whole merge, and every later auto-save
  * then commits locally and fails to push, so a store drifts further from its
@@ -25,7 +26,7 @@ import { dedupeTaskIds, mergeTasksByBid } from "./task-merge.js";
 
 export interface ConflictResolution { resolved: string[]; unresolved: string[] }
 
-type Strategy = "tasks" | "findings" | "archive" | "topic" | "summary" | "union" | "theirs" | null;
+type Strategy = "tasks" | "findings" | "archive" | "topic" | "summary" | "notes" | "union" | "theirs" | null;
 
 export function conflictStrategy(relFile: string): Strategy {
   const file = relFile.replace(/\\/g, "/");
@@ -38,7 +39,8 @@ export function conflictStrategy(relFile: string): Strategy {
   if (name === "review.md" || name === "truths.md") return "union";
   // Coordination state Phren rewrites itself (maintenance-writer.ts): the remote's copy holds.
   if (file === ".config/maintenance-writer.json") return "theirs";
-  if (/(^|\/)(notes|journal)\/[^/]+\.md$/i.test(file)) return "union";
+  if (/(^|\/)notes\/[^/]+\.md$/i.test(file)) return "notes";
+  if (/(^|\/)journal\/[^/]+\.md$/i.test(file)) return "union";
   return null;
 }
 
@@ -92,6 +94,54 @@ function unionText(base: string, ours: string, theirs: string): string | null {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
+const NOTE_HEADING = /^##\s.*<!--\s*nid:([0-9a-z]+)\s*-->/i;
+
+/** A daily notes file split into its header and one block per note id; null when an id repeats. */
+function noteBlocks(content: string): { header: string; notes: Map<string, string> } | null {
+  const lines = content.split("\n");
+  const first = lines.findIndex((line) => NOTE_HEADING.test(line));
+  const notes = new Map<string, string>();
+  if (first === -1) return { header: content, notes };
+  let id = "";
+  let body: string[] = [];
+  const flush = () => { if (id) notes.set(id, body.join("\n").trimEnd()); };
+  for (const line of lines.slice(first)) {
+    const m = NOTE_HEADING.exec(line);
+    if (!m) { body.push(line); continue; }
+    flush();
+    if (notes.has(m[1])) return null;
+    id = m[1];
+    body = [line];
+  }
+  flush();
+  return { header: lines.slice(0, first).join("\n").trimEnd(), notes };
+}
+
+/**
+ * Daily notes merged per note id against the base: a note one side edited or
+ * removed takes that side's change, notes either side added are kept. A line
+ * union could put an edited note's old body back under the same id. A note
+ * both sides edited differently falls back to the line union.
+ */
+function mergeNotes(base: string, ours: string, theirs: string): string | null {
+  const [b, o, t] = [noteBlocks(base), noteBlocks(ours), noteBlocks(theirs)];
+  if (!b || !o || !t) return null;
+  const header = mergeText(b.header, o.header, t.header);
+  if (header === null) return null;
+  const out: string[] = [];
+  for (const id of new Set([...o.notes.keys(), ...t.notes.keys()])) {
+    const [was, mine, incoming] = [b.notes.get(id), o.notes.get(id), t.notes.get(id)];
+    let note: string | undefined;
+    if (mine === incoming || incoming === was) note = mine;
+    else if (mine === was) note = incoming;
+    // Removed on one side, edited on the other: the edit is kept.
+    else if (mine === undefined || incoming === undefined) note = mine ?? incoming;
+    else return null;
+    if (note !== undefined) out.push(note);
+  }
+  return [header, ...out].join("\n\n") + "\n";
+}
+
 /**
  * Generated blocks regenerate, so the incoming block wins; the rest of the
  * file merges with `merge`: a union of both sides by default (a topic
@@ -131,6 +181,7 @@ function resolveContent(strategy: Exclude<Strategy, null>, base: string, ours: s
     // doesn't merge cleanly, take the incoming file whole and let the next
     // summarize pass fold in anything only this machine had.
     case "summary": return mergeWithGeneratedBlock(base, ours, theirs, KNOWS_START, KNOWS_END, "bottom", mergeText) ?? theirs;
+    case "notes": return mergeNotes(base, ours, theirs) ?? unionText(base, ours, theirs);
     case "union": return unionText(base, ours, theirs);
     case "theirs": return theirs;
   }
