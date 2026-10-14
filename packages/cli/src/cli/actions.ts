@@ -230,6 +230,10 @@ export async function handleDoctor(args: string[]) {
     console.log(`- ok  semantic-search: ${semStatus.model} ready, ${semStatus.coverage}`);
   }
 
+  const { codexSignInCheck } = await import("../bridge/codex-auth-refresh.js");
+  const codexSignIn = await codexSignInCheck();
+  if (codexSignIn) console.log(`- ${codexSignIn.ok ? "ok  " : "warn"} codex-signin: ${codexSignIn.message}`);
+
   process.exit(result.ok ? 0 : 1);
 }
 

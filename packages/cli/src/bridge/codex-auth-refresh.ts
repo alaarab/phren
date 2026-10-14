@@ -31,6 +31,22 @@ export async function lastCodexRefresh(file = path.join(codexHome(), "auth.json"
   } catch { return undefined; }
 }
 
+/** Codex's own refresh threshold; a sign-in refreshed longer ago than this plus a day has not been kept alive. */
+const CODEX_SIGNIN_STALE_MS = 9 * 86_400_000;
+
+/** A doctor line for the ChatGPT sign-in Codex shares on this computer, or undefined when there is none
+ * to judge (no Codex, or an API key). A refresh token that has gone unused for over 9 days has expired
+ * server-side, and every `codex exec` and Hook-run worker then fails with a 401 until `codex login`. */
+export async function codexSignInCheck(file?: string, now = Date.now()): Promise<{ ok: boolean; message: string } | undefined> {
+  const at = await lastCodexRefresh(file);
+  if (at === undefined) return undefined;
+  const days = Math.floor((now - at) / 86_400_000);
+  if (at === 0 || now - at > CODEX_SIGNIN_STALE_MS) {
+    return { ok: false, message: `Codex sign-in was last refreshed ${at === 0 ? "at an unknown time" : `${days} days ago`} and has probably expired (run: codex login)` };
+  }
+  return { ok: true, message: `Codex sign-in refreshed ${days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}` };
+}
+
 export function codexAuthRefreshEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return !/^(?:0|off|false|no)$/i.test(env.PHREN_CODEX_AUTH_REFRESH ?? "");
 }

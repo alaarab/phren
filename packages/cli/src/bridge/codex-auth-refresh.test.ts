@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CodexAuthKeeper, codexAuthRefreshEnabled, lastCodexRefresh, REFRESH_AFTER_MS } from "./codex-auth-refresh.js";
+import { CodexAuthKeeper, codexAuthRefreshEnabled, codexSignInCheck, lastCodexRefresh, REFRESH_AFTER_MS } from "./codex-auth-refresh.js";
 
 let directory = "", file = "";
 const now = Date.parse("2026-09-28T10:00:00Z");
@@ -43,5 +43,19 @@ describe("refreshing the shared Codex sign-in ahead of its workers", () => {
     expect(refreshAuth).toHaveBeenCalledTimes(2);
     expect(codexAuthRefreshEnabled({ PHREN_CODEX_AUTH_REFRESH: "off" })).toBe(false);
     expect(codexAuthRefreshEnabled({})).toBe(true);
+  });
+});
+
+describe("doctor's Codex sign-in check", () => {
+  it("is quiet without a ChatGPT sign-in and says when one has gone unrefreshed", async () => {
+    expect(await codexSignInCheck(file, now)).toBeUndefined();
+    await writeFile(file, JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "k" }));
+    expect(await codexSignInCheck(file, now)).toBeUndefined();
+    await signIn(now - 2 * 86_400_000);
+    expect(await codexSignInCheck(file, now)).toEqual({ ok: true, message: "Codex sign-in refreshed 2 days ago" });
+    await signIn(now - 8 * 86_400_000);
+    expect(await codexSignInCheck(file, now)).toMatchObject({ ok: true });
+    await signIn(now - 200 * 86_400_000);
+    expect(await codexSignInCheck(file, now)).toEqual({ ok: false, message: "Codex sign-in was last refreshed 200 days ago and has probably expired (run: codex login)" });
   });
 });
