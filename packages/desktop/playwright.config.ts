@@ -7,8 +7,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,
-  reporter: [["list"]],
-  outputDir: "../../coverage/desktop-playwright",
+  reporter: [["list"], ["html", { open: "never", outputFolder: "../../coverage/desktop-playwright/report" }]],
+  outputDir: "../../coverage/desktop-playwright/test-results",
   use: {
     browserName: "chromium",
     headless: true,
