@@ -81,6 +81,9 @@ export class PhrenClient {
 
   private static readonly MAX_RECONNECT_RETRIES = 3;
   private static readonly RECONNECT_DELAY_MS = 2000;
+  private static readonly FINDINGS_PAGE = 200;
+  private static readonly MAX_FINDINGS = 1000;
+  private static readonly MAX_PROJECT_PAGES = 200;
 
   private buffer = Buffer.alloc(0);
   private nextId = 1;
@@ -90,6 +93,7 @@ export class PhrenClient {
   private reconnectRetries = 0;
   private reconnecting = false;
   private reconnectPromise?: Promise<void>;
+  private lastFailure?: string;
 
   constructor(options: PhrenClientOptions) {
     this.options = options;
@@ -121,11 +125,20 @@ export class PhrenClient {
       phrenLog.warn(`[phren-mcp] ${message.trim()}`);
     });
 
+    // A write to a dead pipe (EPIPE, or write-after-destroy when the binary
+    // never started) emits "error" on stdin; with no listener Node throws it as
+    // an uncaught exception in the extension host. The exit/error handlers on
+    // the child already reject pending requests and reconnect.
+    child.stdin.on("error", (error: Error) => {
+      phrenLog.error(`[phren-mcp] stdin error: ${error.message}`);
+    });
+
     child.on("exit", (code, signal) => {
       if (this.disposed) {
         return;
       }
       const exitError = new Error(`phren MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+      this.lastFailure = exitError.message;
       phrenLog.error(`[phren-mcp] ${exitError.message}`);
       this.rejectPending(exitError);
       this.scheduleReconnect();
@@ -133,6 +146,7 @@ export class PhrenClient {
 
     child.on("error", (error: Error) => {
       phrenLog.error(`[phren-mcp] process error: ${error.message}`);
+      this.lastFailure = error.message;
       this.rejectPending(error);
       // A spawn failure (e.g. ENOENT/EACCES on mcpServerPath or nodePath) can
       // fire "error" without ever firing "exit", since the process never
@@ -195,7 +209,27 @@ export class PhrenClient {
   async getFindings(project: string): Promise<unknown> {
     // The MCP tool defaults to 50. The extension renders findings directly and
     // must not mistake that first page for the project's complete contents.
-    return this.callTool("get_findings", { project, limit: 200 });
+    // A project can hold thousands of findings: follow the server's paging, but
+    // stop at MAX_FINDINGS so a huge store cannot stall the tree or the graph.
+    // `total` stays the server's full count so callers can say "showing N of M".
+    return this.pagedFindings(project);
+  }
+
+  private async pagedFindings(project: string): Promise<unknown> {
+    const first = await this.callTool("get_findings", { project, limit: PhrenClient.FINDINGS_PAGE });
+    const firstData = asRecord(asRecord(first)?.data);
+    if (!firstData || !Array.isArray(firstData.findings)) return first;
+    const findings = [...firstData.findings];
+    let next = typeof firstData?.next_offset === "number" ? firstData.next_offset : null;
+    while (next !== null && findings.length < PhrenClient.MAX_FINDINGS) {
+      const page = await this.callTool("get_findings", { project, limit: PhrenClient.FINDINGS_PAGE, offset: next });
+      const pageData = asRecord(asRecord(page)?.data);
+      const rows = Array.isArray(pageData?.findings) ? pageData.findings : [];
+      if (rows.length === 0) break;
+      findings.push(...rows);
+      next = typeof pageData?.next_offset === "number" && pageData.next_offset > next ? pageData.next_offset : null;
+    }
+    return { ...asRecord(first), data: { ...firstData, findings: findings.slice(0, PhrenClient.MAX_FINDINGS) } };
   }
 
   async getNotes(project: string, date?: string): Promise<unknown> {
@@ -239,7 +273,19 @@ export class PhrenClient {
   }
 
   async listProjects(): Promise<unknown> {
-    return this.callTool("list_projects", { page_size: 50 });
+    // The tool pages at 50; every caller wants the whole list, so follow the pages.
+    const first = await this.callTool("list_projects", { page_size: 50 });
+    const firstData = asRecord(asRecord(first)?.data);
+    const totalPages = typeof firstData?.totalPages === "number" ? Math.min(firstData.totalPages, PhrenClient.MAX_PROJECT_PAGES) : 1;
+    if (!firstData || !Array.isArray(firstData.projects) || totalPages <= 1) return first;
+    const projects = [...firstData.projects];
+    for (let page = 2; page <= totalPages; page++) {
+      const next = await this.callTool("list_projects", { page_size: 50, page });
+      const rows = asRecord(asRecord(next)?.data)?.projects;
+      if (!Array.isArray(rows) || rows.length === 0) break;
+      projects.push(...rows);
+    }
+    return { ...asRecord(first), data: { ...firstData, projects } };
   }
 
   async storeList(): Promise<unknown> {
@@ -449,7 +495,11 @@ export class PhrenClient {
         await this.reconnectPromise;
       }
       if (!this.disposed && !this.reconnecting && this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
-        throw new Error("Phren MCP process exited and all reconnect attempts failed.");
+        const cause = this.lastFailure ? ` (${this.lastFailure})` : "";
+        throw new Error(
+          `Phren MCP process exited and all reconnect attempts failed${cause}. ` +
+            "Check phren.nodePath and phren.mcpServerPath, then reload the window; Phren: Show Log has the details.",
+        );
       }
       await this.ensureInitialized();
       const result = await this.sendRequest<McpToolCallResult>("tools/call", {
@@ -519,7 +569,9 @@ export class PhrenClient {
       method,
       ...(params ? { params } : {}),
     });
-    this.process.stdin.write(message + "\n", "utf8");
+    this.process.stdin.write(message + "\n", "utf8", (error) => {
+      if (error) phrenLog.error(`[phren-mcp] could not send ${method}: ${error.message}`);
+    });
   }
 
   private async sendRequest<T>(method: string, params: Record<string, unknown>): Promise<T> {
