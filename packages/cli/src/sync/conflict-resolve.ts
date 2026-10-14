@@ -189,7 +189,11 @@ function resolveContent(strategy: Exclude<Strategy, null>, base: string, ours: s
     // doesn't merge cleanly, take the incoming file whole and let the next
     // summarize pass fold in anything only this machine had.
     case "summary": return mergeWithGeneratedBlock(base, ours, theirs, KNOWS_START, KNOWS_END, "bottom", mergeText) ?? theirs;
-    case "notes": return mergeNotes(base, ours, theirs) ?? unionText(base, ours, theirs);
+    case "notes": {
+      // Both sides have the file here, so it is never DELETED_FILE.
+      const merged = mergeNotes(base, ours, theirs);
+      return typeof merged === "string" ? merged : unionText(base, ours, theirs);
+    }
     case "union": return unionText(base, ours, theirs);
     case "theirs": return theirs;
   }
