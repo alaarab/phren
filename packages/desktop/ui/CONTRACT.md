@@ -238,11 +238,16 @@ Errors are `Error` with `.status`, `.code` and `.body` (the Hook's JSON).
 ## Hook routes these panes use (all take the session `target`)
 
 - `POST /v1/git/status {target}` → `{branch, upstream, ahead, behind, staged, unstaged, untracked,
-  additions, deletions, totalFiles, files:[{path, status:"M"|"A"|"D"|"R"|"?", staged, additions, deletions, binary}], repository}`.
+  additions, deletions, totalFiles, files:[{path, status:"M"|"A"|"D"|"R"|"?", staged, additions, deletions, binary}], repository, truncated}`.
   A file staged and also changed again appears twice (staged true and false).
 - `POST /v1/diff {target, paths:[]}` → `{files:[{path, status, sections:[{id, kind:"staged"|"unstaged", binary, patch, truncated}]}]}`
   (`patch` is unified diff text; untracked files have no sections; read them whole).
-- `POST /v1/git/stage|unstage|discard {target, paths:[...], expectedRepository}`; stage also takes `confirmBulk`.
+- `POST /v1/git/stage|unstage|discard {target, paths:[...], expectedRepository}`; stage also takes `confirmBulk`, sent only after the inline Stage confirmation.
+  Stage all includes collapsed directories. Confirm directories and their contents, binary or uncounted untracked files, and selections over 100 paths; refuse over 500 paths.
+  The confirmation lists the count, named directories/binary/unknown files, the first 10 paths and the remaining count, with Stage and Cancel. A Hook staging-gate 409 also opens it.
+  `changes/util.js` exports `stagePlan(files, status?) → {paths, directories, binary, unknown, manifest, confirm, error}` for the distinct unstaged selection; confirmation retains that selection and repository. `manifest` records each path's file/dir/binary/deleted type and untracked/counts availability.
+  `changes/stage.js` exports `createStaging(state, {scopeBody, repo, render, postStage, readStatus, announce, refresh}) → {stage(files), stageAll(), confirm()}`.
+  Stage all refuses a truncated status and reports omitted files. Confirm re-reads status in the saved scope, refuses truncated listings or a changed repository, and reopens review if membership or types changed. Single-file Stage remains available during another confirmation.
 - `POST /v1/git/commit {target, message, expectedRepository}`; `POST /v1/git/push {target, expectedRepository}`
   (a 409 whose `error.body.defaultBranch` is set means pushing the default branch: ask with a Phren dialog, then resend with `confirmDefault: true`).
 - `POST /v1/git/log {target, limit}` → `{commits:[{sha, short, subject, author, date, refs, parents}]}` (History).

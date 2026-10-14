@@ -8,6 +8,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 - Released Claude questions and served OpenCode questions appear as answer cards in chat.
 - Answering a pending question from a chat card works for Claude and OpenCode as well as Codex.
+- Stage all refuses truncated listings, staging confirmations recheck file membership and types, and single-file Stage works while another confirmation is open.
+- Changes asks before staging folders, binary or unknown untracked files, or more than 100 paths, and keeps checks in the Hook’s order.
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.
 
 ## [0.1.7] - 2026-10-14
