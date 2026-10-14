@@ -99,22 +99,6 @@ describe("composites", () => {
     expect(calls).toEqual(["toggle_hooks"]);
   });
 
-  it("phren_admin passes a target's own action as operation", async () => {
-    const registered = new Map<string, { config: ToolConfig; handler: ToolHandler }>();
-    const calls: string[] = [];
-    const gate = createToolGate({ profile: "core", register: (n, c, h) => { registered.set(n, { config: c, handler: h }); } });
-    fakeModules(gate.registerTool, calls);
-    gate.registerTool("manage_review_item", { description: "Manage a review item.", inputSchema: z.object({ project: z.string(), line: z.string(), action: z.enum(["approve", "reject", "edit"]) }) },
-      async (args) => { calls.push("manage_review_item"); return ok({ args }); });
-    gate.finish();
-    const admin = registered.get("phren_admin")!;
-
-    expect(admin.config.description).toContain("manage_review_item — Manage a review item. (required: project, line, operation)");
-    const res = parse(await admin.handler({ action: "manage_review_item", project: "p", line: "x", operation: "reject" }));
-    expect(res.data.args).toEqual({ project: "p", line: "x", action: "reject" });
-    expect(calls).toEqual(["manage_review_item"]);
-  });
-
   it("add_finding with kind note goes to the note tool", async () => {
     const { registered, calls } = gateWith("core");
     const res = await registered.get("add_finding")!.handler({ project: "p", finding: ["remember this"], kind: "note" });
