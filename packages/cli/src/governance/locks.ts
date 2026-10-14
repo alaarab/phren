@@ -93,7 +93,11 @@ export function tryFileLock(filePath: string): (() => void) | null {
         } catch { /* already released */ }
       };
     } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      // Windows refuses to create a lock another process is deleting (still
+      // open somewhere) with EPERM, EACCES or EBUSY: it is held, not broken.
+      if (process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY")) return null;
+      if (code !== "EEXIST") throw err;
       try {
         const contents = fs.readFileSync(lockPath, "utf8");
         const pid = Number.parseInt(contents.split("\n")[0], 10);
