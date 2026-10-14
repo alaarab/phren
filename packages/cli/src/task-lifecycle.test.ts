@@ -449,6 +449,8 @@ describe("task auto-capture prompt gate", () => {
     ["pasted content", '<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">'],
     ["a relayed conductor message", "From the conductor, a correction: the owner wants test runs in parallel, fix the runner"],
     ["a relayed agent message", "From tidy-phren: update the docs and fix the lint errors in src/index.ts"],
+    ["a conductor message with a colon", "Conductor: the owner approved the pitches, merge #510 and fix the docs"],
+    ["a conductor message with a comma", "Conductor, PJ is offline so take the four approved items and fix them"],
     ["a computer and agent push report", "From laptop sample-codex: parser batch 2 done, pushed as abc1234"],
     ["a computer and agent commit report", "From devbox claude: parser checks done, committed as abc1234"],
     ["a computer and agent PR report", "From desktop codex: release checklist PR #27 opened"],

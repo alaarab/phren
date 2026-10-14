@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A message that opens with "Conductor:" or "Conductor," is a relayed message, so the prompt hook no longer files it as a task.
+
 ## [0.3.46] - 2026-10-14
 
 ### Added
