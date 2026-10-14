@@ -5,6 +5,16 @@ changelog is at the repository root. The Marketplace listing shows this file.
 
 ## [Unreleased]
 
+## [0.7.1] - unreleased
+
+### Fixed
+
+- A missing or unlaunchable `node` / MCP server no longer raises an unhandled stream error in the extension host when the extension writes to the dead process. Once every reconnect fails, the error names the cause and points to Phren: Show Log.
+- Stores with more than 50 projects show all of them (the project list was read one page only), and a project with thousands of findings loads up to 1,000 of them instead of the first 200.
+- The fragment graph loads projects four at a time, so a store with dozens of projects no longer drops some of them to request timeouts, and it builds reference nodes without a quadratic scan.
+- Windows paths: findings saved from the editor cite repo-relative files with forward slashes (drive letters in any case, spaces, wsl$ and wsl.localhost folders); the graph labels reference docs with backslash paths by file name; workspace folders match tracked projects regardless of drive-letter case or trailing slashes.
+- Multi-root workspaces: the active project is found from any open folder, not only the first, and a file inside nested workspace folders is cited against the innermost one.
+
 ## [0.7.0] - 2026-10-13
 
 ### Fixed

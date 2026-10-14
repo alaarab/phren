@@ -1,6 +1,6 @@
-import * as path from "path";
 import * as vscode from "vscode";
 import { PhrenClient } from "../phrenClient";
+import { baseName, samePath } from "../pathUtils";
 import { readDeviceContext } from "../profileConfig";
 import type {
   DateFilter,
@@ -890,17 +890,20 @@ export class TreeDataSource {
   detectActiveProject(projects: ProjectSummary[]): string | undefined {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) return undefined;
-    const cwdPath = workspaceFolders[0].uri.fsPath;
-    const cwdName = path.basename(cwdPath).toLowerCase();
+    // Multi-root: any open folder can be the project, in folder order.
+    for (const folder of workspaceFolders) {
+      const cwdPath = folder.uri.fsPath;
+      const cwdName = baseName(cwdPath).toLowerCase();
 
-    for (const p of projects) {
-      if (p.source && p.source === cwdPath) return p.name;
-    }
-    for (const p of projects) {
-      if (p.name.toLowerCase() === cwdName) return p.name;
-    }
-    for (const p of projects) {
-      if (p.source && path.basename(p.source).toLowerCase() === cwdName) return p.name;
+      for (const p of projects) {
+        if (p.source && samePath(p.source, cwdPath)) return p.name;
+      }
+      for (const p of projects) {
+        if (p.name.toLowerCase() === cwdName) return p.name;
+      }
+      for (const p of projects) {
+        if (p.source && baseName(p.source).toLowerCase() === cwdName) return p.name;
+      }
     }
     return undefined;
   }
