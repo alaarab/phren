@@ -954,6 +954,8 @@ Archive or unarchive a project. Archive renames the directory with `.archived` s
 | `project` | string | yes | Project name. |
 | `action` | enum | yes | `archive` or `unarchive`. |
 
+In the core profile use `phren_admin(action: "manage_project", project, operation: "archive"|"unarchive")`: `phren_admin`'s own `action` names the tool, so the inner choice goes in `operation`.
+
 ---
 
 ## Fragment Graph
@@ -1216,6 +1218,8 @@ Manage a review queue item: approve (**promotes** the queued line into FINDINGS.
 | `line` | string | yes | The raw queue line text (as returned by `get_review_queue`). Max 10,000 chars. |
 | `action` | enum | yes | Action to perform: `approve`, `reject`, or `edit`. |
 | `new_text` | string | no | The new finding text. Required when action is `edit`. Max 10,000 chars. |
+
+In the core profile use `phren_admin(action: "manage_review_item", project, line, operation: "approve"|"reject"|"edit")`: `phren_admin`'s own `action` names the tool, so the inner choice goes in `operation`.
 
 ### `doctor_fix`
 
