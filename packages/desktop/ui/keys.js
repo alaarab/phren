@@ -108,9 +108,22 @@ function matchesApp(spec, ev) {
   return matches(local, ev);
 }
 
+/** Does a [keys.app] binding press the same keys as a prefix binding? Off
+ * macOS "cmd+b" is Ctrl+B, Herdr's default prefix; the prefix wins there. */
+export function shadowedByPrefix(text, prefixes, mac = IS_MAC) {
+  const spec = parseBinding(text);
+  const local = !mac && spec.cmd ? { ...spec, cmd: false, ctrl: true } : spec;
+  return prefixes.some((prefix) => {
+    const p = parseBinding(prefix);
+    return ["ctrl", "alt", "shift", "cmd", "key"].every((field) => p[field] === local[field]);
+  });
+}
+
 function findAppAction(ev) {
+  const prefixes = config.bindings.prefix || [];
   for (const [action, list] of Object.entries(config.appBindings || {})) {
     for (const text of list) {
+      if (shadowedByPrefix(text, prefixes)) continue;
       const hit = matchesApp(parseBinding(text), ev);
       if (hit !== false) return { action, arg: typeof hit === "number" ? hit : undefined };
     }
@@ -133,10 +146,8 @@ function onKeyDown(ev) {
   // While the palette is open its input owns the keyboard.
   if (isPaletteOpen()) return;
   if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Alt" || ev.key === "Meta") return;
-  // Direct Cmd/Ctrl shortcuts come first, so they work even inside a terminal.
-  const appHit = findAppAction(ev);
-  if (appHit) { ev.preventDefault(); ev.stopPropagation(); run(appHit.action, appHit.arg); return; }
-  if (inTerminal(ev.target)) return;
+  // The key after the prefix belongs to the prefix chord, even when it is
+  // also a direct binding (off macOS, prefix+ctrl+k is Ctrl+K, the palette).
   const now = Date.now();
   if (now < prefixUntil) {
     prefixUntil = 0; showHint(false);
@@ -146,6 +157,10 @@ function onKeyDown(ev) {
     if (found) run(found.action, found.arg);
     return;
   }
+  // Direct Cmd/Ctrl shortcuts come next, so they work even inside a terminal.
+  const appHit = findAppAction(ev);
+  if (appHit) { ev.preventDefault(); ev.stopPropagation(); run(appHit.action, appHit.arg); return; }
+  if (inTerminal(ev.target)) return;
   if (config.bindings.prefix.some((text) => matches(parseBinding(text), ev) === true)) {
     ev.preventDefault(); ev.stopPropagation();
     prefixUntil = now + PREFIX_WINDOW_MS;

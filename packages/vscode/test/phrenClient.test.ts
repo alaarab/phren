@@ -202,6 +202,27 @@ describe("PhrenClient: initialize handshake", () => {
 
     await expect(client.healthCheck()).rejects.toThrow(/Failed to initialize MCP session/);
   });
+
+  it("retries the handshake on the next call after a failed one, without a respawn", async () => {
+    const client = new PhrenClient({ mcpServerPath: "mcp.js", storePath: "/store" });
+    const proc = lastProcess();
+    let healthy = false;
+    proc.stdin.write = vi.fn((data: string) => {
+      const msg = JSON.parse(String(data).trim());
+      if (msg.method === "initialize") {
+        const response = healthy ? { result: {} } : { error: { code: -1, message: "starting" } };
+        queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, ...response }));
+      } else if (msg.method === "tools/call") {
+        queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, result: textResult({ ok: true, data: {} }) }));
+      }
+      return true;
+    });
+
+    await expect(client.healthCheck()).rejects.toThrow(/Failed to initialize MCP session/);
+    healthy = true;
+    await expect(client.healthCheck()).resolves.toBeDefined();
+    expect(createdProcesses).toHaveLength(1);
+  });
 });
 
 describe("PhrenClient: request shaping (pins what changed recently)", () => {

@@ -29,7 +29,7 @@ describe("Hook pull lookup cache", () => {
     now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => now);
   });
-  afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); });
+  afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
   it("shares cold reads, serves within TTL, and returns stale during one refresh with its own Git deadline", async () => {
     const initial = deferred<RequestList>();
@@ -184,19 +184,21 @@ describe("Hook pull lookup cache", () => {
     expect(await gitPulls(root)).toMatchObject({ pulls: [{ number: 2 }] });
   });
 
-  it("keys by branch and host and evicts the oldest of 64 lookups", async () => {
+  // Eviction at the 64-entry limit is LookupCache's own test; 64 rounds of
+  // real git spawns here took longer than the timeout on Windows.
+  it("keys by branch and host", async () => {
     const list = vi.spyOn(PROVIDERS.github, "list").mockResolvedValue(result(1));
+    const checkout = (branch: string) => writeFile(path.join(root, ".git", "HEAD"), `ref: refs/heads/${branch}\n`);
     await gitPulls(root);
-    for (let i = 0; i < 64; i++) {
-      await exec("git", ["-C", root, "symbolic-ref", "HEAD", `refs/heads/topic-${i}`]);
-      await gitPulls(root);
-    }
-    await exec("git", ["-C", root, "symbolic-ref", "HEAD", "refs/heads/feature"]);
+    await checkout("topic");
     await gitPulls(root);
-    expect(list).toHaveBeenCalledTimes(66);
+    expect(list).toHaveBeenCalledTimes(2);
+    await checkout("feature");
+    await gitPulls(root);
+    expect(list).toHaveBeenCalledTimes(2);
     await exec("git", ["-C", root, "remote", "set-url", "origin", "git@github.com:sam/other.git"]);
     await gitPulls(root);
-    expect(list).toHaveBeenCalledTimes(67);
+    expect(list).toHaveBeenCalledTimes(3);
   });
 
   it("an auth refusal replaces a cached success instead of serving it until max age", async () => {

@@ -17,7 +17,10 @@ afterEach(async () => {
   tmp = undefined;
 });
 
-const parse = (result: unknown) => JSON.parse(((result as { content: Array<{ text: string }> }).content)[0].text);
+const parse = (result: unknown) => {
+  const text = ((result as { content: Array<{ text: string }> }).content)[0].text;
+  try { return JSON.parse(text); } catch { throw new Error(`Tool returned non-JSON: ${text}`); }
+};
 
 it("keeps concurrent MCP calls from several servers working while other processes rebuild", async () => {
   tmp = makeTempDir("mcp-index-contention-");

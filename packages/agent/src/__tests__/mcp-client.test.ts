@@ -2,7 +2,17 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { EventEmitter } from "events";
+import { PassThrough, Writable } from "stream";
 import { loadMcpConfig, parseMcpInline, connectMcpServers } from "../mcp-client.js";
+
+// A test may stand in for the MCP server process; every other test spawns for real.
+const fakeSpawn = vi.hoisted(() => ({ impl: undefined as undefined | ((...args: unknown[]) => unknown) }));
+vi.mock("child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("child_process")>();
+  const spawn = (...args: unknown[]) => fakeSpawn.impl ? fakeSpawn.impl(...args) : (actual.spawn as (...a: unknown[]) => unknown)(...args);
+  return { ...actual, spawn };
+});
 
 // ── loadMcpConfig ──────────────────────────────────────────────────────────
 
@@ -135,5 +145,30 @@ describe("connectMcpServers", () => {
     }
 
     expect(stderrChunks.some((c) => c.includes("bogus"))).toBe(true);
+  });
+
+  it("survives a server that closes its stdin (EPIPE on write is not an unhandled error)", async () => {
+    // The server's stdin is gone: every write fails with EPIPE, which a
+    // stream also emits as an 'error' event.
+    fakeSpawn.impl = () => Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      stdin: new Writable({
+        write(_chunk, _encoding, callback) {
+          callback(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+        },
+      }),
+      kill: () => true,
+    });
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (() => true) as any;
+    try {
+      const result = await connectMcpServers({ closed: { command: "closed-stdin-server" } });
+      expect(result.tools).toEqual([]);
+      result.cleanup();
+    } finally {
+      process.stderr.write = origWrite;
+      fakeSpawn.impl = undefined;
+    }
   });
 });

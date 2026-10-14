@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { checkPermission } from "../permissions/checker.js";
 import type { PermissionConfig } from "../permissions/types.js";
 
@@ -182,5 +185,27 @@ describe("subagent tool permissions", () => {
 
   it("list_agents stays read-only safe in all modes", () => {
     expect(checkPermission({ ...base, mode: "suggest" }, "list_agents", {}).verdict).toBe("allow");
+  });
+});
+
+describe("checkPermission: a link to a secret file", () => {
+  it("denies file tools and patches whose canonical target is sensitive", () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "checker-link-")));
+    try {
+      fs.writeFileSync(path.join(root, ".env"), "TOKEN=x\n");
+      fs.symlinkSync(path.join(root, ".env"), path.join(root, "public.txt"));
+      const config: PermissionConfig = { mode: "full-auto", projectRoot: root, allowedPaths: [] };
+      expect(checkPermission(config, "read_file", { path: "public.txt" }).verdict).toBe("deny");
+      expect(checkPermission(config, "apply_patch", {
+        patch: "*** Begin Patch\n*** Update File: public.txt\n-TOKEN=x\n+TOKEN=y\n*** End Patch",
+      }).verdict).toBe("deny");
+      // A shell operand that is such a link asks in auto-confirm.
+      const auto: PermissionConfig = { mode: "auto-confirm", projectRoot: root, allowedPaths: [] };
+      expect(checkPermission(auto, "shell", { command: "cat public.txt" }).verdict).toBe("ask");
+      fs.writeFileSync(path.join(root, "notes.txt"), "hi\n");
+      expect(checkPermission(auto, "shell", { command: "cat notes.txt" }).verdict).toBe("allow");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
