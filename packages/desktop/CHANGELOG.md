@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.7] - unreleased
 
+- Settings › About shows the desktop and each computer's Hook version, with Copy for a bug report.
 - A new version shows as a chip in the titlebar with What's new, and Download or Restart to update.
 - Home's Computers rows show each Hook's version; one behind the newest gets its update command to copy.
 - A session waiting on you shows what the agent said last in the Agents sidebar.
