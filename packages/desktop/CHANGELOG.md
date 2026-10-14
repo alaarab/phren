@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Stage all refuses truncated listings, staging confirmations recheck file membership and types, and single-file Stage works while another confirmation is open.
+
 - Changes asks before staging folders, binary or unknown untracked files, or more than 100 paths, and keeps checks in the Hook’s order.
 
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.

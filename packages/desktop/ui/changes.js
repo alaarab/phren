@@ -11,8 +11,9 @@ import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
 import { openLaunchSheet } from "./shell/launch.js";
 import { armMerge, disarmMerge, isArmed, onArmedChange } from "./shell/merge-when-green.js";
+import { createStaging } from "./changes/stage.js";
 import { CHANGES_CSS } from "./changes/styles.js";
-import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, relTime, span, stagePlan, tileClass } from "./changes/util.js";
+import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, relTime, span, tileClass } from "./changes/util.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
 // "Session" is what this agent changed, from the Hook's per-call capture.
@@ -222,38 +223,15 @@ export function openChanges(el, ctx) {
     }
   }
 
-  const doStage = (f) => stage([f]);
+  const staging = createStaging(state, {
+    scopeBody, repo, render, announce, refresh,
+    postStage: (body) => hookPost(computer, "/v1/git/stage", body),
+    readStatus: (body) => hookPost(computer, "/v1/git/status", body),
+  });
+  const doStage = (f) => staging.stage([f]);
   const doUnstage = (f) => write(() => hookPost(computer, "/v1/git/unstage", scopeBody({ paths: [f.path], expectedRepository: repo() })));
-  const doStageAll = () => stage(state.status?.files || []);
+  const doStageAll = () => staging.stageAll();
 
-  function stage(files) {
-    if (state.busy || state.confirm) return;
-    const plan = stagePlan(files);
-    if (!plan.paths.length) return;
-    state.error = plan.error;
-    if (plan.error) { render(); return; }
-    const body = scopeBody({ paths: plan.paths, expectedRepository: repo() });
-    if (plan.confirm) { state.confirm = { kind: "stage", plan, body }; render(); }
-    else sendStage(plan, body);
-  }
-
-  async function sendStage(plan, body, confirmed = false) {
-    if (state.busy) return;
-    state.busy = "stage"; render();
-    try {
-      await hookPost(computer, "/v1/git/stage", { ...body, ...(confirmed ? { confirmBulk: true } : {}) });
-      state.error = ""; state.confirm = null;
-      announce();
-      await refresh();
-    } catch (e) {
-      // A stale status may miss a directory or an untracked binary. Only the
-      // Hook's staging gate can offer a retry with the user's confirmation.
-      if (!confirmed && e.status === 409 && /confirmBulk=true/.test(e.message)) {
-        state.confirm = { kind: "stage", plan, body, detail: "This selection includes a folder or a binary or unknown untracked file." };
-        state.error = "";
-      } else { state.confirm = null; state.error = e.message || String(e); }
-    } finally { state.busy = null; render(); }
-  }
   const doDiscard = () => write(() => hookPost(computer, "/v1/git/discard", scopeBody({ paths: [state.confirm.path], expectedRepository: repo() })));
 
   async function doCommit() {
@@ -697,7 +675,7 @@ export function openChanges(el, ctx) {
       if (plan.paths.length > 10) list.appendChild(div("", `and ${plan.paths.length - 10} more`));
       card.appendChild(list);
       const actions = div("chg-actions-row");
-      const confirm = button("Stage", "chg-btn stage", () => sendStage(plan, request.body, true));
+      const confirm = button("Stage", "chg-btn stage", () => staging.confirm());
       const cancel = button("Cancel", "chg-btn stage", () => { state.confirm = null; render(); });
       confirm.disabled = cancel.disabled = !!state.busy;
       actions.append(confirm, cancel);

@@ -117,16 +117,22 @@ export function prReason(status, term = "pull request") {
 
 /** The Hook's staging gates, applied to the exact unstaged selection. The
  * Hook checks again on write because the working tree can change meanwhile. */
-export function stagePlan(files) {
+export function stagePlan(files, status) {
   const selected = files.filter((file) => !file.staged);
   const paths = [...new Set(selected.map((file) => file.path))];
   const directories = paths.filter((path) => selected.some((file) => file.path === path && (file.directory || path.endsWith("/"))));
   const binary = paths.filter((path) => selected.some((file) => file.path === path && file.status === "?" && file.binary));
   const unknown = paths.filter((path) => !directories.includes(path) && !binary.includes(path)
     && selected.some((file) => file.path === path && file.status === "?" && file.countsComplete !== true));
+  const manifest = paths.map((path) => {
+    const file = selected.find((file) => file.path === path);
+    return { path, type: directories.includes(path) ? "dir" : file.status === "D" ? "deleted" : file.binary ? "binary" : "file",
+      untracked: file.status === "?", countsComplete: file.countsComplete === true };
+  }).sort((a, b) => a.path.localeCompare(b.path));
+  const omitted = Math.max(0, (status?.totalFiles || 0) - new Set((status?.files || []).map((file) => file.path)).size);
   return {
-    paths, directories, binary, unknown,
+    paths, directories, binary, unknown, manifest,
     confirm: paths.length > 100 || directories.length > 0 || binary.length > 0 || unknown.length > 0,
-    error: paths.length > 500 ? `Choose at most 500 paths to stage at once (${paths.length} selected). Stage smaller selections first.` : "",
+    error: status?.truncated ? `The listing is truncated (${omitted ? omitted + " more file" + (omitted === 1 ? "" : "s") + (omitted === 1 ? " exists" : " exist") : "more changes exist"}). Stage smaller selections first; this partial listing cannot be confirmed.` : paths.length > 500 ? `Choose at most 500 paths to stage at once (${paths.length} selected). Stage smaller selections first.` : "",
   };
 }
