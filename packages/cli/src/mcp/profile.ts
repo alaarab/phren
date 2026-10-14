@@ -226,8 +226,25 @@ function firstSentence(text: string | undefined): string {
   return s.length > 140 ? `${s.slice(0, 139)}…` : s;
 }
 
-function actionLine(action: string, entry: CatalogEntry): string {
-  const required = paramDocs(entry).filter((p) => p.required).map((p) => p.name);
+/**
+ * `phren_admin` takes the action's name in `action`, so a target with its own
+ * `action` parameter (manage_review_item, manage_project) takes it as
+ * `operation` there, as owner_inbox already does.
+ */
+const INNER_ACTION = "operation";
+
+function hasInnerAction(entry: CatalogEntry): boolean {
+  const shape = schemaOf(entry)?.shape;
+  return !!shape && "action" in shape && !(INNER_ACTION in shape);
+}
+
+function adminParamDocs(entry: CatalogEntry): ParamDoc[] {
+  const docs = paramDocs(entry);
+  return hasInnerAction(entry) ? docs.map((p) => p.name === "action" ? { ...p, name: INNER_ACTION } : p) : docs;
+}
+
+function actionLine(action: string, entry: CatalogEntry, docs: ParamDoc[] = paramDocs(entry)): string {
+  const required = docs.filter((p) => p.required).map((p) => p.name);
   const req = required.length ? ` (required: ${required.join(", ")})` : "";
   return `${action} — ${firstSentence(entry.config.description)}${req}`;
 }
@@ -326,7 +343,7 @@ export function buildCompositeTools(catalog: Catalog): BuiltTool[] {
     .filter((n) => !CORE_TOOLS.includes(n) && !folded.has(n) && !(n in COMPOSITES))
     .sort();
   if (adminTargets.length) {
-    const lines = adminTargets.map((n) => actionLine(n, catalog.get(n)!));
+    const lines = adminTargets.map((n) => actionLine(n, catalog.get(n)!, adminParamDocs(catalog.get(n)!)));
     const actionNames = ["list_actions", ...adminTargets] as [string, ...string[]];
     out.push({
       name: "phren_admin",
@@ -343,9 +360,14 @@ export function buildCompositeTools(catalog: Catalog): BuiltTool[] {
         if (action === "list_actions") {
           const actions = adminTargets.map((n) => {
             const entry = catalog.get(n)!;
-            return { name: n, description: entry.config.description ?? "", params: paramDocs(entry) };
+            return { name: n, description: entry.config.description ?? "", params: adminParamDocs(entry) };
           });
           return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, actions }, null, 2) }] };
+        }
+        const entry = catalog.get(action);
+        if (entry && hasInnerAction(entry) && INNER_ACTION in rest) {
+          const { [INNER_ACTION]: operation, ...others } = rest;
+          return dispatch(catalog, action, { ...others, action: operation });
         }
         return dispatch(catalog, action, rest);
       },
