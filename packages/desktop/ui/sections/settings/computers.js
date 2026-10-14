@@ -3,6 +3,7 @@ import { store } from "../../shell/store.js";
 import { hookGet, hookPost } from "../../api.js";
 import { hookDrift, updateCommand } from "../../shell/hook-drift.js";
 import { formatGitWrites } from "./git-writes.js";
+import { createHealthRead } from "./health-read.js";
 import { api, button, el, heading, input, noticeLine, post, showNotice } from "./ui.js";
 
 // ------------------------------------------------------------ page: Computers
@@ -22,6 +23,7 @@ export function buildComputers(page) {
   page.append(head, intro, list, form);
 
   const meta = new Map();
+  let closed = false;
   api("/api/computers").then((computers) => {
     for (const c of Array.isArray(computers) ? computers : []) meta.set(c.name, c);
     render();
@@ -29,10 +31,12 @@ export function buildComputers(page) {
 
   const cards = new Map();
   function render() {
+    if (closed) return;
     const computers = store.merged?.computers ?? [];
     count.textContent = computers.length ? String(computers.length) : "";
     if (!computers.length) {
       list.replaceChildren(el("div", "settings-empty", "No computers linked."));
+      for (const card of cards.values()) card.cancelHealth();
       cards.clear();
       return;
     }
@@ -49,7 +53,7 @@ export function buildComputers(page) {
       card.update(c);
       ordered.push(card.el);
     }
-    for (const [name, card] of cards) if (!seen.has(name)) { card.el.remove(); cards.delete(name); }
+    for (const [name, card] of cards) if (!seen.has(name)) { card.cancelHealth(); card.el.remove(); cards.delete(name); }
     list.replaceChildren(...ordered);
   }
 
@@ -76,11 +80,14 @@ export function buildComputers(page) {
     }
   });
 
-  store.subscribe(render);
-  return () => {
+  const unsubscribe = store.subscribe(render);
+  const refresh = () => {
     render();
     for (const card of cards.values()) card.loadHealth(true);
   };
+  refresh.hide = () => { for (const card of cards.values()) card.cancelHealth(); };
+  refresh.close = () => { closed = true; refresh.hide(); unsubscribe(); };
+  return refresh;
 }
 
 // ------------------------------------------------------------ computer card
@@ -274,7 +281,7 @@ function computerCard(initial, meta, rerender) {
 
   const state = {
     computer: initial.computer, expanded: false,
-    health: undefined, healthError: null, healthLoaded: false, healthLoading: false,
+    health: undefined, healthError: null,
     activity: undefined, activityError: null, activityLoaded: false,
     resources: undefined, resourcesError: null, resourcesLoaded: false,
   };
@@ -302,20 +309,16 @@ function computerCard(initial, meta, rerender) {
     if (state.expanded) renderResources();
   }
 
-  async function loadHealth(force) {
-    if (state.healthLoading || (state.healthLoaded && !force)) return;
-    state.healthLoading = true;
-    try { state.health = await hookGet(state.computer, "/v1/health/details"); state.healthError = null; }
-    catch (err) { state.healthError = err.message; }
-    finally {
-      state.healthLoaded = true; state.healthLoading = false;
-      gitWrites.textContent = state.healthError
-        ? "Git writes without a repository check: Could not load"
-        : formatGitWrites(state.health?.gitWrites);
-      gitWrites.title = state.healthError || "Counts since this Hook started.";
-      renderChecks(); renderPeers();
-    }
-  }
+  const healthRead = createHealthRead(state.computer, (health, error) => {
+    if (health) state.health = health;
+    state.healthError = error?.message ?? null;
+    gitWrites.textContent = state.healthError
+      ? "Git writes without a repository check: Could not load"
+      : formatGitWrites(state.health?.gitWrites);
+    gitWrites.title = state.healthError || "Counts since this Hook started.";
+    renderChecks(); renderPeers();
+  });
+  const loadHealth = (force) => healthRead.load(force);
 
   async function loadActivity() {
     try { state.activity = (await hookGet(state.computer, "/v1/activity")).events ?? []; state.activityError = null; }
@@ -335,7 +338,7 @@ function computerCard(initial, meta, rerender) {
     body.hidden = false;
     toggle.setAttribute("aria-expanded", "true");
     renderChecks(); renderPeers(); renderActivity(); renderResources();
-    if (!state.healthLoaded) loadHealth(false);
+    if (!healthRead.loaded) loadHealth(false);
     if (!state.activityLoaded) { state.activityLoaded = true; loadActivity(); }
     if (!state.resources) loadResources(false);
     filesBrowser.load();
@@ -351,7 +354,7 @@ function computerCard(initial, meta, rerender) {
   toggle.addEventListener("click", () => (state.expanded ? collapse() : expand()));
   refresh.addEventListener("click", () => {
     if (!state.expanded) { expand(); return; }
-    state.healthLoaded = false; state.activityLoaded = false; state.resourcesLoaded = false;
+    state.activityLoaded = false; state.resourcesLoaded = false;
     update(state.lastComputer ?? { computer: state.computer, state: "online" });
     loadHealth(true); state.activityLoaded = true; loadActivity(); loadResources(true); filesBrowser.reload();
   });
@@ -368,7 +371,7 @@ function computerCard(initial, meta, rerender) {
 
   function renderChecks() {
     checks.replaceChildren(el("div", "comp-section-label", "Health"));
-    if (state.healthLoading && !state.health) { checks.append(el("div", "settings-note", "Asking…")); return; }
+    if (healthRead.loading && !state.health) { checks.append(el("div", "settings-note", "Asking…")); return; }
     if (state.healthError) { checks.append(el("div", "settings-error", state.healthError)); return; }
     if (!state.health) { checks.append(el("div", "settings-note", "Not loaded.")); return; }
     checks.append(versionChips(state.health));
@@ -437,7 +440,7 @@ function computerCard(initial, meta, rerender) {
     resources.append(resourceCard(state.resources));
   }
 
-  return { el: card, loadHealth, update: (c) => { state.lastComputer = c; update(c); } };
+  return { el: card, loadHealth, cancelHealth: healthRead.cancel, update: (c) => { state.lastComputer = c; update(c); } };
 }
 
 function meterColor(fill) { return fill >= 0.9 ? "stressed" : fill >= 0.6 ? "busy" : "ok"; }

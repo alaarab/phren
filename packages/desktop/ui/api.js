@@ -30,9 +30,9 @@ export async function hookPost(computer, route, body) {
 }
 
 /** GET a Hook route with query parameters (an object). */
-export async function hookGet(computer, route, query = {}) {
+export async function hookGet(computer, route, query = {}, { signal } = {}) {
   const search = new URLSearchParams(query).toString();
-  return parse(await fetch(base(computer) + route + (search ? `?${search}` : "")));
+  return parse(await fetch(base(computer) + route + (search ? `?${search}` : ""), { signal }));
 }
 
 /** Read a whole text file of the session's repository: {text, version, total}.

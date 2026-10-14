@@ -7,6 +7,7 @@ GitHub release notes, and the app shows them when that version is available.
 ## [0.1.9] - unreleased
 
 - Settings › Computers shows each Hook's git writes without a repository check, counted by client since the Hook started, and identifies Hooks too old to report. Reads refresh when the page opens.
+- Leaving Settings › Computers cancels pending health reads; reopening starts fresh without waiting for an old request to time out.
 
 ## [0.1.8] - 2026-10-14
 
