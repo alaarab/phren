@@ -39,7 +39,7 @@ The `id` is eight lowercase hexadecimal characters and does not change. Names ar
 | `once` | `once` | `once: 2026-09-21T09:00:00` |
 | `cron` | `cron` | `cron: "0 7 * * 1-5"` |
 
-Times have no zone in the file. The Hook evaluates them in the assigned computer's local time zone. A nonexistent wall-clock time during a daylight-saving transition is skipped. A once schedule disables itself after its run is recorded.
+Times have no zone in the file. The Hook evaluates them in the assigned computer's local time zone. A nonexistent wall-clock time during a daylight-saving transition is skipped. A once schedule disables itself after its run is recorded, provided its timing and revision still match the occurrence that fired. An edit accepted during launch admission is left unchanged.
 
 The `computer` value names a key in `machines.yaml`. Matching is case-insensitive and ignores a trailing `.local`, so `Desk`, `desk`, and `desk.local` identify the same computer. There is no `any` computer mode.
 
@@ -116,6 +116,7 @@ All schedule routes are JSON `POST` requests on the authenticated Hook connectio
 | Route | Result |
 | --- | --- |
 | `/v1/schedules` | All store schedules with project, local `nextRun`, aggregated latest batch as `lastRun`, its child rows as `lastRuns`, and running state across all children. `nextRun` is null for schedules owned by another computer. `problems` (when present) says why a schedule can never fire: a computer that is not in `machines.yaml`, or, on the owning computer, a target project with no source directory or one that is gone. `phren schedule list` prints them with `!`, and `phren schedule add` refuses a schedule with one. |
+| `/v1/schedules/update` | Merges `{ project, id, expectedUpdatedAt, changes }` under the schedule file lock. Returns `{ ok: true, schedule }`; 409 returns `{ error, schedule }` with the current stored schedule; 400 rejects invalid edits; 404 means the project or schedule is missing. |
 | `/v1/schedules/run` | Runs `{ project, id, expectedUpdatedAt? }` now. Returns `{ ok, run, runs }`, with `run` the first child for older clients and `runs` in target order. HTTP 200 with `ok: false` exposes partial or total launch failures through each child's `status` and `reason`. Returns 404 for an unknown owner/schedule/target and 409 for overlap, another computer, or unavailable sources. |
 | `/v1/schedules/history` | Returns newest-first local runs. Accepts optional `project`, `id`, and `limit` (default 50, maximum 500). Each row carries its status (including `needs-you` with the owner question as `reason`) and, when the run was recorded blocked at startup, the `blockedStartupPrompt` text the pane showed. |
 
@@ -129,10 +130,35 @@ Use `lastRuns` for individual targets and their session destinations.
 
 After saving a schedule, clients can pass its `updatedAt` as `expectedUpdatedAt`
 in `/v1/schedules/run`. This optional ISO 8601 timestamp must include a time zone;
-fractional seconds and offsets are accepted. The Hook compares parsed instants
+fractional seconds and offsets are accepted. The Hook compares exact revision strings
 inside schedule admission, before recording or launching any child. A mismatch
 waits up to 30 seconds for the store to sync the edit (a copy older than the app's, or none yet) and then returns
 HTTP 409 with a wait-for-store-sync message, leaving the schedule and run
 history unchanged. A copy newer than the app's is refused at once. This prevents an immediate Run now from firing an older
-single-target definition while a multi-target edit is still syncing. Equivalent
-timestamp spellings match; omitting the field retains legacy behavior.
+single-target definition while a multi-target edit is still syncing. Send the
+stored `updatedAt` unchanged, including its offset and every fractional digit;
+omitting the field retains legacy behavior.
+
+Clients should check `capabilities.scheduleUpdate: true` before using
+`POST /v1/schedules/update`; older Hooks omit it and require the client's legacy
+edit path. Send the owner's `project`, schedule `id`, and the per-schedule
+`updatedAt` returned by `/v1/schedules` as `expectedUpdatedAt` (an ISO 8601
+timestamp with a zone; the exact stored string must match). For example:
+
+```json
+{"project":"acme","id":"7f3a2c1d","expectedUpdatedAt":"2026-09-20T21:00:00Z","changes":{"name":"Morning sweep","model":null}}
+```
+
+`changes` accepts only `name`, `prompt`, `enabled`, `computer`, `harness`,
+`model`, `account`, `notify`, `projects`, `session`, `every`, `at`, `days`,
+`interval`, `once`, and `cron`. Omitted keys, including fields unknown to this
+Hook, are preserved. Set an optional field to `null` to remove it; required
+fields (including the selected timing form's fields) cannot be removed.
+`id`, `createdAt`, and `updatedAt` cannot be edited. Unknown body or change
+keys and wrong types return 400 with an error message. The merged schedule
+uses the existing store validation; invalid results return 400 with the
+validation message. Conflicts and rejected edits leave the file unchanged.
+A successful merge gets a new `updatedAt` in canonical UTC form
+(`YYYY-MM-DDTHH:mm:ss.sssZ`) and an atomic write under the same
+lock as CLI schedule edits. The existing YAML serializer preserves values
+and unknown keys, but may reformat comments, quoting, or whitespace.

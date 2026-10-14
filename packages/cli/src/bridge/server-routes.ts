@@ -58,6 +58,7 @@ import { currentModel, currentStep } from "./steps.js";
 import { type AccountUsageReader, capacityRoom, usageForCaller } from "./usage.js";
 import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
+import { updateScheduleRoute } from "./schedule-update.js";
 import { readFinalTurn } from "./schedule-watch.js";
 import { cachedStoreWarnings, healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -157,7 +158,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
-  if (snapshot.has("schedules")) result.scheduleProjects = true;
+  if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; }
   if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
   return result;
 }
@@ -679,6 +680,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             expectedUpdatedAt: z.string().datetime({ offset: true }).optional() }).parse(data);
           const runs = await scheduler!.launchNow(input.project, input.id, false, input.expectedUpdatedAt);
           result = { ok: runs.every(run => run.status !== "failed"), run: runs[0], runs };
+        } else if (url.pathname === "/v1/schedules/update") {
+          result = await updateScheduleRoute(scheduleStore, data);
         } else if (url.pathname === "/v1/schedules/history") {
           const input = z.object({ project: z.string().min(1).max(200).optional(), id: z.string().regex(/^[a-f0-9]{8}$/).optional(),
             limit: z.number().int().min(1).max(500).optional() }).parse(data);
