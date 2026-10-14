@@ -79,6 +79,7 @@ describe("webServers", () => {
   });
   afterEach(async () => {
     if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+    vi.useRealTimers();
     execFileMock.mockReset();
     vi.restoreAllMocks();
   });
@@ -134,6 +135,47 @@ describe("webServers", () => {
     expect(settled).toBe(false);
     complete();
     expect(await expired).toEqual([]);
+  });
+
+  it("expires a stalled scan after twenty seconds so the next poll can retry", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const completions: Array<(error: Error | null, result: { stdout: string; stderr: string }) => void> = [];
+    execFileMock.mockImplementation((_file: string, _args: string[], _options: unknown, callback: typeof completions[number]) => {
+      completions.push(callback);
+      return { on() {} };
+    });
+    const read = webServers();
+    const rejected = expect(read).rejects.toThrow(/time limit/);
+    await vi.advanceTimersByTimeAsync(20_001);
+    await rejected;
+    const next = webServers();
+    await vi.advanceTimersByTimeAsync(0);
+    completions[1](null, { stdout: "", stderr: "" });
+    expect(await next).toEqual([]);
+    completions[0](null, { stdout: "", stderr: "" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await webServers()).toEqual([]);
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds a probe even when HTTP 102 responses keep the socket active", async () => {
+    server.removeAllListeners("request");
+    const intervals = new Set<ReturnType<typeof setInterval>>();
+    server.on("request", (_req, res) => {
+      const interval = setInterval(() => res.writeProcessing(), 100);
+      intervals.add(interval);
+      res.on("close", () => { clearInterval(interval); intervals.delete(interval); });
+    });
+    answer({ ss: { stdout: ssLine(port) }, lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
+    try {
+      expect(await Promise.race([
+        webServers(),
+        new Promise(resolve => setTimeout(() => resolve("stalled"), 2_500)),
+      ])).toEqual([]);
+    } finally {
+      for (const interval of intervals) clearInterval(interval);
+      server.closeAllConnections();
+    }
   });
 
   it("retries a failed scan without caching its error", async () => {

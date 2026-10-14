@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
-import { git, gitHead, gitRoot, withGitReadDeadline, withIndependentGitReadDeadline } from "./projects.js";
+import { git, gitHead, gitRoot, withGitReadDeadline, withIndependentGitReadDeadline, withoutGitReadDeadline } from "./projects.js";
 import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
+import { hostCredentialIdentity } from "./git-host-auth.js";
 import { LookupCache } from "./lookup-cache.js";
 export { checkRollup, checkRuns } from "./git-hosts.js";
 
@@ -247,18 +248,31 @@ export function invalidatePulls(root: string): void {
   pullsCache.invalidate(key => key.startsWith(root + "\0"));
 }
 
+/** Tokens belong to a domain, so revoke every checkout and pending generation. */
+export function invalidatePullsForDomain(domain: string): void {
+  const normalized = domain.trim().toLowerCase().replace(/\.$/, "");
+  pullsCache.invalidate(key => key.split("\0")[1] === normalized);
+}
+
 /** Open pull or merge requests and the checked-out branch's own (any state)
  * with its checks, from whichever host the remote is on (git-hosts.ts). A
  * host that cannot answer (a missing CLI, a stubbed provider, an unknown
  * domain) is `{ available: false, reason, message }`, never an error. */
 export async function gitPulls(cwd: string): Promise<Json> {
-  const root = await repository(cwd);
-  const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
-  const host = await detectHost(root, branch);
+  const { root, branch, host } = await withIndependentGitReadDeadline(async () => {
+    const root = await repository(cwd);
+    const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
+    return { root, branch, host: await detectHost(root, branch) };
+  });
   const provider = providerFor(host);
-  const key = root + "\0" + JSON.stringify([branch, host]);
-  return pullsCache.get(key, () => withIndependentGitReadDeadline(async () => {
+  const credential = await hostCredentialIdentity(host);
+  const key = root + "\0" + (host.domain ?? "").toLowerCase().replace(/\.$/, "") + "\0" + JSON.stringify([branch, host, credential]);
+  return pullsCache.get(key, () => withoutGitReadDeadline(async () => {
     const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
+    if (await hostCredentialIdentity(host) !== credential) {
+      pullsCache.invalidate(candidate => candidate === key);
+      throw new BridgeError(409, "Forge credentials changed during the lookup. Retry.");
+    }
     return { ...list, branch: branch || null, host };
   }));
 }
