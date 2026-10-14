@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `phren maintain summarize --llm` and `set_topic_summary` no longer drop findings archived into a topic while they were writing its summary, and splitting a large topic no longer brings back a finding just rejected from its older archive.
+- A store sync no longer brings back a finding one computer archived or deleted while the other left it unchanged.
+- A store sync merges daily notes per note, so a note edited on one computer no longer keeps its old text alongside the edit, and notes removed on one computer stay removed when the other added to the same day.
+- Concurrent changes to the retention, workflow and index policies no longer overwrite each other.
+- Rejecting a review item removes only that exact finding (a type tag aside), never a different finding that merely contains its text.
 - `phren agent` sandbox: `apply_patch` writes to the path it validated (a `link/../..` path can no longer land outside the project) and no longer moves onto an existing file it has not read; file tools and the permission check refuse a harmless name that links to a secret file; auto-confirm asks before `git` with `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree` or `--config-env`, `sort -o`, `tree -o`, `rg --pre`, `uniq IN OUT`, and any command naming a secret file (an approved `git status` no longer covers `git -c… status`); an MCP server that closes its stdin no longer crashes the agent with an unhandled EPIPE.
 
 ## [0.3.46] - 2026-10-14

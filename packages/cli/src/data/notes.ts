@@ -36,7 +36,8 @@ export interface AddNoteOptions {
   now?: Date;
 }
 
-const NOTE_HEADING_RE = /^##\s+(\d{2}:\d{2}(?::\d{2})?)\s+<!--\s*nid:([a-f0-9]{8})\s*-->(?:\s+<!--\s*promoted\s*-->)?\s*$/i;
+/** A note's heading as this module writes it: `## HH:MM[:SS] <!-- nid:xxxxxxxx -->`, optionally promoted. */
+export const NOTE_HEADING_RE = /^##\s+(\d{2}:\d{2}(?::\d{2})?)\s+<!--\s*nid:([a-f0-9]{8})\s*-->(?:\s+<!--\s*promoted\s*-->)?\s*$/i;
 
 function isValidDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;

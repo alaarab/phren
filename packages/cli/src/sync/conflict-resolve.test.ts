@@ -64,7 +64,7 @@ describe("conflictStrategy", () => {
     expect(conflictStrategy("demo/reference/topics/sync.md")).toBe("topic");
     expect(conflictStrategy("demo/summary.md")).toBe("summary");
     expect(conflictStrategy("demo/review.md")).toBe("union");
-    expect(conflictStrategy("demo/notes/2026-09-24.md")).toBe("union");
+    expect(conflictStrategy("demo/notes/2026-09-24.md")).toBe("notes");
     expect(conflictStrategy("demo/journal/2026-09-24-sam.md")).toBe("union");
     expect(conflictStrategy("demo/settings.yaml")).toBeNull();
   });
@@ -151,6 +151,68 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
     expect(read(local, "demo/summary.md")).toBe(prose("Remote prose."));
     expect(git(local, "status", "--porcelain")).toBe("");
     expect((await recoverPushConflict(local)).ok).toBe(true);
+  });
+
+  it("keeps a finding removed on one side removed instead of resurrecting it", async () => {
+    const findings = (bullets: string[]) => ["# demo Findings", "", "## 2026-09-20", "", ...bullets, ""].join("\n");
+    const { local, writer, commit } = fixture({ "demo/FINDINGS.md": findings(["- [pattern] Keep this one", "- [pitfall] Archived on the laptop"]) });
+    // Local archives the second finding and records a new one in its place.
+    commit(local, { "demo/FINDINGS.md": findings(["- [pattern] Keep this one", "- [bug] Local finding"]) }, "local");
+    commit(writer, { "demo/FINDINGS.md": findings(["- [pattern] Keep this one", "- [pitfall] Archived on the laptop", "- [bug] Remote finding"]) }, "remote");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    const merged = read(local, "demo/FINDINGS.md");
+    for (const text of ["Keep this one", "Local finding", "Remote finding"]) expect(merged).toContain(text);
+    expect(merged).not.toContain("Archived on the laptop");
+  });
+
+  it("merges notes by note id, so an edited note does not keep its old body too", async () => {
+    const note = (id: string, text: string) => [`## 10:00 <!-- nid:${id} -->`, "", text];
+    const notes = (...entries: string[][]) => ["# demo Notes — 2026-09-24", "", ...entries.map((e) => e.join("\n")).join("\n\n").split("\n"), ""].join("\n");
+    const { local, writer, commit } = fixture({ "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Base body")) });
+    commit(local, { "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Edited body")) }, "local edit");
+    commit(writer, { "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Base body"), note("aaaa0003", "Remote note")) }, "remote add");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    expect(read(local, "demo/notes/2026-09-24.md")).toBe(notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Edited body"), note("aaaa0003", "Remote note")));
+  });
+
+  it("reads note boundaries with the notes writer's grammar, not every nid heading", async () => {
+    const note = (id: string, text: string) => [`## 10:00 <!-- nid:${id} -->`, "", text];
+    const notes = (...entries: string[][]) => ["# demo Notes — 2026-09-24", "", ...entries.map((e) => e.join("\n")).join("\n\n").split("\n"), ""].join("\n");
+    const withExample = (example: string) => note("aaaa0001", `Body of A\n\n## Example <!-- nid:bbbb0002 -->\n\n${example}`);
+    const { local, writer, commit } = fixture({ "demo/notes/2026-09-24.md": notes(withExample("example text"), note("cccc0003", "Note C")) });
+    commit(local, { "demo/notes/2026-09-24.md": notes(note("cccc0003", "Note C")) }, "local removes A");
+    commit(writer, { "demo/notes/2026-09-24.md": notes(withExample("example text v2"), note("cccc0003", "Note C")) }, "remote edits A");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    // Removed on one side, edited on the other: the whole edited note A is kept, heading and all.
+    expect(read(local, "demo/notes/2026-09-24.md")).toBe(notes(note("cccc0003", "Note C"), withExample("example text v2")));
+  });
+
+  it("merges a notes file one side deleted against the base instead of taking the other side whole", async () => {
+    const note = (id: string, text: string) => [`## 10:00 <!-- nid:${id} -->`, "", text];
+    const notes = (...entries: string[][]) => ["# demo Notes — 2026-09-24", "", ...entries.map((e) => e.join("\n")).join("\n\n").split("\n"), ""].join("\n");
+    const { local, writer, commit } = fixture({ "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Note A")) });
+    // Local removed its last note, which deletes the daily file.
+    git(local, "rm", "--quiet", "demo/notes/2026-09-24.md");
+    git(local, "commit", "-m", "local removes A");
+    commit(writer, { "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Note A"), note("bbbb0002", "Note B")) }, "remote adds B");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    expect(read(local, "demo/notes/2026-09-24.md")).toBe(notes(note("bbbb0002", "Note B")));
   });
 
   it("heals a topic whose block an earlier union merge left with two start lines", async () => {

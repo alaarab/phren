@@ -373,6 +373,8 @@ export class FindingsMergeLossError extends Error {}
 
 /**
  * Merge two FINDINGS.md versions: union entries per date, newest date first.
+ * Given the merge base, a finding one side removed and the other left
+ * untouched stays removed instead of coming back from the union.
  *
  * Deduplicates by bullet text, keeping the continuation lines of whichever copy
  * wins (ours takes priority). Preamble and trailing regions are unioned from
@@ -385,8 +387,10 @@ export class FindingsMergeLossError extends Error {}
  * `FindingsMergeLossError` rather than committing the loss. Callers leave the
  * conflict for the user.
  */
-export function mergeFindings(ours: string, theirs: string): string {
-  const { text, dedupedContinuations } = buildMergedFindings(ours, theirs);
+export function mergeFindings(ours: string, theirs: string, base?: string): string {
+  const removed = base === undefined ? new Map<string, string>() : removedFindings(base, ours, theirs);
+  const { text, dedupedContinuations } = buildMergedFindings(ours, theirs, removed);
+  const removedLines = new Set([...removed.values()].flatMap((block) => block.split("\n").map((line) => line.trim())));
 
   const present = new Set(text.split("\n").map((line) => line.trim()));
   const lost = [...significantLines(ours), ...significantLines(theirs)]
@@ -394,7 +398,9 @@ export function mergeFindings(ours: string, theirs: string): string {
     // A block that lost a dedup race takes its own continuation lines with it —
     // that is the intended rule (the finding is present, ours' provenance wins),
     // not the content loss this guard exists to catch.
-    .filter((line) => !dedupedContinuations.has(line));
+    .filter((line) => !dedupedContinuations.has(line))
+    // A finding one side removed and the other left as it was is meant to go.
+    .filter((line) => !removedLines.has(line));
   if (lost.length > 0) {
     throw new FindingsMergeLossError(
       `Refusing to auto-merge ${FINDINGS_FILENAME}: ${lost.length} line(s) would be dropped, ` +
@@ -404,7 +410,26 @@ export function mergeFindings(ours: string, theirs: string): string {
   return text;
 }
 
-function buildMergedFindings(ours: string, theirs: string): { text: string; dedupedContinuations: Set<string> } {
+/**
+ * Findings the merge base had that one side removed (archived, deleted or
+ * rewrote) while the other left them exactly as they were, keyed by bullet
+ * text. A union of both sides would bring them back.
+ */
+function removedFindings(base: string, ours: string, theirs: string): Map<string, string> {
+  const blocks = (content: string) => {
+    const byKey = new Map<string, string>();
+    for (const list of parseFindings(content).dates.values()) for (const block of list) byKey.set(findingBulletText(block), block);
+    return byKey;
+  };
+  const [b, o, t] = [blocks(base), blocks(ours), blocks(theirs)];
+  const removed = new Map<string, string>();
+  for (const [key, block] of b) {
+    if ((!o.has(key) && t.get(key) === block) || (!t.has(key) && o.get(key) === block)) removed.set(key, block);
+  }
+  return removed;
+}
+
+function buildMergedFindings(ours: string, theirs: string, removed: Map<string, string> = new Map()): { text: string; dedupedContinuations: Set<string> } {
   const ourSide = parseFindings(ours);
   const theirSide = parseFindings(theirs);
 
@@ -421,6 +446,7 @@ function buildMergedFindings(ours: string, theirs: string): { text: string; dedu
     const merged: string[] = [];
     for (const block of [...(ourSide.dates.get(date) ?? []), ...(theirSide.dates.get(date) ?? [])]) {
       const key = findingBulletText(block);
+      if (removed.has(key)) continue;
       if (seen.has(key)) {
         for (const line of block.split("\n").slice(1)) {
           const trimmed = line.trim();

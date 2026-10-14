@@ -278,6 +278,31 @@ describe("rejectQueueItem: live findings", () => {
     expect(findings.data[0].text).toContain("retry budget");
     expect(readQueueFile()).not.toContain("Always validate webhook signatures");
   });
+
+  it("never removes a different finding that merely contains the rejected text", () => {
+    writeFindings([`- [pattern] Always use pnpm filters in CI <!-- fid:aaaabbbb -->`]);
+    writeTopicDoc("tooling", [`- [pattern] Use pnpm workspaces for the monorepo`]);
+    const line = `- [2026-03-01] use pnpm`;
+    writeQueue([line]);
+
+    const result = rejectQueueItemDetailed(tmpDir, PROJECT, line);
+
+    expect(result.ok && result.data.outcome).toBe("discarded");
+    expect(findingsContent()).toContain("Always use pnpm filters in CI");
+    expect(fs.readFileSync(path.join(projectDir, "reference", "topics", "tooling.md"), "utf8")).toContain("Use pnpm workspaces");
+    expect(readQueueFile()).not.toContain("use pnpm");
+  });
+
+  it("removes the finding when only its type tag differs from the queue entry", () => {
+    writeFindings([`- [pattern] Always validate webhook signatures before parsing the body <!-- fid:aaaabbbb -->`]);
+    const line = `- [2026-03-01] Always validate webhook signatures before parsing the body`;
+    writeQueue([line]);
+
+    const result = rejectQueueItemDetailed(tmpDir, PROJECT, line);
+
+    expect(result.ok && result.data.outcome).toBe("removed");
+    expect(findingsContent()).not.toContain("webhook signatures");
+  });
 });
 
 describe("dequeueQueueItem: drops the question, keeps the knowledge", () => {
@@ -403,8 +428,8 @@ describe("rejectQueueItem: fails loudly instead of lying", () => {
 
   it("refuses when several different archived bullets match", () => {
     writeTopicDoc("general", [
-      `- Retry storms are caused by unjittered exponential backoff in the client`,
-      `- Retry storms are caused by unjittered exponential backoff in the gateway`,
+      `- [pattern] Retry storms are caused by unjittered exponential backoff`,
+      `- [pitfall] Retry storms are caused by unjittered exponential backoff`,
     ]);
     const line = `- [2026-03-01] Retry storms are caused by unjittered exponential backoff`;
     writeQueue([line]);
