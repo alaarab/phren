@@ -576,7 +576,7 @@ test("a reply typed into a notification reaches the session as its next prompt",
   const notes = () => page.evaluate(() => (window as unknown as { __notes: unknown[][] }).__notes);
   try {
     hook.pushOverview(waiting);
-    await expect.poll(notes).toContainEqual(["phren needs you", expect.stringContaining("Bearer [redacted]"), expect.objectContaining({ reply: true, binding: expect.any(Object) })]);
+    await expect.poll(notes).toContainEqual(["phren needs you", expect.stringMatching(/Authorization: \[redacted\] Tests pass\./), expect.objectContaining({ reply: true, binding: expect.any(Object) })]);
     const notice = (await notes()).find((note) => (note[2] as { reply?: boolean })?.reply)!;
     expect(notice[1]).not.toContain("banner-secret");
     const opts = notice[2] as { key: string; binding: unknown };
