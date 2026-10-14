@@ -667,7 +667,7 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 /* Settings > Computers: one expandable health card per computer, and the
    "Pause all agents" confirm. Appended at the end. */
 .comp-cards { gap: 8px; }
-.comp-card { background: var(--surface); border-radius: 10px; overflow: hidden; }
+.comp-card { background: var(--surface); border-radius: 10px; overflow: hidden; container-type: inline-size; }
 .comp-head { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 6px; }
 .comp-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 6px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .18s ease; }
 .comp-toggle:hover { background: rgba(255,255,255,0.03); }
@@ -772,6 +772,22 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .home-row { min-width: 0; }
 .home-row-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .comp-head .settings-actions { min-width: 150px; justify-content: flex-end; }
+
+/* Narrow computer cards: text gets a full row before the actions. */
+@container (max-width: 400px) {
+  .comp-head { flex-wrap: wrap; padding-bottom: 10px; }
+  .comp-toggle { flex: 1 0 100%; display: grid; grid-template-columns: 9px minmax(0, 1fr) 16px; gap: 4px 12px; padding-top: 6px; }
+  .comp-toggle .settings-row-main { display: contents; }
+  .comp-toggle .settings-dot { grid-column: 1; grid-row: 1; }
+  .comp-toggle .settings-row-title { grid-column: 2; grid-row: 1; }
+  .comp-toggle .comp-chevron { grid-column: 3; grid-row: 1; }
+  .comp-toggle .settings-row-meta,
+  .comp-toggle .settings-inline-note { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+  .comp-toggle .settings-row-title { min-width: 0; overflow-wrap: anywhere; }
+  .comp-head .settings-actions { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
+  .comp-head .settings-actions > .settings-inline-note,
+  .comp-head .settings-actions > .settings-error { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+}
 
 /* Grouped titlebar: a group's pages beside its pill, and the Settings gear. */
 .section-subs { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--border); }
