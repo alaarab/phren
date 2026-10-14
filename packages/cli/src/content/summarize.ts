@@ -297,8 +297,12 @@ export function splitTopicFile(filePath: string, maxBullets = TOPIC_SPLIT_AT): s
   if (!moved.length) return null;
   const olderPath = filePath.replace(/\.md$/, ".older.md");
   const title = head.find((l) => l.startsWith("# ")) ?? "# archive";
-  const prior = fs.existsSync(olderPath) ? fs.readFileSync(olderPath, "utf8").trimEnd() + "\n\n" : `${title} (older archive)\n\nSections moved here from ${path.basename(filePath)} once it passed ${maxBullets} bullets. Still indexed; still searchable.\n\n`;
-  atomicWriteText(olderPath, prior + moved.map((sec) => sec.join("\n").trimEnd()).join("\n\n") + "\n");
+  // The older file has writers of its own (a review rejection removes bullets
+  // from it): read and rewrite it under its lock, always taken after the topic's.
+  withFileLock(olderPath, () => {
+    const prior = fs.existsSync(olderPath) ? fs.readFileSync(olderPath, "utf8").trimEnd() + "\n\n" : `${title} (older archive)\n\nSections moved here from ${path.basename(filePath)} once it passed ${maxBullets} bullets. Still indexed; still searchable.\n\n`;
+    atomicWriteText(olderPath, prior + moved.map((sec) => sec.join("\n").trimEnd()).join("\n\n") + "\n");
+  });
   atomicWriteText(filePath, [...head, ...keep.flat()].join("\n").trimEnd() + "\n");
   return olderPath;
 }
@@ -507,6 +511,11 @@ export function readNowBlock(content: string): { text: string; structural: boole
 export function setTopicSummary(filePath: string, text: string, now: () => Date = () => new Date()): { ok: true } | { ok: false; invented: string[] } | { ok: false; error: string } {
   const paragraph = text.replace(/\s+/g, " ").trim();
   if (paragraph.length < 40) return { ok: false, error: "A summary needs at least a couple of sentences." };
+  // Read and write under the topic's lock, or a finding archived in between is lost.
+  return withFileLock(filePath, () => writeTopicSummary(filePath, paragraph, now));
+}
+
+function writeTopicSummary(filePath: string, paragraph: string, now: () => Date): { ok: true } | { ok: false; invented: string[] } | { ok: false; error: string } {
   const content = fs.readFileSync(filePath, "utf8");
   const bullets = parseTopicBullets(content);
   if (!bullets.length) return { ok: false, error: "This file has no archived bullets; it is a hand-written document, not a topic archive." };

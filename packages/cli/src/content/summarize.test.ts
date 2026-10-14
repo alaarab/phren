@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { blockBody, inventedIdentifiers, KNOWS_END, KNOWS_START, NOW_END, NOW_START, digestTopic, mostMentioned, parseTopicBullets, readKnowsBlock, splitTopicFile, structuralNow, summarizeProject, summarizeTopicFile, upsertBlock } from "./summarize.js";
+import { spawn } from "child_process";
+import { blockBody, inventedIdentifiers, KNOWS_END, KNOWS_START, NOW_END, NOW_START, digestTopic, mostMentioned, parseTopicBullets, readKnowsBlock, setTopicSummary, splitTopicFile, structuralNow, summarizeProject, summarizeTopicFile, upsertBlock } from "./summarize.js";
 import { writeRootManifest } from "../shared.js";
 
 // Lets one test stand in for the model; every other test reaches the real callLlm.
@@ -83,6 +84,55 @@ describe("upsertBlock", () => {
     expect(twice).not.toContain("first");
     expect(twice.match(/## Now/g)).toHaveLength(1);
     expect(parseTopicBullets(twice)).toHaveLength(1);
+  });
+});
+
+/** Another process holds `file`'s lock, writes `content` to it after a moment, then releases. */
+async function writeUnderLock(file: string, content: string): Promise<Promise<unknown>> {
+  const child = spawn(process.execPath, ["-e", `
+    const fs = require("fs");
+    fs.writeFileSync(process.argv[1] + ".lock", process.pid + "\\n" + Date.now(), { flag: "wx" });
+    setTimeout(() => { fs.writeFileSync(process.argv[1], process.argv[2]); fs.unlinkSync(process.argv[1] + ".lock"); }, 300);
+  `, file, content], { stdio: "ignore" });
+  const exited = new Promise((resolve) => child.on("exit", resolve));
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(`${file}.lock`) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+  expect(fs.existsSync(`${file}.lock`)).toBe(true);
+  return exited;
+}
+
+describe("topic writes under another writer's lock", () => {
+  it("setTopicSummary keeps a finding archived while it waited for the lock", async () => {
+    const dir = tmp();
+    const file = path.join(dir, "api.md");
+    fs.writeFileSync(file, topicDoc([["2026-03-01", ["- [pattern] RetryPolicy caps at five"]]]));
+    const exited = await writeUnderLock(file, topicDoc([["2026-03-01", ["- [pattern] RetryPolicy caps at five"]], ["2026-03-02", ["- [bug] Pool stalls under load"]]]));
+
+    const result = setTopicSummary(file, "RetryPolicy caps at five retries, according to the archived findings for this topic.");
+    await exited;
+
+    expect(result.ok).toBe(true);
+    const content = fs.readFileSync(file, "utf8");
+    expect(content).toContain("- [bug] Pool stalls under load");
+    expect(content).toContain("## Now");
+  });
+
+  it("splitTopicFile keeps a removal made in the older file while it waited for that file's lock", async () => {
+    const dir = tmp();
+    const file = path.join(dir, "api.md");
+    const olderFile = path.join(dir, "api.older.md");
+    fs.writeFileSync(olderFile, "# demo · api (older archive)\n\n## Archived 2025-12-01\n\n- [pattern] Rejected later\n- [pattern] Still wanted\n");
+    fs.writeFileSync(file, topicDoc([["2026-01-01", ["- [pattern] a", "- [pattern] b"]], ["2026-02-01", ["- [pattern] c", "- [pattern] d"]]]));
+    // A review rejection removes one older bullet while the split is waiting.
+    const exited = await writeUnderLock(olderFile, "# demo · api (older archive)\n\n## Archived 2025-12-01\n\n- [pattern] Still wanted\n");
+
+    expect(splitTopicFile(file, 3)).toBe(olderFile);
+    await exited;
+
+    const older = fs.readFileSync(olderFile, "utf8");
+    expect(older).not.toContain("Rejected later");
+    expect(older).toContain("Still wanted");
+    expect(older).toContain("- [pattern] a");
   });
 });
 
