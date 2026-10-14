@@ -454,7 +454,7 @@ describe("loadGraphData: empty and partial states", () => {
     // Names the count, the store, the log channel, and the first error in
     // project order (app), not whichever parallel fetch rejected first.
     expect(data.emptyReason).toContain("Could not load memory for 2 projects");
-    expect(data.emptyReason).toContain("phren-graphwebview-test-home/.phren");
+    expect(data.emptyReason).toContain(path.join("phren-graphwebview-test-home", ".phren"));
     expect(data.emptyReason).toContain("Phren: Show Log");
     expect(data.emptyReason).toContain("boom-app");
   });
@@ -482,7 +482,7 @@ describe("loadGraphData: empty and partial states", () => {
     const client = fakeClient({ listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }] })) });
     const data = await loadGraphData(client);
     expect(data.nodes).toEqual([]);
-    expect(data.emptyReason).toBe("No findings or tasks yet for the 1 project in /nonexistent/phren-graphwebview-test-home/.phren.");
+    expect(data.emptyReason).toBe(`No findings or tasks yet for the 1 project in ${path.join("/nonexistent/phren-graphwebview-test-home", ".phren")}.`);
   });
 });
 
