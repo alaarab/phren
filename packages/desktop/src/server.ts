@@ -232,7 +232,13 @@ function parseHostPath(pathname: string): { name: string; hookPath: string } | n
   const rest = pathname.slice("/hosts/".length);
   const slash = rest.indexOf("/");
   if (slash <= 0) return null;
-  return { name: decodeURIComponent(rest.slice(0, slash)), hookPath: rest.slice(slash) };
+  // A malformed escape is an unknown computer, never a throw: the WebSocket
+  // path calls this outside any catch.
+  try {
+    return { name: decodeURIComponent(rest.slice(0, slash)), hookPath: rest.slice(slash) };
+  } catch {
+    return null;
+  }
 }
 
 
@@ -476,7 +482,17 @@ export const startServer: StartServer = async (o) => {
         res.end("not found");
         return;
       }
-      res.writeHead(200, { "Content-Type": contentType(file), "Cache-Control": "no-store", ...corsHeaders(req, boundPort, true) });
+      // This route answers on the app's own origin without the cookie check, so an
+      // extension's HTML or SVG opened here as a document must not run script with
+      // the app's privileges: sandbox it into an opaque origin.
+      const type = contentType(file);
+      const documentType = type.startsWith("text/html") || type.startsWith("image/svg+xml");
+      res.writeHead(200, {
+        "Content-Type": type,
+        "Cache-Control": "no-store",
+        ...(documentType ? { "Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff" } : {}),
+        ...corsHeaders(req, boundPort, true),
+      });
       createReadStream(file).on("error", () => res.destroy()).pipe(res);
       return;
     }
@@ -878,7 +894,8 @@ export const startServer: StartServer = async (o) => {
     } else if (pathname === "/pty") {
       accept(req, socket, head, (ws) => attachPty(ws, url));
     } else if (pathname.startsWith("/hosts/")) {
-      accept(req, socket, head, (ws) => void attachHost(ws, pathname, url.search));
+      // A rejection here would be unhandled and stop the daemon.
+      accept(req, socket, head, (ws) => void attachHost(ws, pathname, url.search).catch(() => ws.terminate()));
     } else {
       rejectUpgrade(socket, 404, "Not Found");
     }
