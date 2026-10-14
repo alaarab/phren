@@ -549,6 +549,7 @@ export function mountAgents(root) {
 
   const handlers = {
     onOpenChat: (computer, child) => openSession(computer, child),
+    onDropFiles: (computer, child, files) => { openSession(computer, child); tabs.activeHandle()?.attach?.(files); },
     onOpenTerminal: (computer, server) => showPane("terminal", { computer, server }),
   };
 
