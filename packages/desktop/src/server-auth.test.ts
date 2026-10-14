@@ -1,4 +1,7 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { HookRequest, HookWebSocket, MergedOverview, OverviewHub } from "./contract.js";
 import { startServer, writeAllowed } from "./server.js";
@@ -396,5 +399,45 @@ describe("auth matrix", () => {
   it("refuses the token as a WebSocket query parameter", async () => {
     const status = await rawUpgrade(h.port, `/api/overview?token=${TOKEN}`, headersFor("absent", "localhost", "same", h.port));
     expect(status).toBe(401);
+  });
+});
+
+describe("hardening", () => {
+  it("survives a malformed computer name on a WebSocket path", async () => {
+    const h = await startHarness();
+    const headers = { Host: `localhost:${h.port}`, Origin: `http://localhost:${h.port}`, Cookie: `phren_desktop=${TOKEN}` };
+    const status = await rawUpgrade(h.port, "/hosts/%ZZ/v1/overview", headers);
+    expect(status).toBe(101);
+    await new Promise((done) => setTimeout(done, 50));
+    const after = await rawRequest({ port: h.port, path: "/api/computers", headers: { Host: headers.Host, Cookie: headers.Cookie } });
+    expect(after.status).toBe(200);
+  });
+
+  it("sandboxes extension HTML and SVG served on the app origin", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "desktop-ext-"));
+    const previous = process.env.PHREN_DESKTOP_EXTENSIONS;
+    process.env.PHREN_DESKTOP_EXTENSIONS = dir;
+    try {
+      const root = path.join(dir, "pub.ext", "extension");
+      await mkdir(root, { recursive: true });
+      await writeFile(path.join(root, "page.html"), "<script>1</script>");
+      await writeFile(path.join(root, "icon.svg"), "<svg/>");
+      await writeFile(path.join(root, "main.js"), "1");
+      const h = await startHarness();
+      const get = (file: string) => rawRequest({ port: h.port, path: `/extension-files/pub.ext/${file}`, headers: { Host: `localhost:${h.port}` } });
+      for (const file of ["page.html", "icon.svg"]) {
+        const res = await get(file);
+        expect(res.status).toBe(200);
+        expect(res.headers["content-security-policy"]).toBe("sandbox");
+        expect(res.headers["x-content-type-options"]).toBe("nosniff");
+      }
+      const script = await get("main.js");
+      expect(script.status).toBe(200);
+      expect(script.headers["content-security-policy"]).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PHREN_DESKTOP_EXTENSIONS;
+      else process.env.PHREN_DESKTOP_EXTENSIONS = previous;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
