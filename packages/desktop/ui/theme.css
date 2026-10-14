@@ -238,7 +238,7 @@ button.home-row:hover { background: var(--card); }
 /* Since you left: turns that ended while the window was away. */
 .home-row.tone-done { box-shadow: inset 3px 0 0 var(--done); }
 button.home-row:disabled { cursor: default; opacity: .6; }
-.home-block[data-block="away"] { position: relative; }
+.home-block[data-block="finished"] { position: relative; }
 .home-away-for { color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; }
 .home-away-dismiss { position: absolute; top: -3px; right: 0; padding: 2px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
 .home-away-dismiss:hover { background: var(--raised); color: var(--text); }
