@@ -10,6 +10,8 @@ export type DeliveryOutcome = "delivered" | "pending";
  * pane and held by the agent until its turn ends. `failed` carries a reason
  * and may still turn `delivered` if the agent takes it late. */
 export type DeliveryState = "queued" | "delivered" | "failed";
+/** A transcript row carrying a message's words: its byte offset, and whether the agent fires UserPromptSubmit for it (a user row does; a mid-turn queue removal does not). */
+export interface TranscriptEntry { offset: number; hook: boolean }
 export type TrackedState = DeliveryState | "unknown";
 export interface DeliveryStatus { state: TrackedState; reason?: string; session?: string }
 
@@ -45,7 +47,10 @@ const recordSchema = z.object({
   /** The transcript entry (byte offset) that settled it, so no other message claims the same one. */
   entry: z.number().optional(),
 }).strict();
-type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number };
+/** In memory only: `hookClaim`, a UserPromptSubmit came for these words before any row was readable, so the
+ * row (in the callback's conversation, now the record's) may settle it when it appears, even once failed; `seenRow`, a user row a working check saw in a pane that has sent no
+ * callbacks, settled at the next check if no hook claimed it meanwhile. */
+type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number; hookClaim?: boolean; seenRow?: number };
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
 
 /** One message per record, bound to the pane it was typed into (server, pane,
@@ -58,9 +63,15 @@ export class PromptDeliveries {
   private records: Record[] = [];
   private waiters = new Map<Record, Waiter>();
   private writing: Promise<void> = Promise.resolve();
+  /** Panes (server, pane, agent) that sent a UserPromptSubmit or Stop since the Hook started. */
+  private hookPanes = new Set<string>();
+  private paneKey(target: Pick<Target, "server" | "pane" | "source">) { return [target.server, target.pane, target.source].join("|"); }
+  private static open(record: Record) { return record.state === "typed" || record.state === "queued"; }
+  /** Open, or failed with its own hook's claim still waiting for its row (a late delivery). */
+  private static claimable(record: Record) { return PromptDeliveries.open(record) || (record.state === "failed" && !!record.hookClaim); }
 
   constructor(private file?: string, private now: () => number = Date.now,
-    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<number[]> = transcriptEntries) {
+    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<TranscriptEntry[]> = transcriptEntries) {
     if (!file) return;
     try {
       for (const row of objects(object(JSON.parse(readFileSync(file, "utf8"))).records)) {
@@ -84,7 +95,8 @@ export class PromptDeliveries {
   }
   private save() {
     if (!this.file) return;
-    const rows = this.records.filter(record => record.id).map(({ idleSince: _, checkedAt: __, ...row }) => row);
+    // A record without a phone id is kept once it claimed a transcript row, so after a restart that row is not offered to another message.
+    const rows = this.records.filter(record => record.id || record.entry !== undefined).map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, ...row }) => row);
     const file = this.file;
     this.writing = this.writing.then(() => atomicInPrivateDir(file, { records: rows })).catch(() => undefined);
   }
@@ -198,46 +210,99 @@ export class PromptDeliveries {
   /** Conversation `target` just submitted `prompt`. Its own record wins, then
    * the oldest open one in the same pane: the agent kept the text across a
    * conversation change, and the conversation now in the pane is where it
-   * went. A prompt nothing matches was typed locally. Never refused. */
-  submitted(target: Target, prompt: string): void {
+   * went. A prompt nothing matches was typed locally. Never refused.
+   * For Claude the transcript is consulted first and the submission claims
+   * the earliest unclaimed user row with these words, through the same
+   * `settle` and the same table of claimed entries the idle check uses: a
+   * callback for a row already claimed (the idle check settled it, the hook
+   * came late) settles nothing more. */
+  async submitted(target: Target, prompt: string): Promise<void> {
     const hash = promptHash(prompt);
-    const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered");
-    const record = open.find(entry => entry.session === target.session) ?? open[0];
+    this.hookPanes.add(this.paneKey(target));
+    const pick = () => {
+      const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered");
+      return open.find(entry => entry.session === target.session) ?? open[0];
+    };
+    let record = pick();
     if (!record) return;
-    record.state = "delivered"; record.session = target.session; record.settledAt = this.now(); delete record.reason;
+    let entry: number | undefined;
+    if (target.source === "claude") {
+      // A hook settles a message only by claiming a row for it: rows all claimed by earlier messages is a
+      // callback for a turn already accounted for. No row yet (not written or not readable, or a transcript
+      // that cannot be read) settles nothing now: the claim waits on the record for its row to appear.
+      let rows: TranscriptEntry[] | undefined;
+      try { rows = (await this.landed({ source: target.source, session: target.session, hash, at: record.at })).filter(row => row.hook); } catch { rows = undefined; }
+      record = pick();
+      if (!record) return;
+      // Claims are per conversation: another conversation's rows can sit at the same byte offset.
+      const claimed = new Set(this.records.filter(other => other.hash === hash && this.samePane(other, target) && other.session === target.session && other.entry !== undefined).map(other => other.entry));
+      // A transcript that cannot be read settles on the hook's word, unless a message with these words already
+      // claimed a row in this conversation: the callback may be that message's, late, so it waits for a row.
+      if (!rows && !claimed.size) { this.settle(record, undefined, target.session); this.save(); return; }
+      // The claim is looked for in the conversation that made it (it may have replaced the one the message was typed for).
+      if (!rows?.length) { record.hookClaim = true; record.session = target.session; return; }
+      const free = rows.filter(row => !claimed.has(row.offset)).sort((a, b) => a.offset - b.offset)[0];
+      if (!free) return;
+      entry = free.offset;
+    }
+    this.settle(record, entry, target.session);
     this.save();
+  }
+  /** Marks `record` delivered, with the transcript entry that settled it when known. */
+  private settle(record: Record, entry?: number, session?: string) {
+    record.state = "delivered"; record.settledAt = this.now(); delete record.reason; delete record.hookClaim; delete record.seenRow;
+    if (session) record.session = session;
+    if (entry !== undefined) record.entry = entry;
     this.release(record, "delivered");
   }
-  /** Whether the transcript shows the agent took `record`'s message. Each matching
-   * transcript entry settles one message: of several identical open messages in a
-   * conversation (two "yes"), the oldest take the entries, and an entry another
-   * message settled with is not offered again. `pass` carries the entries still
-   * unclaimed within one observe. */
-  private async taken(record: Record, pass: Map<string, number[]>): Promise<boolean> {
+  /** Whether the transcript shows the agent took `record`'s message, claiming the entry it settled with.
+   * An entry settles one message: the table of records' `entry` offsets (per conversation) is the only
+   * state, so neither this path nor the hook's can settle two messages with one turn. A user row is a
+   * turn start whose UserPromptSubmit hook settles the message itself, so while the agent works only a
+   * mid-turn queue removal (no hook fires for it) settles from the transcript; once the agent is idle
+   * (`working` false) a user row settles too, for a hook that never came. Of several identical open
+   * messages the oldest take the entries. `pass` carries the entries still unclaimed within one observe. */
+  private async taken(record: Record, pass: Map<string, TranscriptEntry[]>, working = false): Promise<boolean> {
     // Only Claude's transcript says which entry a message settled with; Codex keeps the any-match check.
-    if (record.source !== "claude") return (await this.landed(record).catch(() => [] as number[])).length > 0;
+    if (record.source !== "claude") return (await this.landed(record).catch(() => [] as TranscriptEntry[])).length > 0;
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
-    const open = this.records.filter(other => same(other) && (other.state === "typed" || other.state === "queued")).sort((a, b) => a.at - b.at);
+    const open = this.records.filter(other => same(other) && PromptDeliveries.claimable(other)).sort((a, b) => a.at - b.at);
     if (open[0] !== record) return false;
-    const key = [record.hash, record.server, record.pane, record.session].join("|");
+    const key = [record.hash, record.server, record.pane, record.session, working].join("|");
     let free = pass.get(key);
     if (!free) {
-      const found = await this.landed(record).catch(() => [] as number[]);
+      const found = (await this.landed(record).catch(() => [] as TranscriptEntry[])).sort((a, b) => a.offset - b.offset);
       const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
-      // A message the agent's hook settled has an entry too, but none recorded: it takes the oldest unclaimed.
-      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
-      free = found.filter(entry => !used.has(entry)).sort((a, b) => a - b).slice(hooked);
+      // A message the agent's hook settled took a user row without recording it (a transcript it could not read):
+      // the oldest user rows are theirs, whether the agent works or not.
+      let hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
+      const unclaimed = found.filter(entry => !used.has(entry.offset)).filter(entry => !(entry.hook && hooked-- > 0));
+      if (working) {
+        // A user row is its hook's to settle, unless that hook already came (before the row could be read), or
+        // the pane sends no callbacks at all: then a row two checks in a row saw unclaimed settles it.
+        const row = unclaimed.find(entry => entry.hook);
+        const hookless = !this.hookPanes.has(this.paneKey(record));
+        const own = row && (record.hookClaim || (hookless && record.seenRow === row.offset));
+        if (row && hookless && !own) record.seenRow = row.offset;
+        free = unclaimed.filter(entry => !entry.hook || (own && entry === row));
+      } else free = unclaimed;
     }
+    // The record may have settled (its hook claimed a row) while the transcript was read.
+    if (!PromptDeliveries.claimable(record)) return false;
     const entry = free.shift();
     pass.set(key, free);
     if (entry === undefined) return false;
-    record.entry = entry;
+    record.entry = entry.offset;
     return true;
   }
   /** A turn in `target`'s pane ended: the agent now takes held input or never will. */
   stopped(target: Target): void {
     const at = this.now();
-    for (const record of this.records) if (this.samePane(record, target) && (record.state === "typed" || record.state === "queued") && record.at < at) record.stoppedAt = at;
+    this.hookPanes.add(this.paneKey(target));
+    let marked = false;
+    for (const record of this.records) if (this.samePane(record, target) && (record.state === "typed" || record.state === "queued") && record.at < at) { record.stoppedAt = at; marked = true; }
+    // Persisted: after a restart an idle pane's message is still failed or settled by its Stop.
+    if (marked) this.save();
   }
 
   /** Called on the Hook's activity tick with a server's panes. A message
@@ -247,12 +312,22 @@ export class PromptDeliveries {
   async observe(server: string, panes: Json[]): Promise<void> {
     const now = this.now();
     let changed = false;
-    const pass = new Map<string, number[]>();
+    const pass = new Map<string, TranscriptEntry[]>();
     for (const record of this.records) {
-      if (record.server !== server || (record.state !== "typed" && record.state !== "queued")) continue;
+      if (record.server !== server) continue;
+      // A failed message whose own hook came late, before its row: settled when the row appears.
+      if (record.state === "failed" && record.hookClaim) {
+        if (record.source === "claude" && (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS)) {
+          record.checkedAt = now;
+          if (await this.taken(record, pass, true)) { this.settle(record); changed = true; }
+        }
+        continue;
+      }
+      if (record.state !== "typed" && record.state !== "queued") continue;
       const pane = panes.find(entry => entry.pane_id === record.pane);
       if (!pane || (record.terminal && pane.terminal_id !== record.terminal) || (pane.agent && pane.agent !== record.source)) {
-        if (await this.taken(record, pass)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); continue; }
+        if (await this.taken(record, pass)) { this.settle(record); changed = true; continue; }
+        if (!PromptDeliveries.open(record)) continue;
         record.state = "failed"; record.settledAt = now; changed = true;
         record.reason = pane ? "The agent in this pane restarted before it took the message." : "The agent's pane closed before it took the message.";
         continue;
@@ -263,13 +338,15 @@ export class PromptDeliveries {
         // its UserPromptSubmit hook; its transcript is the only place that says so.
         if (record.source === "claude" && (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS)) {
           record.checkedAt = now;
-          if (await this.taken(record, pass)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); }
+          if (await this.taken(record, pass, true)) { this.settle(record); changed = true; }
         }
         continue;
       }
       record.idleSince ??= now;
       if (record.stoppedAt === undefined || now - Math.max(record.idleSince, record.stoppedAt) < DELIVERY_GIVE_UP_MS) continue;
-      if (await this.taken(record, pass)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); continue; }
+      if (await this.taken(record, pass)) { this.settle(record); changed = true; continue; }
+      // Settled delivered by its hook while the transcript was read: never downgraded.
+      if (!PromptDeliveries.open(record)) continue;
       record.state = "failed"; record.settledAt = now; changed = true;
       record.reason = "The agent finished its turn without taking the message.";
     }
@@ -282,8 +359,8 @@ export class PromptDeliveries {
  * (a mid-turn steer). Reads at most the last 512 KiB. */
 /** The byte offsets (in the file, `start` being the buffer's own offset) of the rows in `buffer`
  * whose user text has `record`'s words, newest first. One offset per row. */
-export function matchingOffsets(buffer: Buffer, start: number, record: { hash: string; at: number }): number[] {
-  const entries: number[] = [];
+export function matchingOffsets(buffer: Buffer, start: number, record: { hash: string; at: number }): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = [];
   const lines = buffer.toString("utf8").split("\n");
   let offset = start + buffer.length;
   for (let index = lines.length - 1; index >= 0; index--) {
@@ -294,12 +371,12 @@ export function matchingOffsets(buffer: Buffer, start: number, record: { hash: s
     const stamp = Date.parse(String(row.timestamp ?? ""));
     if (Number.isFinite(stamp) && stamp < record.at - 5_000) break;
     // One entry per row, even when its content repeats the words.
-    if (userTexts(row).some(text => promptHash(text) === record.hash)) entries.push(offset);
+    if (userTexts(row).some(text => promptHash(text) === record.hash)) entries.push({ offset, hook: row.type === "user" });
   }
   return entries;
 }
 
-async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<number[]> {
+async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<TranscriptEntry[]> {
   const file = await open(await transcriptPath(record.source, record.session), "r");
   try {
     const size = (await file.stat()).size, start = Math.max(0, size - 524_288), buffer = Buffer.alloc(size - start);

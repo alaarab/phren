@@ -1322,7 +1322,7 @@ export class AgentHooks {
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
-          if (typeof body.prompt === "string") this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
+          if (typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
           await this.recordTurn(target, pane, body, dispatch);
           const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
           res.end(JSON.stringify(context ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } } : {})); return;
