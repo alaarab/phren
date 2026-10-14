@@ -568,7 +568,9 @@ export function renderInteractions(container, agentStatus, { computer, target, o
     }
   }
 
-  for (const prompt of Array.isArray(status.pendingQuestions) ? status.pendingQuestions : []) {
+  const prompts = Array.isArray(status.pendingQuestions) ? [...status.pendingQuestions] : [];
+  if (Array.isArray(status.terminalPrompt?.questions)) prompts.push(status.terminalPrompt);
+  for (const prompt of prompts) {
     const questions = normalizeQuestions(prompt.questions);
     if (!questions.length) continue;
     cards.push(buildQuestionCard({
