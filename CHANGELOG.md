@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `phren maintain summarize --llm` no longer drops findings archived into a topic while the model was writing its summary.
+- A store sync no longer brings back a finding one computer archived or deleted while the other left it unchanged.
+- A store sync merges daily notes per note, so a note edited on one computer no longer keeps its old text alongside the edit.
+- Concurrent changes to the retention, workflow and index policies no longer overwrite each other.
+- Rejecting a review item removes only that exact finding (a type tag aside), never a different finding that merely contains its text.
+- In the core MCP profile, `phren_admin` can approve, reject and edit review items and archive projects: pass the inner choice as `operation` (`manage_review_item`, `manage_project`), as `owner_inbox` already does.
+
 ## [0.3.46] - 2026-10-14
 
 ### Added
