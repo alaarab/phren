@@ -72,7 +72,8 @@ function defaultOverview() {
     kind: "overview",
     mux: { id: "default", kind: "herdr", session: "default" },
     groups: [{ id: "1", label: "phren", children: [defaultSession()] }],
-    phren: { computer: { id: "test-computer", name: "This computer" }, version: VERSION, capabilities: { overviewStream: true } },
+    // A real Hook's overview frames carry the same capabilities as /v1/health, and the desktop reads them from here.
+    phren: { computer: { id: "test-computer", name: "This computer" }, version: VERSION, capabilities: defaultHealth().capabilities },
   };
 }
 

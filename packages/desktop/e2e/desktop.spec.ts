@@ -819,8 +819,21 @@ test("a session continues in another agent from the sidebar menu", async ({ page
   await expect(sheet.locator(".launch-status")).toHaveText("Moved", { timeout: 10_000 });
 });
 
+/** The Hook capabilities the page sees: the desktop reads them from overview frames (and /v1/health before the first one). */
+async function hookCapabilities(page: import("@playwright/test").Page, capabilities: Record<string, unknown>, version = "0.3.45") {
+  await page.route("**/v1/health", (route) => route.fulfill({ json: { version, capabilities } }));
+  await page.routeWebSocket(/\/api\/overview$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      const msg = JSON.parse(String(message));
+      for (const c of msg.merged?.computers ?? []) if (c.overview) c.overview.phren = { ...c.overview.phren, version, capabilities };
+      ws.send(JSON.stringify(msg));
+    });
+  });
+}
+
 test("Quick chat starts phren's agent in chat mode on the project", async ({ page }) => {
-  await page.route("**/v1/health", (route) => route.fulfill({ json: { version: "0.3.45", capabilities: { quickChat: true } } }));
+  await hookCapabilities(page, { quickChat: true });
   await page.route("**/v1/dispatch/capacity", (route) => route.fulfill({ status: 404, json: { error: "not here" } }));
   await page.route("**/v1/harnesses", (route) => route.fulfill({ json: { harnesses: [
     { source: "claude", installed: true, usable: true }, { source: "codex", installed: true, usable: true }, { source: "phren", installed: true, usable: true },
@@ -849,7 +862,7 @@ test("Quick chat starts phren's agent in chat mode on the project", async ({ pag
 });
 
 test("Quick chat stays off on a Hook without it", async ({ page }) => {
-  await page.route("**/v1/health", (route) => route.fulfill({ json: { version: "0.3.20", capabilities: {} } }));
+  await hookCapabilities(page, {}, "0.3.20");
   await page.route("**/v1/harnesses", (route) => route.fulfill({ json: { harnesses: [{ source: "phren", installed: true, usable: true }] } }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator("#needs-pill").waitFor();
@@ -866,7 +879,7 @@ test("⌘K's ? search offers to ask the question in a quick chat", async ({ page
   await page.route("**/memory/search**", (route) => route.fulfill({ json: { results: [
     { kind: "finding", text: "The session guard drops the cookie on refresh.", score: 0.82, finding: { id: "fid:1", type: "pitfall" } },
   ] } }));
-  await page.route("**/v1/health", (route) => route.fulfill({ json: { version: "0.3.45", capabilities: { quickChat: true } } }));
+  await hookCapabilities(page, { quickChat: true });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click();
   await page.locator(".sb-row", { hasText: "Fix login" }).click();
