@@ -41,7 +41,10 @@ it.each([
   "https://alice:swordfish@internal.example/api", "redis://:swordfish@localhost:6379", '{"password":"swordfish"}',
   "DB_PASSWORD=swordfish", '"api_key": "short-key"', "glpat-" + "x".repeat(20), "npm_" + "A1b2".repeat(9),
   "sk_live_" + "Ab12".repeat(6), "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
-  "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "/JalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "AccountKey=/9Zx8Wv7Ut6Sr5Qp4On3Ml2Kj1Ih0Gf==", "dop_v1_" + "abcdef0123456789".repeat(4),
+  "Authorization: Basic YWxpY2U6c3dvcmRmaXNo", "Authorization: Token swordfish",
+  '{"password":"alpha\\"omega"}', "accessToken=swordfish123",
 ])("redacts credentials before constructing a notification: %s", (secret) => {
   const notice = needsNotice(row({ lastReply: `Use ${secret} now. Tests pass.` }));
   expect(notice.body).not.toContain(secret);
@@ -54,7 +57,16 @@ it.each([
   "Look at /Users/sam/Projects/phren-w1e/packages/desktop/ui/shell/needs-notify.js line 40.",
   "Edit packages/desktop/ui/shell/needs-notify.js and src/ui-needs-notify.test.ts.",
   "The token budget is fine and tokens are counted per turn.",
+  "The CancellationToken: None means no cancellation.",
   "Merged at 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 on main.",
 ])("keeps ordinary references readable: %s", (text) => {
   expect(needsNotice(row({ lastReply: text })).body).toContain(text.slice(0, 60));
+});
+
+it("redacts a long reply in bounded time", () => {
+  const started = performance.now();
+  for (const filler of ["a.".repeat(64_000) + "!", "_".repeat(64_000), ("ab" + "/").repeat(40_000)]) {
+    needsNotice(row({ lastReply: filler }));
+  }
+  expect(performance.now() - started).toBeLessThan(250);
 });
