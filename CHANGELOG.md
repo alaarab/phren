@@ -12,7 +12,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - A store sync merges daily notes per note, so a note edited on one computer no longer keeps its old text alongside the edit, and notes removed on one computer stay removed when the other added to the same day.
 - Concurrent changes to the retention, workflow and index policies no longer overwrite each other.
 - Rejecting a review item removes only that exact finding (a type tag aside), never a different finding that merely contains its text.
-- In the core MCP profile, `phren_admin` can approve, reject and edit review items and archive projects: pass the inner choice as `operation` (`manage_review_item`, `manage_project`), as `owner_inbox` already does.
 
 ## [0.3.46] - 2026-10-14
 
