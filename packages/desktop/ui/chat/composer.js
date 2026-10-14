@@ -629,11 +629,15 @@ export function createComposer({ computer, target, provider, branch, project, on
     else entry.hidden = true;
     renderPending();
     updateGhost();
-    emit(id, entry.text, "delivered");
+    if (!matched || entry.state !== "delivered") emit(id, entry.text, "delivered");
   }
 
   function reconcileTranscript(messages, acknowledgementID = (id) => id) {
     const normalize = (text) => text.replace(/\s+/gu, " ").trim();
+    // Sends before the initial backlog wait for its end, never its old user rows.
+    for (const entry of pendings.values()) {
+      if (entry.submittedAfterLine === null) entry.submittedAfterLine = submissionCursor();
+    }
     for (const message of messages) {
       // A consumed queue row and the real row replacing it acknowledge one submission.
       const rowID = acknowledgementID(message.id);
@@ -646,6 +650,7 @@ export function createComposer({ computer, target, provider, branch, project, on
         continue;
       }
       for (const [id, entry] of pendings) {
+        if (entry.state === "failed" || entry.submittedAfterLine === null) continue;
         if (message.line > entry.submittedAfterLine && normalize(entry.text) && normalize(message.text) === normalize(entry.text)) {
           settledRows.add(rowID);
           settledRows.add(message.id);

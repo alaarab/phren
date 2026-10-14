@@ -114,7 +114,7 @@ export function openChat(el, computerName, child, opts = {}) {
     onWorkers: () => openWork("workers"),
     onDictate: () => toggleDictation(),
     onTalk: () => toggleTalk(),
-    submissionCursor: () => Math.max(history.totalLines - 1, ...history.messages.map(message => message.line)),
+    submissionCursor: () => backlogLoaded ? Math.max(history.totalLines - 1, ...history.messages.map(message => message.line)) : null,
   });
 
   // ---- voice: dictation into the composer, and talk mode with spoken replies ----
@@ -183,6 +183,7 @@ export function openChat(el, computerName, child, opts = {}) {
 
   // ---- state ----
   const history = new AgentChatHistory();
+  let backlogLoaded = false;
   const preparation = new ChatTranscriptPreparation();
   let preview = null;
   let agentStatus = {};
@@ -282,6 +283,7 @@ export function openChat(el, computerName, child, opts = {}) {
     if (read.updatesPreview) preview = read.preview;
     if (read.kind === "preview") { render(); return; }
     history.receive(read);
+    if (read.kind === "backlog") backlogLoaded = true;
     composer.reconcileTranscript(history.messages, (id) => history.acknowledgementID(id));
     render();
   }

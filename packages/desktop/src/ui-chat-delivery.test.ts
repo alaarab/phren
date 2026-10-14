@@ -65,17 +65,63 @@ beforeEach(() => {
 });
 afterEach(() => { for (const view of views) { view.close?.(); view.destroy?.(); } vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-function chat() {
+function chat(backlogLoaded = true) {
   const el = new Element();
   const update = vi.spyOn(ChatTranscriptPreparation.prototype, "update");
   views.push(openChat(el, "mini", { target }));
   const socket = Socket.all.find(s => s.url.includes("/v1/transcripts"))!;
+  if (backlogLoaded) socket.frame({ type: "backlog", totalLines: 0, entries: [] });
   const echoes = () => update.mock.calls.at(-1)![1]!.pendingEchoes;
   const send = async (text: string) => { el.find("pc-input")!.value = text; el.find("pc-input")!.fire("keydown"); await vi.advanceTimersByTimeAsync(0); };
   return { el, socket, echoes, send };
 }
 
 describe("chat delivery reconciliation", () => {
+  it("anchors an early send after the initial backlog and keeps its failure receipt visible", async () => {
+    const c = chat(false);
+    await c.send("yes");
+    const id = c.echoes()[0].id;
+    c.socket.frame({ type: "backlog", totalLines: 10, entries: [user(3, "yes")] });
+    expect(c.echoes().map(e => e.id)).toEqual([id]);
+    c.socket.frame({ type: "older", totalLines: 10, entries: [user(1, "yes")] });
+    await vi.advanceTimersByTimeAsync(2000);
+    const polls = fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt/status"));
+    expect(polls).toHaveLength(1);
+    expect(JSON.parse(polls[0][1].body).deliveryId).toBe(id);
+    c.socket.frame({ type: "delivery", deliveryId: id, state: "failed", reason: "Never reached agent" });
+    expect(c.echoes()[0].deliveryState).toBe("failed");
+    expect(c.el.find("pc-pending-state failed")?.textContent).toBe("Failed: Never reached agent");
+  });
+
+  it.each([0, 10])("settles an early send only on a fresh row after backlog end %s", async (end) => {
+    const c = chat(false);
+    await c.send("yes");
+    c.socket.frame({ type: "backlog", totalLines: end, entries: end ? [user(3, "yes")] : [] });
+    expect(c.echoes()).toHaveLength(1);
+    c.socket.frame({ type: "append", totalLines: end + 1, entries: [user(end, "yes")] });
+    expect(c.echoes()).toHaveLength(0);
+  });
+
+  it("settles identical retries FIFO without clearing a failed send except by its own receipt", async () => {
+    const c = chat();
+    c.socket.frame({ type: "backlog", totalLines: 10, entries: [] });
+    await c.send("yes");
+    const failed = c.echoes()[0].id;
+    c.socket.frame({ type: "delivery", deliveryId: failed, state: "failed", reason: "Never reached agent" });
+    await c.send("yes");
+    await c.send("yes");
+    const [one, two] = c.echoes().slice(1).map(e => e.id);
+    c.socket.frame({ type: "append", totalLines: 11, entries: [user(10, "yes")] });
+    expect(c.echoes().map(e => e.id)).toEqual([failed, two]);
+    c.socket.frame({ type: "delivery", deliveryId: one, state: "delivered" });
+    expect(c.el.find("pc-pending-state failed")?.textContent).toBe("Failed: Never reached agent");
+    c.socket.frame({ type: "append", totalLines: 12, entries: [user(11, "yes")] });
+    expect(c.echoes().map(e => e.id)).toEqual([failed]);
+    c.socket.frame({ type: "delivery", deliveryId: failed, state: "delivered" });
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(c.echoes()).toHaveLength(0);
+  });
+
   it("keeps queued rows pending and polling so cancellation receipts remain visible", async () => {
     const c = chat();
     await c.send("next step");

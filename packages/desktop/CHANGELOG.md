@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Chat excludes the initial backlog from early sends and settles identical pending sends in order, keeping failed sends failed until their own delivered receipt arrives.
 - Reconnecting chat keeps settled queue and transcript rows from settling another identical pending prompt or stopping its delivery polling.
 - Consuming a queued prompt and then receiving its real transcript row settles only that submission, keeping repeated prompts pending.
 - Queued transcript rows keep chat deliveries pending until consumed, late delivered receipts clear earlier failures, and transcript confirmation tolerates whitespace changes.
