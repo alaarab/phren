@@ -27,6 +27,10 @@ const MAX_HEAD = 256 * 1024;
 const MAX_HEADER_LINE = 8192;
 const MAX_HEADERS = 32;
 const READ_TIMEOUT_MS = 10_000;
+/** How long the Hook may go quiet on an admitted request: every scoped route is
+ * a store read or one finding/task write (whose file lock waits at most 5 s),
+ * so a minute of silence means it is stuck, not slow. */
+const ANSWER_IDLE_MS = 60_000;
 const PROJECT = PROJECT_NAME.source.slice(1, -1);
 
 type Query = Map<string, string[]>;
@@ -193,7 +197,7 @@ function readRequest(scope: GatewayScope, input: Readable): Promise<Read> {
   });
 }
 
-export interface ScopedIO { input: Readable; output: Writable; socket: string }
+export interface ScopedIO { input: Readable; output: Writable; socket: string; answerIdleMs?: number }
 
 /**
  * Serve one scoped SSH session. Commands other than the pipe are refused
@@ -223,6 +227,11 @@ export async function scopedDispatch(scope: string, command: string, io: ScopedI
       answered = true;
       io.output.write(httpResponse(503, "Phren Hook is not running on this computer."));
     });
-    socket.on("close", () => resolve());
+    // A stalled route or a gone SSH client must not hold this process open.
+    socket.setTimeout(io.answerIdleMs ?? ANSWER_IDLE_MS, () => socket.destroy());
+    const drop = () => socket.destroy();
+    io.output.once("error", drop);
+    io.output.once("close", drop);
+    socket.on("close", () => { io.output.off("error", drop); io.output.off("close", drop); resolve(); });
   });
 }

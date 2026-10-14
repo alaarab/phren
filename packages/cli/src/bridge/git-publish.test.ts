@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { checkRollup, gitPulls, gitStatus, invalidatePulls } from "./git.js";
-import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
+import { gitCommit, gitPullRequest, gitPush, runCombined } from "./git-publish.js";
 import { BridgeError } from "./protocol.js";
 
 const execFileAsync = promisify(execFile);
@@ -251,5 +251,19 @@ describe("git publish routes", () => {
     expect(checkRollup([{ status: "IN_PROGRESS" }, { status: "COMPLETED", conclusion: "FAILURE" }])).toBe("failing");
     expect(checkRollup([{ __typename: "StatusContext", state: "PENDING" }])).toBe("pending");
     expect(checkRollup([{ __typename: "StatusContext", state: "ERROR" }])).toBe("failing");
+  });
+
+  it.skipIf(process.platform === "win32")("answers at its deadline when a descendant outside its group keeps the pipes open", async () => {
+    // The child starts a grandchild in its own group that inherits stdout and prints its pid.
+    const script = "const c = require('child_process').spawn(process.execPath, ['-e', 'console.log(process.pid); setTimeout(() => {}, 30000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }); setTimeout(() => {}, 30000);";
+    const started = Date.now();
+    const run = await runCombined(process.execPath, ["-e", script], tmpdir(), 300, {}, 100);
+    try {
+      expect(run).toMatchObject({ code: null, timedOut: true });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      const pid = Number(run.output.trim().split("\n")[0]);
+      if (pid > 0) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
   });
 });

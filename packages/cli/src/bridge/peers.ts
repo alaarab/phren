@@ -4,6 +4,7 @@ import path from "node:path";
 import { Duplex } from "node:stream";
 import { dump, load } from "js-yaml";
 import { z } from "zod";
+import { tryFileLock } from "../governance/locks.js";
 import { logger } from "../logger.js";
 import { hookRequest } from "./client.js";
 import { dispatchKeyPath, publicComputerKey } from "./computers.js";
@@ -41,6 +42,31 @@ export async function hookPeers(root = bridgeRoot()): Promise<HookPeer[]> {
  */
 export async function addHookPeer(input: unknown, root = bridgeRoot()): Promise<{ added: boolean; peer: HookPeer }> {
   const peer = peerSchema.parse(input);
+  return lockedHooksYaml(root, () => addHookPeerNow(peer, root));
+}
+
+/** One hooks.yaml change at a time, in this process and across processes, so
+ * two links read, check and write in turn and neither loses the other's peer. */
+const hooksYamlQueues = new Map<string, Promise<unknown>>();
+const HOOKS_YAML_LOCK_WAIT_MS = 5_000;
+async function lockedHooksYaml<T>(root: string, work: () => Promise<T>): Promise<T> {
+  const file = path.join(path.resolve(root), "hooks.yaml");
+  const previous = hooksYamlQueues.get(file) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(async () => {
+    const deadline = Date.now() + HOOKS_YAML_LOCK_WAIT_MS;
+    let release = tryFileLock(file);
+    while (!release) {
+      if (Date.now() >= deadline) throw new BridgeError(409, "hooks.yaml is being changed by another process. Try again.");
+      await new Promise(resolve => setTimeout(resolve, 50));
+      release = tryFileLock(file);
+    }
+    try { return await work(); } finally { release(); }
+  });
+  hooksYamlQueues.set(file, next);
+  try { return await next; } finally { if (hooksYamlQueues.get(file) === next) hooksYamlQueues.delete(file); }
+}
+
+async function addHookPeerNow(peer: HookPeer, root: string): Promise<{ added: boolean; peer: HookPeer }> {
   const existing = await hookPeers(root).catch(error => {
     if (error instanceof BridgeError && error.details?.hooksYaml === "missing") return [];
     throw error;

@@ -536,6 +536,11 @@ export async function gitDiscard(cwd: string, paths: unknown): Promise<Json> {
   treeCache.delete(root);
   try {
     const files = await repositoryPaths(root, paths);
+    // A directory pathspec would revert or remove everything under it.
+    for (const file of files) {
+      const info = await lstat(path.join(root, file)).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+      if (info?.isDirectory()) throw new BridgeError(409, "Discard the files in this directory one at a time.");
+    }
     const untracked = new Set((await git(root, "ls-files", "--others", "--exclude-standard", "-z")).split("\0").filter(Boolean));
     for (const file of files) {
       const literal = `:(literal)${file}`;

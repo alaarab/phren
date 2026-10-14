@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -38,4 +38,20 @@ it.skipIf(process.platform === "win32")("pins a linked computer in a private hoo
   await addHookPeer({ ...mini, name: "Devbox", address: "workstation", username: "octo" }, root);
   expect((await hookPeers(root)).map(peer => peer.name)).toEqual(["Mini", "Devbox"]);
   expect(await readFile(path.join(root, "hooks.yaml"), "utf8")).toMatch(/^version: 1\ncomputers:\n/);
+});
+
+it.skipIf(process.platform === "win32")("keeps every peer when links run at once or wait on another process's hooks.yaml lock", async () => {
+  const peer = (n: number) => ({ name: `Box${n}`, address: `box-${n}`, username: "sam", port: 22, server: "default", hostKey: key });
+  await Promise.all([1, 2, 3, 4].map(n => addHookPeer(peer(n), root)));
+  expect((await hookPeers(root)).map(p => p.name).sort()).toEqual(["Box1", "Box2", "Box3", "Box4"]);
+
+  // A live process (our parent) holds the lock: the link waits for it, then reads afresh.
+  const lock = path.join(root, "hooks.yaml.lock");
+  await writeFile(lock, `${process.ppid}\n${Date.now()}\n0`);
+  const pending = addHookPeer(peer(5), root);
+  await new Promise(resolve => setTimeout(resolve, 150));
+  expect((await hookPeers(root)).map(p => p.name)).not.toContain("Box5");
+  await rm(lock);
+  await pending;
+  expect((await hookPeers(root)).map(p => p.name)).toHaveLength(5);
 });
