@@ -260,6 +260,10 @@ export async function runPair(args: string[], version: string): Promise<number> 
   console.log(renderUnicodeCompact(url, { border: 2 }));
   const typed = `${code.slice(0, 3)}-${code.slice(3)}`;
   console.log(`\n  Can't scan? Choose "Enter code" and type:  ${hosts[0]}${session.port === PAIR_PORT ? "" : `:${session.port}`}   ${typed}`);
+  if (process.env.WSL_DISTRO_NAME) {
+    console.log(`\n  This is WSL: Windows may block inbound port ${session.port} (and SSH) from the phone. If it cannot connect, run once in an admin PowerShell:`);
+    console.log(`    New-NetFirewallHyperVRule -Name phren-pair -DisplayName "Phren pairing" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts ${session.port},22`);
+  }
   console.log(`  Waiting for your phone (${minutes} min). Ctrl-C cancels.`);
   const cancel = () => session.close();
   process.once("SIGINT", cancel);
