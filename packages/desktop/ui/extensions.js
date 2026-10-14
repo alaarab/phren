@@ -219,15 +219,23 @@ export function openExtensions(el, ctx = {}) {
   head.append(input, themeWrap);
 
   // Node extensions are opt-in: they run as you, outside the browser sandbox.
+  // Where the OS sandbox is on (macOS) they cannot reach the desktop's key or the Hook.
+  const NODE_TEXT = {
+    sandbox: "Run Node extensions. A sandbox keeps them away from this desktop's key and the Hook, but they can read and change your files. Leave this off unless you trust every installed extension.",
+    environment: "Run Node extensions. They run as you and can read this desktop's key, which reaches every linked computer. Leave this off unless you trust every installed extension.",
+  };
   const nodeRow = document.createElement("label");
   nodeRow.className = "ext-node-toggle";
   const nodeBox = document.createElement("input");
   nodeBox.type = "checkbox";
   const nodeText = document.createElement("span");
-  nodeText.textContent = "Run Node extensions. They run as you and can read this desktop's key, which reaches every linked computer. Leave this off unless you trust every installed extension.";
+  nodeText.textContent = NODE_TEXT.environment;
   nodeRow.append(nodeBox, nodeText);
   head.append(nodeRow);
-  api("/api/extensions/node").then((d) => { nodeBox.checked = !!d.enabled; }).catch(() => { nodeRow.hidden = true; });
+  api("/api/extensions/node").then((d) => {
+    nodeBox.checked = !!d.enabled;
+    nodeText.textContent = NODE_TEXT[d.isolation] || NODE_TEXT.environment;
+  }).catch(() => { nodeRow.hidden = true; });
   nodeBox.addEventListener("change", async () => {
     nodeBox.disabled = true;
     try {
