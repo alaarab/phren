@@ -202,4 +202,16 @@ All use the same phren store. No vendor lock-in.
 
 ---
 
+## FAQ
+
+### What happens if I edit memory on two computers at once?
+
+Phren combines changes when the computers next sync through the same Git remote.
+Findings added on either computer are kept, and a removed finding stays removed if the other computer left it unchanged.
+Notes merge per note, and tasks merge per task, with completed tasks taking precedence when both sides change them.
+A conflicting handwritten summary paragraph takes the incoming copy; conflicting config or policy files stop sync and need your choice.
+See [sync conflicts across computers](docs/sync-conflicts.md) for the full rules and how to fix a conflict.
+
+---
+
 MIT License. Made by [Ala Arab](https://github.com/alaarab).
