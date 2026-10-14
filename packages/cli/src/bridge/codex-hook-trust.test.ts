@@ -7,7 +7,7 @@ import { carryCodexHookTrust, codexHookHash, codexHookTrustText } from "./codex-
 const NODE = "'/home/alaarab/.local/share/mise/installs/node/26.7.0/bin/node'";
 const PROGRAM = "/home/alaarab/.local/share/phren/bridge/current/bridge-hook.mjs";
 const PHREN = `${NODE} '${PROGRAM}' hook codex`;
-const OTHER_APP = "'/home/alaarab/.local/bin/other-hook' codex-hook";
+const OTHER_HOOK = "'/home/user/.local/bin/other-hook' codex-hook";
 const HERDR = "bash '/home/alaarab/.codex/herdr-agent-state.sh' session";
 const HOOKS_PATH = "/home/alaarab/.codex/hooks.json";
 
@@ -17,10 +17,10 @@ const other = (command: string, timeout?: number) => ({ hooks: [{ command, ...(t
 /** Devbox's hooks.json with Phren's session callbacks at `timeout`. */
 function hooksJson(timeout: number): string {
   return JSON.stringify({ hooks: {
-    PermissionRequest: [other(OTHER_APP), { hooks: [{ type: "command", command: PHREN, timeout: 60 }] }],
-    SessionStart: [other(HERDR, 10), other(OTHER_APP), phren(timeout)],
-    Stop: [other(OTHER_APP), phren(timeout)],
-    UserPromptSubmit: [other(OTHER_APP), phren(timeout)],
+    PermissionRequest: [other(OTHER_HOOK), { hooks: [{ type: "command", command: PHREN, timeout: 60 }] }],
+    SessionStart: [other(HERDR, 10), other(OTHER_HOOK), phren(timeout)],
+    Stop: [other(OTHER_HOOK), phren(timeout)],
+    UserPromptSubmit: [other(OTHER_HOOK), phren(timeout)],
     PreToolUse: [phren(10)],
     PostToolUse: [phren(10)],
   } }, null, 2) + "\n";
@@ -32,10 +32,10 @@ const table = (key: string, hash: string, extra = "") => `[hooks.state."${HOOKS_
 const CONFIG = [
   'model = "gpt-5.5"\n\n[features]\nhooks = true\n\n[mcp_servers.phren]\ncommand = "node"\n\n[hooks.state]\n\n',
   table("session_start:0:0", "sha256:20ac17f15582f4f45b2622557b7cd34f3e0ff0d4f477b59d679b6621f9b5c936"),
-  table("permission_request:0:0", "sha256:41cdec35e4aa4ceabd331d1d45bd5390af4ce389b9cfc5b80df13e39b0d298c0", "enabled = true\n"),
-  table("session_start:1:0", "sha256:d26d53e74b5c6bdd4bcd0e2c0fb91e1a7e07f66e0c9dc483347fa0871d08f1e4"),
-  table("user_prompt_submit:0:0", "sha256:9d3b871ba5617c6e2e1692964b543c3ae50ebd7fe31271e30d6cc25f706a2351"),
-  table("stop:0:0", "sha256:900d0b9ea69972c2df4bf2221a4646e41b8871d3ea1c82a2f3a37ad22726d989"),
+  table("permission_request:0:0", "sha256:eea85619cf378e70aa5621c76d5764837fb4d5843991588b013b6410a681e32e", "enabled = true\n"),
+  table("session_start:1:0", "sha256:29cb7e282e779428050af47039892d8c8c9b3d9765a4bba69df602e94d15e91b"),
+  table("user_prompt_submit:0:0", "sha256:4e6e3cd81518a2ad06f4c846bdc2b4282eda0b4fe3dc059c9390948c4e4a398a"),
+  table("stop:0:0", "sha256:caec2e6d767a5310a41e88d92dbbfb7b2337491e967d58b6bc9f6a463ed55017"),
   table("permission_request:1:0", "sha256:6b53f9427411ef087cc8ee65b296126bc951961065483b03b461496462ece434"),
   table("session_start:2:0", "sha256:29b61baf8a029ace439714e9b6a8ddbbc69c442167ed4f16270c90f41a80d046"),
   table("user_prompt_submit:1:0", "sha256:2b3204d3d5503b7cd5224d5588b085f184590b617e3e6b4ff7a41637a24cb2bd"),
@@ -66,7 +66,7 @@ describe("codex hook trust", () => {
     expect(run("PostToolUse", { command: PHREN, timeout: 10 })).toBe("sha256:469120aaf94242a1e71d220c19153d73d61868a05991de55600c2f27c36f3325");
     expect(run("PermissionRequest", { command: PHREN, timeout: 60 })).toBe("sha256:6b53f9427411ef087cc8ee65b296126bc951961065483b03b461496462ece434");
     expect(run("SessionStart", { command: HERDR, timeout: 10 })).toBe("sha256:20ac17f15582f4f45b2622557b7cd34f3e0ff0d4f477b59d679b6621f9b5c936");
-    expect(run("SessionStart", { command: OTHER_APP })).toBe("sha256:d26d53e74b5c6bdd4bcd0e2c0fb91e1a7e07f66e0c9dc483347fa0871d08f1e4");
+    expect(run("SessionStart", { command: OTHER_HOOK })).toBe("sha256:29cb7e282e779428050af47039892d8c8c9b3d9765a4bba69df602e94d15e91b");
     expect(run("SessionStart", { command: PHREN, timeout: 3 })).toBe("sha256:29b61baf8a029ace439714e9b6a8ddbbc69c442167ed4f16270c90f41a80d046");
     expect(run("Stop", { command: PHREN, timeout: 3 })).toBe("sha256:3d9f307186e7eaf9414d9922f2a4dbbc86856f3923ca2b3e899a9cc77a7243d9");
     expect(run("UserPromptSubmit", { command: PHREN, timeout: 3 })).toBe("sha256:2b3204d3d5503b7cd5224d5588b085f184590b617e3e6b4ff7a41637a24cb2bd");
@@ -96,7 +96,7 @@ describe("codex hook trust", () => {
 
   it("follows a Phren group that moved to another index", () => {
     const moved = JSON.parse(hooksJson(15)) as { hooks: Record<string, unknown[]> };
-    moved.hooks.Stop = [other(OTHER_APP), other("'/usr/bin/extra' stop"), phren(15)];
+    moved.hooks.Stop = [other(OTHER_HOOK), other("'/usr/bin/extra' stop"), phren(15)];
     const hooks = JSON.stringify(moved, null, 2);
     const result = codexHookTrustText(CONFIG, hooks, PROGRAM, [HOOKS_PATH], hooksJson(3))!;
     expect(result.carried).toContain(`${HOOKS_PATH}:stop:2:0`);
@@ -119,7 +119,7 @@ describe("codex hook trust", () => {
     const forged = CONFIG.replace("29b61baf8a029ace439714e9b6a8ddbbc69c442167ed4f16270c90f41a80d046", "0".repeat(64));
     expect(codexHookTrustText(forged, hooksJson(15), PROGRAM, [HOOKS_PATH], hooksJson(3))?.carried).not.toContain(`${HOOKS_PATH}:session_start:2:0`);
     // A modified non-Phren entry stays modified.
-    const edited = hooksJson(15).replaceAll(`"command": "${OTHER_APP}"`, `"command": "${OTHER_APP} --verbose"`);
+    const edited = hooksJson(15).replaceAll(`"command": "${OTHER_HOOK}"`, `"command": "${OTHER_HOOK} --verbose"`);
     const result = codexHookTrustText(CONFIG, edited, PROGRAM, [HOOKS_PATH])!;
     expect(result.carried.every(key => /session_start:2:0|stop:1:0|user_prompt_submit:1:0/.test(key))).toBe(true);
     expect(untrusted(result.text, edited)).toContain(`${HOOKS_PATH}:session_start:1:0`);

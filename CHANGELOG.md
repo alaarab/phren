@@ -1339,7 +1339,7 @@ Released from `release/0.2.15`: 0.2.14 plus this fix only.
 ### Changed
 
 - Chat loads earlier messages automatically as you scroll upward, retaining the current reading position.
-- Removed “Open in another app” actions and the external-chat preference. Project
+- Removed external terminal app actions and the external-chat preference. Project
   actions open Phren chat or its native Herdr terminal.
 - The installer preserves existing device keys, project mappings, and drafts.
   Recognized Phren SSH keys are migrated with a backup; other keys and other
