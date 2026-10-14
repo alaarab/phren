@@ -282,7 +282,7 @@ export function openChat(el, computerName, child, opts = {}) {
     if (read.updatesPreview) preview = read.preview;
     if (read.kind === "preview") { render(); return; }
     history.receive(read);
-    composer.reconcileTranscript(history.messages);
+    composer.reconcileTranscript(history.messages, (id) => history.acknowledgementID(id));
     render();
   }
 

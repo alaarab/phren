@@ -91,15 +91,24 @@ describe("chat delivery reconciliation", () => {
     expect(c.echoes()[0].deliveryState).toBe("failed");
   });
 
-  it("settles only one duplicate when a queued row is replaced by its real turn", async () => {
+  it("settles a consumed queued submission once when its real row arrives later", async () => {
     const c = chat();
     await c.send("yes");
     await c.send("yes");
     const two = c.echoes()[1].id;
     const queued = user(0, "yes");
-    c.socket.frame({ type: "append", totalLines: 1, entries: [{ ...queued, raw: { ...queued.raw, phrenQueued: true } }] });
-    c.socket.frame({ type: "append", totalLines: 2, entries: [user(1, "yes")] });
+    c.socket.frame({ type: "append", totalLines: 2, entries: [
+      { ...queued, raw: { ...queued.raw, phrenQueued: true, phrenQueueKey: "a".repeat(64) } },
+      { ...user(1, "yes"), raw: { ...queued.raw, phrenQueued: true, phrenQueueKey: "b".repeat(64) } },
+    ] });
+    expect(c.echoes()).toHaveLength(2);
+    c.socket.frame({ type: "append", totalLines: 3, entries: [{ line: 2, raw: { type: "phren_queue_consumed", key: "a".repeat(64) } }] });
     expect(c.echoes().map(e => e.id)).toEqual([two]);
+    c.socket.frame({ type: "append", totalLines: 4, entries: [user(3, "yes")] });
+    expect(c.echoes().map(e => e.id)).toEqual([two]);
+    expect(c.el.find("pc-pending-state queued")?.textContent).toBe("Queued");
+    c.socket.frame({ type: "append", totalLines: 5, entries: [{ line: 4, raw: { type: "phren_queue_consumed", key: "b".repeat(64) } }] });
+    expect(c.echoes()).toHaveLength(0);
   });
 
   it("lets a late delivered receipt recover failure even when transcript text differs", async () => {

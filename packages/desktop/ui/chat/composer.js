@@ -9,7 +9,7 @@
 //   onWorkers, onDictate, onTalk }) -> {
 //   el, focus(), insert(text), attach(files), setStatus(agentStatus), setBackground(jobs),
 //   setCounts({ agents, workers }), onDelivery(fn), applyDelivery(receipt),
-//   reconcileTranscript(messages), pendingEchoes(), destroy()
+//   reconcileTranscript(messages, acknowledgementID), pendingEchoes(), destroy()
 // }
 // A left-footer button whose callback is missing is hidden. jobs are
 // [{ id, label, state, detail? }]; the collapsed Background strip is
@@ -632,13 +632,15 @@ export function createComposer({ computer, target, provider, branch, project, on
     emit(id, entry.text, "delivered");
   }
 
-  function reconcileTranscript(messages) {
+  function reconcileTranscript(messages, acknowledgementID = (id) => id) {
     const normalize = (text) => text.replace(/\s+/gu, " ").trim();
     for (const message of messages) {
-      if (message.role !== "user" || message.isQueued || message.localCommand !== null || settledRows.has(message.id)) continue;
+      // A consumed queue row and the real row replacing it acknowledge one submission.
+      const rowID = acknowledgementID(message.id);
+      if (message.role !== "user" || message.isQueued || message.localCommand !== null || settledRows.has(rowID)) continue;
       for (const [id, entry] of pendings) {
         if (message.line > entry.submittedAfterLine && normalize(entry.text) && normalize(message.text) === normalize(entry.text)) {
-          settledRows.add(message.id);
+          settledRows.add(rowID);
           removePending(id, true);
           break;
         }

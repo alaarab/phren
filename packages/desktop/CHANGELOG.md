@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Consuming a queued prompt and then receiving its real transcript row settles only that submission, keeping repeated prompts pending.
 - Queued transcript rows keep chat deliveries pending until consumed, late delivered receipts clear earlier failures, and transcript confirmation tolerates whitespace changes.
 - Chat keeps repeated prompts pending until their own delivery settles, clears finished reply previews, and saves drafts separately for each computer.
 
