@@ -41,7 +41,27 @@ const WRITING_ARGS: Record<string, RegExp> = {
   sed: /^(-i|--in-place)|(^|[;{}\n]|\/[gpIiMm0-9]*)\s*[we](\s|$)/,
   eslint: /^--fix/,
   git: /^(-o|--output)/,
+  // sort -o writes its output file; --compress-program runs one.
+  sort: /^(-o|--output|--compress-program)/,
+  tree: /^-o/,
+  // rg --pre runs a program on every file it searches.
+  rg: /^--pre(=|$)/,
 };
+
+/**
+ * git options before the subcommand that set config (core.fsmonitor and
+ * diff.external run programs), swap git's own executables, or point it at
+ * another repository: `git -c… status` is not `git status`.
+ */
+const GIT_GLOBAL_UNSAFE = /^(-c|-C|--config-env|--exec-path|--git-dir|--work-tree)/;
+
+function gitGlobalOptionsUnsafe(args: string[]): boolean {
+  for (const a of args) {
+    if (!a.startsWith("-")) return false;
+    if (GIT_GLOBAL_UNSAFE.test(a)) return true;
+  }
+  return false;
+}
 
 /** Package scripts that `npm run` and friends may run unprompted. */
 const SAFE_SCRIPT = /^(test|build|lint|check|typecheck|type-check|tsc|compile)(:[\w:-]+)?$/;
@@ -111,6 +131,9 @@ function segmentIsSafe(tokens: string[]): boolean {
   const name = binary.includes("/") ? "" : binary;
   const writing = WRITING_ARGS[name];
   if (writing && args.some((a) => writing.test(a))) return false;
+  // uniq IN OUT overwrites OUT.
+  if (name === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return false;
+  if (name === "git" && gitGlobalOptionsUnsafe(args)) return false;
   if (READ_ONLY.has(name) || RUNNERS.has(name)) return true;
   const subs = SUBCOMMANDS[name];
   if (!subs) return false;
@@ -133,6 +156,8 @@ export function isAutoApprovableCommand(command: string): boolean {
 export function commandPattern(tokens: string[]): string {
   const [binary, ...args] = tokens;
   if (!binary) return "*";
+  // Such a git line is its own pattern, so approving `git status` doesn't approve it.
+  if (binary === "git" && gitGlobalOptionsUnsafe(args)) return tokens.join(" ");
   if (MULTI_COMMAND_TOOLS.has(binary)) {
     const sub = args.find((a) => !a.startsWith("-"));
     if (sub) return `${binary} ${sub}`;

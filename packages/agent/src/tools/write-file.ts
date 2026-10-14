@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
 import { encodeDiffPayload } from "../multi/diff-renderer.js";
-import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
+import { checkSensitivePath, checkSensitiveTarget, validatePath } from "../permissions/sandbox.js";
 import { recordFileState, staleFileError } from "./file-state.js";
 import { syntaxCheckNote } from "./syntax-check.js";
 
@@ -33,6 +33,8 @@ export const writeFileTool: AgentTool = {
     if (!sandboxResult.ok) {
       return { output: `Path outside sandbox: ${sandboxResult.error}`, is_error: true };
     }
+    const target = checkSensitiveTarget(resolved, sandboxResult.resolved);
+    if (target.sensitive) return { output: `Access denied: ${target.reason}`, is_error: true };
 
     const stale = staleFileError(filePath, { requireRead: true });
     if (stale) return { output: stale, is_error: true };

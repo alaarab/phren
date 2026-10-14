@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `phren agent` sandbox: `apply_patch` writes to the path it validated (a `link/../..` path can no longer land outside the project) and no longer moves onto an existing file it has not read; file tools and the permission check refuse a harmless name that links to a secret file; auto-confirm asks before `git` with `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree` or `--config-env`, `sort -o`, `tree -o`, `rg --pre`, `uniq IN OUT`, and any command naming a secret file (an approved `git status` no longer covers `git -c… status`); an MCP server that closes its stdin no longer crashes the agent with an unhandled EPIPE.
+
 ## [0.3.46] - 2026-10-14
 
 ### Added

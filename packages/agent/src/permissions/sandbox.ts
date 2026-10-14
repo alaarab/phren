@@ -138,3 +138,13 @@ export function checkSensitivePath(resolved: string): { sensitive: boolean; reas
 
   return { sensitive: false };
 }
+
+/**
+ * Sensitive-path check over a requested path and its canonical target, so a
+ * harmless-looking name that links to a secret file is still refused.
+ */
+export function checkSensitiveTarget(requested: string, canonical?: string): { sensitive: boolean; reason?: string } {
+  const lexical = checkSensitivePath(requested);
+  if (lexical.sensitive || canonical === undefined) return lexical;
+  return checkSensitivePath(canonical);
+}

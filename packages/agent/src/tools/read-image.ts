@@ -3,7 +3,7 @@ import * as path from "path";
 import type { AgentTool, AgentToolImage } from "./types.js";
 import type { LlmProvider } from "../providers/types.js";
 import { modelSupportsVision } from "../models.js";
-import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
+import { checkSensitivePath, checkSensitiveTarget, validatePath } from "../permissions/sandbox.js";
 
 /** Anthropic rejects images over 5MB; the other providers are in the same range. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -54,6 +54,8 @@ export function createReadImageTool(provider: LlmProvider): AgentTool {
       if (!sandboxResult.ok) {
         return { output: `Path outside sandbox: ${sandboxResult.error}`, is_error: true };
       }
+      const target = checkSensitiveTarget(resolved, sandboxResult.resolved);
+      if (target.sensitive) return { output: `Access denied: ${target.reason}`, is_error: true };
 
       const mediaType = MEDIA_TYPES[path.extname(filePath).toLowerCase()];
       if (!mediaType) {

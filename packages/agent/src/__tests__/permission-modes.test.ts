@@ -25,6 +25,11 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "cargo test",
     "go vet ./...",
     "rg foo 2>/dev/null",
+    "git --no-pager log -1",
+    "sort a.txt | uniq -c",
+    "uniq a.txt",
+    "tree -L 2",
+    "rg --pre-glob '*.gz' foo",
   ];
   const asked = [
     "rm -rf src",
@@ -46,6 +51,27 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "python x.py",
     "npx prettier --write .",
     "eslint --fix .",
+    // git options before the subcommand can run programs or switch repos.
+    'git -ccore.fsmonitor="touch /tmp/pwned" status',
+    "git -c core.fsmonitor=x status",
+    "git -cdiff.external=/tmp/x diff",
+    "git --config-env=core.pager=EVIL log",
+    "git --exec-path=/tmp/evil status",
+    "git -C /tmp/elsewhere status",
+    "git --git-dir=/tmp/other/.git log",
+    "git --work-tree=/tmp/other status",
+    // Read-only tools with arguments that write files or run programs.
+    "sort -o out.txt a.txt",
+    "sort --output=out.txt a.txt",
+    "sort --compress-program=sh a.txt",
+    "tree -o out.txt",
+    "rg --pre ./run.sh foo",
+    "rg --pre=./run.sh foo",
+    "uniq in.txt out.txt",
+    // Secret files ask, as read_file would refuse them.
+    "cat .env",
+    "cat ~/.ssh/id_ed25519",
+    "grep TOKEN config/secrets.json",
   ];
 
   for (const command of unprompted) {

@@ -23,7 +23,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
-import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
+import { checkSensitivePath, checkSensitiveTarget, validatePath } from "../permissions/sandbox.js";
 import { describeNotFound } from "./edit-engine.js";
 import { forgetFileState, recordFileState, staleFileError } from "./file-state.js";
 import { syntaxCheckNote } from "./syntax-check.js";
@@ -263,17 +263,27 @@ export function applyChunks(content: string, chunks: PatchChunk[], filePath: str
 
 export interface PlannedWrite {
   path: string;
+  /** Where the write lands on disk. */
+  abs: string;
   /** null deletes. */
   content: string | null;
   before: string | null;
   status: "A" | "M" | "D";
 }
 
-/** Compute every file change for a patch without writing anything. */
-export function planPatch(ops: PatchOp[], cwd: string): PlannedWrite[] {
+/**
+ * Compute every file change for a patch without writing anything. `resolve`
+ * maps a patch path to its file on disk; the tool passes the sandbox's
+ * canonical path, so planning and writes act on the file that was validated.
+ */
+export function planPatch(
+  ops: PatchOp[],
+  cwd: string,
+  resolve: (p: string) => string = (p) => path.resolve(cwd, p),
+): PlannedWrite[] {
   const state = new Map<string, string | null>();
   const read = (p: string): string | null => {
-    const abs = path.resolve(cwd, p);
+    const abs = resolve(p);
     if (state.has(abs)) return state.get(abs)!;
     if (!fs.existsSync(abs)) return null;
     if (fs.statSync(abs).isDirectory()) throw new PatchError(`${p} is a directory.`);
@@ -281,8 +291,9 @@ export function planPatch(ops: PatchOp[], cwd: string): PlannedWrite[] {
   };
   const writes: PlannedWrite[] = [];
   const record = (p: string, content: string | null, before: string | null, status: PlannedWrite["status"]) => {
-    state.set(path.resolve(cwd, p), content);
-    writes.push({ path: p, content, before, status });
+    const abs = resolve(p);
+    state.set(abs, content);
+    writes.push({ path: p, abs, content, before, status });
   };
   for (const op of ops) {
     if (op.kind === "add") {
@@ -331,24 +342,33 @@ export const applyPatchTool: AgentTool = {
     let writes: PlannedWrite[];
     try {
       const ops = parsePatch(text);
+      // Validation follows links and `..` on disk; everything after it uses
+      // that canonical path, never a lexical fold of the patch's path.
+      const canonical = new Map<string, string>();
       for (const p of patchPaths(ops)) {
         const sensitive = checkSensitivePath(path.resolve(cwd, p));
         if (sensitive.sensitive) return { output: `Access denied: ${p}: ${sensitive.reason}`, is_error: true };
         const sandbox = validatePath(p, cwd, []);
         if (!sandbox.ok) return { output: `Path outside sandbox: ${sandbox.error}`, is_error: true };
+        const target = checkSensitiveTarget(p, sandbox.resolved);
+        if (target.sensitive) return { output: `Access denied: ${p}: ${target.reason}`, is_error: true };
+        canonical.set(p, sandbox.resolved);
       }
+      const resolve = (p: string): string => canonical.get(p)!;
       for (const op of ops) {
-        // Add File over an existing file is a whole-file overwrite.
-        const stale = staleFileError(path.resolve(cwd, op.path), { requireRead: op.kind === "add" });
+        // Add File over an existing file is a whole-file overwrite, and so is
+        // a move onto an existing file.
+        const stale = staleFileError(resolve(op.path), { requireRead: op.kind === "add" })
+          ?? (op.kind === "update" && op.moveTo ? staleFileError(resolve(op.moveTo), { requireRead: true }) : null);
         if (stale) throw new PatchError(stale);
       }
-      writes = planPatch(ops, cwd);
+      writes = planPatch(ops, cwd, resolve);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { output: `apply_patch failed; no files were changed.\n${msg}`, is_error: true };
     }
     for (const w of writes) {
-      const abs = path.resolve(cwd, w.path);
+      const abs = w.abs;
       if (w.content === null) {
         if (fs.existsSync(abs)) fs.rmSync(abs);
         forgetFileState(abs);

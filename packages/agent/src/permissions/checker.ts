@@ -1,6 +1,6 @@
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
-import { isAutoApprovableCommand } from "./shell-classify.js";
+import { isAutoApprovableCommand, splitCommandLine } from "./shell-classify.js";
 import { evaluateRules } from "./rules.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
@@ -122,6 +122,11 @@ export function checkPermission(
       if (!pathResult.ok) {
         return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
       }
+      // A harmless name can link to a secret file.
+      const target = checkSensitivePath(pathResult.resolved);
+      if (target.sensitive) {
+        return { verdict: "deny", reason: `Sensitive path: ${target.reason}` };
+      }
     }
   }
 
@@ -135,6 +140,10 @@ export function checkPermission(
       const pathResult = validatePath(p, config.projectRoot, config.allowedPaths);
       if (!pathResult.ok) {
         return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
+      }
+      const target = checkSensitivePath(pathResult.resolved);
+      if (target.sensitive) {
+        return { verdict: "deny", reason: `Sensitive path: ${target.reason}` };
       }
     }
   }
@@ -174,7 +183,11 @@ export function checkPermission(
         const cwdResult = validatePath(cwd, config.projectRoot, config.allowedPaths);
         // Only commands that read, build or test; anything else (rm, git
         // push, npm publish, a redirect into a file) asks.
-        if (cwdResult.ok && isAutoApprovableCommand((input.command as string) || "")) {
+        // A read-only command still asks before it touches a secret file
+        // (`cat .env`), as read_file would be refused.
+        const command = (input.command as string) || "";
+        const touchesSecret = (splitCommandLine(command) ?? []).some((tokens) => tokens.some((t) => checkSensitivePath(t).sensitive));
+        if (cwdResult.ok && !touchesSecret && isAutoApprovableCommand(command)) {
           return { verdict: "allow", reason: "Read, build or test command within sandbox." };
         }
       }

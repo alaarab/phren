@@ -116,6 +116,37 @@ describe("apply_patch tool", () => {
     expect(fs.readFileSync("one.txt", "utf-8")).toBe("1\n");
   });
 
+  it("writes where validation resolved a path through a link, not its lexical fold", async () => {
+    // lnk/../../x.txt is project/deep/x.txt on disk but ../x.txt lexically.
+    const project = path.join(dir, "project");
+    fs.mkdirSync(path.join(project, "deep/one/two"), { recursive: true });
+    fs.symlinkSync(path.join(project, "deep/one/two"), path.join(project, "lnk"), "dir");
+    process.chdir(project);
+    const r = await applyPatchTool.execute({ patch: "*** Begin Patch\n*** Add File: lnk/../../x.txt\n+x\n*** End Patch" });
+    expect(r.is_error).toBeFalsy();
+    expect(fs.readFileSync(path.join(project, "deep/x.txt"), "utf-8")).toBe("x\n");
+    expect(fs.existsSync(path.join(dir, "x.txt"))).toBe(false);
+  });
+
+  it("refuses a patch through a link to a secret file", async () => {
+    fs.writeFileSync(".env", "TOKEN=x\n");
+    fs.symlinkSync(path.join(dir, ".env"), path.join(dir, "public.txt"));
+    const r = await applyPatchTool.execute({ patch: "*** Begin Patch\n*** Update File: public.txt\n-TOKEN=x\n+TOKEN=y\n*** End Patch" });
+    expect(r.is_error).toBe(true);
+    expect(r.output).toContain("Access denied");
+    expect(fs.readFileSync(".env", "utf-8")).toBe("TOKEN=x\n");
+  });
+
+  it("does not move onto an existing file it has not read", async () => {
+    fs.writeFileSync("a.txt", "a\n");
+    fs.writeFileSync("dest.txt", "keep\n");
+    const r = await applyPatchTool.execute({ patch: "*** Begin Patch\n*** Update File: a.txt\n*** Move to: dest.txt\n*** End Patch" });
+    expect(r.is_error).toBe(true);
+    expect(r.output).toContain("has not been read");
+    expect(fs.readFileSync("dest.txt", "utf-8")).toBe("keep\n");
+    expect(fs.existsSync("a.txt")).toBe(true);
+  });
+
   it("refuses paths outside the project", async () => {
     const r = await applyPatchTool.execute({ patch: "*** Begin Patch\n*** Add File: ../escape.txt\n+x\n*** End Patch" });
     expect(r.is_error).toBe(true);
