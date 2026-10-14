@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { z } from "zod";
@@ -197,6 +198,21 @@ export async function readScheduleDocument(projectDir: string): Promise<Schedule
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { document: { version: 1 }, schedules: [] };
     throw error;
   }
+  return parseScheduleDocument(text);
+}
+
+/** Synchronous I/O for writers sharing a lock with synchronous store routes. */
+export function readScheduleDocumentSync(projectDir: string): ScheduleDocument {
+  let text: string;
+  try { text = readFileSync(schedulePath(projectDir), "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { document: { version: 1 }, schedules: [] };
+    throw error;
+  }
+  return parseScheduleDocument(text);
+}
+
+function parseScheduleDocument(text: string): ScheduleDocument {
   const document = object(yaml.load(text, { schema: yaml.CORE_SCHEMA }));
   if (document.version !== 1) throw new Error("schedules.yaml must have version: 1.");
   if (!Array.isArray(document.schedules)) throw new Error("schedules.yaml must contain a schedules list.");
@@ -211,7 +227,7 @@ const SCHEDULE_LOCK_WAIT_MS = 5_000;
 /** Hold `<project>/schedules.yaml.lock` (one holder per file, in this process and
  * across processes) for one read, check and write, so two edits never
  * overwrite each other. */
-export async function withScheduleLock<T>(projectDir: string, work: () => Promise<T>): Promise<T> {
+export async function withScheduleLock<T>(projectDir: string, work: () => T | Promise<T>): Promise<T> {
   const file = path.resolve(schedulePath(projectDir));
   const previous = scheduleQueues.get(file) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(async () => {
@@ -222,17 +238,37 @@ export async function withScheduleLock<T>(projectDir: string, work: () => Promis
       await new Promise(resolve => setTimeout(resolve, 50));
       release = tryFileLock(file);
     }
-    try { return await work(); } finally { release(); }
+    try {
+      const result = work();
+      // A synchronous writer must release before yielding: a store route
+      // waiting synchronously on this lock otherwise stalls its owner too.
+      return result instanceof Promise ? await result : result;
+    } finally { release(); }
   });
   scheduleQueues.set(file, next);
   try { return await next; } finally { if (scheduleQueues.get(file) === next) scheduleQueues.delete(file); }
 }
 
 export async function writeScheduleDocument(projectDir: string, schedules: Schedule[], original: Record<string, unknown> = { version: 1 }): Promise<void> {
+  await atomicInPrivateDir(schedulePath(projectDir), serializeScheduleDocument(schedules, original));
+}
+
+export function writeScheduleDocumentSync(projectDir: string, schedules: Schedule[], original: Record<string, unknown> = { version: 1 }): void {
+  const text = serializeScheduleDocument(schedules, original), file = schedulePath(projectDir);
+  mkdirSync(projectDir, { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${randomBytes(8).toString("hex")}.tmp`;
+  try {
+    writeFileSync(temporary, text, { mode: 0o600, flag: "wx" });
+    renameSync(temporary, file);
+  } finally {
+    try { unlinkSync(temporary); } catch { /* already renamed or not created */ }
+  }
+}
+
+function serializeScheduleDocument(schedules: Schedule[], original: Record<string, unknown>): string {
   if (schedules.length > MAX_SCHEDULES) throw new Error(`A project can have at most ${MAX_SCHEDULES} schedules.`);
   schedules.forEach(parseSchedule);
-  const text = yaml.dump({ ...original, version: 1, schedules }, { lineWidth: 1000, noRefs: true, sortKeys: false });
-  await atomicInPrivateDir(schedulePath(projectDir), text);
+  return yaml.dump({ ...original, version: 1, schedules }, { lineWidth: 1000, noRefs: true, sortKeys: false });
 }
 
 export function canonicalComputer(value: string): string {

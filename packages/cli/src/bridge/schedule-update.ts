@@ -4,7 +4,7 @@ import { getProjectDirs } from "../shared.js";
 import { BridgeError } from "./protocol.js";
 import {
   SCHEDULE_EVERY, SCHEDULE_HARNESSES, SCHEDULE_NOTIFY, SCHEDULE_SESSIONS, WEEKDAYS,
-  parseSchedule, readScheduleDocument, withScheduleLock, writeScheduleDocument, type Schedule,
+  parseSchedule, readScheduleDocumentSync, withScheduleLock, writeScheduleDocumentSync, type Schedule,
 } from "./schedule-format.js";
 
 const optional = <T extends z.ZodType>(schema: T) => schema.nullable().optional();
@@ -31,14 +31,14 @@ export async function updateScheduleRoute(store: string, body: unknown): Promise
   catch (error) { throw new BridgeError(400, error instanceof Error ? error.message : "Invalid schedule update."); }
   const directory = getProjectDirs(store).find(dir => path.basename(dir).toLowerCase() === input.project.toLowerCase());
   if (!directory) throw new BridgeError(404, `Unknown project "${input.project}".`);
-  return withScheduleLock(directory, async () => {
-    const file = await readScheduleDocument(directory);
+  return withScheduleLock(directory, () => {
+    const file = readScheduleDocumentSync(directory);
     // Keep raw siblings too: parsing can normalize duplicate days/notifications.
     const schedules = (file.document.schedules as Schedule[] | undefined) ?? [];
     const index = schedules.findIndex(schedule => schedule.id === input.id);
     if (index < 0) throw new BridgeError(404, `Schedule "${input.id}" was not found in ${input.project}.`);
     const current = schedules[index];
-    if (Date.parse(current.updatedAt) !== Date.parse(input.expectedUpdatedAt)) {
+    if (current.updatedAt !== input.expectedUpdatedAt) {
       throw new BridgeError(409, "This schedule changed. Refresh it and try again.", { schedule: current });
     }
     const updated = { ...current };
@@ -50,7 +50,7 @@ export async function updateScheduleRoute(store: string, body: unknown): Promise
     catch (error) { throw new BridgeError(400, error instanceof Error ? error.message : "Invalid schedule."); }
     updated.updatedAt = new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString();
     schedules[index] = updated;
-    await writeScheduleDocument(directory, schedules, file.document);
+    writeScheduleDocumentSync(directory, schedules, file.document);
     return { ok: true, schedule: updated };
   });
 }

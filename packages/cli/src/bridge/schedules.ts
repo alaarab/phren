@@ -9,7 +9,7 @@ import { getProjectSourcePath } from "../project-config.js";
 import { getProjectDirs } from "../shared.js";
 import {
   computerMatches, latestScheduleBatch, nextRun, readScheduleDocument, readScheduleRuns, reusableLaunches, runningStatuses, scheduleNotifications, scheduleSessionRoute,
-  writeScheduleDocument, writeScheduleRuns,
+  readScheduleDocumentSync, withScheduleLock, writeScheduleDocumentSync, writeScheduleRuns,
   type Schedule, type ScheduleLauncher, type ScheduleNotify, type ScheduleRun, type ScheduleRunOutcome, type SchedulePushSender, type ScheduleStatus,
 } from "./schedule-format.js";
 
@@ -166,8 +166,17 @@ export class Scheduler {
       await writeScheduleRuns(this.runsFile, [...runs, ...children.map(child => child.run)]);
       for (const child of children) this.own.add(child.run.id);
       if (schedule.every === "once" && schedule.enabled) {
-        const schedules = file.schedules.map(item => item.id === id ? { ...item, enabled: false, updatedAt: startedAt } : item);
-        try { await writeScheduleDocument(projectDir, schedules, file.document); }
+        try {
+          await withScheduleLock(projectDir, () => {
+            const current = readScheduleDocumentSync(projectDir);
+            const schedules = (current.document.schedules as Schedule[] | undefined) ?? [];
+            const index = schedules.findIndex(item => item.id === id);
+            if (index < 0) return; // A concurrent removal must stay removed.
+            schedules[index] = { ...schedules[index], enabled: false,
+              updatedAt: new Date(Math.max(this.now().getTime(), Date.parse(schedules[index].updatedAt) + 1)).toISOString() };
+            writeScheduleDocumentSync(projectDir, schedules, current.document);
+          });
+        }
         catch (error) {
           // The durable batch already consumes the occurrence. A YAML write
           // failure must not strand pending children in this running process.

@@ -142,7 +142,7 @@ Clients should check `capabilities.scheduleUpdate: true` before using
 `POST /v1/schedules/update`; older Hooks omit it and require the client's legacy
 edit path. Send the owner's `project`, schedule `id`, and the per-schedule
 `updatedAt` returned by `/v1/schedules` as `expectedUpdatedAt` (an ISO 8601
-timestamp with a zone; equivalent instants match). For example:
+timestamp with a zone; the exact stored string must match). For example:
 
 ```json
 {"project":"acme","id":"7f3a2c1d","expectedUpdatedAt":"2026-09-20T21:00:00Z","changes":{"name":"Morning sweep","model":null}}
@@ -157,6 +157,7 @@ fields (including the selected timing form's fields) cannot be removed.
 keys and wrong types return 400 with an error message. The merged schedule
 uses the existing store validation; invalid results return 400 with the
 validation message. Conflicts and rejected edits leave the file unchanged.
-A successful merge gets a new `updatedAt` and an atomic write under the same
+A successful merge gets a new `updatedAt` in canonical UTC form
+(`YYYY-MM-DDTHH:mm:ss.sssZ`) and an atomic write under the same
 lock as CLI schedule edits. The existing YAML serializer preserves values
 and unknown keys, but may reformat comments, quoting, or whitespace.

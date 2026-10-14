@@ -7,6 +7,8 @@ import { handleScheduleCommand } from "../cli/schedules.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
 import { parseSchedule, readScheduleDocument, withScheduleLock, writeScheduleDocument } from "./schedule-format.js";
+import { Scheduler } from "./schedules.js";
+import * as locks from "../governance/locks.js";
 
 const original = parseSchedule({ id: "7f3a2c1d", name: "Sweep", enabled: true, computer: "Desk", harness: "codex",
   every: "daily", at: "07:30", prompt: "Run the tests.", model: "test-model",
@@ -24,7 +26,7 @@ beforeEach(async () => {
   const modules = { store, modules: BUILTIN_MODULES.filter(m => m.name === "schedules"), has: (name: string) => name === "schedules" };
   handler = createRouteHandler({ modules, scheduleStore: store, streams: {}, info: {} } as unknown as RouteContext);
 });
-afterEach(async () => { vi.restoreAllMocks(); await rm(store, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(store, { recursive: true, force: true }); });
 
 async function post(body: unknown, route = "/v1/schedules/update") {
   const request = Readable.from([Buffer.from(JSON.stringify(body))]) as IncomingMessage;
@@ -39,7 +41,7 @@ const input = (changes: unknown) => ({ project: "demo", id: original.id, expecte
 describe("Hook schedule updates", () => {
   it("merges edits, removes optional fields, and preserves unknown fields and sibling bytes", async () => {
     const before = await readFile(file, "utf8"), sibling = before.slice(before.indexOf("  - id: abcdef12"));
-    const result = await post({ ...input({ name: "Edited", model: null }), expectedUpdatedAt: "2026-03-07T17:00:00+01:00" });
+    const result = await post(input({ name: "Edited", model: null }));
     expect(result.status).toBe(200);
     const { model: _model, ...kept } = original;
     expect(result.body).toMatchObject({ ok: true, schedule: { ...kept, name: "Edited", updatedAt: expect.any(String) } });
@@ -56,6 +58,66 @@ describe("Hook schedule updates", () => {
     const result = await post({ ...input({ prompt: "Stale" }), expectedUpdatedAt: "2026-01-01T00:00:00Z" });
     expect(result).toMatchObject({ status: 409, body: { schedule: original, error: expect.any(String) } });
     expect(await readFile(file, "utf8")).toBe(before);
+  });
+
+  it("refuses a stale revision that differs below one millisecond", async () => {
+    const current = { ...original, updatedAt: "2026-03-07T16:00:00.0002Z" };
+    await writeScheduleDocument(project, [current]);
+    const before = await readFile(file, "utf8");
+    const result = await post({ ...input({ name: "Stale" }), expectedUpdatedAt: "2026-03-07T16:00:00.0001Z" });
+    expect(result).toMatchObject({ status: 409, body: { schedule: current } });
+    expect(await readFile(file, "utf8")).toBe(before);
+    const saved = await post({ ...input({ name: "Fresh" }), expectedUpdatedAt: current.updatedAt });
+    expect(saved.status).toBe(200);
+    expect(saved.body.schedule.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  it("consumes a once schedule without restoring edits accepted during admission", async () => {
+    const once = { ...original, every: "once" as const, once: "2026-03-07T17:00:00", notify: [] };
+    const sibling = { ...original, id: "abcdef12" };
+    await writeScheduleDocument(project, [once, sibling]);
+    let resume!: (value: string) => void, entered!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const scheduler = new Scheduler({ store, runsFile: path.join(store, "runs.jsonl"), computer: "Desk",
+      now: () => new Date(), launch: async () => ({ launch: { mode: "headless" } }),
+      locateProject: () => { entered(); return new Promise(resolve => { resume = resolve; }); } });
+    const running = scheduler.launchNow("demo", once.id);
+    await ready;
+    let edited, siblingEdit;
+    try {
+      edited = await post(input({ name: "New once name" }));
+      siblingEdit = await post({ ...input({ name: "New sibling name" }), id: sibling.id });
+      expect(edited.status).toBe(200); expect(siblingEdit.status).toBe(200);
+    } finally { resume(project); }
+    await running;
+    const schedules = (await readScheduleDocument(project)).schedules;
+    expect(schedules[0]).toMatchObject({ name: "New once name", enabled: false });
+    expect(schedules[0].updatedAt).not.toBe(edited!.body.schedule.updatedAt);
+    expect(schedules[1]).toEqual(siblingEdit!.body.schedule);
+  });
+
+  it.each(["update", "consume-once"])("%s releases the schedule lock before a synchronous store writer runs on the next microtask", async mode => {
+    if (mode === "consume-once") await writeScheduleDocument(project,
+      [{ ...original, every: "once", once: "2026-03-07T17:00:00", notify: [] }]);
+    vi.stubEnv("PHREN_FILE_LOCK_MAX_WAIT_MS", "50"); vi.stubEnv("PHREN_FILE_LOCK_POLL_MS", "10");
+    const acquire = locks.tryFileLock;
+    let competing!: Promise<unknown>;
+    vi.spyOn(locks, "tryFileLock").mockImplementation(target => {
+      const release = acquire(target);
+      if (release && target === file) competing = Promise.resolve().then(() => {
+        locks.withFileLock(file, () => {});
+      }).catch(error => error);
+      return release;
+    });
+    if (mode === "update") {
+      expect((await post(input({ name: "Edited" }))).status).toBe(200);
+    } else {
+      const scheduler = new Scheduler({ store, runsFile: path.join(store, "runs.jsonl"), computer: "Desk",
+        now: () => new Date(), launch: async () => ({ launch: { mode: "headless" } }) });
+      expect((await scheduler.launchNow("demo", original.id))[0].status).toBe("running");
+      expect((await readScheduleDocument(project)).schedules[0].enabled).toBe(false);
+    }
+    await expect(competing).resolves.toBeUndefined();
   });
 
   it("changes timing forms and launch settings together without dropping other fields", async () => {

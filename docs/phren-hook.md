@@ -1302,7 +1302,9 @@ All schedule routes use authenticated JSON `POST` requests:
 `capabilities.scheduleUpdate: true` advertises the update route when the schedules
 module is enabled. Clients should use their legacy edit path on older Hooks.
 `expectedUpdatedAt` is the per-schedule timestamp from `/v1/schedules`, with
-an ISO 8601 time zone; equivalent instants match. A mismatch returns HTTP 409
+an ISO 8601 time zone; the exact stored string must match, including all
+fractional digits. New revisions use canonical UTC form
+(`YYYY-MM-DDTHH:mm:ss.sssZ`). A mismatch returns HTTP 409
 with `{ error, schedule }`, where `schedule` is the current stored definition.
 A missing project or schedule returns 404. Invalid body fields, types, or merged
 schedule validation return 400 with `{ error }`. These failures write nothing.
