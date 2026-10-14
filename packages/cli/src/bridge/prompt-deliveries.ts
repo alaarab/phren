@@ -205,9 +205,9 @@ export class PromptDeliveries {
    * went. A prompt nothing matches was typed locally. Never refused. */
   submitted(target: Target, prompt: string): void {
     const hash = promptHash(prompt);
-    // This hook may be the late one of a message the transcript already settled: it is not another message's.
-    const now = this.now();
-    const due = this.records.filter(record => record.hookDue && record.hash === hash && this.samePane(record, target) && now - (record.settledAt ?? 0) <= DELIVERY_GIVE_UP_MS)
+    // This hook may be the late one of a message the transcript already settled in this conversation: it is not another message's.
+    // The claim lasts until its hook arrives or the turn ends (stopped), not for a fixed time.
+    const due = this.records.filter(record => record.hookDue && record.hash === hash && this.samePane(record, target) && record.session === target.session)
       .sort((a, b) => (a.settledAt ?? 0) - (b.settledAt ?? 0))[0];
     if (due) { delete due.hookDue; this.save(); return; }
     const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered");
@@ -248,6 +248,8 @@ export class PromptDeliveries {
   stopped(target: Target): void {
     const at = this.now();
     for (const record of this.records) if (this.samePane(record, target) && (record.state === "typed" || record.state === "queued") && record.at < at) record.stoppedAt = at;
+    // A turn that ended has fired the hooks it was going to: no settled message is still waiting for one.
+    for (const record of this.records) if (record.hookDue && this.samePane(record, target) && record.session === target.session) delete record.hookDue;
   }
 
   /** Called on the Hook's activity tick with a server's panes. A message
