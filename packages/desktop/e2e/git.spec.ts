@@ -112,7 +112,8 @@ const shot = (page: Page, name: string) => page.screenshot({ path: test.info().o
 
 test("the diff tab compares whole files in Monaco, steps through changes and stages one hunk", async ({ page }) => {
   const errors = await openSession(page);
-  await page.locator(".chg-row", { hasText: "app.ts" }).first().click();
+  // The name, not the row centre: the row also holds the Phren-findings badge, which opens its card.
+  await page.locator(".chg-row", { hasText: "app.ts" }).first().locator(".chg-name").click();
   const doc = page.locator(".dd-doc");
   await expect(doc.locator(".monaco-diff-editor")).toBeVisible({ timeout: 20_000 });
   await expect(doc.locator(".dd-pos")).toHaveText(/1\/2/, { timeout: 15_000 });
