@@ -202,9 +202,14 @@ once the desk has been idle for 60 seconds.
 - Remote store data is untrusted. The memory mirror accepts only canonical
   blob ids, and every download must hash to its id.
 - VS Code web extensions run in an isolated `{{uuid}}.localhost` frame.
-  **Node extensions run as you**: they could read the desktop key and reach
-  every linked computer. They are therefore off until you turn them on in
-  Settings › Extensions.
+  **Node extensions run as you**, so they are off until you turn them on in
+  Settings › Extensions. Their host starts with no desktop secrets in its
+  environment, its own HOME and temporary folder, and a connection token made
+  fresh on every start. On macOS it also runs under `sandbox-exec`, which
+  denies the bridge folder (the desktop key), the SSH connection sockets, the
+  Hook, Herdr and tmux sockets and the SSH agent. They can still read and
+  change your other files. On Linux and Windows only the environment and
+  folders are separate, so the key stays readable there.
 - Electron grants notifications, the clipboard and the microphone to the
   app's own origin only.
 

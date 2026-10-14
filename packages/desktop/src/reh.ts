@@ -1,16 +1,18 @@
 // The Node extension host for Phren desktop's editor: VS Code's remote
 // extension host (REH), built from the exact VS Code commit the editor bundle
 // uses (packages/desktop-editor/scripts/build-reh.sh). It runs on this computer,
-// bound to loopback with a secret connection token, and holds the extensions
-// whose code needs Node (most language servers). The page learns its address
-// and token only through the cookie-protected /api/reh.
+// bound to loopback with a connection token made fresh on every start, and
+// holds the extensions whose code needs Node (most language servers). The page
+// learns its address and token only through the cookie-protected /api/reh. It
+// runs isolated from the desktop's credentials (reh-sandbox.ts).
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { type HostDirs, hostEnv, hostTmpDir, isolatedCommand, isolation, privateDir } from "./reh-sandbox.js";
 
 const exec = promisify(execFile);
 
@@ -21,6 +23,9 @@ export interface RehStatus {
   connectionToken?: string;
   version?: string;
   reason?: string;
+  /** "sandbox" when the OS keeps the host from the desktop's key and the Hook;
+   * "environment" when only its environment and folders are separate. */
+  isolation?: "sandbox" | "environment";
 }
 
 const configRoot = () => process.env.XDG_CONFIG_HOME ?? path.join(homedir(), ".config");
@@ -70,15 +75,16 @@ function launcher(dir: string): string {
   return path.join(bin, name);
 }
 
+/** A new connection token for each start, in a file of its own (two daemons,
+ * say an installed app and a checkout, never overwrite each other's), so a
+ * token a past host or page held stops working when the host restarts. The
+ * file is removed when that host exits. */
+export const rehTokenDir = (): string => path.join(rehRoot(), "tokens");
 async function connectionToken(): Promise<{ file: string; token: string }> {
-  const file = path.join(rehRoot(), "connection-token");
-  try {
-    const token = (await readFile(file, "utf8")).trim();
-    if (/^[A-Za-z0-9-]{32,}$/.test(token) && ((await stat(file)).mode & 0o077) === 0) return { file, token };
-  } catch { /* create it */ }
   const token = randomBytes(24).toString("hex");
-  await mkdir(rehRoot(), { recursive: true, mode: 0o700 });
-  await writeFile(file, token, { mode: 0o600 });
+  await mkdir(rehTokenDir(), { recursive: true, mode: 0o700 });
+  const file = path.join(rehTokenDir(), `${process.pid}-${randomBytes(6).toString("hex")}`);
+  await writeFile(file, token, { mode: 0o600, flag: "wx" });
   await chmod(file, 0o600);
   return { file, token };
 }
@@ -87,15 +93,23 @@ let child: ChildProcess | null = null;
 let starting: Promise<RehStatus> | null = null;
 let current: RehStatus | null = null;
 
-/** The REH's environment: process.env minus the desktop's own secrets, which a
- *  Node extension running in the host could otherwise read. */
-function rehEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("PHREN_DESKTOP_")) delete env[key];
-  }
-  env.VSCODE_AGENT_FOLDER = path.join(rehRoot(), "data");
-  return env;
+/** The host's own folders: HOME (also its cwd) and data under the REH root,
+ * its temporary folder short enough for socket paths. */
+function hostDirs(): HostDirs {
+  privateDir(rehRoot());
+  return {
+    home: privateDir(path.join(rehRoot(), "home")),
+    tmp: privateDir(hostTmpDir()),
+    agentFolder: path.join(rehRoot(), "data"),
+  };
+}
+
+/** Run the server's launcher isolated (reh-sandbox.ts), for the host itself
+ * and for its install and uninstall commands alike. */
+function isolated(launcherPath: string, args: string[]): { command: string; args: string[]; options: { env: NodeJS.ProcessEnv; cwd: string } } {
+  const dirs = hostDirs();
+  const run = isolatedCommand(launcherPath, args, [rehRoot(), dirs.tmp]);
+  return { ...run, options: { env: hostEnv(process.env, dirs), cwd: dirs.home } };
 }
 
 /** True while the Node extension host process is alive. */
@@ -103,11 +117,10 @@ export function isRehRunning(): boolean {
   return !!child && child.exitCode === null;
 }
 
-/** Start the server once (lazily) and report how the editor reaches it. */
 /**
- * Node extensions run as the owner: they can read this desktop's key and reach
- * every linked computer's Hook. Until they run isolated, the Node extension
- * host starts only when the owner turns it on (Settings › Extensions).
+ * Node extensions run code with the owner's file access. Even isolated from the
+ * desktop's credentials, the Node extension host starts only when the owner
+ * turns it on (Settings › Extensions).
  */
 // The extensions folder (as extensions.ts computes it; not imported, to avoid an import cycle).
 const extensionsRoot = () => process.env.PHREN_DESKTOP_EXTENSIONS
@@ -119,8 +132,9 @@ export async function setNodeExtensionsEnabled(enabled: boolean): Promise<void> 
   else { await rm(nodeFlagFile(), { force: true }); stopReh(); }
 }
 
+/** Start the server once (lazily) and report how the editor reaches it. */
 export function rehStatus(): Promise<RehStatus> {
-  if (!nodeExtensionsEnabled()) return Promise.resolve({ available: false, reason: "Node extensions are off. They run as you and can reach every linked computer; turn them on in Settings › Extensions." });
+  if (!nodeExtensionsEnabled()) return Promise.resolve({ available: false, reason: "Node extensions are off. Turn them on in Settings › Extensions." });
   if (current?.available && child && child.exitCode === null) return Promise.resolve(current);
   if (starting) return starting;
   starting = start().finally(() => { starting = null; });
@@ -134,15 +148,28 @@ async function start(): Promise<RehStatus> {
   try { dir = await ensureInstalled(tarball); }
   catch (error) { return { available: false, reason: `The Node extension host could not be unpacked: ${(error as Error).message}` }; }
   const version = path.basename(dir).replace(/^vscode-reh-[a-z0-9]+-[a-z0-9]+-/, "");
-  const { file, token } = await connectionToken();
-  await mkdir(rehExtensionsDir(), { recursive: true, mode: 0o700 });
-  return new Promise<RehStatus>((resolve) => {
-    const proc = spawn(launcher(dir), [
+  let run: ReturnType<typeof isolated>;
+  let token: string;
+  let tokenFile: string | undefined;
+  const dropToken = () => { if (tokenFile) rm(tokenFile, { force: true }).catch(() => {}); };
+  try {
+    const made = await connectionToken();
+    token = made.token;
+    tokenFile = made.file;
+    await mkdir(rehExtensionsDir(), { recursive: true, mode: 0o700 });
+    run = isolated(launcher(dir), [
       "--host", "127.0.0.1", "--port", "0",
-      "--connection-token-file", file,
+      "--connection-token-file", made.file,
       "--extensions-dir", rehExtensionsDir(),
       "--accept-server-license-terms", "--disable-telemetry",
-    ], { stdio: ["ignore", "pipe", "pipe"], env: rehEnv() });
+    ]);
+  } catch (error) {
+    dropToken();
+    return { available: false, reason: `The Node extension host could not be prepared: ${(error as Error).message}` };
+  }
+  const how = isolation();
+  return new Promise<RehStatus>((resolve) => {
+    const proc = spawn(run.command, run.args, { stdio: ["ignore", "pipe", "pipe"], ...run.options });
     const thisProc = proc;
     child = thisProc;
     let output = "";
@@ -162,11 +189,18 @@ async function start(): Promise<RehStatus> {
     const onData = (chunk: Buffer) => {
       output = (output + chunk.toString()).slice(-8192);
       const match = /listening on (?:[\d.:]*?:)?(\d{2,5})\b/i.exec(output);
-      if (match && !current?.available) finish({ available: true, authority: `localhost:${match[1]}`, connectionToken: token, version });
+      if (match && !current?.available) finish({ available: true, authority: `localhost:${match[1]}`, connectionToken: token, version, isolation: how });
     };
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData);
+    proc.on("error", (error) => {
+      // The launcher (or sandbox-exec) could not be run at all; no exit follows.
+      dropToken();
+      if (child === thisProc) child = null;
+      finish({ available: false, reason: `The Node extension host could not be started: ${error.message}` });
+    });
     proc.on("exit", (code) => {
+      dropToken();
       if (child !== thisProc) return; // a newer host owns the state
       child = null;
       if (current?.available) current = null; // restart lazily on the next request
@@ -187,8 +221,8 @@ export async function installIntoReh(vsix: string): Promise<boolean> {
   if (!tarball) return false;
   const dir = await ensureInstalled(tarball);
   await mkdir(rehExtensionsDir(), { recursive: true, mode: 0o700 });
-  await exec(launcher(dir), ["--install-extension", vsix, "--force", "--extensions-dir", rehExtensionsDir(), "--accept-server-license-terms"],
-    { timeout: 120_000, env: rehEnv() });
+  const run = isolated(launcher(dir), ["--install-extension", vsix, "--force", "--extensions-dir", rehExtensionsDir(), "--accept-server-license-terms"]);
+  await exec(run.command, run.args, { timeout: 120_000, ...run.options });
   return true;
 }
 
@@ -196,6 +230,6 @@ export async function uninstallFromReh(id: string): Promise<void> {
   const tarball = findTarball();
   if (!tarball) return;
   const dir = await ensureInstalled(tarball);
-  await exec(launcher(dir), ["--uninstall-extension", id, "--extensions-dir", rehExtensionsDir(), "--accept-server-license-terms"],
-    { timeout: 60_000, env: rehEnv() }).catch(() => {});
+  const run = isolated(launcher(dir), ["--uninstall-extension", id, "--extensions-dir", rehExtensionsDir(), "--accept-server-license-terms"]);
+  await exec(run.command, run.args, { timeout: 60_000, ...run.options }).catch(() => {});
 }
