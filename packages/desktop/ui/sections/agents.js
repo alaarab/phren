@@ -544,12 +544,13 @@ export function mountAgents(root) {
   }
 
   function openSession(computer, child, options) {
-    tabs.open(chatDoc(computer, child), options);
+    return tabs.open(chatDoc(computer, child), options);
   }
 
   const handlers = {
     onOpenChat: (computer, child) => openSession(computer, child),
-    onDropFiles: (computer, child, files) => { openSession(computer, child); tabs.activeHandle()?.attach?.(files); },
+    // tabs.open mounts synchronously and returns that session's own chat, so the files can't land in another one.
+    onDropFiles: (computer, child, files) => { openSession(computer, child)?.attach?.(files); },
     onOpenTerminal: (computer, server) => showPane("terminal", { computer, server }),
   };
 
