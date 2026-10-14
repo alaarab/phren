@@ -119,6 +119,18 @@ describe.skipIf(process.platform === "win32")("rehStatus", () => {
     expect(status.reason).toContain("3");
   });
 
+  it("never spawns the host when Node extensions are turned off during its start", async () => {
+    process.env.PHREN_REH_TARBALL = buildTarball("vscode-reh-test-any-1.0.0.tar.gz", listeningBody());
+
+    const pending = rehStatus();
+    await setNodeExtensionsEnabled(false);
+    const status = await pending;
+
+    expect(status.available).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(existsSync(runsLog)).toBe(false);
+  });
+
   it("kills a server that never reports listening after the start timeout", async () => {
     process.env.PHREN_REH_START_TIMEOUT_MS = "600";
     const body = `trap 'echo term >> "${runsLog}"' TERM\necho run >> "${runsLog}"\nwhile true; do sleep 0.5; done`;

@@ -413,6 +413,37 @@ describe("hardening", () => {
     expect(after.status).toBe(200);
   });
 
+  it("sandboxes every proxied Hook response", async () => {
+    const h = await startHarness();
+    const res = await rawRequest({ port: h.port, path: "/hosts/This%20computer/v1/files/range", headers: { Host: `localhost:${h.port}`, Cookie: `phren_desktop=${TOKEN}` } });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-security-policy"]).toBe("sandbox");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+  });
+
+  it("drops a WebSocket that sends a bad frame and keeps serving", async () => {
+    const h = await startHarness();
+    const headers = { Host: `localhost:${h.port}`, Origin: `http://localhost:${h.port}`, Cookie: `phren_desktop=${TOKEN}` };
+    const closed = await new Promise<boolean>((resolve, reject) => {
+      const req = httpRequest({ host: "127.0.0.1", port: h.port, path: "/api/overview", headers: {
+        Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", ...headers,
+      } });
+      req.on("upgrade", (_res, socket) => {
+        socket.on("error", () => undefined);
+        socket.on("close", () => resolve(true));
+        socket.resume();
+        // A masked frame with the reserved opcode 3: the receiver rejects it.
+        socket.write(Buffer.from([0x83, 0x80, 0, 0, 0, 0]));
+      });
+      req.on("response", () => reject(new Error("upgrade refused")));
+      req.on("error", reject);
+      req.end();
+    });
+    expect(closed).toBe(true);
+    const after = await rawRequest({ port: h.port, path: "/api/computers", headers: { Host: headers.Host, Cookie: headers.Cookie } });
+    expect(after.status).toBe(200);
+  });
+
   it("sandboxes extension HTML and SVG served on the app origin", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "desktop-ext-"));
     const previous = process.env.PHREN_DESKTOP_EXTENSIONS;

@@ -92,6 +92,8 @@ async function connectionToken(): Promise<{ file: string; token: string }> {
 let child: ChildProcess | null = null;
 let starting: Promise<RehStatus> | null = null;
 let current: RehStatus | null = null;
+/** Bumped by stopReh(): a start that began before it must not spawn the host. */
+let generation = 0;
 
 /** The host's own folders: HOME (also its cwd) and data under the REH root,
  * its temporary folder short enough for socket paths. */
@@ -142,6 +144,7 @@ export function rehStatus(): Promise<RehStatus> {
 }
 
 async function start(): Promise<RehStatus> {
+  const startedIn = generation;
   const tarball = findTarball();
   if (!tarball) return { available: false, reason: "No Node extension host is built for this computer. Run packages/desktop-editor/scripts/build-reh.sh." };
   let dir: string;
@@ -166,6 +169,11 @@ async function start(): Promise<RehStatus> {
   } catch (error) {
     dropToken();
     return { available: false, reason: `The Node extension host could not be prepared: ${(error as Error).message}` };
+  }
+  // Turned off (or stopped) while unpacking: never spawn the host.
+  if (startedIn !== generation || !nodeExtensionsEnabled()) {
+    dropToken();
+    return { available: false, reason: "Node extensions are off. Turn them on in Settings › Extensions." };
   }
   const how = isolation();
   return new Promise<RehStatus>((resolve) => {
@@ -210,6 +218,7 @@ async function start(): Promise<RehStatus> {
 }
 
 export function stopReh(): void {
+  generation++;
   child?.kill("SIGTERM");
   child = null;
   current = null;

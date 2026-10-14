@@ -11,6 +11,7 @@ import {
   newScheduleId,
   parseSchedule,
   readScheduleDocument,
+  withScheduleLock,
   writeScheduleDocument,
   type Schedule,
   type ScheduleEvery,
@@ -103,18 +104,25 @@ async function add(store: string, args: string[]): Promise<void> {
   // Refuse what could never fire: the owning computer is this one, so its source paths can be checked now.
   const problems = await scheduleProblems(validated, path.basename(directory), { store, owned: ownsHere(validated) });
   if (problems.length) throw new Error(`This schedule could not run: ${problems.join(" ")}`);
-  await writeScheduleDocument(directory, [...file.schedules, validated], file.document);
+  // Append to the file as it is now, under the lock every schedules.yaml writer takes.
+  await withScheduleLock(directory, async () => {
+    const current = await readScheduleDocument(directory);
+    await writeScheduleDocument(directory, [...current.schedules, validated], current.document);
+  });
   console.log(`Added schedule ${validated.id} to ${path.basename(directory)}.`);
 }
 
 async function mutate(store: string, action: "remove" | "enable" | "disable", projectName: string | undefined, id: string | undefined): Promise<void> {
   if (!projectName || !id) throw new Error(`Usage: phren schedule ${action} <project> <id>`);
-  const directory = projectDirectory(store, projectName), file = await readScheduleDocument(directory);
-  const existing = file.schedules.find(schedule => schedule.id === id);
-  if (!existing) throw new Error(`Schedule "${id}" was not found in ${path.basename(directory)}.`);
-  const schedules = action === "remove" ? file.schedules.filter(schedule => schedule.id !== id)
-    : file.schedules.map(schedule => schedule.id === id ? { ...schedule, enabled: action === "enable", updatedAt: new Date().toISOString() } : schedule);
-  await writeScheduleDocument(directory, schedules, file.document);
+  const directory = projectDirectory(store, projectName);
+  await withScheduleLock(directory, async () => {
+    const file = await readScheduleDocument(directory);
+    const existing = file.schedules.find(schedule => schedule.id === id);
+    if (!existing) throw new Error(`Schedule "${id}" was not found in ${path.basename(directory)}.`);
+    const schedules = action === "remove" ? file.schedules.filter(schedule => schedule.id !== id)
+      : file.schedules.map(schedule => schedule.id === id ? { ...schedule, enabled: action === "enable", updatedAt: new Date().toISOString() } : schedule);
+    await writeScheduleDocument(directory, schedules, file.document);
+  });
   console.log(`${action === "remove" ? "Removed" : action === "enable" ? "Enabled" : "Disabled"} schedule ${id}.`);
 }
 

@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Hook: two editor saves of one file through different spellings (`f.txt`, `./f.txt`) take one lock, so neither overwrites the other; a timed-out `/v1/git/commit` or push kills its whole process group, escalates to SIGKILL, and answers at its deadline even when a hook's child keeps the output open; concurrent `hooks.yaml` links take a cross-process lock and keep every peer; staging a hunk whose removed or added text starts with `--`/`++` no longer reads it as a file header; discarding a directory is refused instead of reverting everything in it; a scoped (gitboy) SSH session ends when the Hook stays silent for a minute or the SSH side goes away.
+- `phren schedule add/remove/enable/disable` hold a `schedules.yaml` lock across read and write (shared with Phren desktop's schedule editor), so concurrent edits keep each other's changes.
 
 ## [0.3.46] - 2026-10-14
 

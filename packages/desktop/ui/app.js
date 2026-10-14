@@ -1,6 +1,7 @@
 // Phren desktop's UI entry: the titlebar, the section registry and the
 // overview store. Sections live in ./sections, shared plumbing in ./shell.
 import { installKeys } from "./keys.js";
+import { hookPost } from "./api.js";
 import { connectStore, store } from "./shell/store.js";
 import { canGoBack, canGoForward, goBack, goForward, installSections, onTrailChange, registerSection, sectionHandle, setSectionBadge, showPillAt, showSection } from "./shell/sections.js";
 import { openLaunchSheet } from "./shell/launch.js";
@@ -178,8 +179,6 @@ import("./chat/talk.js").then(({ installPushToTalk }) => installPushToTalk({
     const row = store.sessions().find(({ child }) => child.role === "conductor");
     return row ? { computer: row.computer, target: row.child.target } : null;
   },
-  send: (computer, target, text) => fetch(`/hosts/${encodeURIComponent(computer)}/v1/prompt`, {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Phren-Desktop": "1" },
-    body: JSON.stringify({ target, text, deliveryId: crypto.randomUUID() }),
-  }),
+  // hookPost rejects on a non-2xx answer, so talk.js shows its failure toast.
+  send: (computer, target, text) => hookPost(computer, "/v1/prompt", { target, text, deliveryId: crypto.randomUUID() }),
 })).catch(() => {});

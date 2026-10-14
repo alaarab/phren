@@ -4,8 +4,8 @@
 // paths, so the daemon can use the CLI's own parsers and mutators on it and
 // upload back only the files a mutation changed.
 import { createHash } from "node:crypto";
-import { parseSchedule, readScheduleDocument, writeScheduleDocument, type Schedule } from "@phren/cli/client/schedule-format";
-import { existsSync, readFileSync } from "node:fs";
+import { parseSchedule, readScheduleDocument, withScheduleLock, writeScheduleDocument, type Schedule } from "@phren/cli/client/schedule-format";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -26,6 +26,7 @@ import { readTasks } from "@phren/cli/data/tasks";
 import { readProjectTopics } from "@phren/cli/client/project-topics";
 import { buildGraph } from "@phren/cli/client/graph-data";
 import { findPhrenPath, getProjectDirs } from "@phren/cli/paths";
+import { withFileLock } from "@phren/cli/shared/governance";
 import type { Computer, HookRequest } from "./contract.js";
 
 const DEFAULT_SYNC_MS = 10_000;
@@ -91,8 +92,8 @@ async function storeFileInfo(dir: string, file: string): Promise<{ file: string;
 }
 
 /** The sha a delete must present to remove this file, or null when absent. */
-async function fileSha(file: string): Promise<string | null> {
-  try { return blobSha(await readFile(file)); } catch { return null; }
+function fileShaSync(file: string): string | null {
+  try { return blobSha(readFileSync(file)); } catch { return null; }
 }
 
 function expandHome(value: string, home: string): string {
@@ -374,6 +375,20 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       state.blobShas.set(rel, sha);
       uploaded.push(rel);
     }
+    // A file the mutation removed (a day's last note) is deleted on the
+    // computer too, compare-and-swapping on the sha it had.
+    for (const [rel, sha] of [...state.blobShas]) {
+      if (!isMemoryPath(rel) || existsSync(path.join(dir, rel))) continue;
+      const res = await opts.hookRequest(computer, "POST", STORE_DELETE_ROUTE, { path: rel, sha });
+      if (res.status === 409) {
+        state.sha = null;
+        await ensureRemote(computer, true).catch(() => undefined);
+        throw new MemoryHttpError(409, "changed");
+      }
+      if (res.status !== 200) throw new MemoryHttpError(502, `Deleting ${rel} failed with ${res.status}.`);
+      state.blobShas.delete(rel);
+      uploaded.push(rel);
+    }
     // The store head moved: force the next read to pick it up.
     if (uploaded.length > 0) state.sha = null;
     return uploaded;
@@ -509,9 +524,14 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       const rel = safeStorePath(storePath);
       const dir = await storeDir(computer);
       if (computer.local) {
-        // No mirror to write through: apply the delete to the real store.
-        if (await fileSha(path.join(dir, rel)) !== expectedSha) throw new MemoryHttpError(409, "changed");
-        await rm(path.join(dir, rel), { force: true });
+        // No mirror to write through: apply the delete to the real store, under
+        // the lock the CLI's writers take, so no write lands between check and
+        // delete. Synchronous inside: the lock is held without yielding.
+        const file = path.join(dir, rel);
+        withFileLock(file, () => {
+          if (fileShaSync(file) !== expectedSha) throw new MemoryHttpError(409, "changed");
+          rmSync(file, { force: true });
+        });
         return { ok: true as const };
       }
       const res = await opts.hookRequest(computer, "POST", STORE_DELETE_ROUTE, { path: rel, sha: expectedSha });
@@ -538,26 +558,12 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(project) || !id) throw new MemoryHttpError(400, "project and id are required.");
       const dir = await storeDir(computer);
       const projectDir = path.join(dir, project);
-      const { document, schedules } = await readScheduleDocument(projectDir);
-      const index = schedules.findIndex((item) => item.id === id);
-      // The Hook's listing adds runtime fields (ScheduleStatus) that are not part of the file.
-      const fileFields = (value: unknown): Record<string, unknown> => {
-        const { project: _p, nextRun: _n, lastRun: _l, lastRuns: _r, running: _u, owned: _o, ...rest } = (value ?? {}) as Record<string, unknown>;
-        return rest;
-      };
-      const normal = (value: unknown) => JSON.stringify(parseSchedule(fileFields(value)));
-      if (body.original != null) {
-        if (index < 0 || normal(schedules[index]) !== normal(body.original)) throw new MemoryHttpError(409, "This schedule changed on another computer. Reopen it to edit.");
-      } else if (index >= 0 && body.schedule != null) {
-        throw new MemoryHttpError(409, "A schedule with this id already exists.");
-      }
-      const next: Schedule[] = schedules.slice();
-      if (body.schedule == null) { if (index >= 0) next.splice(index, 1); }
-      else if (index >= 0) next[index] = parseSchedule(fileFields(body.schedule));
-      else next.push(parseSchedule(fileFields(body.schedule)));
-      await writeScheduleDocument(projectDir, next, document);
-      if (computer.local) return { ok: true };
-      return { ok: true, uploaded: await uploadChanges(computer, dir) };
+      // The lock the CLI takes too: read, check, write (and upload) as one step.
+      return withScheduleLock(projectDir, async () => {
+        await saveScheduleFile(projectDir, id, body);
+        if (computer.local) return { ok: true as const };
+        return { ok: true as const, uploaded: await uploadChanges(computer, dir) };
+      });
     },
 
     async graph(computer, project) {
@@ -566,4 +572,25 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       return buildGraph(dir, undefined, focus);
     },
   };
+
+  async function saveScheduleFile(projectDir: string, id: string, body: { schedule?: unknown; original?: unknown }): Promise<void> {
+    const { document, schedules } = await readScheduleDocument(projectDir);
+    const index = schedules.findIndex((item) => item.id === id);
+    // The Hook's listing adds runtime fields (ScheduleStatus) that are not part of the file.
+    const fileFields = (value: unknown): Record<string, unknown> => {
+      const { project: _p, nextRun: _n, lastRun: _l, lastRuns: _r, running: _u, owned: _o, ...rest } = (value ?? {}) as Record<string, unknown>;
+      return rest;
+    };
+    const normal = (value: unknown) => JSON.stringify(parseSchedule(fileFields(value)));
+    if (body.original != null) {
+      if (index < 0 || normal(schedules[index]) !== normal(body.original)) throw new MemoryHttpError(409, "This schedule changed on another computer. Reopen it to edit.");
+    } else if (index >= 0 && body.schedule != null) {
+      throw new MemoryHttpError(409, "A schedule with this id already exists.");
+    }
+    const next: Schedule[] = schedules.slice();
+    if (body.schedule == null) { if (index >= 0) next.splice(index, 1); }
+    else if (index >= 0) next[index] = parseSchedule(fileFields(body.schedule));
+    else next.push(parseSchedule(fileFields(body.schedule)));
+    await writeScheduleDocument(projectDir, next, document);
+  }
 }
