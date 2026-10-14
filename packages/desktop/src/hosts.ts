@@ -69,6 +69,9 @@ function number(value: unknown, where: string): number {
 }
 
 const written = new Map<string, string>();
+// Retain the argv used to open masters: key files may rotate before teardown.
+const masters = new Map<string, Map<string, string[]>>();
+const masterOwner = (c: Computer): string => JSON.stringify([bridgeRoot(), c.name, c.address, c.username, c.port ?? 22, c.keyFile, c.hostKey]);
 const WINDOWS = process.platform === "win32";
 const NULL_DEVICE = WINDOWS ? "NUL" : "/dev/null";
 
@@ -91,13 +94,20 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
     chmodSync(knownHosts, 0o600);
     written.set(c.name, c.hostKey);
   }
+  const socketPath = WINDOWS ? undefined : controlPath(c, opts?.slot ?? 0);
+  if (socketPath) {
+    const owner = masterOwner(c);
+    const opened = masters.get(owner) ?? new Map<string, string[]>();
+    opened.set(socketPath, exitArgs(c, socketPath));
+    masters.set(owner, opened);
+  }
   return [
     "-F", NULL_DEVICE,
     // Windows' OpenSSH has no connection sharing: each request opens its own connection there.
     ...(WINDOWS ? [] : [
       "-o", "ControlMaster=auto",
       "-o", "ControlPersist=60",
-      "-o", `ControlPath=${controlPath(c, opts?.slot ?? 0)}`,
+      "-o", `ControlPath=${socketPath}`,
     ]),
     "-o", `UserKnownHostsFile=${knownHosts}`,
     "-o", `GlobalKnownHostsFile=${NULL_DEVICE}`,
@@ -124,9 +134,13 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
 export function masterExitArgs(c: Computer, slot: number): string[] {
   if (c.local) throw new Error("masterExitArgs cannot run on the local computer.");
   if (!c.address || !c.username) throw new Error(`Computer ${c.name} is missing SSH details.`);
+  return exitArgs(c, controlPath(c, slot));
+}
+
+function exitArgs(c: Computer, socketPath: string): string[] {
   return [
     "-F", "/dev/null",
-    "-o", `ControlPath=${controlPath(c, slot)}`,
+    "-o", `ControlPath=${socketPath}`,
     "-p", String(c.port ?? 22),
     `${c.username}@${c.address}`,
     "-O", "exit",
@@ -137,8 +151,12 @@ export function masterExitArgs(c: Computer, slot: number): string[] {
 export async function closeMasters(c: Computer): Promise<void> {
   if (c.local || WINDOWS) return;
   try {
-    await Promise.all([0, 1, 2, 3].map(slot =>
-      exec("ssh", masterExitArgs(c, slot), { timeout: 5_000 }).then(() => undefined, () => undefined)));
+    const owner = masterOwner(c);
+    const opened = masters.get(owner);
+    masters.delete(owner);
+    const args = opened ? [...opened.values()] : [0, 1, 2, 3].map(slot => masterExitArgs(c, slot));
+    await Promise.all(args.map(argv =>
+      exec("ssh", argv, { timeout: 5_000 }).then(() => undefined, () => undefined)));
   } catch {
     // A missing address or ssh must never fail teardown.
   }

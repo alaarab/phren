@@ -9,6 +9,8 @@ import type {
   MergedOverview,
 } from "./contract.js";
 
+import { masterKey } from "./hosts.js";
+
 const OVERVIEW_PATH = "/v1/overview?watchApprovals=1&resources=1";
 const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 60_000;
@@ -30,6 +32,8 @@ interface Supervisor {
   silenceTimer?: NodeJS.Timeout;
   stableTimer?: NodeJS.Timeout;
   stopped: boolean;
+  attempt: number;
+  identity?: string;
 }
 
 /** Truncate a possibly multi-line SSH/hook error to a short single line. */
@@ -64,6 +68,7 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     state: "connecting",
     backoffMs: BASE_BACKOFF_MS,
     stopped: false,
+    attempt: 0,
   }));
 
   let started = false;
@@ -108,6 +113,7 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
 
   function stopSupervisor(sup: Supervisor): void {
     sup.stopped = true;
+    sup.attempt++;
     clearTimers(sup);
     const socket = sup.socket;
     sup.socket = undefined;
@@ -205,21 +211,23 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     if (sup.stopped || sup.state === "verify") return;
     sup.state = "connecting";
     scheduleChange();
+    const attempt = ++sup.attempt;
     let settled = false;
     const timer = setTimeout(() => {
-      if (settled) return;
+      if (settled || attempt !== sup.attempt) return;
       settled = true;
       fail(sup, new Error("Timed out connecting to the Hook."));
     }, CONNECT_TIMEOUT_MS);
     const settle = (run: () => void): void => {
       clearTimeout(timer);
-      if (settled) return;
+      if (settled || attempt !== sup.attempt) return;
       settled = true;
       run();
     };
     try {
+      sup.identity = masterKey(sup.computer);
       ws(sup.computer, `${OVERVIEW_PATH}&server=${encodeURIComponent(sup.computer.server)}`).then(
-        (socket) => { if (settled) socket.terminate(); else settle(() => attach(sup, socket)); },
+        (socket) => { if (settled || attempt !== sup.attempt) { clearTimeout(timer); socket.terminate(); } else settle(() => attach(sup, socket)); },
         (err: unknown) => settle(() => fail(sup, err)),
       );
     } catch (err) {
@@ -265,12 +273,12 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
       for (const computer of computers) {
         const sup = byName.get(computer.name);
         if (!sup) {
-          const fresh: Supervisor = { computer, state: "connecting", backoffMs: BASE_BACKOFF_MS, stopped: false };
+          const fresh: Supervisor = { computer, state: "connecting", backoffMs: BASE_BACKOFF_MS, stopped: false, attempt: 0 };
           supervisors.push(fresh);
           if (started) connect(fresh);
           continue;
         }
-        if (sshChanged(sup.computer, computer)) {
+        if (sshChanged(sup.computer, computer) || (sup.identity !== undefined && sup.identity !== masterKey(computer))) {
           // A different SSH identity: drop the old socket and retry from scratch
           // (this is how a "verify" state clears after a relink).
           stopSupervisor(sup);

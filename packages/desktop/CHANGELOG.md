@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Replacing a connection discards pending handshakes; relinking after key rotation closes the original SSH masters and refreshes the overview.
+
 - Connections follow the configured Hook server, refresh capabilities on heartbeats, time out while waiting for a channel, and verify changed SSH keys and host pins on relink.
 
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.

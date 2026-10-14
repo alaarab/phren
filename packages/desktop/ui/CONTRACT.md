@@ -11,13 +11,15 @@ badge and notifications; nothing else lives there.
 ## Daemon connections
 
 The overview uses each computer's configured `server` and reconnects when its
-SSH username or server changes. Heartbeat `phren` blocks refresh the merged
+SSH username, server or public key identity changes. Pending handshakes from a
+replaced connection are discarded. Heartbeat `phren` blocks refresh the merged
 overview's version and capabilities while retaining its sessions.
 `ChannelPool.acquire(computerName, { timeoutMs?, signal? })` bounds queued
 acquisition (60 s by default); cancellation removes the waiter. HTTP's 60 s
 deadline includes acquisition. SSH masters are keyed by the public key identity,
 pinned host key fingerprint and destination. Relinking closes old masters before
-verification; enrollment keeps the public key beside the private key as `.pub`.
+verification using the control paths retained when they were opened, including
+when a key rotates at the same path; enrollment keeps the public key beside the private key as `.pub`.
 
 ## Store (`shell/store.js`)
 
