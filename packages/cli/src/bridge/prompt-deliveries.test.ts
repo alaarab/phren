@@ -163,74 +163,54 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [claudePane("working")]);
     expect(store.status("again-0002", claudeTarget).state).toBe("delivered");
   });
-  it("gives a late hook to the message the transcript settled, not to another with the same words", async () => {
+  it("leaves a user row to its hook while the agent works: one turn settles one message", async () => {
     const store = deliveries();
-    await send(store, "late-0001", "yes", claudeTarget);
-    clock += 10; await send(store, "late-0002", "yes", claudeTarget);
+    await send(store, "row-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "row-0002", "yes", claudeTarget);
     landed = true; matches = 1; hookRows = true; clock += 3_000;
     await store.observe("default", [claudePane("working")]);
-    expect(store.status("late-0001", claudeTarget).state).toBe("delivered");
-    // The UserPromptSubmit for that same row arrives late.
-    clock += 1_000; store.submitted(claudeTarget, "yes");
-    expect(store.status("late-0002", claudeTarget).state).toBe("queued");
-    // A hook for a second send is that message's own.
-    clock += 1_000; store.submitted(claudeTarget, "yes");
-    expect(store.status("late-0002", claudeTarget).state).toBe("delivered");
-  });
-  it("keeps the claim past 30 s until the turn ends, and only for its own conversation", async () => {
-    const store = deliveries();
-    await send(store, "claim-0001", "yes", claudeTarget);
-    clock += 10; await send(store, "claim-0002", "yes", claudeTarget);
-    landed = true; matches = 1; hookRows = true; clock += 3_000;
+    // The row's own UserPromptSubmit settles the first; nothing the transcript said claimed an entry.
+    expect(store.status("row-0001", claudeTarget).state).toBe("queued");
+    clock += 5_000; store.submitted(claudeTarget, "yes");
+    expect(store.status("row-0001", claudeTarget).state).toBe("delivered");
+    expect(store.status("row-0002", claudeTarget).state).toBe("queued");
     await store.observe("default", [claudePane("working")]);
-    // /clear: another conversation in the pane asks the same words; it takes the open message but not the first one's claim.
-    const cleared: Target = { ...claudeTarget, session: "00000000-aaaa-7000-8000-00000000000b" };
-    clock += 60_000; store.submitted(cleared, "yes");
-    expect(store.status("claim-0002", claudeTarget).state).toBe("delivered");
-    clock += 10; await send(store, "claim-0003", "yes", claudeTarget);
-    // The first conversation's own late hook still finds its claim, long after 30 s.
-    clock += 60_000; store.submitted(claudeTarget, "yes");
-    expect(store.status("claim-0003", claudeTarget).state).toBe("queued");
-    // Once its turn has ended no claim is left to answer for.
-    store.stopped(claudeTarget);
-    store.submitted(claudeTarget, "yes");
-    expect(store.status("claim-0003", claudeTarget).state).toBe("delivered");
+    expect(store.status("row-0002", claudeTarget).state).toBe("queued");
+    clock += 5_000; store.submitted(claudeTarget, "yes");
+    expect(store.status("row-0002", claudeTarget).state).toBe("delivered");
   });
-  it("gives a hook more than 30 s late to the message the transcript settled", async () => {
+  it("settles a user row at idle only for a hook that never came, once per row", async () => {
     const store = deliveries();
-    await send(store, "slow-0001", "yes", claudeTarget);
-    clock += 10; await send(store, "slow-0002", "yes", claudeTarget);
-    landed = true; matches = 1; hookRows = true; clock += 3_000;
-    await store.observe("default", [claudePane("working")]);
-    clock += 120_000; store.submitted(claudeTarget, "yes");
-    expect(store.status("slow-0002", claudeTarget).state).toBe("queued");
-  });
-  it("keeps no claim for a message settled after its turn ended, and persists the end of one", async () => {
-    const store = deliveries();
-    await send(store, "end-0001", "yes", claudeTarget);
-    clock += 10; await send(store, "end-0002", "yes", claudeTarget);
-    // The Stop came first: the idle check settles the first from its user row, with no hook left to come.
+    await send(store, "idle-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "idle-0002", "yes", claudeTarget);
+    // Stop before the settlement: the idle check reads the row, and there is no hook left to come.
     clock += 1; store.stopped(claudeTarget);
-    await store.observe("default", [claudePane("working")]);
     landed = true; matches = 1; hookRows = true;
     await store.observe("default", [claudePane("idle")]);
     clock += DELIVERY_GIVE_UP_MS;
     await store.observe("default", [claudePane("idle")]);
-    expect(store.status("end-0001", claudeTarget).state).toBe("delivered");
+    expect(store.status("idle-0001", claudeTarget).state).toBe("delivered");
+    // One row, one message: the second was not taken (it fails loudly) until its own hook arrives.
+    expect(store.status("idle-0002", claudeTarget).state).toBe("failed");
     store.submitted(claudeTarget, "yes");
-    expect(store.status("end-0002", claudeTarget).state).toBe("delivered");
+    expect(store.status("idle-0002", claudeTarget).state).toBe("delivered");
   });
-  it("does not bring a claim back after a restart once the turn has ended", async () => {
-    const store = deliveries();
-    await send(store, "gone-0001", "yes", claudeTarget);
-    clock += 10; await send(store, "gone-0002", "yes", claudeTarget);
-    landed = true; matches = 1; hookRows = true; clock += 3_000;
+  it("is unaffected by a Stop that lands while the transcript is being read", async () => {
+    let store!: PromptDeliveries;
+    let stopDuringRead = false;
+    store = new PromptDeliveries(undefined, () => clock, async () => {
+      if (stopDuringRead) store.stopped(claudeTarget);
+      return [{ offset: 0, hook: false }];
+    });
+    stores.push(store);
+    await send(store, "mid-read-1", "yes", claudeTarget);
+    clock += 10; await send(store, "mid-read-2", "yes", claudeTarget);
+    stopDuringRead = true; clock += 3_000;
     await store.observe("default", [claudePane("working")]);
-    store.stopped(claudeTarget);
-    await store.flush();
-    const restarted = deliveries();
-    restarted.submitted(claudeTarget, "yes");
-    expect(restarted.status("gone-0002", claudeTarget).state).toBe("delivered");
+    expect(store.status("mid-read-1", claudeTarget).state).toBe("delivered");
+    expect(store.status("mid-read-2", claudeTarget).state).toBe("queued");
+    store.submitted(claudeTarget, "yes");
+    expect(store.status("mid-read-2", claudeTarget).state).toBe("delivered");
   });
   it("survives a Hook restart after the transcript check", async () => {
     const store = deliveries();

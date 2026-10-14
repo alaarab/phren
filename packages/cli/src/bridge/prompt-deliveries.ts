@@ -46,8 +46,6 @@ const recordSchema = z.object({
   reason: z.string().max(500).optional(), at: z.number(), settledAt: z.number().optional(), stoppedAt: z.number().optional(),
   /** The transcript entry (byte offset) that settled it, so no other message claims the same one. */
   entry: z.number().optional(),
-  /** Settled from a user row, whose UserPromptSubmit hook is still to arrive: that hook belongs to this message, not to another with the same words. */
-  hookDue: z.boolean().optional(),
 }).strict();
 type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number };
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -205,11 +203,6 @@ export class PromptDeliveries {
    * went. A prompt nothing matches was typed locally. Never refused. */
   submitted(target: Target, prompt: string): void {
     const hash = promptHash(prompt);
-    // This hook may be the late one of a message the transcript already settled in this conversation: it is not another message's.
-    // The claim lasts until its hook arrives or the turn ends (stopped), not for a fixed time.
-    const due = this.records.filter(record => record.hookDue && record.hash === hash && this.samePane(record, target) && record.session === target.session)
-      .sort((a, b) => (a.settledAt ?? 0) - (b.settledAt ?? 0))[0];
-    if (due) { delete due.hookDue; this.save(); return; }
     const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered");
     const record = open.find(entry => entry.session === target.session) ?? open[0];
     if (!record) return;
@@ -217,42 +210,42 @@ export class PromptDeliveries {
     this.save();
     this.release(record, "delivered");
   }
-  /** Whether the transcript shows the agent took `record`'s message. Each matching
-   * transcript entry settles one message: of several identical open messages in a
-   * conversation (two "yes"), the oldest take the entries, and an entry another
-   * message settled with is not offered again. `pass` carries the entries still
-   * unclaimed within one observe. */
+  /** Whether the transcript shows the agent took `record`'s message, claiming the entry it settled with.
+   * An entry settles one message: the table of records' `entry` offsets (per conversation) is the only
+   * state, so neither this path nor the hook's can settle two messages with one turn. A user row is a
+   * turn start whose UserPromptSubmit hook settles the message itself, so while the agent works only a
+   * mid-turn queue removal (no hook fires for it) settles from the transcript; once the agent is idle
+   * (`working` false) a user row settles too, for a hook that never came. Of several identical open
+   * messages the oldest take the entries. `pass` carries the entries still unclaimed within one observe. */
   private async taken(record: Record, pass: Map<string, TranscriptEntry[]>, working = false): Promise<boolean> {
     // Only Claude's transcript says which entry a message settled with; Codex keeps the any-match check.
     if (record.source !== "claude") return (await this.landed(record).catch(() => [] as TranscriptEntry[])).length > 0;
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
     const open = this.records.filter(other => same(other) && (other.state === "typed" || other.state === "queued")).sort((a, b) => a.at - b.at);
     if (open[0] !== record) return false;
-    const key = [record.hash, record.server, record.pane, record.session].join("|");
+    const key = [record.hash, record.server, record.pane, record.session, working].join("|");
     let free = pass.get(key);
     if (!free) {
-      const found = await this.landed(record).catch(() => [] as TranscriptEntry[]);
+      const found = (await this.landed(record).catch(() => [] as TranscriptEntry[])).sort((a, b) => a.offset - b.offset);
       const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
-      // A message the agent's hook settled has an entry too, but none recorded: it takes the oldest unclaimed.
-      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
-      free = found.filter(entry => !used.has(entry.offset)).sort((a, b) => a.offset - b.offset).slice(hooked);
+      const unclaimed = found.filter(entry => !used.has(entry.offset));
+      if (working) free = unclaimed.filter(entry => !entry.hook);
+      else {
+        // A message the agent's hook settled took a user row without recording it: the oldest user rows are theirs.
+        let hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
+        free = unclaimed.filter(entry => !(entry.hook && hooked-- > 0));
+      }
     }
     const entry = free.shift();
     pass.set(key, free);
     if (entry === undefined) return false;
     record.entry = entry.offset;
-    // Only a turn still running has a hook to come; once it ended (idle) none is.
-    if (entry.hook && working) record.hookDue = true;
     return true;
   }
   /** A turn in `target`'s pane ended: the agent now takes held input or never will. */
   stopped(target: Target): void {
     const at = this.now();
     for (const record of this.records) if (this.samePane(record, target) && (record.state === "typed" || record.state === "queued") && record.at < at) record.stoppedAt = at;
-    // A turn that ended has fired the hooks it was going to: no settled message is still waiting for one.
-    let cleared = false;
-    for (const record of this.records) if (record.hookDue && this.samePane(record, target) && record.session === target.session) { delete record.hookDue; cleared = true; }
-    if (cleared) this.save();
   }
 
   /** Called on the Hook's activity tick with a server's panes. A message
