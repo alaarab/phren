@@ -10,6 +10,8 @@ export type DeliveryOutcome = "delivered" | "pending";
  * pane and held by the agent until its turn ends. `failed` carries a reason
  * and may still turn `delivered` if the agent takes it late. */
 export type DeliveryState = "queued" | "delivered" | "failed";
+/** A transcript row carrying a message's words: its byte offset, and whether the agent fires UserPromptSubmit for it (a user row does; a mid-turn queue removal does not). */
+export interface TranscriptEntry { offset: number; hook: boolean }
 export type TrackedState = DeliveryState | "unknown";
 export interface DeliveryStatus { state: TrackedState; reason?: string; session?: string }
 
@@ -44,6 +46,8 @@ const recordSchema = z.object({
   reason: z.string().max(500).optional(), at: z.number(), settledAt: z.number().optional(), stoppedAt: z.number().optional(),
   /** The transcript entry (byte offset) that settled it, so no other message claims the same one. */
   entry: z.number().optional(),
+  /** Settled from a user row, whose UserPromptSubmit hook is still to arrive: that hook belongs to this message, not to another with the same words. */
+  hookDue: z.boolean().optional(),
 }).strict();
 type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number };
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -60,7 +64,7 @@ export class PromptDeliveries {
   private writing: Promise<void> = Promise.resolve();
 
   constructor(private file?: string, private now: () => number = Date.now,
-    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<number[]> = transcriptEntries) {
+    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<TranscriptEntry[]> = transcriptEntries) {
     if (!file) return;
     try {
       for (const row of objects(object(JSON.parse(readFileSync(file, "utf8"))).records)) {
@@ -201,6 +205,11 @@ export class PromptDeliveries {
    * went. A prompt nothing matches was typed locally. Never refused. */
   submitted(target: Target, prompt: string): void {
     const hash = promptHash(prompt);
+    // This hook may be the late one of a message the transcript already settled: it is not another message's.
+    const now = this.now();
+    const due = this.records.filter(record => record.hookDue && record.hash === hash && this.samePane(record, target) && now - (record.settledAt ?? 0) <= DELIVERY_GIVE_UP_MS)
+      .sort((a, b) => (a.settledAt ?? 0) - (b.settledAt ?? 0))[0];
+    if (due) { delete due.hookDue; this.save(); return; }
     const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered");
     const record = open.find(entry => entry.session === target.session) ?? open[0];
     if (!record) return;
@@ -213,25 +222,26 @@ export class PromptDeliveries {
    * conversation (two "yes"), the oldest take the entries, and an entry another
    * message settled with is not offered again. `pass` carries the entries still
    * unclaimed within one observe. */
-  private async taken(record: Record, pass: Map<string, number[]>): Promise<boolean> {
+  private async taken(record: Record, pass: Map<string, TranscriptEntry[]>): Promise<boolean> {
     // Only Claude's transcript says which entry a message settled with; Codex keeps the any-match check.
-    if (record.source !== "claude") return (await this.landed(record).catch(() => [] as number[])).length > 0;
+    if (record.source !== "claude") return (await this.landed(record).catch(() => [] as TranscriptEntry[])).length > 0;
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
     const open = this.records.filter(other => same(other) && (other.state === "typed" || other.state === "queued")).sort((a, b) => a.at - b.at);
     if (open[0] !== record) return false;
     const key = [record.hash, record.server, record.pane, record.session].join("|");
     let free = pass.get(key);
     if (!free) {
-      const found = await this.landed(record).catch(() => [] as number[]);
+      const found = await this.landed(record).catch(() => [] as TranscriptEntry[]);
       const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
       // A message the agent's hook settled has an entry too, but none recorded: it takes the oldest unclaimed.
       const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
-      free = found.filter(entry => !used.has(entry)).sort((a, b) => a - b).slice(hooked);
+      free = found.filter(entry => !used.has(entry.offset)).sort((a, b) => a.offset - b.offset).slice(hooked);
     }
     const entry = free.shift();
     pass.set(key, free);
     if (entry === undefined) return false;
-    record.entry = entry;
+    record.entry = entry.offset;
+    if (entry.hook) record.hookDue = true;
     return true;
   }
   /** A turn in `target`'s pane ended: the agent now takes held input or never will. */
@@ -247,7 +257,7 @@ export class PromptDeliveries {
   async observe(server: string, panes: Json[]): Promise<void> {
     const now = this.now();
     let changed = false;
-    const pass = new Map<string, number[]>();
+    const pass = new Map<string, TranscriptEntry[]>();
     for (const record of this.records) {
       if (record.server !== server || (record.state !== "typed" && record.state !== "queued")) continue;
       const pane = panes.find(entry => entry.pane_id === record.pane);
@@ -282,8 +292,8 @@ export class PromptDeliveries {
  * (a mid-turn steer). Reads at most the last 512 KiB. */
 /** The byte offsets (in the file, `start` being the buffer's own offset) of the rows in `buffer`
  * whose user text has `record`'s words, newest first. One offset per row. */
-export function matchingOffsets(buffer: Buffer, start: number, record: { hash: string; at: number }): number[] {
-  const entries: number[] = [];
+export function matchingOffsets(buffer: Buffer, start: number, record: { hash: string; at: number }): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = [];
   const lines = buffer.toString("utf8").split("\n");
   let offset = start + buffer.length;
   for (let index = lines.length - 1; index >= 0; index--) {
@@ -294,12 +304,12 @@ export function matchingOffsets(buffer: Buffer, start: number, record: { hash: s
     const stamp = Date.parse(String(row.timestamp ?? ""));
     if (Number.isFinite(stamp) && stamp < record.at - 5_000) break;
     // One entry per row, even when its content repeats the words.
-    if (userTexts(row).some(text => promptHash(text) === record.hash)) entries.push(offset);
+    if (userTexts(row).some(text => promptHash(text) === record.hash)) entries.push({ offset, hook: row.type === "user" });
   }
   return entries;
 }
 
-async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<number[]> {
+async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<TranscriptEntry[]> {
   const file = await open(await transcriptPath(record.source, record.session), "r");
   try {
     const size = (await file.stat()).size, start = Math.max(0, size - 524_288), buffer = Buffer.alloc(size - start);
