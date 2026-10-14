@@ -789,14 +789,28 @@ describe("multi-project schedules", () => {
   });
 
   it.each(["2026-03-07T16:00:00.125Z", "2026-03-07T16:00:00.125000Z", "2026-03-07T09:00:00.125-07:00"])(
-    "accepts the matching schedule instant %s and launches all targets", async expectedUpdatedAt => {
-      const fixture = await targets(schedule({ projects: ["alpha", "beta"], notify: [], updatedAt: "2026-03-07T16:00:00.125Z" }));
+    "accepts the exact stored schedule revision %s and launches all targets", async expectedUpdatedAt => {
+      const fixture = await targets(schedule({ projects: ["alpha", "beta"], notify: [], updatedAt: expectedUpdatedAt }));
       const launched: string[] = [];
       const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
         computer: "Desk", launch: async context => { launched.push(context.project); return { launch: { mode: "headless" } }; } });
       const runs = await scheduler.launchNow("demo", "7f3a2c1d", false, expectedUpdatedAt);
       expect(launched).toEqual(["alpha", "beta"]);
       expect(runs).toMatchObject([{ project: "alpha", status: "running" }, { project: "beta", status: "running" }]);
+    });
+
+  it.each(["2026-03-07T16:00:00.125001Z", "2026-03-07T16:00:00.125Z", "2026-03-07T09:00:00.125002-07:00"])(
+    "refuses a different Run now revision %s even when Date.parse matches", async expectedUpdatedAt => {
+      const fixture = await storeFixture(schedule({ every: "once", once: "2026-09-20T09:00:00", notify: [],
+        updatedAt: "2026-03-07T16:00:00.125002Z" }));
+      let launches = 0;
+      const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+        computer: "Desk", revisionWaitMs: 0, launch: async () => { launches++; return { launch: { mode: "headless" } }; } });
+      const file = path.join(fixture.project, "schedules.yaml"), before = await readFile(file, "utf8");
+      await expect(scheduler.launchNow("demo", "7f3a2c1d", false, expectedUpdatedAt)).rejects.toMatchObject({ status: 409 });
+      expect(launches).toBe(0);
+      expect(await scheduler.history()).toEqual([]);
+      expect(await readFile(file, "utf8")).toBe(before);
     });
 
   it("continues after a child fails and refuses overlap during dispatch and while a sibling runs", async () => {

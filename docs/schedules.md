@@ -39,7 +39,7 @@ The `id` is eight lowercase hexadecimal characters and does not change. Names ar
 | `once` | `once` | `once: 2026-09-21T09:00:00` |
 | `cron` | `cron` | `cron: "0 7 * * 1-5"` |
 
-Times have no zone in the file. The Hook evaluates them in the assigned computer's local time zone. A nonexistent wall-clock time during a daylight-saving transition is skipped. A once schedule disables itself after its run is recorded.
+Times have no zone in the file. The Hook evaluates them in the assigned computer's local time zone. A nonexistent wall-clock time during a daylight-saving transition is skipped. A once schedule disables itself after its run is recorded, provided its timing and revision still match the occurrence that fired. An edit accepted during launch admission is left unchanged.
 
 The `computer` value names a key in `machines.yaml`. Matching is case-insensitive and ignores a trailing `.local`, so `Desk`, `desk`, and `desk.local` identify the same computer. There is no `any` computer mode.
 
@@ -130,13 +130,14 @@ Use `lastRuns` for individual targets and their session destinations.
 
 After saving a schedule, clients can pass its `updatedAt` as `expectedUpdatedAt`
 in `/v1/schedules/run`. This optional ISO 8601 timestamp must include a time zone;
-fractional seconds and offsets are accepted. The Hook compares parsed instants
+fractional seconds and offsets are accepted. The Hook compares exact revision strings
 inside schedule admission, before recording or launching any child. A mismatch
 waits up to 30 seconds for the store to sync the edit (a copy older than the app's, or none yet) and then returns
 HTTP 409 with a wait-for-store-sync message, leaving the schedule and run
 history unchanged. A copy newer than the app's is refused at once. This prevents an immediate Run now from firing an older
-single-target definition while a multi-target edit is still syncing. Equivalent
-timestamp spellings match; omitting the field retains legacy behavior.
+single-target definition while a multi-target edit is still syncing. Send the
+stored `updatedAt` unchanged, including its offset and every fractional digit;
+omitting the field retains legacy behavior.
 
 Clients should check `capabilities.scheduleUpdate: true` before using
 `POST /v1/schedules/update`; older Hooks omit it and require the client's legacy

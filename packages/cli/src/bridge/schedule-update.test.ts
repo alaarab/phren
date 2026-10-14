@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleScheduleCommand } from "../cli/schedules.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
-import { parseSchedule, readScheduleDocument, withScheduleLock, writeScheduleDocument } from "./schedule-format.js";
+import { parseSchedule, readScheduleDocument, withScheduleLock, writeScheduleDocument, type Schedule } from "./schedule-format.js";
 import { Scheduler } from "./schedules.js";
 import * as locks from "../governance/locks.js";
 
@@ -72,7 +72,7 @@ describe("Hook schedule updates", () => {
     expect(saved.body.schedule.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
-  it("consumes a once schedule without restoring edits accepted during admission", async () => {
+  it.each(["unchanged", "daily", "once-time", "revision"])("consumes only the original once occurrence during a concurrent %s edit", async change => {
     const once = { ...original, every: "once" as const, once: "2026-03-07T17:00:00", notify: [] };
     const sibling = { ...original, id: "abcdef12" };
     await writeScheduleDocument(project, [once, sibling]);
@@ -83,16 +83,31 @@ describe("Hook schedule updates", () => {
       locateProject: () => { entered(); return new Promise(resolve => { resume = resolve; }); } });
     const running = scheduler.launchNow("demo", once.id);
     await ready;
-    let edited, siblingEdit;
+    let edited: Schedule = once;
+    let siblingEdit, beforeConsumption = "";
     try {
-      edited = await post(input({ name: "New once name" }));
+      if (change === "revision") {
+        const result = await post(input({ name: "New once name" }));
+        expect(result.status).toBe(200);
+        edited = result.body.schedule;
+      } else if (change !== "unchanged") {
+        // Keep the revision unchanged to independently exercise each timing guard.
+        edited = { ...once, ...(change === "daily" ? { every: "daily" as const } : { once: "2026-03-08T17:00:00" }) };
+        await withScheduleLock(project, async () => { await writeScheduleDocument(project, [edited, sibling]); });
+      }
       siblingEdit = await post({ ...input({ name: "New sibling name" }), id: sibling.id });
-      expect(edited.status).toBe(200); expect(siblingEdit.status).toBe(200);
+      expect(siblingEdit.status).toBe(200);
+      beforeConsumption = await readFile(file, "utf8");
     } finally { resume(project); }
     await running;
     const schedules = (await readScheduleDocument(project)).schedules;
-    expect(schedules[0]).toMatchObject({ name: "New once name", enabled: false });
-    expect(schedules[0].updatedAt).not.toBe(edited!.body.schedule.updatedAt);
+    if (change === "unchanged") {
+      expect(schedules[0]).toMatchObject({ ...once, enabled: false, updatedAt: expect.any(String) });
+      expect(schedules[0].updatedAt).not.toBe(once.updatedAt);
+    } else {
+      expect(schedules[0]).toEqual(edited);
+      expect(await readFile(file, "utf8")).toBe(beforeConsumption);
+    }
     expect(schedules[1]).toEqual(siblingEdit!.body.schedule);
   });
 
