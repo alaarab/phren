@@ -8,6 +8,7 @@ import { gitPulls } from "./git.js";
 import { gitHostToken, gitMergeRequest, gitPullRequest } from "./git-publish.js";
 import { gitCheckout } from "./git-sync.js";
 import { git, withGitReadDeadline } from "./projects.js";
+import { ghHostBlock } from "./git-host-auth.js";
 
 const exec = promisify(execFile);
 const result = (number: number): RequestList => ({ available: true, pulls: [{ number }], current: null });
@@ -196,5 +197,49 @@ describe("Hook pull lookup cache", () => {
     await exec("git", ["-C", root, "remote", "set-url", "origin", "git@github.com:sam/other.git"]);
     await gitPulls(root);
     expect(list).toHaveBeenCalledTimes(67);
+  });
+
+  it("an auth refusal replaces a cached success instead of serving it until max age", async () => {
+    const list = vi.spyOn(PROVIDERS.github, "list").mockResolvedValue(result(1));
+    await gitPulls(root);
+    now += 30_001;
+    list.mockResolvedValue({ available: false, reason: "auth", pulls: [], current: null });
+    await gitPulls(root); // stale while the refresh runs
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(await gitPulls(root)).toMatchObject({ available: false, reason: "auth" });
+  });
+
+  it("a sign-in during a cold lookup reads again under the new credentials instead of failing", async () => {
+    vi.stubEnv("GH_CONFIG_DIR", path.join(root, "gh"));
+    await mkdir(path.join(root, "gh"));
+    const file = path.join(root, "gh", "hosts.yml");
+    await writeFile(file, "github.com:\n  user: old-account\n");
+    const first = deferred<RequestList>();
+    const list = vi.spyOn(PROVIDERS.github, "list").mockReturnValueOnce(first.promise).mockResolvedValue(result(2));
+    const call = gitPulls(root);
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    await writeFile(file, "github.com:\n  user: new-account\n");
+    first.resolve(result(1));
+    expect(await call).toMatchObject({ pulls: [{ number: 2 }] });
+  });
+
+  it("signing into another gh host leaves github.com's cached pulls alone", async () => {
+    vi.stubEnv("GH_CONFIG_DIR", path.join(root, "gh"));
+    await mkdir(path.join(root, "gh"));
+    const file = path.join(root, "gh", "hosts.yml");
+    await writeFile(file, "github.com:\n  user: sam\n");
+    const list = vi.spyOn(PROVIDERS.github, "list").mockResolvedValue(result(1));
+    await gitPulls(root);
+    await writeFile(file, "github.com:\n  user: sam\nghe.example.com:\n  user: work\n");
+    await gitPulls(root);
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("ghHostBlock returns only that host's lines", () => {
+    const yml = "github.com:\n    user: sam\n    git_protocol: ssh\nghe.example.com:\n    user: work\n";
+    expect(ghHostBlock(yml, "github.com")).toBe("github.com:\n    user: sam\n    git_protocol: ssh");
+    expect(ghHostBlock(yml, "GHE.example.com.")).toBe("ghe.example.com:\n    user: work");
+    expect(ghHostBlock(yml, "gitlab.com")).toBe("");
   });
 });
