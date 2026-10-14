@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
@@ -68,7 +68,9 @@ function number(value: unknown, where: string): number {
   return value;
 }
 
-const written = new Map<string, string>();
+// Retain the argv used to open masters: key files may rotate before teardown.
+const masters = new Map<string, Map<string, string[]>>();
+const masterOwner = (c: Computer): string => JSON.stringify([bridgeRoot(), c.name, c.address, c.username, c.port ?? 22, c.keyFile, c.hostKey]);
 const WINDOWS = process.platform === "win32";
 const NULL_DEVICE = WINDOWS ? "NUL" : "/dev/null";
 
@@ -79,17 +81,27 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
   const root = bridgeRoot();
   const port = c.port ?? 22;
   const controlDir = path.join(root, "desktop-cm");
-  const knownHosts = knownHostsPath(c.name);
-  // The master socket and pinned known_hosts live together; %C hashes the connection tuple.
+  // Compute once so the pin file and socket always have the same identity.
+  const identity = masterKey(c);
+  const knownHosts = knownHostsPath(identity);
   mkdirSync(controlDir, { recursive: true, mode: 0o700 });
-  // Revoke deletes the file without touching this cache, so a relink under the
-  // same name and host key must still rewrite it.
-  if (written.get(c.name) !== c.hostKey || !existsSync(knownHosts)) {
+  // Each identity has its own pin; a queued old Computer cannot overwrite it.
+  // Publish the complete file atomically before any SSH process can read it.
+  if (!existsSync(knownHosts)) {
     const lines = [`${c.address} ${c.hostKey}`];
     if (port !== 22) lines.push(`[${c.address}]:${port} ${c.hostKey}`);
-    writeFileSync(knownHosts, `${lines.join("\n")}\n`, { mode: 0o600 });
-    chmodSync(knownHosts, 0o600);
-    written.set(c.name, c.hostKey);
+    const temporary = `${knownHosts}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temporary, `${lines.join("\n")}\n`, { mode: 0o600, flag: "wx" });
+      renameSync(temporary, knownHosts);
+    } finally { rmSync(temporary, { force: true }); }
+  }
+  const socketPath = WINDOWS ? undefined : path.join(controlSocketDir(), `${identity}-${opts?.slot ?? 0}`);
+  if (socketPath) {
+    const owner = masterOwner(c);
+    const opened = masters.get(owner) ?? new Map<string, string[]>();
+    opened.set(socketPath, exitArgs(c, socketPath));
+    masters.set(owner, opened);
   }
   return [
     "-F", NULL_DEVICE,
@@ -97,7 +109,7 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
     ...(WINDOWS ? [] : [
       "-o", "ControlMaster=auto",
       "-o", "ControlPersist=60",
-      "-o", `ControlPath=${controlPath(c, opts?.slot ?? 0)}`,
+      "-o", `ControlPath=${socketPath}`,
     ]),
     "-o", `UserKnownHostsFile=${knownHosts}`,
     "-o", `GlobalKnownHostsFile=${NULL_DEVICE}`,
@@ -106,6 +118,7 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
     "-o", "UpdateHostKeys=no",
     "-i", c.keyFile,
     "-o", "IdentitiesOnly=yes",
+    "-o", "IdentityAgent=none",
     "-o", "BatchMode=yes",
     "-o", "ForwardAgent=no",
     "-o", "ClearAllForwardings=yes",
@@ -124,9 +137,13 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
 export function masterExitArgs(c: Computer, slot: number): string[] {
   if (c.local) throw new Error("masterExitArgs cannot run on the local computer.");
   if (!c.address || !c.username) throw new Error(`Computer ${c.name} is missing SSH details.`);
+  return exitArgs(c, controlPath(c, slot));
+}
+
+function exitArgs(c: Computer, socketPath: string): string[] {
   return [
     "-F", "/dev/null",
-    "-o", `ControlPath=${controlPath(c, slot)}`,
+    "-o", `ControlPath=${socketPath}`,
     "-p", String(c.port ?? 22),
     `${c.username}@${c.address}`,
     "-O", "exit",
@@ -137,8 +154,12 @@ export function masterExitArgs(c: Computer, slot: number): string[] {
 export async function closeMasters(c: Computer): Promise<void> {
   if (c.local || WINDOWS) return;
   try {
-    await Promise.all([0, 1, 2, 3].map(slot =>
-      exec("ssh", masterExitArgs(c, slot), { timeout: 5_000 }).then(() => undefined, () => undefined)));
+    const owner = masterOwner(c);
+    const opened = masters.get(owner);
+    masters.delete(owner);
+    const args = opened ? [...opened.values()] : [0, 1, 2, 3].map(slot => masterExitArgs(c, slot));
+    await Promise.all(args.map(argv =>
+      exec("ssh", argv, { timeout: 5_000 }).then(() => undefined, () => undefined)));
   } catch {
     // A missing address or ssh must never fail teardown.
   }
@@ -149,19 +170,25 @@ export async function closeMasters(c: Computer): Promise<void> {
  * a channel pool just as they share masters. */
 export function masterKey(c: Computer): string {
   if (c.local) return c.name;
-  return `${c.keyFile ?? ""}\n${c.username ?? ""}@${c.address ?? ""}:${c.port ?? 22}`;
+  if (!c.keyFile) throw new Error(`Computer ${c.name} is missing its SSH key.`);
+  // Read every time so even same-size rotations with unchanged mtimes and
+  // stale .pub sidecars get new masters. The private digest stays in memory;
+  // only the combined socket identity leaves this function.
+  const identity = createHash("sha256").update(readFileSync(c.keyFile)).digest("hex");
+  return createHash("sha256").update(JSON.stringify([
+    c.username ?? "", c.address ?? "", c.port ?? 22, c.hostKey ?? "", identity,
+  ])).digest("hex").slice(0, 24);
 }
 
-/** The ControlMaster socket path for one slot. A hash of the key file path
- * keeps computers that share a name but not a key apart; the slot index lets
+/** The ControlMaster socket path for one slot. A hash of the private identity,
+ * pinned host key and destination isolates changed credentials; the slot index lets
  * the channel pool spread concurrent channels over several connections. */
 function controlPath(c: Computer, slot: number): string {
-  const tag = createHash("sha256").update(c.keyFile ?? "").digest("hex").slice(0, 8);
-  return path.join(controlSocketDir(), `${tag}-${slot}-%C`);
+  return path.join(controlSocketDir(), `${masterKey(c)}-${slot}`);
 }
 
 /** Unix socket paths are capped at 104 bytes on macOS, and ssh appends a
- * 40-character %C hash plus a 17-character temp suffix, so the masters live
+ * 17-character temp suffix, so the masters live
  * in a short private directory rather than under the bridge folder. */
 function controlSocketDir(): string {
   const dir = `/tmp/phren-desktop-${userInfo().uid}`;
@@ -172,12 +199,8 @@ function controlSocketDir(): string {
   return dir;
 }
 
-/** A filesystem-safe fragment of a display name. */
-function safeName(name: string): string {
-  return name.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 100) || "computer";
-}
-
-/** Where this computer's pinned known_hosts lives (removed on revoke). */
-export function knownHostsPath(name: string): string {
-  return path.join(bridgeRoot(), "desktop-cm", `known_hosts-${safeName(name)}`);
+/** Where a master's pinned known_hosts lives (removed on revoke).
+ * Pass the identity returned by masterKey, never a computer display name. */
+export function knownHostsPath(identity: string): string {
+  return path.join(bridgeRoot(), "desktop-cm", `known_hosts-${identity}`);
 }

@@ -186,6 +186,7 @@ export class PhrenClient {
           this.initialized = false;
           this.initializePromise = undefined;
           this.process = this.spawnProcess();
+          this.lastFailure = undefined;
           this.reconnecting = false;
           phrenLog.info(`[phren-mcp] Reconnect attempt ${attempt} spawned successfully.`);
           resolve();
@@ -494,7 +495,7 @@ export class PhrenClient {
       if (this.reconnecting && this.reconnectPromise) {
         await this.reconnectPromise;
       }
-      if (!this.disposed && !this.reconnecting && this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
+      if (!this.disposed && !this.reconnecting && this.lastFailure && this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
         const cause = this.lastFailure ? ` (${this.lastFailure})` : "";
         throw new Error(
           `Phren MCP process exited and all reconnect attempts failed${cause}. ` +
