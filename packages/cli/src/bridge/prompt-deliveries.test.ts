@@ -177,6 +177,34 @@ describe("a message the agent took into its running turn", () => {
     clock += 1_000; store.submitted(claudeTarget, "yes");
     expect(store.status("late-0002", claudeTarget).state).toBe("delivered");
   });
+  it("keeps the claim past 30 s until the turn ends, and only for its own conversation", async () => {
+    const store = deliveries();
+    await send(store, "claim-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "claim-0002", "yes", claudeTarget);
+    landed = true; matches = 1; hookRows = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    // /clear: another conversation in the pane asks the same words; it takes the open message but not the first one's claim.
+    const cleared: Target = { ...claudeTarget, session: "00000000-aaaa-7000-8000-00000000000b" };
+    clock += 60_000; store.submitted(cleared, "yes");
+    expect(store.status("claim-0002", claudeTarget).state).toBe("delivered");
+    clock += 10; await send(store, "claim-0003", "yes", claudeTarget);
+    // The first conversation's own late hook still finds its claim, long after 30 s.
+    clock += 60_000; store.submitted(claudeTarget, "yes");
+    expect(store.status("claim-0003", claudeTarget).state).toBe("queued");
+    // Once its turn has ended no claim is left to answer for.
+    store.stopped(claudeTarget);
+    store.submitted(claudeTarget, "yes");
+    expect(store.status("claim-0003", claudeTarget).state).toBe("delivered");
+  });
+  it("gives a hook more than 30 s late to the message the transcript settled", async () => {
+    const store = deliveries();
+    await send(store, "slow-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "slow-0002", "yes", claudeTarget);
+    landed = true; matches = 1; hookRows = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    clock += 120_000; store.submitted(claudeTarget, "yes");
+    expect(store.status("slow-0002", claudeTarget).state).toBe("queued");
+  });
   it("survives a Hook restart after the transcript check", async () => {
     const store = deliveries();
     await send(store, "keep-0001", "Still queued", claudeTarget);
