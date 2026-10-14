@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { aboutText } from "../ui/sections/settings/about.js";
 
 describe("aboutText", () => {
-  it("copies versions and states without unrelated computer details", () => {
+  it("copies versions and states, with computers numbered instead of named", () => {
     const computers = [
       { computer: "Mac mini", state: "online", hostname: "private.example", token: "secret",
         overview: { phren: { version: "0.3.45" }, cwd: "/private/work", url: "https://private.example" } },
@@ -12,7 +12,7 @@ describe("aboutText", () => {
     ];
     expect(aboutText({ version: "0.1.7", platform: "darwin", userAgent: "Electron test", computers })).toBe(
       "Phren desktop 0.1.7\nPlatform: darwin\nUser agent: Electron test\n" +
-      "Mac mini · online · Hook 0.3.45\nLaptop · offline · Hook —\nServer · connecting · Hook —",
+      "Computer 1 · online · Hook 0.3.45\nComputer 2 · offline · Hook —\nComputer 3 · connecting · Hook —",
     );
   });
 
