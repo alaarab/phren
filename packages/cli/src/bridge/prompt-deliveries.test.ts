@@ -287,6 +287,69 @@ describe("a message the agent took into its running turn", () => {
     expect(userTexts({ type: "queue-operation", operation: "enqueue", content: "from my phone" })).toEqual([]);
     expect(userTexts({ type: "queue-operation", operation: "dequeue" })).toEqual([]);
   });
+  it("settles from a user row while the agent works in a pane that sends no callbacks", async () => {
+    const store = deliveries();
+    await send(store, "nohook-01", "Start the build", claudeTarget);
+    landed = true; hookRows = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    // Its hook would claim the row: give it a check's time.
+    expect(store.status("nohook-01", claudeTarget).state).toBe("queued");
+    clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("nohook-01", claudeTarget).state).toBe("delivered");
+  });
+  it("never downgrades a message its hook settled while the idle check was reading", async () => {
+    let store!: PromptDeliveries;
+    let reads = 0;
+    store = new PromptDeliveries(undefined, () => clock, async () => {
+      // The idle check's read: the hook arrives, claims its row (the hook's own read), and only then does the idle read return nothing.
+      if (++reads === 1) { await store.submitted(claudeTarget, "yes"); return []; }
+      return [{ offset: 0, hook: true }];
+    });
+    stores.push(store);
+    await send(store, "race-0001", "yes", claudeTarget);
+    clock += 1; store.stopped(claudeTarget);
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("race-0001", claudeTarget).state).toBe("delivered");
+  });
+  it("keeps a hook's claim that came before its row was readable, and applies it when the row appears", async () => {
+    const store = deliveries();
+    await send(store, "early-0001", "yes", claudeTarget);
+    hookRows = true;
+    await store.submitted(claudeTarget, "yes");
+    expect(store.status("early-0001", claudeTarget).state).toBe("queued");
+    landed = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("early-0001", claudeTarget).state).toBe("delivered");
+  });
+  it("does not let a late hook whose transcript cannot be read confirm a later identical message", async () => {
+    let readable = true;
+    const store = new PromptDeliveries(undefined, () => clock, async () => { if (!readable) throw new Error("EIO"); return [{ offset: 0, hook: false }]; });
+    stores.push(store);
+    await send(store, "unread-01", "yes", claudeTarget);
+    clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("unread-01", claudeTarget).state).toBe("delivered");
+    clock += 1_000; await send(store, "unread-02", "yes", claudeTarget);
+    // The first message's hook, late, and the transcript unreadable now.
+    readable = false;
+    await store.submitted(claudeTarget, "yes");
+    expect(store.status("unread-02", claudeTarget).state).toBe("queued");
+  });
+  it("keeps the row a message without a phone id claimed across a restart", async () => {
+    const store = deliveries();
+    expect(await store.expect(claudeTarget, "yes", 1)).toBe("pending");
+    landed = true; matches = 1; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    await store.flush();
+    const restarted = deliveries();
+    clock += 1_000; await send(restarted, "after-0001", "yes", claudeTarget);
+    clock += 3_000;
+    await restarted.observe("default", [claudePane("working")]);
+    expect(restarted.status("after-0001", claudeTarget).state).toBe("queued");
+  });
   it("leaves Codex delivery as it was: not settled from a transcript while the agent works", async () => {
     const store = deliveries();
     await send(store, "codex-0001", "yes");
