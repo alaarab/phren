@@ -6,6 +6,16 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Schedule saves hold the schedules.yaml lock (shared with `phren schedule`) across read, check and write, so two saves at once keep both edits.
+- Removing a remote computer's last note of a day deletes that file on the computer too, compare-and-swapping on its sha.
+- Deleting a file in this computer's store takes the store writers' lock across the sha check and the delete.
+- Turning Node extensions off while the extension host is still unpacking cancels its start.
+- A daemon that never reports ready is stopped and reaped instead of left running.
+- A bad WebSocket frame (a terminal paste over the size limit) closes that socket instead of crashing the daemon.
+- Push-to-talk shows its failure toast when the Hook refuses the message.
+- A send whose answer was lost (502, timeout) is retried under its own delivery id instead of failing and coming back as a draft, and attachments upload once across retries. If it still gets no answer, it stays as Unknown, keeps asking the Hook for its state, and offers Retry under the same id.
+- Responses proxied from a Hook are served with `nosniff` and a sandbox CSP, so repository files never run as a page on the app origin.
+
 - Removing a pending chat send hides it while keeping its place, so its transcript row cannot settle a later identical send or hide that send's failure.
 - Released Claude questions and served OpenCode questions appear as answer cards in chat.
 - Answering a pending question from a chat card works for Claude and OpenCode as well as Codex.

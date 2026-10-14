@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { SchedulePush, SchedulePushResult } from "./push.js";
 import { atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
 import { isValidProjectName } from "../utils-paths.js";
+import { tryFileLock } from "../governance/locks.js";
 import { isAccountSlug } from "./claude-accounts.js";
 
 /** The schedules.yaml store: the schedule and run record shapes, validation,
@@ -203,6 +204,28 @@ export async function readScheduleDocument(projectDir: string): Promise<Schedule
   const schedules = document.schedules.map(parseSchedule);
   if (new Set(schedules.map(item => item.id)).size !== schedules.length) throw new Error("Schedule IDs must be unique within a project.");
   return { document, schedules };
+}
+
+const scheduleQueues = new Map<string, Promise<unknown>>();
+const SCHEDULE_LOCK_WAIT_MS = 5_000;
+/** Hold `<project>/schedules.yaml.lock` (one holder per file, in this process and
+ * across processes) for one read, check and write, so two edits never
+ * overwrite each other. */
+export async function withScheduleLock<T>(projectDir: string, work: () => Promise<T>): Promise<T> {
+  const file = path.resolve(schedulePath(projectDir));
+  const previous = scheduleQueues.get(file) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(async () => {
+    const deadline = Date.now() + SCHEDULE_LOCK_WAIT_MS;
+    let release = tryFileLock(file);
+    while (!release) {
+      if (Date.now() >= deadline) throw new Error("schedules.yaml is being changed elsewhere. Try again.");
+      await new Promise(resolve => setTimeout(resolve, 50));
+      release = tryFileLock(file);
+    }
+    try { return await work(); } finally { release(); }
+  });
+  scheduleQueues.set(file, next);
+  try { return await next; } finally { if (scheduleQueues.get(file) === next) scheduleQueues.delete(file); }
 }
 
 export async function writeScheduleDocument(projectDir: string, schedules: Schedule[], original: Record<string, unknown> = { version: 1 }): Promise<void> {

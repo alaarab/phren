@@ -1,9 +1,19 @@
 import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fileVersion } from "./file-range.js";
 import { writeRepoFile } from "./file-write.js";
+
+// Lets a test hold the final rename open, so two saves overlap at the swap.
+const slowRename = vi.hoisted(() => ({ ms: 0 }));
+vi.mock("node:fs/promises", async original => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, rename: async (...args: Parameters<typeof actual.rename>) => {
+    if (slowRename.ms) await new Promise(resolve => setTimeout(resolve, slowRename.ms));
+    return actual.rename(...args);
+  } };
+});
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "file-write-")); await mkdir(path.join(root, "src")); });
@@ -63,6 +73,17 @@ it("lets only one of two concurrent saves of the same version succeed", async ()
     writeRepoFile(root, "src/race.ts", "b\n", first.version),
     writeRepoFile(root, "src/race.ts", "c\n", first.version),
   ]);
+  expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+  expect(results.filter(r => r.status === "rejected")).toHaveLength(1);
+});
+
+it("serializes saves that name one file through different spellings", async () => {
+  const first = await writeRepoFile(root, "src/alias.ts", "a\n");
+  slowRename.ms = 50;
+  const results = await Promise.allSettled([
+    writeRepoFile(root, "src/alias.ts", "b\n", first.version),
+    writeRepoFile(root, "./src/alias.ts", "c\n", first.version),
+  ]).finally(() => { slowRename.ms = 0; });
   expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
   expect(results.filter(r => r.status === "rejected")).toHaveLength(1);
 });

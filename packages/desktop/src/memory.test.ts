@@ -1,6 +1,6 @@
 import { dump, load } from "js-yaml";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -18,6 +18,7 @@ function json(body: unknown): HookResponse {
 interface FakeStore {
   request: HookRequest;
   posts: Array<{ path: string; content: string; sha: string | null }>;
+  deletes: Array<{ path: string; sha: string }>;
   calls: { head: number; tree: number; blob: number; file: number; blobs: number };
   change(next: Record<string, string | null>): void;
 }
@@ -27,6 +28,7 @@ function fakeStore(initial: Record<string, string>, { batch = false, extraTree =
   const files = new Map<string, Buffer>();
   for (const [p, text] of Object.entries(initial)) files.set(p, Buffer.from(text));
   const posts: FakeStore["posts"] = [];
+  const deletes: FakeStore["deletes"] = [];
   const calls = { head: 0, tree: 0, blob: 0, file: 0, blobs: 0 };
   let head = "1".repeat(40);
   const bump = (token: string) => { head = blobSha(Buffer.from(`${head}:${token}`)); };
@@ -70,12 +72,22 @@ function fakeStore(initial: Record<string, string>, { batch = false, extraTree =
       bump(data.path);
       return json({ content: { sha: blobSha(content), path: data.path }, commit: { sha: blobSha(content) } });
     }
+    if (method === "POST" && url.pathname === "/v1/store/delete") {
+      const data = body as { path: string; sha: string };
+      deletes.push(data);
+      const current = files.get(data.path);
+      if (!current || blobSha(current) !== data.sha) return { status: 409, headers: {}, body: Buffer.from(JSON.stringify({ error: "changed" })) };
+      files.delete(data.path);
+      bump(data.path);
+      return json({ ok: true });
+    }
     return { status: 404, headers: {}, body: Buffer.from("{}") };
   };
 
   return {
     request,
     posts,
+    deletes,
     calls,
     change(next) {
       for (const [p, text] of Object.entries(next)) {
@@ -217,5 +229,56 @@ describe("remote mirror", () => {
     expect(post?.sha).toBe(blobSha(Buffer.from("# Findings\n")));
     expect(Buffer.from(post!.content, "base64").toString("utf8")).toContain("The relay must never share the daemon origin");
     await expect(svc.addFinding(B, { project: "proj-a", text: "  " })).rejects.toThrow();
+  });
+});
+
+describe("store writes", () => {
+  const LOCAL: Computer = { ...B, name: "here", local: true };
+  const savedEnv = { path: process.env.PHREN_PATH, wait: process.env.PHREN_FILE_LOCK_MAX_WAIT_MS };
+  let store: string;
+  beforeEach(async () => {
+    store = path.join(dir, "store");
+    await mkdir(path.join(store, "proj-a"), { recursive: true });
+    process.env.PHREN_PATH = store;
+  });
+  afterEach(() => {
+    for (const [key, value] of [["PHREN_PATH", savedEnv.path], ["PHREN_FILE_LOCK_MAX_WAIT_MS", savedEnv.wait]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+
+  it("keeps both of two schedules saved at once", async () => {
+    const svc = service(fakeStore({}));
+    const sched = (id: string) => ({ id, name: id, enabled: true, computer: "Devbox", harness: "claude", every: "daily", at: "02:00",
+      prompt: "go", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" });
+    await Promise.all(["a1b2c3d4", "e5f6a7b8"].map((id) => svc.saveSchedule(LOCAL, { project: "proj-a", id, schedule: sched(id) })));
+    const saved = load(await readFile(path.join(store, "proj-a/schedules.yaml"), "utf8")) as { schedules: Array<{ id: string }> };
+    expect(saved.schedules.map((x) => x.id).sort()).toEqual(["a1b2c3d4", "e5f6a7b8"]);
+  });
+
+  it("deletes a local file only while holding its writers' lock", async () => {
+    const file = path.join(store, "proj-a/truths.md");
+    await writeFile(file, "- truth\n");
+    const sha = blobSha(Buffer.from("- truth\n"));
+    // Another live process (our parent) is writing it.
+    await writeFile(`${file}.lock`, `${process.ppid}\n${Date.now()}`);
+    process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "200";
+    const svc = service(fakeStore({}));
+    await expect(svc.deleteStoreFile(LOCAL, "proj-a/truths.md", sha)).rejects.toThrow(/lock/);
+    expect(existsSync(file)).toBe(true);
+    await rm(`${file}.lock`);
+    await svc.deleteStoreFile(LOCAL, "proj-a/truths.md", sha);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("deletes on the computer a file a remote mutation removed", async () => {
+    const day = "# proj-a Notes — 2026-10-10\n\n## 10:00 <!-- nid:abcdef12 -->\n\nonly note\n";
+    const remote = fakeStore({ "proj-a/FINDINGS.md": "# Findings\n", "proj-a/notes/2026-10-10.md": day });
+    const svc = service(remote);
+    await svc.notes(B, "proj-a");
+    const result = await svc.removeNote(B, { project: "proj-a", id: "abcdef12" });
+    expect(remote.deletes).toEqual([{ path: "proj-a/notes/2026-10-10.md", sha: blobSha(Buffer.from(day)) }]);
+    expect(result.uploaded).toEqual(["proj-a/notes/2026-10-10.md"]);
+    expect((await svc.notes(B, "proj-a")).items).toEqual([]);
   });
 });

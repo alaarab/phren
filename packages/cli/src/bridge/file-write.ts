@@ -27,7 +27,9 @@ async function serialized<T>(key: string, work: () => Promise<T>): Promise<T> {
 }
 
 export async function writeRepoFile(root: string, requested: string, content: string, expectedVersion?: string) {
-  const key = `${await realpath(root).catch(() => root)}\u0000${requested}`;
+  // `f.txt` and `./f.txt` name one file, so they must share one lock.
+  const name = typeof requested === "string" ? path.posix.normalize(requested) : requested;
+  const key = `${await realpath(root).catch(() => root)}\u0000${name}`;
   return serialized(key, () => writeRepoFileNow(root, requested, content, expectedVersion));
 }
 

@@ -309,6 +309,9 @@ export const startServer: StartServer = async (o) => {
     wss.handleUpgrade(req, socket, head, (ws) => {
       liveSockets.add(ws);
       ws.on("close", () => liveSockets.delete(ws));
+      // A bad frame (one over maxPayload, say) is emitted as 'error': unheard,
+      // it would throw and take down the daemon with every session.
+      ws.on("error", () => ws.terminate());
       onOpen(ws);
     });
   };
@@ -842,6 +845,10 @@ export const startServer: StartServer = async (o) => {
         const hookRes = await o.hookRequest(computer, req.method ?? "GET", parsed.hookPath + url.search, body);
         res.writeHead(hookRes.status, {
           "Content-Type": headerValue(hookRes.headers, "content-type") ?? "application/json; charset=utf-8",
+          // Repository bytes (an .svg or .xml from /v1/files/range) must never
+          // run as a document on the app origin.
+          "X-Content-Type-Options": "nosniff",
+          "Content-Security-Policy": "sandbox",
         });
         res.end(hookRes.body);
       } catch (err) {

@@ -101,6 +101,15 @@ export function isBusyRefusal(status, reason) {
   return status === 409 && typeof reason === "string" && reason.startsWith("This agent is working.");
 }
 
+/** No definite answer from the Hook: the daemon's proxy lost it (502, 504) or
+ * the request never completed. The Hook may already have typed the prompt. */
+export function isUncertainFailure(status) {
+  return status === undefined || status === 502 || status === 504;
+}
+
+/** How many times an uncertain send is retried under its own id. */
+export const UNCERTAIN_RETRIES = 3;
+
 /** A safe upload name for the Hook's zod schema (^[A-Za-z0-9_][A-Za-z0-9_ .()-]{0,199}$, no ".."). */
 export function uploadName(name) {
   const cleaned = String(name || "")
@@ -372,6 +381,12 @@ export function createComposer({ computer, target, provider, branch, project, on
       const row = node("div", "pc-pending-row");
       row.append(node("span", "pc-pending-msg", entry.text || "[image]"));
       row.append(node("span", `pc-pending-state ${entry.state}`, pendingLabel(entry)));
+      if (entry.retry) {
+        const again = node("button", "pc-pending-retry", "Retry");
+        again.title = "Send again under the same id; the Hook types it at most once";
+        again.addEventListener("click", () => entry.retry && entry.retry());
+        row.append(again);
+      }
       const remove = node("button", "pc-pending-x", "\u00d7");
       remove.title = "Remove";
       remove.addEventListener("click", () => { cancelPending(id); });
@@ -384,7 +399,7 @@ export function createComposer({ computer, target, provider, branch, project, on
   function pendingLabel(entry) {
     if (entry.state === "failed") return entry.reason ? `Failed: ${entry.reason}` : "Failed";
     if (entry.state === "queued") return "Queued";
-    if (entry.state === "unknown") return "Unknown";
+    if (entry.state === "unknown") return entry.reason ? `Unknown: ${entry.reason}` : "Unknown";
     return "Sending\u2026";
   }
 
@@ -566,19 +581,46 @@ export function createComposer({ computer, target, provider, branch, project, on
     await deliver(id, text, sending, 1);
   }
 
-  async function deliver(id, text, sending, refusals) {
+  // Attachments upload once; every retry sends the same paths under the same
+  // id, so the Hook (which types one id once) can recognize it.
+  async function deliver(id, text, sending, refusals, uploaded = null, uncertain = 0) {
     if (destroyed || !pendings.has(id)) return;
+    let paths = uploaded;
     try {
-      const paths = await uploadAll(sending);
+      if (!paths) paths = await uploadAll(sending);
       const res = await hookPost(computer, "/v1/prompt", promptBody(target, withAttachments(text, paths), id));
       applyPromptReply(id, res);
     } catch (error) {
       if (!pendings.has(id) || deliveryIsFinal(pendings.get(id).state)) return;
       const reason = (error && error.body && error.body.error) || (error && error.message);
-      if (isBusyRefusal(error && error.status, reason)) {
+      const status = error && error.status;
+      const retry = (seconds, nextUncertain) => {
         setPending(id, text || "[image]", "queued");
         const entry = pendings.get(id);
-        if (entry) entry.timer = setTimeout(() => deliver(id, text, sending, refusals + 1), busyRetryDelay(refusals) * 1000);
+        if (entry) entry.timer = setTimeout(() => { entry.timer = null; deliver(id, text, sending, refusals + 1, paths, nextUncertain); }, seconds * 1000);
+      };
+      if (isBusyRefusal(status, reason)) { retry(busyRetryDelay(refusals), uncertain); return; }
+      // Not a refusal: the Hook may have taken it. Ask again under the same id
+      // rather than restoring the draft for a resend that would type it twice.
+      if (isUncertainFailure(status) && uncertain < UNCERTAIN_RETRIES) { retry(busyRetryDelay(uncertain + 1), uncertain + 1); return; }
+      if (isUncertainFailure(status)) {
+        // Still no answer: it may have landed. Keep asking the Hook about this
+        // id, never hand it back as a draft (a resend would get a new id and
+        // could type it twice); Retry sends it again under the same id.
+        const entry = pendings.get(id);
+        if (entry) {
+          entry.retry = () => {
+            entry.retry = null;
+            // A status poll already on its way belongs to the attempt before.
+            entry.generation = (entry.generation || 0) + 1;
+            if (entry.timer) clearTimeout(entry.timer);
+            entry.timer = null;
+            setPending(id, text || "[image]", "pending");
+            deliver(id, text, sending, 1, paths, 0);
+          };
+        }
+        setPending(id, text || "[image]", "unknown", reason || "The Hook did not answer");
+        pollStatus(id);
         return;
       }
       setPending(id, text || "[image]", "failed", reason || "Send failed");
@@ -611,10 +653,14 @@ export function createComposer({ computer, target, provider, branch, project, on
     entry.timer = setTimeout(async () => {
       entry.timer = null;
       if (destroyed || pendings.get(id) !== entry || deliveryIsFinal(entry.state)) return;
+      const generation = entry.generation;
       try {
         const res = await hookPost(computer, "/v1/prompt/status", { target, deliveryId: id });
+        // A Retry started a new attempt meanwhile: this answer is stale.
+        if (entry.generation !== generation) return;
         applyDelivery({ ...res, deliveryId: id });
       } catch { /* keep the last state, ask again */ }
+      if (entry.generation !== generation) return;
       pollStatus(id);
     }, 2000);
   }

@@ -283,6 +283,87 @@ describe("chat delivery reconciliation", () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/v1/prompt/status"))).toBe(true);
   });
+
+  it("retries a busy or uncertain send under its own id with its image uploaded once", async () => {
+    vi.stubGlobal("FileReader", class {
+      result = ""; onload?: () => void;
+      readAsDataURL() { this.result = "data:image/png;base64,QUJD"; queueMicrotask(() => this.onload?.()); }
+    });
+    const reply = (status: number, body: unknown) => ({ ok: status < 300, status, text: async () => JSON.stringify(body) });
+    let prompts = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/v1/upload")) return reply(200, { path: "/tmp/up/a.png" });
+      if (url.endsWith("/v1/prompt")) {
+        prompts++;
+        if (prompts === 1) return reply(409, { error: "This agent is working. Try again when it is done." });
+        // The daemon's proxy timed out; the Hook may have typed it.
+        if (prompts === 2) return reply(502, { error: "timed out" });
+      }
+      return reply(200, { state: "queued" });
+    });
+    const c = chat();
+    const input = c.el.find("pc-input")!;
+    input.listeners.get("paste")!({ clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => ({ type: "image/png", size: 3, name: "a.png" }) }] }, preventDefault() {} });
+    await vi.advanceTimersByTimeAsync(0);
+    await c.send("look");
+    await vi.advanceTimersByTimeAsync(10_000);
+    const calls = (suffix: string) => fetchMock.mock.calls.filter(([url]) => url.endsWith(suffix));
+    expect(calls("/v1/upload")).toHaveLength(1);
+    const bodies = calls("/v1/prompt").map(([, options]) => JSON.parse(options.body));
+    expect(bodies).toHaveLength(3);
+    expect(new Set(bodies.map(body => body.deliveryId)).size).toBe(1);
+    expect(new Set(bodies.map(body => body.text)).size).toBe(1);
+    // Never handed back as a draft to send again under a new id.
+    expect(input.value).toBe("");
+  });
+
+  it("keeps an unanswered send after its retries, polling it and retrying it under the same id", async () => {
+    let answer = 502;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/v1/prompt") && answer === 502) return { ok: false, status: 502, text: async () => JSON.stringify({ error: "timed out" }) };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ state: "unknown" }) };
+    });
+    const c = chat();
+    const input = c.el.find("pc-input")!;
+    await c.send("ship it");
+    await vi.advanceTimersByTimeAsync(30_000);
+    const prompts = () => fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt")).map(([, options]) => JSON.parse(options.body).deliveryId);
+    expect(prompts()).toHaveLength(4);
+    expect(input.value).toBe("");
+    expect(c.el.find("pc-pending-state unknown")?.textContent).toMatch(/^Unknown/);
+    const polled = fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt/status")).map(([, options]) => JSON.parse(options.body).deliveryId);
+    expect(new Set(polled)).toEqual(new Set([prompts()[0]]));
+    answer = 200;
+    c.el.find("pc-pending-retry")!.fire("click");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prompts()).toHaveLength(5);
+    expect(new Set(prompts()).size).toBe(1);
+  });
+
+  it("ignores a status answer that was on its way when Retry started a new attempt", async () => {
+    const unknown = { ok: true, status: 200, text: async () => JSON.stringify({ state: "unknown" }) };
+    let held: ((value: unknown) => void) | undefined, hold = false;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/v1/prompt")) return { ok: false, status: 502, text: async () => JSON.stringify({ error: "timed out" }) };
+      if (hold && !held) return new Promise(resolve => { held = resolve; });
+      return unknown;
+    });
+    const c = chat();
+    await c.send("ship it");
+    await vi.advanceTimersByTimeAsync(20_000);
+    const prompts = () => fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt")).length;
+    expect(prompts()).toBe(4);
+    hold = true;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(held).toBeDefined(); // a status poll is in flight
+    c.el.find("pc-pending-retry")!.fire("click");
+    await vi.advanceTimersByTimeAsync(0);
+    held!(unknown);
+    await vi.advanceTimersByTimeAsync(30_000);
+    // The new attempt ran all its retries and offers Retry again.
+    expect(prompts()).toBe(8);
+    expect(c.el.find("pc-pending-retry")).toBeDefined();
+  });
 });
 
 it("applies preview changes and clears carried by append and backlog frames", () => {

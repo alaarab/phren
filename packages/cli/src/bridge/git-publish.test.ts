@@ -3,9 +3,9 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } fro
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkRollup, gitPulls, gitStatus, invalidatePulls } from "./git.js";
-import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
+import { gitCommit, gitPullRequest, gitPush, runCombined } from "./git-publish.js";
 import { BridgeError } from "./protocol.js";
 
 const execFileAsync = promisify(execFile);
@@ -251,5 +251,45 @@ describe("git publish routes", () => {
     expect(checkRollup([{ status: "IN_PROGRESS" }, { status: "COMPLETED", conclusion: "FAILURE" }])).toBe("failing");
     expect(checkRollup([{ __typename: "StatusContext", state: "PENDING" }])).toBe("pending");
     expect(checkRollup([{ __typename: "StatusContext", state: "ERROR" }])).toBe("failing");
+  });
+
+  it.skipIf(process.platform === "win32")("sends no SIGKILL once the timed-out group is gone", async () => {
+    const kill = vi.spyOn(process, "kill");
+    try {
+      const run = await runCombined(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], tmpdir(), 200, {}, 100);
+      expect(run.timedOut).toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const signals = kill.mock.calls.map(([, signal]) => signal);
+      expect(signals).toContain("SIGTERM");
+      expect(signals).toContain(0);
+      expect(signals).not.toContain("SIGKILL");
+    } finally { kill.mockRestore(); }
+  });
+
+  it.skipIf(process.platform === "win32")("kills a descendant that ignores SIGTERM even after git itself exits", async () => {
+    const pidFile = path.join(await mkdtemp(path.join(tmpdir(), "phren-kill-")), "pid");
+    // The grandchild stays in the group, holds no pipes and ignores SIGTERM.
+    const inner = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
+    const script = `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(inner)}], { stdio: 'ignore' }); setTimeout(() => {}, 30000);`;
+    const run = await runCombined(process.execPath, ["-e", script], tmpdir(), 500, {}, 150);
+    expect(run.timedOut).toBe(true);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 40 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 50));
+    try { expect(alive()).toBe(false); } finally { if (alive()) process.kill(pid, "SIGKILL"); }
+  });
+
+  it.skipIf(process.platform === "win32")("answers at its deadline when a descendant outside its group keeps the pipes open", async () => {
+    // The child starts a grandchild in its own group that inherits stdout and prints its pid.
+    const script = "const c = require('child_process').spawn(process.execPath, ['-e', 'console.log(process.pid); setTimeout(() => {}, 30000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] }); setTimeout(() => {}, 30000);";
+    const started = Date.now();
+    const run = await runCombined(process.execPath, ["-e", script], tmpdir(), 300, {}, 100);
+    try {
+      expect(run).toMatchObject({ code: null, timedOut: true });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      const pid = Number(run.output.trim().split("\n")[0]);
+      if (pid > 0) try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
   });
 });

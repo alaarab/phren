@@ -229,6 +229,27 @@ describe.skipIf(process.platform === "win32")("scoped SSH session", () => {
     expect(received).toEqual([]);
   });
 
+  it("ends the session when the Hook goes quiet or the SSH side goes away", async () => {
+    const silent = path.join(dir, "silent.sock");
+    const stalled = createServer(() => { /* accepts, never answers */ });
+    await new Promise<void>(resolve => stalled.listen(silent, resolve));
+    try {
+      const request = head("GET /v1/projects/app/memory HTTP/1.1");
+      const quiet = new PassThrough();
+      quiet.end(request);
+      await scopedDispatch("gitboy-read", "phren-hook v1 pipe", { input: quiet, output: new PassThrough(), socket: silent, answerIdleMs: 100 });
+
+      const input = new PassThrough(), output = new PassThrough();
+      input.end(request);
+      const done = scopedDispatch("gitboy-read", "phren-hook v1 pipe", { input, output, socket: silent });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      output.destroy();
+      await done;
+    } finally {
+      stalled.close();
+    }
+  });
+
   it("reports a stopped Hook as 503", async () => {
     const reply = await session("phren-hook v1 pipe", [head("GET /v1/projects/app/memory HTTP/1.1")], path.join(dir, "missing.sock"));
     expect(reply).toMatch(/^HTTP\/1\.1 503 Service Unavailable/);

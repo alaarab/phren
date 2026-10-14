@@ -71,7 +71,24 @@ function headerName(raw: string): string | null {
 export function patchFiles(patch: string): string[] {
   const files = new Set<string>();
   let hunks = 0;
+  // Lines still owed to the current hunk's old and new sides: inside a hunk
+  // body, `--- x` is a removed line `-- x`, never a file header.
+  let oldLeft = 0, newLeft = 0;
   for (const line of patch.split("\n")) {
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line.startsWith("\\")) continue;
+      if (line.startsWith("-")) oldLeft--;
+      else if (line.startsWith("+")) newLeft--;
+      else { oldLeft--; newLeft--; }
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      hunks++;
+      oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
+      newLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      continue;
+    }
     if (/^(?:rename|copy) (?:from|to) |^(?:old|new|deleted file|new file) mode |^GIT binary patch|^Binary files /.test(line)) {
       throw new BridgeError(400, "Only text hunks can be staged one at a time. Stage the whole file instead.");
     }
@@ -79,7 +96,6 @@ export function patchFiles(patch: string): string[] {
       const name = headerName(line.slice(4).replace(/\t.*$/, ""));
       if (name) files.add(name);
     }
-    if (line.startsWith("@@ ")) hunks++;
   }
   if (!files.size || !hunks) throw new BridgeError(400, "This patch has no hunks.");
   if (files.size > 1) throw new BridgeError(400, "Stage hunks of one file at a time.");

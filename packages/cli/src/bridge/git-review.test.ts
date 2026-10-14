@@ -82,6 +82,14 @@ describe("git review routes", () => {
     expect(() => patchFiles(`--- x\n+++ x\n${hunk}`)).toThrow(/not a Git patch/);
   });
 
+  it("reads hunk lines that look like headers as hunk lines", () => {
+    // Removing the text `-- old` and adding `++ new` gives body lines `--- old` and `+++ new`.
+    const patch = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n keep\n--- old\n+++ new\n\\ No newline at end of file\n@@ -9 +9 @@\n-a\n+b\n";
+    expect(patchFiles(patch)).toEqual(["x"]);
+    // A second file's header after the hunks is still a header.
+    expect(() => patchFiles(`${patch}--- a/y\n+++ b/y\n@@ -1 +1 @@\n-a\n+b\n`)).toThrow(/one file/);
+  });
+
   it("folds a session's recorded edits by file, newest first, within its repository", () => {
     const edit = (root: string, file: string, status: string, added: number, removed: number) =>
       ({ root, path: file, status, patch: `@@ -1 +1 @@\n-${file}\n+${file}!\n`, added, removed });

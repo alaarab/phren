@@ -237,16 +237,18 @@ function spawnDaemon(nodePath) {
 }
 
 function killDaemon() {
-  if (!daemon || daemonExited) return;
+  // The child itself, not the global: the caller may drop the handle next.
+  const child = daemon;
+  if (!child || daemonExited) return;
   try {
-    daemon.kill("SIGTERM");
+    child.kill("SIGTERM");
   } catch {
     return;
   }
   const timer = setTimeout(() => {
-    if (!daemonExited) {
+    if (child.exitCode === null && child.signalCode === null) {
       try {
-        daemon.kill("SIGKILL");
+        child.kill("SIGKILL");
       } catch {
         // Already gone.
       }
@@ -439,6 +441,15 @@ async function start() {
     });
   } catch (err) {
     createErrorWindow(err.message, daemonStderr);
+    // A daemon that never reported ready is still running: stop it (SIGTERM,
+    // then SIGKILL) and wait for its exit before letting go of it, or it
+    // outlives the app.
+    const child = daemon;
+    if (child && !daemonExited) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      killDaemon();
+      await exited;
+    }
     daemon = null;
   }
 }

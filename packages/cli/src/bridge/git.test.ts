@@ -154,6 +154,17 @@ describe("git routes", () => {
     expect(await readFile(path.join(root, "untracked-dir/keep.txt"), "utf8")).toBe("keep\n");
   });
 
+  it("refuses to discard a tracked directory and leaves its edits alone", async () => {
+    const { root } = await repository();
+    await writeFile(path.join(root, "folder/inner.txt"), "edited\n");
+    await expect(gitDiscard(root, ["folder"])).rejects.toMatchObject({ status: 409 });
+    expect(await readFile(path.join(root, "folder/inner.txt"), "utf8")).toBe("edited\n");
+    // Deleted from disk, it is still a directory in the index: nothing comes back.
+    await rm(path.join(root, "folder"), { recursive: true });
+    await expect(gitDiscard(root, ["folder"])).rejects.toMatchObject({ status: 409 });
+    await expect(readFile(path.join(root, "folder/inner.txt"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("keeps a replacement directory navigable while its tracked file is deleted", async () => {
     const { root } = await repository();
     await rm(path.join(root, "root.txt"));
