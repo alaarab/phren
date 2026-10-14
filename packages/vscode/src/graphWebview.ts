@@ -160,6 +160,22 @@ interface GraphPayload {
   emptyReason?: string;
 }
 
+/**
+ * Fills in the list fields a partial payload left out, so a payload with no
+ * `nodes` reaches the empty state and one with no `edges` or `topics` still
+ * mounts. Serialized into the webview script with toString(), so it must stay
+ * self-contained plain JavaScript once types are stripped.
+ */
+export function normalizeGraphPayload(raw: unknown): GraphPayload {
+  const p = (raw && typeof raw === "object" ? raw : {}) as GraphPayload;
+  if (!Array.isArray(p.nodes)) p.nodes = [];
+  if (!Array.isArray(p.edges)) p.edges = [];
+  if (!Array.isArray(p.topics)) p.topics = [];
+  if (!p.summaries || typeof p.summaries !== "object") p.summaries = {};
+  if (!p.scores || typeof p.scores !== "object") p.scores = { entries: {} } as MemoryScores;
+  return p;
+}
+
 /* ── Main entry ──────────────────────────────────────────── */
 
 interface GraphCacheEntry {
@@ -1548,7 +1564,8 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   <script nonce="${nonce}">
 ${graphScript}
 (function() {
-  var payload = ${payloadJson};
+  var normalizeGraphPayload = ${normalizeGraphPayload.toString()};
+  var payload = normalizeGraphPayload(${payloadJson});
   var vscode = acquireVsCodeApi();
   var nodeLookup = {};
   function rebuildNodeLookup() {
@@ -2195,10 +2212,10 @@ ${graphScript}
   window.addEventListener('message', function(event) {
     var data = event && event.data;
     if (!data) return;
-    if (data.type === 'graphData' && data.payload && data.payload.nodes) {
+    if (data.type === 'graphData' && data.payload) {
       // In-place data refresh: remount the shared renderer (camera pose is
       // preserved on remount) instead of the extension rewriting the HTML.
-      payload = data.payload;
+      payload = normalizeGraphPayload(data.payload);
       rebuildNodeLookup();
       mapAndMountGraph();
       if (currentNode) {
