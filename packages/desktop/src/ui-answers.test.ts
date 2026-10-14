@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  answerApproval, answerQuestion, answerSudo, buildClaudeUpdatedInput, buildQuestionAnswers,
-  approvalDecision, dismissSideAnswer, questionValue, sendSecret,
-} from "../ui/chat/answers.js";
+// @ts-expect-error Plain ESM UI module.
+import { answerApproval, answerQuestion, answerSudo, buildClaudeUpdatedInput, buildQuestionAnswers, approvalDecision, dismissSideAnswer, questionValue, sendSecret } from "../ui/chat/answers.js";
 
 const COMPUTER = "box";
 const TARGET = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "s1" };
@@ -61,21 +59,43 @@ describe("answerApproval", () => {
 });
 
 describe("answerQuestion", () => {
-  it("answers a Codex prompt by toolUseId", async () => {
+  // server-pane-routes.ts requires question text, boolean multiSelect and
+  // string option labels for Claude/OpenCode; Codex resolves its own prompt.
+  const questions = [
+    { id: "q1", header: "Route", question: "Which?", multiSelect: false, options: [{ label: "A", description: "First" }, { label: "B" }] },
+    { id: "q2", question: "Anything else?", multiSelect: false, options: [{ label: "No" }] },
+  ];
+  const answers = buildQuestionAnswers(questions, [{ selections: [1] }, { text: "  Something else  " }]);
+
+  it("answers a Codex prompt by toolUseId even when given questions", async () => {
     stubFetch();
-    await answerQuestion(COMPUTER, TARGET, { id: "tu1", answers: [{ optionIndexes: [0] }] });
+    const target = { ...TARGET, source: "codex" };
+    await answerQuestion(COMPUTER, target, { id: "tu1", questions, answers });
     const call = lastCall();
     expect(call.url).toBe("/hosts/box/v1/questions/answer");
-    expect(call.body).toEqual({ target: TARGET, toolUseId: "tu1", answers: [{ optionIndexes: [0] }] });
+    expect(call.body).toEqual({ target, toolUseId: "tu1", answers: [{ optionIndexes: [1] }, { optionIndexes: [], text: "Something else" }] });
   });
 
-  it("answers a released Claude dialog by its question set", async () => {
+  it.each(["claude", "opencode"])("answers a pending %s dialog with the Hook's question schema", async (source) => {
     stubFetch();
-    const questions = [{ question: "Which?", options: ["A", "B"] }];
-    await answerQuestion(COMPUTER, TARGET, { id: "ignored", questions, answers: [{ optionIndexes: [1] }] });
+    const target = { ...TARGET, source };
+    const multi = { question: "Which extras?", multiSelect: true, options: [{ label: "C" }, { label: "D" }] };
+    const allQuestions = [...questions, multi];
+    await answerQuestion(COMPUTER, target, {
+      id: "dialog1", questions: allQuestions,
+      answers: buildQuestionAnswers(allQuestions, [{ selections: [1] }, { text: "Something else" }, { selections: [1, 0], text: "  E  " }]),
+    });
     const call = lastCall();
-    expect(call.body).toEqual({ target: TARGET, questions, answers: [{ optionIndexes: [1] }] });
-    expect(call.body.toolUseId).toBeUndefined();
+    expect(call.url).toBe("/hosts/box/v1/questions/answer");
+    expect(call.body).toEqual({
+      target,
+      questions: [
+        { question: "Which?", multiSelect: false, options: ["A", "B"] },
+        { question: "Anything else?", multiSelect: false, options: ["No"] },
+        { question: "Which extras?", multiSelect: true, options: ["C", "D"] },
+      ],
+      answers: [{ optionIndexes: [1] }, { optionIndexes: [], text: "Something else" }, { optionIndexes: [0, 1], text: "E" }],
+    });
   });
 });
 

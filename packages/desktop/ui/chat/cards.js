@@ -573,7 +573,7 @@ export function renderInteractions(container, agentStatus, { computer, target, o
     if (!questions.length) continue;
     cards.push(buildQuestionCard({
       title: `${ctx.provider} has a question`, questions, allowsTyping: true, receipt: "Answer sent", ctx,
-      run: (answers) => answerQuestion(computer, target, { id: prompt.toolUseId ?? prompt.id, answers: buildQuestionAnswers(questions, answers) }),
+      run: (answers) => answerQuestion(computer, target, { id: prompt.toolUseId ?? prompt.id, questions, answers: buildQuestionAnswers(questions, answers) }),
     }));
   }
 
