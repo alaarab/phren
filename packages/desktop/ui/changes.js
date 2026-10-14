@@ -11,6 +11,7 @@ import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
 import { openLaunchSheet } from "./shell/launch.js";
 import { armMerge, disarmMerge, isArmed, onArmedChange } from "./shell/merge-when-green.js";
+import { createStaging } from "./changes/stage.js";
 import { CHANGES_CSS } from "./changes/styles.js";
 import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, relTime, span, tileClass } from "./changes/util.js";
 
@@ -60,7 +61,6 @@ export function openChanges(el, ctx) {
   const repo = () => (state.status && state.status.repository) || undefined;
   // What the remote's host calls its requests; generic until /v1/git/pulls says.
   const terms = () => hostTerms(state.pulls && state.pulls.host);
-  const changedPaths = () => [...new Set((state.status?.files || []).filter((f) => !f.staged).map((f) => f.path))];
   // Only this pane's own commit box counts: the chat composer beside it is a
   // textarea too, and is focused most of the time.
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.tagName === "INPUT" || a.tagName === "SELECT") && el.contains(a); };
@@ -223,9 +223,15 @@ export function openChanges(el, ctx) {
     }
   }
 
-  const doStage = (f) => write(() => hookPost(computer, "/v1/git/stage", scopeBody({ paths: [f.path], expectedRepository: repo() })));
+  const staging = createStaging(state, {
+    scopeBody, repo, render, announce, refresh,
+    postStage: (body) => hookPost(computer, "/v1/git/stage", body),
+    readStatus: (body) => hookPost(computer, "/v1/git/status", body),
+  });
+  const doStage = (f) => staging.stage([f]);
   const doUnstage = (f) => write(() => hookPost(computer, "/v1/git/unstage", scopeBody({ paths: [f.path], expectedRepository: repo() })));
-  const doStageAll = () => write(() => hookPost(computer, "/v1/git/stage", scopeBody({ paths: changedPaths(), confirmBulk: true, expectedRepository: repo() })));
+  const doStageAll = () => staging.stageAll();
+
   const doDiscard = () => write(() => hookPost(computer, "/v1/git/discard", scopeBody({ paths: [state.confirm.path], expectedRepository: repo() })));
 
   async function doCommit() {
@@ -654,6 +660,27 @@ export function openChanges(el, ctx) {
       row.appendChild(button("Push to " + state.confirm.branch, "chg-btn danger", () => doPush(true)));
       row.appendChild(button("Cancel", "chg-btn stage", () => { state.confirm = null; render(); }));
       foot.appendChild(row);
+    }
+    if (state.confirm && state.confirm.kind === "stage") {
+      const request = state.confirm;
+      const { plan } = request;
+      const card = div("chg-confirm chg-stage-confirm");
+      card.appendChild(div("", `Stage ${plan.paths.length} ${plan.paths.length === 1 ? "path" : "paths"}?`));
+      if (plan.directories.length) card.appendChild(div("", "Folders and their contents: " + plan.directories.join(", ")));
+      if (plan.binary.length) card.appendChild(div("", "Untracked binary files without a text diff: " + plan.binary.join(", ")));
+      if (plan.unknown.length) card.appendChild(div("", "Untracked files without complete counts: " + plan.unknown.join(", ")));
+      if (request.detail) card.appendChild(div("", request.detail));
+      const list = div("chg-stage-paths");
+      for (const path of plan.paths.slice(0, 10)) list.appendChild(div("", path));
+      if (plan.paths.length > 10) list.appendChild(div("", `and ${plan.paths.length - 10} more`));
+      card.appendChild(list);
+      const actions = div("chg-actions-row");
+      const confirm = button("Stage", "chg-btn stage", () => staging.confirm());
+      const cancel = button("Cancel", "chg-btn stage", () => { state.confirm = null; render(); });
+      confirm.disabled = cancel.disabled = !!state.busy;
+      actions.append(confirm, cancel);
+      card.appendChild(actions);
+      foot.appendChild(card);
     }
     const s = state.status;
     if (!s) return foot;

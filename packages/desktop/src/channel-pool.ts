@@ -21,7 +21,7 @@ export interface ChannelPoolStats {
 }
 
 export interface ChannelPool {
-  acquire(computerName: string): Promise<AcquiredChannel>;
+  acquire(computerName: string, options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<AcquiredChannel>;
   stats(computerName: string): ChannelPoolStats;
 }
 
@@ -71,11 +71,31 @@ export function createChannelPool(maxSlots = MAX_SLOTS, maxChannels = MAX_CHANNE
   };
 
   return {
-    acquire(computerName: string): Promise<AcquiredChannel> {
+    acquire(computerName: string, options = {}): Promise<AcquiredChannel> {
+      const { signal, timeoutMs = 60_000 } = options;
+      if (signal?.aborted) return Promise.reject(signal.reason);
+      if (timeoutMs <= 0) return Promise.reject(new Error("Timed out waiting for a Hook channel."));
       const pool = forName(computerName);
       const slot = firstFree(pool);
       if (slot !== -1) return Promise.resolve(take(pool, slot));
-      return new Promise(resolve => { pool.waiters.push({ resolve }); });
+      return new Promise((resolve, reject) => {
+        const cleanup = (): void => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", abort);
+        };
+        const waiter: Waiter = { resolve(channel) { cleanup(); resolve(channel); } };
+        const cancel = (error: unknown): void => {
+          const index = pool.waiters.indexOf(waiter);
+          if (index === -1) return;
+          pool.waiters.splice(index, 1);
+          cleanup();
+          reject(error);
+        };
+        const abort = (): void => cancel(signal?.reason);
+        const timer = setTimeout(() => cancel(new Error("Timed out waiting for a Hook channel.")), timeoutMs);
+        signal?.addEventListener("abort", abort, { once: true });
+        pool.waiters.push(waiter);
+      });
     },
     stats(computerName: string): ChannelPoolStats {
       const pool = pools.get(computerName);

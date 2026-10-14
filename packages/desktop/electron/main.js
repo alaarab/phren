@@ -275,7 +275,8 @@ function registerIpc() {
     const body = String(payload?.body ?? "").slice(0, 300);
     // A session's key: clicking opens it; a waiting agent's takes a reply (macOS only).
     const key = typeof payload?.key === "string" ? payload.key.slice(0, 200) : "";
-    const reply = !!key && payload?.reply === true && process.platform === "darwin";
+    const binding = payload?.binding;
+    const reply = !!binding && !!key && payload?.reply === true && process.platform === "darwin";
     const note = new Notification({ title, body, ...(reply ? { hasReply: true, replyPlaceholder: "Reply to the agent" } : {}) });
     const done = () => liveNotes.delete(note);
     note.on("click", () => {
@@ -285,7 +286,7 @@ function registerIpc() {
     note.on("reply", (details, legacy) => {
       done();
       const text = String(details?.reply ?? legacy ?? "").trim().slice(0, 8000);
-      if (text && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("phren:reply", { key, text });
+      if (text && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("phren:reply", { key, text, binding });
     });
     note.on("close", done);
     liveNotes.add(note);

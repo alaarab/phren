@@ -25,12 +25,17 @@ export async function answerApproval(computer, target, { actionId, decision, sco
 
 /** Answer a question: Codex's asynchronous prompt by toolUseId, or a released
  * Claude/opencode dialog by its own question set. `answers` is the Hook's own
- * `[{ optionIndexes, text? }]` array (see questions.ts). */
+ * `[{ optionIndexes, text? }]` array (see questions.ts). `questions` carries
+ * the card's normalized options; dialog payloads send only their labels. */
 export async function answerQuestion(computer, target, { id, answers, questions } = {}) {
+  const dialog = target.source === "claude" || target.source === "opencode";
   return hookPost(computer, "/v1/questions/answer", {
     target,
-    ...(questions === undefined ? {} : { questions }),
-    ...(questions === undefined && id !== undefined ? { toolUseId: id } : {}),
+    ...(dialog ? { questions: questions.map((question) => ({
+      question: question.question,
+      multiSelect: question.multiSelect === true,
+      options: question.options.map((option) => option.label),
+    })) } : id === undefined ? {} : { toolUseId: id }),
     answers,
   });
 }

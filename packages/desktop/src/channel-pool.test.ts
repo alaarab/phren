@@ -1,7 +1,36 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelPool, type AcquiredChannel } from "./channel-pool.js";
 
+afterEach(() => vi.useRealTimers());
+
 describe("createChannelPool", () => {
+  it("times out a queued acquisition without consuming a later release", async () => {
+    vi.useFakeTimers();
+    const pool = createChannelPool(1, 1);
+    const held = await pool.acquire("box");
+    const waiting = pool.acquire("box", { timeoutMs: 100 });
+    const rejected = expect(waiting).rejects.toThrow(/timed out.*channel/i);
+    await vi.advanceTimersByTimeAsync(100);
+    await rejected;
+    expect(pool.stats("box").waiting).toBe(0);
+    held.release();
+    expect((await pool.acquire("box")).slot).toBe(0);
+  });
+
+  it("removes a cancelled waiter and rejects an already cancelled acquisition", async () => {
+    const pool = createChannelPool(1, 1);
+    const held = await pool.acquire("box");
+    const controller = new AbortController();
+    const waiting = pool.acquire("box", { signal: controller.signal });
+    const rejected = expect(waiting).rejects.toThrow("Cancelled");
+    controller.abort(new Error("Cancelled"));
+    await rejected;
+    expect(pool.stats("box").waiting).toBe(0);
+    held.release();
+    await expect(pool.acquire("box", { signal: controller.signal })).rejects.toThrow("Cancelled");
+    expect(pool.stats("box").slots).toEqual([0]);
+  });
+
   it("fills a slot before moving to the next", async () => {
     const pool = createChannelPool();
     const held: AcquiredChannel[] = [];

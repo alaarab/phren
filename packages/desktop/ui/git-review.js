@@ -190,7 +190,7 @@ export function hostTerms(host) {
 /** "Pull request" → sentence case for titles. */
 export function capitalize(text) { return text ? text[0].toUpperCase() + text.slice(1) : text; }
 
-const RUN_ORDER = { failing: 0, pending: 1, passing: 2, neutral: 3, skipped: 4 };
+const RUN_ORDER = { failing: 0, pending: 1, passing: 2, skipped: 3, neutral: 4 };
 
 /** The pipeline bar: one segment per state that has runs, failing first,
  * each with its share of the bar. */

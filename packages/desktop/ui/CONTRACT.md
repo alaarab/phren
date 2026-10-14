@@ -2,11 +2,41 @@
 
 Read "Shell" first: it is how every new screen plugs in.
 
+`chat/answers.js`: `answerQuestion(computer, target, { id, answers, questions })`
+posts to `/v1/questions/answer`. Cards pass normalized questions with
+`options: [{ label, description? }]` and answers with `{ optionIndexes, text? }`.
+For Claude and OpenCode it sends question text, `multiSelect` and string option
+labels; for Codex it sends `toolUseId: id` and answers without questions.
+
+`chat/cards.js`: `renderInteractions(container, agentStatus, { computer, target,
+onAnswered })` renders question sets from both `pendingQuestions` (Codex) and
+`terminalPrompt.questions` (released Claude and served OpenCode), using the same
+answer card and serializer. The chat's card signature includes terminal questions
+so changes redraw the cards while identical status frames preserve typed answers.
+
 # Shell (phase 1)
 
 `index.html` holds only the titlebar (`#section-pills`, `#needs-pill`,
 `#conn-count`) and `#sections`. `app.js` registers sections and wires keys,
 badge and notifications; nothing else lives there.
+
+## Daemon connections
+
+The overview uses each computer's configured `server` and reconnects when its
+SSH username, server or private key contents change. Pending handshakes and frames from a
+replaced connection are discarded by connection generation. Heartbeat `phren` blocks refresh the merged
+overview's version and capabilities while retaining its sessions.
+`ChannelPool.acquire(computerName, { timeoutMs?, signal? })` bounds queued
+acquisition (60 s by default); cancellation removes the waiter. HTTP's 60 s
+deadline includes acquisition. SSH masters use a 96-bit SHA-256 socket name over the private key identity,
+full pinned host key and destination (username, address, port), recomputed from the private file
+on each use without trusting its `.pub` sidecar. `knownHostsPath(masterKey(computer))`
+returns the identity's pin file under `desktop-cm`; it is written atomically before SSH
+starts and never reused for another pin. Desktop-key SSH uses `IdentityAgent=none`,
+`IdentitiesOnly=yes` and `StrictHostKeyChecking=yes`; the owner's enrollment and
+revocation login still uses their own SSH configuration. Relinking closes old masters before
+verification using the control paths retained when they were opened, including
+when a key rotates at the same path; enrollment keeps the public key beside the private key as `.pub`.
 
 ## Store (`shell/store.js`)
 
@@ -95,6 +125,9 @@ the centre below 1200 px). Extensions live in Settings.
 
 ## Other shell modules
 
+- `shell/store.js`: `sessions(merged?, { includeOffline = false }?)` and `store.sessions(options?)` flatten online computers only by default; the sidebar requests last-seen rows with `includeOffline: true`. `needsYou(merged?)` counts only online attention. `sessionKind(child)` shares the attention predicate and preserves working, done, idle and error; other statuses are unknown. `store.find` also finds cached rows.
+- `shell/returns.js`: `stateChip(state)` returns `{ label, cls }` for dispatch returns and worker states, shared by Conductor and Review; unrecognised states keep their word with no class, missing states read "unknown".
+
 - `shell/approvals.js`: `startApprovals()`, started once by `app.js`, follows the overview store and opens a `/v1/status` watcher for each session with a pending approval. Home and the tray share `approvals.approval(key)`, `approvals.answerKey(key, decision, scope?)` and `approvals.subscribe(fn)`; watchers and summaries are removed when the approval or session goes away. Away data and its overview/CI feeders already live independently in `shell/away.js`. Home mounts without starting reads or keys; `show()` starts receipt/schedule polling, follows CI checks and attaches its keydown listener, and `hide()` stops them. The handler also ignores keys while hidden.
 
 - `shell/theme.js`: `initTheme()`, `applyTheme(id)`, `currentTheme()`, `themes()`; the phone's five token sets in `tokens.json`. Extension themes colour the editor and terminal only.
@@ -104,7 +137,7 @@ the centre below 1200 px). Extensions live in Settings.
 - `shell/merge-when-green.js`: `startMergeWhenGreen({ notify })`, started by `app.js`. Changes › PRs arms the branch's open request with "Merge when checks pass" (`armMerge`, kept in memory only); while anything is armed, one `/v1/git/pulls` per armed request every minute, and `/v1/git/pr/merge` with the armed method and `expectedHeadSha` once `mergeDecision` says its checks pass and the host does not block it. New commits, a failing check, conflicts or a closed request disarm it; each outcome is a notification. `mergeDecision` is exported for `src/ui-merge-when-green.test.ts`.
 - `shell/summon.js`: `startSummon(window.phrenDesktop)`, started by `app.js`. The Electron shell registers a system-wide accelerator (`globalShortcut`, IPC `phren:summon-key`) that shows and focuses the window and sends `phren:summon`, which opens ⌘K. The key is kept in localStorage (`phren.desktop.summon`, default `CommandOrControl+Shift+Space`, `""` is off) and set from Settings › Keys, which records it from a keydown (`acceleratorFromEvent`, ⌘/Ctrl or ⌥/Alt required) and reports a key the system refused. Absent in a browser. `acceleratorFromEvent` and `formatAccelerator` are exported for `src/ui-summon.test.ts`.
 - `shell/tray.js`: `startTray(window.phrenDesktop)`, started by `app.js`. Sends the shell `trayState(store.needsYou(), trayEnabled())` over IPC `phren:tray` whenever it changes: up to twelve rows `{ key, title, sub }` and a `more` count, or `{ enabled: false }`. The shell draws a menu bar / system tray icon (`electron/tray/`, a template image on macOS) with the count beside it on a Mac and the rows in its menu; its New agent… item sends `phren:new-agent`, which opens the launch sheet; choosing a row sends `phren:open-session` with the row key, which `shell/needs-notify.js` opens. While the icon is on, closing the window on a Mac hides it and the Dock or the icon brings it back. Settings › Notifications turns it off (localStorage `phren.desktop.tray`). Absent in a browser. A row with a known pending approval (`shell/approvals.js`) carries its summary, and the shell gives it a submenu with that summary, Allow, Deny and Open; Allow / Deny come back as `phren:tray-answer` and `approvals.answerKey(key, decision)` answers through `/v1/approvals/answer`. The tray never mounts Home. `trayState` is exported for `src/ui-tray.test.ts`.
-- `shell/needs-notify.js`: `startNeedsNotify(window.phrenDesktop, { enabled, openSession })`, started by `app.js`: a native notification for each row that newly needs you (`needsNotice`), carrying its key. Clicking one opens that session (`phren:open-session`, shared with the tray). On macOS a plain wait (`agentStatus` `waiting`, no approval) takes a typed reply (`hasReply`), which comes back as `phren:reply` and `sendReply` posts as `/v1/prompt` to that target; a gone session or a refused prompt is its own notification. The body adds the row's `lastReply` (what the agent said last; overview rows from Hook 0.3.45 on) on a second line, Home shows it under Needs you and Since you left rows, and the Agents sidebar under a detailed row that needs you (not an approval). `needsNotice` and `sendReply` are exported for `src/ui-needs-notify.test.ts`.
+- `shell/needs-notify.js`: `startNeedsNotify(window.phrenDesktop, { enabled, openSession })`, started by `app.js`: a native notification for each row that newly needs you (`needsNotice`), carrying its session key. Approval notifications follow `approvals.subscribe` and remember session plus actionId across status reconnects and offline flaps until the approval clears on an online overview or the cached session disappears; plain waiting deduplicates by session. The first overview establishes a silent baseline, including its approvals when their action IDs arrive. Clicking one opens that session including cached offline rows (`phren:open-session`, shared with the tray). On macOS a plain wait (`agentStatus` `waiting`, no approval) takes a typed reply (`hasReply`), whose notification options carry `binding: { target, id, sessionId, conversationId }`, a copy captured at display time and echoed unchanged through Electron as `phren:reply`. `sendReply(key, text, { expected: binding })` checks that every target field and the row identity still match, including cached offline rows, then posts `/v1/prompt` to the captured target. Missing native bindings or replacement conversations are refused with a notice; a gone session or a refused prompt is its own notification. `redact.js` exports browser-safe `redactString(value)`, shared with daemon tracing through `#redact`, and `redactNotice(value)` which adds credential assignments and long encoded secrets to the existing bearer, known API key and private key redaction before notification truncation. The redacted body adds the row's `lastReply` (what the agent said last; overview rows from Hook 0.3.45 on) on a second line, Home shows it under Needs you and Since you left rows, and the Agents sidebar under a detailed row that needs you (not an approval). `needsNotice` and `sendReply` are exported for `src/ui-needs-notify.test.ts`.
 - `shell/away.js`: `startAway()`, started by `app.js`, and the shared `away` tracker. Away begins when the window is hidden or loses focus; every overview is observed, and a session that was `working` and no longer is counts as a finished turn while away. The CI watch's settled checks (`onChecksSettled` in `shell/ci-watch.js`) are kept too while away (`noteChecks`, latest per request). Coming back after at least `MIN_AWAY_MS` (a minute) with finished turns or settled checks publishes `{ since, back, rows, checks }`, the checks listed first and opening the session's Changes › PRs; (newest first, at most 20) to Home's "Since you left" block, which shows each session as it is now and opens it; Dismiss (or the next time away) clears it. `createAway({ now })` and `endedTurns` are exported for `src/ui-away.test.ts`.
 - `shell/warm.js`: `startWarm({ sections, mount, settleMs })`, started by `app.js`. After the first overview with an online computer and a 3 s settle, mounts Projects and Tasks hidden through `sectionHandle`, one per idle callback, so their first reads happen before the first visit. Tested in `src/ui-warm.test.ts`.
 - `shell/skeleton.js`: `skeleton({ count, itemClass, widths, wrapClass, label })` → a `role=status` `aria-busy` wrapper of placeholder items reusing the section's own item class (`pj-card`, `tasks-project`, `mem-row`), one `.skel` bar per width (a list of lists varies them per item). Styles in `theme.css` (`.skel`, `.skel-wrap`), still under reduced motion.
@@ -227,11 +260,16 @@ Errors are `Error` with `.status`, `.code` and `.body` (the Hook's JSON).
 ## Hook routes these panes use (all take the session `target`)
 
 - `POST /v1/git/status {target}` → `{branch, upstream, ahead, behind, staged, unstaged, untracked,
-  additions, deletions, totalFiles, files:[{path, status:"M"|"A"|"D"|"R"|"?", staged, additions, deletions, binary}], repository}`.
+  additions, deletions, totalFiles, files:[{path, status:"M"|"A"|"D"|"R"|"?", staged, additions, deletions, binary}], repository, truncated}`.
   A file staged and also changed again appears twice (staged true and false).
 - `POST /v1/diff {target, paths:[]}` → `{files:[{path, status, sections:[{id, kind:"staged"|"unstaged", binary, patch, truncated}]}]}`
   (`patch` is unified diff text; untracked files have no sections; read them whole).
-- `POST /v1/git/stage|unstage|discard {target, paths:[...], expectedRepository}`; stage also takes `confirmBulk`.
+- `POST /v1/git/stage|unstage|discard {target, paths:[...], expectedRepository}`; stage also takes `confirmBulk`, sent only after the inline Stage confirmation.
+  Stage all includes collapsed directories. Confirm directories and their contents, binary or uncounted untracked files, and selections over 100 paths; refuse over 500 paths.
+  The confirmation lists the count, named directories/binary/unknown files, the first 10 paths and the remaining count, with Stage and Cancel. A Hook staging-gate 409 also opens it.
+  `changes/util.js` exports `stagePlan(files, status?) → {paths, directories, binary, unknown, manifest, confirm, error}` for the distinct unstaged selection; confirmation retains that selection and repository. `manifest` records each path's file/dir/binary/deleted type and untracked/counts availability.
+  `changes/stage.js` exports `createStaging(state, {scopeBody, repo, render, postStage, readStatus, announce, refresh}) → {stage(files), stageAll(), confirm()}`.
+  Stage all refuses a truncated status and reports omitted files. Confirm re-reads status in the saved scope, refuses truncated listings or a changed repository, and reopens review if membership or types changed. Single-file Stage remains available during another confirmation.
 - `POST /v1/git/commit {target, message, expectedRepository}`; `POST /v1/git/push {target, expectedRepository}`
   (a 409 whose `error.body.defaultBranch` is set means pushing the default branch: ask with a Phren dialog, then resend with `confirmDefault: true`).
 - `POST /v1/git/log {target, limit}` → `{commits:[{sha, short, subject, author, date, refs, parents}]}` (History).
