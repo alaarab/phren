@@ -5,14 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.47] - 2026-10-14
+
 ### Fixed
 
+- In the core MCP profile, `phren_admin` reaches review-queue approve/reject/edit and project archive: pass the inner choice as `operation`, as `owner_inbox` already does.
 - Once-schedule consumption leaves a row edited or rescheduled during launch admission unchanged; Run now rejects revisions that differ below a millisecond or use a different timestamp spelling.
 - A message that opens with "Conductor:" or "Conductor," is a relayed message, so the prompt hook no longer files it as a task.
 - Hook schedule edits and once-schedule consumption release their file lock before yielding, preserve edits accepted during launch admission, and reject stale update revisions differing below a millisecond.
 
 ### Added
 
+- `phren doctor` warns when the shared Codex ChatGPT sign-in was last refreshed more than 9 days ago (`codex-signin`), before every Codex worker starts failing with 401.
 - Hook: `POST /v1/schedules/update` merges client edits under the schedule lock, preserves untouched fields, and returns the current schedule on a revision conflict; advertised by `scheduleUpdate`.
 
 ### Changed
