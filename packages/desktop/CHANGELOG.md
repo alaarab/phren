@@ -4,8 +4,10 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
-## [0.1.8] - unreleased
+## [0.1.8] - 2026-10-14
 
+- Cmd/Ctrl+1–9 open the titlebar's sections, as advertised; Open session 1–9 has no default shortcut now (sessions keep prefix+1–9, and `session_N` can still be bound).
+- On Linux and Windows the Herdr prefix (Ctrl+B) works: the sidebar shortcut on the same key no longer swallows it, and the key after the prefix always goes to the prefix chord.
 - Schedule saves hold the schedules.yaml lock (shared with `phren schedule`) across read, check and write, so two saves at once keep both edits.
 - Removing a remote computer's last note of a day deletes that file on the computer too, compare-and-swapping on its sha.
 - Deleting a file in this computer's store takes the store writers' lock across the sha check and the delete.
