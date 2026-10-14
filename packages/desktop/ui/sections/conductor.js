@@ -3,6 +3,7 @@
 // This is the phone's Conductor screens, drawn with the desktop shell's CSS.
 // Everything reads through each computer's Hook (the daemon's /hosts proxy).
 import { hookGet, hookPost } from "../api.js";
+import { stateChip } from "../shell/returns.js";
 import { sessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { readAhead } from "../shell/read-ahead.js";
@@ -58,25 +59,6 @@ function scopeTitle(scope) {
   return String(scope ?? "").startsWith("project:") ? String(scope).slice("project:".length) : "Everywhere";
 }
 
-/** The word a return or worker state shows, and its chip class. */
-function stateChip(state) {
-  switch (String(state)) {
-    case "done": return { label: "done", cls: "done" };
-    case "needs-you": return { label: "needs you", cls: "needs" };
-    case "blocked": return { label: "blocked", cls: "needs" };
-    case "stalled": return { label: "stalled", cls: "needs" };
-    case "failed": return { label: "failed", cls: "failed" };
-    case "gone": return { label: "gone", cls: "gone" };
-    case "working": return { label: "working", cls: "working" };
-    case "launching": return { label: "launching", cls: "working" };
-    case "sending": return { label: "sending", cls: "working" };
-    case "accepted": return { label: "accepted", cls: "working" };
-    case "uncertain": return { label: "uncertain", cls: "needs" };
-    case "idle": return { label: "idle", cls: "" };
-    case "closed": return { label: "closed", cls: "gone" };
-    default: return { label: String(state ?? "unknown"), cls: "" };
-  }
-}
 
 export function mountConductor(root) {
   ensureCss();

@@ -552,6 +552,23 @@ test("the summon hotkey is set in Settings › Keys and opens ⌘K when it fires
 });
 
 test("the menu bar icon lists who needs you and opens the one chosen", async ({ page }) => {
+  let cachedFrame: { merged: { computers: Array<{ state: string }> } };
+  let showOffline!: () => void;
+  let offline = false;
+  await page.routeWebSocket("**/api/overview", (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((data) => {
+      const frame = JSON.parse(String(data));
+      cachedFrame = frame;
+      if (offline) for (const computer of frame.merged.computers) computer.state = "offline";
+      socket.send(JSON.stringify(frame));
+    });
+    showOffline = () => {
+      offline = true;
+      for (const computer of cachedFrame.merged.computers) computer.state = "offline";
+      socket.send(JSON.stringify(cachedFrame));
+    };
+  });
   // The Electron preload's shell: records what the icon is told to draw.
   await page.addInitScript(() => {
     const trays: unknown[] = [];
@@ -570,7 +587,9 @@ test("the menu bar icon lists who needs you and opens the one chosen", async ({ 
   const { key, sub } = (await last())!.rows![0];
   expect(sub).toBe("This computer · wants approval");
 
-  // Choosing the row opens that session.
+  // A notification/tray click still opens the cached session after disconnect.
+  showOffline();
+  await expect(page.locator("#needs-pill")).toHaveText("0 need you");
   await page.evaluate((k) => (window as unknown as { __openSession: (k: string) => void }).__openSession(k), key);
   await expect(page.locator(".section-pill.selected")).toHaveText("Agents");
   await expect(page.locator(".doc-tab.selected")).toContainText("Ship release");
@@ -600,15 +619,36 @@ test("a reply typed into a notification reaches the session as its next prompt",
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click();
   await expect(page.locator(".sb-row", { hasText: "Fix login" })).toBeVisible();
-  const key = "This computer/sess-fix-login";
-  const before = hook.calls.filter((c) => c.path === "/v1/prompt").length;
-  await page.evaluate((k) => (window as unknown as { __reply: (r: { key: string; text: string }) => void }).__reply({ key: k, text: "yes, ship it" }), key);
-  await expect.poll(() => hook.calls.filter((c) => c.path === "/v1/prompt").length).toBe(before + 1);
-  expect(hook.calls.filter((c) => c.path === "/v1/prompt").at(-1)!.body).toMatchObject({ target: { session: "sess-fix-login" }, text: "yes, ship it" });
+  const overview = await fixture("overview.json") as { groups: Array<{ children: Array<Record<string, unknown>> }> };
+  const waiting = structuredClone(overview);
+  const child = waiting.groups[0].children[0];
+  Object.assign(child, { agentStatus: "waiting", sessionId: "A", lastReply: "Use Authorization: Bearer banner-secret. Tests pass." });
+  const notes = () => page.evaluate(() => (window as unknown as { __notes: unknown[][] }).__notes);
+  try {
+    hook.pushOverview(waiting);
+    await expect.poll(notes).toContainEqual(["phren needs you", expect.stringMatching(/Authorization: \[redacted\] Tests pass\./), expect.objectContaining({ reply: true, binding: expect.any(Object) })]);
+    const notice = (await notes()).find((note) => (note[2] as { reply?: boolean })?.reply)!;
+    expect(notice[1]).not.toContain("banner-secret");
+    const opts = notice[2] as { key: string; binding: unknown };
+    const reply = (value: unknown) => page.evaluate((r) => (window as unknown as { __reply: (r: unknown) => void }).__reply(r), value);
+    const before = hook.calls.filter((c) => c.path === "/v1/prompt").length;
+    await reply({ ...opts, text: "yes, ship it" });
+    await expect.poll(() => hook.calls.filter((c) => c.path === "/v1/prompt").length).toBe(before + 1);
+    expect(hook.calls.filter((c) => c.path === "/v1/prompt").at(-1)!.body).toMatchObject({ target: { session: "sess-fix-login" }, text: "yes, ship it" });
 
-  // A session that is gone is reported, not dropped.
-  await page.evaluate(() => (window as unknown as { __reply: (r: { key: string; text: string }) => void }).__reply({ key: "nowhere/0", text: "hi" }));
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __notes: unknown[][] }).__notes.at(-1))).toEqual(["Reply not sent", "That session is gone."]);
+    // Restart the conversation in the same tab, keeping the old banner alive.
+    const restarted = structuredClone(waiting);
+    Object.assign(restarted.groups[0].children[0], { sessionId: "B", target: { ...(child.target as object), session: "replacement" }, title: "Restarted login" });
+    hook.pushOverview(restarted);
+    await expect(page.locator(".sb-row", { hasText: "Restarted login" })).toBeVisible();
+    await reply({ ...opts, text: "old reply" });
+    await expect.poll(notes).toContainEqual(["Reply not sent", "That session has changed. Open it to reply."]);
+    expect(hook.calls.filter((c) => c.path === "/v1/prompt")).toHaveLength(before + 1);
+    await reply({ key: "nowhere/0", text: "hi", binding: opts.binding });
+    await expect.poll(notes).toContainEqual(["Reply not sent", "That session is gone."]);
+  } finally {
+    hook.pushOverview(overview);
+  }
 });
 
 test("Home lists the turns that ended since you left", async ({ page }) => {

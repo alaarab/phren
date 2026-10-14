@@ -308,7 +308,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
 
   function overviewChild(target) {
     if (!target) return null;
-    for (const row of sessions(merged)) {
+    for (const row of sessions(merged, { includeOffline: true })) {
       const t = row.child.target;
       if (t && t.server === target.server && t.workspace === target.workspace && t.tab === target.tab
         && t.pane === target.pane && t.source === target.source && t.session === target.session) return row;
@@ -332,7 +332,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     meta.append(el("span", "home-age", age(entry.at)));
     shell.button.append(meta);
     const launch = run.launch ?? {};
-    const match = sessions(merged).find((row) => row.computer === entry.computer && launch.paneId
+    const match = sessions(merged, { includeOffline: true }).find((row) => row.computer === entry.computer && launch.paneId
       && row.child.target?.pane === launch.paneId && (!launch.server || row.child.target?.server === launch.server));
     shell.button.addEventListener("click", () => {
       markSeen(entry.id);
