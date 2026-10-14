@@ -21,6 +21,12 @@ describe("session web servers", () => {
     expect(result.map(entry => [entry.port, entry.source])).toEqual([[3000, "started"]]);
   });
 
+  it("hands no session a server whose owner could not be verified, even one its transcript mentions", () => {
+    const unverified: LocalServer[] = [{ ...server(5173, 300), pid: undefined, unverified: true }, { ...server(3000, 121), pid: undefined, unverified: true }];
+    const result = attributeServers({ servers: unverified, parents, ownRoots: new Set([100]), otherRoots: new Set([200]), mentioned: new Set([5173, 3000]) });
+    expect(result).toEqual([]);
+  });
+
   it("finds a detached server the transcript mentions, labelled as mentioned", () => {
     const result = attributeServers({ servers, parents, ownRoots: new Set([100]), otherRoots: new Set([200]), mentioned: new Set([5173]) });
     expect(result.map(entry => [entry.port, entry.source])).toEqual([[3000, "started"], [5173, "mentioned"]]);

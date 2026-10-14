@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync, realpathSync } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
@@ -264,9 +265,27 @@ function credentialIdentity(host: Parameters<typeof hostCredentialIdentity>[0], 
 
 class CredentialsChanged extends Error {}
 
-/** Invalidate every branch/host lookup for this checkout after a Hook write. */
+/** The repository a checkout belongs to: its common git directory, which every worktree of
+ * it shares, so a pull-request write seen from one checkout reaches the others. A path that
+ * cannot be read stands for itself. */
+function repositoryId(root: string): string {
+  try {
+    const dotGit = path.join(root, ".git");
+    let gitDir = dotGit;
+    try {
+      const link = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"));
+      if (link) gitDir = path.resolve(root, link[1].trim());
+    } catch { /* a directory: the main checkout */ }
+    let common = gitDir;
+    try { common = path.resolve(gitDir, readFileSync(path.join(gitDir, "commondir"), "utf8").trim()); } catch { /* no commondir: gitDir is the common one */ }
+    return realpathSync(common);
+  } catch { return root; }
+}
+
+/** Invalidate every branch/host lookup of this checkout's repository after a Hook write. */
 export function invalidatePulls(root: string): void {
-  pullsCache.invalidate(key => key.startsWith(root + "\0"));
+  const prefix = repositoryId(root) + "\0";
+  pullsCache.invalidate(key => key.startsWith(prefix));
 }
 
 /** Tokens belong to a domain, so revoke every checkout and pending generation. */
@@ -288,7 +307,7 @@ export async function gitPulls(cwd: string, retried = false): Promise<Json> {
   });
   const provider = providerFor(host);
   const credential = await credentialIdentity(host);
-  const key = root + "\0" + (host.domain ?? "").toLowerCase().replace(/\.$/, "") + "\0" + JSON.stringify([branch, host, credential]);
+  const key = repositoryId(root) + "\0" + (host.domain ?? "").toLowerCase().replace(/\.$/, "") + "\0" + JSON.stringify([branch, host, credential]);
   try {
     return await pullsCache.get(key, () => withoutGitReadDeadline(async () => {
       const list = provider ? await provider.list(root, branch, host) : unknownHost(host);

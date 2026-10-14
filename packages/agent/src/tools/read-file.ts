@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
-import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
+import { checkSensitivePath, checkSensitiveTarget, validatePath } from "../permissions/sandbox.js";
 import { recordFileState } from "./file-state.js";
 
 /** Minified bundles and data files can have megabyte lines; cap each one. */
@@ -36,6 +36,9 @@ export const readFileTool: AgentTool = {
     if (!sandboxResult.ok) {
       return { output: `Path outside sandbox: ${sandboxResult.error}`, is_error: true };
     }
+    // A harmless name can link to a secret file.
+    const target = checkSensitiveTarget(resolved, sandboxResult.resolved);
+    if (target.sensitive) return { output: `Access denied: ${target.reason}`, is_error: true };
 
     if (!fs.existsSync(filePath)) return { output: `File not found: ${filePath}`, is_error: true };
     if (fs.statSync(filePath).isDirectory()) {

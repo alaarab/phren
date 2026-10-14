@@ -153,6 +153,11 @@ class StdioTransport implements McpTransport {
     this.proc.on("error", (err) => {
       if (!this.closed) onError(err);
     });
+    // EPIPE after the server closes its stdin arrives as a stream error; with
+    // no listener it would be an unhandled error that crashes the agent.
+    this.proc.stdin?.on("error", (err) => {
+      if (!this.closed) onError(err);
+    });
     this.proc.on("exit", (code, signal) => {
       if (!this.closed) {
         onError(new Error(`MCP server exited (code ${code ?? "null"}, signal ${signal ?? "none"})`));

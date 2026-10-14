@@ -5,7 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-- The Hook answers pull-request and web-server lookups from a short cache, refreshing in the background (session open and Previews no longer wait on the forge or a port scan).
+### Fixed
+
+- `phren maintain summarize --llm` and `set_topic_summary` no longer drop findings archived into a topic while they were writing its summary, and splitting a large topic no longer brings back a finding just rejected from its older archive.
+- A store sync no longer brings back a finding one computer archived or deleted while the other left it unchanged.
+- A store sync merges daily notes per note, so a note edited on one computer no longer keeps its old text alongside the edit, and notes removed on one computer stay removed when the other added to the same day.
+- Concurrent changes to the retention, workflow and index policies no longer overwrite each other.
+- Rejecting a review item removes only that exact finding (a type tag aside), never a different finding that merely contains its text.
+- `phren agent` sandbox: `apply_patch` writes to the path it validated (a `link/../..` path can no longer land outside the project) and no longer moves onto an existing file it has not read; file tools and the permission check refuse a harmless name that links to a secret file; auto-confirm asks before `git` with `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree` or `--config-env`, `sort -o`, `tree -o`, `rg --pre`, `uniq IN OUT`, and any command naming a secret file (an approved `git status` no longer covers `git -c… status`); an MCP server that closes its stdin no longer crashes the agent with an unhandled EPIPE.
+
+## [0.3.46] - 2026-10-14
+
+### Added
+
+- `phren pair` from WSL prints the Hyper-V firewall rule the Windows side needs.
+- `phren status` marks a schedule's last run when the schedule is paused.
+
+### Changed
+
+- The Hook answers pull-request and web-server lookups from a short cache, refreshing in the background (session open and Previews no longer wait on the forge or a port scan). Cached listeners are revalidated, and a repository's pull lookups are invalidated on their own.
+
+### Fixed
+
+- A usage reader that never answers no longer blocks every `/v1/usage` poll (phone usage, `phren usage`, dispatch capacity) until the Hook restarts; each read gives up after 30 s with a "did not answer in time" row.
+- A phone message the agent takes into its running turn is settled as delivered instead of waiting for the next turn.
+- Questions: a `409` from questions/answer says whether keys were already sent; questions Claude cut at 2000 characters, or whose labels it collapsed or wrapped, still match; a tall Claude question is read far enough to find its tab bar.
+- Hook callbacks from headless `claude -p` runs inside a pane are ignored, so they no longer rebind the pane.
+- An old Codex that cannot listen on a unix socket is reported as unsupported once instead of as an hourly warning.
+- Schedules refuse and flag a prompt with no words in it.
+- `phren task list` uses the active profile, accepts a project name, and names an argument that is neither.
+- `phren dispatch` names a missing or invalid flag instead of printing schema JSON.
+- A module command run before `phren init` says to run init.
+- Auto-captured task titles no longer end at a dot inside a version or file name.
 
 ## [0.3.45] - 2026-10-13
 

@@ -16,7 +16,9 @@ describe("extractPattern", () => {
 
   it("extracts binary and subcommand for multi-command tools", () => {
     expect(extractPattern("shell", { command: "git status" })).toBe("git status");
-    expect(extractPattern("shell", { command: "git -c x=y push --force" })).toBe("git x=y");
+    expect(extractPattern("shell", { command: "git --no-pager log -1" })).toBe("git log");
+    // Config or repo options before the subcommand: the whole line is the pattern.
+    expect(extractPattern("shell", { command: "git -c x=y push --force" })).toBe("git -c x=y push --force");
   });
 
   it("extracts binary from multi-arg command", () => {
@@ -90,6 +92,14 @@ describe("isAllowed", () => {
     addAllow("shell", { command: "rm x" }, "session");
     expect(isAllowed("shell", { command: "git status && rm -rf src" })).toBe(true);
     expect(isAllowed("shell", { command: "git status > out.txt" })).toBe(false);
+  });
+
+  it("an approved git subcommand does not cover it behind config or repo options", () => {
+    addAllow("shell", { command: "git status" }, "session");
+    for (const command of ['git -ccore.fsmonitor="touch /tmp/pwned" status', "git --exec-path=/tmp/x status", "git -C /tmp/x status"]) {
+      expect(isAllowed("shell", { command }), command).toBe(false);
+    }
+    expect(isAllowed("shell", { command: "git --no-pager status" })).toBe(true);
   });
 
   it("an older binary-only entry still covers its subcommands", () => {

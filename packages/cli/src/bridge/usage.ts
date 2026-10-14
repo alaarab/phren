@@ -737,6 +737,18 @@ export function settleClaudeUsage(usage: AccountUsage, now: number): AccountUsag
  *  busy machine, for a rolling seven-day cost that barely moves in a minute. */
 export const OPENCODE_STATS_REUSE_MS = 10 * 60_000;
 
+/** Longest one reader may hold its shared slot. A read that never settles (a
+ *  child whose grandchild keeps stdout open, say) would otherwise block every
+ *  later poll until the Hook restarts. */
+export const USAGE_READ_LIMIT_MS = 30_000;
+function bounded<T>(read: Promise<T>, fallback: () => T, ms = USAGE_READ_LIMIT_MS): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback()), ms); timer.unref?.(); });
+  return Promise.race([read, late]).finally(() => clearTimeout(timer));
+}
+const unanswered = (source: AccountUsage["source"], name: string): AccountUsage =>
+  ({ source, windows: [], message: `${name} did not answer in time on this computer. Phren will ask again shortly.` });
+
 export class AccountUsageReader {
   private cached?: { at: number; value: AccountUsage };
   private pending?: Promise<AccountUsage>;
@@ -765,7 +777,7 @@ export class AccountUsageReader {
   /** Codex and every Claude home, without the spend readers: what a dispatch capacity probe asks. */
   async limits(allAccounts = true): Promise<AccountUsage[]> {
     if (!this.cached || this.now() - this.cached.at >= 60_000) {
-      this.pending ??= this.readCodex().then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
+      this.pending ??= bounded(this.readCodex(), () => unanswered("codex", "Codex")).then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
     }
     const codex = this.pending ?? Promise.resolve(this.cached!.value);
     // Every home, default first; the labels and keys are read once per poll.
@@ -775,7 +787,7 @@ export class AccountUsageReader {
       const email = claudeAccountEmail(home);
       const credits = claudeCredits(home.id);
       // Claude Code's own answer only when the profile can't name the plan, or a credit asks whether this is a Console login.
-      const auth = credits.length || claudePlanUnknown(home) ? await this.readAuth(home).catch(() => undefined) : undefined;
+      const auth = credits.length || claudePlanUnknown(home) ? await bounded(this.readAuth(home).catch(() => undefined), () => undefined) : undefined;
       const fallback = auth?.console ? "Console" : auth?.plan ? claudePlan({ subscriptionType: auth.plan }) : undefined;
       const subscription = claudeAccountSubscription(home, now, fallback);
       const usage = settleClaudeUsage(await this.claude(home), this.now());
@@ -793,9 +805,10 @@ export class AccountUsageReader {
     if (!cached || this.now() - cached.at >= 60_000) {
       const at = this.now();
       if (!this.spendingPending.has(key)) {
-        const pending = Promise.all([this.openCode(at), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
-          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined),
-          includeElevenLabs ? this.readElevenLabs(new Date(at)).catch(() => undefined) : Promise.resolve(undefined)])
+        const pending = Promise.all([this.openCode(at), bounded(this.readOpenCodeGo(new Date(at)), () => unanswered("opencode-go", "OpenCode Go")),
+          bounded(this.readOpenRouter(new Date(at)), () => undefined),
+          includeCopilot ? bounded(this.readCopilot(new Date(at)), () => unanswered("copilot", "GitHub Copilot")) : Promise.resolve(undefined),
+          includeElevenLabs ? bounded(this.readElevenLabs(new Date(at)).catch(() => undefined), () => undefined) : Promise.resolve(undefined)])
           .then(([openCode, openCodeGo, openRouter, copilot, elevenLabs]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : []), ...(elevenLabs ? [elevenLabs] : [])])
           .then(value => { this.spendingCached.set(key, { at, value }); return value; })
           .finally(() => { this.spendingPending.delete(key); });
@@ -807,8 +820,10 @@ export class AccountUsageReader {
   /** One `opencode stats` run serves every spending key for `OPENCODE_STATS_REUSE_MS`. */
   private openCode(at: number): Promise<AccountUsage> {
     if (this.openCodeCached && at - this.openCodeCached.at < OPENCODE_STATS_REUSE_MS) return Promise.resolve(this.openCodeCached.value);
-    this.openCodePending ??= this.readOpenCode(new Date(at))
-      .then(value => { this.openCodeCached = { at, value }; return value; })
+    let late = false;
+    this.openCodePending ??= bounded(this.readOpenCode(new Date(at)), () => { late = true; return unanswered("opencode", "opencode stats"); })
+      // A late answer is not kept for the ten minutes a real one is.
+      .then(value => { if (!late) this.openCodeCached = { at, value }; return value; })
       .finally(() => { this.openCodePending = undefined; });
     return this.openCodePending;
   }
@@ -821,7 +836,7 @@ export class AccountUsageReader {
       const cached = this.claudeCached.get(home.dir);
       if (!cached || this.now() - cached.at >= 60_000) {
         const at = this.now();
-        if (!this.claudePending.has(home.dir)) this.claudePending.set(home.dir, this.readClaudeLive(new Date(at), home)
+        if (!this.claudePending.has(home.dir)) this.claudePending.set(home.dir, bounded(this.readClaudeLive(new Date(at), home), () => undefined)
           .then(value => { this.claudeCached.set(home.dir, { at, value }); return value; })
           .catch(() => { this.claudeCached.set(home.dir, { at, value: undefined }); return undefined; })
           .finally(() => { this.claudePending.delete(home.dir); }));

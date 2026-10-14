@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool, AgentToolResult } from "./types.js";
 import { encodeDiffPayload } from "../multi/diff-renderer.js";
-import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
+import { checkSensitivePath, checkSensitiveTarget, validatePath } from "../permissions/sandbox.js";
 import { applyEdits, snippetAround, type EditSpec } from "./edit-engine.js";
 import { recordFileState, staleFileError } from "./file-state.js";
 import { syntaxCheckNote } from "./syntax-check.js";
@@ -16,6 +16,8 @@ function openForEdit(filePath: unknown): { ok: true; filePath: string; content: 
   if (sensitive.sensitive) return { ok: false, result: { output: `Access denied: ${sensitive.reason}`, is_error: true } };
   const sandboxResult = validatePath(filePath, process.cwd(), []);
   if (!sandboxResult.ok) return { ok: false, result: { output: `Path outside sandbox: ${sandboxResult.error}`, is_error: true } };
+  const target = checkSensitiveTarget(filePath, sandboxResult.resolved);
+  if (target.sensitive) return { ok: false, result: { output: `Access denied: ${target.reason}`, is_error: true } };
   if (!fs.existsSync(filePath)) {
     return { ok: false, result: { output: `File not found: ${filePath}. Use write_file to create a new file.`, is_error: true } };
   }

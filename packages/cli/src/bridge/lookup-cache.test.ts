@@ -15,6 +15,18 @@ it("keeps a success through failed refreshes until maxAge", async () => {
   await expect(cache.get("key", async () => { throw new Error("timeout"); })).rejects.toThrow("timeout");
 });
 
+it("evicts the oldest key once it holds more than its limit", async () => {
+  const cache = new LookupCache<number>(10_000, 100_000, 64);
+  const read = vi.fn(async () => 1);
+  for (let i = 0; i <= 64; i++) await cache.get(`key-${i}`, read);
+  expect(read).toHaveBeenCalledTimes(65);
+  await cache.get("key-64", read); // still cached
+  await cache.get("key-1", read); // still cached
+  expect(read).toHaveBeenCalledTimes(65);
+  await cache.get("key-0", read); // the oldest was evicted
+  expect(read).toHaveBeenCalledTimes(66);
+});
+
 it("expires stalled reads and rejects late results without overwriting a newer refresh", async () => {
   vi.useFakeTimers();
   const cache = new LookupCache<number>(10, 100);

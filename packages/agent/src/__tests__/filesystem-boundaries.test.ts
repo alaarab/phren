@@ -9,11 +9,14 @@ import * as path from "node:path";
 // accidental synchronous infinite loop cannot be stopped by a test timer.
 const grepModule = new URL("../tools/grep.ts", import.meta.url).href;
 const writeModule = new URL("../tools/write-file.ts", import.meta.url).href;
+const readModule = new URL("../tools/read-file.ts", import.meta.url).href;
+const fileStateModule = new URL("../tools/file-state.ts", import.meta.url).href;
 const loader = import.meta.resolve("tsx");
 let directory: string, project: string;
 function run(script: string, fallback = false): any {
   const source = `const { grepTool } = await import(${JSON.stringify(grepModule)});
     const { writeFileTool } = await import(${JSON.stringify(writeModule)});
+    const { readFileTool } = await import(${JSON.stringify(readModule)});
     ${script}`;
   return JSON.parse(execFileSync(process.execPath, ["--import", loader, "--input-type=module", "-e", source], {
     cwd: project, timeout: 5_000, encoding: "utf8",
@@ -55,6 +58,21 @@ describe("filesystem tool boundaries", () => {
     const direct = run(`console.log(JSON.stringify(await grepTool.execute({ path: "alias.txt", pattern: "fixture_" })));`);
     expect(direct.is_error).toBe(true);
     expect(direct.output).not.toContain("fixture_secret");
+  });
+
+  it("read_file and write_file refuse a harmless name that links to a secret file", () => {
+    fs.writeFileSync(path.join(project, ".env"), "fixture_secret");
+    fs.symlinkSync(path.join(project, ".env"), path.join(project, "public.txt"));
+    const read = run(`console.log(JSON.stringify(await readFileTool.execute({ path: "public.txt" })));`);
+    expect(read.is_error).toBe(true);
+    expect(read.output).not.toContain("fixture_secret");
+    // Seed the read record so the unread-file guard can't be what refuses.
+    const write = run(`const { recordFileState } = await import(${JSON.stringify(fileStateModule)});
+      recordFileState("public.txt");
+      console.log(JSON.stringify(await writeFileTool.execute({ path: "public.txt", content: "x" })));`);
+    expect(write.is_error).toBe(true);
+    expect(write.output).toContain("Access denied");
+    expect(fs.readFileSync(path.join(project, ".env"), "utf8")).toBe("fixture_secret");
   });
 
   it("write_file refuses a missing destination through an escaping parent link", () => {

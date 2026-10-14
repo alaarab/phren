@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AccountUsageReader,
   OPENCODE_STATS_REUSE_MS,
+  USAGE_READ_LIMIT_MS,
   captureClaudeUsage,
   claudeOAuthUsage,
   claudeScopedWindows,
@@ -564,5 +565,26 @@ describe("ElevenLabs usage", () => {
     expect(usage.accounts.filter(a => a.source === "elevenlabs").map(a => a.windows[0].usedPercent)).toEqual([10]);
     expect(usageForCaller(usage.accounts, new Set(["codex", "claude", "opencode", "openrouter"]), false).some(a => a.source === "elevenlabs")).toBe(false);
     expect(usageForCaller(usage.accounts, new Set(["elevenlabs"]), false).map(a => a.source)).toEqual(["elevenlabs"]);
+  });
+});
+
+describe("AccountUsageReader with a reader that never answers", () => {
+  it("frees the shared slot after USAGE_READ_LIMIT_MS so later polls are answered", async () => {
+    vi.useFakeTimers();
+    try {
+      let time = 0, codexCalls = 0;
+      const never = () => new Promise<never>(() => {});
+      const reader = new AccountUsageReader(() => { codexCalls++; return codexCalls === 1 ? never() : Promise.resolve({ source: "codex" as const, windows: [] }); },
+        () => time, async () => undefined, async () => ({ source: "opencode" as const, windows: [] }),
+        async () => undefined, async () => ({ source: "opencode-go" as const, windows: [] }), async () => ({ source: "copilot" as const, windows: [] }));
+      const first = reader.read(new Set(["codex"]));
+      await vi.advanceTimersByTimeAsync(USAGE_READ_LIMIT_MS);
+      const answered = await first;
+      expect(answered.accounts.find(account => account.source === "codex")?.message).toMatch(/did not answer in time/);
+      time = 60_000;
+      const second = await reader.read(new Set(["codex"]));
+      expect(codexCalls).toBe(2);
+      expect(second.accounts.find(account => account.source === "codex")?.message).toBeUndefined();
+    } finally { vi.useRealTimers(); }
   });
 });

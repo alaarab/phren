@@ -6,6 +6,7 @@ changelog is at the repository root. The Marketplace listing shows this file.
 ## [0.7.2] - unreleased
 
 - A healthy third MCP replacement can initialize and restore the reconnect budget; retries are exhausted only after the final attempt fails.
+- A failed MCP handshake is no longer cached: the next call tries it again, so the extension recovers once the server does.
 
 ## [0.7.1] - 2026-10-13
 
