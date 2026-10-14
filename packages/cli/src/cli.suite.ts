@@ -113,6 +113,18 @@ describe("CLI integration: doctor", () => {
   });
 });
 
+describe("CLI integration: no store", () => {
+  it("says to run init, not to enable a module, for a module command", () => {
+    const tmp = makeTempDir("phren-cli-nostore-");
+    try {
+      const { stderr, exitCode } = runCli(["task", "list"], { PHREN_PATH: path.join(tmp.path, "missing"), HOME: tmp.path });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("phren init");
+      expect(stderr).not.toContain("is disabled");
+    } finally { tmp.cleanup(); }
+  });
+});
+
 describe("CLI integration: status", () => {
   let phrenDir: string;
   let cleanup: () => void;
