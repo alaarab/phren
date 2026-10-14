@@ -22,6 +22,8 @@ export const DELIVERY_GIVE_UP_MS = 30_000;
 const MAX_RECORDS = 512;
 /** How often a message still held by a working agent is looked for in its transcript. */
 const LANDED_CHECK_MS = 3_000;
+/** The transcript scan starts this long before a message was typed (clock skew), so entries up to this far back may belong to an earlier message. */
+const ENTRY_SLACK_MS = 5_000;
 
 /** What the agent hands its UserPromptSubmit hook is the terminal's pasted
  * form of what Phren typed; compare the words, not the wrapping. Claude Code
@@ -40,6 +42,8 @@ const recordSchema = z.object({
   server: z.string().min(1).max(200), pane: z.string().min(1).max(200), source: provider, session: z.string().min(1).max(200),
   terminal: z.string().max(200).optional(), state: z.enum(["typed", "queued", "delivered", "failed"]),
   reason: z.string().max(500).optional(), at: z.number(), settledAt: z.number().optional(), stoppedAt: z.number().optional(),
+  /** The transcript entry (byte offset) that settled it, so no other message claims the same one. */
+  entry: z.number().optional(),
 }).strict();
 type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number };
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -56,7 +60,7 @@ export class PromptDeliveries {
   private writing: Promise<void> = Promise.resolve();
 
   constructor(private file?: string, private now: () => number = Date.now,
-    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<number> = transcriptCount) {
+    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<number[]> = transcriptEntries) {
     if (!file) return;
     try {
       for (const row of objects(object(JSON.parse(readFileSync(file, "utf8"))).records)) {
@@ -206,23 +210,27 @@ export class PromptDeliveries {
   }
   /** Whether the transcript shows the agent took `record`'s message. Each matching
    * transcript entry settles one message: of several identical open messages in a
-   * conversation (two "yes"), the oldest take the entries, so one consumed
-   * message does not settle them all. `pass` carries the entries still
+   * conversation (two "yes"), the oldest take the entries, and an entry another
+   * message settled with is not offered again. `pass` carries the entries still
    * unclaimed within one observe. */
-  private async taken(record: Record, pass: Map<string, number>): Promise<boolean> {
+  private async taken(record: Record, pass: Map<string, number[]>): Promise<boolean> {
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
     const open = this.records.filter(other => same(other) && (other.state === "typed" || other.state === "queued")).sort((a, b) => a.at - b.at);
     if (open[0] !== record) return false;
     const key = [record.hash, record.server, record.pane, record.session].join("|");
-    let left = pass.get(key);
-    if (left === undefined) {
-      const found = await this.landed(record).catch(() => 0);
-      // Messages of the same words settled since this one was typed already have their entries.
-      const claimed = this.records.filter(other => same(other) && other.state === "delivered" && (other.settledAt ?? 0) >= record.at).length;
-      left = Math.max(0, found - claimed);
+    let free = pass.get(key);
+    if (!free) {
+      const found = await this.landed(record).catch(() => [] as number[]);
+      const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
+      // A message the agent's hook settled has an entry too, but none recorded: it takes the oldest unclaimed.
+      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
+      free = found.filter(entry => !used.has(entry)).sort((a, b) => a - b).slice(hooked);
     }
-    pass.set(key, Math.max(0, left - 1));
-    return left > 0;
+    const entry = free.shift();
+    pass.set(key, free);
+    if (entry === undefined) return false;
+    record.entry = entry;
+    return true;
   }
   /** A turn in `target`'s pane ended: the agent now takes held input or never will. */
   stopped(target: Target): void {
@@ -237,7 +245,7 @@ export class PromptDeliveries {
   async observe(server: string, panes: Json[]): Promise<void> {
     const now = this.now();
     let changed = false;
-    const pass = new Map<string, number>();
+    const pass = new Map<string, number[]>();
     for (const record of this.records) {
       if (record.server !== server || (record.state !== "typed" && record.state !== "queued")) continue;
       const pane = panes.find(entry => entry.pane_id === record.pane);
@@ -267,23 +275,27 @@ export class PromptDeliveries {
   }
 }
 
-/** How many user rows with these words reached the conversation's transcript
+/** The byte offsets of the user rows with these words that reached the conversation's transcript
  * after the message was typed: the agent took it without its hook saying so
  * (a mid-turn steer). Reads at most the last 512 KiB. */
-async function transcriptCount(record: { source: Provider; session: string; hash: string; at: number }): Promise<number> {
+async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<number[]> {
   const file = await open(await transcriptPath(record.source, record.session), "r");
   try {
     const size = (await file.stat()).size, start = Math.max(0, size - 524_288), buffer = Buffer.alloc(size - start);
     await file.read(buffer, 0, buffer.length, start);
-    let count = 0;
-    for (const line of buffer.toString("utf8").split("\n").reverse()) {
+    const entries: number[] = [];
+    const lines = buffer.toString("utf8").split("\n");
+    let offset = start + buffer.length;
+    for (let index = lines.length - 1; index >= 0; index--) {
+      const line = lines[index];
+      offset -= Buffer.byteLength(line) + (index < lines.length - 1 ? 1 : 0);
       let row: Json;
       try { row = object(JSON.parse(line)); } catch { continue; }
       const stamp = Date.parse(String(row.timestamp ?? ""));
       if (Number.isFinite(stamp) && stamp < record.at - 5_000) break;
-      for (const text of userTexts(row)) if (promptHash(text) === record.hash) count++;
+      for (const text of userTexts(row)) if (promptHash(text) === record.hash) entries.push(offset);
     }
-    return count;
+    return entries;
   } finally { await file.close(); }
 }
 
@@ -295,6 +307,8 @@ export function userTexts(row: Json): string[] {
     if (typeof content === "string") texts.push(content);
     else for (const block of objects(content)) if (typeof block.text === "string") texts.push(block.text);
   };
+  // Codex input the agent has not consumed yet (materialized as `phrenQueued`) is still waiting.
+  if (row.phrenQueued) return texts;
   if (row.type === "user" && !row.isMeta) blocks(object(row.message).content);
   // Claude Code takes a message typed mid-turn out of its queue into the running turn:
   // `enqueue` when typed, then `remove` (not `dequeue`, which starts a turn of its own) with the same words.
