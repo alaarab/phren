@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Removing a pending chat send hides it while keeping its place, so its transcript row cannot settle a later identical send or hide that send's failure.
 - Released Claude questions and served OpenCode questions appear as answer cards in chat.
 - Answering a pending question from a chat card works for Claude and OpenCode as well as Codex.
 - Stage all refuses truncated listings, staging confirmations recheck file membership and types, and single-file Stage works while another confirmation is open.
@@ -16,6 +17,11 @@ GitHub release notes, and the app shows them when that version is available.
 - SSH master sockets cover the full host pin and current private key with 96-bit isolation; replaced connections cannot overwrite the new computer's overview or capabilities.
 - Replacing a connection discards pending handshakes; relinking after key rotation closes the original SSH masters and refreshes the overview.
 - Connections follow the configured Hook server, refresh capabilities on heartbeats, time out while waiting for a channel, and verify changed SSH keys and host pins on relink.
+- Chat excludes the initial backlog from early sends and settles identical pending sends in order, keeping failed sends failed until their own delivered receipt arrives.
+- Reconnecting chat keeps settled queue and transcript rows from settling another identical pending prompt or stopping its delivery polling.
+- Consuming a queued prompt and then receiving its real transcript row settles only that submission, keeping repeated prompts pending.
+- Queued transcript rows keep chat deliveries pending until consumed, late delivered receipts clear earlier failures, and transcript confirmation tolerates whitespace changes.
+- Chat keeps repeated prompts pending until their own delivery settles, clears finished reply previews, and saves drafts separately for each computer.
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.
 
 ## [0.1.7] - 2026-10-14
