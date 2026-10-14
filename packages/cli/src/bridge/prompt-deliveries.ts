@@ -222,7 +222,7 @@ export class PromptDeliveries {
    * conversation (two "yes"), the oldest take the entries, and an entry another
    * message settled with is not offered again. `pass` carries the entries still
    * unclaimed within one observe. */
-  private async taken(record: Record, pass: Map<string, TranscriptEntry[]>): Promise<boolean> {
+  private async taken(record: Record, pass: Map<string, TranscriptEntry[]>, working = false): Promise<boolean> {
     // Only Claude's transcript says which entry a message settled with; Codex keeps the any-match check.
     if (record.source !== "claude") return (await this.landed(record).catch(() => [] as TranscriptEntry[])).length > 0;
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
@@ -241,7 +241,8 @@ export class PromptDeliveries {
     pass.set(key, free);
     if (entry === undefined) return false;
     record.entry = entry.offset;
-    if (entry.hook) record.hookDue = true;
+    // Only a turn still running has a hook to come; once it ended (idle) none is.
+    if (entry.hook && working) record.hookDue = true;
     return true;
   }
   /** A turn in `target`'s pane ended: the agent now takes held input or never will. */
@@ -249,7 +250,9 @@ export class PromptDeliveries {
     const at = this.now();
     for (const record of this.records) if (this.samePane(record, target) && (record.state === "typed" || record.state === "queued") && record.at < at) record.stoppedAt = at;
     // A turn that ended has fired the hooks it was going to: no settled message is still waiting for one.
-    for (const record of this.records) if (record.hookDue && this.samePane(record, target) && record.session === target.session) delete record.hookDue;
+    let cleared = false;
+    for (const record of this.records) if (record.hookDue && this.samePane(record, target) && record.session === target.session) { delete record.hookDue; cleared = true; }
+    if (cleared) this.save();
   }
 
   /** Called on the Hook's activity tick with a server's panes. A message
@@ -275,7 +278,7 @@ export class PromptDeliveries {
         // its UserPromptSubmit hook; its transcript is the only place that says so.
         if (record.source === "claude" && (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS)) {
           record.checkedAt = now;
-          if (await this.taken(record, pass)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); }
+          if (await this.taken(record, pass, true)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); }
         }
         continue;
       }

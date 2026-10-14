@@ -205,6 +205,33 @@ describe("a message the agent took into its running turn", () => {
     clock += 120_000; store.submitted(claudeTarget, "yes");
     expect(store.status("slow-0002", claudeTarget).state).toBe("queued");
   });
+  it("keeps no claim for a message settled after its turn ended, and persists the end of one", async () => {
+    const store = deliveries();
+    await send(store, "end-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "end-0002", "yes", claudeTarget);
+    // The Stop came first: the idle check settles the first from its user row, with no hook left to come.
+    clock += 1; store.stopped(claudeTarget);
+    await store.observe("default", [claudePane("working")]);
+    landed = true; matches = 1; hookRows = true;
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("end-0001", claudeTarget).state).toBe("delivered");
+    store.submitted(claudeTarget, "yes");
+    expect(store.status("end-0002", claudeTarget).state).toBe("delivered");
+  });
+  it("does not bring a claim back after a restart once the turn has ended", async () => {
+    const store = deliveries();
+    await send(store, "gone-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "gone-0002", "yes", claudeTarget);
+    landed = true; matches = 1; hookRows = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    store.stopped(claudeTarget);
+    await store.flush();
+    const restarted = deliveries();
+    restarted.submitted(claudeTarget, "yes");
+    expect(restarted.status("gone-0002", claudeTarget).state).toBe("delivered");
+  });
   it("survives a Hook restart after the transcript check", async () => {
     const store = deliveries();
     await send(store, "keep-0001", "Still queued", claudeTarget);
