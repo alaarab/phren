@@ -66,6 +66,8 @@ export function attributeServers(input: {
 }): SessionServer[] {
   const result: SessionServer[] = [];
   for (const server of input.servers) {
+    // A listing whose owner could not be verified may be shown, but it belongs to no session.
+    if (server.unverified) continue;
     if (descendsFrom(server.pid, input.ownRoots, input.parents)) result.push({ ...server, source: "started" });
     else if (input.mentioned.has(server.port) && !descendsFrom(server.pid, input.otherRoots, input.parents)) {
       result.push({ ...server, source: "mentioned" });

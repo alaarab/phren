@@ -295,7 +295,8 @@ function decodeEntities(text: string): string {
   });
 }
 
-export interface LocalServer { name: string; port: number; origin: string; process?: string; pid?: number }
+/** `unverified`: the owner could not be checked against the live socket table, so no session may be handed this server. */
+export interface LocalServer { name: string; port: number; origin: string; process?: string; pid?: number; unverified?: true }
 function probe(port: number, host: string): Promise<string | null> {
   return new Promise(resolve => {
     let settled = false;
@@ -369,7 +370,7 @@ export async function webServers(): Promise<LocalServer[]> {
   if (!servers.some(server => server.pid !== undefined) || Date.now() - (scanStarted.get(servers) ?? 0) < LISTENER_TRUST_MS) return servers;
   const live = await readListeners().catch(() => undefined);
   // The table could not be read (ss timed out, no lsof): ownership cannot be verified, so none is claimed.
-  if (!live) return servers.map(({ pid: _pid, ...server }) => server);
+  if (!live) return servers.map(({ pid: _pid, ...server }) => ({ ...server, unverified: true as const }));
   const kept = servers.filter(server => server.pid === undefined || live.get(listenerKey(server))?.pid === server.pid);
   if (kept.length !== servers.length) serversCache.invalidate(() => true);
   return kept;

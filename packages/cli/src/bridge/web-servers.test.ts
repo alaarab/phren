@@ -141,6 +141,7 @@ describe("webServers", () => {
     expect(unverified).toHaveLength(1);
     expect(unverified[0]).toMatchObject({ port });
     expect(unverified[0].pid).toBeUndefined();
+    expect(unverified[0].unverified).toBe(true);
   });
   it("falls back to lsof when ss is missing", async () => {
     answer({ lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
