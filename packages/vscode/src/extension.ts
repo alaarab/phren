@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as vscode from "vscode";
 import { PhrenClient } from "./phrenClient";
+import { samePath } from "./pathUtils";
 import { PhrenTreeProvider } from "./providers/PhrenTreeProvider";
 import { PhrenActivityProvider } from "./providers/PhrenActivityProvider";
 import { PhrenStatusBar } from "./statusBar";
@@ -262,18 +263,17 @@ async function detectAndOfferWorkspaceFolders(
     const projectsRaw = prefetchedProjectsRaw ?? await phrenClient.listProjects();
     const projectsData = asRecord(asRecord(projectsRaw)?.data);
     const projects = asArraySafe(projectsData?.projects);
-    const trackedPaths = new Set<string>();
+    const trackedPaths: string[] = [];
     for (const p of projects) {
       const rec = asRecord(p);
       const src = typeof rec?.source === "string" ? rec.source : undefined;
-      if (src) trackedPaths.add(src);
+      if (src) trackedPaths.push(src);
     }
 
     const dismissed: string[] = context.globalState.get("phren.dismissedFolders", []);
-    const dismissedSet = new Set(dismissed);
 
     const untracked = workspaceFolders.filter(
-      (f) => !trackedPaths.has(f.uri.fsPath) && !dismissedSet.has(f.uri.fsPath),
+      (f) => !trackedPaths.some((t) => samePath(t, f.uri.fsPath)) && !dismissed.some((d) => samePath(d, f.uri.fsPath)),
     );
     if (untracked.length === 0) return;
 

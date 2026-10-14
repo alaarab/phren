@@ -624,6 +624,21 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
 
 /* ── Data loading ────────────────────────────────────────── */
 
+const PROJECT_FETCH_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const scores = loadMemoryScores();
 
@@ -651,9 +666,15 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
   // Parallel per-project fetches (including topic configs). A project whose
   // calls fail is logged and dropped so it cannot blank every other project.
   const projectErrors = new Map<string, string>();
+  // At most PROJECT_FETCH_CONCURRENCY projects at a time: one stdio server answers
+  // them all, and a store with dozens of projects would otherwise queue hundreds
+  // of requests behind the per-request timeout and drop projects that were only
+  // waiting their turn.
   const perProjectResults = (
-    await Promise.all(
-      projects.map(async (p) => {
+    await mapWithConcurrency(
+      projects,
+      PROJECT_FETCH_CONCURRENCY,
+      async (p) => {
         try {
           const topicConfig = await fetchTopicConfig(client, p.name);
           const [summary, findings, tasks] = await Promise.all([
@@ -666,7 +687,7 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
           projectErrors.set(p.name, toErrorMessage(error));
           return null;
         }
-      }),
+      },
     )
   ).filter((result): result is NonNullable<typeof result> => result !== null);
 
@@ -778,6 +799,7 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
 
   // Fragment nodes and edges
   const projectNameSet = new Set(projects.map((p) => p.name));
+  const refIds = new Set<string>();
   for (const entity of entities) {
     const entityId = entity.id || `entity:${entity.name}`;
     const connectedProjects: string[] = [];
@@ -823,7 +845,8 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
     // Reference doc nodes
     for (const doc of entity.docs) {
       const refId = `ref:${doc}`;
-      if (!nodes.find((n) => n.id === refId)) {
+      if (!refIds.has(refId)) {
+        refIds.add(refId);
         let refProject = "";
         for (const pName of projectNameSet) {
           if (doc.startsWith(pName + "/") || doc.startsWith(pName + "\\")) {
@@ -835,7 +858,7 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
           id: refId,
           kind: "reference",
           projectName: refProject,
-          label: doc.split("/").pop() || doc,
+          label: doc.split(/[\\/]/).pop() || doc,
           subtype: "reference",
           text: doc,
           radius: 6,

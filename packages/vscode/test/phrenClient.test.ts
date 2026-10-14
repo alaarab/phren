@@ -24,7 +24,7 @@ interface JsonRpcRequestSeen {
 type FakeChildProcess = EventEmitter & {
   stdout: EventEmitter;
   stderr: EventEmitter;
-  stdin: { write: ReturnType<typeof vi.fn> };
+  stdin: EventEmitter & { write: ReturnType<typeof vi.fn> };
   kill: ReturnType<typeof vi.fn>;
   killed: boolean;
 };
@@ -38,13 +38,13 @@ function makeFakeProcess(): FakeChildProcess {
     proc.killed = true;
     return true;
   });
-  proc.stdin = {
+  proc.stdin = Object.assign(new EventEmitter(), {
     write: vi.fn((_data: string, encodingOrCb?: unknown, cb?: unknown) => {
       const callback = typeof encodingOrCb === "function" ? encodingOrCb : cb;
       if (typeof callback === "function") callback(undefined);
       return true;
     }),
-  };
+  });
   return proc;
 }
 
@@ -544,5 +544,106 @@ describe("PhrenClient: reconnect on unexpected process exit", () => {
     // Not 3 — the second call into scheduleReconnect() while already
     // reconnecting is a no-op, so only one respawn happens.
     expect(createdProcesses).toHaveLength(2);
+  });
+});
+
+describe("PhrenClient: missing binary", () => {
+  it("survives an 'error' on the child's stdin (EPIPE / write-after-destroy) instead of raising an unhandled error event", () => {
+    vi.useFakeTimers();
+    new PhrenClient({ mcpServerPath: "mcp.js", storePath: "/store" });
+    expect(() => lastProcess().stdin.emit("error", new Error("write EPIPE"))).not.toThrow();
+    expect(phrenLog.error).toHaveBeenCalledWith(expect.stringContaining("write EPIPE"));
+  });
+
+  it("names the spawn failure and the log once every reconnect attempt has failed", async () => {
+    vi.useFakeTimers();
+    const client = new PhrenClient({ mcpServerPath: "mcp.js", storePath: "/store", nodePath: "/no/such/node" });
+    const maxRetries = (PhrenClient as unknown as { MAX_RECONNECT_RETRIES: number }).MAX_RECONNECT_RETRIES;
+    const delayMs = (PhrenClient as unknown as { RECONNECT_DELAY_MS: number }).RECONNECT_DELAY_MS;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      lastProcess().emit("error", new Error("spawn /no/such/node ENOENT"));
+      await vi.advanceTimersByTimeAsync(delayMs);
+    }
+
+    await expect(client.healthCheck()).rejects.toThrow(/spawn \/no\/such\/node ENOENT.*Phren: Show Log/s);
+  });
+});
+
+describe("PhrenClient: large stores", () => {
+  const projectPage = (page: number, totalPages: number, names: string[]) =>
+    textResult({ ok: true, data: { projects: names.map((name) => ({ name })), total: 120, page, totalPages, pageSize: 50 } });
+
+  it("listProjects fetches every page, not just the first 50", async () => {
+    const { client, proc } = await readyClient();
+    const seen: number[] = [];
+    proc.stdin.write = vi.fn((data: string) => {
+      const msg = JSON.parse(String(data).trim());
+      if (msg.method !== "tools/call") return true;
+      const page = (msg.params.arguments.page as number | undefined) ?? 1;
+      seen.push(page);
+      const names = Array.from({ length: page === 3 ? 20 : 50 }, (_, i) => `p${page}-${i}`);
+      queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, result: projectPage(page, 3, names) }));
+      return true;
+    });
+
+    const raw = (await client.listProjects()) as { data: { projects: unknown[]; total: number } };
+
+    expect(seen).toEqual([1, 2, 3]);
+    expect(raw.data.projects).toHaveLength(120);
+    expect(raw.data.total).toBe(120);
+  });
+
+  it("getFindings follows next_offset up to a cap and stops", async () => {
+    const { client, proc } = await readyClient();
+    const offsets: number[] = [];
+    proc.stdin.write = vi.fn((data: string) => {
+      const msg = JSON.parse(String(data).trim());
+      if (msg.method !== "tools/call") return true;
+      const offset = (msg.params.arguments.offset as number | undefined) ?? 0;
+      offsets.push(offset);
+      const findings = Array.from({ length: 200 }, (_, i) => ({ id: `F${offset + i}`, text: "x" }));
+      const result = textResult({ ok: true, data: { findings, total: 50_000, offset, next_offset: offset + 200 } });
+      queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, result }));
+      return true;
+    });
+
+    const raw = (await client.getFindings("big")) as { data: { findings: unknown[]; total: number } };
+
+    expect(offsets).toEqual([0, 200, 400, 600, 800]);
+    expect(raw.data.findings).toHaveLength(1000);
+    expect(raw.data.total).toBe(50_000);
+  });
+
+  it("getFindings never returns more than the cap when pages are uneven", async () => {
+    const { client, proc } = await readyClient();
+    let calls = 0;
+    proc.stdin.write = vi.fn((data: string) => {
+      const msg = JSON.parse(String(data).trim());
+      if (msg.method !== "tools/call") return true;
+      const offset = (msg.params.arguments.offset as number | undefined) ?? 0;
+      const size = ++calls === 1 ? 12 : 200;
+      const findings = Array.from({ length: size }, (_, i) => ({ id: `F${offset + i}`, text: "x" }));
+      const result = textResult({ ok: true, data: { findings, total: 5000, next_offset: offset + size } });
+      queueMicrotask(() => reply(proc, { jsonrpc: "2.0", id: msg.id, result }));
+      return true;
+    });
+    const raw = (await client.getFindings("big")) as { data: { findings: unknown[] } };
+    expect(raw.data.findings).toHaveLength(1000);
+  });
+
+  it("getFindings makes a single call when the first page is the whole project", async () => {
+    const { client, proc } = await readyClient();
+    let calls = 0;
+    proc.stdin.write = vi.fn((data: string) => {
+      const msg = JSON.parse(String(data).trim());
+      if (msg.method !== "tools/call") return true;
+      calls++;
+      queueMicrotask(() =>
+        reply(proc, { jsonrpc: "2.0", id: msg.id, result: textResult({ ok: true, data: { findings: [{ id: "F1", text: "a" }], total: 1, next_offset: null } }) }),
+      );
+      return true;
+    });
+    await client.getFindings("small");
+    expect(calls).toBe(1);
   });
 });
