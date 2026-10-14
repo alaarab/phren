@@ -20,6 +20,24 @@ so changes redraw the cards while identical status frames preserve typed answers
 `#conn-count`) and `#sections`. `app.js` registers sections and wires keys,
 badge and notifications; nothing else lives there.
 
+## Daemon connections
+
+The overview uses each computer's configured `server` and reconnects when its
+SSH username, server or private key contents change. Pending handshakes and frames from a
+replaced connection are discarded by connection generation. Heartbeat `phren` blocks refresh the merged
+overview's version and capabilities while retaining its sessions.
+`ChannelPool.acquire(computerName, { timeoutMs?, signal? })` bounds queued
+acquisition (60 s by default); cancellation removes the waiter. HTTP's 60 s
+deadline includes acquisition. SSH masters use a 96-bit SHA-256 socket name over the private key identity,
+full pinned host key and destination (username, address, port), recomputed from the private file
+on each use without trusting its `.pub` sidecar. `knownHostsPath(masterKey(computer))`
+returns the identity's pin file under `desktop-cm`; it is written atomically before SSH
+starts and never reused for another pin. Desktop-key SSH uses `IdentityAgent=none`,
+`IdentitiesOnly=yes` and `StrictHostKeyChecking=yes`; the owner's enrollment and
+revocation login still uses their own SSH configuration. Relinking closes old masters before
+verification using the control paths retained when they were opened, including
+when a key rotates at the same path; enrollment keeps the public key beside the private key as `.pub`.
+
 ## Store (`shell/store.js`)
 
 One `/api/overview` WebSocket for the whole app. Never open your own.
