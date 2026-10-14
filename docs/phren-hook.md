@@ -39,7 +39,9 @@ and the computer answers with an HMAC over its host fingerprint, so a phone that
 typed the code by hand pins the right host key too. The listener (port 47291)
 accepts one phone, closes after five wrong codes, and times out after five
 minutes (`--minutes` up to 30). SSH itself must be on: Remote Login on macOS,
-`sshd` on Linux.
+`sshd` on Linux. Under WSL, Windows can also block inbound 47291 and SSH from
+the phone; `phren pair` then prints the one-time admin PowerShell
+`New-NetFirewallHyperVRule` that allows both.
 
 The manual route still works: in Phren, choose **Enter details** under Add
 computer and type the address, port and user. Then choose how this phone gets in:
