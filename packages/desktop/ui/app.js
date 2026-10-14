@@ -24,6 +24,7 @@ import { startCiWatch } from "./shell/ci-watch.js";
 import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
 import { startSummon } from "./shell/summon.js";
+import { startApprovals } from "./shell/approvals.js";
 import { startTray } from "./shell/tray.js";
 import { startNeedsNotify } from "./shell/needs-notify.js";
 import { startAway } from "./shell/away.js";
@@ -97,6 +98,7 @@ startNeedsNotify(shell, {
   stallsEnabled: () => notifyEnabled() && stallNotifyEnabled() && !quietNow(),
   openSession,
 });
+startApprovals();
 startTray(shell);
 
 startAway();

@@ -353,8 +353,9 @@ function updateTray(state) {
     const sub = text(row?.sub, 80);
     const open = () => { if (showWindow()) mainWindow.webContents.send("phren:open-session", key); };
     const approval = text(row?.approval, 120);
+    const actionId = text(row?.actionId, 200);
     const answer = (decision) => () => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("phren:tray-answer", { key, decision });
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("phren:tray-answer", { key, decision, actionId });
     };
     items.push({
       label: mac ? title : `${title} · ${sub}`,

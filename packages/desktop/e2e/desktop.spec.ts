@@ -363,6 +363,38 @@ test("the window opens on Home", async ({ page }) => {
   await expect(page).toHaveURL(/#\/home$/);
 });
 
+test("Home reads and handles keys only while shown, including a hidden first mount", async ({ page }) => {
+  let receipts = 0;
+  let schedules = 0;
+  await page.route("**/v1/dispatch", async (route) => {
+    receipts++;
+    await route.fulfill({ json: { dispatches: [] } });
+  });
+  await page.route("**/v1/schedules", async (route) => {
+    schedules++;
+    await route.fulfill({ json: { schedules: [] } });
+  });
+  await page.clock.install();
+  await page.goto(`${url}#/agents`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".sb-row", { hasText: "Ship release" })).toBeVisible();
+  await page.evaluate(async () => {
+    const sections = await import("/shell/sections.js");
+    sections.sectionHandle("home");
+  });
+  await page.clock.fastForward(65_000);
+  expect({ receipts, schedules }).toEqual({ receipts: 0, schedules: 0 });
+  // Hidden Home must not consume the keyboard's open-session shortcut.
+  const consumed = await page.evaluate(() => !document.dispatchEvent(new KeyboardEvent("keydown", { key: "o", bubbles: true, cancelable: true })));
+  expect(consumed).toBe(false);
+  await page.locator('.section-pill[data-section="home"]').click();
+  await expect.poll(() => ({ receipts, schedules })).toEqual({ receipts: 1, schedules: 1 });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.clock.fastForward(65_000);
+  expect({ receipts, schedules }).toEqual({ receipts: 1, schedules: 1 });
+  await page.locator('.section-pill[data-section="home"]').click();
+  await expect.poll(() => ({ receipts, schedules })).toEqual({ receipts: 2, schedules: 2 });
+});
+
 test("Home and Conductor agree on the running conductor", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".home-conductor-title")).toHaveText("Conductor");
@@ -678,7 +710,7 @@ test("a sidebar row waiting on you shows what the agent said last", async ({ pag
   await page.screenshot({ path: test.info().outputPath("desktop-sidebar-reply.png"), clip: { x: box.x, y: box.y, width: box.width, height: 320 } });
 });
 
-test("the menu bar answers an approval Home is watching", async ({ page }) => {
+test("the menu bar answers an approval before Home is opened", async ({ page }) => {
   await page.addInitScript(() => {
     const trays: unknown[] = [];
     const shell = {
@@ -698,14 +730,16 @@ test("the menu bar answers an approval Home is watching", async ({ page }) => {
     answers.push(route.request().postDataJSON());
     await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
   });
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.goto(`${url}#/agents`, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => localStorage.removeItem("phren.desktop.tray"));
   type Tray = { rows?: Array<{ key: string; approval?: string }> };
   const last = () => page.evaluate(() => (window as unknown as { __trays: Tray[] }).__trays.at(-1));
   await expect.poll(async () => (await last())?.rows?.find((r) => r.approval)?.approval).toBe("Run pnpm test in phren-release");
+  await expect(page.locator(".section-home")).toHaveCount(0);
   const key = (await last())!.rows!.find((r) => r.approval)!.key;
   await page.evaluate((k) => (window as unknown as { __trayAnswer: (a: { key: string; decision: string }) => void }).__trayAnswer({ key: k, decision: "approve" }), key);
   await expect.poll(() => answers.length).toBe(1);
+  await expect(page.locator(".section-home")).toHaveCount(0);
   expect(answers[0]).toMatchObject({ actionId: "a1", target: { session: "sess-release" } });
 });
 
