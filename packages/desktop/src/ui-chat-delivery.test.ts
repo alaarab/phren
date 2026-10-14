@@ -91,7 +91,7 @@ describe("chat delivery reconciliation", () => {
     expect(c.echoes()[0].deliveryState).toBe("failed");
   });
 
-  it("settles a consumed queued submission once when its real row arrives later", async () => {
+  it.each([false, true])("settles a consumed queued submission once when its real row arrives later (reconnect: %s)", async (reconnect) => {
     const c = chat();
     await c.send("yes");
     await c.send("yes");
@@ -107,7 +107,18 @@ describe("chat delivery reconciliation", () => {
     c.socket.frame({ type: "append", totalLines: 4, entries: [user(3, "yes")] });
     expect(c.echoes().map(e => e.id)).toEqual([two]);
     expect(c.el.find("pc-pending-state queued")?.textContent).toBe("Queued");
-    c.socket.frame({ type: "append", totalLines: 5, entries: [{ line: 4, raw: { type: "phren_queue_consumed", key: "b".repeat(64) } }] });
+    if (reconnect) {
+      // The reconnect window retains A's real row but neither original queue row.
+      c.socket.frame({ type: "backlog", reset: true, startLine: 3, totalLines: 100, entries: [user(3, "yes")] });
+      expect(c.echoes().map(e => e.id)).toEqual([two]);
+      await vi.advanceTimersByTimeAsync(2000);
+      const polls = fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt/status"));
+      expect(polls).toHaveLength(1);
+      expect(JSON.parse(polls[0][1].body).deliveryId).toBe(two);
+      c.socket.frame({ type: "append", totalLines: 101, entries: [user(100, "yes")] });
+    } else {
+      c.socket.frame({ type: "append", totalLines: 5, entries: [{ line: 4, raw: { type: "phren_queue_consumed", key: "b".repeat(64) } }] });
+    }
     expect(c.echoes()).toHaveLength(0);
   });
 

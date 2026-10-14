@@ -637,10 +637,18 @@ export function createComposer({ computer, target, provider, branch, project, on
     for (const message of messages) {
       // A consumed queue row and the real row replacing it acknowledge one submission.
       const rowID = acknowledgementID(message.id);
-      if (message.role !== "user" || message.isQueued || message.localCommand !== null || settledRows.has(rowID)) continue;
+      if (message.role !== "user" || message.isQueued || message.localCommand !== null) continue;
+      // Remember both identities even when the replacement arrives after settlement:
+      // a reconnect can drop the history's queue-to-real acknowledgement mapping.
+      if (settledRows.has(rowID) || settledRows.has(message.id)) {
+        settledRows.add(rowID);
+        settledRows.add(message.id);
+        continue;
+      }
       for (const [id, entry] of pendings) {
         if (message.line > entry.submittedAfterLine && normalize(entry.text) && normalize(message.text) === normalize(entry.text)) {
           settledRows.add(rowID);
+          settledRows.add(message.id);
           removePending(id, true);
           break;
         }
