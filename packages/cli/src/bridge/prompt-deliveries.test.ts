@@ -2,21 +2,23 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, PromptDeliveries, userTexts } from "./prompt-deliveries.js";
+import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, matchingOffsets, promptHash, PromptDeliveries, userTexts } from "./prompt-deliveries.js";
 import type { Json, Target } from "./protocol.js";
 
 const target: Target = { server: "default", workspace: "w6", tab: "w6:t1", pane: "w6:p1", source: "codex", session: "01a10831-4b62-7000-8000-000000000001" };
 const rotated: Target = { ...target, session: "01a10985-bf36-7000-8000-000000000002" };
-let root: string, file: string, clock: number, landed: boolean, stores: PromptDeliveries[] = [];
-const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed); stores.push(store); return store; };
-const pane = (status: string, terminal = "term-1"): Json => ({ pane_id: target.pane, agent: "codex", terminal_id: terminal, agent_status: status });
+let root: string, file: string, clock: number, landed: boolean, matches = 1, stores: PromptDeliveries[] = [];
+const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed ? Array.from({ length: matches }, (_, i) => i * 100) : []); stores.push(store); return store; };
+const claudeTarget: Target = { ...target, source: "claude" };
+const pane = (status: string, terminal = "term-1", agent = "codex"): Json => ({ pane_id: target.pane, agent, terminal_id: terminal, agent_status: status });
+const claudePane = (status: string): Json => pane(status, "term-1", "claude");
 /** Typed into a busy pane and answered queued, as /v1/prompt does. */
 async function send(store: PromptDeliveries, id: string, text: string, where = target) {
   expect(await store.expect(where, text, 1, undefined, id, "term-1")).toBe("pending");
   store.queue(id, where);
 }
 
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-deliveries-")); file = path.join(root, "deliveries.json"); clock = 1_000_000; landed = false; });
+beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-deliveries-")); file = path.join(root, "deliveries.json"); clock = 1_000_000; landed = false; matches = 1; });
 afterEach(async () => { await Promise.all(stores.map(store => store.flush())); stores = []; await rm(root, { recursive: true, force: true }); });
 
 describe("phone messages bound to their pane", () => {
@@ -121,6 +123,87 @@ describe("a message the agent never takes fails loudly", () => {
     landed = true; clock += DELIVERY_GIVE_UP_MS;
     await store.observe("default", [pane("idle")]);
     expect(store.status("steer-0001", target).state).toBe("delivered");
+  });
+});
+
+describe("a message the agent took into its running turn", () => {
+  it("is delivered while the agent still works, not left queued until its turn ends", async () => {
+    const store = deliveries();
+    await send(store, "mid-0001", "How long until it is all in?", claudeTarget);
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("mid-0001", claudeTarget).state).toBe("queued");
+    landed = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("mid-0001", claudeTarget).state).toBe("delivered");
+  });
+  it("settles one of two identical messages per transcript entry", async () => {
+    const store = deliveries();
+    await send(store, "yes-00001", "yes", claudeTarget);
+    clock += 10; await send(store, "yes-00002", "yes", claudeTarget);
+    landed = true; matches = 1; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("yes-00001", claudeTarget).state).toBe("delivered");
+    expect(store.status("yes-00002", claudeTarget).state).toBe("queued");
+    matches = 2; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("yes-00002", claudeTarget).state).toBe("delivered");
+  });
+  it("does not offer an entry an earlier identical message settled with to a later one", async () => {
+    const store = deliveries();
+    await send(store, "again-0001", "yes", claudeTarget);
+    landed = true; matches = 1; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("again-0001", claudeTarget).state).toBe("delivered");
+    // A second "yes" a moment later: the scan still sees the first entry (it reaches back past the send).
+    clock += 1_000; await send(store, "again-0002", "yes", claudeTarget);
+    clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("again-0002", claudeTarget).state).toBe("queued");
+    matches = 2; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("again-0002", claudeTarget).state).toBe("delivered");
+  });
+  it("survives a Hook restart after the transcript check", async () => {
+    const store = deliveries();
+    await send(store, "keep-0001", "Still queued", claudeTarget);
+    await store.observe("default", [claudePane("working")]);
+    await send(store, "keep-0002", "Saves the file again", claudeTarget);
+    await store.flush();
+    const restarted = deliveries();
+    expect(restarted.status("keep-0001", claudeTarget).state).toBe("queued");
+  });
+  it("is looked for in the transcript at most every few seconds", async () => {
+    const calls: number[] = [];
+    const store = new PromptDeliveries(undefined, () => clock, async () => { calls.push(clock); return []; });
+    await send(store, "mid-0002", "Anything yet?", claudeTarget);
+    await store.observe("default", [claudePane("working")]);
+    clock += 1_000; await store.observe("default", [claudePane("working")]);
+    clock += 2_000; await store.observe("default", [claudePane("working")]);
+    expect(calls.length).toBe(2);
+  });
+  it("reads a dequeued-from-the-queue row as the user's words", () => {
+    expect(userTexts({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "from my phone" })).toEqual(["from my phone"]);
+    expect(userTexts({ type: "queue-operation", operation: "remove", reason: "delivered_to_agent", content: "from my phone" })).toEqual(["from my phone"]);
+    // Input the agent never saw is not input it took.
+    expect(userTexts({ type: "queue-operation", operation: "remove", reason: "cleared_on_cancel", content: "from my phone" })).toEqual([]);
+    expect(userTexts({ type: "queue-operation", operation: "remove", content: "from my phone" })).toEqual([]);
+    expect(userTexts({ type: "queue-operation", operation: "enqueue", content: "from my phone" })).toEqual([]);
+    expect(userTexts({ type: "queue-operation", operation: "dequeue" })).toEqual([]);
+  });
+  it("leaves Codex delivery as it was: not settled from a transcript while the agent works", async () => {
+    const store = deliveries();
+    await send(store, "codex-0001", "yes");
+    landed = true; clock += 3_000;
+    await store.observe("default", [pane("working")]);
+    expect(store.status("codex-0001", target).state).toBe("queued");
+  });
+  it("counts one entry for a row that repeats the words", () => {
+    const at = 1_000;
+    const row = (blocks: string[], stamp: string) => JSON.stringify({ type: "user", timestamp: stamp, message: { content: blocks.map(text => ({ type: "text", text })) } });
+    const lines = [row(["other"], "2026-10-14T00:00:00.000Z"), row(["yes", "yes"], "2026-10-14T00:00:01.000Z"), row(["yes"], "2026-10-14T00:00:02.000Z")];
+    const buffer = Buffer.from(lines.join("\n") + "\n");
+    const offsets = matchingOffsets(buffer, 100, { hash: promptHash("yes"), at });
+    expect(offsets).toEqual([100 + Buffer.byteLength(lines[0] + "\n" + lines[1] + "\n"), 100 + Buffer.byteLength(lines[0] + "\n")]);
   });
 });
 
