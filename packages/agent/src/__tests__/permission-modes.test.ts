@@ -38,6 +38,13 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "rg 'credentials.json' src",
     "grep -rn id_ed25519 src",
     "rg -e .npmrc src",
+    "rg --regexp=.npmrc src",
+    "rg -e foo -e .npmrc src",
+    "rg -e.npmrc src",
+    // After `--` an argument is an operand, not an option.
+    "rg -- --pre src",
+    "sort -- -output.txt",
+    "sort -r a.txt",
   ];
   const asked = [
     "rm -rf src",
@@ -83,6 +90,21 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "grep TOKEN .env",
     "rg -f .env src",
     "uniq -f 1 in.txt out.txt",
+    "uniq -- -in.txt out.txt",
+    "uniq in.txt -- out.txt",
+    // Clustered short options still write.
+    "sort -ro out.txt a.txt",
+    "tree -fo out.txt",
+    // git grep -O opens the matches in a program.
+    "git grep -O foo",
+    "git grep --open-files-in-pager=vim foo",
+    // With the pattern given by option, every operand is a path.
+    "rg --regexp=TOKEN config/secrets.json",
+    "rg -e TOKEN .npmrc",
+    "grep -e TOKEN -- .env",
+    // Relative spellings of secret folders.
+    "cat .aws/config",
+    "cat .ssh/config",
   ];
 
   for (const command of unprompted) {

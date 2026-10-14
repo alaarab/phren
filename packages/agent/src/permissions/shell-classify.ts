@@ -40,10 +40,11 @@ const WRITING_ARGS: Record<string, RegExp> = {
   // -i edits in place; a script's w command writes a file and e runs one.
   sed: /^(-i|--in-place)|(^|[;{}\n]|\/[gpIiMm0-9]*)\s*[we](\s|$)/,
   eslint: /^--fix/,
-  git: /^(-o|--output)/,
-  // sort -o writes its output file; --compress-program runs one.
-  sort: /^(-o|--output|--compress-program)/,
-  tree: /^-o/,
+  // git grep -O / --open-files-in-pager runs a program on the matches.
+  git: /^(-o|--output|-[A-Za-z]*O|--open-files-in-pager)/,
+  // sort -o writes its output file, also inside a cluster (-ro); --compress-program runs one.
+  sort: /^(-[A-Za-z]*o|--output|--compress-program)/,
+  tree: /^-[A-Za-z]*o/,
   // rg --pre runs a program on every file it searches.
   rg: /^--pre(=|$)/,
 };
@@ -132,11 +133,17 @@ function segmentIsSafe(tokens: string[]): boolean {
   // A leading assignment (PATH=… cmd) can change what runs.
   if (!binary || /^[A-Za-z_][A-Za-z0-9_]*=/.test(binary)) return false;
   const name = binary.includes("/") ? "" : binary;
+  // After `--` every argument is an operand, never an option (find's
+  // expression and sed's script are checked whole).
+  const end = name === "find" || name === "sed" ? -1 : args.indexOf("--");
+  const options = end === -1 ? args : args.slice(0, end);
   const writing = WRITING_ARGS[name];
-  if (writing && args.some((a) => writing.test(a))) return false;
+  if (writing && options.some((a) => writing.test(a))) return false;
   // uniq IN OUT overwrites OUT.
-  if (name === "uniq" && args.filter((a, i) => !a.startsWith("-") && !UNIQ_VALUE_OPTION.test(args[i - 1] ?? "")).length > 1) {
-    return false;
+  if (name === "uniq") {
+    const operands = options.filter((a, i) => !a.startsWith("-") && !UNIQ_VALUE_OPTION.test(options[i - 1] ?? "")).length
+      + (end === -1 ? 0 : args.length - end - 1);
+    if (operands > 1) return false;
   }
   if (name === "git" && gitGlobalOptionsUnsafe(args)) return false;
   if (READ_ONLY.has(name) || RUNNERS.has(name)) return true;

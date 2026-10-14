@@ -348,6 +348,7 @@ export const applyPatchTool: AgentTool = {
       // Validation follows links and `..` on disk; everything after it uses
       // that canonical path, never a lexical fold of the patch's path.
       const canonical = new Map<string, string>();
+      const removed = new Set(ops.flatMap((op) => op.kind === "delete" || (op.kind === "update" && op.moveTo) ? [op.path] : []));
       for (const p of patchPaths(ops)) {
         const sensitive = checkSensitivePath(path.resolve(cwd, p));
         if (sensitive.sensitive) return { output: `Access denied: ${p}: ${sensitive.reason}`, is_error: true };
@@ -358,7 +359,12 @@ export const applyPatchTool: AgentTool = {
         canonical.set(p, sandbox.resolved);
         const base = path.basename(p);
         const parent = base === "." || base === ".." ? null : validatePath(path.dirname(p), cwd, []);
-        entries.set(p, parent?.ok ? path.join(parent.resolved, base) : sandbox.resolved);
+        if (parent?.ok) entries.set(p, path.join(parent.resolved, base));
+        else if (removed.has(p)) {
+          // The entry itself lives outside the project (a link's real parent),
+          // even if what it points at is inside: never delete the target instead.
+          return { output: `Path outside sandbox: ${p}: its folder is outside the project.`, is_error: true };
+        }
       }
       const resolve = (p: string): string => canonical.get(p)!;
       for (const op of ops) {
@@ -376,8 +382,8 @@ export const applyPatchTool: AgentTool = {
     for (const w of writes) {
       const abs = w.abs;
       if (w.content === null) {
-        const entry = entries.get(w.path) ?? abs;
-        if (fs.lstatSync(entry, { throwIfNoEntry: false })) fs.rmSync(entry);
+        const entry = entries.get(w.path);
+        if (entry && fs.lstatSync(entry, { throwIfNoEntry: false })) fs.rmSync(entry);
         forgetFileState(abs);
       } else {
         fs.mkdirSync(path.dirname(abs), { recursive: true });

@@ -199,6 +199,11 @@ describe("checkPermission: a link to a secret file", () => {
       expect(checkPermission(config, "apply_patch", {
         patch: "*** Begin Patch\n*** Update File: public.txt\n-TOKEN=x\n+TOKEN=y\n*** End Patch",
       }).verdict).toBe("deny");
+      // A shell operand that is such a link asks in auto-confirm.
+      const auto: PermissionConfig = { mode: "auto-confirm", projectRoot: root, allowedPaths: [] };
+      expect(checkPermission(auto, "shell", { command: "cat public.txt" }).verdict).toBe("ask");
+      fs.writeFileSync(path.join(root, "notes.txt"), "hi\n");
+      expect(checkPermission(auto, "shell", { command: "cat notes.txt" }).verdict).toBe("allow");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

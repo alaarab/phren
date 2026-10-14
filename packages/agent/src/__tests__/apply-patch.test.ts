@@ -146,6 +146,22 @@ describe("apply_patch tool", () => {
     expect(fs.readFileSync("original.txt", "utf-8")).toBe("keep\n");
   });
 
+  it("refuses to delete through a folder link that leaves the project, even back into it", async () => {
+    // project/external -> outside; outside/back.txt -> project/original.txt.
+    const project = path.join(dir, "project");
+    const outside = path.join(dir, "outside");
+    fs.mkdirSync(project);
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(project, "original.txt"), "keep\n");
+    fs.symlinkSync(outside, path.join(project, "external"), "dir");
+    fs.symlinkSync(path.join(project, "original.txt"), path.join(outside, "back.txt"));
+    process.chdir(project);
+    const r = await applyPatchTool.execute({ patch: "*** Begin Patch\n*** Delete File: external/back.txt\n*** End Patch" });
+    expect(r.is_error).toBe(true);
+    expect(fs.readFileSync(path.join(project, "original.txt"), "utf-8")).toBe("keep\n");
+    expect(fs.lstatSync(path.join(outside, "back.txt"), { throwIfNoEntry: false })).toBeDefined();
+  });
+
   it("does not move onto an existing file it has not read", async () => {
     fs.writeFileSync("a.txt", "a\n");
     fs.writeFileSync("dest.txt", "keep\n");
