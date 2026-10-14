@@ -7,15 +7,14 @@ import { fileURLToPath } from "node:url";
 import type { WebSocket } from "ws";
 import type { Computer, HookResponse } from "./contract.js";
 
+// @ts-expect-error shared plain ESM redaction module
+import { redactString } from "#redact";
+export { redactString };
+
 const MAX_BODY = 256 * 1024;
 const MAX_TRACE = 50 * 1024 * 1024;
 const MAX_MS = 30 * 60 * 1000;
 const SENSITIVE = /token|secret|password|passphrase|authorization|cookie|apikey|api_key|privatekey/i;
-const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
-const BEARER = /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi;
-// Well-known token shapes that can sit inside ordinary text (a pasted command,
-// an error message): GitHub, OpenAI/Anthropic-style, Slack, AWS access keys.
-const TOKENS = /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/g;
 // Routes whose request body is a secret as a whole (a typed password, a
 // secret answer), whatever its keys are called.
 const SECRET_ROUTES = /^\/v1\/(?:secret|sudo)(?:\/|$)/;
@@ -72,11 +71,6 @@ function desktopVersion(): string {
 }
 
 // ---------------------------------------------------------------- redaction
-/** Replace a private-key block or a bare bearer token with "[redacted]". */
-export function redactString(value: string): string {
-  return value.replace(PRIVATE_KEY, "[redacted]").replace(BEARER, "Bearer [redacted]").replace(TOKENS, "[redacted]");
-}
-
 /** A query string with sensitive parameters' values replaced. */
 export function redactQuery(query: string): string {
   if (!query) return query;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+// @ts-expect-error plain ESM UI module
 import { needsNotice, sendReply } from "../ui/shell/needs-notify.js";
 
 const row = (child: Record<string, unknown>) => ({
@@ -30,4 +31,16 @@ describe("sendReply", () => {
     expect(await sendReply("mini/7", "hi", { find: () => undefined })).toBe("That session is gone.");
     expect(await sendReply("mini/7", "hi", { find: () => row({}), post: async () => { throw new Error("pane closed"); } })).toBe("pane closed");
   });
+});
+
+
+it.each([
+  "Authorization: Bearer abc.def.ghi", `sk-${"a".repeat(30)}`, `ghp_${"a".repeat(36)}`,
+  `github_pat_${"a".repeat(40)}`, "xoxb-1234567890-secret", "AKIA1234567890ABCDEF",
+  "password=short-secret", 'api_key="two words"', "deadbeef".repeat(8), "aB9+/".repeat(12) + "==",
+])("redacts credentials before constructing a notification: %s", (secret) => {
+  const notice = needsNotice(row({ lastReply: `Use ${secret} now. Tests pass.` }));
+  expect(notice.body).not.toContain(secret);
+  expect(notice.body).toContain("[redacted]");
+  expect(notice.body).toContain("now. Tests pass.");
 });

@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Notifications retain approval history across reconnects, open cached offline sessions, bind replies to the original conversation, and redact credentials.
+
 - Offline sessions no longer count as live attention; replacement approvals notify again, sidebar error and unknown states stay visible, and Review and Conductor share return labels.
 
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.

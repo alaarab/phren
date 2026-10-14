@@ -46,12 +46,15 @@ async function notifications() {
   const { startNeedsNotify } = await import("../ui/shell/needs-notify.js");
   const notify = vi.fn();
   connectStore();
-  startNeedsNotify({ notify }, { enabled: () => true, openSession: vi.fn() });
+  const openSession = vi.fn();
+  let click!: (key: string) => void;
+  let reply!: (value: unknown) => Promise<void>;
+  startNeedsNotify({ notify, onOpenSession: (fn: typeof click) => { click = fn; }, onReply: (fn: typeof reply) => { reply = fn; } }, { enabled: () => true, openSession });
   startApprovals();
-  const overview = (children: unknown[]) => Socket.opened[0].message({ type: "overview", merged: {
-    computers: [{ computer: "mini", state: "online", overview: { groups: [{ children }] } }],
+  const overview = (children: unknown[], state = "online") => Socket.opened[0].message({ type: "overview", merged: {
+    computers: [{ computer: "mini", state, overview: { groups: [{ children }] } }],
   } });
-  return { notify, overview, Socket };
+  return { notify, overview, Socket, openSession, click, reply };
 }
 
 it("notifies replacement approvals while blocked, and deduplicates plain waits by session", async () => {
@@ -71,7 +74,7 @@ it("notifies replacement approvals while blocked, and deduplicates plain waits b
   overview([{ ...child, agentStatus: "waiting", approvalPending: false }]);
   overview([{ ...child, agentStatus: "waiting", approvalPending: false, lastReply: "Still waiting" }]);
   expect(notify).toHaveBeenCalledTimes(3);
-  expect(notify.mock.lastCall?.[2]).toEqual({ key: "mini/7", reply: true });
+  expect(notify.mock.lastCall?.[2]).toMatchObject({ key: "mini/7", reply: true, binding: { target: { pane: "p" }, id: "7" } });
 });
 
 it("silently baselines existing approvals until they are replaced", async () => {
@@ -84,4 +87,65 @@ it("silently baselines existing approvals until they are replaced", async () => 
   expect(notify).not.toHaveBeenCalled();
   approval("replacement");
   expect(notify).toHaveBeenCalledTimes(1);
+});
+
+
+it("remembers approval actions across status reconnects and offline flaps, then retires answered or gone sessions", async () => {
+  const { notify, overview, Socket } = await notifications();
+  const child = { id: "7", agentStatus: "blocked", approvalPending: true, target: { pane: "p" } };
+  const approval = (actionId: string) => Socket.opened.at(-1)!.message({ agentStatus: { pendingApproval: { actionId } } });
+  overview([]);
+  overview([child]);
+  approval("A");
+  Socket.opened.at(-1)!.close();
+  overview([child]);
+  approval("A");
+  overview([child], "offline");
+  overview([child]);
+  approval("A");
+  expect(notify).toHaveBeenCalledTimes(1);
+  approval("B");
+  approval("A");
+  expect(notify).toHaveBeenCalledTimes(2);
+  overview([{ ...child, approvalPending: false, agentStatus: "working" }]);
+  overview([child]);
+  approval("A");
+  expect(notify).toHaveBeenCalledTimes(3);
+  overview([]);
+  overview([child]);
+  approval("A");
+  expect(notify).toHaveBeenCalledTimes(4);
+});
+
+it("opens a notification's cached offline session and attempts its reply through the Hook", async () => {
+  const { overview, notify, click, reply, openSession } = await notifications();
+  const child = { id: "7", agentStatus: "waiting", target: { pane: "p", session: "A" } };
+  overview([]);
+  overview([child]);
+  const opts = notify.mock.lastCall![2];
+  overview([child], "offline");
+  click("mini/7");
+  expect(openSession).toHaveBeenCalledWith("mini", child);
+  const fetch = vi.fn().mockResolvedValue({ ok: false, text: async () => '{"error":"Computer offline"}' });
+  vi.stubGlobal("fetch", fetch);
+  await reply({ ...opts, text: "hi" });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(notify.mock.lastCall).toEqual(["Reply not sent", "Computer offline"]);
+});
+
+it.each([
+  { target: { pane: "p", session: "B" }, sessionId: "A" },
+  { target: { session: "A", pane: "p" }, sessionId: "B" },
+])("refuses an old notification reply when its target or conversation changes: %j", async (replacement) => {
+  const { overview, notify, reply } = await notifications();
+  const child = { id: "7", agentStatus: "waiting", target: { pane: "p", session: "A" }, sessionId: "A" };
+  overview([]);
+  overview([child]);
+  const opts = structuredClone(notify.mock.lastCall![2]);
+  overview([{ ...child, ...replacement }]);
+  const fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => "{}" });
+  vi.stubGlobal("fetch", fetch);
+  await reply({ ...opts, text: "hi" });
+  expect(fetch).not.toHaveBeenCalled();
+  expect(notify.mock.lastCall).toEqual(["Reply not sent", "That session has changed. Open it to reply."]);
 });
