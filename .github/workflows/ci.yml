@@ -123,7 +123,7 @@ jobs:
   browser-test:
     if: github.event_name == 'workflow_dispatch' && inputs.release_candidate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -136,3 +136,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+      - name: Build desktop UI dependencies
+        run: |
+          pnpm --filter @phren/desktop-kit build
+          pnpm --filter @phren/desktop build
+          pnpm --filter @phren/desktop-editor build
+      - name: Desktop e2e
+        run: pnpm exec playwright test -c packages/desktop/playwright.config.ts
+      - name: Upload desktop Playwright failures
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-playwright
+          retention-days: 3
+          path: coverage/desktop-playwright/
+          if-no-files-found: ignore
