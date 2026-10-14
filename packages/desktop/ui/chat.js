@@ -2,7 +2,7 @@
 // Reads the transcript through @phren/desktop-kit (every harness), keeps
 // history and older pages, draws interaction cards and the phone's composer.
 //
-//   openChat(el, computerName, child, opts) -> { close(), focus(), insert(text) }
+//   openChat(el, computerName, child, opts) -> { close(), focus(), insert(text), attach(files) }
 //   opts: { onConsole?() }   // the session tile's switch to its console
 
 import { isShown, watchShown } from "./shown.js";
@@ -65,7 +65,7 @@ function ensureStyle() {
  * @param {string} computerName Hook computer name
  * @param {{title?:string,label?:string,cwd?:string,branch?:string,agentStatus?:string,target?:object}} child overview row
  * @param {{onConsole?:Function}} opts
- * @returns {{close:()=>void, focus:()=>void, insert:(text:string)=>void}}
+ * @returns {{close:()=>void, focus:()=>void, insert:(text:string)=>void, attach:(files:FileList|File[])=>void}}
  */
 export function openChat(el, computerName, child, opts = {}) {
   ensureStyle();
@@ -906,6 +906,8 @@ export function openChat(el, computerName, child, opts = {}) {
   return {
     /** Append review text (a diff line, a selection) to the draft and focus it, without sending. */
     insert(text) { composer.insert(text); },
+    /** Add dropped Files to the composer's pending attachments. */
+    attach(files) { composer.attach(files); },
     focus() { composer.focus(); },
     close() {
       closed = true;
