@@ -103,6 +103,7 @@ function createWindow(url) {
       nodeIntegration: false,
       sandbox: true,
       preload: path.join(here, "preload.cjs"),
+      additionalArguments: [`--phren-desktop-version=${app.getVersion()}`],
     },
   });
   const origin = new URL(url).origin;

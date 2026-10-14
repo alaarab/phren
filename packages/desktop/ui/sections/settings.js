@@ -1,6 +1,6 @@
 // Settings: one home for global configuration, a left list of pages and the
 // page on the right. Each page lives in ./settings/ (Computers, Keys, Appearance,
-// Notifications, Diagnostics); Extensions is the extensions host.
+// Notifications, Diagnostics, About); Extensions is the extensions host.
 // The theme picker is filled by app.js into #appearance-themes; notifications
 // and the dock badge are read back through notifyEnabled()/badgeEnabled().
 import { openExtensions } from "../extensions.js";
@@ -11,6 +11,7 @@ import { buildKeys } from "./settings/keys.js";
 import { buildAppearance } from "./settings/appearance.js";
 import { buildNotifications } from "./settings/notifications.js";
 import { buildDiagnostics } from "./settings/diagnostics.js";
+import { buildAbout } from "./settings/about.js";
 
 export { badgeEnabled, ciNotifyEnabled, notifyEnabled, stallNotifyEnabled } from "./settings/prefs.js";
 
@@ -26,6 +27,7 @@ const PAGES = [
   { id: "appearance", label: "Appearance" },
   { id: "notifications", label: "Notifications" },
   { id: "diagnostics", label: "Diagnostics" },
+  { id: "about", label: "About" },
 ];
 
 export function mountSettings(root) {
@@ -81,6 +83,7 @@ const BUILDERS = {
   appearance: buildAppearance,
   notifications: buildNotifications,
   diagnostics: buildDiagnostics,
+  about: buildAbout,
 };
 
 
