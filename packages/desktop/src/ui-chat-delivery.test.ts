@@ -77,6 +77,27 @@ function chat(backlogLoaded = true) {
 }
 
 describe("chat delivery reconciliation", () => {
+  it("keeps a removed send's place so its row cannot settle the next identical send", async () => {
+    const c = chat();
+    await c.send("yes");
+    const removed = c.echoes()[0].id;
+    c.el.find("pc-pending-x")!.fire("click");
+    expect(c.echoes()).toHaveLength(0);
+    expect(c.el.find("pc-pending")!.hidden).toBe(true);
+    await c.send("yes");
+    const next = c.echoes()[0].id;
+    c.socket.frame({ type: "append", totalLines: 1, entries: [user(0, "yes")] });
+    expect(c.echoes().map(e => e.id)).toEqual([next]);
+    expect(c.el.find("pc-pending-state queued")?.textContent).toBe("Queued");
+    await vi.advanceTimersByTimeAsync(2000);
+    const polls = fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt/status"));
+    expect(polls.map(([, options]) => JSON.parse(options.body).deliveryId)).toEqual([next]);
+    c.socket.frame({ type: "delivery", deliveryId: removed, state: "delivered" });
+    c.socket.frame({ type: "delivery", deliveryId: next, state: "failed", reason: "Cancelled before consumption" });
+    expect(c.echoes()[0]).toMatchObject({ id: next, deliveryState: "failed" });
+    expect(c.el.find("pc-pending-state failed")?.textContent).toBe("Failed: Cancelled before consumption");
+  });
+
   it("anchors an early send after the initial backlog and keeps its failure receipt visible", async () => {
     const c = chat(false);
     await c.send("yes");

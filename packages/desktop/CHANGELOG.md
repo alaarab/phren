@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Removing a pending chat send hides it while keeping its place, so its transcript row cannot settle a later identical send or hide that send's failure.
 - Released Claude questions and served OpenCode questions appear as answer cards in chat.
 - Answering a pending question from a chat card works for Claude and OpenCode as well as Codex.
 - Stage all refuses truncated listings, staging confirmations recheck file membership and types, and single-file Stage works while another confirmation is open.

@@ -367,7 +367,7 @@ export function createComposer({ computer, target, provider, branch, project, on
     pendingEl.replaceChildren();
     let shown = 0;
     for (const [id, entry] of pendings) {
-      if (entry.state === "delivered") continue;
+      if (entry.hidden || entry.state === "delivered") continue;
       shown++;
       const row = node("div", "pc-pending-row");
       row.append(node("span", "pc-pending-msg", entry.text || "[image]"));
@@ -404,10 +404,11 @@ export function createComposer({ computer, target, provider, branch, project, on
   function cancelPending(id) {
     const entry = pendings.get(id);
     if (!entry) return;
-    if (entry.timer) clearTimeout(entry.timer);
-    entry.timer = null;
-    pendings.delete(id);
+    // Removing the UI does not cancel delivery. Keep its FIFO reservation
+    // and receipt polling so its row cannot settle a later identical send.
+    entry.hidden = true;
     renderPending();
+    updateGhost();
     emit(id, entry.text, "failed", "Removed");
   }
 
