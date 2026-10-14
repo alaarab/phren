@@ -7,7 +7,7 @@
 //
 // createComposer({ computer, target, provider, branch, project, onConsole, onAgents,
 //   onWorkers, onDictate, onTalk }) -> {
-//   el, focus(), insert(text), setStatus(agentStatus), setBackground(jobs),
+//   el, focus(), insert(text), attach(files), setStatus(agentStatus), setBackground(jobs),
 //   setCounts({ agents, workers }), onDelivery(fn), destroy()
 // }
 // A left-footer button whose callback is missing is hidden. jobs are
@@ -263,7 +263,7 @@ const ICON = {
  * @param {{computer:string, target:object, provider:string, branch?:string,
  *   onConsole?:Function, onAgents?:Function, onWorkers?:Function,
  *   onDictate?:Function, onTalk?:Function}} options
- * @returns {{el:HTMLElement, focus:Function, insert:Function, setStatus:Function, setBackground:Function, setCounts:Function, onDelivery:Function, destroy:Function}}
+ * @returns {{el:HTMLElement, focus:Function, insert:Function, attach:Function, setStatus:Function, setBackground:Function, setCounts:Function, onDelivery:Function, destroy:Function}}
  */
 export function createComposer({ computer, target, provider, branch, project, onConsole, onAgents, onWorkers, onDictate, onTalk }) {
   ensureStyles();
@@ -407,7 +407,9 @@ export function createComposer({ computer, target, provider, branch, project, on
 
   async function addFiles(files) {
     for (const file of Array.from(files || [])) {
-      if (!file || !String(file.type || "").startsWith("image/")) continue;
+      if (!file) continue;
+      // Dropped on a session row or the composer, a non-image would otherwise vanish without a word.
+      if (!String(file.type || "").startsWith("image/")) { draftError.textContent = "Only images can be attached."; continue; }
       if (file.size > MAX_IMAGE_BYTES) { draftError.textContent = "Choose an image under 8 MB."; continue; }
       try {
         const base64 = await readBase64(file);
@@ -953,6 +955,8 @@ export function createComposer({ computer, target, provider, branch, project, on
       onInput();
       input.focus();
     },
+    /** Add Files as pending attachments, as if picked or dropped on the composer. */
+    attach(files) { addFiles(files); input.focus(); },
     setStatus(agentStatus) {
       status = agentStatus || {};
       working = String(status.status || "").toLowerCase() === "working";

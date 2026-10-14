@@ -467,6 +467,7 @@ export function mountAgents(root) {
       close() { chat.close(); consoleHandle?.close(); },
       focus() { if (mode === "console") consoleHandle?.focus?.(); else chat.focus?.(); },
       insert(text) { setMode("chat"); chat.insert?.(text); },
+      attach(files) { setMode("chat"); chat.attach?.(files); },
       toggleMode() { setMode(mode === "chat" ? "console" : "chat"); },
       setMode,
     };
@@ -544,11 +545,13 @@ export function mountAgents(root) {
   }
 
   function openSession(computer, child, options) {
-    tabs.open(chatDoc(computer, child), options);
+    return tabs.open(chatDoc(computer, child), options);
   }
 
   const handlers = {
     onOpenChat: (computer, child) => openSession(computer, child),
+    // tabs.open mounts synchronously and returns that session's own chat, so the files can't land in another one.
+    onDropFiles: (computer, child, files) => { openSession(computer, child)?.attach?.(files); },
     onOpenTerminal: (computer, server) => showPane("terminal", { computer, server }),
   };
 
