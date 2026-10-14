@@ -24,6 +24,7 @@ import { readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { atomicWriteText, debugLog } from "../phren-paths.js";
 import { errorMessage } from "../utils.js";
+import { withFileLock } from "../governance/locks.js";
 
 export const NOW_START = "<!-- phren:now:start -->";
 export const NOW_END = "<!-- phren:now:end -->";
@@ -296,14 +297,48 @@ export function splitTopicFile(filePath: string, maxBullets = TOPIC_SPLIT_AT): s
   if (!moved.length) return null;
   const olderPath = filePath.replace(/\.md$/, ".older.md");
   const title = head.find((l) => l.startsWith("# ")) ?? "# archive";
-  const prior = fs.existsSync(olderPath) ? fs.readFileSync(olderPath, "utf8").trimEnd() + "\n\n" : `${title} (older archive)\n\nSections moved here from ${path.basename(filePath)} once it passed ${maxBullets} bullets. Still indexed; still searchable.\n\n`;
-  atomicWriteText(olderPath, prior + moved.map((sec) => sec.join("\n").trimEnd()).join("\n\n") + "\n");
+  // The older file has writers of its own (a review rejection removes bullets
+  // from it): read and rewrite it under its lock, always taken after the topic's.
+  withFileLock(olderPath, () => {
+    const prior = fs.existsSync(olderPath) ? fs.readFileSync(olderPath, "utf8").trimEnd() + "\n\n" : `${title} (older archive)\n\nSections moved here from ${path.basename(filePath)} once it passed ${maxBullets} bullets. Still indexed; still searchable.\n\n`;
+    atomicWriteText(olderPath, prior + moved.map((sec) => sec.join("\n").trimEnd()).join("\n\n") + "\n");
+  });
   atomicWriteText(filePath, [...head, ...keep.flat()].join("\n").trimEnd() + "\n");
   return olderPath;
 }
 
+/** Attempts at writing a topic block before giving up because the file keeps changing underneath. */
+const TOPIC_WRITE_ATTEMPTS = 3;
+
+/**
+ * Writes `next` only if the topic still reads `expected`, under the same file
+ * lock the archive pass appends with. False when it changed meanwhile.
+ */
+function writeIfUnchanged(filePath: string, expected: string, next: string): boolean {
+  return withFileLock(filePath, () => {
+    if (fs.readFileSync(filePath, "utf8") !== expected) return false;
+    if (next !== expected) atomicWriteText(filePath, next);
+    return true;
+  });
+}
+
 export async function summarizeTopicFile(filePath: string, slug: string, opts: SummarizeOptions = {}): Promise<TopicResult> {
-  const split = splitTopicFile(filePath);
+  const split = withFileLock(filePath, () => splitTopicFile(filePath));
+  // The model can take minutes; findings archived into this topic meanwhile
+  // must not be overwritten by the snapshot it was given, so every write
+  // re-reads under the lock and starts over when the file moved.
+  for (let attempt = 1; ; attempt++) {
+    const result = await summarizeTopicOnce(filePath, slug, opts, split);
+    if (result) return result;
+    if (attempt >= TOPIC_WRITE_ATTEMPTS) {
+      debugLog(`summarize: ${slug} kept changing while it was summarized; left as it was`);
+      const current = fs.readFileSync(filePath, "utf8");
+      return { slug, file: filePath, bullets: parseTopicBullets(current).length, updated: false, split: split ?? undefined, now: blockBody(current, NOW_START, NOW_END) ?? "" };
+    }
+  }
+}
+
+async function summarizeTopicOnce(filePath: string, slug: string, opts: SummarizeOptions, split: string | null): Promise<TopicResult | null> {
   const content = fs.readFileSync(filePath, "utf8");
   const stamp = (opts.now ?? (() => new Date()))().toISOString();
   const prev = blockMeta(content, NOW_START);
@@ -317,7 +352,7 @@ export async function summarizeTopicFile(filePath: string, slug: string, opts: S
     const e = content.indexOf(NOW_END);
     if (s !== -1 && e !== -1 && e > s) {
       const stripped = `${content.slice(0, s)}${content.slice(e + NOW_END.length)}`.replace(/\n{3,}/g, "\n\n");
-      atomicWriteText(filePath, stripped);
+      if (!writeIfUnchanged(filePath, content, stripped)) return null;
       return { slug, file: filePath, bullets: 0, updated: true, now: "" };
     }
     return { slug, file: filePath, bullets: 0, updated: false, now: "" };
@@ -331,7 +366,7 @@ export async function summarizeTopicFile(filePath: string, slug: string, opts: S
   if (opts.llm) now = await proseNow(digest, bullets, AbortSignal.timeout(150_000));
   if (!now) now = structuralNow(digest);
   const next = upsertBlock(content, NOW_START, NOW_END, block(NOW_START, NOW_END, "## Now", now, stamp, fingerprint), "top");
-  if (next !== content) atomicWriteText(filePath, next);
+  if (!writeIfUnchanged(filePath, content, next)) return null;
   return { slug, file: filePath, bullets: bullets.length, updated: next !== content, split: split ?? undefined, now };
 }
 
@@ -476,6 +511,11 @@ export function readNowBlock(content: string): { text: string; structural: boole
 export function setTopicSummary(filePath: string, text: string, now: () => Date = () => new Date()): { ok: true } | { ok: false; invented: string[] } | { ok: false; error: string } {
   const paragraph = text.replace(/\s+/g, " ").trim();
   if (paragraph.length < 40) return { ok: false, error: "A summary needs at least a couple of sentences." };
+  // Read and write under the topic's lock, or a finding archived in between is lost.
+  return withFileLock(filePath, () => writeTopicSummary(filePath, paragraph, now));
+}
+
+function writeTopicSummary(filePath: string, paragraph: string, now: () => Date): { ok: true } | { ok: false; invented: string[] } | { ok: false; error: string } {
   const content = fs.readFileSync(filePath, "utf8");
   const bullets = parseTopicBullets(content);
   if (!bullets.length) return { ok: false, error: "This file has no archived bullets; it is a hand-written document, not a topic archive." };
