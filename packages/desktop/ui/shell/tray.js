@@ -30,7 +30,7 @@ export function trayState(rows, enabled, approvalOf = () => undefined) {
     const name = child.title ?? child.label ?? "Session";
     const row = { key, title: project && project !== name ? `${project}: ${name}` : name, sub: `${computer} · ${reason(child)}` };
     const approval = child.approvalPending ? approvalOf(key) : undefined;
-    return approval ? { ...row, approval: approval.summary } : row;
+    return approval ? { ...row, approval: approval.summary, actionId: approval.actionId } : row;
   });
   return { enabled: true, rows: shown, more: Math.max(0, rows.length - shown.length) };
 }
@@ -60,5 +60,6 @@ export function startTray(shell) {
   store.subscribe(push);
   approvals.subscribe(() => push());
   push();
-  shell.onTrayAnswer?.(({ key, decision }) => { void approvals.answerKey(key, decision); });
+  // The menu answers the action it showed; a replaced one is refused (answerKey checks the id).
+  shell.onTrayAnswer?.(({ key, decision, actionId }) => { void approvals.answerKey(key, decision, undefined, actionId); });
 }

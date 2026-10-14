@@ -51,13 +51,20 @@ function syncWatchers(value) {
 
 export const approvals = {
   approval(key) { return pending.get(key); },
-  async answerKey(key, decision, scope) {
+  /**
+   * Answer the pending approval on a session. With `expectedActionId` (the one a
+   * surface showed), a different pending action is refused rather than answered:
+   * the approval was replaced after the person saw it.
+   */
+  async answerKey(key, decision, scope, expectedActionId) {
     const row = store.needsYou().find((r) => r.key === key);
     const info = pending.get(key);
-    if (!info || !row?.child.target) return;
+    if (!info || !row?.child.target) return false;
+    if (expectedActionId !== undefined && info.actionId !== expectedActionId) return false;
     try {
       await answerApproval(row.computer, row.child.target, { actionId: info.actionId, decision, ...(scope ? { scope } : {}) });
-    } catch { /* the Hook may no longer be holding the approval */ }
+      return true;
+    } catch { return false; /* the Hook may no longer be holding the approval */ }
   },
   subscribe(fn) {
     listeners.add(fn);

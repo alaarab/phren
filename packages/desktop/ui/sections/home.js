@@ -605,8 +605,15 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   function onKeydown(event) {
     if (!visible) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const tag = (document.activeElement?.tagName || "").toUpperCase();
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    // Only when nothing else has focus, or focus is inside Home: Enter on another
+    // control (a section pill, a sidebar row) must do that control's job, never approve.
+    const active = document.activeElement;
+    const free = !active || active === document.body || active === document.documentElement;
+    if (!free && !root.contains(active)) return;
+    const tag = (active?.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || active?.isContentEditable) return;
+    // A focused button or link inside Home keeps Enter for itself.
+    if (event.key === "Enter" && !free && (tag === "BUTTON" || tag === "A")) return;
     const rows = needsYou(merged);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (!rows.length) return;

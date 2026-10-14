@@ -57,7 +57,7 @@ describe("shared approvals", () => {
     expect(status.url).toContain("/hosts/mini/v1/status?server=herdr");
     status.message(approvalFrame({ actionId: "a1", command: "pnpm build" }));
     expect(setTray.mock.lastCall?.[0].rows).toEqual([
-      { key: "mini/a", title: "Fix build", sub: "mini · wants approval", approval: "pnpm build" },
+      { key: "mini/a", title: "Fix build", sub: "mini · wants approval", approval: "pnpm build", actionId: "a1" },
     ]);
     answer({ key: "mini/a", decision: "approve" });
     answer({ key: "mini/a", decision: "deny" });
@@ -112,5 +112,34 @@ describe("shared approvals", () => {
     expect(JSON.parse(String(vi.mocked(fetch).mock.lastCall?.[1]?.body))).toEqual({
       target, actionId: "new", decision: "allow-project",
     });
+  });
+});
+
+describe("answerKey with the action a surface showed", () => {
+  it("refuses when the pending approval was replaced after it was shown", async () => {
+    const { approvals, overviewSocket } = await start();
+    overviewSocket.message(overview());
+    const status = Socket.opened[1];
+    status.message(approvalFrame({ actionId: "A", title: "rm -rf build" }));
+    status.message(approvalFrame({ actionId: "B", title: "rm -rf build" })); // replaced, same summary
+    expect(await approvals.answerKey("mini/a", "approve", undefined, "A")).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await approvals.answerKey("mini/a", "approve", undefined, "B")).toBe(true);
+    expect(JSON.parse(String(vi.mocked(fetch).mock.lastCall?.[1]?.body))).toMatchObject({ actionId: "B" });
+  });
+
+  it("the menu bar answers with the action it showed", async () => {
+    await start();
+    const { startTray } = await import("../ui/shell/tray.js");
+    const setTray = vi.fn();
+    let answer!: (value: { key: string; decision: string; actionId?: string }) => void;
+    startTray({ setTray, onTrayAnswer: (fn: typeof answer) => { answer = fn; } });
+    Socket.opened[0].message(overview());
+    Socket.opened[1].message(approvalFrame({ actionId: "A", command: "pnpm build" }));
+    expect(setTray.mock.lastCall?.[0].rows[0]).toMatchObject({ approval: "pnpm build", actionId: "A" });
+    Socket.opened[1].message(approvalFrame({ actionId: "B", command: "pnpm build" }));
+    answer({ key: "mini/a", decision: "approve", actionId: "A" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
