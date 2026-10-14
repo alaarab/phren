@@ -4,6 +4,7 @@
   "private": true,
   "description": "Phren desktop: a client of every computer's Phren Hook",
   "type": "module",
+  "imports": { "#redact": "./ui/redact.js" },
   "bin": {
     "phren-desktop": "./dist/src/main.js"
   },

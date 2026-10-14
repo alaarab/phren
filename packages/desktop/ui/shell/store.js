@@ -23,11 +23,11 @@ export const store = {
   /** Rows that need the owner: blocked or waiting agents and pending approvals. */
   needsYou() { return needsYou(merged); },
 
-  /** Every agent row across computers, flattened. */
-  sessions() { return sessions(merged); },
+  /** Live agent rows, or last-seen rows too with includeOffline. */
+  sessions(options) { return sessions(merged, options); },
 
   /** Find a session row by computer and child id. */
-  find(computer, id) { return sessions(merged).find((s) => s.computer === computer && s.child.id === id) ?? null; },
+  find(computer, id) { return sessions(merged, { includeOffline: true }).find((s) => s.computer === computer && s.child.id === id) ?? null; },
 
   /**
    * The Hook's declared capabilities for a computer (`/v1/health`), cached and
@@ -67,13 +67,13 @@ export const store = {
 };
 
 export function needsYou(m = merged) {
-  return sessions(m).filter(({ child }) =>
-    child.agentStatus === "blocked" || child.agentStatus === "waiting" || child.approvalPending);
+  return sessions(m).filter(({ child }) => sessionKind(child) === "needs");
 }
 
-export function sessions(m = merged) {
+export function sessions(m = merged, { includeOffline = false } = {}) {
   const rows = [];
   for (const c of m?.computers ?? []) {
+    if (!includeOffline && c.state !== "online") continue;
     for (const g of c.overview?.groups ?? []) {
       for (const child of g.children ?? []) {
         if (child.target) rows.push({ key: `${c.computer}/${child.id}`, computer: c.computer, group: g, child });
@@ -118,4 +118,12 @@ export function connectStore() {
 /** The project name a session row shows: the last folder of its working directory. */
 export function projectOf(child) {
   return (child.cwd ?? "").split("/").filter(Boolean).pop() ?? child.label ?? "";
+}
+
+/** The sidebar status, sharing the attention predicate with needsYou. */
+export function sessionKind(child) {
+  const s = child.agentStatus;
+  if (s === "blocked" || s === "waiting" || child.approvalPending === true) return "needs";
+  if (["working", "done", "idle", "error"].includes(s)) return s;
+  return "unknown";
 }
