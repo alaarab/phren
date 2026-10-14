@@ -336,8 +336,8 @@ shell or agent started directly on the PTY in a validated project folder (no
 chat, transcripts, or persistence for that one). Herdr's public JSON socket supplies workspace and pane control. Every
 chat mutation revalidates server, workspace, tab, pane, provider, and conversation.
 An agent-only socket registers lifecycle callbacks and explicit permission
-requests; it is inaccessible through the phone dispatcher. No Moshi installation
-or service is required. See [the connection protocol](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
+requests; it is inaccessible through the phone dispatcher. The Phren Hook
+provides these connections directly. See [the connection protocol](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
 
 ## Scheduling
 

@@ -54,8 +54,8 @@ the phone app. "Phren desktop", the package `@phren/desktop` and the command
 `phren desktop` name it only where it must be told apart. The earlier
 working name "Station" is retired.
 
-In one line: T3 Code's connection runtime and inbox, Moshi's desktop
-multi-host pattern, Herdr's sidebar, on Phren's Hook, in Phren's look.
+In one line: T3 Code's connection runtime and inbox, SSH connections to every
+computer, Herdr's sidebar, on Phren's Hook, in Phren's look.
 
 What it is not: it does not own agent processes (T3's thread-owns-process
 model), it does not replace Herdr or tmux, it does not go through a cloud
@@ -100,12 +100,12 @@ browser too.
 | --- | --- | --- |
 | **Web UI served by each Hook over Tailscale** | No, not as the base | The Hook listens on a Unix socket only and its whole trust model is SSH. A browser cannot speak SSH, so this needs a TCP listener, a token layer and a PTY WebSocket in every Hook before anything works, and it changes the security story the phone depends on. It also leaves fan-in to the browser. Keep it as a later option for the desktop daemon itself (section 3.4). |
 | **Electron shell over the desktop daemon** | **Chosen** (owner, 2026-10-09) | Chromium everywhere. On Linux (Omarchy, Wayland) Tauri would render with WebKitGTK, where xterm.js's WebGL renderer and general WebGL behaviour are inconsistent; Electron gives the same Chromium engine on macOS and Linux, so terminals, the 3D memory graph and the editor behave identically on every computer. Native menus, notifications, dock badge and tray come with it. Costs accepted: a 100 to 150 MB installer and an Electron release train. Keep the shell thin: the daemon (on the installed Node, 22.19+, same as the Hook) owns SSH, PTYs and Hook clients, and the shell only starts it and loads its UI, so the same UI still works in a plain browser tab (an iPad or a borrowed laptop on the tailnet). This is T3's own split: its renderer is an ordinary remote client of its server. |
-| **Tauri shell over the desktop daemon** | Not chosen | 10 MB shell, but WKWebView on macOS and WebKitGTK on Linux, so the Linux rendering path differs from the Mac one exactly where the desktop is heaviest (xterm.js with WebGL, the graph). Moshi ships this shape. |
+| **Tauri shell over the desktop daemon** | Not chosen | 10 MB shell, but WKWebView on macOS and WebKitGTK on Linux, so the Linux rendering path differs from the Mac one exactly where the desktop is heaviest (xterm.js with WebGL, the graph). |
 | **Native SwiftUI Mac app** | No | A third native port of the phone's state machines with no Linux story. |
 | **VS Code extension** | No | The existing extension is memory-only over MCP; a fleet UI inside VS Code's sidebar does not fit terminals, chats and multi-pane layouts, and ties the desktop to one editor. |
 
 Rendering choices inside the UI: **xterm.js** with the WebGL addon and the
-canvas fallback (Moshi's choice; T3's libghostty wasm is faster but a
+canvas fallback (T3's libghostty wasm is faster but a
 heavier dependency to carry); **Monaco** for the editor and file diffs
 (section 5); **`@pierre/diffs`** or the phone's diff rules ported to HTML for
 the chat's inline diffs; the existing `packages/cli/browser/graph/` bundle for the
@@ -156,14 +156,14 @@ connection; the desktop daemon does the same with OpenSSH itself: one
 request a new session on that master, with the same hardening flags the
 Hook's `peers.ts` uses (temp `known_hosts` holding only the pinned key,
 `StrictHostKeyChecking=yes`, `IdentitiesOnly`, no agent, no forwarding,
-`BatchMode=yes`). This is Moshi's `/hosts/<name>/*` proxy and Zed's
-ControlMaster reuse. WebSockets (`/v1/overview`, `/v1/transcripts`,
+`BatchMode=yes`). Requests are proxied by computer, reusing ControlMaster
+connections as Zed does. WebSockets (`/v1/overview`, `/v1/transcripts`,
 `/v1/status`) are long-lived sessions on the same master.
 
 Terminals: a local PTY (node-pty) running `ssh -t <computer>
 phren-hook v1 terminal <server>` (or `v1 shell <folder> [agent]`), bridged to
 the UI as a WebSocket of raw bytes with resize frames. Terminal bytes never
-pass through the remote Hook, as in Moshi and the phone.
+pass through the remote Hook, matching the phone transport.
 
 Web previews: `phren-hook v1 web 127.0.0.1 <port>` exec, surfaced as a local
 loopback port the UI's preview pane and the system browser can open.
@@ -186,8 +186,7 @@ The daemon binds `127.0.0.1` with a per-run token in the URL and a CSRF
 token for writes, as `phren web-ui` does today. Phase 3 may bind the
 Tailscale interface with the token plus `tailscale whois` on each
 connection so a browser on another tailnet device can open this computer's
-desktop (Moshi's `--listen 0.0.0.0` with the auth it lacks). Never a
-public port.
+desktop with authenticated access. Never a public port.
 
 ### 3.5 Hook changes this needs
 
@@ -360,7 +359,7 @@ piece of Hook work in the plan and should be its own PR with
 **Layout**: the window is a sidebar plus a tiled area. Tiles are chats,
 terminals, diffs, files, the graph, a preview. Layouts are saved per
 computer set, like Herdr's layout snapshots and the Code tab's drag-and-drop
-panes. Keyboard: a command palette across computers (Moshi's Cmd-K), "jump
+panes. Keyboard: a command palette across computers, "jump
 to latest unread", and a session switcher.
 
 ```

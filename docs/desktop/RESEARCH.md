@@ -1,13 +1,12 @@
 # Phren desktop: research notes
 
-Compiled 2026-10-07 for [DESIGN.md](DESIGN.md). Five surveys were run in parallel
-(Moshi, T3 Code, other references, the Phren Hook, the phren-apps repo) and
+Compiled 2026-10-07 for [DESIGN.md](DESIGN.md). Surveys of T3 Code, other
+references, the Phren Hook and the phren-apps repo were run in parallel and
 checked against public source, bundled docs and the local installs on the Mac
-mini. Versions: Phren CLI 0.3.33, phren-apps 1.0.5, moshi-hook 0.4.16 (daemon
-running 0.3.26), Herdr 0.9.1 (docs 0.9.3), T3 Code main `12865b4`
-(stable v0.0.45), Codex CLI 0.157 line.
+mini. Versions: Phren CLI 0.3.33, phren-apps 1.0.5, Herdr 0.9.1 (docs 0.9.3),
+T3 Code main `12865b4` (stable v0.0.45), Codex CLI 0.157 line.
 
-Sections: [Moshi](#1-moshi-and-moshi-hook), [T3 Code](#2-t3-code),
+Sections: [Phren transport decisions](#1-phren-transport-decisions), [T3 Code](#2-t3-code),
 [Codex app](#3-codex-app-and-app-server), [cmux](#4-cmux), [Herdr](#5-herdr),
 [VS Code remote and code-server](#6-vs-code-remote-code-server-openvscode-server),
 [Zed and ACP](#7-zed-remote-and-acp), [other fleet products](#8-other-2026-fleet-products),
@@ -15,89 +14,22 @@ Sections: [Moshi](#1-moshi-and-moshi-hook), [T3 Code](#2-t3-code),
 [the phone apps](#10-the-phone-apps-what-a-desktop-shares),
 [Phren's design language](#11-phrens-design-language), [cross-cutting takeaways](#12-cross-cutting-takeaways).
 
-## 1. Moshi and moshi-hook
+## 1. Phren transport decisions
 
-**Correction to the brief: moshi-hook is closed source.** The Go module path
-is `github.com/rjyo/moshi`, a private monorepo. Public pieces are only the
-Homebrew tap (`rjyo/homebrew-moshi`, which mirrors `docs/{api,hooks,usage,windows}.md`),
-a `moshi-skill` repo and an obsolete TypeScript predecessor. Release tarballs
-ship no LICENSE (SBOM says NOASSERTION). The bundled `docs/api.md` (1,442
-lines) is the real spec and is excellent. Go, 24.5 MB arm64 binary with the
-web client embedded, 104 tagged releases in five months (about daily), a solo
-maker. The iOS app is React Native; the desktop app is Tauri over the same web
-client.
+The desktop is a client of the Phren Hook on each computer. Use bounded
+GET snapshots, POST mutations with delivery acknowledgements, and WebSocket
+streams for live state. An acknowledgement proves delivery, not a state change.
 
-**Five wire surfaces** (api.md):
+Reuse SSH connections across requests and attach terminals through a local
+PTY. Keep transcripts, diffs, files and previews on the SSH path. Pair devices
+with revocable keys; authenticate any listener reachable beyond loopback.
 
-1. Local Unix socket, agent hook subprocess to daemon, newline JSON, auth by
-   file mode. Frames `approval.request`, `session.update`, `session.closed`,
-   `session.bind` up; `approval.response`, `ack`, `error` down.
-2. HTTPS to `api.getmoshi.app`, bearer `hostSecret`: host register, Easy Pair
-   bootstrap, inbox events, usage snapshots.
-3. WSS to the cloud for the approval round trip and push fan-out (`hello`,
-   `approval.request`, `approval.decision`, `ping`).
-4. Host gateway on `127.0.0.1:24543`, **no auth, loopback only**. The phone
-   reaches it with an SSH local forward on its own terminal connection.
-5. CLI JSON over SSH exec as preflight: `moshi-hook context|servers|cwd-list --json`.
-
-**Cloud carries only summaries**: inbox rows capped at 200/80/256 characters,
-usage windows, approval decisions, push. Transcripts, diffs, files and
-previews never leave the SSH path. Pro licensing is enforced server side.
-
-**Connections**: SSH (keys or password, jump hosts), Mosh (UDP, Pro) and
-Eternal Terminal (TCP 2022, Pro). No host discovery; Tailscale is plain
-networking, picked first by Easy Pair. **Easy Pair** is one QR flow that
-installs an Ed25519 key in `authorized_keys` and pairs the daemon secret;
-`host list` and `host revoke` manage keys. Docs warn to turn Tailscale SSH off
-because its port 22 hijack hangs key auth.
-
-**Sessions live in the multiplexer**, never in Moshi: tmux, Herdr (preferred,
-hooks mandatory) or Zellij. `moshi DIR` is `exec tmux new-session -A -s <basename>`.
-The gateway normalizes both muxes into a two-level tree (workspace/tab or
-session/window, panes lazily) with `agentStatus` working|blocked|done|idle|unknown,
-`title` read from each agent's own records, `model`, `contextRemaining`,
-`statusChangedAt` (plus `statusChangedAtApprox` after restarts). The tree
-rebuilds every 5 s at rest and every 1 s for 3 s after a hook event; the
-agent watch ticks at 250 ms; every `/events` frame is a partial merge.
-
-**Multi-host desktop pattern** (the one most relevant to a desktop):
-`/hosts/<name>/*` on the web listener reverse-proxies HTTP and WS to
-`127.0.0.1:24543` on `<name>` through `ssh -W` with `ControlMaster=auto`,
-`ControlPersist=10m`, `BatchMode=yes`. `GET /v1/pty?mux=…&host=<name>` runs
-the multiplexer attach through a local `ssh -t` on a locally owned PTY, so
-terminal bytes never traverse the remote daemon. `POST /v1/hosts/forward`
-opens same-port `-L` forwards (max 16). A `GET /v1/version` capability probe
-gates host switches; 404 blocks the switch with an upgrade message.
-
-**Hooks for 20 agents.** Claude gets SessionStart, UserPromptSubmit, Stop,
-SessionEnd, PermissionRequest, Notification, and Pre/PostToolUse only for
-AskUserQuestion and ExitPlanMode (per-tool hooks are deliberately not
-installed). Remote approve/deny is typed into the agent's own TUI after
-re-reading the screen (409 if the dialog changed). Codex is hooks plus rollout
-tailing. OpenCode is an in-process Bun plugin.
-
-**Transcripts** stream raw JSONL rows with physical line numbers and
-SHA-validated resume cursors; every harness is rewritten into Claude-shaped
-rows so clients keep one reducer. **Diff viewer and file browser** are an
-embedded SPA (`/apps/diff/<session>/`) with hunk staging, history, branches,
-PRs and an fs watcher; **no editing**. The web client is Vite/Rolldown,
-xterm.js with fit, web-links and WebGL addons, KaTeX, JetBrains Mono, Pierre
-diff components.
-
-**Copy**: the transport doctrine (GET for bounded snapshots, POST for user
-mutations returning an ack, WS for live state; an ack proves delivery, never
-state), the single `/events` stream with client-sent `watch` config and
-partial merges, the multi-host `ssh -W` proxy with local PTY attach, Easy
-Pair, verified TUI answers, doctor-as-data, titles from the agent's own
-records, `statusChangedAt` honesty.
-**Avoid**: zero-auth gateway and `--listen 0.0.0.0`, cloud-only approvals,
-screen scraping as primary truth (Moshi must disable it on EL10 tmux and
-cannot use it on Herdr), hard failure on version skew, the 20-agent adapter
-matrix.
-
-Sources: getmoshi.app docs (connections, hooks, chat-view, diff-viewer,
-multiplexer, tailscale, desktop), `https://cdn.getmoshi.app/hook/v0.4.16/…tar.gz`
-docs, `moshi-hook <cmd> --help`, `doctor --json`, `/opt/homebrew/opt/moshi-hook/README.md`.
+Agent status and titles should come from the harness's own records. Verify
+the current TUI dialog before answering a permission request, expose health
+checks as structured data, and gate features by capabilities rather than
+requiring matching versions. Screen scraping is a fallback, not the primary
+source of state. Keep the supported harness set small and approvals available
+without a cloud service.
 
 ## 2. T3 Code
 
@@ -504,10 +436,10 @@ From `apps/ios/DESIGN.md`, `design/controls.md`, `design/sessions.md`,
    workspace → pane rows with agent state, branch, PR, ports and the last
    notification, with an unread ring and "jump to latest". Herdr's five
    states and "reports beat heuristics" is the right status model.
-4. Multi-host desktops use the user's own SSH: Moshi's `ssh -W` reverse proxy
-   with local PTY attach, Zed's ControlMaster per project, cmux's uploaded
-   daemon. T3's ordered route list with learned routes is the best reconnect
-   discipline.
+4. Multi-host desktops use the user's own SSH: reuse connections and
+   attach terminals through local PTYs. Zed uses ControlMaster per project;
+   cmux uploads a daemon. T3's ordered route list with learned routes is the
+   best reconnect discipline.
 5. Nobody embeds VS Code. They keep a light file pane and a diff viewer with
    line comments that become a prompt, and link out ("Open in VS Code, Zed").
 6. Worktree-per-task is table stakes but must stay optional for Phren,

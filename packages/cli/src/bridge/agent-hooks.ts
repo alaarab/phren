@@ -593,7 +593,7 @@ export class AgentHooks {
     if (entry && !entry.dialog) {
       // The permission the pane still shows after its hook let go: keep the
       // request's own details and answer it with the dialog's rows, so the
-      // phone can approve it long after the hold ended, as Moshi does. Not a
+      // phone can approve it long after the hold ended. Not a
       // `dialog`: Claude takes a row's digit at once, and an Enter after it
       // could land on the next permission.
       if (dialog?.title) { entry.choice = dialog; entry.released = true; }
