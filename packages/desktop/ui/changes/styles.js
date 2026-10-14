@@ -59,6 +59,8 @@ export const CHANGES_CSS = `
 .chg-note{color:var(--waiting);font-size:12px}
 .chg-confirm{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;font-size:12.5px;color:var(--text-2)}
 .chg-confirm>span:first-child{flex:1}
+.chg-stage-confirm{flex-direction:column;align-items:stretch;max-height:320px;overflow:auto;overflow-wrap:anywhere}
+.chg-stage-paths{font:12px/1.5 "JetBrains Mono",ui-monospace,Menlo,monospace;color:var(--muted)}
 .chg-commit{display:flex;align-items:flex-end;gap:8px}
 .chg-msg{flex:1;min-height:34px;max-height:96px;resize:none;padding:8px 10px;background:var(--sunken);border:1px solid var(--border);border-radius:12px;color:var(--text);font:13px/1.4 system-ui,sans-serif;outline:none}
 .chg-msg:focus{border-color:var(--border-strong)}

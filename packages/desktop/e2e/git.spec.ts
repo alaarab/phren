@@ -69,7 +69,7 @@ test.beforeEach(async ({}, info) => {
   taskBranches = [];
   process.env.PHREN_BRIDGE_HOME = dir;
   // A test titled "on GitLab" runs against a GitLab remote, not yet connected.
-  git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github" });
+  git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github", directory: /remote branch checks out/.test(info.title) });
   hook = await startFakeHook({ dir, routes: { ...git.routes, ...MEMORY_ROUTES }, files: { "src/app.ts": FAKE_GIT_WORKING_APP } });
   hub = createOverviewHub([LOCAL], hookWebSocket);
   const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
@@ -231,12 +231,94 @@ test("branches switch with a confirmation, carry edits only when told, and a new
   expect(errors).toEqual([]);
 });
 
+test("single-file Stage works while its Discard confirmation is open", async ({ page }) => {
+  const errors = await openSession(page);
+  const row = page.locator(".chg-row", { hasText: "app.ts" }).first();
+  await row.hover();
+  await row.locator('.chg-icon[title="More actions"]').click();
+  await row.getByRole("button", { name: "Discard", exact: true }).click();
+  await expect(page.locator(".chg-confirm")).toContainText("Discard changes to app.ts?");
+  await row.hover();
+  await row.locator('.chg-icon[title="Stage"]').click();
+  await expect.poll(() => git.staged()).toBe(2);
+  await expect(page.locator(".chg-confirm")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("Stage all refuses a truncated 501-file listing", async ({ page }) => {
+  await page.route("**/v1/git/status", async (route) => {
+    const response = await route.fetch();
+    const status = await response.json();
+    const files = Array.from({ length: 500 }, (_, i) => ({ path: `file-${i}.txt`, status: "M", staged: false, countsComplete: true }));
+    await route.fulfill({ response, json: { ...status, files, truncated: true, totalFiles: 501, staged: 0, unstaged: 501, untracked: 0 } });
+  });
+  const errors = await openSession(page);
+  await page.getByRole("button", { name: "Stage all 500", exact: true }).click();
+  await expect(page.locator(".chg")).toContainText("1 more file exists");
+  await expect(page.locator(".chg-stage-confirm")).toHaveCount(0);
+  expect(git.calls.filter((call) => call.route === "stage")).toHaveLength(0);
+  expect(errors).toEqual([]);
+});
+
+test("stale Stage all review names a replacement directory before authorizing it", async ({ page }) => {
+  let replaced = false;
+  await page.route("**/v1/git/status", async (route) => {
+    const response = await route.fetch();
+    const status = await response.json();
+    const files: Record<string, unknown>[] = Array.from({ length: 101 }, (_, i) => ({
+      path: i === 0 ? "config.txt" : `file-${i}.txt`, status: "M", staged: false, binary: false, countsComplete: true,
+    }));
+    if (replaced) {
+      files[0] = { ...files[0], status: "D" };
+      files.push({ path: "config.txt/", status: "?", staged: false, directory: true, countsComplete: false });
+    }
+    await route.fulfill({ response, json: { ...status, files, truncated: false, totalFiles: files.length, staged: 0, unstaged: 101, untracked: replaced ? 1 : 0 } });
+  });
+  const errors = await openSession(page);
+  await page.getByRole("button", { name: "Stage all 101", exact: true }).click();
+  const confirmation = page.locator(".chg-stage-confirm");
+  await expect(confirmation).toContainText("Stage 101 paths?");
+  await expect(confirmation).not.toContainText("Folders and their contents");
+  replaced = true;
+  await confirmation.getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(confirmation).toContainText("The selection changed. Review the new listing");
+  await expect(confirmation).toContainText("Stage 102 paths?");
+  await expect(confirmation).toContainText("Folders and their contents: config.txt/");
+  expect(git.calls.filter((call) => call.route === "stage")).toHaveLength(0);
+  await confirmation.getByRole("button", { name: "Stage", exact: true }).click();
+  await expect.poll(() => git.calls.filter((call) => call.route === "stage").length).toBe(1);
+  expect(git.calls.find((call) => call.route === "stage")?.body).toMatchObject({ confirmBulk: true, expectedRepository: "/Users/you/phren" });
+  expect(errors).toEqual([]);
+});
+
 test("a remote branch checks out as a tracking local branch", async ({ page }) => {
   await openSession(page);
   // Stage everything first so nothing has to travel.
   await page.locator(".chg-row", { hasText: "app.ts" }).first().hover();
   await page.locator(".chg-row", { hasText: "app.ts" }).first().locator('.chg-icon[title="Stage"]').click();
   await expect.poll(() => git.staged()).toBe(2);
+  expect(git.calls.find((call) => call.route === "stage")?.body).not.toHaveProperty("confirmBulk");
+  const staged = page.locator(".chg-sec", { hasText: "STAGED" }).locator(".chg-row", { hasText: "app.ts" });
+  await staged.hover();
+  await staged.locator('.chg-icon[title="Unstage"]').click();
+  await expect.poll(() => git.staged()).toBe(0);
+  await page.getByRole("button", { name: "Stage all 3", exact: true }).click();
+  const confirmation = page.locator(".chg-stage-confirm");
+  await expect(confirmation).toContainText("Stage 3 paths?");
+  await expect(confirmation).toContainText("Folders and their contents: assets/");
+  await expect(confirmation.locator(".chg-stage-paths")).toHaveText("src/app.tsREADME.mdassets/");
+  expect(git.calls.filter((call) => call.route === "stage")).toHaveLength(1);
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirmation).toHaveCount(0);
+  expect(git.calls.filter((call) => call.route === "stage")).toHaveLength(1);
+  await page.getByRole("button", { name: "Stage all 3", exact: true }).click();
+  await confirmation.getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect.poll(() => git.staged()).toBe(2);
+  expect(git.calls.filter((call) => call.route === "stage").at(-1)?.body).toMatchObject({
+    paths: ["src/app.ts", "README.md", "assets/"], confirmBulk: true, expectedRepository: "/Users/you/phren",
+  });
+  await expect(page.locator(".chg-sec", { hasText: "STAGED" })).toContainText("icon.svg");
   await page.locator(".chg-seg", { hasText: "Branches" }).click();
   await page.locator('.chg-branch-row[data-branch="origin/agent/parser"]').click();
   await expect(page.locator(".chg-confirm")).toContainText("Check out origin/agent/parser as agent/parser");
