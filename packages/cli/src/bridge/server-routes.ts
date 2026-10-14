@@ -69,6 +69,7 @@ import { conductorAnswer, linkSetMember, nameSet, readSets } from "./conductor-s
 import { conductorPane } from "./conductor-role.js";
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
+import { GitWriteDiagnostics } from "./git-write-policy.js";
 import { SPEECH_FORMATS, streamSpeech } from "./speech.js";
 import { readSpeechKey } from "./speech-key.js";
 import { DEFAULT_SPEECH_VOICE, listSpeechVoices, resolveSpeechVoice } from "./speech-voice.js";
@@ -352,6 +353,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
     modelCatalog, accountUsage, resources, launches, locatedDirectories, fanoutMessages, canary } = ctx;
   const { conversationReader, childConversationReader, emptyPage } = ctx.streams;
   const readWorkspaces = workspacesReader(ctx);
+  const gitWrites = new GitWriteDiagnostics();
+  const paneContext = { ...ctx, gitWrites };
   return async (request, response) => {
     response.setHeader("X-Phren-Protocol", String(PROTOCOL));
     response.setHeader("Cache-Control", "no-store");
@@ -384,8 +387,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/tasks/stores": result = await getTaskDirectoryRoute(modules.store); break;
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
           case "/v1/metrics": result = hookMetrics.snapshot(); break;
-          case "/v1/health/details": result = await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
-            scheduler: scheduler ? { running: true, lastTickAt: scheduler.lastTickAt } : undefined, push: agentHooks.push.status }); break;
+          case "/v1/health/details": result = { ...await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
+            scheduler: scheduler ? { running: true, lastTickAt: scheduler.lastTickAt } : undefined, push: agentHooks.push.status }),
+            gitWrites: gitWrites.snapshot() }; break;
           case "/v1/health/peers": {
             // A peer's health probe asks whether this computer lists it back.
             const caller = z.object({ name: z.string().max(253).optional(), hostKey: z.string().max(512).optional() })
@@ -789,7 +793,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             { ...data, cwd: await launchDirectory(data.cwd ?? homeDir(), await journal.recent(), locatedDirectories) }))
             : await workspaceAction(selectedServer(url), operation, data);
         } else {
-          result = await paneRoute(ctx, url, data, response);
+          result = await paneRoute(paneContext, url, data, response, request.headers);
         }
       }
       } else if (request.method === "DELETE") {

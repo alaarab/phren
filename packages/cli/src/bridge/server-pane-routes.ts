@@ -1,4 +1,5 @@
-import type { ServerResponse } from "node:http";
+import type { IncomingHttpHeaders, ServerResponse } from "node:http";
+import { EXPECTED_REPOSITORY_REQUIRED, isGitWriteRoute, type GitWriteDiagnostics } from "./git-write-policy.js";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
@@ -36,6 +37,7 @@ import { sendServedPrompt, servedPane } from "./opencode-panes.js";
  * conversation yet) takes keys, a secret or a first prompt. */
 
 export interface PaneRouteContext {
+  gitWrites?: GitWriteDiagnostics;
   agentHooks: AgentHooks;
   modelSwitcher: ModelSwitcher;
   settingsSwitcher: SettingsSwitcher;
@@ -256,7 +258,11 @@ function deliveryReply(agentHooks: AgentHooks, id: string, target: Json, text: s
     ...(status.state === "queued" ? { queued: true } : {}), ...(status.reason ? { reason: status.reason } : {}) };
 }
 
-export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse): Promise<unknown> {
+export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, headers: IncomingHttpHeaders = {}): Promise<unknown> {
+  if (isGitWriteRoute(url.pathname) && data.expectedRepository === undefined) {
+    ctx.gitWrites?.record(url.pathname, headers);
+    if (EXPECTED_REPOSITORY_REQUIRED) throw new BridgeError(400, "This app is too old to change Git safely. Update it.", { code: "expected-repository-required" });
+  }
   if (["/v1/diff", "/v1/git/status", "/v1/git/worktrees"].includes(url.pathname)) {
     return withGitReadDeadline(() => paneRouteOnce(ctx, url, data, response, () => {}));
   }
@@ -587,7 +593,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // Git routes read the pane's repository, or a spawned child's own
     // worktree, exactly as /v1/diff resolves it.
     let cwd = await gitRepository(pane, target, data.child, data.worktree);
-    if (["stage", "unstage", "discard", "commit", "push", "pr", "pr/merge", "host-token", "checkout", "fetch", "pull", "apply"].some(action => url.pathname === `/v1/git/${action}`)
+    if (isGitWriteRoute(url.pathname)
       && data.expectedRepository !== undefined) {
       const expected = z.string().min(1).max(4096).refine(value => path.isAbsolute(value) && !value.includes("\0"), "Expected an absolute repository path.").parse(data.expectedRepository);
       const root = await gitRoot(cwd);

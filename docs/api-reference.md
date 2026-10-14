@@ -1566,14 +1566,31 @@ omit collapsed directories and untracked binaries by default, and label skipped
 items. Explicit row actions can confirm the selection. Unstage and discard keep
 their 64-path limit; discard does not recursively remove untracked directories.
 
-All six write routes (`stage`, `unstage`, `discard`, `commit`, `push`, `pr`)
+All twelve write routes (`stage`, `unstage`, `discard`, `commit`, `push`, `pr`,
+`pr/merge`, `host-token`, `checkout` including branch creation, `fetch`, `pull`, `apply`)
 accept optional `expectedRepository`: the last observed status `repository`, an
 absolute string of at most 4096 characters without NUL. After resolving the
 current pane/child/worktree, Hook compares its canonical Git root with that
 value. A mismatch returns 409 `git-checkout-changed` before any write; refresh
 Changes before retrying. This field is a precondition, never a selector for the
-checkout. Older callers may omit it. It detects a move between checkouts, not
+checkout. Older callers may currently omit it. It detects a move between checkouts, not
 concurrent edits or a branch switch inside the same checkout.
+
+Current iOS, Android and desktop already send `expectedRepository`. During the
+compatibility window, omitted fields still allow the write, but the Hook logs
+one warning per client and route per run. `GET /v1/health/details` exposes
+`gitWrites` rows with `client`, `count`, and the message
+`N git writes without expectedRepository from <client>`. Counts include every
+omission and reset when the Hook restarts. Identity uses available
+`X-Phren-Client`, `X-Phren-App-Version` or `X-Phren-Client-Version`, and
+`User-Agent` headers; absent identity is `unknown client`. The raw SSH pipe does
+not expose the paired key label. These headers are diagnostic hints.
+
+Hooks will start refusing these writes without `expectedRepository` no earlier
+than the first Hook release on or after **2026-11-15**, once warning counts show
+no older clients. The release switch is off by default; when enabled, omission
+returns HTTP 400 with
+`{ "error": "This app is too old to change Git safely. Update it.", "code": "expected-repository-required" }`.
 
 `POST /v1/diff` adds `repository`, `observedAt`, `totalFiles` and `truncated`.
 Each repository listing is capped at 500 paths and one million patch characters;

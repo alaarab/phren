@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- Hook Git writes without `expectedRepository` still run, but warn once per client and route and report omission counts in health details. Refusal is planned no earlier than the first Hook release on or after 2026-11-15, once warning counts show no older clients; current iOS, Android and desktop already send it.
+
 ## [0.3.46] - 2026-10-14
 
 ### Added
