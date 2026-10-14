@@ -591,11 +591,11 @@ export function createComposer({ computer, target, provider, branch, project, on
     pollStatus(id);
   }
 
-  // Pushed and polled receipts share this state, and late replies cannot
-  // revive a delivery already settled by a receipt or transcript row.
+  // Pushed and polled receipts share this state. A late delivered receipt
+  // can recover a failure, but stale replies cannot undo final states.
   function applyDelivery({ deliveryId, state = "unknown", reason } = {}) {
     const entry = pendings.get(deliveryId);
-    if (!entry || deliveryIsFinal(entry.state)) return;
+    if (!entry || entry.state === "delivered" || (entry.state === "failed" && state !== "delivered")) return;
     if (entry.timer) clearTimeout(entry.timer);
     entry.timer = null;
     setPending(deliveryId, entry.text, state, reason);
@@ -633,10 +633,11 @@ export function createComposer({ computer, target, provider, branch, project, on
   }
 
   function reconcileTranscript(messages) {
+    const normalize = (text) => text.replace(/\s+/gu, " ").trim();
     for (const message of messages) {
-      if (message.role !== "user" || message.localCommand !== null || settledRows.has(message.id)) continue;
+      if (message.role !== "user" || message.isQueued || message.localCommand !== null || settledRows.has(message.id)) continue;
       for (const [id, entry] of pendings) {
-        if (message.line > entry.submittedAfterLine && entry.text && message.text === entry.text) {
+        if (message.line > entry.submittedAfterLine && normalize(entry.text) && normalize(message.text) === normalize(entry.text)) {
           settledRows.add(message.id);
           removePending(id, true);
           break;

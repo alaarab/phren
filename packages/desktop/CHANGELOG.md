@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Queued transcript rows keep chat deliveries pending until consumed, late delivered receipts clear earlier failures, and transcript confirmation tolerates whitespace changes.
 - Chat keeps repeated prompts pending until their own delivery settles, clears finished reply previews, and saves drafts separately for each computer.
 
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.

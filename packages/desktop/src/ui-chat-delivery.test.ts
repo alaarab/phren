@@ -76,6 +76,58 @@ function chat() {
 }
 
 describe("chat delivery reconciliation", () => {
+  it("keeps queued rows pending and polling so cancellation receipts remain visible", async () => {
+    const c = chat();
+    await c.send("next step");
+    const id = c.echoes()[0].id;
+    const queued = user(0, "next step");
+    c.socket.frame({ type: "append", totalLines: 1, entries: [{ ...queued, raw: { ...queued.raw, phrenQueued: true } }] });
+    expect(c.echoes().map(e => e.id)).toEqual([id]);
+    expect(c.el.find("pc-pending-state queued")?.textContent).toBe("Queued");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt/status"))).toHaveLength(1);
+    c.socket.frame({ type: "delivery", deliveryId: id, state: "failed", reason: "Cancelled before consumption" });
+    expect(c.el.find("pc-pending-state failed")?.textContent).toBe("Failed: Cancelled before consumption");
+    expect(c.echoes()[0].deliveryState).toBe("failed");
+  });
+
+  it("settles only one duplicate when a queued row is replaced by its real turn", async () => {
+    const c = chat();
+    await c.send("yes");
+    await c.send("yes");
+    const two = c.echoes()[1].id;
+    const queued = user(0, "yes");
+    c.socket.frame({ type: "append", totalLines: 1, entries: [{ ...queued, raw: { ...queued.raw, phrenQueued: true } }] });
+    c.socket.frame({ type: "append", totalLines: 2, entries: [user(1, "yes")] });
+    expect(c.echoes().map(e => e.id)).toEqual([two]);
+  });
+
+  it("lets a late delivered receipt recover failure even when transcript text differs", async () => {
+    const c = chat();
+    await c.send("next step");
+    const id = c.echoes()[0].id;
+    c.socket.frame({ type: "delivery", deliveryId: id, state: "failed", reason: "Turn ended" });
+    // Stale non-delivered receipts must not clear a failure.
+    c.socket.frame({ type: "delivery", deliveryId: id, state: "queued" });
+    expect(c.echoes()[0].deliveryState).toBe("failed");
+    c.socket.frame({ type: "append", totalLines: 1, entries: [user(0, "Harness prefix: next step")] });
+    expect(c.echoes()).toHaveLength(1);
+    c.socket.frame({ type: "delivery", deliveryId: id, state: "delivered" });
+    expect(c.el.find("pc-pending")!.hidden).toBe(true);
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(c.echoes()).toHaveLength(0);
+  });
+
+  it("matches complete transcript text after whitespace normalization", async () => {
+    const c = chat();
+    await c.send("  next\n\tstep  ");
+    c.socket.frame({ type: "append", totalLines: 1, entries: [user(0, "next step please")] });
+    expect(c.echoes()).toHaveLength(1);
+    c.socket.frame({ type: "append", totalLines: 2, entries: [user(1, "next step")] });
+    expect(c.echoes()).toHaveLength(0);
+    expect(c.el.find("pc-pending")!.hidden).toBe(true);
+  });
+
   it("keeps duplicate submissions until distinct exact user rows after submission", async () => {
     const c = chat();
     c.socket.frame({ type: "backlog", totalLines: 10, entries: [user(3, "yes")] });

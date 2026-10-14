@@ -135,6 +135,56 @@ test("sidebar, chat and changes render against the fake Hook", async ({ page }) 
   await page.screenshot({ path: test.info().outputPath("desktop-smoke.png") });
 });
 
+test("queued chat stays pending through cancellation and recovers on a late delivered receipt", async ({ page }) => {
+  let deliveryId = "";
+  await page.route("**/v1/prompt", async (route) => {
+    deliveryId = route.request().postDataJSON().deliveryId;
+    await route.fulfill({ json: { state: "queued" } });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).first().click();
+  await expect(page.locator(".ct-column")).toContainText("Fix the login flow");
+  await page.locator(".pc-input").fill("Next review step");
+  await page.locator(".pc-input").press("Enter");
+  await expect(page.locator(".pc-pending-state")).toHaveText("Queued");
+  const raw = { type: "user", message: { role: "user", content: "Next review step" } };
+  hook.pushTranscript(undefined, { type: "append", totalLines: 21, entries: [{ line: 20, raw: { ...raw, phrenQueued: true } }] });
+  // Seeing the queued transcript bubble proves the frame was rendered.
+  await expect(page.locator(".ct-user-bubble", { hasText: "Next review step" })).toHaveCount(2);
+  await expect(page.locator(".pc-pending-state")).toHaveText("Queued");
+  hook.pushTranscript(undefined, { type: "delivery", deliveryId, state: "failed", reason: "Cancelled before consumption" });
+  await expect(page.locator(".pc-pending-state")).toHaveText("Failed: Cancelled before consumption");
+  hook.pushTranscript(undefined, { type: "append", totalLines: 22, entries: [{ line: 21, raw: { ...raw, message: { role: "user", content: "Harness prefix: Next review step" } } }] });
+  await expect(page.locator(".ct-column")).toContainText("Harness prefix: Next review step");
+  hook.pushTranscript(undefined, { type: "delivery", deliveryId, state: "delivered" });
+  await expect(page.locator(".pc-pending")).toBeHidden();
+  await expect(page.locator(".ct-pending")).toHaveCount(0);
+});
+
+test("a queued row and its real turn settle only one repeated chat submission", async ({ page }) => {
+  await page.route("**/v1/prompt", route => route.fulfill({ json: { state: "queued" } }));
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).first().click();
+  await expect(page.locator(".ct-column")).toContainText("Fix the login flow");
+  for (let i = 0; i < 2; i++) {
+    await page.locator(".pc-input").fill("Repeat review");
+    await page.locator(".pc-input").press("Enter");
+    await expect(page.locator(".pc-pending-state.queued")).toHaveCount(i + 1);
+  }
+  const raw = { type: "user", message: { role: "user", content: "Repeat review" } };
+  hook.pushTranscript(undefined, { type: "append", totalLines: 21, entries: [{ line: 20, raw: { ...raw, phrenQueued: true } }] });
+  await expect(page.locator(".ct-user-bubble", { hasText: "Repeat review" })).toHaveCount(3);
+  await expect(page.locator(".pc-pending-row")).toHaveCount(2);
+  hook.pushTranscript(undefined, { type: "append", totalLines: 22, entries: [{ line: 21, raw: { ...raw, message: { role: "user", content: "  Repeat\nreview  " } } }] });
+  await expect(page.locator(".pc-pending-row")).toHaveCount(1);
+  await expect(page.locator(".ct-pending")).toHaveCount(1);
+  hook.pushTranscript(undefined, { type: "append", totalLines: 23, entries: [{ line: 22, raw }] });
+  await expect(page.locator(".pc-pending")).toBeHidden();
+  await expect(page.locator(".ct-pending")).toHaveCount(0);
+});
+
 test("home lists who needs you, and sessions open as centre tabs", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
