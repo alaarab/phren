@@ -2683,13 +2683,14 @@ home-laptop: personal
 ci-server: minimal</code></pre>
 
         <h2 id="syncing">Syncing via Git <a href="#syncing" class="anchor-link">#</a></h2>
+        <p>Editing memory on two computers at once? See <a href="sync-conflicts.md">Sync conflicts across computers</a> for the rules and steps to fix a conflict.</p>
         <p>The <code>~/.phren</code> directory is a git repository. Syncing is plain git, automated through hooks:</p>
         <ul>
           <li>The <strong>SessionStart</strong> hook runs <code>git pull</code> on <code>~/.phren</code> at the beginning of every session</li>
           <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
         </ul>
         <p>Findings, tasks, and skills sync automatically as you work. Use profiles plus <code>machines.yaml</code> to scope which projects are active on each machine, then run <code>phren init</code> after profile changes to refresh local config.</p>
-        <p>Periodic remote checks are off by default. Set an interval to enable checks of shared Git stores while an MCP server is running. Clients sharing a store coordinate one check per interval. Each check reads the upstream commit with <code>git ls-remote</code>; only changed refs trigger a fetch, followed by a fast-forward update. Uncommitted edits, diverged history, and in-progress Git operations defer the update and record a reason in runtime sync status. Failed remote checks back off, up to 30 minutes or the configured interval if longer.</p>
+        <p>Phren Hook syncs stores every five minutes by default, even without an active agent session. Separate periodic remote checks while an MCP server runs are off by default. Clients sharing a store coordinate one check per interval. These checks save pending local edits before pulling and can combine changes from both computers. A conflict phren cannot resolve cancels the attempted combination and names the files. Checks wait if another Git operation is running. Failed remote checks back off, up to 30 minutes or the configured interval if longer.</p>
         <pre><code>phren config pull-interval       # show this machine's effective setting
 phren config pull-interval 60    # enable checks every minute
 phren config pull-interval 600   # every ten minutes

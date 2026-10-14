@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A message that opens with "Conductor:" or "Conductor," is a relayed message, so the prompt hook no longer files it as a task.
 - Hook schedule edits and once-schedule consumption release their file lock before yielding, preserve edits accepted during launch admission, and reject stale update revisions differing below a millisecond.
 
 ### Added

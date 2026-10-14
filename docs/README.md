@@ -14,6 +14,7 @@ tectonic docs/whitepaper.tex --outdir docs
 
 ## Other docs in this folder
 
+- [Sync conflicts across computers](sync-conflicts.md): How memory combines across computers and how to fix a conflict.
 - `docs/architecture.md`: Data flow diagrams for hooks, MCP server, FTS5 index, and memory governance.
 - `docs/architecture-team-stores.md`: Team-store and multi-store architecture notes.
 - `docs/llms-install.md`: Installation guide, MCP setup, hooks and memory governance pipeline.
