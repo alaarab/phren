@@ -444,7 +444,25 @@ export function mountSchedules(root) {
     });
   }
 
+  let listSignature = null;
+  const timeLabels = new Map();
   function renderList() {
+    // Polls return fresh objects even when nothing changed. Keep action buttons
+    // attached (and focused) until schedule data or its computer label changes.
+    const signature = JSON.stringify([state.loadedOnce, [...state.entries.values()]
+      .sort((a, b) => a.key.localeCompare(b.key))
+      .map((entry) => [entry, displayName(ownerName(entry.schedule))])]);
+    if (signature === listSignature) {
+      // Relative times still age without detaching a row someone is using.
+      for (const [key, labels] of timeLabels) {
+        const entry = state.entries.get(key);
+        labels.next.textContent = nextText(entry).text;
+        if (labels.age) labels.age.textContent = relative(new Date(labels.when));
+      }
+      return;
+    }
+    listSignature = signature;
+    timeLabels.clear();
     if (!state.loadedOnce) { listEl.replaceChildren(el("div", "sch-empty", "Loading schedules…")); return; }
     if (!state.entries.size) {
       listEl.replaceChildren(el("div", "sch-empty", "No schedules yet. Create one with New schedule."));
@@ -537,12 +555,18 @@ export function mountSchedules(root) {
 
     const meta = el("div", "sch-row-meta");
     const next = nextText(entry);
-    meta.append(el("span", `sch-next${next.offline ? " offline" : ""}`, next.text));
+    const labels = { next: el("span", `sch-next${next.offline ? " offline" : ""}`, next.text) };
+    timeLabels.set(entry.key, labels);
+    meta.append(labels.next);
     const chip = chipFor(entry);
     if (chip) {
       meta.append(el("span", `sch-chip ${chip.cls}`, chip.label));
       const when = entry.runtime?.lastRun?.finishedAt ?? entry.runtime?.lastRun?.startedAt;
-      if (when && !entry.runtime?.running) meta.append(el("span", "sch-age", relative(new Date(when))));
+      if (when && !entry.runtime?.running) {
+        labels.when = when;
+        labels.age = el("span", "sch-age", relative(new Date(when)));
+        meta.append(labels.age);
+      }
     }
     row.append(meta);
 
@@ -1074,7 +1098,7 @@ export function mountSchedules(root) {
 
   let onlineSig = "";
   const unsubscribe = store.subscribe((merged) => {
-    const sig = (merged?.computers ?? []).map((c) => `${c.computer}:${c.state}`).join(",");
+    const sig = (merged?.computers ?? []).map((c) => `${c.computer}:${c.state}`).sort().join(",");
     if (sig === onlineSig) return;
     onlineSig = sig;
     // Hidden, the next show() reads; this one only follows computers coming and going while open.

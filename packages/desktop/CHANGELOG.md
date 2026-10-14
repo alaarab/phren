@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.9] - unreleased
 
+- Narrow schedule editors wrap conflict notices and timing controls inside the scrolling body; unchanged schedule refreshes preserve list buttons and focus.
 - Schedule edits and Pause/Resume use the Hook's merge route when supported, preserving newer fields and showing the latest version after a conflict; removed schedules close the editor and validation errors stay on the form.
 
 ## [0.1.8] - 2026-10-14
