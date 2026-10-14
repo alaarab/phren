@@ -6,14 +6,14 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Released Claude questions and served OpenCode questions appear as answer cards in chat.
+- Answering a pending question from a chat card works for Claude and OpenCode as well as Codex.
+- Stage all refuses truncated listings, staging confirmations recheck file membership and types, and single-file Stage works while another confirmation is open.
+- Changes asks before staging folders, binary or unknown untracked files, or more than 100 paths, and keeps checks in the Hook’s order.
 - SSH masters verify their own atomically written host pin and authenticate only with the desktop private key, never an inherited SSH agent.
-
 - SSH master sockets cover the full host pin and current private key with 96-bit isolation; replaced connections cannot overwrite the new computer's overview or capabilities.
-
 - Replacing a connection discards pending handshakes; relinking after key rotation closes the original SSH masters and refreshes the overview.
-
 - Connections follow the configured Hook server, refresh capabilities on heartbeats, time out while waiting for a channel, and verify changed SSH keys and host pins on relink.
-
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.
 
 ## [0.1.7] - 2026-10-14

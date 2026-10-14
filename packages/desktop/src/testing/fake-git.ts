@@ -28,7 +28,7 @@ export interface FakeGit {
 
 /** The host the fake remote is on: GitHub (fully answered) or a stubbed
  * GitLab, as the Hook's providers answer them. */
-export function createFakeGit(options: { host?: "github" | "gitlab" } = {}): FakeGit {
+export function createFakeGit(options: { host?: "github" | "gitlab"; directory?: boolean } = {}): FakeGit {
   const host = options.host === "gitlab"
     ? { kind: "gitlab", name: "GitLab", domain: "gitlab.example.com", webUrl: "https://gitlab.example.com/team/phren", remote: "origin", source: "remote-override", terms: { short: "MR", long: "merge request", ref: "!" }, supported: true }
     : { kind: "github", name: "GitHub", domain: "github.com", webUrl: "https://github.com/sam/phren", remote: "origin", source: "url", terms: { short: "PR", long: "pull request", ref: "#" }, supported: true };
@@ -36,6 +36,7 @@ export function createFakeGit(options: { host?: "github" | "gitlab" } = {}): Fak
   let gitlabConnected = false;
   let gitlabMerged = false;
   let readmeStaged = false;
+  let directoryStaged = false;
   let branch = "main";
   const branches = new Map<string, { upstream?: string; ahead: number; behind: number }>([
     ["main", { upstream: "origin/main", ahead: 1, behind: 0 }],
@@ -55,10 +56,13 @@ export function createFakeGit(options: { host?: "github" | "gitlab" } = {}): Fak
     if (stagedHunks < 2) files.push({ path: APP, status: "M", staged: false, additions: stagedHunks === 0 ? 3 : 1, deletions: 1, countsComplete: true });
     files.push(readmeStaged ? { path: README, status: "A", staged: true, additions: 2, deletions: 0, countsComplete: true }
       : { path: README, status: "?", staged: false, additions: 2, deletions: 0, countsComplete: true });
+    if (options.directory) files.push(directoryStaged
+      ? { path: "assets/icon.svg", status: "A", staged: true, additions: 1, deletions: 0, countsComplete: true }
+      : { path: "assets/", status: "?", staged: false, directory: true, countsComplete: false });
     const t = tracking();
     return {
       repository: "/Users/you/phren", observedAt: new Date().toISOString(), truncated: false, countsComplete: true,
-      totalFiles: 2, branch, upstream: t.upstream ?? null, ahead: t.ahead, behind: t.behind,
+      totalFiles: options.directory ? 3 : 2, branch, upstream: t.upstream ?? null, ahead: t.ahead, behind: t.behind,
       staged: files.filter((f) => f.staged).length, unstaged: files.filter((f) => !f.staged && f.status !== "?").length,
       untracked: readmeStaged ? 0 : 1, additions: 5, deletions: 2, defaultBranch: "main", files,
     };
@@ -128,6 +132,10 @@ export function createFakeGit(options: { host?: "github" | "gitlab" } = {}): Fak
     "POST /v1/git/stage": (_req, body) => {
       record("stage", body);
       const paths = ((body ?? {}) as { paths?: string[] }).paths ?? [];
+      if (paths.includes("assets/")) {
+        if (!(body as { confirmBulk?: boolean }).confirmBulk) return { status: 409, json: { error: "Confirm staging this directory and its contents with confirmBulk=true." } };
+        directoryStaged = true;
+      }
       if (paths.includes(APP)) stagedHunks = 2;
       if (paths.includes(README)) readmeStaged = true;
       return ok({ ok: true });
