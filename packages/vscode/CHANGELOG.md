@@ -5,10 +5,11 @@ changelog is at the repository root. The Marketplace listing shows this file.
 
 ## [Unreleased]
 
-## [0.7.1] - unreleased
+## [0.7.1] - 2026-10-13
 
 ### Fixed
 
+- The fragment graph no longer fails with "Cannot read properties of undefined (reading 'size')" when the store sends a partial graph (a missing node, edge or topic list): it fills the gaps and shows what it has, or the empty state.
 - A missing or unlaunchable `node` / MCP server no longer raises an unhandled stream error in the extension host when the extension writes to the dead process. Once every reconnect fails, the error names the cause and points to Phren: Show Log.
 - Stores with more than 50 projects show all of them (the project list was read one page only), and a project with thousands of findings loads up to 1,000 of them instead of the first 200.
 - The fragment graph loads projects four at a time, so a store with dozens of projects no longer drops some of them to request timeouts, and it builds reference nodes without a quadratic scan.
