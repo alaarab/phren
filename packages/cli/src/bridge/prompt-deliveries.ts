@@ -200,14 +200,40 @@ export class PromptDeliveries {
   /** Conversation `target` just submitted `prompt`. Its own record wins, then
    * the oldest open one in the same pane: the agent kept the text across a
    * conversation change, and the conversation now in the pane is where it
-   * went. A prompt nothing matches was typed locally. Never refused. */
-  submitted(target: Target, prompt: string): void {
+   * went. A prompt nothing matches was typed locally. Never refused.
+   * For Claude the transcript is consulted first and the submission claims
+   * the earliest unclaimed user row with these words, through the same
+   * `settle` and the same table of claimed entries the idle check uses: a
+   * callback for a row already claimed (the idle check settled it, the hook
+   * came late) settles nothing more. */
+  async submitted(target: Target, prompt: string): Promise<void> {
     const hash = promptHash(prompt);
-    const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered");
-    const record = open.find(entry => entry.session === target.session) ?? open[0];
+    const pick = () => {
+      const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered");
+      return open.find(entry => entry.session === target.session) ?? open[0];
+    };
+    let record = pick();
     if (!record) return;
-    record.state = "delivered"; record.session = target.session; record.settledAt = this.now(); delete record.reason;
+    let entry: number | undefined;
+    if (target.source === "claude") {
+      const rows = (await this.landed({ source: target.source, session: target.session, hash, at: record.at }).catch(() => [] as TranscriptEntry[])).filter(row => row.hook);
+      if (rows.length > 0) {
+        const claimed = new Set(this.records.filter(other => other.hash === hash && this.samePane(other, target) && other.entry !== undefined).map(other => other.entry));
+        const free = rows.filter(row => !claimed.has(row.offset)).sort((a, b) => a.offset - b.offset)[0];
+        if (!free) return;
+        entry = free.offset;
+      }
+      record = pick();
+      if (!record) return;
+    }
+    this.settle(record, entry, target.session);
     this.save();
+  }
+  /** Marks `record` delivered, with the transcript entry that settled it when known. */
+  private settle(record: Record, entry?: number, session?: string) {
+    record.state = "delivered"; record.settledAt = this.now(); delete record.reason;
+    if (session) record.session = session;
+    if (entry !== undefined) record.entry = entry;
     this.release(record, "delivered");
   }
   /** Whether the transcript shows the agent took `record`'s message, claiming the entry it settled with.
@@ -245,7 +271,10 @@ export class PromptDeliveries {
   /** A turn in `target`'s pane ended: the agent now takes held input or never will. */
   stopped(target: Target): void {
     const at = this.now();
-    for (const record of this.records) if (this.samePane(record, target) && (record.state === "typed" || record.state === "queued") && record.at < at) record.stoppedAt = at;
+    let marked = false;
+    for (const record of this.records) if (this.samePane(record, target) && (record.state === "typed" || record.state === "queued") && record.at < at) { record.stoppedAt = at; marked = true; }
+    // Persisted: after a restart an idle pane's message is still failed or settled by its Stop.
+    if (marked) this.save();
   }
 
   /** Called on the Hook's activity tick with a server's panes. A message
@@ -260,7 +289,7 @@ export class PromptDeliveries {
       if (record.server !== server || (record.state !== "typed" && record.state !== "queued")) continue;
       const pane = panes.find(entry => entry.pane_id === record.pane);
       if (!pane || (record.terminal && pane.terminal_id !== record.terminal) || (pane.agent && pane.agent !== record.source)) {
-        if (await this.taken(record, pass)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); continue; }
+        if (await this.taken(record, pass)) { this.settle(record); changed = true; continue; }
         record.state = "failed"; record.settledAt = now; changed = true;
         record.reason = pane ? "The agent in this pane restarted before it took the message." : "The agent's pane closed before it took the message.";
         continue;
@@ -271,13 +300,13 @@ export class PromptDeliveries {
         // its UserPromptSubmit hook; its transcript is the only place that says so.
         if (record.source === "claude" && (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS)) {
           record.checkedAt = now;
-          if (await this.taken(record, pass, true)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); }
+          if (await this.taken(record, pass, true)) { this.settle(record); changed = true; }
         }
         continue;
       }
       record.idleSince ??= now;
       if (record.stoppedAt === undefined || now - Math.max(record.idleSince, record.stoppedAt) < DELIVERY_GIVE_UP_MS) continue;
-      if (await this.taken(record, pass)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); continue; }
+      if (await this.taken(record, pass)) { this.settle(record); changed = true; continue; }
       record.state = "failed"; record.settledAt = now; changed = true;
       record.reason = "The agent finished its turn without taking the message.";
     }

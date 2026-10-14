@@ -25,7 +25,7 @@ describe("phone messages bound to their pane", () => {
   it("reach the conversation that replaced the one they were sent to while queued", async () => {
     const store = deliveries();
     await send(store, "rotate-0001", "Split PR #283 by scope");
-    store.submitted(rotated, "Split PR #283 by scope");
+    await store.submitted(rotated, "Split PR #283 by scope");
     expect(store.status("rotate-0001", target)).toEqual({ state: "delivered", session: rotated.session });
     expect(store.forPane(rotated)).toEqual([{ deliveryId: "rotate-0001", state: "delivered", session: rotated.session }]);
   });
@@ -35,10 +35,10 @@ describe("phone messages bound to their pane", () => {
     await send(store, "first-0001", "Run the suite");
     await send(store, "second-0002", "Then open the PR");
     expect(store.forPane(target).map(item => item.state)).toEqual(["queued", "queued"]);
-    store.submitted(target, "Run the suite");
+    await store.submitted(target, "Run the suite");
     expect(store.status("first-0001", target).state).toBe("delivered");
     expect(store.status("second-0002", target).state).toBe("queued");
-    store.submitted(target, "Then open the PR");
+    await store.submitted(target, "Then open the PR");
     expect(store.status("second-0002", target).state).toBe("delivered");
   });
 
@@ -46,14 +46,14 @@ describe("phone messages bound to their pane", () => {
     const store = deliveries();
     await send(store, "same-0001", "yes");
     await send(store, "same-0002", "yes");
-    store.submitted(target, "yes");
+    await store.submitted(target, "yes");
     expect([store.status("same-0001", target).state, store.status("same-0002", target).state]).toEqual(["delivered", "queued"]);
   });
 
   it("leave a prompt typed by hand in another pane alone", async () => {
     const store = deliveries();
     await send(store, "mine-0001", "continue");
-    store.submitted({ ...target, pane: "w6:p2" }, "continue");
+    await store.submitted({ ...target, pane: "w6:p2" }, "continue");
     expect(store.status("mine-0001", target).state).toBe("queued");
   });
 
@@ -67,7 +67,7 @@ describe("phone messages bound to their pane", () => {
     const restarted = deliveries();
     expect(restarted.status("restart-0001", target).state).toBe("queued");
     expect(restarted.status("restart-0002", target).state).toBe("queued");
-    restarted.submitted(rotated, "Merge the deps branch");
+    await restarted.submitted(rotated, "Merge the deps branch");
     expect(restarted.status("restart-0001", target)).toEqual({ state: "delivered", session: rotated.session });
   });
 
@@ -111,7 +111,7 @@ describe("a message the agent never takes fails loudly", () => {
     await store.observe("default", [pane("idle")]);
     expect(store.status("dropped-0001", target)).toEqual({ state: "failed", reason: "The agent finished its turn without taking the message.", session: target.session });
     // Taken late after all (someone pressed Enter in the terminal).
-    store.submitted(target, "Lost words");
+    await store.submitted(target, "Lost words");
     expect(store.status("dropped-0001", target).state).toBe("delivered");
   });
 
@@ -171,12 +171,13 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [claudePane("working")]);
     // The row's own UserPromptSubmit settles the first; nothing the transcript said claimed an entry.
     expect(store.status("row-0001", claudeTarget).state).toBe("queued");
-    clock += 5_000; store.submitted(claudeTarget, "yes");
+    clock += 5_000; await store.submitted(claudeTarget, "yes");
     expect(store.status("row-0001", claudeTarget).state).toBe("delivered");
     expect(store.status("row-0002", claudeTarget).state).toBe("queued");
     await store.observe("default", [claudePane("working")]);
     expect(store.status("row-0002", claudeTarget).state).toBe("queued");
-    clock += 5_000; store.submitted(claudeTarget, "yes");
+    // The second turn's row is in the transcript now.
+    matches = 2; clock += 5_000; await store.submitted(claudeTarget, "yes");
     expect(store.status("row-0002", claudeTarget).state).toBe("delivered");
   });
   it("settles a user row at idle only for a hook that never came, once per row", async () => {
@@ -190,9 +191,13 @@ describe("a message the agent took into its running turn", () => {
     clock += DELIVERY_GIVE_UP_MS;
     await store.observe("default", [claudePane("idle")]);
     expect(store.status("idle-0001", claudeTarget).state).toBe("delivered");
-    // One row, one message: the second was not taken (it fails loudly) until its own hook arrives.
+    // One row, one message: the second was not taken (it fails loudly).
     expect(store.status("idle-0002", claudeTarget).state).toBe("failed");
-    store.submitted(claudeTarget, "yes");
+    // A delayed callback for the row the idle check already claimed settles nothing more, even the failed message.
+    await store.submitted(claudeTarget, "yes");
+    expect(store.status("idle-0002", claudeTarget).state).toBe("failed");
+    // The next turn's own row and callback settle it.
+    matches = 2; await store.submitted(claudeTarget, "yes");
     expect(store.status("idle-0002", claudeTarget).state).toBe("delivered");
   });
   it("is unaffected by a Stop that lands while the transcript is being read", async () => {
@@ -209,8 +214,19 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [claudePane("working")]);
     expect(store.status("mid-read-1", claudeTarget).state).toBe("delivered");
     expect(store.status("mid-read-2", claudeTarget).state).toBe("queued");
-    store.submitted(claudeTarget, "yes");
+    await store.submitted(claudeTarget, "yes");
     expect(store.status("mid-read-2", claudeTarget).state).toBe("delivered");
+  });
+  it("keeps a Stop across a restart, so an idle pane's message is still failed", async () => {
+    const store = deliveries();
+    await send(store, "stop-0001", "Go on", claudeTarget);
+    clock += 1; store.stopped(claudeTarget);
+    await store.flush();
+    const restarted = deliveries();
+    await restarted.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await restarted.observe("default", [claudePane("idle")]);
+    expect(restarted.status("stop-0001", claudeTarget).state).toBe("failed");
   });
   it("survives a Hook restart after the transcript check", async () => {
     const store = deliveries();
@@ -230,7 +246,7 @@ describe("a message the agent took into its running turn", () => {
     clock += 2_000; await store.observe("default", [claudePane("working")]);
     expect(calls.length).toBe(2);
   });
-  it("reads a dequeued-from-the-queue row as the user's words", () => {
+  it("reads a dequeued-from-the-queue row as the user's words", async () => {
     expect(userTexts({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "from my phone" })).toEqual(["from my phone"]);
     expect(userTexts({ type: "queue-operation", operation: "remove", reason: "delivered_to_agent", content: "from my phone" })).toEqual(["from my phone"]);
     // Input the agent never saw is not input it took.
@@ -246,7 +262,7 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [pane("working")]);
     expect(store.status("codex-0001", target).state).toBe("queued");
   });
-  it("counts one entry for a row that repeats the words", () => {
+  it("counts one entry for a row that repeats the words", async () => {
     const at = 1_000;
     const row = (blocks: string[], stamp: string) => JSON.stringify({ type: "user", timestamp: stamp, message: { content: blocks.map(text => ({ type: "text", text })) } });
     const lines = [row(["other"], "2026-10-14T00:00:00.000Z"), row(["yes", "yes"], "2026-10-14T00:00:01.000Z"), row(["yes"], "2026-10-14T00:00:02.000Z")];
@@ -266,13 +282,13 @@ describe("a message held by a Codex thread the pane has left", () => {
     store.threadChanged(target);
     expect(store.status("left-0001", target)).toEqual({ state: "failed", reason: "The pane moved to another Codex conversation before the agent took the message.", session: target.session });
     expect(store.status("other-0002", { ...target, pane: "w6:p2" }).state).toBe("queued");
-    store.submitted(target, "Run the suite");
+    await store.submitted(target, "Run the suite");
     expect(store.status("left-0001", target).state).toBe("delivered");
   });
 });
 
 describe("user text in transcripts", () => {
-  it("reads Claude user rows and Codex user messages, not assistant rows", () => {
+  it("reads Claude user rows and Codex user messages, not assistant rows", async () => {
     expect(userTexts({ type: "user", message: { content: "Hello" } })).toEqual(["Hello"]);
     expect(userTexts({ type: "user", message: { content: [{ type: "text", text: "Hi" }, { type: "image" }] } })).toEqual(["Hi"]);
     expect(userTexts({ type: "event_msg", payload: { type: "user_message", message: "Go" } })).toEqual(["Go"]);
