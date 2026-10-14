@@ -47,6 +47,13 @@ describe("pathUtils", () => {
     expect(containingFolder([], "/c/x.ts")).toBeUndefined();
   });
 
+  it("relativeInside keeps a backslash in a POSIX filename and treats WSL folders as case-sensitive", () => {
+    expect(relativeInside("/repo", "/repo/src/a\\b.ts")).toBe("src/a\\b.ts");
+    expect(relativeInside("\\\\wsl$\\Ubuntu\\home\\App", "\\\\wsl$\\Ubuntu\\home\\app\\a.ts")).toBeUndefined();
+    expect(relativeInside("\\\\WSL$\\Ubuntu\\home\\App", "\\\\wsl$\\Ubuntu\\home\\App\\a.ts")).toBe("a.ts");
+    expect(samePath("\\\\wsl$\\Ubuntu\\home\\App", "\\\\wsl$\\Ubuntu\\home\\app")).toBe(false);
+  });
+
   it("samePath ignores trailing separators, slash style and Windows case", () => {
     expect(samePath("C:\\Repo\\", "c:/repo")).toBe(true);
     expect(samePath("/a/b/", "/a/b")).toBe(true);
