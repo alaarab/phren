@@ -16,6 +16,8 @@ export class LookupCache<T> {
     private readonly limit = 64,
     private readonly available: (value: T) => boolean = () => true,
     private readonly pendingTimeout = 45_000,
+    /** A result that revokes what was cached (lost access), so the old success is never served again. */
+    private readonly revokes: (value: T) => boolean = () => false,
   ) {}
 
   invalidate(matches: (key: string) => boolean): void {
@@ -45,7 +47,7 @@ export class LookupCache<T> {
         if (this.entries.get(key) === current && current.pending === pending) {
           const previous = current.value;
           const keepSuccess = previous && this.available(previous.data) &&
-            !this.available(data) && Date.now() - previous.at < this.maxAge;
+            !this.available(data) && !this.revokes(data) && Date.now() - previous.at < this.maxAge;
           if (!keepSuccess) current.value = { data, at: Date.now() };
         }
         return data;
@@ -55,7 +57,7 @@ export class LookupCache<T> {
       });
       entry.pending = pending;
     }
-    if (cached && age < maxAge) {
+    if (cached && age < maxAge && !this.revokes(cached.data)) {
       void entry.pending.catch(() => {});
       return Promise.resolve(cached.data);
     }

@@ -241,7 +241,28 @@ export async function gitBranches(cwd: string): Promise<Json> {
   return { current, local, remote };
 }
 
-const pullsCache = new LookupCache<Json>(30_000, 300_000, 64, value => value.available === true);
+// An auth or not-found refusal means access was lost: it replaces a cached success at once.
+const REVOKING = new Set(["auth", "not-found"]);
+const pullsCache = new LookupCache<Json>(30_000, 300_000, 64, value => value.available === true, 45_000,
+  value => value.available === false && REVOKING.has(String(value.reason)));
+
+// GitLab's fingerprint can need a glab subprocess, so it is read at most every
+// few seconds per host with concurrent polls sharing one read. The others are
+// plain file reads and stay exact, so a sign-out is seen on the next poll.
+const credentialReads = new Map<string, { at: number; value: Promise<string> }>();
+const CREDENTIAL_TTL_MS = 5_000;
+function credentialIdentity(host: Parameters<typeof hostCredentialIdentity>[0], fresh = false): Promise<string> {
+  const key = JSON.stringify([host.kind ?? null, (host.domain ?? "").toLowerCase()]);
+  const hit = credentialReads.get(key);
+  if (host.kind !== "gitlab") return hostCredentialIdentity(host);
+  if (!fresh && hit && Date.now() - hit.at < CREDENTIAL_TTL_MS) return hit.value;
+  const value = hostCredentialIdentity(host).catch(error => { credentialReads.delete(key); throw error; });
+  credentialReads.set(key, { at: Date.now(), value });
+  if (credentialReads.size > 64) credentialReads.delete(credentialReads.keys().next().value!);
+  return value;
+}
+
+class CredentialsChanged extends Error {}
 
 /** Invalidate every branch/host lookup for this checkout after a Hook write. */
 export function invalidatePulls(root: string): void {
@@ -251,6 +272,7 @@ export function invalidatePulls(root: string): void {
 /** Tokens belong to a domain, so revoke every checkout and pending generation. */
 export function invalidatePullsForDomain(domain: string): void {
   const normalized = domain.trim().toLowerCase().replace(/\.$/, "");
+  for (const key of credentialReads.keys()) if (JSON.parse(key)[1] === normalized) credentialReads.delete(key);
   pullsCache.invalidate(key => key.split("\0")[1] === normalized);
 }
 
@@ -258,23 +280,31 @@ export function invalidatePullsForDomain(domain: string): void {
  * with its checks, from whichever host the remote is on (git-hosts.ts). A
  * host that cannot answer (a missing CLI, a stubbed provider, an unknown
  * domain) is `{ available: false, reason, message }`, never an error. */
-export async function gitPulls(cwd: string): Promise<Json> {
+export async function gitPulls(cwd: string, retried = false): Promise<Json> {
   const { root, branch, host } = await withIndependentGitReadDeadline(async () => {
     const root = await repository(cwd);
     const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
     return { root, branch, host: await detectHost(root, branch) };
   });
   const provider = providerFor(host);
-  const credential = await hostCredentialIdentity(host);
+  const credential = await credentialIdentity(host);
   const key = root + "\0" + (host.domain ?? "").toLowerCase().replace(/\.$/, "") + "\0" + JSON.stringify([branch, host, credential]);
-  return pullsCache.get(key, () => withoutGitReadDeadline(async () => {
-    const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
-    if (await hostCredentialIdentity(host) !== credential) {
-      pullsCache.invalidate(candidate => candidate === key);
-      throw new BridgeError(409, "Forge credentials changed during the lookup. Retry.");
-    }
-    return { ...list, branch: branch || null, host };
-  }));
+  try {
+    return await pullsCache.get(key, () => withoutGitReadDeadline(async () => {
+      const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
+      // A sign-in or token change during the lookup: never cache what the old credentials returned.
+      if (await credentialIdentity(host, true) !== credential) {
+        pullsCache.invalidate(candidate => candidate === key);
+        throw new CredentialsChanged();
+      }
+      return { ...list, branch: branch || null, host };
+    }));
+  } catch (error) {
+    if (!(error instanceof CredentialsChanged)) throw error;
+    // Read again once under the new credentials rather than failing the request.
+    if (!retried) return gitPulls(cwd, true);
+    throw new BridgeError(409, "Forge credentials keep changing. Retry.");
+  }
 }
 
 /** A repo-relative tree path, or the repository root for `""`. */
