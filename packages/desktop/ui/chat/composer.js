@@ -407,7 +407,9 @@ export function createComposer({ computer, target, provider, branch, project, on
 
   async function addFiles(files) {
     for (const file of Array.from(files || [])) {
-      if (!file || !String(file.type || "").startsWith("image/")) continue;
+      if (!file) continue;
+      // Dropped on a session row or the composer, a non-image would otherwise vanish without a word.
+      if (!String(file.type || "").startsWith("image/")) { draftError.textContent = "Only images can be attached."; continue; }
       if (file.size > MAX_IMAGE_BYTES) { draftError.textContent = "Choose an image under 8 MB."; continue; }
       try {
         const base64 = await readBase64(file);
