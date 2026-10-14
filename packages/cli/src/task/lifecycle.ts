@@ -74,8 +74,9 @@ const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_cont
 // Relays may name one sender ("From tidy-phren:") or a computer and agent
 // ("From macbook android-codex:"). Keep "From now on" as a request.
 // A two-word sender needs the colon; longer names need a parenthesized handle.
-// "From the settings page, add …" stays a request.
-const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)(?:[\w.-]+\s*[,:]|[\w.-]+\s+[\w.-]+\s*:|[\w.-]+(?:[ \t]+[\w.-]+)*[ \t]+\([\w.-]+\)[ \t]*:)/i;
+// "From the settings page, add …" stays a request. A message the conductor
+// sends opens with "Conductor:" or "Conductor,".
+const RELAYED_MESSAGE_RE = /^\s*(?:conductor\s*[,:]|from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)(?:[\w.-]+\s*[,:]|[\w.-]+\s+[\w.-]+\s*:|[\w.-]+(?:[ \t]+[\w.-]+)*[ \t]+\([\w.-]+\)[ \t]*:))/i;
 // Dispatch returns are typed into an idle agent as ordinary prompts.
 const DISPATCH_RETURN_NOTICE_RE = /^\s*returns?:\s+[^\n]+\bCall dispatch_returns\.\s*$/i;
 // A dispatched or scheduled worker's first prompt names its brief file
