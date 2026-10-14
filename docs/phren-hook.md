@@ -1287,3 +1287,37 @@ Manual items remain until explicitly resolved. Show history on demand, retain
 ids across retries, and refresh after actions. On upgrade, stale automatic
 items resolve with `stale: source gone`; an unreachable worker is hidden as
 unverified rather than resolved. No phone UI changes are included here.
+
+## Schedule editing
+
+All schedule routes use authenticated JSON `POST` requests:
+
+| Route | Body and response |
+| --- | --- |
+| `/v1/schedules` | `{}`; returns `{ computer, timeZone, schedules }`, including each schedule's stored `updatedAt`. |
+| `/v1/schedules/update` | `{ project, id, expectedUpdatedAt, changes }`; returns `{ ok: true, schedule }` after a locked merge and atomic write. |
+| `/v1/schedules/run` | `{ project, id, expectedUpdatedAt? }`; returns `{ ok, run, runs }`. |
+| `/v1/schedules/history` | `{ project?, id?, limit? }`; returns `{ runs }`. |
+
+`capabilities.scheduleUpdate: true` advertises the update route when the schedules
+module is enabled. Clients should use their legacy edit path on older Hooks.
+`expectedUpdatedAt` is the per-schedule timestamp from `/v1/schedules`, with
+an ISO 8601 time zone; equivalent instants match. A mismatch returns HTTP 409
+with `{ error, schedule }`, where `schedule` is the current stored definition.
+A missing project or schedule returns 404. Invalid body fields, types, or merged
+schedule validation return 400 with `{ error }`. These failures write nothing.
+
+`changes` accepts `name`, `prompt`, `enabled`, `computer`, `harness`, `model`,
+`account`, `notify`, `projects`, `session`, `every`, `at`, `days`, `interval`,
+`once`, and `cron`. Only supplied keys change; unknown stored keys remain.
+`null` removes optional fields, but cannot remove a required field, including
+one required by the selected timing form. Identity and timestamps are not
+editable, and unknown request keys are refused. For example:
+
+```json
+{"project":"acme","id":"7f3a2c1d","expectedUpdatedAt":"2026-09-20T21:00:00Z","changes":{"enabled":false,"model":null}}
+```
+
+The Hook reads fresh under the CLI schedule writers' lock, validates the merged
+schedule, assigns a new `updatedAt`, and writes atomically. See
+[scheduled prompts](schedules.md#hook-routes) for timing and serialization details.

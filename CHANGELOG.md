@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Hook: `POST /v1/schedules/update` merges client edits under the schedule lock, preserves untouched fields, and returns the current schedule on a revision conflict; advertised by `scheduleUpdate`.
+
 ## [0.3.46] - 2026-10-14
 
 ### Added
