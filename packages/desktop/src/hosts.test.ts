@@ -75,6 +75,16 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     expect(slot2).not.toBe(controlPath(sshArgs(desk, "x")));
   });
 
+  it("never shares a master between two identities for the same destination", async () => {
+    await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
+    const [, desk] = await loadComputers();
+    const other = { ...desk, keyFile: path.join(root, "id_ed25519_dispatch") };
+    expect(controlPath(sshArgs(other, "x"))).not.toBe(controlPath(sshArgs(desk, "x")));
+    // Teardown targets the exact master each identity's channels used.
+    expect(controlPath(masterExitArgs(desk, 1))).toBe(controlPath(sshArgs(desk, "x", { slot: 1 })));
+    expect(controlPath(masterExitArgs(other, 1))).toBe(controlPath(sshArgs(other, "x", { slot: 1 })));
+  });
+
   it("refuses the local computer", () => {
     expect(() => sshArgs({ name: "This computer", local: true, server: "default" }, "x")).toThrow(/local/);
   });
