@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -83,7 +83,7 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
   const port = c.port ?? 22;
   const controlDir = path.join(root, "desktop-cm");
   const knownHosts = knownHostsPath(c.name);
-  // The master socket and pinned known_hosts live together; %C hashes the connection tuple.
+  // Keep each computer's pinned known_hosts under the bridge folder.
   mkdirSync(controlDir, { recursive: true, mode: 0o700 });
   // Revoke deletes the file without touching this cache, so a relink under the
   // same name and host key must still rewrite it.
@@ -168,29 +168,24 @@ export async function closeMasters(c: Computer): Promise<void> {
 export function masterKey(c: Computer): string {
   if (c.local) return c.name;
   if (!c.keyFile) throw new Error(`Computer ${c.name} is missing its SSH key.`);
-  let publicKey: string;
-  try { publicKey = readFileSync(`${c.keyFile}.pub`, "utf8"); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    // Older enrollments kept only the private half. ssh-keygen returns its
-    // public identity; private key contents never enter the master hash.
-    publicKey = execFileSync("ssh-keygen", ["-y", "-P", "", "-f", c.keyFile], { encoding: "utf8", timeout: 10_000, maxBuffer: 4096 });
-  }
-  const identity = createHash("sha256").update(publicKey.trim().split(/\s+/).slice(0, 2).join(" ")).digest("hex");
-  const pin = createHash("sha256").update(Buffer.from(c.hostKey?.trim().split(/\s+/)[1] ?? "", "base64")).digest("hex");
-  return `${identity}\n${pin}\n${c.username ?? ""}@${c.address ?? ""}:${c.port ?? 22}`;
+  // Read every time so even same-size rotations with unchanged mtimes and
+  // stale .pub sidecars get new masters. The private digest stays in memory;
+  // only the combined socket identity leaves this function.
+  const identity = createHash("sha256").update(readFileSync(c.keyFile)).digest("hex");
+  return createHash("sha256").update(JSON.stringify([
+    c.username ?? "", c.address ?? "", c.port ?? 22, c.hostKey ?? "", identity,
+  ])).digest("hex").slice(0, 24);
 }
 
-/** The ControlMaster socket path for one slot. A hash of the public identity,
+/** The ControlMaster socket path for one slot. A hash of the private identity,
  * pinned host key and destination isolates changed credentials; the slot index lets
  * the channel pool spread concurrent channels over several connections. */
 function controlPath(c: Computer, slot: number): string {
-  const tag = createHash("sha256").update(masterKey(c)).digest("hex").slice(0, 8);
-  return path.join(controlSocketDir(), `${tag}-${slot}-%C`);
+  return path.join(controlSocketDir(), `${masterKey(c)}-${slot}`);
 }
 
 /** Unix socket paths are capped at 104 bytes on macOS, and ssh appends a
- * 40-character %C hash plus a 17-character temp suffix, so the masters live
+ * 17-character temp suffix, so the masters live
  * in a short private directory rather than under the bridge folder. */
 function controlSocketDir(): string {
   const dir = `/tmp/phren-desktop-${userInfo().uid}`;

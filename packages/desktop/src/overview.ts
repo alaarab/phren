@@ -160,8 +160,8 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     scheduleChange();
   }
 
-  function attach(sup: Supervisor, socket: WebSocket): void {
-    if (sup.stopped) {
+  function attach(sup: Supervisor, socket: WebSocket, attempt: number): void {
+    if (sup.stopped || attempt !== sup.attempt) {
       socket.terminate();
       return;
     }
@@ -172,12 +172,14 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     sup.silenceTimer = setTimeout(() => reconnect(sup), SILENCE_MS);
 
     const finish = (err?: Error): void => {
-      if (sup.socket !== socket) return; // already settled
+      if (sup.stopped || attempt !== sup.attempt || sup.socket !== socket) return; // already settled or replaced
       sup.socket = undefined;
       clearTimers(sup);
       fail(sup, err);
     };
-    socket.on("message", (data: RawData) => onFrame(sup, data));
+    socket.on("message", (data: RawData) => {
+      if (!sup.stopped && attempt === sup.attempt && sup.socket === socket) onFrame(sup, data);
+    });
     socket.on("close", () => finish());
     socket.on("error", (err: Error) => finish(err));
   }
@@ -227,7 +229,7 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     try {
       sup.identity = masterKey(sup.computer);
       ws(sup.computer, `${OVERVIEW_PATH}&server=${encodeURIComponent(sup.computer.server)}`).then(
-        (socket) => { if (settled || attempt !== sup.attempt) { clearTimeout(timer); socket.terminate(); } else settle(() => attach(sup, socket)); },
+        (socket) => { if (settled || attempt !== sup.attempt) { clearTimeout(timer); socket.terminate(); } else settle(() => attach(sup, socket, attempt)); },
         (err: unknown) => settle(() => fail(sup, err)),
       );
     } catch (err) {

@@ -22,7 +22,7 @@ beforeEach(async () => {
   dir = await mkdtemp(path.resolve(".scratch/request-"));
   process.env.PHREN_BRIDGE_HOME = dir;
   const keyFile = path.join(dir, "key");
-  await writeFile(`${keyFile}.pub`, "ssh-ed25519 AAAATESTKEY");
+  await writeFile(keyFile, "private test key");
   computer = { name: "Remote", local: false, server: "default", address: "box", username: "me", keyFile, hostKey: "ssh-ed25519 AAAAPIN" };
   ssh.kill.mockReset();
   ssh.spawn.mockReset().mockImplementation(() => {

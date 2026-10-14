@@ -11,9 +11,9 @@ const previous = process.env.PHREN_BRIDGE_HOME;
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "desktop-hosts-"));
   process.env.PHREN_BRIDGE_HOME = root;
-  await writeFile(path.join(root, "id_ed25519_desktop.pub"), KEY);
-  await writeFile(path.join(root, "id_ed25519_dispatch.pub"), `${KEY}different`);
-  await writeFile(path.join(root, "other.pub"), `${KEY}other`);
+  await writeFile(path.join(root, "id_ed25519_desktop"), "private desktop");
+  await writeFile(path.join(root, "id_ed25519_dispatch"), "private dispatch");
+  await writeFile(path.join(root, "other"), "private other");
 });
 afterEach(async () => { process.env.PHREN_BRIDGE_HOME = previous; await rm(root, { recursive: true, force: true }); });
 
@@ -44,7 +44,7 @@ describe("loadComputers", () => {
   });
 });
 
-const CONTROL_PATH = /^ControlPath=\/tmp\/phren-desktop-\d+\/[0-9a-f]{8}-(\d)-%C$/;
+const CONTROL_PATH = /^ControlPath=\/tmp\/phren-desktop-\d+\/[0-9a-f]{24}-(\d)$/;
 
 function controlPath(args: string[]): string {
   const option = args.find(arg => arg.startsWith("ControlPath="));
@@ -74,9 +74,9 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
     const [, desk] = await loadComputers();
     expect(controlPath(sshArgs(desk, "x"))).toMatch(CONTROL_PATH);
-    expect(controlPath(sshArgs(desk, "x"))).toMatch(/-0-%C$/);
+    expect(controlPath(sshArgs(desk, "x"))).toMatch(/-0$/);
     const slot2 = controlPath(sshArgs(desk, "x", { slot: 2 }));
-    expect(slot2).toMatch(/-2-%C$/);
+    expect(slot2).toMatch(/-2$/);
     // Same key, same slot: stable path.
     expect(slot2).toBe(controlPath(sshArgs(desk, "x", { slot: 2 })));
     expect(slot2).not.toBe(controlPath(sshArgs(desk, "x")));
@@ -109,7 +109,7 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     expect(masterKey({ ...desk, port: 22 })).not.toBe(masterKey(desk));
   });
 
-  it("isolates a changed pin or public key at the same pathname", async () => {
+  it("isolates a changed pin or private key at the same pathname", async () => {
     await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
     const [, desk] = await loadComputers();
     const originalKey = masterKey(desk);
@@ -117,11 +117,11 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     const repinned = { ...desk, hostKey: "ssh-ed25519 AAAANEWPIN" };
     expect(masterKey(repinned)).not.toBe(originalKey);
     expect(controlPath(sshArgs(repinned, "x"))).not.toBe(originalPath);
-    await writeFile(`${desk.keyFile}.pub`, "ssh-ed25519 AAAANEWIDENTITY");
+    await writeFile(desk.keyFile!, "private replacement");
     expect(masterKey(desk)).not.toBe(originalKey);
     expect(controlPath(sshArgs(desk, "x"))).not.toBe(originalPath);
     const alias = path.join(root, "alias");
-    await writeFile(`${alias}.pub`, "ssh-ed25519 AAAANEWIDENTITY");
+    await writeFile(alias, "private replacement");
     expect(masterKey({ ...desk, keyFile: alias })).toBe(masterKey(desk));
   });
 
@@ -137,7 +137,7 @@ describe.skipIf(process.platform === "win32")("masterExitArgs", () => {
     const args = masterExitArgs(desk, 3);
     expect(args).toContain("-F");
     expect(args).toContain("/dev/null");
-    expect(controlPath(args)).toMatch(/-3-%C$/);
+    expect(controlPath(args)).toMatch(/-3$/);
     expect(args.slice(args.indexOf("-p"), args.indexOf("-p") + 2)).toEqual(["-p", "2222"]);
     expect(args).toContain("me@box");
     expect(args.slice(-2)).toEqual(["-O", "exit"]);
