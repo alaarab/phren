@@ -210,7 +210,8 @@ export async function runTopLevelCommand(
       snapshot = activateModules(store, undefined, true);
     }
     const unavailable = disabledCommand([cmd.name, ...argv.slice(1)].join(" "), snapshot);
-    if (unavailable) { console.error(unavailable); return finish(1); }
+    // Without a store every module reads as disabled; "run init" is the fix, not "enable the module".
+    if (unavailable) { console.error(findPhrenPath() ? unavailable : "phren is not set up yet. Run: phren init"); return finish(1); }
   } catch (error) {
     if (!["init", "modules", "doctor", "verify", "uninstall", "link"].includes(cmd.name)) {
       console.error(errorMessage(error)); return finish(1);
