@@ -10,10 +10,14 @@ function computerLine(c) {
   return `${c.computer} · ${c.state} · Hook ${c.overview?.phren?.version ?? "—"}`;
 }
 
-/** Only the display names, states and versions belong in a bug report. */
+/**
+ * The copied report. A bug report may be posted publicly, so computers are
+ * numbered instead of named (a name can be an SSH host); state and Hook
+ * version are what the report needs.
+ */
 export function aboutText({ version, platform, userAgent, computers = [] }) {
   return [desktopLine(version), `Platform: ${platform}`, `User agent: ${userAgent}`,
-    ...computers.map(computerLine)].join("\n");
+    ...computers.map((c, i) => computerLine({ ...c, computer: `Computer ${i + 1}` }))].join("\n");
 }
 
 export function buildAbout(page) {
@@ -59,6 +63,7 @@ export function buildAbout(page) {
   });
 
   render();
-  store.subscribe(() => { if (!page.hidden) render(); });
+  // Settings hides an ancestor, not this page, when another section opens.
+  store.subscribe(() => { if (page.isConnected && !page.closest("[hidden]")) render(); });
   return render;
 }
