@@ -8,7 +8,7 @@ import type { Json, Target } from "./protocol.js";
 const target: Target = { server: "default", workspace: "w6", tab: "w6:t1", pane: "w6:p1", source: "codex", session: "01a10831-4b62-7000-8000-000000000001" };
 const rotated: Target = { ...target, session: "01a10985-bf36-7000-8000-000000000002" };
 let root: string, file: string, clock: number, landed: boolean, matches = 1, stores: PromptDeliveries[] = [];
-const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed ? matches : 0); stores.push(store); return store; };
+const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed ? Array.from({ length: matches }, (_, i) => i * 100) : []); stores.push(store); return store; };
 const pane = (status: string, terminal = "term-1"): Json => ({ pane_id: target.pane, agent: "codex", terminal_id: terminal, agent_status: status });
 /** Typed into a busy pane and answered queued, as /v1/prompt does. */
 async function send(store: PromptDeliveries, id: string, text: string, where = target) {
@@ -146,6 +146,21 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [pane("working")]);
     expect(store.status("yes-00002", target).state).toBe("delivered");
   });
+  it("does not offer an entry an earlier identical message settled with to a later one", async () => {
+    const store = deliveries();
+    await send(store, "again-0001", "yes");
+    landed = true; matches = 1; clock += 3_000;
+    await store.observe("default", [pane("working")]);
+    expect(store.status("again-0001", target).state).toBe("delivered");
+    // A second "yes" a moment later: the scan still sees the first entry (it reaches back past the send).
+    clock += 1_000; await send(store, "again-0002", "yes");
+    clock += 3_000;
+    await store.observe("default", [pane("working")]);
+    expect(store.status("again-0002", target).state).toBe("queued");
+    matches = 2; clock += 3_000;
+    await store.observe("default", [pane("working")]);
+    expect(store.status("again-0002", target).state).toBe("delivered");
+  });
   it("survives a Hook restart after the transcript check", async () => {
     const store = deliveries();
     await send(store, "keep-0001", "Still queued");
@@ -157,7 +172,7 @@ describe("a message the agent took into its running turn", () => {
   });
   it("is looked for in the transcript at most every few seconds", async () => {
     const calls: number[] = [];
-    const store = new PromptDeliveries(undefined, () => clock, async () => { calls.push(clock); return 0; });
+    const store = new PromptDeliveries(undefined, () => clock, async () => { calls.push(clock); return []; });
     await send(store, "mid-0002", "Anything yet?");
     await store.observe("default", [pane("working")]);
     clock += 1_000; await store.observe("default", [pane("working")]);
@@ -171,6 +186,8 @@ describe("a message the agent took into its running turn", () => {
     expect(userTexts({ type: "queue-operation", operation: "remove", reason: "cleared_on_cancel", content: "from my phone" })).toEqual([]);
     expect(userTexts({ type: "queue-operation", operation: "remove", content: "from my phone" })).toEqual([]);
     expect(userTexts({ type: "queue-operation", operation: "enqueue", content: "from my phone" })).toEqual([]);
+    // Codex input the agent has not consumed yet is still waiting.
+    expect(userTexts({ type: "user", phrenQueued: true, message: { role: "user", content: "still queued" } })).toEqual([]);
     expect(userTexts({ type: "queue-operation", operation: "dequeue" })).toEqual([]);
   });
 });
