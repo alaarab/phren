@@ -10,6 +10,7 @@ import path from "node:path";
 import { phrenStoreRoot } from "./transcripts.js";
 import { locateProject } from "./locate.js";
 import { BridgeError, type Json } from "./protocol.js";
+import { LookupCache } from "./lookup-cache.js";
 import { countGit } from "./metrics.js";
 
 const exec = promisify(execFile);
@@ -42,6 +43,11 @@ export async function withGitReadDeadline<T>(read: () => Promise<T>): Promise<T>
     budget.controller.abort();
     await Promise.allSettled([...budget.pending]);
   }
+}
+
+/** A background lookup owns its deadline even after the requesting route ends. */
+export function withIndependentGitReadDeadline<T>(read: () => Promise<T>): Promise<T> {
+  return gitReadBudget.exit(() => withGitReadDeadline(read));
 }
 
 /** Bind Git to the selected checkout, even when Hook inherited another Git
@@ -339,7 +345,13 @@ async function listenersFromSs(ports: Map<string, LocalServer>): Promise<void> {
   }
 }
 
-export async function webServers(): Promise<LocalServer[]> {
+const serversCache = new LookupCache<LocalServer[]>(10_000, 300_000, 1);
+
+export function webServers(): Promise<LocalServer[]> {
+  return serversCache.get("listeners", scanWebServers);
+}
+
+async function scanWebServers(): Promise<LocalServer[]> {
   const ports = new Map<string, LocalServer>();
   // Prefer ss on Linux and lsof elsewhere; try the other if the first is missing.
   const readers = process.platform === "linux" ? [listenersFromSs, listenersFromLsof] : [listenersFromLsof, listenersFromSs];
