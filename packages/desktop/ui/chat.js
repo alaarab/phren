@@ -7,7 +7,7 @@
 
 import { isShown, watchShown } from "./shown.js";
 import {
-  readTranscriptFrame, AgentChatHistory, ChatTranscriptPreparation, chatActivityContext, chatPendingEcho, ElapsedTime,
+  readTranscriptFrame, AgentChatHistory, ChatTranscriptPreparation, chatActivityContext, ElapsedTime,
 } from "/vendor/kit/index.js";
 import { hookPost, hookGet } from "./api.js";
 import { createTimelineView } from "./chat/timeline-view.js";
@@ -46,9 +46,6 @@ function node(tag, className, text) {
 function firstLine(text) {
   const line = String(text || "").split("\n")[0];
   return line.length > 80 ? `${line.slice(0, 79)}\u2026` : line;
-}
-function normalizeText(text) {
-  return String(text || "").replace(/\s+/g, " ").trim();
 }
 function ensureStyle() {
   if (document.getElementById("chat-style")) return;
@@ -117,6 +114,7 @@ export function openChat(el, computerName, child, opts = {}) {
     onWorkers: () => openWork("workers"),
     onDictate: () => toggleDictation(),
     onTalk: () => toggleTalk(),
+    submissionCursor: () => Math.max(history.totalLines - 1, ...history.messages.map(message => message.line)),
   });
 
   // ---- voice: dictation into the composer, and talk mode with spoken replies ----
@@ -186,7 +184,6 @@ export function openChat(el, computerName, child, opts = {}) {
   // ---- state ----
   const history = new AgentChatHistory();
   const preparation = new ChatTranscriptPreparation();
-  const echoes = new Map();
   let preview = null;
   let agentStatus = {};
   let harnessVerb = null;
@@ -212,7 +209,7 @@ export function openChat(el, computerName, child, opts = {}) {
   let lastSudoAt = 0;
   let closed = false;
 
-  composer.onDelivery(onComposerDelivery);
+  composer.onDelivery(render);
 
   // ---- colour from the overview row until a status frame arrives ----
   applyStatusColor((child && child.agentStatus) || "");
@@ -228,7 +225,7 @@ export function openChat(el, computerName, child, opts = {}) {
       waiting,
       harnessVerb,
       workingDirectory: (child && child.cwd) || null,
-      pendingEchoes: [...echoes.values()],
+      pendingEchoes: composer.pendingEchoes(),
     });
   }
 
@@ -278,61 +275,15 @@ export function openChat(el, computerName, child, opts = {}) {
   function onTranscript(frame) {
     const type = frame && frame.type;
     if (type === "side-answer") { renderSide(frame); return; }
-    if (type === "delivery") { applyDeliveryFrame(frame); return; }
+    if (type === "delivery") { composer.applyDelivery(frame); return; }
     const read = readFrame(frame);
     if (!read) return;
     if (read.activityVerb) harnessVerb = read.activityVerb;
-    if (read.kind === "preview") { preview = read.preview; render(); return; }
+    if (read.updatesPreview) preview = read.preview;
+    if (read.kind === "preview") { render(); return; }
     history.receive(read);
-    reconcileEchoes();
+    composer.reconcileTranscript(history.messages);
     render();
-  }
-
-  // ---- deliveries as pending echoes ----
-  function onComposerDelivery({ deliveryId, text, state } = {}) {
-    if (!deliveryId) return;
-    const echo = echoes.get(deliveryId)
-      || chatPendingEcho(deliveryId, text || "", [], { submittedAt: new Date().toISOString() });
-    if (text) echo.text = text;
-    echo.deliveryState = state || echo.deliveryState;
-    echoes.set(deliveryId, echo);
-    if (state === "delivered") scheduleEchoRemoval(deliveryId);
-    render();
-  }
-
-  function applyDeliveryFrame(frame) {
-    const id = String(frame.deliveryId || "");
-    if (!id) return;
-    const state = String(frame.state || "unknown");
-    // Only messages this composer sent have a bubble; the Hook also reports
-    // deliveries from the phone and from before this chat opened.
-    const echo = echoes.get(id);
-    if (!echo) return;
-    echo.deliveryState = state;
-    echoes.set(id, echo);
-    if (state === "delivered") scheduleEchoRemoval(id);
-    render();
-  }
-
-  function scheduleEchoRemoval(id) {
-    const echo = echoes.get(id);
-    if (!echo || echo.timer) return;
-    echo.timer = setTimeout(() => { echoes.delete(id); render(); }, 1200);
-  }
-
-  // A real user row retires its echo, whatever the delivery state said.
-  function reconcileEchoes() {
-    if (echoes.size === 0) return;
-    const users = history.messages
-      .filter((message) => message.role === "user" && message.localCommand === null)
-      .map((message) => normalizeText(message.text));
-    for (const [id, echo] of [...echoes]) {
-      const text = normalizeText(echo.text);
-      if (text && users.some((user) => user.includes(text))) {
-        if (echo.timer) clearTimeout(echo.timer);
-        echoes.delete(id);
-      }
-    }
   }
 
   // ---- status ----
@@ -923,8 +874,6 @@ export function openChat(el, computerName, child, opts = {}) {
       sudoHandle?.destroy?.();
       timeline.destroy?.();
       composer.destroy?.();
-      for (const echo of echoes.values()) if (echo.timer) clearTimeout(echo.timer);
-      echoes.clear();
       el.replaceChildren();
       el.classList.remove("chat-pane");
     },

@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Chat keeps repeated prompts pending until their own delivery settles, clears finished reply previews, and saves drafts separately for each computer.
+
 - Home stops reading in the background when you're not on it; the menu bar keeps its approvals without it.
 
 ## [0.1.7] - 2026-10-14

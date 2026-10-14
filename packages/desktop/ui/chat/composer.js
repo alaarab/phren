@@ -8,7 +8,8 @@
 // createComposer({ computer, target, provider, branch, project, onConsole, onAgents,
 //   onWorkers, onDictate, onTalk }) -> {
 //   el, focus(), insert(text), attach(files), setStatus(agentStatus), setBackground(jobs),
-//   setCounts({ agents, workers }), onDelivery(fn), destroy()
+//   setCounts({ agents, workers }), onDelivery(fn), applyDelivery(receipt),
+//   reconcileTranscript(messages), pendingEchoes(), destroy()
 // }
 // A left-footer button whose callback is missing is hidden. jobs are
 // [{ id, label, state, detail? }]; the collapsed Background strip is
@@ -190,9 +191,9 @@ export function contextPercent(agentStatus) {
 }
 
 /** The localStorage key for one target's draft. */
-export function draftKey(target) {
+export function draftKey(target, computer) {
   const t = target || {};
-  return `phren.composer.draft.${[t.source, t.server, t.pane, t.session].filter(Boolean).join(":")}`;
+  return `phren.composer.draft.${computer === undefined ? "" : `${encodeURIComponent(computer)}:`}${[t.source, t.server, t.pane, t.session].filter(Boolean).join(":")}`;
 }
 
 /** Permission mode display labels (AgentPermissionMode.swift). */
@@ -260,12 +261,12 @@ const ICON = {
 
 /**
  * Build the chat composer card.
- * @param {{computer:string, target:object, provider:string, branch?:string,
+ * @param {{computer:string, target:object, provider:string, branch?:string, submissionCursor?:Function,
  *   onConsole?:Function, onAgents?:Function, onWorkers?:Function,
  *   onDictate?:Function, onTalk?:Function}} options
- * @returns {{el:HTMLElement, focus:Function, insert:Function, attach:Function, setStatus:Function, setBackground:Function, setCounts:Function, onDelivery:Function, destroy:Function}}
+ * @returns {{el:HTMLElement, focus:Function, insert:Function, attach:Function, setStatus:Function, setBackground:Function, setCounts:Function, onDelivery:Function, applyDelivery:Function, reconcileTranscript:Function, pendingEchoes:Function, destroy:Function}}
  */
-export function createComposer({ computer, target, provider, branch, project, onConsole, onAgents, onWorkers, onDictate, onTalk }) {
+export function createComposer({ computer, target, provider, branch, project, onConsole, onAgents, onWorkers, onDictate, onTalk, submissionCursor = () => -1 }) {
   ensureStyles();
   const source = String(provider || (target && target.source) || "").toLowerCase();
   const name = providerLabel(source);
@@ -323,6 +324,7 @@ export function createComposer({ computer, target, provider, branch, project, on
   let backgroundOpen = false;
   try { backgroundOpen = localStorage.getItem(bgKey) === "open"; } catch { /* storage unavailable */ }
   const pendings = new Map();
+  const settledRows = new Set();
   let deliveryHandlers = [];
   let modelCache = null;
   let currentModel = "";
@@ -335,12 +337,22 @@ export function createComposer({ computer, target, provider, branch, project, on
 
   // ---- draft persistence ----
   try {
-    const saved = localStorage.getItem(draftKey(target));
+    const key = draftKey(target, computer);
+    let saved = localStorage.getItem(key);
+    const legacy = draftKey(target);
+    if (saved === null) {
+      saved = localStorage.getItem(legacy);
+      if (saved !== null) {
+        input.value = saved;
+        localStorage.setItem(key, saved);
+        localStorage.removeItem(legacy);
+      }
+    }
     if (saved) input.value = saved;
   } catch { /* storage unavailable */ }
 
   function saveDraft() {
-    try { localStorage.setItem(draftKey(target), input.value); draftError.textContent = ""; }
+    try { localStorage.setItem(draftKey(target, computer), input.value); draftError.textContent = ""; }
     catch { draftError.textContent = "Couldn't save this draft on this computer."; }
   }
 
@@ -372,16 +384,20 @@ export function createComposer({ computer, target, provider, branch, project, on
   function pendingLabel(entry) {
     if (entry.state === "failed") return entry.reason ? `Failed: ${entry.reason}` : "Failed";
     if (entry.state === "queued") return "Queued";
+    if (entry.state === "unknown") return "Unknown";
     return "Sending\u2026";
   }
 
   function setPending(id, text, state, reason) {
-    const entry = pendings.get(id) || { text };
+    const entry = pendings.get(id) || {
+      text, submittedAt: new Date().toISOString(), submittedAfterLine: submissionCursor(),
+    };
     entry.text = text;
     entry.state = state;
     entry.reason = reason;
     pendings.set(id, entry);
     renderPending();
+    updateGhost();
     emit(id, entry.text, state, reason);
   }
 
@@ -554,8 +570,9 @@ export function createComposer({ computer, target, provider, branch, project, on
     try {
       const paths = await uploadAll(sending);
       const res = await hookPost(computer, "/v1/prompt", promptBody(target, withAttachments(text, paths), id));
-      applyPromptReply(id, text, res);
+      applyPromptReply(id, res);
     } catch (error) {
+      if (!pendings.has(id) || deliveryIsFinal(pendings.get(id).state)) return;
       const reason = (error && error.body && error.body.error) || (error && error.message);
       if (isBusyRefusal(error && error.status, reason)) {
         setPending(id, text || "[image]", "queued");
@@ -568,33 +585,64 @@ export function createComposer({ computer, target, provider, branch, project, on
     }
   }
 
-  function applyPromptReply(id, text, res) {
-    if (res && (res.state === "delivered" || res.delivered === true)) { settleDelivered(id, text); return; }
-    if (res && res.state === "failed") { setPending(id, text || "[image]", "failed", res.reason); return; }
-    setPending(id, text || "[image]", "queued");
-    pollStatus(id, text);
+  function applyPromptReply(id, res) {
+    if (!pendings.has(id)) return;
+    applyDelivery({ deliveryId: id, state: res && res.delivered === true ? "delivered" : (res && res.state) || "queued", reason: res && res.reason });
+    pollStatus(id);
   }
 
-  function pollStatus(id, text) {
+  // Pushed and polled receipts share this state, and late replies cannot
+  // revive a delivery already settled by a receipt or transcript row.
+  function applyDelivery({ deliveryId, state = "unknown", reason } = {}) {
+    const entry = pendings.get(deliveryId);
+    if (!entry || deliveryIsFinal(entry.state)) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = null;
+    setPending(deliveryId, entry.text, state, reason);
+    if (state === "delivered") {
+      entry.timer = setTimeout(() => removePending(deliveryId), 1200);
+    } else if (!deliveryIsFinal(state)) pollStatus(deliveryId);
+  }
+
+  function pollStatus(id) {
     const entry = pendings.get(id);
-    if (!entry) return;
+    if (!entry || entry.timer || deliveryIsFinal(entry.state)) return;
     entry.timer = setTimeout(async () => {
-      if (destroyed || !pendings.has(id)) return;
+      entry.timer = null;
+      if (destroyed || pendings.get(id) !== entry || deliveryIsFinal(entry.state)) return;
       try {
         const res = await hookPost(computer, "/v1/prompt/status", { target, deliveryId: id });
-        const state = res && res.state;
-        if (state === "delivered") { settleDelivered(id, text); return; }
-        if (state === "failed") { setPending(id, text || "[image]", "failed", res.reason); return; }
-        setPending(id, text || "[image]", "queued");
+        applyDelivery({ ...res, deliveryId: id });
       } catch { /* keep the last state, ask again */ }
-      pollStatus(id, text);
+      pollStatus(id);
     }, 2000);
   }
 
-  function settleDelivered(id, text) {
-    setPending(id, text || "[image]", "delivered");
+  function removePending(id, matched = false) {
     const entry = pendings.get(id);
-    if (entry) entry.timer = setTimeout(() => { pendings.delete(id); renderPending(); }, 1200);
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = null;
+    // Keep a delivered receipt as a reservation until its user row lands,
+    // so that row cannot settle another identical submission.
+    if (matched) pendings.delete(id);
+    else entry.hidden = true;
+    renderPending();
+    updateGhost();
+    emit(id, entry.text, "delivered");
+  }
+
+  function reconcileTranscript(messages) {
+    for (const message of messages) {
+      if (message.role !== "user" || message.localCommand !== null || settledRows.has(message.id)) continue;
+      for (const [id, entry] of pendings) {
+        if (message.line > entry.submittedAfterLine && entry.text && message.text === entry.text) {
+          settledRows.add(message.id);
+          removePending(id, true);
+          break;
+        }
+      }
+    }
   }
 
   async function stop() {
@@ -779,7 +827,7 @@ export function createComposer({ computer, target, provider, branch, project, on
 
   function updateGhost() {
     const suggestion = typeof status.suggestion === "string" ? status.suggestion : "";
-    const show = source === "claude" && !!suggestion && input.value === "" && attachments.length === 0 && !working && pendings.size === 0;
+    const show = source === "claude" && !!suggestion && input.value === "" && attachments.length === 0 && !working && ![...pendings.values()].some(entry => !entry.hidden);
     ghostEl.hidden = !show;
     ghostEl.dataset.text = show ? suggestion : "";
     ghostEl.replaceChildren();
@@ -970,6 +1018,13 @@ export function createComposer({ computer, target, provider, branch, project, on
     setCounts(next) {
       counts = { agents: 0, workers: 0, ...(next || {}) };
       updateFooter();
+    },
+    applyDelivery,
+    reconcileTranscript,
+    pendingEchoes() {
+      return [...pendings].filter(([, entry]) => !entry.hidden).map(([id, entry]) => ({
+        id, text: entry.text, images: [], submittedAt: entry.submittedAt, deliveryState: entry.state,
+      }));
     },
     onDelivery(fn) {
       deliveryHandlers.push(fn);

@@ -136,7 +136,8 @@ this folder; xterm is at `/vendor/xterm/xterm.js` (ESM build `/vendor/xterm/xter
 Files and owners:
 - `index.html`, `theme.css`, `app.js`, `terminal.js`: the shell (layout, data flow, terminal tile).
 - `sidebar.js`: the sessions sidebar.
-- `chat.js`: the chat pane.
+- `chat.js`: the chat pane; applies preview updates (including clears) on every transcript frame carrying them.
+- `chat/composer.js`: owns delivery state for both the pending strip and timeline echoes. `createComposer` takes `submissionCursor()` (the last known transcript line when sending) and returns `applyDelivery({deliveryId,state,reason?})` for pushed receipts, `reconcileTranscript(messages)` for exact one-to-one user-row matching after submission, and `pendingEchoes()` for the timeline. `onDelivery(fn)` notifies state changes, including removals; receipt polling remains the fallback. Delivered receipts reserve their first matching transcript row even after the echo disappears. `draftKey(target, computer)` scopes drafts by computer; the target-only key is read for one-time migration when no scoped draft exists.
 - `chat/recall.js`: the composer's recall strip. Once a prompt has three words, a typing pause asks the session's project memory (`GET /v1/projects/:project/memory/search`, 6 results) and shows up to three confident hits (score 0.3 or more) as chips above the editor; a click appends `Phren remembers: <text>` to the prompt, × hides them until the prompt is sent. `recallQuery`, `recallHits` and `withRecall` are exported for `src/ui-recall.test.ts`.
 
 ## Exports
