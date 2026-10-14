@@ -6,6 +6,10 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.8] - unreleased
 
+- Released Claude questions and served OpenCode questions appear as answer cards in chat.
+- Answering a pending question from a chat card works for Claude and OpenCode as well as Codex.
+- Stage all refuses truncated listings, staging confirmations recheck file membership and types, and single-file Stage works while another confirmation is open.
+- Changes asks before staging folders, binary or unknown untracked files, or more than 100 paths, and keeps checks in the Hook’s order.
 - Notifications retain approval history across reconnects, open cached offline sessions, bind replies to the original conversation, and redact credentials.
 
 - Offline sessions no longer count as live attention; replacement approvals notify again, sidebar error and unknown states stay visible, and Review and Conductor share return labels.

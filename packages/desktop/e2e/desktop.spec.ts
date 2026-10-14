@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "@playwright/test";
+import { expect, test, type WebSocketRoute } from "@playwright/test";
 import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
 import { hookRequest, hookWebSocket } from "../src/hook-client.js";
 import { createOverviewHub } from "../src/overview.js";
@@ -356,6 +356,56 @@ test("Enter on a focused Deny denies (it never approves)", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect.poll(() => decisions).toEqual(["deny"]);
 });
+
+for (const source of ["claude", "opencode"]) {
+  test(`${source} terminal questions appear in chat and accept choices and typed answers`, async ({ page }) => {
+    const overview = await fixture("overview.json") as any;
+    const child = overview.groups[0].children[0];
+    child.agent = source;
+    child.target.source = source;
+    overview.groups[0].children = [child];
+    await page.routeWebSocket("**/api/overview", (ws) => {
+      ws.send(JSON.stringify({ type: "overview", merged: { computers: [{ computer: "This computer", state: "online", overview }] } }));
+    });
+    let statusSocket: WebSocketRoute | undefined;
+    await page.routeWebSocket("**/v1/status?**", (ws) => {
+      statusSocket = ws;
+      ws.send(JSON.stringify({ agentStatus: { status: "working" } }));
+    });
+    const posted: unknown[] = [];
+    await page.route("**/v1/questions/answer", async (route) => {
+      posted.push(route.request().postDataJSON());
+      await route.fulfill({ json: { ok: true } });
+    });
+    await page.goto(`${url}#/agents`, { waitUntil: "domcontentloaded" });
+    await page.locator(".sb-row", { hasText: "Fix login" }).click();
+    await expect.poll(() => !!statusSocket).toBe(true);
+    const questions = [{ question: "Red or blue?", multiSelect: false, options: [{ label: "Red" }, { label: "Blue" }] }];
+    const sendStatus = (terminalPrompt?: unknown) => statusSocket!.send(JSON.stringify({
+      agentStatus: { status: "waiting", terminalPrompt },
+    }));
+    const prompt = { toolName: "AskUserQuestion", questions, questionIndex: 0 };
+    const card = page.locator(".interaction-card.question");
+    sendStatus(prompt);
+    await expect(card).toContainText("Red or blue?");
+    await card.getByRole("button", { name: "Blue", exact: true }).click();
+    await card.getByRole("button", { name: "Send answer" }).click();
+    await expect(card).toContainText("Answer sent");
+    sendStatus();
+    await expect(card).toHaveCount(0);
+    sendStatus(prompt);
+    await card.getByRole("textbox").fill("Green");
+    sendStatus({ ...prompt, at: new Date().toISOString() });
+    await expect(card.getByRole("textbox")).toHaveValue("Green");
+    await card.getByRole("button", { name: "Send answer" }).click();
+    await expect(card).toContainText("Answer sent");
+    const base = { target: child.target, questions: [{ question: "Red or blue?", multiSelect: false, options: ["Red", "Blue"] }] };
+    expect(posted).toEqual([
+      { ...base, answers: [{ optionIndexes: [1] }] },
+      { ...base, answers: [{ optionIndexes: [], text: "Green" }] },
+    ]);
+  });
+}
 
 test("the window opens on Home", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
