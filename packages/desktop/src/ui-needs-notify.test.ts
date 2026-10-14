@@ -45,6 +45,9 @@ it.each([
   "AccountKey=/9Zx8Wv7Ut6Sr5Qp4On3Ml2Kj1Ih0Gf==", "dop_v1_" + "abcdef0123456789".repeat(4),
   "Authorization: Basic YWxpY2U6c3dvcmRmaXNo", "Authorization: Token swordfish",
   '{"password":"alpha\\"omega"}', "accessToken=swordfish123",
+  "PGPASSWORD=swordfish", "MYSQL_PWD=hunter2", "SECRET_KEY=django-insecure-example-secret-value!",
+  "Server=db;User ID=alice;Pwd=swordfish;", "https://acct.blob.core.windows.net/c?sv=2022&sig=aB9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2Yz3Ab4C%3D",
+  "Authorization: AWS4-HMAC-SHA256 Credential=ASIAIOSFODNN7EXAMPLE/20261014/us-east-1/s3/aws4_request, Signature=" + "ab12".repeat(16),
 ])("redacts credentials before constructing a notification: %s", (secret) => {
   const notice = needsNotice(row({ lastReply: `Use ${secret} now. Tests pass.` }));
   expect(notice.body).not.toContain(secret);
@@ -69,4 +72,14 @@ it("redacts a long reply in bounded time", () => {
     needsNotice(row({ lastReply: filler }));
   }
   expect(performance.now() - started).toBeLessThan(250);
+});
+
+it("never leaks the start of a secret cut by the notification length", () => {
+  for (const tail of [' password="swordfish-and-more-text"', " https://alice:swordfish@internal.example/api", ` ghp_${"a".repeat(36)}`]) {
+    for (let pad = 360; pad <= 400; pad += 4) {
+      const body = needsNotice(row({ lastReply: "x".repeat(pad) + tail })).body;
+      expect(body).not.toContain("swordfish");
+      expect(body).not.toMatch(/ghp_a/);
+    }
+  }
 });
