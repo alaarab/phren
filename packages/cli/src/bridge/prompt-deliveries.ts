@@ -48,7 +48,7 @@ const recordSchema = z.object({
   entry: z.number().optional(),
 }).strict();
 /** In memory only: `hookClaim`, a UserPromptSubmit came for these words before any row was readable, so the
- * row may settle it when it appears; `seenRow`, a user row a working check saw in a pane that has sent no
+ * row (in the callback's conversation, now the record's) may settle it when it appears, even once failed; `seenRow`, a user row a working check saw in a pane that has sent no
  * callbacks, settled at the next check if no hook claimed it meanwhile. */
 type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number; hookClaim?: boolean; seenRow?: number };
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -67,6 +67,8 @@ export class PromptDeliveries {
   private hookPanes = new Set<string>();
   private paneKey(target: Pick<Target, "server" | "pane" | "source">) { return [target.server, target.pane, target.source].join("|"); }
   private static open(record: Record) { return record.state === "typed" || record.state === "queued"; }
+  /** Open, or failed with its own hook's claim still waiting for its row (a late delivery). */
+  private static claimable(record: Record) { return PromptDeliveries.open(record) || (record.state === "failed" && !!record.hookClaim); }
 
   constructor(private file?: string, private now: () => number = Date.now,
     private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<TranscriptEntry[]> = transcriptEntries) {
@@ -237,7 +239,8 @@ export class PromptDeliveries {
       // A transcript that cannot be read settles on the hook's word, unless a message with these words already
       // claimed a row in this conversation: the callback may be that message's, late, so it waits for a row.
       if (!rows && !claimed.size) { this.settle(record, undefined, target.session); this.save(); return; }
-      if (!rows?.length) { record.hookClaim = true; return; }
+      // The claim is looked for in the conversation that made it (it may have replaced the one the message was typed for).
+      if (!rows?.length) { record.hookClaim = true; record.session = target.session; return; }
       const free = rows.filter(row => !claimed.has(row.offset)).sort((a, b) => a.offset - b.offset)[0];
       if (!free) return;
       entry = free.offset;
@@ -263,14 +266,17 @@ export class PromptDeliveries {
     // Only Claude's transcript says which entry a message settled with; Codex keeps the any-match check.
     if (record.source !== "claude") return (await this.landed(record).catch(() => [] as TranscriptEntry[])).length > 0;
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
-    const open = this.records.filter(other => same(other) && (other.state === "typed" || other.state === "queued")).sort((a, b) => a.at - b.at);
+    const open = this.records.filter(other => same(other) && PromptDeliveries.claimable(other)).sort((a, b) => a.at - b.at);
     if (open[0] !== record) return false;
     const key = [record.hash, record.server, record.pane, record.session, working].join("|");
     let free = pass.get(key);
     if (!free) {
       const found = (await this.landed(record).catch(() => [] as TranscriptEntry[])).sort((a, b) => a.offset - b.offset);
       const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
-      const unclaimed = found.filter(entry => !used.has(entry.offset));
+      // A message the agent's hook settled took a user row without recording it (a transcript it could not read):
+      // the oldest user rows are theirs, whether the agent works or not.
+      let hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
+      const unclaimed = found.filter(entry => !used.has(entry.offset)).filter(entry => !(entry.hook && hooked-- > 0));
       if (working) {
         // A user row is its hook's to settle, unless that hook already came (before the row could be read), or
         // the pane sends no callbacks at all: then a row two checks in a row saw unclaimed settles it.
@@ -279,14 +285,10 @@ export class PromptDeliveries {
         const own = row && (record.hookClaim || (hookless && record.seenRow === row.offset));
         if (row && hookless && !own) record.seenRow = row.offset;
         free = unclaimed.filter(entry => !entry.hook || (own && entry === row));
-      } else {
-        // A message the agent's hook settled took a user row without recording it: the oldest user rows are theirs.
-        let hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && (other.settledAt ?? 0) >= record.at - ENTRY_SLACK_MS).length;
-        free = unclaimed.filter(entry => !(entry.hook && hooked-- > 0));
-      }
+      } else free = unclaimed;
     }
     // The record may have settled (its hook claimed a row) while the transcript was read.
-    if (!PromptDeliveries.open(record)) return false;
+    if (!PromptDeliveries.claimable(record)) return false;
     const entry = free.shift();
     pass.set(key, free);
     if (entry === undefined) return false;
@@ -312,7 +314,16 @@ export class PromptDeliveries {
     let changed = false;
     const pass = new Map<string, TranscriptEntry[]>();
     for (const record of this.records) {
-      if (record.server !== server || (record.state !== "typed" && record.state !== "queued")) continue;
+      if (record.server !== server) continue;
+      // A failed message whose own hook came late, before its row: settled when the row appears.
+      if (record.state === "failed" && record.hookClaim) {
+        if (record.source === "claude" && (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS)) {
+          record.checkedAt = now;
+          if (await this.taken(record, pass, true)) { this.settle(record); changed = true; }
+        }
+        continue;
+      }
+      if (record.state !== "typed" && record.state !== "queued") continue;
       const pane = panes.find(entry => entry.pane_id === record.pane);
       if (!pane || (record.terminal && pane.terminal_id !== record.terminal) || (pane.agent && pane.agent !== record.source)) {
         if (await this.taken(record, pass)) { this.settle(record); changed = true; continue; }

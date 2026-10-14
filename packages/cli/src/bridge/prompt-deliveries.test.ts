@@ -338,6 +338,50 @@ describe("a message the agent took into its running turn", () => {
     await store.submitted(claudeTarget, "yes");
     expect(store.status("unread-02", claudeTarget).state).toBe("queued");
   });
+  it("keeps the row of a message its hook settled unread for that message after a restart, while the agent works", async () => {
+    let readable = false;
+    const store = () => { const made = new PromptDeliveries(file, () => clock, async () => { if (!readable) throw new Error("EIO"); return [{ offset: 0, hook: true }]; }); stores.push(made); return made; };
+    const first = store();
+    await send(first, "unread-a1", "yes", claudeTarget);
+    await first.submitted(claudeTarget, "yes");
+    expect(first.status("unread-a1", claudeTarget).state).toBe("delivered");
+    await first.flush();
+    // After a restart (no callbacks seen yet) an identical message within the scan slack must not take A's row.
+    readable = true;
+    const restarted = store();
+    clock += 1_000; await send(restarted, "unread-b1", "yes", claudeTarget);
+    clock += 3_000; await restarted.observe("default", [claudePane("working")]);
+    clock += 3_000; await restarted.observe("default", [claudePane("working")]);
+    expect(restarted.status("unread-b1", claudeTarget).state).toBe("queued");
+  });
+  it("looks for a deferred hook claim in the conversation that made it", async () => {
+    const next: Target = { ...claudeTarget, session: "00000000-cccc-7000-8000-00000000000d" };
+    let rowIn: string | undefined;
+    const store = new PromptDeliveries(undefined, () => clock, async record => record.session === rowIn ? [{ offset: 0, hook: true }] : []);
+    stores.push(store);
+    await send(store, "clear-0001", "yes", claudeTarget);
+    // /clear, then the new conversation submits it before its row is readable.
+    await store.submitted(next, "yes");
+    expect(store.status("clear-0001", claudeTarget).state).toBe("queued");
+    rowIn = next.session; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("clear-0001", claudeTarget)).toEqual({ state: "delivered", session: next.session });
+  });
+  it("turns a failed message delivered when its late hook's row appears", async () => {
+    const store = deliveries();
+    await send(store, "late-0001", "yes", claudeTarget);
+    clock += 1; store.stopped(claudeTarget);
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("late-0001", claudeTarget).state).toBe("failed");
+    hookRows = true;
+    await store.submitted(claudeTarget, "yes");
+    expect(store.status("late-0001", claudeTarget).state).toBe("failed");
+    landed = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("late-0001", claudeTarget).state).toBe("delivered");
+  });
   it("keeps the row a message without a phone id claimed across a restart", async () => {
     const store = deliveries();
     expect(await store.expect(claudeTarget, "yes", 1)).toBe("pending");
