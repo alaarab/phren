@@ -901,6 +901,25 @@ either, the store's health names both failures.
 
 ### Health and the canary
 
+Current iOS, Android and desktop send `expectedRepository` on Git writes so the
+Hook can refuse a write after the pane moves to another checkout. During the
+compatibility window, older requests without it still run. The Hook logs one
+warning per client and write route per run and counts every omission in
+`GET /v1/health/details` as `gitWrites` rows (`client`, `count`, `warning`):
+`N git writes without expectedRepository from <client>`. Counts reset at Hook
+restart. Available client/version and user-agent headers identify the request;
+the raw SSH pipe does not expose the paired key label. Missing identity is
+reported as `unknown client`.
+
+Hooks will start refusing Git writes without `expectedRepository` no earlier
+than the first Hook release on or after **2026-11-15**, once warning counts show
+no older clients. The release switch remains off by default. When enabled, it
+returns HTTP 400 with
+`{ "error": "This app is too old to change Git safely. Update it.", "code": "expected-repository-required" }`.
+This covers stage, unstage, discard, commit, push, opening and merging a PR,
+host-token, checkout (including branch creation), fetch, pull and apply; see
+the [Git route contract](api-reference.md#commit-push-and-pull-request).
+
 `GET /v1/health/details` answers whether phren is healthy on this computer, and
 the phone's Settings → Health (or Health on a computer's page in Agents) shows one
 section per computer from it. `phren status` prints the same data under Health.
@@ -925,6 +944,8 @@ It reports:
   shows; it is null for a Hook too old to say.
 - `push`: whether direct APNs is configured (`apns.json`).
 - `canary`: the last `canary.json`.
+- `gitWrites`: counts and warnings for writes without `expectedRepository`, per
+  client for this Hook run, empty when every write supplies it.
 
 Nothing in it is a secret, a file's contents or a store path.
 
