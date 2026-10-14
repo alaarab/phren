@@ -7,8 +7,8 @@ import type { Json, Target } from "./protocol.js";
 
 const target: Target = { server: "default", workspace: "w6", tab: "w6:t1", pane: "w6:p1", source: "codex", session: "01a10831-4b62-7000-8000-000000000001" };
 const rotated: Target = { ...target, session: "01a10985-bf36-7000-8000-000000000002" };
-let root: string, file: string, clock: number, landed: boolean, matches = 1, stores: PromptDeliveries[] = [];
-const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed ? Array.from({ length: matches }, (_, i) => i * 100) : []); stores.push(store); return store; };
+let root: string, file: string, clock: number, landed: boolean, matches = 1, hookRows = false, stores: PromptDeliveries[] = [];
+const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed ? Array.from({ length: matches }, (_, i) => ({ offset: i * 100, hook: hookRows })) : []); stores.push(store); return store; };
 const claudeTarget: Target = { ...target, source: "claude" };
 const pane = (status: string, terminal = "term-1", agent = "codex"): Json => ({ pane_id: target.pane, agent, terminal_id: terminal, agent_status: status });
 const claudePane = (status: string): Json => pane(status, "term-1", "claude");
@@ -18,7 +18,7 @@ async function send(store: PromptDeliveries, id: string, text: string, where = t
   store.queue(id, where);
 }
 
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-deliveries-")); file = path.join(root, "deliveries.json"); clock = 1_000_000; landed = false; matches = 1; });
+beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-deliveries-")); file = path.join(root, "deliveries.json"); clock = 1_000_000; landed = false; matches = 1; hookRows = false; });
 afterEach(async () => { await Promise.all(stores.map(store => store.flush())); stores = []; await rm(root, { recursive: true, force: true }); });
 
 describe("phone messages bound to their pane", () => {
@@ -163,6 +163,20 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [claudePane("working")]);
     expect(store.status("again-0002", claudeTarget).state).toBe("delivered");
   });
+  it("gives a late hook to the message the transcript settled, not to another with the same words", async () => {
+    const store = deliveries();
+    await send(store, "late-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "late-0002", "yes", claudeTarget);
+    landed = true; matches = 1; hookRows = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("late-0001", claudeTarget).state).toBe("delivered");
+    // The UserPromptSubmit for that same row arrives late.
+    clock += 1_000; store.submitted(claudeTarget, "yes");
+    expect(store.status("late-0002", claudeTarget).state).toBe("queued");
+    // A hook for a second send is that message's own.
+    clock += 1_000; store.submitted(claudeTarget, "yes");
+    expect(store.status("late-0002", claudeTarget).state).toBe("delivered");
+  });
   it("survives a Hook restart after the transcript check", async () => {
     const store = deliveries();
     await send(store, "keep-0001", "Still queued", claudeTarget);
@@ -203,7 +217,9 @@ describe("a message the agent took into its running turn", () => {
     const lines = [row(["other"], "2026-10-14T00:00:00.000Z"), row(["yes", "yes"], "2026-10-14T00:00:01.000Z"), row(["yes"], "2026-10-14T00:00:02.000Z")];
     const buffer = Buffer.from(lines.join("\n") + "\n");
     const offsets = matchingOffsets(buffer, 100, { hash: promptHash("yes"), at });
-    expect(offsets).toEqual([100 + Buffer.byteLength(lines[0] + "\n" + lines[1] + "\n"), 100 + Buffer.byteLength(lines[0] + "\n")]);
+    expect(offsets.map(entry => entry.offset)).toEqual([100 + Buffer.byteLength(lines[0] + "\n" + lines[1] + "\n"), 100 + Buffer.byteLength(lines[0] + "\n")]);
+    expect(offsets.every(entry => entry.hook)).toBe(true);
+    expect(matchingOffsets(Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "yes", timestamp: "2026-10-14T00:00:02.000Z" }) + "\n"), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false }]);
   });
 });
 
