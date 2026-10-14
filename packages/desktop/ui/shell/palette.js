@@ -75,7 +75,7 @@ function kindOf(child) {
 
 // ------------------------------------------------------------ sources
 function sessionItems() {
-  return store.sessions().map((row) => {
+  return store.sessions({ includeOffline: true }).map((row) => {
     const { computer, child } = row;
     const kind = kindOf(child);
     const project = projectOf(child);

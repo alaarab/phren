@@ -154,9 +154,9 @@ describe("misc helpers", () => {
     expect(permissionModeLabel(undefined)).toBe("Mode");
   });
 
-  it("keys a draft by the target", () => {
-    expect(draftKey({ source: "claude", server: "default", pane: "1", session: "s1" }))
-      .toBe("phren.composer.draft.claude:default:1:s1");
-    expect(draftKey({})).toBe("phren.composer.draft.");
+  it("keys a draft by the computer and target", () => {
+    expect(draftKey({ source: "claude", server: "default", pane: "1", session: "s1" }, "mini"))
+      .toBe("phren.composer.draft.mini:claude:default:1:s1");
+    expect(draftKey({}, "book")).toBe("phren.composer.draft.book:");
   });
 });

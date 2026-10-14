@@ -459,6 +459,32 @@ describe("PhrenClient: timeouts and disposal", () => {
 });
 
 describe("PhrenClient: reconnect on unexpected process exit", () => {
+  it("initializes a healthy third replacement and resets the retry budget", async () => {
+    vi.useFakeTimers();
+    const { client } = await readyClient();
+
+    // The original process and the first two replacements fail.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      lastProcess().emit("exit", 1, null);
+      await vi.advanceTimersByTimeAsync(2000);
+    }
+    expect(createdProcesses).toHaveLength(4);
+    autoRespondEverything(lastProcess());
+
+    try {
+      await expect(client.healthCheck()).resolves.toEqual({ ok: true, data: {} });
+
+      // Successful initialization restores the budget for a later failure.
+      lastProcess().emit("exit", 1, null);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(createdProcesses).toHaveLength(5);
+      autoRespondEverything(lastProcess());
+      await expect(client.healthCheck()).resolves.toEqual({ ok: true, data: {} });
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("respawns after RECONNECT_DELAY_MS and gives up after MAX_RECONNECT_RETRIES, after which calls fail fast without spawning again", async () => {
     vi.useFakeTimers();
     const client = new PhrenClient({ mcpServerPath: "mcp.js", storePath: "/store" });

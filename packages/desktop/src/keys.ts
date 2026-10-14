@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { dump, load } from "js-yaml";
 import type { Computer, EnrollDesktop, LinkComputer, RevokeComputer } from "./contract.js";
 import { hookRequest } from "./hook-client.js";
-import { bridgeRoot, closeMasters, desktopKeyPath, knownHostsPath, loadComputers } from "./hosts.js";
+import { bridgeRoot, closeMasters, desktopKeyPath, knownHostsPath, loadComputers, masterKey } from "./hosts.js";
 
 const exec = promisify(execFile);
 const forcedCommand = 'command="sh ~/.local/share/phren/bridge/dispatch"';
@@ -92,6 +92,7 @@ export const enrollDesktop: EnrollDesktop = async () => {
     await chmod(key, 0o600);
     const { stdout } = await exec("ssh-keygen", ["-y", "-P", "", "-f", key], { timeout: 10_000, maxBuffer: 4096 });
     const publicKey = publicDesktopKey(stdout.trim());
+    await writeFile(`${key}.pub`, `${publicKey} ${comment}\n`, { mode: 0o600 });
     return { publicKey, line: desktopKeyLine(publicKey, comment), comment };
   } finally { await rm(lock, { recursive: true, force: true }); }
 };
@@ -101,6 +102,8 @@ export const linkComputer: LinkComputer = async (host, options) => {
   if (!HOST.test(host)) throw new Error("Supply an ssh host or user@host.");
   if (options?.name !== undefined && !NAME.test(options.name)) throw new Error("A computer name may use A-Z a-z 0-9 _ . - only.");
   const name = options?.name ?? host.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 100);
+  const previous = (await loadComputers()).find(computer => !computer.local && computer.name === name);
+  if (previous) await closeMasters(previous);
   const { line } = await enrollDesktop();
 
   const { stdout: config } = await exec("ssh", ["-G", host], { timeout: 10_000 });
@@ -117,6 +120,7 @@ export const linkComputer: LinkComputer = async (host, options) => {
   await updateDesktopYaml(doc => upsertPeer(doc, peer));
 
   const computer: Computer = { name, local: false, address, username, port, hostKey, server: peer.server, keyFile: desktopKeyPath() };
+  await closeMasters(computer);
   const response = await hookRequest(computer, "GET", "/v1/health")
     .catch(error => { throw new Error(`Linked ${name}, but its Hook did not answer over the new key: ${(error as Error).message}`); });
   const product = jsonProduct(response.body);
@@ -145,7 +149,11 @@ export const revokeComputer: RevokeComputer = async name => {
   }
 
   await updateDesktopYaml(doc => removePeer(doc, name));
-  await rm(knownHostsPath(name), { force: true });
+  try { await rm(knownHostsPath(masterKey(target)), { force: true }); }
+  catch (error) {
+    // Revocation still works if the private key has already been removed.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   // Drop any ControlMaster still holding the revoked key, so the connection
   // dies even when the remote authorized_keys step failed.
   await closeMasters(target);
