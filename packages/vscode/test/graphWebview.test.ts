@@ -40,6 +40,7 @@ import {
   isValidProjectName,
   loadGraphData,
   qualityMultiplierFromEntry,
+  normalizeGraphPayload,
   renderGraphHtmlForTests,
   showGraphWebview,
 } from "../src/graphWebview";
@@ -499,6 +500,29 @@ describe("renderGraphHtmlForTests: empty state", () => {
     expect(html).toContain("No projects found in the Phren store at /home/me/.phren.");
     expect(html).toContain("phren.storePath");
     expect(html).toContain("Phren: Show Log");
+  });
+});
+
+describe("normalizeGraphPayload", () => {
+  // A payload missing its lists used to reach the webview as-is: no `nodes`
+  // threw before the empty state could show, no `edges` threw while mapping.
+  it("fills in missing lists so a partial payload renders instead of throwing", () => {
+    expect(normalizeGraphPayload(undefined)).toEqual({ nodes: [], edges: [], topics: [], summaries: {}, scores: { entries: {} } });
+    const partial = normalizeGraphPayload({ nodes: [{ id: "p:app", kind: "project", label: "app" }], emptyReason: "x" });
+    expect(partial.nodes).toHaveLength(1);
+    expect(partial.edges).toEqual([]);
+    expect(partial.topics).toEqual([]);
+    expect(partial.emptyReason).toBe("x");
+  });
+
+  it("is embedded in the webview script as runnable JavaScript", () => {
+    const html = renderGraphHtmlForTests({} as never);
+    const match = html.match(/var normalizeGraphPayload = ([\s\S]*?);\n\s*var payload = normalizeGraphPayload\((.*)\);\n/);
+    expect(match).not.toBeNull();
+    const fn = new Function(`return (${match![1]});`)() as (raw: unknown) => { nodes: unknown[]; edges: unknown[] };
+    const payload = fn(JSON.parse(match![2]));
+    expect(payload.nodes).toEqual([]);
+    expect(payload.edges).toEqual([]);
   });
 });
 

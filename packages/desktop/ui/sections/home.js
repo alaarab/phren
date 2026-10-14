@@ -618,7 +618,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   }
 
   function startPolling() {
-    stopPolling();
+    if (pollTimer !== null) return;
     void pollReceipts();
     pollTimer = setInterval(() => { void pollReceipts(); }, RETURN_POLL_MS);
   }
