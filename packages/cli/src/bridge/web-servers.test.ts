@@ -12,7 +12,6 @@ vi.mock("node:child_process", async importOriginal => ({
 }));
 
 let webServers: typeof import("./projects.js").webServers;
-let setPidAlive: typeof import("./projects.js").setPidAlive;
 
 type Answer = { stdout: string } | Error;
 function answer(byTool: Record<string, Answer>) {
@@ -64,8 +63,7 @@ describe("webServers", () => {
   let port = 0;
   beforeEach(async context => {
     vi.resetModules();
-    ({ webServers, setPidAlive } = await import("./projects.js"));
-    setPidAlive(() => true);
+    ({ webServers } = await import("./projects.js"));
     const nonce = randomUUID();
     server = createServer((_req, res) => {
       res.setHeader("content-type", "text/html"); res.setHeader("x-test-nonce", nonce);
@@ -92,15 +90,25 @@ describe("webServers", () => {
     expect(found).toEqual([{ name: "Acme & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
   });
 
-  it("drops a cached listener whose process has gone, so a reused port is not attributed to it", async () => {
+  it("drops a cached listener that no longer holds its port, even if its process still runs", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
     answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` } });
     expect(await webServers()).toMatchObject([{ port, pid: 42 }]);
-    // Session A's server stops; session B's takes the port inside the cache's ten seconds.
-    setPidAlive(pid => pid !== 42);
-    expect(await webServers()).toEqual([]);
-    // The cache was refreshed, not just filtered: B's server (pid 77) shows up with its own pid.
+    // Session A's process closes the listener but keeps running; B's server takes the port inside the cache's ten seconds.
+    now += 2_000;
     answer({ ss: { stdout: `${ssLine(port, "bun", 77)}\n` } });
+    expect(await webServers()).toEqual([]);
+    // The cache was refreshed, not just filtered: B's server shows up with its own pid.
     expect(await webServers()).toMatchObject([{ port, pid: 77 }]);
+  });
+  it("keeps a cached listener the socket table still shows with the same owner", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` } });
+    expect(await webServers()).toMatchObject([{ port, pid: 42 }]);
+    now += 2_000;
+    expect(await webServers()).toMatchObject([{ port, pid: 42 }]);
   });
   it("falls back to lsof when ss is missing", async () => {
     answer({ lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });

@@ -354,26 +354,28 @@ async function listenersFromSs(ports: Map<string, LocalServer>): Promise<void> {
 
 const serversCache = new LookupCache<LocalServer[]>(10_000, 300_000, 1, () => true, 20_000);
 
-/** Whether `pid` is still a running process. EPERM means it exists but is not ours. */
-let pidAlive = (pid: number): boolean => {
-  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
-};
-/** Only for tests: what counts as a running process. */
-export function setPidAlive(check: ((pid: number) => boolean) | undefined): void {
-  pidAlive = check ?? ((pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; } });
-}
+/** When the cached listeners were last read from the socket table. */
+let scannedAt = 0;
+/** A cached listener is trusted this long after its scan; the socket table is read again after that. */
+const LISTENER_TRUST_MS = 1_000;
 
-/** The web servers listening here. A cached listener whose process has gone is dropped and the
- * cache refreshed: its port may already belong to another session's server, and attributing it
- * to the old owner would open that session's preview on the wrong app. */
+/** The web servers listening here. A cached listener is checked against the live socket table
+ * before it is returned: if the process that held its address and port no longer listens there
+ * (it stopped, or closed the socket and kept running), the port may already belong to another
+ * session's server, and attributing it to the old owner would open that session's preview on the
+ * wrong app. Such a result drops the entry and refreshes the cache. */
 export async function webServers(): Promise<LocalServer[]> {
   const servers = await serversCache.get("listeners", scanWebServers);
-  const live = servers.filter(server => server.pid === undefined || pidAlive(server.pid));
-  if (live.length !== servers.length) serversCache.invalidate(() => true);
-  return live;
+  if (!servers.some(server => server.pid !== undefined) || Date.now() - scannedAt < LISTENER_TRUST_MS) return servers;
+  const live = await readListeners().catch(() => undefined);
+  if (!live) return servers;
+  const kept = servers.filter(server => server.pid === undefined || live.get(new URL(server.origin).host)?.pid === server.pid);
+  if (kept.length !== servers.length) serversCache.invalidate(() => true);
+  return kept;
 }
 
-async function scanWebServers(): Promise<LocalServer[]> {
+/** The listening sockets (address:port to owner), without probing any of them. */
+async function readListeners(): Promise<Map<string, LocalServer>> {
   const ports = new Map<string, LocalServer>();
   // Prefer ss on Linux and lsof elsewhere; try the other if the first is missing.
   const readers = process.platform === "linux" ? [listenersFromSs, listenersFromLsof] : [listenersFromLsof, listenersFromSs];
@@ -382,6 +384,11 @@ async function scanWebServers(): Promise<LocalServer[]> {
     try { await reader(ports); lastError = undefined; break; } catch (error) { lastError = error; }
   }
   if (lastError && ports.size === 0) throw new BridgeError(503, "No socket listing tool found: install lsof (or iproute2's ss on Linux).");
+  return ports;
+}
+
+async function scanWebServers(): Promise<LocalServer[]> {
+  const ports = await readListeners();
   // Probe well-known ports first so a browser's dozens of ephemeral listeners
   // cannot push a dev server on :3000 past the cap.
   const candidates = [...ports.values()]
@@ -394,6 +401,7 @@ async function scanWebServers(): Promise<LocalServer[]> {
       if (name !== null) found.push({ ...server, name });
     }));
   }
+  scannedAt = Date.now();
   return found.sort((a, b) => a.port - b.port);
 }
 
