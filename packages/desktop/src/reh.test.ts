@@ -1,16 +1,17 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findTarball, nodeExtensionsEnabled, rehRoot, rehStatus, setNodeExtensionsEnabled, stopReh } from "./reh.js";
+import { findTarball, nodeExtensionsEnabled, rehRoot, rehStatus, rehTokenDir, setNodeExtensionsEnabled, stopReh } from "./reh.js";
 
 const ORIGINAL_REH = process.env.PHREN_DESKTOP_REH;
 const ORIGINAL_TARBALL = process.env.PHREN_REH_TARBALL;
 const ORIGINAL_TIMEOUT = process.env.PHREN_REH_START_TIMEOUT_MS;
 const ORIGINAL_EXTENSIONS = process.env.PHREN_DESKTOP_EXTENSIONS;
 const ORIGINAL_BRIDGE = process.env.PHREN_BRIDGE_HOME;
+const ORIGINAL_PATH = process.env.PATH;
 const PLANTED = ["PHREN_DESKTOP_TOKEN_FD", "PHREN_DESKTOP_TOKEN", "SSH_AUTH_SOCK", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "VSCODE_IPC_HOOK_CLI", "TMUX", "NODE_OPTIONS"] as const;
 const ORIGINAL_PLANTED = Object.fromEntries(PLANTED.map((key) => [key, process.env[key]]));
 
@@ -34,6 +35,7 @@ afterEach(() => {
   restore("PHREN_DESKTOP_EXTENSIONS", ORIGINAL_EXTENSIONS);
   restore("PHREN_REH_START_TIMEOUT_MS", ORIGINAL_TIMEOUT);
   restore("PHREN_BRIDGE_HOME", ORIGINAL_BRIDGE);
+  restore("PATH", ORIGINAL_PATH);
   for (const key of PLANTED) restore(key, ORIGINAL_PLANTED[key]);
   rmSync(work, { recursive: true, force: true });
 });
@@ -90,9 +92,11 @@ describe.skipIf(process.platform === "win32")("rehStatus", () => {
       isolation: process.platform === "darwin" ? "sandbox" : "environment",
     });
     expect(existsSync(path.join(rehRoot(), "vscode-reh-test-any-1.0.0", "product.json"))).toBe(true);
-    const tokenFile = path.join(rehRoot(), "connection-token");
-    expect(readFileSync(tokenFile, "utf8")).toBe(status.connectionToken);
-    expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
+    // The host was handed its own token file holding the token the editor gets.
+    const tokenFiles = readdirSync(rehTokenDir()).map((name) => path.join(rehTokenDir(), name));
+    expect(tokenFiles).toHaveLength(1);
+    expect(readFileSync(tokenFiles[0], "utf8")).toBe(status.connectionToken);
+    expect(statSync(tokenFiles[0]).mode & 0o777).toBe(0o600);
   });
 
   it("returns the same status on a second call without starting a second server", async () => {
@@ -170,6 +174,9 @@ describe.skipIf(process.platform === "win32")("extension host isolation", () => 
     process.env.PHREN_BRIDGE_HOME = bridge;
     writeFileSync(path.join(bridge, "id_ed25519_desktop"), "PRIVATE KEY MATERIAL\n", { mode: 0o600 });
     writeFileSync(path.join(work, "readable.txt"), "workspace file\n");
+    const pathBin = path.join(work, "bin");
+    mkdirSync(pathBin);
+    process.env.PATH = `${pathBin}${path.delimiter}${process.env.PATH}`;
     const server = createServer((socket) => socket.end("hook answered\n"));
     hook = server;
     await new Promise<void>((resolve) => server.listen(path.join(bridge, "hook.sock"), resolve));
@@ -183,6 +190,10 @@ describe.skipIf(process.platform === "win32")("extension host isolation", () => 
     process.env.PHREN_REH_TARBALL = buildTarball("vscode-reh-test-any-1.0.0.tar.gz", [
       `cat "${bridge}/id_ed25519_desktop" > "${seen}" 2>&1 || echo "key: denied" >> "${seen}"`,
       `ls "${bridge}" >> "${seen}" 2>&1 || echo "list: denied" >> "${seen}"`,
+      // A program planted on the daemon's PATH would run outside the sandbox.
+      `echo planted > "${pathBin}/ssh" 2>/dev/null && echo "plant: written" >> "${seen}" || echo "plant: denied" >> "${seen}"`,
+      // Moving the bridge's parent would take the key out from under its rule.
+      `mv "${work}" "${work}-moved" 2>/dev/null && cat "${work}-moved/bridge/id_ed25519_desktop" >> "${seen}" || echo "move: denied" >> "${seen}"`,
       `cat "${work}/readable.txt" >> "${seen}"`,
       `"${process.execPath}" "${probe}" "${bridge}/hook.sock" >> "${seen}" 2>&1`,
       `echo "Extension host agent listening on 54321"`,
@@ -196,6 +207,9 @@ describe.skipIf(process.platform === "win32")("extension host isolation", () => 
     expect(log).not.toContain("PRIVATE KEY MATERIAL");
     expect(log).toContain("key: denied");
     expect(log).toContain("list: denied");
+    expect(log).toContain("move: denied");
+    expect(log).toContain("plant: denied");
+    expect(existsSync(path.join(pathBin, "ssh"))).toBe(false);
     expect(log).not.toContain("hook answered");
     expect(log).toMatch(/hook: E(PERM|ACCES)/);
     // The same host still reads the owner's other files.
