@@ -10,6 +10,7 @@ import path from "node:path";
 import { phrenStoreRoot } from "./transcripts.js";
 import { locateProject } from "./locate.js";
 import { BridgeError, type Json } from "./protocol.js";
+import { LookupCache } from "./lookup-cache.js";
 import { countGit } from "./metrics.js";
 
 const exec = promisify(execFile);
@@ -42,6 +43,17 @@ export async function withGitReadDeadline<T>(read: () => Promise<T>): Promise<T>
     budget.controller.abort();
     await Promise.allSettled([...budget.pending]);
   }
+}
+
+/** Run provider work outside a completed route's local Git budget. Each local
+ * Git call retains its own timeout, while forge requests use provider limits. */
+export function withoutGitReadDeadline<T>(read: () => Promise<T>): Promise<T> {
+  return gitReadBudget.exit(read);
+}
+
+/** A background lookup owns its deadline even after the requesting route ends. */
+export function withIndependentGitReadDeadline<T>(read: () => Promise<T>): Promise<T> {
+  return gitReadBudget.exit(() => withGitReadDeadline(read));
 }
 
 /** Bind Git to the selected checkout, even when Hook inherited another Git
@@ -287,7 +299,8 @@ export interface LocalServer { name: string; port: number; origin: string; proce
 function probe(port: number, host: string): Promise<string | null> {
   return new Promise(resolve => {
     let settled = false;
-    const finish = (value: string | null) => { if (!settled) { settled = true; resolve(value); } };
+    const finish = (value: string | null) => { if (!settled) { settled = true; clearTimeout(deadline); resolve(value); } };
+    const deadline = setTimeout(() => { finish(null); req.destroy(); }, 1200);
     const req = request({ hostname: host, port, path: "/", method: "GET", timeout: 1200, headers: { Host: `localhost:${port}` } }, res => {
       let body = "";
       res.on("data", data => { body += data.toString(); if (body.length > 32_768) res.destroy(); });
@@ -339,7 +352,13 @@ async function listenersFromSs(ports: Map<string, LocalServer>): Promise<void> {
   }
 }
 
-export async function webServers(): Promise<LocalServer[]> {
+const serversCache = new LookupCache<LocalServer[]>(10_000, 300_000, 1, () => true, 20_000);
+
+export function webServers(): Promise<LocalServer[]> {
+  return serversCache.get("listeners", scanWebServers);
+}
+
+async function scanWebServers(): Promise<LocalServer[]> {
   const ports = new Map<string, LocalServer>();
   // Prefer ss on Linux and lsof elsewhere; try the other if the first is missing.
   const readers = process.platform === "linux" ? [listenersFromSs, listenersFromLsof] : [listenersFromLsof, listenersFromSs];

@@ -3,7 +3,7 @@ import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { BridgeError, type Json } from "./protocol.js";
 import { git, gitRoot } from "./projects.js";
 import { countGit } from "./metrics.js";
-import { defaultBranch, invalidateTree } from "./git.js";
+import { defaultBranch, invalidatePulls, invalidateTree } from "./git.js";
 import { z } from "zod";
 import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
 import { writeHostToken } from "./git-host-auth.js";
@@ -130,7 +130,8 @@ export async function gitPullRequest(cwd: string, draft: unknown): Promise<Json>
   const host = await detectHost(root, branch);
   const provider = providerFor(host);
   if (!provider) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
-  return { ...await provider.open(root, branch, draft === true, host), host };
+  try { return { ...await provider.open(root, branch, draft === true, host), host }; }
+  finally { invalidatePulls(root); }
 }
 
 const MergeBody = z.object({
@@ -150,7 +151,8 @@ export async function gitMergeRequest(cwd: string, data: unknown): Promise<Json>
   const host = await detectHost(root, branch);
   const provider = providerFor(host);
   if (!provider) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
-  return { ...await provider.merge(root, request, host), host };
+  try { return { ...await provider.merge(root, request, host), host }; }
+  finally { invalidatePulls(root); }
 }
 
 /** Connect (or, with an empty token, disconnect) this repository's GitLab or

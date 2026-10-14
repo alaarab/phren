@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { homeDir } from "../home-paths.js";
+import type { GitHost } from "./git-hosts.js";
+import { invalidatePullsForDomain } from "./git.js";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -67,6 +71,7 @@ export async function writeHostToken(domain: string, kind: TokenHostKind, token:
   else delete hosts[key];
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await atomic(file, JSON.stringify({ hosts }, null, 2) + "\n", 0o600);
+  invalidatePullsForDomain(key);
 }
 
 /** The environment variables each host's own tools read. GITLAB_TOKEN is
@@ -113,4 +118,39 @@ export async function listHostTokens(file = gitHostsFile()): Promise<{ domain: s
   const store = await readStore(file);
   if (store === "unsafe") return "unsafe";
   return Object.entries(store?.hosts ?? {}).map(([domain, { kind, user, savedAt }]) => ({ domain, kind, ...(user ? { user } : {}), ...(savedAt ? { savedAt } : {}) }));
+}
+
+/** Credential fingerprint only: raw credentials never enter lookup keys.
+ * gh logout/switch-user rewrites hosts.yml even when its token is in a keychain. */
+/** The lines of gh's hosts.yml under one host key (its user, protocol and any plain token). */
+export function ghHostBlock(hostsYml: string, domain: string): string {
+  const want = domain.trim().toLowerCase().replace(/\.$/, "");
+  const out: string[] = [];
+  let inside = false;
+  for (const line of hostsYml.split(/\r?\n/)) {
+    const top = /^(\S[^:]*):\s*$/.exec(line);
+    if (top) { inside = top[1].trim().replace(/^["']|["']$/g, "").toLowerCase() === want; if (inside) out.push(line); continue; }
+    if (inside && (line.startsWith(" ") || line.startsWith("\t") || line.trim() === "")) out.push(line);
+    else if (line.trim()) inside = false;
+  }
+  return out.join("\n").trimEnd();
+}
+
+export async function hostCredentialIdentity(host: GitHost): Promise<string> {
+  let state: unknown = null;
+  if (host.kind === "github") {
+    const dir = process.env.GH_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir(), ".config"), "gh");
+    // Only this host's block of gh's hosts.yml: signing into another host must not change it.
+    const hosts = await readFile(path.join(dir, "hosts.yml"), "utf8").catch(() => "");
+    state = [
+      process.env.GH_TOKEN, process.env.GITHUB_TOKEN,
+      process.env.GH_ENTERPRISE_TOKEN, process.env.GITHUB_ENTERPRISE_TOKEN,
+      ghHostBlock(hosts, host.domain ?? "github.com"),
+    ];
+  } else if (host.kind && host.domain) {
+    const store = await readStore();
+    state = [await resolveHostToken(host.kind, host.domain),
+      store && store !== "unsafe" ? store.hosts[normalDomain(host.domain)] : store];
+  }
+  return createHash("sha256").update(JSON.stringify(state)).digest("hex");
 }

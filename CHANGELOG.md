@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+- The Hook answers pull-request and web-server lookups from a short cache, refreshing in the background (session open and Previews no longer wait on the forge or a port scan).
+
 ## [0.3.45] - 2026-10-13
 
 ### Added

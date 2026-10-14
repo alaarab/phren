@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { checkRollup, gitPulls, gitStatus } from "./git.js";
+import { checkRollup, gitPulls, gitStatus, invalidatePulls } from "./git.js";
 import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
 import { BridgeError } from "./protocol.js";
 
@@ -218,6 +218,7 @@ describe("git publish routes", () => {
       statusCheckRollup: [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS" }, { __typename: "StatusContext", context: "ci", state: "SUCCESS" }],
       reviewDecision: "CHANGES_REQUESTED", mergeStateStatus: "BLOCKED",
     }));
+    invalidatePulls(root); // Simulate the next poll after the external forge update.
     expect((await gitPulls(root)).current).toEqual({ number: 51, title: "Finish", url: "https://github.com/sam/phren/pull/51",
       head: "feature/pr", base: "main", draft: true, state: "OPEN", checks: "passing",
       checkRuns: [{ name: "build", state: "passing" }, { name: "ci", state: "passing" }], reviewDecision: "CHANGES_REQUESTED", mergeState: "BLOCKED" });

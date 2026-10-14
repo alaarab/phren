@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
-import { git, gitHead, gitRoot, withGitReadDeadline } from "./projects.js";
+import { git, gitHead, gitRoot, withGitReadDeadline, withIndependentGitReadDeadline, withoutGitReadDeadline } from "./projects.js";
 import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
+import { hostCredentialIdentity } from "./git-host-auth.js";
+import { LookupCache } from "./lookup-cache.js";
 export { checkRollup, checkRuns } from "./git-hosts.js";
 
 
@@ -239,17 +241,70 @@ export async function gitBranches(cwd: string): Promise<Json> {
   return { current, local, remote };
 }
 
+// An auth or not-found refusal means access was lost: it replaces a cached success at once.
+const REVOKING = new Set(["auth", "not-found"]);
+const pullsCache = new LookupCache<Json>(30_000, 300_000, 64, value => value.available === true, 45_000,
+  value => value.available === false && REVOKING.has(String(value.reason)));
+
+// GitLab's fingerprint can need a glab subprocess, so it is read at most every
+// few seconds per host with concurrent polls sharing one read. The others are
+// plain file reads and stay exact, so a sign-out is seen on the next poll.
+const credentialReads = new Map<string, { at: number; value: Promise<string> }>();
+const CREDENTIAL_TTL_MS = 5_000;
+function credentialIdentity(host: Parameters<typeof hostCredentialIdentity>[0], fresh = false): Promise<string> {
+  const key = JSON.stringify([host.kind ?? null, (host.domain ?? "").toLowerCase()]);
+  const hit = credentialReads.get(key);
+  if (host.kind !== "gitlab") return hostCredentialIdentity(host);
+  if (!fresh && hit && Date.now() - hit.at < CREDENTIAL_TTL_MS) return hit.value;
+  const value = hostCredentialIdentity(host).catch(error => { credentialReads.delete(key); throw error; });
+  credentialReads.set(key, { at: Date.now(), value });
+  if (credentialReads.size > 64) credentialReads.delete(credentialReads.keys().next().value!);
+  return value;
+}
+
+class CredentialsChanged extends Error {}
+
+/** Invalidate every branch/host lookup for this checkout after a Hook write. */
+export function invalidatePulls(root: string): void {
+  pullsCache.invalidate(key => key.startsWith(root + "\0"));
+}
+
+/** Tokens belong to a domain, so revoke every checkout and pending generation. */
+export function invalidatePullsForDomain(domain: string): void {
+  const normalized = domain.trim().toLowerCase().replace(/\.$/, "");
+  for (const key of credentialReads.keys()) if (JSON.parse(key)[1] === normalized) credentialReads.delete(key);
+  pullsCache.invalidate(key => key.split("\0")[1] === normalized);
+}
+
 /** Open pull or merge requests and the checked-out branch's own (any state)
  * with its checks, from whichever host the remote is on (git-hosts.ts). A
  * host that cannot answer (a missing CLI, a stubbed provider, an unknown
  * domain) is `{ available: false, reason, message }`, never an error. */
-export async function gitPulls(cwd: string): Promise<Json> {
-  const root = await repository(cwd);
-  const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
-  const host = await detectHost(root, branch);
+export async function gitPulls(cwd: string, retried = false): Promise<Json> {
+  const { root, branch, host } = await withIndependentGitReadDeadline(async () => {
+    const root = await repository(cwd);
+    const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
+    return { root, branch, host: await detectHost(root, branch) };
+  });
   const provider = providerFor(host);
-  const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
-  return { ...list, branch: branch || null, host };
+  const credential = await credentialIdentity(host);
+  const key = root + "\0" + (host.domain ?? "").toLowerCase().replace(/\.$/, "") + "\0" + JSON.stringify([branch, host, credential]);
+  try {
+    return await pullsCache.get(key, () => withoutGitReadDeadline(async () => {
+      const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
+      // A sign-in or token change during the lookup: never cache what the old credentials returned.
+      if (await credentialIdentity(host, true) !== credential) {
+        pullsCache.invalidate(candidate => candidate === key);
+        throw new CredentialsChanged();
+      }
+      return { ...list, branch: branch || null, host };
+    }));
+  } catch (error) {
+    if (!(error instanceof CredentialsChanged)) throw error;
+    // Read again once under the new credentials rather than failing the request.
+    if (!retried) return gitPulls(cwd, true);
+    throw new BridgeError(409, "Forge credentials keep changing. Retry.");
+  }
 }
 
 /** A repo-relative tree path, or the repository root for `""`. */
@@ -282,7 +337,7 @@ type TreeEntry = { name: string; path: string; kind: "dir" | "file"; status?: st
 type TreeSnapshot = { version: string; levels: Map<string, TreeEntry[]> };
 const treeCache = new Map<string, { head: string; expires: number; snapshot: Promise<TreeSnapshot> }>();
 /** Drop the cached tree after a write (commit, push) outside this module. */
-export function invalidateTree(root: string): void { treeCache.delete(root); }
+export function invalidateTree(root: string): void { treeCache.delete(root); invalidatePulls(root); }
 const TREE_TTL_MS = 2_000;
 
 /** Build directory children once, without diff hunks, line counts or upstream walks. */
