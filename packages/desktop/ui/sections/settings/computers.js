@@ -2,6 +2,7 @@
 import { store } from "../../shell/store.js";
 import { hookGet, hookPost } from "../../api.js";
 import { hookDrift, updateCommand } from "../../shell/hook-drift.js";
+import { formatGitWrites } from "./git-writes.js";
 import { api, button, el, heading, input, noticeLine, post, showNotice } from "./ui.js";
 
 // ------------------------------------------------------------ page: Computers
@@ -40,7 +41,11 @@ export function buildComputers(page) {
     for (const c of computers) {
       seen.add(c.computer);
       let card = cards.get(c.computer);
-      if (!card) { card = computerCard(c, meta, render); cards.set(c.computer, card); }
+      if (!card) {
+        card = computerCard(c, meta, render);
+        cards.set(c.computer, card);
+        if (!page.closest("[hidden]")) card.loadHealth(false);
+      }
       card.update(c);
       ordered.push(card.el);
     }
@@ -72,7 +77,10 @@ export function buildComputers(page) {
   });
 
   store.subscribe(render);
-  return render;
+  return () => {
+    render();
+    for (const card of cards.values()) card.loadHealth(true);
+  };
 }
 
 // ------------------------------------------------------------ computer card
@@ -228,7 +236,8 @@ function computerCard(initial, meta, rerender) {
   const stateText = el("span", "", "");
   const addrText = el("span", "", "");
   metaLine.append(stateText, version, addrText);
-  main.append(title, metaLine);
+  const gitWrites = el("div", "settings-inline-note", "Git writes without a repository check: Loading…");
+  main.append(title, metaLine, gitWrites);
   const chevron = el("span", "comp-chevron", "\u203A");
   toggle.append(dot, main, chevron);
 
@@ -298,7 +307,14 @@ function computerCard(initial, meta, rerender) {
     state.healthLoading = true;
     try { state.health = await hookGet(state.computer, "/v1/health/details"); state.healthError = null; }
     catch (err) { state.healthError = err.message; }
-    finally { state.healthLoaded = true; state.healthLoading = false; renderChecks(); renderPeers(); }
+    finally {
+      state.healthLoaded = true; state.healthLoading = false;
+      gitWrites.textContent = state.healthError
+        ? "Git writes without a repository check: Could not load"
+        : formatGitWrites(state.health?.gitWrites);
+      gitWrites.title = state.healthError || "Counts since this Hook started.";
+      renderChecks(); renderPeers();
+    }
   }
 
   async function loadActivity() {
@@ -421,7 +437,7 @@ function computerCard(initial, meta, rerender) {
     resources.append(resourceCard(state.resources));
   }
 
-  return { el: card, update: (c) => { state.lastComputer = c; update(c); } };
+  return { el: card, loadHealth, update: (c) => { state.lastComputer = c; update(c); } };
 }
 
 function meterColor(fill) { return fill >= 0.9 ? "stressed" : fill >= 0.6 ? "busy" : "ok"; }
