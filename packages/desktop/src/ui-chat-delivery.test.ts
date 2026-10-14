@@ -339,6 +339,31 @@ describe("chat delivery reconciliation", () => {
     expect(prompts()).toHaveLength(5);
     expect(new Set(prompts()).size).toBe(1);
   });
+
+  it("ignores a status answer that was on its way when Retry started a new attempt", async () => {
+    const unknown = { ok: true, status: 200, text: async () => JSON.stringify({ state: "unknown" }) };
+    let held: ((value: unknown) => void) | undefined, hold = false;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/v1/prompt")) return { ok: false, status: 502, text: async () => JSON.stringify({ error: "timed out" }) };
+      if (hold && !held) return new Promise(resolve => { held = resolve; });
+      return unknown;
+    });
+    const c = chat();
+    await c.send("ship it");
+    await vi.advanceTimersByTimeAsync(20_000);
+    const prompts = () => fetchMock.mock.calls.filter(([url]) => url.endsWith("/v1/prompt")).length;
+    expect(prompts()).toBe(4);
+    hold = true;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(held).toBeDefined(); // a status poll is in flight
+    c.el.find("pc-pending-retry")!.fire("click");
+    await vi.advanceTimersByTimeAsync(0);
+    held!(unknown);
+    await vi.advanceTimersByTimeAsync(30_000);
+    // The new attempt ran all its retries and offers Retry again.
+    expect(prompts()).toBe(8);
+    expect(c.el.find("pc-pending-retry")).toBeDefined();
+  });
 });
 
 it("applies preview changes and clears carried by append and backlog frames", () => {

@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } fro
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkRollup, gitPulls, gitStatus, invalidatePulls } from "./git.js";
 import { gitCommit, gitPullRequest, gitPush, runCombined } from "./git-publish.js";
 import { BridgeError } from "./protocol.js";
@@ -251,6 +251,19 @@ describe("git publish routes", () => {
     expect(checkRollup([{ status: "IN_PROGRESS" }, { status: "COMPLETED", conclusion: "FAILURE" }])).toBe("failing");
     expect(checkRollup([{ __typename: "StatusContext", state: "PENDING" }])).toBe("pending");
     expect(checkRollup([{ __typename: "StatusContext", state: "ERROR" }])).toBe("failing");
+  });
+
+  it.skipIf(process.platform === "win32")("sends no SIGKILL once the timed-out group is gone", async () => {
+    const kill = vi.spyOn(process, "kill");
+    try {
+      const run = await runCombined(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], tmpdir(), 200, {}, 100);
+      expect(run.timedOut).toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const signals = kill.mock.calls.map(([, signal]) => signal);
+      expect(signals).toContain("SIGTERM");
+      expect(signals).toContain(0);
+      expect(signals).not.toContain("SIGKILL");
+    } finally { kill.mockRestore(); }
   });
 
   it.skipIf(process.platform === "win32")("kills a descendant that ignores SIGTERM even after git itself exits", async () => {

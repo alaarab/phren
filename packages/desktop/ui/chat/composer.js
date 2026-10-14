@@ -611,6 +611,8 @@ export function createComposer({ computer, target, provider, branch, project, on
         if (entry) {
           entry.retry = () => {
             entry.retry = null;
+            // A status poll already on its way belongs to the attempt before.
+            entry.generation = (entry.generation || 0) + 1;
             if (entry.timer) clearTimeout(entry.timer);
             entry.timer = null;
             setPending(id, text || "[image]", "pending");
@@ -651,10 +653,14 @@ export function createComposer({ computer, target, provider, branch, project, on
     entry.timer = setTimeout(async () => {
       entry.timer = null;
       if (destroyed || pendings.get(id) !== entry || deliveryIsFinal(entry.state)) return;
+      const generation = entry.generation;
       try {
         const res = await hookPost(computer, "/v1/prompt/status", { target, deliveryId: id });
+        // A Retry started a new attempt meanwhile: this answer is stale.
+        if (entry.generation !== generation) return;
         applyDelivery({ ...res, deliveryId: id });
       } catch { /* keep the last state, ask again */ }
+      if (entry.generation !== generation) return;
       pollStatus(id);
     }, 2000);
   }

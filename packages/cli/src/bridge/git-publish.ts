@@ -54,14 +54,24 @@ export function runCombined(command: string, args: string[], cwd: string, timeou
       try { if (group && child.pid) process.kill(-child.pid, signal); else child.kill(signal); }
       catch { child.kill(signal); }
     };
-    // A timeout signals the group exactly twice: SIGTERM now, SIGKILL one
-    // grace later whether or not git has exited, then never again. A group id
-    // cannot be reused while any member lives, and the SIGKILL comes at most
-    // one grace after the leader could have exited.
+    // The SIGKILL goes only to a group that still has a member: a group id is
+    // not reused while any member lives, so a hook's child that ignored
+    // SIGTERM is still ours. Residual race, not closed: if every member exited
+    // during the grace and the id was then taken by a new group, the probe
+    // cannot tell the two apart; that needs both an emptied group and an id
+    // reuse inside one grace period.
+    const escalate = () => {
+      if (!group || !child.pid) { child.kill("SIGKILL"); return; }
+      try { process.kill(-child.pid, 0); } catch { return; }
+      try { process.kill(-child.pid, "SIGKILL"); } catch { /* gone since the probe */ }
+    };
+    // A timeout signals the group at most twice: SIGTERM now, and one grace
+    // later SIGKILL if the group is still there, whether or not git has
+    // exited; never again after that.
     const timer = setTimeout(() => {
       timedOut = true;
       kill("SIGTERM");
-      setTimeout(() => kill("SIGKILL"), killGraceMs).unref();
+      setTimeout(escalate, killGraceMs).unref();
       // A descendant outside the group can hold the pipes open forever:
       // answer at the deadline whether or not 'close' ever comes.
       deadline = setTimeout(() => {
