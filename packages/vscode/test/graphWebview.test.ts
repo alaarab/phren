@@ -710,3 +710,54 @@ describe("showGraphWebview: webview <-> extension message protocol", () => {
     expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: "graphData", payload: expect.any(Object) });
   });
 });
+
+describe("loadGraphData: large and Windows-pathed stores", () => {
+  it("does not fire every project's requests at the MCP server at once", async () => {
+    const names = Array.from({ length: 60 }, (_, i) => `proj-${i}`);
+    let inFlight = 0;
+    let peak = 0;
+    const tracked = <T>(value: T) => async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight--;
+      return value;
+    };
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: names.map((name) => ({ name })) })),
+      getTopicConfig: vi.fn(tracked(ok({ topics: [] }))),
+      getProjectSummary: vi.fn(tracked(ok({ summary: "s" }))),
+      getFindings: vi.fn(tracked(ok({ findings: [{ id: "f1", text: "a finding", date: "2026-01-01" }] }))),
+      getTasks: vi.fn(tracked(ok({ items: {} }))),
+    });
+
+    const data = await loadGraphData(client);
+
+    expect(data.nodes.filter((n) => n.kind === "project")).toHaveLength(60);
+    expect(peak).toBeLessThanOrEqual(16);
+  });
+
+  it("labels a reference doc by its file name when the doc path uses backslashes", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }] })),
+      getFindings: vi.fn(async () => ok({ findings: [{ id: "f1", text: "a finding", date: "2026-01-01" }] })),
+      readGraph: vi.fn(async () => ok({ fragments: [{ name: "Thing", docs: ["app\\reference\\api.md"] }] })),
+    });
+    const data = await loadGraphData(client);
+    const ref = data.nodes.find((n) => n.kind === "reference")!;
+    expect(ref.label).toBe("api.md");
+    expect(ref.projectName).toBe("app");
+  });
+
+  it("shares one reference node between entities that cite the same doc", async () => {
+    const client = fakeClient({
+      listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }] })),
+      getFindings: vi.fn(async () => ok({ findings: [{ id: "f1", text: "a finding", date: "2026-01-01" }] })),
+      readGraph: vi.fn(async () =>
+        ok({ fragments: [{ name: "A", docs: ["app/FINDINGS.md"] }, { name: "B", docs: ["app/FINDINGS.md"] }] }),
+      ),
+    });
+    const data = await loadGraphData(client);
+    expect(data.nodes.filter((n) => n.kind === "reference")).toHaveLength(1);
+  });
+});
