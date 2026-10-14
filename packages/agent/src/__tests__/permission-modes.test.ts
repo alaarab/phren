@@ -25,6 +25,26 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "cargo test",
     "go vet ./...",
     "rg foo 2>/dev/null",
+    "git --no-pager log -1",
+    "sort a.txt | uniq -c",
+    "uniq a.txt",
+    "tree -L 2",
+    "rg --pre-glob '*.gz' foo",
+    "uniq -f 1 README.md",
+    "uniq -s 2 README.md",
+    "uniq --skip-fields 1 README.md",
+    // A search pattern that mentions a secret name is not a path.
+    // (`.env` itself trips shell-safety's separate `env` warning.)
+    "rg 'credentials.json' src",
+    "grep -rn id_ed25519 src",
+    "rg -e .npmrc src",
+    "rg --regexp=.npmrc src",
+    "rg -e foo -e .npmrc src",
+    "rg -e.npmrc src",
+    // After `--` an argument is an operand, not an option.
+    "rg -- --pre src",
+    "sort -- -output.txt",
+    "sort -r a.txt",
   ];
   const asked = [
     "rm -rf src",
@@ -46,6 +66,45 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "python x.py",
     "npx prettier --write .",
     "eslint --fix .",
+    // git options before the subcommand can run programs or switch repos.
+    'git -ccore.fsmonitor="touch /tmp/pwned" status',
+    "git -c core.fsmonitor=x status",
+    "git -cdiff.external=/tmp/x diff",
+    "git --config-env=core.pager=EVIL log",
+    "git --exec-path=/tmp/evil status",
+    "git -C /tmp/elsewhere status",
+    "git --git-dir=/tmp/other/.git log",
+    "git --work-tree=/tmp/other status",
+    // Read-only tools with arguments that write files or run programs.
+    "sort -o out.txt a.txt",
+    "sort --output=out.txt a.txt",
+    "sort --compress-program=sh a.txt",
+    "tree -o out.txt",
+    "rg --pre ./run.sh foo",
+    "rg --pre=./run.sh foo",
+    "uniq in.txt out.txt",
+    // Secret files ask, as read_file would refuse them.
+    "cat .env",
+    "cat ~/.ssh/id_ed25519",
+    "grep TOKEN config/secrets.json",
+    "grep TOKEN .env",
+    "rg -f .env src",
+    "uniq -f 1 in.txt out.txt",
+    "uniq -- -in.txt out.txt",
+    "uniq in.txt -- out.txt",
+    // Clustered short options still write.
+    "sort -ro out.txt a.txt",
+    "tree -fo out.txt",
+    // git grep -O opens the matches in a program.
+    "git grep -O foo",
+    "git grep --open-files-in-pager=vim foo",
+    // With the pattern given by option, every operand is a path.
+    "rg --regexp=TOKEN config/secrets.json",
+    "rg -e TOKEN .npmrc",
+    "grep -e TOKEN -- .env",
+    // Relative spellings of secret folders.
+    "cat .aws/config",
+    "cat .ssh/config",
   ];
 
   for (const command of unprompted) {

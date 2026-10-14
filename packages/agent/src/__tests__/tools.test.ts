@@ -13,6 +13,7 @@ import { grepTool } from "../tools/grep.js";
 vi.mock("../permissions/sandbox.js", () => ({
   validatePath: (value: string) => ({ ok: true, resolved: path.resolve(value) }),
   checkSensitivePath: () => ({ sensitive: false }),
+  checkSensitiveTarget: () => ({ sensitive: false }),
 }));
 
 describe("readFileTool", () => {

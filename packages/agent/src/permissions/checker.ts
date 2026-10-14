@@ -1,8 +1,11 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
-import { isAutoApprovableCommand } from "./shell-classify.js";
+import { isAutoApprovableCommand, splitCommandLine } from "./shell-classify.js";
 import { evaluateRules } from "./rules.js";
-import { validatePath, checkSensitivePath } from "./sandbox.js";
+import { validatePath, checkSensitivePath, checkSensitiveTarget } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 import { parsePatch, patchPaths } from "../tools/apply-patch.js";
 
@@ -49,6 +52,60 @@ const AUTO_CONFIRM_TOOLS = new Set([
 const DENY_LIST_TOOLS = new Set<string>([
   // Reserved for future use — e.g. "delete_project"
 ]);
+
+/** Search tools whose first positional is a pattern, not a file. */
+const PATTERN_FIRST = new Set(["grep", "egrep", "fgrep", "rg"]);
+
+/** A search tool's options that give the pattern (so no operand is one). */
+const PATTERN_OPTION = /^(-e|--regexp)$/;
+const PATTERN_OPTION_JOINED = /^(-e.|--regexp=)/;
+/** Options whose value is a file of patterns: a path. */
+const PATTERN_FILE_OPTION = /^(-f|--file)$/;
+
+/** Is this path-like argument a secret file, under its own name or where it leads? */
+function secretPath(value: string, cwd: string): boolean {
+  const looksLikePath = /[/\\]/.test(value) || value.startsWith(".") || value.startsWith("~")
+    || fs.existsSync(path.resolve(cwd, value));
+  if (!looksLikePath) return false;
+  const expanded = value === "~" || value.startsWith("~/") ? path.join(os.homedir(), value.slice(1)) : value;
+  // Resolved against cwd, so `.aws/config` matches "/.aws/" like the absolute spelling.
+  const abs = path.resolve(cwd, expanded);
+  let real: string | undefined;
+  try { real = fs.realpathSync(abs); } catch { /* not there (yet) */ }
+  return checkSensitivePath(value).sensitive || checkSensitiveTarget(abs, real).sensitive;
+}
+
+/**
+ * Whether a simple command names a secret file. Only arguments that look like
+ * paths count (they exist, contain a separator, or start with `.` or `~`), and
+ * a search tool's pattern is skipped, so `rg 'credentials.json' src` doesn't
+ * ask. After `--` every argument is an operand.
+ */
+function namesSecretFile(tokens: string[], cwd: string): boolean {
+  const [binary, ...args] = tokens;
+  const end = args.indexOf("--");
+  const options = end === -1 ? args : args.slice(0, end);
+  const searchTool = PATTERN_FIRST.has(binary ?? "");
+  // A pattern given by -e/--regexp or -f/--file: every operand is a path.
+  let patternPending = searchTool && !options.some((a) =>
+    PATTERN_OPTION.test(a) || PATTERN_OPTION_JOINED.test(a) || PATTERN_FILE_OPTION.test(a) || /^--file=/.test(a));
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (end === -1 || i < end) {
+      if (arg.startsWith("-")) {
+        // An explicit pattern is not a path; skip it and its value.
+        if (searchTool && PATTERN_OPTION.test(arg)) { i++; continue; }
+        if (searchTool && PATTERN_OPTION_JOINED.test(arg)) continue;
+        const eq = arg.indexOf("=");
+        if (eq !== -1 && secretPath(arg.slice(eq + 1), cwd)) return true;
+        continue;
+      }
+    } else if (i === end) continue;
+    if (patternPending && !PATTERN_FILE_OPTION.test(args[i - 1] ?? "")) { patternPending = false; continue; }
+    if (secretPath(arg, cwd)) return true;
+  }
+  return false;
+}
 
 /**
  * Check whether a tool call should be allowed, asked about, or denied.
@@ -122,6 +179,11 @@ export function checkPermission(
       if (!pathResult.ok) {
         return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
       }
+      // A harmless name can link to a secret file.
+      const target = checkSensitivePath(pathResult.resolved);
+      if (target.sensitive) {
+        return { verdict: "deny", reason: `Sensitive path: ${target.reason}` };
+      }
     }
   }
 
@@ -135,6 +197,10 @@ export function checkPermission(
       const pathResult = validatePath(p, config.projectRoot, config.allowedPaths);
       if (!pathResult.ok) {
         return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
+      }
+      const target = checkSensitivePath(pathResult.resolved);
+      if (target.sensitive) {
+        return { verdict: "deny", reason: `Sensitive path: ${target.reason}` };
       }
     }
   }
@@ -174,7 +240,11 @@ export function checkPermission(
         const cwdResult = validatePath(cwd, config.projectRoot, config.allowedPaths);
         // Only commands that read, build or test; anything else (rm, git
         // push, npm publish, a redirect into a file) asks.
-        if (cwdResult.ok && isAutoApprovableCommand((input.command as string) || "")) {
+        // A read-only command still asks before it touches a secret file
+        // (`cat .env`), as read_file would be refused.
+        const command = (input.command as string) || "";
+        const touchesSecret = (splitCommandLine(command) ?? []).some((tokens) => namesSecretFile(tokens, cwd));
+        if (cwdResult.ok && !touchesSecret && isAutoApprovableCommand(command)) {
           return { verdict: "allow", reason: "Read, build or test command within sandbox." };
         }
       }

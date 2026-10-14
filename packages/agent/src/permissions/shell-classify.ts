@@ -40,8 +40,32 @@ const WRITING_ARGS: Record<string, RegExp> = {
   // -i edits in place; a script's w command writes a file and e runs one.
   sed: /^(-i|--in-place)|(^|[;{}\n]|\/[gpIiMm0-9]*)\s*[we](\s|$)/,
   eslint: /^--fix/,
-  git: /^(-o|--output)/,
+  // git grep -O / --open-files-in-pager runs a program on the matches.
+  git: /^(-o|--output|-[A-Za-z]*O|--open-files-in-pager)/,
+  // sort -o writes its output file, also inside a cluster (-ro); --compress-program runs one.
+  sort: /^(-[A-Za-z]*o|--output|--compress-program)/,
+  tree: /^-[A-Za-z]*o/,
+  // rg --pre runs a program on every file it searches.
+  rg: /^--pre(=|$)/,
 };
+
+/**
+ * git options before the subcommand that set config (core.fsmonitor and
+ * diff.external run programs), swap git's own executables, or point it at
+ * another repository: `git -c… status` is not `git status`.
+ */
+const GIT_GLOBAL_UNSAFE = /^(-c|-C|--config-env|--exec-path|--git-dir|--work-tree)/;
+
+/** uniq options whose value is the next argument, not a file. */
+const UNIQ_VALUE_OPTION = /^(-f|-s|-w|--skip-fields|--skip-chars|--check-chars)$/;
+
+function gitGlobalOptionsUnsafe(args: string[]): boolean {
+  for (const a of args) {
+    if (!a.startsWith("-")) return false;
+    if (GIT_GLOBAL_UNSAFE.test(a)) return true;
+  }
+  return false;
+}
 
 /** Package scripts that `npm run` and friends may run unprompted. */
 const SAFE_SCRIPT = /^(test|build|lint|check|typecheck|type-check|tsc|compile)(:[\w:-]+)?$/;
@@ -109,8 +133,19 @@ function segmentIsSafe(tokens: string[]): boolean {
   // A leading assignment (PATH=… cmd) can change what runs.
   if (!binary || /^[A-Za-z_][A-Za-z0-9_]*=/.test(binary)) return false;
   const name = binary.includes("/") ? "" : binary;
+  // After `--` every argument is an operand, never an option (find's
+  // expression and sed's script are checked whole).
+  const end = name === "find" || name === "sed" ? -1 : args.indexOf("--");
+  const options = end === -1 ? args : args.slice(0, end);
   const writing = WRITING_ARGS[name];
-  if (writing && args.some((a) => writing.test(a))) return false;
+  if (writing && options.some((a) => writing.test(a))) return false;
+  // uniq IN OUT overwrites OUT.
+  if (name === "uniq") {
+    const operands = options.filter((a, i) => !a.startsWith("-") && !UNIQ_VALUE_OPTION.test(options[i - 1] ?? "")).length
+      + (end === -1 ? 0 : args.length - end - 1);
+    if (operands > 1) return false;
+  }
+  if (name === "git" && gitGlobalOptionsUnsafe(args)) return false;
   if (READ_ONLY.has(name) || RUNNERS.has(name)) return true;
   const subs = SUBCOMMANDS[name];
   if (!subs) return false;
@@ -133,6 +168,8 @@ export function isAutoApprovableCommand(command: string): boolean {
 export function commandPattern(tokens: string[]): string {
   const [binary, ...args] = tokens;
   if (!binary) return "*";
+  // Such a git line is its own pattern, so approving `git status` doesn't approve it.
+  if (binary === "git" && gitGlobalOptionsUnsafe(args)) return tokens.join(" ");
   if (MULTI_COMMAND_TOOLS.has(binary)) {
     const sub = args.find((a) => !a.startsWith("-"));
     if (sub) return `${binary} ${sub}`;

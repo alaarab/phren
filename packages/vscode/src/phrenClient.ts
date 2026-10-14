@@ -524,7 +524,12 @@ export class PhrenClient {
     }
 
     if (!this.initializePromise) {
-      this.initializePromise = this.initialize();
+      // A failed handshake is not cached: the next call tries again.
+      const attempt = this.initialize();
+      this.initializePromise = attempt;
+      attempt.catch(() => {
+        if (this.initializePromise === attempt) this.initializePromise = undefined;
+      });
     }
 
     await this.initializePromise;
