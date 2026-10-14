@@ -96,7 +96,13 @@ export function tryFileLock(filePath: string): (() => void) | null {
       const code = (err as NodeJS.ErrnoException).code;
       // Windows refuses to create a lock another process is deleting (still
       // open somewhere) with EPERM, EACCES or EBUSY: it is held, not broken.
-      if (process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY")) return null;
+      // With no lock file there at all, the error is a real permission problem.
+      if (process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY")) {
+        let present = true;
+        try { fs.statSync(lockPath); } catch (statErr: unknown) { present = (statErr as NodeJS.ErrnoException).code !== "ENOENT"; }
+        if (present) return null;
+        throw err;
+      }
       if (code !== "EEXIST") throw err;
       try {
         const contents = fs.readFileSync(lockPath, "utf8");

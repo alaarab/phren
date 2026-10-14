@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
@@ -26,15 +27,29 @@ describe("tryFileLock", () => {
   it("reports a lock Windows is still deleting as held, not as an error", () => {
     const tmp = makeTempDir("phren-trylock-");
     try {
+      const lockFile = path.join(tmp.path, "index-rebuild.lock");
+      fs.writeFileSync(lockFile, "being deleted");
       Object.defineProperty(process, "platform", { value: "win32" });
       fail.code = "EPERM";
       expect(tryFileLock(path.join(tmp.path, "index-rebuild"))).toBeNull();
+      fs.unlinkSync(lockFile);
       Object.defineProperty(process, "platform", { value: "linux" });
       expect(() => tryFileLock(path.join(tmp.path, "index-rebuild"))).toThrow(/EPERM/);
       fail.code = undefined;
       const release = tryFileLock(path.join(tmp.path, "index-rebuild"));
       expect(release).toBeTypeOf("function");
       release!();
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("surfaces a Windows permission error when no lock file exists", () => {
+    const tmp = makeTempDir("phren-trylock-");
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      fail.code = "EACCES";
+      expect(() => tryFileLock(path.join(tmp.path, "index-rebuild"))).toThrow(/EACCES/);
     } finally {
       tmp.cleanup();
     }
