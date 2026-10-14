@@ -183,6 +183,38 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
     expect(read(local, "demo/notes/2026-09-24.md")).toBe(notes(note("aaaa0001", "Kept note"), note("aaaa0002", "Edited body"), note("aaaa0003", "Remote note")));
   });
 
+  it("reads note boundaries with the notes writer's grammar, not every nid heading", async () => {
+    const note = (id: string, text: string) => [`## 10:00 <!-- nid:${id} -->`, "", text];
+    const notes = (...entries: string[][]) => ["# demo Notes — 2026-09-24", "", ...entries.map((e) => e.join("\n")).join("\n\n").split("\n"), ""].join("\n");
+    const withExample = (example: string) => note("aaaa0001", `Body of A\n\n## Example <!-- nid:bbbb0002 -->\n\n${example}`);
+    const { local, writer, commit } = fixture({ "demo/notes/2026-09-24.md": notes(withExample("example text"), note("cccc0003", "Note C")) });
+    commit(local, { "demo/notes/2026-09-24.md": notes(note("cccc0003", "Note C")) }, "local removes A");
+    commit(writer, { "demo/notes/2026-09-24.md": notes(withExample("example text v2"), note("cccc0003", "Note C")) }, "remote edits A");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    // Removed on one side, edited on the other: the whole edited note A is kept, heading and all.
+    expect(read(local, "demo/notes/2026-09-24.md")).toBe(notes(note("cccc0003", "Note C"), withExample("example text v2")));
+  });
+
+  it("merges a notes file one side deleted against the base instead of taking the other side whole", async () => {
+    const note = (id: string, text: string) => [`## 10:00 <!-- nid:${id} -->`, "", text];
+    const notes = (...entries: string[][]) => ["# demo Notes — 2026-09-24", "", ...entries.map((e) => e.join("\n")).join("\n\n").split("\n"), ""].join("\n");
+    const { local, writer, commit } = fixture({ "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Note A")) });
+    // Local removed its last note, which deletes the daily file.
+    git(local, "rm", "--quiet", "demo/notes/2026-09-24.md");
+    git(local, "commit", "-m", "local removes A");
+    commit(writer, { "demo/notes/2026-09-24.md": notes(note("aaaa0001", "Note A"), note("bbbb0002", "Note B")) }, "remote adds B");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    expect(read(local, "demo/notes/2026-09-24.md")).toBe(notes(note("bbbb0002", "Note B")));
+  });
+
   it("heals a topic whose block an earlier union merge left with two start lines", async () => {
     const doubled = (now: string, bullets: string[]) => topic(now, bullets)
       .replace(`<!-- phren:now:start at=${now}`, `<!-- phren:now:start at=2026-09-01T00:00:00Z hash=abc123abc123 -->\n<!-- phren:now:start at=${now}`);

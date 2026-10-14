@@ -23,6 +23,7 @@ import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { mergeFindings, mergeTask } from "../content/validate.js";
 import { cleanBlock, KNOWS_END, KNOWS_START, NOW_END, NOW_START, upsertBlock } from "../content/summarize.js";
 import { dedupeTaskIds, mergeTasksByBid } from "./task-merge.js";
+import { NOTE_HEADING_RE } from "../data/notes.js";
 
 export interface ConflictResolution { resolved: string[]; unresolved: string[] }
 
@@ -94,23 +95,24 @@ function unionText(base: string, ours: string, theirs: string): string | null {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-const NOTE_HEADING = /^##\s.*<!--\s*nid:([0-9a-z]+)\s*-->/i;
+const DELETED_FILE = Symbol("deleted");
 
 /** A daily notes file split into its header and one block per note id; null when an id repeats. */
 function noteBlocks(content: string): { header: string; notes: Map<string, string> } | null {
+  // The notes writer's own heading grammar: a note body may contain other `## ... nid:` lines.
   const lines = content.split("\n");
-  const first = lines.findIndex((line) => NOTE_HEADING.test(line));
+  const first = lines.findIndex((line) => NOTE_HEADING_RE.test(line));
   const notes = new Map<string, string>();
-  if (first === -1) return { header: content, notes };
+  if (first === -1) return { header: content.trimEnd(), notes };
   let id = "";
   let body: string[] = [];
   const flush = () => { if (id) notes.set(id, body.join("\n").trimEnd()); };
   for (const line of lines.slice(first)) {
-    const m = NOTE_HEADING.exec(line);
+    const m = NOTE_HEADING_RE.exec(line);
     if (!m) { body.push(line); continue; }
     flush();
-    if (notes.has(m[1])) return null;
-    id = m[1];
+    if (notes.has(m[2])) return null;
+    id = m[2];
     body = [line];
   }
   flush();
@@ -121,11 +123,16 @@ function noteBlocks(content: string): { header: string; notes: Map<string, strin
  * Daily notes merged per note id against the base: a note one side edited or
  * removed takes that side's change, notes either side added are kept. A line
  * union could put an edited note's old body back under the same id. A note
- * both sides edited differently falls back to the line union.
+ * both sides edited differently falls back to the line union. A side that
+ * deleted the file counts as one with the base's header and no notes, and
+ * DELETED_FILE comes back when no note survives that deletion.
  */
-function mergeNotes(base: string, ours: string, theirs: string): string | null {
-  const [b, o, t] = [noteBlocks(base), noteBlocks(ours), noteBlocks(theirs)];
-  if (!b || !o || !t) return null;
+function mergeNotes(base: string, ours: string | null, theirs: string | null): string | typeof DELETED_FILE | null {
+  const b = noteBlocks(base);
+  if (!b) return null;
+  const deleted = { header: b.header, notes: new Map<string, string>() };
+  const [o, t] = [ours === null ? deleted : noteBlocks(ours), theirs === null ? deleted : noteBlocks(theirs)];
+  if (!o || !t) return null;
   const header = mergeText(b.header, o.header, t.header);
   if (header === null) return null;
   const out: string[] = [];
@@ -139,6 +146,7 @@ function mergeNotes(base: string, ours: string, theirs: string): string | null {
     else return null;
     if (note !== undefined) out.push(note);
   }
+  if (!out.length && (ours === null || theirs === null)) return DELETED_FILE;
   return [header, ...out].join("\n\n") + "\n";
 }
 
@@ -207,8 +215,15 @@ export function resolveStoreConflicts(cwd: string): ConflictResolution {
       const theirs = stage(cwd, 3, relFile);
       const fullPath = path.join(cwd, relFile);
       if (ours === null && theirs === null) { unresolved.push(relFile); continue; }
-      // Removed on one side and edited on the other: keep the edited file.
-      const merged = ours === null ? theirs : theirs === null ? ours : resolveContent(strategy, base, ours, theirs);
+      // Removed on one side and edited on the other: keep the edited file,
+      // except daily notes, whose deletion can mean their last note was removed.
+      const notesMerge = strategy === "notes" && (ours === null || theirs === null) ? mergeNotes(base, ours, theirs) : null;
+      if (notesMerge === DELETED_FILE) {
+        git(cwd, ["rm", "--quiet", "--force", "--ignore-unmatch", "--", relFile]);
+        resolved.push(relFile);
+        continue;
+      }
+      const merged = notesMerge ?? (ours === null ? theirs : theirs === null ? ours : resolveContent(strategy, base, ours, theirs));
       if (merged === null) { unresolved.push(relFile); continue; }
       const tmp = `${fullPath}.tmp-${crypto.randomUUID()}`;
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
