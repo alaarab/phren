@@ -130,6 +130,18 @@ describe("webServers", () => {
     answer({ ss: { stdout: `${ssLine(port, "bun", 77)}\n` } });
     expect(await webServers()).toEqual([]);
   });
+  it("withholds a cached owner when the socket table cannot be read to verify it", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` } });
+    expect(await webServers()).toMatchObject([{ port, pid: 42 }]);
+    now += 2_000;
+    answer({});
+    const unverified = await webServers();
+    expect(unverified).toHaveLength(1);
+    expect(unverified[0]).toMatchObject({ port });
+    expect(unverified[0].pid).toBeUndefined();
+  });
   it("falls back to lsof when ss is missing", async () => {
     answer({ lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
     const found = await webServers();

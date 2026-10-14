@@ -368,7 +368,8 @@ export async function webServers(): Promise<LocalServer[]> {
   const servers = await serversCache.get("listeners", scanWebServers);
   if (!servers.some(server => server.pid !== undefined) || Date.now() - (scanStarted.get(servers) ?? 0) < LISTENER_TRUST_MS) return servers;
   const live = await readListeners().catch(() => undefined);
-  if (!live) return servers;
+  // The table could not be read (ss timed out, no lsof): ownership cannot be verified, so none is claimed.
+  if (!live) return servers.map(({ pid: _pid, ...server }) => server);
   const kept = servers.filter(server => server.pid === undefined || live.get(listenerKey(server))?.pid === server.pid);
   if (kept.length !== servers.length) serversCache.invalidate(() => true);
   return kept;
