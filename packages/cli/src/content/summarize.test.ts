@@ -1,9 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { blockBody, inventedIdentifiers, KNOWS_END, KNOWS_START, NOW_END, NOW_START, digestTopic, mostMentioned, parseTopicBullets, readKnowsBlock, splitTopicFile, structuralNow, summarizeProject, summarizeTopicFile, upsertBlock } from "./summarize.js";
 import { writeRootManifest } from "../shared.js";
+
+// Lets one test stand in for the model; every other test reaches the real callLlm.
+const llm = vi.hoisted(() => ({ answer: null as null | (() => Promise<string>) }));
+vi.mock("./dedup.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./dedup.js")>();
+  return { ...actual, callLlm: (...args: Parameters<typeof actual.callLlm>) => llm.answer ? llm.answer() : actual.callLlm(...args) };
+});
+afterEach(() => { llm.answer = null; });
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
@@ -115,6 +123,26 @@ describe("summarizeTopicFile", () => {
     expect(again.now).toContain("1 finding, archived");
     const forced = await summarizeTopicFile(file, "api", { force: true, now: () => new Date("2026-09-05T12:00:00Z") });
     expect(forced.updated).toBe(true);
+  });
+});
+
+describe("summarizeTopicFile with a model", () => {
+  it("keeps a finding archived into the topic while the model was answering", async () => {
+    const dir = tmp();
+    const file = path.join(dir, "api.md");
+    fs.writeFileSync(file, topicDoc([["2026-03-01", ["- [pattern] RetryPolicy caps at five"]]]));
+    let calls = 0;
+    llm.answer = async () => {
+      // Another process archives a finding into this topic mid-generation, once.
+      if (calls++ === 0) fs.appendFileSync(file, "\n## Archived 2026-03-02\n\n- [bug] Pool stalls under load\n");
+      return "RetryPolicy caps at five retries, and the pool stalls under load according to the archived findings.";
+    };
+    const result = await summarizeTopicFile(file, "api", { llm: true, now: () => new Date("2026-09-05T10:00:00Z") });
+    const content = fs.readFileSync(file, "utf8");
+    expect(content).toContain("- [bug] Pool stalls under load");
+    expect(content).toContain("## Now");
+    expect(result.bullets).toBe(2);
+    expect(calls).toBe(2);
   });
 });
 
