@@ -709,12 +709,6 @@ function writeJsonFileUnlocked(filePath: string, data: unknown): void {
   fs.renameSync(tmpPath, filePath);
 }
 
-function writeJsonFile(filePath: string, data: unknown): void {
-  withFileLock(filePath, () => {
-    writeJsonFileUnlocked(filePath, data);
-  });
-}
-
 function getRetentionPolicyGlobal(phrenPath: string): RetentionPolicy {
   const parsed = readJsonFile<Partial<RetentionPolicy>>(govFile(phrenPath, "retention-policy"), {});
   return withDefaults(parsed, DEFAULT_POLICY);
@@ -726,16 +720,21 @@ export function getRetentionPolicy(phrenPath: string, projectName?: string): Ret
 }
 
 export function updateRetentionPolicy(phrenPath: string, patch: RetentionPolicyPatch): PhrenResult<RetentionPolicy> {
-  const current = getRetentionPolicy(phrenPath);
-  const next: RetentionPolicy = {
-    ...current,
-    ...patch,
-    decay: {
-      ...current.decay,
-      ...(patch.decay || {}),
-    },
-  };
-  writeJsonFile(govFile(phrenPath, "retention-policy"), next);
+  // Read and write under one lock, or a concurrent patch's fields are lost.
+  const file = govFile(phrenPath, "retention-policy");
+  const next = withFileLock(file, () => {
+    const current = getRetentionPolicy(phrenPath);
+    const merged: RetentionPolicy = {
+      ...current,
+      ...patch,
+      decay: {
+        ...current.decay,
+        ...(patch.decay || {}),
+      },
+    };
+    writeJsonFileUnlocked(file, merged);
+    return merged;
+  });
   appendAuditLog(phrenPath, "update_policy", JSON.stringify(next));
   return phrenOk(next);
 }
@@ -761,7 +760,17 @@ export function getWorkflowPolicy(phrenPath: string, projectName?: string): Work
 }
 
 export function updateWorkflowPolicy(phrenPath: string, patch: Partial<WorkflowPolicy>): PhrenResult<WorkflowPolicy> {
-  const current = getWorkflowPolicy(phrenPath);
+  const file = govFile(phrenPath, "workflow-policy");
+  const next = withFileLock(file, () => {
+    const merged = patchedWorkflowPolicy(getWorkflowPolicy(phrenPath), patch);
+    writeJsonFileUnlocked(file, merged);
+    return merged;
+  });
+  appendAuditLog(phrenPath, "update_workflow_policy", JSON.stringify(next));
+  return phrenOk(next);
+}
+
+function patchedWorkflowPolicy(current: WorkflowPolicy, patch: Partial<WorkflowPolicy>): WorkflowPolicy {
   const riskySections = Array.isArray(patch.riskySections)
     ? patch.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(section)))
     : current.riskySections;
@@ -778,9 +787,7 @@ export function updateWorkflowPolicy(phrenPath: string, patch: Partial<WorkflowP
     taskMode,
     findingSensitivity,
   };
-  writeJsonFile(govFile(phrenPath, "workflow-policy"), next);
-  appendAuditLog(phrenPath, "update_workflow_policy", JSON.stringify(next));
-  return phrenOk(next);
+  return next;
 }
 
 export function getIndexPolicy(phrenPath: string): IndexPolicy {
@@ -794,7 +801,17 @@ export function getIndexPolicy(phrenPath: string): IndexPolicy {
 }
 
 export function updateIndexPolicy(phrenPath: string, patch: Partial<IndexPolicy>): PhrenResult<IndexPolicy> {
-  const current = getIndexPolicy(phrenPath);
+  const file = govFile(phrenPath, "index-policy");
+  const next = withFileLock(file, () => {
+    const merged = patchedIndexPolicy(getIndexPolicy(phrenPath), patch);
+    writeJsonFileUnlocked(file, merged);
+    return merged;
+  });
+  appendAuditLog(phrenPath, "update_index_policy", JSON.stringify(next));
+  return phrenOk(next);
+}
+
+function patchedIndexPolicy(current: IndexPolicy, patch: Partial<IndexPolicy>): IndexPolicy {
   const next: IndexPolicy = {
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     includeGlobs: Array.isArray(patch.includeGlobs)
@@ -805,9 +822,7 @@ export function updateIndexPolicy(phrenPath: string, patch: Partial<IndexPolicy>
       : current.excludeGlobs,
     includeHidden: patch.includeHidden ?? current.includeHidden,
   };
-  writeJsonFile(govFile(phrenPath, "index-policy"), next);
-  appendAuditLog(phrenPath, "update_index_policy", JSON.stringify(next));
-  return phrenOk(next);
+  return next;
 }
 
 export function getRuntimeHealth(phrenPath: string): RuntimeHealth {

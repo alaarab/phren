@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { spawn } from "child_process";
 import { makeTempDir, initTestPhrenRoot } from "../test-helpers.js";
 import {
   getRetentionPolicy,
@@ -194,6 +195,32 @@ describe("updateWorkflowPolicy", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.riskySections).toEqual(["Review", "Conflicts"]);
+  });
+
+  it("reads the policy under the write lock, so a concurrent writer's change survives", async () => {
+    const file = path.join(phrenPath, ".config", "workflow-policy.json");
+    const lock = `${file}.lock`;
+    // Another process holds the lock, writes taskMode, then releases it.
+    const writer = spawn(process.execPath, ["-e", `
+      const fs = require("fs");
+      fs.writeFileSync(process.argv[1] + ".lock", process.pid + "\\n" + Date.now(), { flag: "wx" });
+      setTimeout(() => {
+        fs.writeFileSync(process.argv[1], JSON.stringify({ taskMode: "manual" }));
+        fs.unlinkSync(process.argv[1] + ".lock");
+      }, 300);
+    `, file], { stdio: "ignore" });
+    const exited = new Promise((resolve) => writer.on("exit", resolve));
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(lock) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    expect(fs.existsSync(lock)).toBe(true);
+
+    const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: "aggressive" });
+    await exited;
+
+    expect(result.ok && result.data.taskMode).toBe("manual");
+    const reread = getWorkflowPolicy(phrenPath);
+    expect(reread.taskMode).toBe("manual");
+    expect(reread.findingSensitivity).toBe("aggressive");
   });
 });
 
