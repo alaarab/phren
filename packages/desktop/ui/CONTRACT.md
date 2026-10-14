@@ -2,6 +2,18 @@
 
 Read "Shell" first: it is how every new screen plugs in.
 
+`chat/answers.js`: `answerQuestion(computer, target, { id, answers, questions })`
+posts to `/v1/questions/answer`. Cards pass normalized questions with
+`options: [{ label, description? }]` and answers with `{ optionIndexes, text? }`.
+For Claude and OpenCode it sends question text, `multiSelect` and string option
+labels; for Codex it sends `toolUseId: id` and answers without questions.
+
+`chat/cards.js`: `renderInteractions(container, agentStatus, { computer, target,
+onAnswered })` renders question sets from both `pendingQuestions` (Codex) and
+`terminalPrompt.questions` (released Claude and served OpenCode), using the same
+answer card and serializer. The chat's card signature includes terminal questions
+so changes redraw the cards while identical status frames preserve typed answers.
+
 # Shell (phase 1)
 
 `index.html` holds only the titlebar (`#section-pills`, `#needs-pill`,
