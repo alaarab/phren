@@ -125,6 +125,8 @@ the centre below 1200 px). Extensions live in Settings.
 
 ## Other shell modules
 
+- `schedule-update.js`: `scheduleChanges(before, after)` allowlists edited schedule fields and uses `null` for removals; `updateSchedule(computer, project, original, before, after)` posts through `hookPost` with the exact stored revision, skipping unchanged values. Schedules retains the source Hook for each listed schedule and checks that Hook's `scheduleUpdate` capability for edits and Pause/Resume. Conflicts reopen the editor with the returned schedule and a review notice; removed schedules close it, and validation errors stay on the form. Older Hooks, creation and deletion retain the daemon's memory save path. Covered by `src/ui-schedule-update.test.ts`.
+
 - `shell/store.js`: `sessions(merged?, { includeOffline = false }?)` and `store.sessions(options?)` flatten online computers only by default; the sidebar requests last-seen rows with `includeOffline: true`. `needsYou(merged?)` counts only online attention. `sessionKind(child)` shares the attention predicate and preserves working, done, idle and error; other statuses are unknown. `store.find` also finds cached rows.
 - `shell/returns.js`: `stateChip(state)` returns `{ label, cls }` for dispatch returns and worker states, shared by Conductor and Review; unrecognised states keep their word with no class, missing states read "unknown".
 
