@@ -4,8 +4,9 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
-## [0.1.7] - unreleased
+## [0.1.7] - 2026-10-14
 
+- Home has one Finished block, right after Needs you: what ended while you were away comes first (with Dismiss), then recent worker returns and scheduled runs. It replaces Since you left and Recent returns.
 - On macOS, Node extensions run in a sandbox that keeps them away from this desktop's key, its SSH connections and the Hook; everywhere, they start without the desktop's secrets in their environment.
 - Home reads once at startup instead of twice.
 - Settings › About shows the desktop and each computer's Hook version, with Copy for a bug report (computers numbered, not named).
@@ -16,7 +17,7 @@ GitHub release notes, and the app shows them when that version is available.
 - ⌘K lists the projects on every computer and opens one's page.
 - A working session with no output for five minutes reads "stalled" on Home and in the sidebar, with a notification; one working only on background tasks says how many.
 - Allow or Deny an approval from the menu bar icon's menu, or start a new agent from it.
-- Since you left also lists the pull requests whose checks passed or failed while you were away.
+- What finished while you were away also lists the pull requests whose checks passed or failed.
 - Settings › Notifications is grouped (what notifies, quiet hours, where the needs-you count shows), with quiet hours and a separate switch for stalled-agent notifications.
 - Continue a session in another agent (Codex, Claude on another account, OpenCode, Copilot) from its sidebar menu or ⌘K: it writes a hand-off and the new agent picks up in the same folder.
 - Relinking a computer you removed works without restarting the desktop.
