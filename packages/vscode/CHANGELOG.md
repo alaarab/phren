@@ -3,7 +3,9 @@
 The VS Code extension versions separately from `@phren/cli`; the CLI's own
 changelog is at the repository root. The Marketplace listing shows this file.
 
-## [Unreleased]
+## [0.7.2] - unreleased
+
+- A healthy third MCP replacement can initialize and restore the reconnect budget; retries are exhausted only after the final attempt fails.
 
 ## [0.7.1] - 2026-10-13
 
