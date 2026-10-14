@@ -202,10 +202,10 @@ describe("a message the agent took into its running turn", () => {
   });
   it("is unaffected by a Stop that lands while the transcript is being read", async () => {
     let store!: PromptDeliveries;
-    let stopDuringRead = false;
+    let stopDuringRead = false, rows: { offset: number; hook: boolean }[] = [{ offset: 0, hook: false }];
     store = new PromptDeliveries(undefined, () => clock, async () => {
       if (stopDuringRead) store.stopped(claudeTarget);
-      return [{ offset: 0, hook: false }];
+      return rows;
     });
     stores.push(store);
     await send(store, "mid-read-1", "yes", claudeTarget);
@@ -214,6 +214,7 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [claudePane("working")]);
     expect(store.status("mid-read-1", claudeTarget).state).toBe("delivered");
     expect(store.status("mid-read-2", claudeTarget).state).toBe("queued");
+    rows = [{ offset: 0, hook: false }, { offset: 100, hook: true }];
     await store.submitted(claudeTarget, "yes");
     expect(store.status("mid-read-2", claudeTarget).state).toBe("delivered");
   });
@@ -227,6 +228,37 @@ describe("a message the agent took into its running turn", () => {
     clock += DELIVERY_GIVE_UP_MS;
     await restarted.observe("default", [claudePane("idle")]);
     expect(restarted.status("stop-0001", claudeTarget).state).toBe("failed");
+  });
+  it("settles nothing for a callback when no unclaimed row is within reach of the message", async () => {
+    const store = deliveries();
+    await send(store, "far-0001", "yes", claudeTarget);
+    clock += 10; await send(store, "far-0002", "yes", claudeTarget);
+    // First message settled from its row at idle; the second message is far newer than that row, so its scan window holds no row at all.
+    clock += 1; store.stopped(claudeTarget);
+    landed = true; matches = 1; hookRows = true;
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("far-0001", claudeTarget).state).toBe("delivered");
+    const state = store.status("far-0002", claudeTarget).state;
+    landed = false;
+    await store.submitted(claudeTarget, "yes");
+    expect(store.status("far-0002", claudeTarget).state).toBe(state);
+  });
+  it("claims rows per conversation: a new conversation's row at the same offset is its own", async () => {
+    const store = deliveries();
+    await send(store, "conv-0001", "yes", claudeTarget);
+    clock += 1; store.stopped(claudeTarget);
+    landed = true; matches = 1; hookRows = true;
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("conv-0001", claudeTarget).state).toBe("delivered");
+    // /clear: another conversation, its own transcript, a row at the same byte offset 0.
+    const next: Target = { ...claudeTarget, session: "00000000-bbbb-7000-8000-00000000000c" };
+    clock += 10; await send(store, "conv-0002", "yes", next);
+    await store.submitted(next, "yes");
+    expect(store.status("conv-0002", next).state).toBe("delivered");
   });
   it("survives a Hook restart after the transcript check", async () => {
     const store = deliveries();

@@ -216,9 +216,14 @@ export class PromptDeliveries {
     if (!record) return;
     let entry: number | undefined;
     if (target.source === "claude") {
-      const rows = (await this.landed({ source: target.source, session: target.session, hash, at: record.at }).catch(() => [] as TranscriptEntry[])).filter(row => row.hook);
-      if (rows.length > 0) {
-        const claimed = new Set(this.records.filter(other => other.hash === hash && this.samePane(other, target) && other.entry !== undefined).map(other => other.entry));
+      // The row is in the transcript before the prompt hook runs, so a hook settles a message only by claiming a row for it:
+      // none left (all claimed by earlier messages, or none within reach) is a callback for a turn already accounted for.
+      // A transcript that cannot be read at all is the one case the hook settles on its own word.
+      let rows: TranscriptEntry[] | undefined;
+      try { rows = (await this.landed({ source: target.source, session: target.session, hash, at: record.at })).filter(row => row.hook); } catch { rows = undefined; }
+      if (rows) {
+        // Claims are per conversation: another conversation's rows can sit at the same byte offset.
+        const claimed = new Set(this.records.filter(other => other.hash === hash && this.samePane(other, target) && other.session === target.session && other.entry !== undefined).map(other => other.entry));
         const free = rows.filter(row => !claimed.has(row.offset)).sort((a, b) => a.offset - b.offset)[0];
         if (!free) return;
         entry = free.offset;
