@@ -92,7 +92,9 @@ export const DEFAULTS_APP: Record<string, string[]> = {
   next_needs_you: ["cmd+shift+a"], close_tab: ["cmd+w"],
   split_right: ["cmd+\\"], split_down: ["cmd+shift+\\"], console: ["cmd+shift+t"],
 };
-for (let n = 1; n <= 9; n++) DEFAULTS_APP[`session_${n}`] = [`cmd+${n}`];
+// Cmd/Ctrl+1–9 belong to the titlebar's pills (app.js); sessions keep prefix+1..9,
+// and session_N stays bindable under [keys.app].
+for (let n = 1; n <= 9; n++) DEFAULTS_APP[`session_${n}`] = [];
 
 export interface KeyConfig {
   bindings: Record<string, string[]>;
