@@ -455,6 +455,24 @@ function makeRow(sb, desc) {
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
   });
   node.addEventListener("contextmenu", (event) => { event.preventDefault(); showMenu(node); });
+  // Files dropped on a row open that session and land in its composer.
+  const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
+  node.addEventListener("dragover", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    node.classList.add("sb-drop");
+  });
+  node.addEventListener("dragleave", (event) => { if (!node.contains(event.relatedTarget)) node.classList.remove("sb-drop"); });
+  node.addEventListener("drop", (event) => {
+    node.classList.remove("sb-drop");
+    const row = node.__row;
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (!row || !files.length) return;
+    event.preventDefault();
+    markSeen(sb, row.computer, row.child);
+    sb.handlers.onDropFiles?.(row.computer, row.child, files);
+    requestRender(sb);
+  });
   return node;
 }
 
