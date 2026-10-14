@@ -8,7 +8,13 @@ import { knownHostsPath, loadComputers, masterExitArgs, masterKey, sshArgs } fro
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 let root: string;
 const previous = process.env.PHREN_BRIDGE_HOME;
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "desktop-hosts-")); process.env.PHREN_BRIDGE_HOME = root; });
+beforeEach(async () => {
+  root = await mkdtemp(path.join(tmpdir(), "desktop-hosts-"));
+  process.env.PHREN_BRIDGE_HOME = root;
+  await writeFile(path.join(root, "id_ed25519_desktop.pub"), KEY);
+  await writeFile(path.join(root, "id_ed25519_dispatch.pub"), `${KEY}different`);
+  await writeFile(path.join(root, "other.pub"), `${KEY}other`);
+});
 afterEach(async () => { process.env.PHREN_BRIDGE_HOME = previous; await rm(root, { recursive: true, force: true }); });
 
 const peers = (name: string) => `version: 1\ncomputers:\n  - name: ${name}\n    address: box\n    username: me\n    port: 2222\n    hostKey: ${KEY}\n`;
@@ -64,7 +70,7 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     expect(sshArgs(desk, "x", { tty: true })).toContain("-tt");
   });
 
-  it("keys the master socket by key file hash and slot", async () => {
+  it("keys the master socket by identity and slot", async () => {
     await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
     const [, desk] = await loadComputers();
     expect(controlPath(sshArgs(desk, "x"))).toMatch(CONTROL_PATH);
@@ -101,6 +107,22 @@ describe.skipIf(process.platform === "win32")("sshArgs", () => {
     expect(masterKey({ ...desk, name: "Alias" })).toBe(masterKey(desk));
     expect(masterKey({ ...desk, keyFile: path.join(root, "other") })).not.toBe(masterKey(desk));
     expect(masterKey({ ...desk, port: 22 })).not.toBe(masterKey(desk));
+  });
+
+  it("isolates a changed pin or public key at the same pathname", async () => {
+    await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
+    const [, desk] = await loadComputers();
+    const originalKey = masterKey(desk);
+    const originalPath = controlPath(sshArgs(desk, "x"));
+    const repinned = { ...desk, hostKey: "ssh-ed25519 AAAANEWPIN" };
+    expect(masterKey(repinned)).not.toBe(originalKey);
+    expect(controlPath(sshArgs(repinned, "x"))).not.toBe(originalPath);
+    await writeFile(`${desk.keyFile}.pub`, "ssh-ed25519 AAAANEWIDENTITY");
+    expect(masterKey(desk)).not.toBe(originalKey);
+    expect(controlPath(sshArgs(desk, "x"))).not.toBe(originalPath);
+    const alias = path.join(root, "alias");
+    await writeFile(`${alias}.pub`, "ssh-ed25519 AAAANEWIDENTITY");
+    expect(masterKey({ ...desk, keyFile: alias })).toBe(masterKey(desk));
   });
 
   it("refuses the local computer", () => {

@@ -47,7 +47,8 @@ function isHostKeyError(message?: string): boolean {
 /** True when the SSH identity changed enough that the current supervisor is
  * pointing at the wrong machine (a relink after a "verify" state, say). */
 function sshChanged(a: Computer, b: Computer): boolean {
-  return a.address !== b.address || a.port !== b.port || a.hostKey !== b.hostKey || a.keyFile !== b.keyFile;
+  return a.address !== b.address || a.port !== b.port || a.hostKey !== b.hostKey || a.keyFile !== b.keyFile
+    || a.username !== b.username || a.server !== b.server;
 }
 
 function frameText(data: RawData): string {
@@ -136,7 +137,14 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
       scheduleChange();
       return;
     }
-    if (rec.type !== "overview") return; // heartbeat: liveness only
+    if (rec.type === "heartbeat") {
+      if (sup.overview && rec.phren && typeof rec.phren === "object" && !Array.isArray(rec.phren)) {
+        sup.overview = { ...sup.overview, phren: rec.phren as HookOverview["phren"] };
+        scheduleChange();
+      }
+      return;
+    }
+    if (rec.type !== "overview") return;
     const overview = { ...rec };
     delete overview.type;
     sup.overview = overview as HookOverview;
@@ -210,7 +218,7 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
       run();
     };
     try {
-      ws(sup.computer, OVERVIEW_PATH).then(
+      ws(sup.computer, `${OVERVIEW_PATH}&server=${encodeURIComponent(sup.computer.server)}`).then(
         (socket) => { if (settled) socket.terminate(); else settle(() => attach(sup, socket)); },
         (err: unknown) => settle(() => fail(sup, err)),
       );

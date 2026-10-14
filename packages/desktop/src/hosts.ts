@@ -1,6 +1,6 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
@@ -149,14 +149,25 @@ export async function closeMasters(c: Computer): Promise<void> {
  * a channel pool just as they share masters. */
 export function masterKey(c: Computer): string {
   if (c.local) return c.name;
-  return `${c.keyFile ?? ""}\n${c.username ?? ""}@${c.address ?? ""}:${c.port ?? 22}`;
+  if (!c.keyFile) throw new Error(`Computer ${c.name} is missing its SSH key.`);
+  let publicKey: string;
+  try { publicKey = readFileSync(`${c.keyFile}.pub`, "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // Older enrollments kept only the private half. ssh-keygen returns its
+    // public identity; private key contents never enter the master hash.
+    publicKey = execFileSync("ssh-keygen", ["-y", "-P", "", "-f", c.keyFile], { encoding: "utf8", timeout: 10_000, maxBuffer: 4096 });
+  }
+  const identity = createHash("sha256").update(publicKey.trim().split(/\s+/).slice(0, 2).join(" ")).digest("hex");
+  const pin = createHash("sha256").update(Buffer.from(c.hostKey?.trim().split(/\s+/)[1] ?? "", "base64")).digest("hex");
+  return `${identity}\n${pin}\n${c.username ?? ""}@${c.address ?? ""}:${c.port ?? 22}`;
 }
 
-/** The ControlMaster socket path for one slot. A hash of the key file path
- * keeps computers that share a name but not a key apart; the slot index lets
+/** The ControlMaster socket path for one slot. A hash of the public identity,
+ * pinned host key and destination isolates changed credentials; the slot index lets
  * the channel pool spread concurrent channels over several connections. */
 function controlPath(c: Computer, slot: number): string {
-  const tag = createHash("sha256").update(c.keyFile ?? "").digest("hex").slice(0, 8);
+  const tag = createHash("sha256").update(masterKey(c)).digest("hex").slice(0, 8);
   return path.join(controlSocketDir(), `${tag}-${slot}-%C`);
 }
 

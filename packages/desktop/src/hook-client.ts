@@ -16,21 +16,29 @@ const MAX_BODY = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT = 60_000;
 const HANDSHAKE_TIMEOUT = 20_000;
 
-export const openHookPipe: OpenHookPipe = c => c.local ? localPipe() : remotePipe(c);
+export const openHookPipe: OpenHookPipe = c => openPipe(c);
 
-function localPipe(): Promise<Duplex> {
+function openPipe(c: Computer, signal?: AbortSignal): Promise<Duplex> {
+  return c.local ? localPipe(signal) : remotePipe(c, signal);
+}
+
+function localPipe(signal?: AbortSignal): Promise<Duplex> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return; }
     const socket = connect(path.join(bridgeRoot(), "hook.sock"));
-    socket.once("connect", () => resolve(socket));
-    socket.once("error", reject);
+    const abort = (): void => { socket.destroy(signal?.reason); };
+    signal?.addEventListener("abort", abort, { once: true });
+    const cleanup = (): void => signal?.removeEventListener("abort", abort);
+    socket.once("connect", () => { cleanup(); resolve(socket); });
+    socket.once("error", error => { cleanup(); reject(error); });
   });
 }
 
-async function remotePipe(c: Computer): Promise<Duplex> {
+async function remotePipe(c: Computer, signal?: AbortSignal): Promise<Duplex> {
   // One master slot per pipe: the pool spreads the desktop's concurrent
   // channels over up to 4 connections so sshd's per-connection MaxSessions
   // (10) is never exceeded.
-  const channel = await channelPool.acquire(masterKey(c));
+  const channel = await channelPool.acquire(masterKey(c), { signal });
   let released = false;
   const release = (): void => { if (released) return; released = true; channel.release(); };
   return new Promise((resolve, reject) => {
@@ -87,35 +95,46 @@ export const hookRequest: HookRequest = async (c, method, requestPath, body) => 
 };
 
 async function requestOnce(c: Computer, method: string, requestPath: string, body?: unknown): Promise<HookResponse> {
-  const pipe = await openHookPipe(c);
-  return new Promise<HookResponse>((resolve, reject) => {
-    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
-    const req = request({
-      createConnection: () => pipe,
-      method,
-      path: requestPath,
-      headers: {
-        Host: "phren.local",
-        Connection: "close",
-        "X-Phren-Client": "desktop",
-        ...(payload === undefined ? {} : { "Content-Type": "application/json", "Content-Length": payload.byteLength }),
-      },
-    }, response => {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      response.on("data", (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > MAX_BODY) req.destroy(new Error("Hook response exceeds 16 MiB."));
-        else chunks.push(chunk);
+  const controller = new AbortController();
+  let pipe: Duplex | undefined;
+  const timer = setTimeout(() => {
+    controller.abort(new Error(pipe ? "Hook request timed out after 60 s." : "Hook request timed out waiting for a channel after 60 s."));
+    pipe?.destroy(controller.signal.reason);
+  }, REQUEST_TIMEOUT);
+  try {
+    pipe = await openPipe(c, controller.signal);
+    controller.signal.throwIfAborted();
+    const connection = pipe;
+    return await new Promise<HookResponse>((resolve, reject) => {
+      const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+      const req = request({
+        createConnection: () => connection,
+        method,
+        path: requestPath,
+        headers: {
+          Host: "phren.local",
+          Connection: "close",
+          "X-Phren-Client": "desktop",
+          ...(payload === undefined ? {} : { "Content-Type": "application/json", "Content-Length": payload.byteLength }),
+        },
+      }, response => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        response.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > MAX_BODY) req.destroy(new Error("Hook response exceeds 16 MiB."));
+          else chunks.push(chunk);
+        });
+        response.on("error", reject);
+        response.on("end", () => resolve({ status: response.statusCode ?? 0, headers: lowerHeaders(response.headers), body: Buffer.concat(chunks) }));
       });
-      response.on("error", reject);
-      response.on("end", () => resolve({ status: response.statusCode ?? 0, headers: lowerHeaders(response.headers), body: Buffer.concat(chunks) }));
+      req.on("error", reject);
+      req.end(payload);
     });
-    const timer = setTimeout(() => req.destroy(new Error("Hook request timed out after 60 s.")), REQUEST_TIMEOUT);
-    req.on("close", () => clearTimeout(timer));
-    req.on("error", reject);
-    req.end(payload);
-  });
+  } finally {
+    clearTimeout(timer);
+    if (controller.signal.aborted) pipe?.destroy();
+  }
 }
 
 function lowerHeaders(headers: IncomingHttpHeaders): Record<string, string> {
