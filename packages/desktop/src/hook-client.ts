@@ -9,7 +9,7 @@ import { Duplex } from "node:stream";
 import { WebSocket } from "ws";
 import type { Computer, HookRequest, HookResponse, HookWebSocket, OpenHookPipe } from "./contract.js";
 import { channelPool } from "./channel-pool.js";
-import { bridgeRoot, sshArgs } from "./hosts.js";
+import { bridgeRoot, masterKey, sshArgs } from "./hosts.js";
 import { recordHttp, recordWebSocket } from "./trace.js";
 
 const MAX_BODY = 16 * 1024 * 1024;
@@ -30,7 +30,7 @@ async function remotePipe(c: Computer): Promise<Duplex> {
   // One master slot per pipe: the pool spreads the desktop's concurrent
   // channels over up to 4 connections so sshd's per-connection MaxSessions
   // (10) is never exceeded.
-  const channel = await channelPool.acquire(c.name);
+  const channel = await channelPool.acquire(masterKey(c));
   let released = false;
   const release = (): void => { if (released) return; released = true; channel.release(); };
   return new Promise((resolve, reject) => {
