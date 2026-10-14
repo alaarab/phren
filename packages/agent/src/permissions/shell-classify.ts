@@ -55,6 +55,9 @@ const WRITING_ARGS: Record<string, RegExp> = {
  */
 const GIT_GLOBAL_UNSAFE = /^(-c|-C|--config-env|--exec-path|--git-dir|--work-tree)/;
 
+/** uniq options whose value is the next argument, not a file. */
+const UNIQ_VALUE_OPTION = /^(-f|-s|-w|--skip-fields|--skip-chars|--check-chars)$/;
+
 function gitGlobalOptionsUnsafe(args: string[]): boolean {
   for (const a of args) {
     if (!a.startsWith("-")) return false;
@@ -132,7 +135,9 @@ function segmentIsSafe(tokens: string[]): boolean {
   const writing = WRITING_ARGS[name];
   if (writing && args.some((a) => writing.test(a))) return false;
   // uniq IN OUT overwrites OUT.
-  if (name === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return false;
+  if (name === "uniq" && args.filter((a, i) => !a.startsWith("-") && !UNIQ_VALUE_OPTION.test(args[i - 1] ?? "")).length > 1) {
+    return false;
+  }
   if (name === "git" && gitGlobalOptionsUnsafe(args)) return false;
   if (READ_ONLY.has(name) || RUNNERS.has(name)) return true;
   const subs = SUBCOMMANDS[name];

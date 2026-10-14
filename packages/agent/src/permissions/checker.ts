@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
 import { isAutoApprovableCommand, splitCommandLine } from "./shell-classify.js";
@@ -49,6 +51,34 @@ const AUTO_CONFIRM_TOOLS = new Set([
 const DENY_LIST_TOOLS = new Set<string>([
   // Reserved for future use — e.g. "delete_project"
 ]);
+
+/** Search tools whose first positional is a pattern, not a file. */
+const PATTERN_FIRST = new Set(["grep", "egrep", "fgrep", "rg"]);
+
+/**
+ * Whether a simple command names a secret file. Only arguments that look like
+ * paths count (they exist, contain a separator, or start with `.` or `~`), and
+ * a search tool's pattern is skipped, so `rg 'process.env' src` doesn't ask.
+ */
+function namesSecretFile(tokens: string[], cwd: string): boolean {
+  const [binary, ...args] = tokens;
+  let patternSkipped = !PATTERN_FIRST.has(binary ?? "");
+  return args.some((arg, i) => {
+    let value = arg;
+    if (arg.startsWith("-")) {
+      const eq = arg.indexOf("=");
+      if (eq === -1) return false;
+      value = arg.slice(eq + 1);
+    } else if (!patternSkipped) {
+      patternSkipped = true;
+      // `-f FILE` reads the patterns from a file, so that argument is a path.
+      if (!/^(-f|--file)$/.test(args[i - 1] ?? "")) return false;
+    }
+    const looksLikePath = /[/\\]/.test(value) || value.startsWith(".") || value.startsWith("~")
+      || fs.existsSync(path.resolve(cwd, value));
+    return looksLikePath && checkSensitivePath(value).sensitive;
+  });
+}
 
 /**
  * Check whether a tool call should be allowed, asked about, or denied.
@@ -186,7 +216,7 @@ export function checkPermission(
         // A read-only command still asks before it touches a secret file
         // (`cat .env`), as read_file would be refused.
         const command = (input.command as string) || "";
-        const touchesSecret = (splitCommandLine(command) ?? []).some((tokens) => tokens.some((t) => checkSensitivePath(t).sensitive));
+        const touchesSecret = (splitCommandLine(command) ?? []).some((tokens) => namesSecretFile(tokens, cwd));
         if (cwdResult.ok && !touchesSecret && isAutoApprovableCommand(command)) {
           return { verdict: "allow", reason: "Read, build or test command within sandbox." };
         }

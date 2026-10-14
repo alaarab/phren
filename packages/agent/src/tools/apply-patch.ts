@@ -340,6 +340,9 @@ export const applyPatchTool: AgentTool = {
     }
     const cwd = process.cwd();
     let writes: PlannedWrite[];
+    // What a deletion removes: the directory entry the patch names, in its
+    // canonical parent, so deleting a link removes the link, not its target.
+    const entries = new Map<string, string>();
     try {
       const ops = parsePatch(text);
       // Validation follows links and `..` on disk; everything after it uses
@@ -353,6 +356,9 @@ export const applyPatchTool: AgentTool = {
         const target = checkSensitiveTarget(p, sandbox.resolved);
         if (target.sensitive) return { output: `Access denied: ${p}: ${target.reason}`, is_error: true };
         canonical.set(p, sandbox.resolved);
+        const base = path.basename(p);
+        const parent = base === "." || base === ".." ? null : validatePath(path.dirname(p), cwd, []);
+        entries.set(p, parent?.ok ? path.join(parent.resolved, base) : sandbox.resolved);
       }
       const resolve = (p: string): string => canonical.get(p)!;
       for (const op of ops) {
@@ -370,7 +376,8 @@ export const applyPatchTool: AgentTool = {
     for (const w of writes) {
       const abs = w.abs;
       if (w.content === null) {
-        if (fs.existsSync(abs)) fs.rmSync(abs);
+        const entry = entries.get(w.path) ?? abs;
+        if (fs.lstatSync(entry, { throwIfNoEntry: false })) fs.rmSync(entry);
         forgetFileState(abs);
       } else {
         fs.mkdirSync(path.dirname(abs), { recursive: true });

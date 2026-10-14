@@ -30,6 +30,14 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "uniq a.txt",
     "tree -L 2",
     "rg --pre-glob '*.gz' foo",
+    "uniq -f 1 README.md",
+    "uniq -s 2 README.md",
+    "uniq --skip-fields 1 README.md",
+    // A search pattern that mentions a secret name is not a path.
+    // (`.env` itself trips shell-safety's separate `env` warning.)
+    "rg 'credentials.json' src",
+    "grep -rn id_ed25519 src",
+    "rg -e .npmrc src",
   ];
   const asked = [
     "rm -rf src",
@@ -72,6 +80,9 @@ describe("auto-confirm runs only commands that read, build or test", () => {
     "cat .env",
     "cat ~/.ssh/id_ed25519",
     "grep TOKEN config/secrets.json",
+    "grep TOKEN .env",
+    "rg -f .env src",
+    "uniq -f 1 in.txt out.txt",
   ];
 
   for (const command of unprompted) {

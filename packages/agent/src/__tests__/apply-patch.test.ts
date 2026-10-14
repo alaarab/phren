@@ -137,6 +137,15 @@ describe("apply_patch tool", () => {
     expect(fs.readFileSync(".env", "utf-8")).toBe("TOKEN=x\n");
   });
 
+  it("deletes a link itself, not the file it points to", async () => {
+    fs.writeFileSync("original.txt", "keep\n");
+    fs.symlinkSync(path.join(dir, "original.txt"), path.join(dir, "alias.txt"));
+    const r = await applyPatchTool.execute({ patch: "*** Begin Patch\n*** Delete File: alias.txt\n*** End Patch" });
+    expect(r.is_error).toBeFalsy();
+    expect(fs.lstatSync("alias.txt", { throwIfNoEntry: false })).toBeUndefined();
+    expect(fs.readFileSync("original.txt", "utf-8")).toBe("keep\n");
+  });
+
   it("does not move onto an existing file it has not read", async () => {
     fs.writeFileSync("a.txt", "a\n");
     fs.writeFileSync("dest.txt", "keep\n");

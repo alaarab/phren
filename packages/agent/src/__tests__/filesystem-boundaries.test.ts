@@ -10,6 +10,7 @@ import * as path from "node:path";
 const grepModule = new URL("../tools/grep.ts", import.meta.url).href;
 const writeModule = new URL("../tools/write-file.ts", import.meta.url).href;
 const readModule = new URL("../tools/read-file.ts", import.meta.url).href;
+const fileStateModule = new URL("../tools/file-state.ts", import.meta.url).href;
 const loader = import.meta.resolve("tsx");
 let directory: string, project: string;
 function run(script: string, fallback = false): any {
@@ -65,8 +66,12 @@ describe("filesystem tool boundaries", () => {
     const read = run(`console.log(JSON.stringify(await readFileTool.execute({ path: "public.txt" })));`);
     expect(read.is_error).toBe(true);
     expect(read.output).not.toContain("fixture_secret");
-    const write = run(`console.log(JSON.stringify(await writeFileTool.execute({ path: "public.txt", content: "x" })));`);
+    // Seed the read record so the unread-file guard can't be what refuses.
+    const write = run(`const { recordFileState } = await import(${JSON.stringify(fileStateModule)});
+      recordFileState("public.txt");
+      console.log(JSON.stringify(await writeFileTool.execute({ path: "public.txt", content: "x" })));`);
     expect(write.is_error).toBe(true);
+    expect(write.output).toContain("Access denied");
     expect(fs.readFileSync(path.join(project, ".env"), "utf8")).toBe("fixture_secret");
   });
 
