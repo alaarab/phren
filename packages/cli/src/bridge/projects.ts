@@ -354,8 +354,8 @@ async function listenersFromSs(ports: Map<string, LocalServer>): Promise<void> {
 
 const serversCache = new LookupCache<LocalServer[]>(10_000, 300_000, 1, () => true, 20_000);
 
-/** When the cached listeners were last read from the socket table. */
-let scannedAt = 0;
+/** When each cached listing's socket-table read began: the listing is only as fresh as that, however long probing took. */
+const scanStarted = new WeakMap<LocalServer[], number>();
 /** A cached listener is trusted this long after its scan; the socket table is read again after that. */
 const LISTENER_TRUST_MS = 1_000;
 
@@ -366,12 +366,17 @@ const LISTENER_TRUST_MS = 1_000;
  * wrong app. Such a result drops the entry and refreshes the cache. */
 export async function webServers(): Promise<LocalServer[]> {
   const servers = await serversCache.get("listeners", scanWebServers);
-  if (!servers.some(server => server.pid !== undefined) || Date.now() - scannedAt < LISTENER_TRUST_MS) return servers;
+  if (!servers.some(server => server.pid !== undefined) || Date.now() - (scanStarted.get(servers) ?? 0) < LISTENER_TRUST_MS) return servers;
   const live = await readListeners().catch(() => undefined);
   if (!live) return servers;
-  const kept = servers.filter(server => server.pid === undefined || live.get(new URL(server.origin).host)?.pid === server.pid);
+  const kept = servers.filter(server => server.pid === undefined || live.get(listenerKey(server))?.pid === server.pid);
   if (kept.length !== servers.length) serversCache.invalidate(() => true);
   return kept;
+}
+
+/** The key `addListener` files a server under: its host with the port always spelled out (a URL's host drops the default one). */
+export function listenerKey(server: Pick<LocalServer, "origin" | "port">): string {
+  return `${server.origin.includes("[::1]") ? "[::1]" : "127.0.0.1"}:${server.port}`;
 }
 
 /** The listening sockets (address:port to owner), without probing any of them. */
@@ -388,6 +393,7 @@ async function readListeners(): Promise<Map<string, LocalServer>> {
 }
 
 async function scanWebServers(): Promise<LocalServer[]> {
+  const started = Date.now();
   const ports = await readListeners();
   // Probe well-known ports first so a browser's dozens of ephemeral listeners
   // cannot push a dev server on :3000 past the cap.
@@ -401,8 +407,9 @@ async function scanWebServers(): Promise<LocalServer[]> {
       if (name !== null) found.push({ ...server, name });
     }));
   }
-  scannedAt = Date.now();
-  return found.sort((a, b) => a.port - b.port);
+  const listing = found.sort((a, b) => a.port - b.port);
+  scanStarted.set(listing, started);
+  return listing;
 }
 
 /** Launch only in real local directories under home or a locator candidate. */

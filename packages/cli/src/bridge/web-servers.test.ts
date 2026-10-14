@@ -110,6 +110,26 @@ describe("webServers", () => {
     now += 2_000;
     expect(await webServers()).toMatchObject([{ port, pid: 42 }]);
   });
+  it("spells the port out in a listener's key, default ports included", async () => {
+    const { listenerKey } = await import("./projects.js");
+    // A URL's host drops :80 and :443, but the socket table's keys never do.
+    expect(listenerKey({ origin: "http://127.0.0.1:80", port: 80 })).toBe("127.0.0.1:80");
+    expect(listenerKey({ origin: "http://[::1]:443", port: 443 })).toBe("[::1]:443");
+    expect(listenerKey({ origin: `http://127.0.0.1:${port}`, port })).toBe(`127.0.0.1:${port}`);
+  });
+  it("trusts a listing only as far as its scan began, not as far as its probes finished", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` } });
+    const scan = webServers();
+    await vi.waitFor(() => expect(execFileMock).toHaveBeenCalled());
+    // Probing takes a while: the scan "finishes" 5 s after it read the socket table.
+    now += 5_000;
+    expect(await scan).toMatchObject([{ port, pid: 42 }]);
+    // Meanwhile A closed its listener and B took the port.
+    answer({ ss: { stdout: `${ssLine(port, "bun", 77)}\n` } });
+    expect(await webServers()).toEqual([]);
+  });
   it("falls back to lsof when ss is missing", async () => {
     answer({ lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
     const found = await webServers();
