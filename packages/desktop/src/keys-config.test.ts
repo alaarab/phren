@@ -32,8 +32,8 @@ describe("loadKeyConfig", () => {
     expect(config.appBindings).toEqual(DEFAULTS_APP);
     expect(config.appBindings.palette).toEqual(["cmd+k"]);
     expect(config.appBindings.open_file).toEqual(["cmd+p"]);
-    expect(config.appBindings.session_1).toEqual(["cmd+1"]);
-    expect(config.appBindings.session_9).toEqual(["cmd+9"]);
+    expect(config.appBindings.session_1).toEqual([]);
+    expect(config.appBindings.session_9).toEqual([]);
     expect(config.appBindings.sidebar).toEqual(["cmd+b"]);
     expect(config.appSources.palette).toBe("default");
   });

@@ -83,7 +83,10 @@ test.beforeEach(async ({}, info) => {
   closeServer = server.close;
 });
 
-test.afterEach(async () => {
+test.afterEach(async ({ page }) => {
+  // The page keeps polling git status; a route that fetches from the daemon
+  // must be gone before the daemon closes, or the poll's fetch fails the test.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   hub?.stop();
   await closeServer?.();
   await hook?.close();

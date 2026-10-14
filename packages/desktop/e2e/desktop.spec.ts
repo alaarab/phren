@@ -236,7 +236,7 @@ test("palette, settings and the three-segment tool panel", async ({ page }) => {
   await expect(page.locator("#side .segments .segment")).toHaveText(["Changes", "Files", "Search"]);
 
   // ⌘K opens the palette; typing a session title and Enter opens it.
-  await page.keyboard.press("Meta+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await expect(page.locator(".palette-input")).toBeFocused();
   await page.keyboard.type("Ship release");
   await page.screenshot({ path: test.info().outputPath("desktop-palette.png") });
@@ -739,7 +739,7 @@ test("⌘K lists the watched pull requests and opens one on its session's PRs", 
   await page.goto(url, { waitUntil: "domcontentloaded" });
   // Home follows the CI watch, so its first look fills the palette too.
   await expect(page.locator(".home-check", { hasText: "#42" })).toBeVisible();
-  await page.keyboard.press("Meta+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("42");
   const row = page.locator(".palette-row", { hasText: "#42 Keep the session through the guard" });
   await expect(row).toContainText("Checks failing");
@@ -814,7 +814,7 @@ test("an available update shows in the titlebar with What's new", async ({ page 
 test("⌘K lists projects and opens one's page", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator("#needs-pill").waitFor();
-  await page.keyboard.press("Meta+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("phren");
   // The first open loads the Projects list, then the row fills in.
   const row = page.locator(".palette-row", { hasText: "Project · This computer" });
@@ -1041,7 +1041,7 @@ test("Quick chat stays off on a Hook without it", async ({ page }) => {
   await page.route("**/v1/harnesses", (route) => route.fulfill({ json: { harnesses: [{ source: "phren", installed: true, usable: true }] } }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator("#needs-pill").waitFor();
-  await page.keyboard.press("Meta+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type(">quick chat");
   await page.keyboard.press("Enter");
   await expect(page.locator(".launch-sheet .launch-title")).toHaveText("Quick chat");
@@ -1058,7 +1058,7 @@ test("⌘K's ? search offers to ask the question in a quick chat", async ({ page
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click();
   await page.locator(".sb-row", { hasText: "Fix login" }).click();
-  await page.keyboard.press("Meta+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type("?why does login drop the session");
   const ask = page.locator(".palette-row", { hasText: "Ask in a quick chat: why does login drop the session" });
   await expect(ask).toContainText("phren · This computer");
@@ -1124,13 +1124,13 @@ test("⌘K continues the open session in another agent", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator("#needs-pill").waitFor();
   // No session open: the command is not offered.
-  await page.keyboard.press("Meta+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type(">continue");
   await expect(page.locator(".palette-row", { hasText: "Continue this session in" })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.locator('.section-pill[data-section="agents"]').click();
   await page.locator(".sb-row", { hasText: "Fix login" }).click();
-  await page.keyboard.press("Meta+k");
+  await page.keyboard.press("ControlOrMeta+k");
   await page.keyboard.type(">continue");
   const row = page.locator(".palette-row", { hasText: "Continue this session in" });
   await expect(row).toContainText("Fix login");
