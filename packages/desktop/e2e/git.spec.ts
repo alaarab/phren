@@ -69,7 +69,7 @@ test.beforeEach(async ({}, info) => {
   taskBranches = [];
   process.env.PHREN_BRIDGE_HOME = dir;
   // A test titled "on GitLab" runs against a GitLab remote, not yet connected.
-  git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github" });
+  git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github", directory: /remote branch checks out/.test(info.title) });
   hook = await startFakeHook({ dir, routes: { ...git.routes, ...MEMORY_ROUTES }, files: { "src/app.ts": FAKE_GIT_WORKING_APP } });
   hub = createOverviewHub([LOCAL], hookWebSocket);
   const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
@@ -237,6 +237,28 @@ test("a remote branch checks out as a tracking local branch", async ({ page }) =
   await page.locator(".chg-row", { hasText: "app.ts" }).first().hover();
   await page.locator(".chg-row", { hasText: "app.ts" }).first().locator('.chg-icon[title="Stage"]').click();
   await expect.poll(() => git.staged()).toBe(2);
+  expect(git.calls.find((call) => call.route === "stage")?.body).not.toHaveProperty("confirmBulk");
+  const staged = page.locator(".chg-sec", { hasText: "STAGED" }).locator(".chg-row", { hasText: "app.ts" });
+  await staged.hover();
+  await staged.locator('.chg-icon[title="Unstage"]').click();
+  await expect.poll(() => git.staged()).toBe(0);
+  await page.getByRole("button", { name: "Stage all 3", exact: true }).click();
+  const confirmation = page.locator(".chg-stage-confirm");
+  await expect(confirmation).toContainText("Stage 3 paths?");
+  await expect(confirmation).toContainText("Folders and their contents: assets/");
+  await expect(confirmation.locator(".chg-stage-paths")).toHaveText("src/app.tsREADME.mdassets/");
+  expect(git.calls.filter((call) => call.route === "stage")).toHaveLength(1);
+  await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirmation).toHaveCount(0);
+  expect(git.calls.filter((call) => call.route === "stage")).toHaveLength(1);
+  await page.getByRole("button", { name: "Stage all 3", exact: true }).click();
+  await confirmation.getByRole("button", { name: "Stage", exact: true }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect.poll(() => git.staged()).toBe(2);
+  expect(git.calls.filter((call) => call.route === "stage").at(-1)?.body).toMatchObject({
+    paths: ["src/app.ts", "README.md", "assets/"], confirmBulk: true, expectedRepository: "/Users/you/phren",
+  });
+  await expect(page.locator(".chg-sec", { hasText: "STAGED" })).toContainText("icon.svg");
   await page.locator(".chg-seg", { hasText: "Branches" }).click();
   await page.locator('.chg-branch-row[data-branch="origin/agent/parser"]').click();
   await expect(page.locator(".chg-confirm")).toContainText("Check out origin/agent/parser as agent/parser");

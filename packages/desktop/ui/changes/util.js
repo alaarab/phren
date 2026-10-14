@@ -114,3 +114,19 @@ export function prReason(status, term = "pull request") {
   if (status.ahead > 0) return "Push " + status.ahead + " commit" + (status.ahead === 1 ? "" : "s") + " first.";
   return "";
 }
+
+/** The Hook's staging gates, applied to the exact unstaged selection. The
+ * Hook checks again on write because the working tree can change meanwhile. */
+export function stagePlan(files) {
+  const selected = files.filter((file) => !file.staged);
+  const paths = [...new Set(selected.map((file) => file.path))];
+  const directories = paths.filter((path) => selected.some((file) => file.path === path && (file.directory || path.endsWith("/"))));
+  const binary = paths.filter((path) => selected.some((file) => file.path === path && file.status === "?" && file.binary));
+  const unknown = paths.filter((path) => !directories.includes(path) && !binary.includes(path)
+    && selected.some((file) => file.path === path && file.status === "?" && file.countsComplete !== true));
+  return {
+    paths, directories, binary, unknown,
+    confirm: paths.length > 100 || directories.length > 0 || binary.length > 0 || unknown.length > 0,
+    error: paths.length > 500 ? `Choose at most 500 paths to stage at once (${paths.length} selected). Stage smaller selections first.` : "",
+  };
+}

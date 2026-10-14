@@ -230,7 +230,10 @@ Errors are `Error` with `.status`, `.code` and `.body` (the Hook's JSON).
   A file staged and also changed again appears twice (staged true and false).
 - `POST /v1/diff {target, paths:[]}` → `{files:[{path, status, sections:[{id, kind:"staged"|"unstaged", binary, patch, truncated}]}]}`
   (`patch` is unified diff text; untracked files have no sections; read them whole).
-- `POST /v1/git/stage|unstage|discard {target, paths:[...], expectedRepository}`; stage also takes `confirmBulk`.
+- `POST /v1/git/stage|unstage|discard {target, paths:[...], expectedRepository}`; stage also takes `confirmBulk`, sent only after the inline Stage confirmation.
+  Stage all includes collapsed directories. Confirm directories and their contents, binary or uncounted untracked files, and selections over 100 paths; refuse over 500 paths.
+  The confirmation lists the count, named directories/binary/unknown files, the first 10 paths and the remaining count, with Stage and Cancel. A Hook staging-gate 409 also opens it.
+  `changes/util.js` exports `stagePlan(files) → {paths, directories, binary, unknown, confirm, error}` for the distinct unstaged selection; confirmation retains that selection and repository.
 - `POST /v1/git/commit {target, message, expectedRepository}`; `POST /v1/git/push {target, expectedRepository}`
   (a 409 whose `error.body.defaultBranch` is set means pushing the default branch: ask with a Phren dialog, then resend with `confirmDefault: true`).
 - `POST /v1/git/log {target, limit}` → `{commits:[{sha, short, subject, author, date, refs, parents}]}` (History).
