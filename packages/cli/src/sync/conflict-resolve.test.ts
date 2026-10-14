@@ -153,6 +153,22 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
     expect((await recoverPushConflict(local)).ok).toBe(true);
   });
 
+  it("keeps a finding removed on one side removed instead of resurrecting it", async () => {
+    const findings = (bullets: string[]) => ["# demo Findings", "", "## 2026-09-20", "", ...bullets, ""].join("\n");
+    const { local, writer, commit } = fixture({ "demo/FINDINGS.md": findings(["- [pattern] Keep this one", "- [pitfall] Archived on the laptop"]) });
+    // Local archives the second finding and records a new one in its place.
+    commit(local, { "demo/FINDINGS.md": findings(["- [pattern] Keep this one", "- [bug] Local finding"]) }, "local");
+    commit(writer, { "demo/FINDINGS.md": findings(["- [pattern] Keep this one", "- [pitfall] Archived on the laptop", "- [bug] Remote finding"]) }, "remote");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    const merged = read(local, "demo/FINDINGS.md");
+    for (const text of ["Keep this one", "Local finding", "Remote finding"]) expect(merged).toContain(text);
+    expect(merged).not.toContain("Archived on the laptop");
+  });
+
   it("heals a topic whose block an earlier union merge left with two start lines", async () => {
     const doubled = (now: string, bullets: string[]) => topic(now, bullets)
       .replace(`<!-- phren:now:start at=${now}`, `<!-- phren:now:start at=2026-09-01T00:00:00Z hash=abc123abc123 -->\n<!-- phren:now:start at=${now}`);

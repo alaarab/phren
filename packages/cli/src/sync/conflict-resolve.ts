@@ -123,7 +123,7 @@ function resolveContent(strategy: Exclude<Strategy, null>, base: string, ours: s
     // When a smarter merge refuses, a line union still keeps every record of
     // both sides (repeated task ids collapsed): a knowledge file never blocks a sync.
     case "tasks": return orUnion(() => mergeTasksByBid(base, ours, theirs), base, ours, theirs, dedupe);
-    case "findings": return orUnion(() => mergeFindings(ours, theirs), base, ours, theirs);
+    case "findings": return orUnion(() => mergeFindings(ours, theirs, base), base, ours, theirs);
     // Archived tasks only accumulate: keep both sides, the incoming version of any duplicate.
     case "archive": return dedupe(orUnion(() => mergeTask(theirs, ours), base, ours, theirs));
     case "topic": return mergeWithGeneratedBlock(base, ours, theirs, NOW_START, NOW_END, "top");
