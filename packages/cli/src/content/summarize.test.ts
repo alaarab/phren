@@ -87,18 +87,28 @@ describe("upsertBlock", () => {
   });
 });
 
-/** Another process holds `file`'s lock, writes `content` to it after a moment, then releases. */
-async function writeUnderLock(file: string, content: string): Promise<Promise<unknown>> {
+/**
+ * Another process holds `file`'s lock; once told to go (the caller is about to
+ * write), it waits a moment, writes `content` to the file and releases.
+ */
+async function writeUnderLock(file: string, content: string): Promise<{ exited: Promise<unknown> }> {
+  const go = `${file}.go`;
   const child = spawn(process.execPath, ["-e", `
     const fs = require("fs");
-    fs.writeFileSync(process.argv[1] + ".lock", process.pid + "\\n" + Date.now(), { flag: "wx" });
-    setTimeout(() => { fs.writeFileSync(process.argv[1], process.argv[2]); fs.unlinkSync(process.argv[1] + ".lock"); }, 300);
-  `, file, content], { stdio: "ignore" });
+    const [file, content, go] = process.argv.slice(1);
+    fs.writeFileSync(file + ".lock", process.pid + "\\n" + Date.now(), { flag: "wx" });
+    const poll = setInterval(() => {
+      if (!fs.existsSync(go)) return;
+      clearInterval(poll);
+      setTimeout(() => { fs.writeFileSync(file, content); fs.unlinkSync(file + ".lock"); }, 200);
+    }, 5);
+  `, file, content, go], { stdio: "ignore" });
   const exited = new Promise((resolve) => child.on("exit", resolve));
   const deadline = Date.now() + 5000;
   while (!fs.existsSync(`${file}.lock`) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
   expect(fs.existsSync(`${file}.lock`)).toBe(true);
-  return exited;
+  fs.writeFileSync(go, "");
+  return { exited };
 }
 
 describe("topic writes under another writer's lock", () => {
@@ -106,7 +116,7 @@ describe("topic writes under another writer's lock", () => {
     const dir = tmp();
     const file = path.join(dir, "api.md");
     fs.writeFileSync(file, topicDoc([["2026-03-01", ["- [pattern] RetryPolicy caps at five"]]]));
-    const exited = await writeUnderLock(file, topicDoc([["2026-03-01", ["- [pattern] RetryPolicy caps at five"]], ["2026-03-02", ["- [bug] Pool stalls under load"]]]));
+    const { exited } = await writeUnderLock(file, topicDoc([["2026-03-01", ["- [pattern] RetryPolicy caps at five"]], ["2026-03-02", ["- [bug] Pool stalls under load"]]]));
 
     const result = setTopicSummary(file, "RetryPolicy caps at five retries, according to the archived findings for this topic.");
     await exited;
@@ -124,7 +134,7 @@ describe("topic writes under another writer's lock", () => {
     fs.writeFileSync(olderFile, "# demo · api (older archive)\n\n## Archived 2025-12-01\n\n- [pattern] Rejected later\n- [pattern] Still wanted\n");
     fs.writeFileSync(file, topicDoc([["2026-01-01", ["- [pattern] a", "- [pattern] b"]], ["2026-02-01", ["- [pattern] c", "- [pattern] d"]]]));
     // A review rejection removes one older bullet while the split is waiting.
-    const exited = await writeUnderLock(olderFile, "# demo · api (older archive)\n\n## Archived 2025-12-01\n\n- [pattern] Still wanted\n");
+    const { exited } = await writeUnderLock(olderFile, "# demo · api (older archive)\n\n## Archived 2025-12-01\n\n- [pattern] Still wanted\n");
 
     expect(splitTopicFile(file, 3)).toBe(olderFile);
     await exited;
