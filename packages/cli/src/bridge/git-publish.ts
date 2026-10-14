@@ -167,11 +167,10 @@ export async function gitHostToken(cwd: string, data: unknown): Promise<Json> {
   if (!provider || !host.domain || !host.kind) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
   if (host.kind === "github" || !provider.whoami) return { ok: false, reason: "unsupported", message: "GitHub uses the GitHub CLI's sign-in: run gh auth login on this computer.", host };
   const kind = host.kind;
-  if (!token.trim()) { await writeHostToken(host.domain, kind, ""); invalidatePulls(root); return { ok: true, disconnected: true, domain: host.domain, host }; }
+  if (!token.trim()) { await writeHostToken(host.domain, kind, ""); return { ok: true, disconnected: true, domain: host.domain, host }; }
   try {
     const { user } = await provider.whoami(root, host, token.trim());
     await writeHostToken(host.domain, kind, token.trim(), user || undefined);
-    invalidatePulls(root);
     return { ok: true, domain: host.domain, kind, ...(user ? { user } : {}), host };
   } catch (error) {
     if (error instanceof HostApiError) return { ok: false, reason: error.reason, message: error.reason === "auth" ? `${host.name} refused that token.` : error.message, host };

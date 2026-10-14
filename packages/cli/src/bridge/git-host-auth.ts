@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { homeDir } from "../home-paths.js";
+import type { GitHost } from "./git-hosts.js";
+import { invalidatePullsForDomain } from "./git.js";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -67,6 +71,7 @@ export async function writeHostToken(domain: string, kind: TokenHostKind, token:
   else delete hosts[key];
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await atomic(file, JSON.stringify({ hosts }, null, 2) + "\n", 0o600);
+  invalidatePullsForDomain(key);
 }
 
 /** The environment variables each host's own tools read. GITLAB_TOKEN is
@@ -113,4 +118,24 @@ export async function listHostTokens(file = gitHostsFile()): Promise<{ domain: s
   const store = await readStore(file);
   if (store === "unsafe") return "unsafe";
   return Object.entries(store?.hosts ?? {}).map(([domain, { kind, user, savedAt }]) => ({ domain, kind, ...(user ? { user } : {}), ...(savedAt ? { savedAt } : {}) }));
+}
+
+/** Credential fingerprint only: raw credentials never enter lookup keys.
+ * gh logout/switch-user rewrites hosts.yml even when its token is in a keychain. */
+export async function hostCredentialIdentity(host: GitHost): Promise<string> {
+  let state: unknown = null;
+  if (host.kind === "github") {
+    const dir = process.env.GH_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir(), ".config"), "gh");
+    state = [
+      process.env.GH_TOKEN, process.env.GITHUB_TOKEN,
+      process.env.GH_ENTERPRISE_TOKEN, process.env.GITHUB_ENTERPRISE_TOKEN,
+      await readFile(path.join(dir, "hosts.yml"), "utf8").catch(() => ""),
+      await stat(path.join(dir, "hosts.yml")).then(info => [info.mtimeMs, info.ctimeMs]).catch(() => null),
+    ];
+  } else if (host.kind && host.domain) {
+    const store = await readStore();
+    state = [await resolveHostToken(host.kind, host.domain),
+      store && store !== "unsafe" ? store.hosts[normalDomain(host.domain)] : store];
+  }
+  return createHash("sha256").update(JSON.stringify(state)).digest("hex");
 }

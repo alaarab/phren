@@ -1,10 +1,12 @@
+import { BridgeError } from "./protocol.js";
+
 interface Entry<T> {
   value?: { data: T; at: number };
   pending?: Promise<T>;
 }
 
-/** Bounded Hook lookups. Invalidated/evicted refreshes may finish for their
- * callers, but cannot repopulate the cache. Failures are never retained. */
+/** Bounded Hook lookups. Invalidated/expired refreshes may finish, but cannot
+ * repopulate the cache. Failed refreshes retain successes only until maxAge. */
 export class LookupCache<T> {
   private readonly entries = new Map<string, Entry<T>>();
 
@@ -13,6 +15,7 @@ export class LookupCache<T> {
     private readonly maxAge = 300_000,
     private readonly limit = 64,
     private readonly available: (value: T) => boolean = () => true,
+    private readonly pendingTimeout = 45_000,
   ) {}
 
   invalidate(matches: (key: string) => boolean): void {
@@ -34,14 +37,23 @@ export class LookupCache<T> {
     if (cached && age < ttl) return Promise.resolve(cached.data);
     if (!entry.pending) {
       const current = entry;
-      entry.pending = Promise.resolve().then(read).then(data => {
-        current.value = { data, at: Date.now() };
+      let timer: ReturnType<typeof setTimeout>;
+      const timeout = new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new BridgeError(504, "Lookup did not finish within the request time limit.", { code: "lookup-timeout" })), this.pendingTimeout);
+      });
+      const pending = Promise.race([Promise.resolve().then(read), timeout]).then(data => {
+        if (this.entries.get(key) === current && current.pending === pending) {
+          const previous = current.value;
+          const keepSuccess = previous && this.available(previous.data) &&
+            !this.available(data) && Date.now() - previous.at < this.maxAge;
+          if (!keepSuccess) current.value = { data, at: Date.now() };
+        }
         return data;
-      }, error => {
-        // A failed refresh must not keep serving an old success indefinitely.
-        if (this.entries.get(key) === current) this.entries.delete(key);
-        throw error;
-      }).finally(() => { current.pending = undefined; });
+      }).finally(() => {
+        clearTimeout(timer);
+        if (current.pending === pending) current.pending = undefined;
+      });
+      entry.pending = pending;
     }
     if (cached && age < maxAge) {
       void entry.pending.catch(() => {});
