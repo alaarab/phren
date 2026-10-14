@@ -354,8 +354,23 @@ async function listenersFromSs(ports: Map<string, LocalServer>): Promise<void> {
 
 const serversCache = new LookupCache<LocalServer[]>(10_000, 300_000, 1, () => true, 20_000);
 
-export function webServers(): Promise<LocalServer[]> {
-  return serversCache.get("listeners", scanWebServers);
+/** Whether `pid` is still a running process. EPERM means it exists but is not ours. */
+let pidAlive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+};
+/** Only for tests: what counts as a running process. */
+export function setPidAlive(check: ((pid: number) => boolean) | undefined): void {
+  pidAlive = check ?? ((pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; } });
+}
+
+/** The web servers listening here. A cached listener whose process has gone is dropped and the
+ * cache refreshed: its port may already belong to another session's server, and attributing it
+ * to the old owner would open that session's preview on the wrong app. */
+export async function webServers(): Promise<LocalServer[]> {
+  const servers = await serversCache.get("listeners", scanWebServers);
+  const live = servers.filter(server => server.pid === undefined || pidAlive(server.pid));
+  if (live.length !== servers.length) serversCache.invalidate(() => true);
+  return live;
 }
 
 async function scanWebServers(): Promise<LocalServer[]> {

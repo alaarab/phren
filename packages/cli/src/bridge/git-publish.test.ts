@@ -228,6 +228,21 @@ describe("git publish routes", () => {
     expect((await gitPulls(root)).current).toBeNull();
   });
 
+  // The fake gh is a /bin/sh script, which Windows cannot execute.
+  it.skipIf(process.platform === "win32")("invalidates pull lookups for every worktree of the repository, not just the acting checkout", async () => {
+    const { root, git } = await clone();
+    const sibling = path.join(path.dirname(root), path.basename(root) + "-sibling");
+    await git("worktree", "add", "-q", "-b", "feature/sibling", sibling);
+    const view = (state: string) => JSON.stringify({ number: 52, title: "Sibling", url: "https://github.com/sam/phren/pull/52", state, isDraft: false,
+      headRefName: "feature/sibling", baseRefName: "main", statusCheckRollup: [], reviewDecision: "", mergeStateStatus: "CLEAN" });
+    await writeFile(path.join(stub, "view.json"), view("OPEN"));
+    expect((await gitPulls(sibling)).current).toMatchObject({ number: 52, state: "OPEN" });
+    // The PR is merged from the main checkout; its write invalidates by repository.
+    await writeFile(path.join(stub, "view.json"), view("MERGED"));
+    invalidatePulls(root);
+    expect((await gitPulls(sibling)).current).toMatchObject({ number: 52, state: "MERGED" });
+  });
+
   it("rolls checks up to one word", () => {
     expect(checkRollup([])).toBeNull();
     expect(checkRollup(undefined)).toBeNull();

@@ -12,6 +12,7 @@ vi.mock("node:child_process", async importOriginal => ({
 }));
 
 let webServers: typeof import("./projects.js").webServers;
+let setPidAlive: typeof import("./projects.js").setPidAlive;
 
 type Answer = { stdout: string } | Error;
 function answer(byTool: Record<string, Answer>) {
@@ -63,7 +64,8 @@ describe("webServers", () => {
   let port = 0;
   beforeEach(async context => {
     vi.resetModules();
-    ({ webServers } = await import("./projects.js"));
+    ({ webServers, setPidAlive } = await import("./projects.js"));
+    setPidAlive(() => true);
     const nonce = randomUUID();
     server = createServer((_req, res) => {
       res.setHeader("content-type", "text/html"); res.setHeader("x-test-nonce", nonce);
@@ -90,6 +92,16 @@ describe("webServers", () => {
     expect(found).toEqual([{ name: "Acme & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
   });
 
+  it("drops a cached listener whose process has gone, so a reused port is not attributed to it", async () => {
+    answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` } });
+    expect(await webServers()).toMatchObject([{ port, pid: 42 }]);
+    // Session A's server stops; session B's takes the port inside the cache's ten seconds.
+    setPidAlive(pid => pid !== 42);
+    expect(await webServers()).toEqual([]);
+    // The cache was refreshed, not just filtered: B's server (pid 77) shows up with its own pid.
+    answer({ ss: { stdout: `${ssLine(port, "bun", 77)}\n` } });
+    expect(await webServers()).toMatchObject([{ port, pid: 77 }]);
+  });
   it("falls back to lsof when ss is missing", async () => {
     answer({ lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
     const found = await webServers();
