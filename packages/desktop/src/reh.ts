@@ -75,16 +75,17 @@ function launcher(dir: string): string {
   return path.join(bin, name);
 }
 
-/** A new connection token for each start, so one a past host or page held
- * stops working when the host restarts. */
+/** A new connection token for each start, in a file of its own (two daemons,
+ * say an installed app and a checkout, never overwrite each other's), so a
+ * token a past host or page held stops working when the host restarts. The
+ * file is removed when that host exits. */
+export const rehTokenDir = (): string => path.join(rehRoot(), "tokens");
 async function connectionToken(): Promise<{ file: string; token: string }> {
-  const file = path.join(rehRoot(), "connection-token");
   const token = randomBytes(24).toString("hex");
-  await mkdir(rehRoot(), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${randomBytes(4).toString("hex")}.tmp`;
-  await writeFile(temporary, token, { mode: 0o600, flag: "wx" });
-  await chmod(temporary, 0o600);
-  await rename(temporary, file);
+  await mkdir(rehTokenDir(), { recursive: true, mode: 0o700 });
+  const file = path.join(rehTokenDir(), `${process.pid}-${randomBytes(6).toString("hex")}`);
+  await writeFile(file, token, { mode: 0o600, flag: "wx" });
+  await chmod(file, 0o600);
   return { file, token };
 }
 
@@ -107,7 +108,7 @@ function hostDirs(): HostDirs {
  * and for its install and uninstall commands alike. */
 function isolated(launcherPath: string, args: string[]): { command: string; args: string[]; options: { env: NodeJS.ProcessEnv; cwd: string } } {
   const dirs = hostDirs();
-  const run = isolatedCommand(launcherPath, args);
+  const run = isolatedCommand(launcherPath, args, [rehRoot(), dirs.tmp]);
   return { ...run, options: { env: hostEnv(process.env, dirs), cwd: dirs.home } };
 }
 
@@ -149,9 +150,12 @@ async function start(): Promise<RehStatus> {
   const version = path.basename(dir).replace(/^vscode-reh-[a-z0-9]+-[a-z0-9]+-/, "");
   let run: ReturnType<typeof isolated>;
   let token: string;
+  let tokenFile: string | undefined;
+  const dropToken = () => { if (tokenFile) rm(tokenFile, { force: true }).catch(() => {}); };
   try {
     const made = await connectionToken();
     token = made.token;
+    tokenFile = made.file;
     await mkdir(rehExtensionsDir(), { recursive: true, mode: 0o700 });
     run = isolated(launcher(dir), [
       "--host", "127.0.0.1", "--port", "0",
@@ -160,6 +164,7 @@ async function start(): Promise<RehStatus> {
       "--accept-server-license-terms", "--disable-telemetry",
     ]);
   } catch (error) {
+    dropToken();
     return { available: false, reason: `The Node extension host could not be prepared: ${(error as Error).message}` };
   }
   const how = isolation();
@@ -188,7 +193,14 @@ async function start(): Promise<RehStatus> {
     };
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData);
+    proc.on("error", (error) => {
+      // The launcher (or sandbox-exec) could not be run at all; no exit follows.
+      dropToken();
+      if (child === thisProc) child = null;
+      finish({ available: false, reason: `The Node extension host could not be started: ${error.message}` });
+    });
     proc.on("exit", (code) => {
+      dropToken();
       if (child !== thisProc) return; // a newer host owns the state
       child = null;
       if (current?.available) current = null; // restart lazily on the next request

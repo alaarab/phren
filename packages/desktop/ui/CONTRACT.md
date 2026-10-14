@@ -310,7 +310,7 @@ runs Node extensions on this computer, bound to 127.0.0.1. It is off until the o
   starting the host lazily.
 
 The host's one channel is the loopback WebSocket the editor page opens to it with
-`connectionToken`, made fresh on every start (`<reh>/connection-token`, 0600). It holds no
+`connectionToken`, made fresh on every start (its own 0600 file in `<reh>/tokens/`, removed when the host exits). It holds no
 daemon credential: not the daemon token or cookie, not the Hook socket, not an SSH key or
 ControlMaster. Install and uninstall run the same launcher, isolated the same way. If a
 host feature ever needs the daemon, add it as a route reachable only with a per-start
@@ -330,13 +330,24 @@ Isolation (`reh-sandbox.ts`):
 - macOS: `sandbox-exec -p <HOST_PROFILE> -D NAME=path…` (paths as parameters, never
   spliced into the profile). `(allow default)`, then denies: read/write of the bridge
   folder, `/tmp/phren-desktop-<uid>` (ControlMasters), `~/.cache/phren/desktop-traces` and
-  `~/Library/Application Support/Phren`; writes to the desktop's extensions folder, the
-  installed app's own code and `~/Library/LaunchAgents`; unix-socket connects into the
+  `~/Library/Application Support/Phren`; writes to what the daemon or the owner later runs
+  outside the sandbox: the desktop's extensions folder, the installed app's own code,
+  `~/Library/LaunchAgents`, every folder on the daemon's PATH, the node it runs on,
+  `/opt/homebrew`, `/usr/local`, shell startup files, `~/.ssh`, git's global config and
+  Claude's and Codex's settings (never a folder the host itself writes in); renaming or
+  removing any ancestor of those paths (which would move them out from under their
+  rules); unix-socket connects into the
   bridge folder (`hook.sock`), the ControlMaster folder, Herdr's folder, tmux's
   `tmux-<uid>` and launchd's SSH agent; AppleEvents, LaunchServices opens and running
   `launchctl`, `crontab`, `at`, `osascript` and `open`. `PHREN_REH_SANDBOX=off` turns it
   off for troubleshooting. `isolation` is `"sandbox"` only when it is applied.
-- Linux and Windows: environment and folders only (`isolation: "environment"`).
+- Linux and Windows: environment and folders only (`isolation: "environment"`): the key and
+  `hook.sock` stay reachable there, and Settings › Extensions says so.
+- Not covered, even on macOS: the profile starts from `(allow default)`, so an extension
+  still reads the owner's other files (other projects, `~/.ssh`, cloud credentials) and
+  the network, and the write denials list known ways out rather than every file something
+  later executes. Follow-ups: bubblewrap on Linux; a deny-default profile limited to the
+  opened folders and toolchains.
 
 ## Daemon (src/extensions.ts, routes in src/server.ts)
 

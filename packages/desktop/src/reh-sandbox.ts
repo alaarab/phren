@@ -14,7 +14,9 @@
 //   the Hook socket, the SSH agent, Herdr or tmux are denied; so are AppleEvents,
 //   LaunchServices opens, launchd jobs and cron, which would run code outside
 //   the sandbox. Everything else (the owner's projects, toolchains, the network)
-//   stays allowed, because language servers need it.
+//   stays allowed, because language servers need it. Writes to programs and
+//   startup files that run later outside the sandbox (the daemon's PATH, shell
+//   startup files, agent settings) are denied, so code cannot be planted there.
 //
 // The host gets no daemon credential at all. Its one channel is the loopback
 // WebSocket the editor page opens to it with the per-start connection token.
@@ -101,13 +103,12 @@ export const hostTmpDir = (): string =>
  * no path is ever spliced into the profile's text. Rules are evaluated last
  * match wins, after `(allow default)`.
  */
-export const HOST_PROFILE = `(version 1)
+const HOST_PROFILE = `(version 1)
 (allow default)
 (deny file-read* file-write* (subpath (param "BRIDGE")))
 (deny file-read* file-write* (subpath (param "CONTROL")))
 (deny file-read* file-write* (subpath (param "TRACES")))
 (deny file-read* file-write* (subpath (param "APPDATA")))
-(deny file-write* (subpath (param "DESKTOP_CONFIG")) (subpath (param "DESKTOP_CODE")) (subpath (param "LAUNCH_AGENTS")))
 (deny network-outbound (remote unix-socket (subpath (param "BRIDGE"))))
 (deny network-outbound (remote unix-socket (subpath (param "CONTROL"))))
 (deny network-outbound (remote unix-socket (subpath (param "HERDR"))))
@@ -135,28 +136,50 @@ function real(p: string): string {
 }
 
 /** The folders the profile protects, resolved for this computer. */
-export function protectedPaths(): Record<string, string> {
+function protectedPaths(): Record<string, string> {
   const home = homedir();
-  const config = process.env.XDG_CONFIG_HOME || path.join(home, ".config");
   const cache = process.env.XDG_CACHE_HOME || path.join(home, ".cache");
   const tmuxDir = process.env.TMUX_TMPDIR || "/tmp";
-  // The daemon's own code: protected only in an installed app, so a developer
-  // can still edit this checkout in the editor.
-  const code = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   return {
     BRIDGE: real(bridgeRoot()),
     CONTROL: real(`/tmp/phren-desktop-${userInfo().uid}`),
     TRACES: real(path.join(cache, "phren", "desktop-traces")),
     APPDATA: real(path.join(home, "Library", "Application Support", "Phren")),
-    DESKTOP_CONFIG: real(process.env.PHREN_DESKTOP_EXTENSIONS || path.join(config, "phren", "desktop-extensions")),
-    DESKTOP_CODE: /\.app\/Contents\//.test(code) ? real(code) : "/nonexistent/phren-desktop-code",
-    LAUNCH_AGENTS: real(path.join(home, "Library", "LaunchAgents")),
     HERDR: real(process.env.PHREN_HERDR_HOME || path.join(home, ".config", "herdr")),
     TMUX: real(path.join(tmuxDir, `tmux-${userInfo().uid}`)),
   };
 }
 
-export const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+/** Files and folders the host may read but not change: programs and startup
+ * files that the daemon or the owner later runs outside the sandbox. Planting
+ * an `ssh` on the daemon's PATH, a line in ~/.zshenv or a Claude hook would
+ * otherwise carry an extension's code out of it. */
+function writeProtectedPaths(writable: string[]): string[] {
+  const home = homedir();
+  const config = process.env.XDG_CONFIG_HOME || path.join(home, ".config");
+  // The daemon's own code: protected only in an installed app, so a developer
+  // can still edit this checkout in the editor.
+  const code = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+  const pathDirs = (process.env.PATH ?? "").split(path.delimiter).filter((dir) => path.isAbsolute(dir));
+  const list = [
+    process.env.PHREN_DESKTOP_EXTENSIONS || path.join(config, "phren", "desktop-extensions"),
+    ...(/\.app\/Contents\//.test(code) ? [code] : []),
+    path.join(home, "Library", "LaunchAgents"),
+    ...pathDirs,
+    path.dirname(process.execPath),
+    "/opt/homebrew",
+    "/usr/local",
+    ...[".zshenv", ".zshrc", ".zprofile", ".zlogin", ".zlogout", ".bashrc", ".bash_profile", ".bash_login", ".profile",
+      ".ssh", ".gitconfig", ".config/git", ".config/fish", ".claude/settings.json", ".claude/settings.local.json",
+      ".codex/config.toml"].map((file) => path.join(home, file)),
+  ];
+  // Never a folder the host has to write in (a PATH entry of ~ would otherwise lock all of HOME).
+  const keep = writable.map(real);
+  const holds = (outer: string, inner: string) => inner === outer || inner.startsWith(outer.endsWith(path.sep) ? outer : outer + path.sep);
+  return [...new Set(list.map(real))].filter((p) => !keep.some((dir) => holds(p, dir)));
+}
+
+const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
 /** How the host is isolated on this computer: an OS sandbox, or only its
  * environment and folders. */
@@ -167,8 +190,23 @@ export function isolation(): "sandbox" | "environment" {
 
 /** The command line that runs `command args` isolated: under sandbox-exec on
  * macOS, else as is. */
-export function isolatedCommand(command: string, args: string[], paths = protectedPaths()): { command: string; args: string[] } {
+export function isolatedCommand(command: string, args: string[], writable: string[]): { command: string; args: string[] } {
   if (isolation() !== "sandbox") return { command, args };
-  const params = Object.entries(paths).flatMap(([name, value]) => ["-D", `${name}=${value}`]);
-  return { command: SANDBOX_EXEC, args: ["-p", HOST_PROFILE, ...params, command, ...args] };
+  const paths = protectedPaths();
+  const writeProtected = writeProtectedPaths([...writable, homedir()]);
+  // Renaming a protected folder's parent would carry the folder out from under
+  // its rule, so every ancestor is itself protected from rename and removal
+  // (writes inside them, which are on other paths, stay allowed).
+  const ancestors = new Set<string>();
+  for (const value of [...Object.values(paths), ...writeProtected]) {
+    for (let dir = path.dirname(value); dir !== path.dirname(dir); dir = path.dirname(dir)) ancestors.add(dir);
+  }
+  const named: Record<string, string> = { ...paths };
+  const rule = (prefix: string, values: Iterable<string>, filter: "literal" | "subpath"): string => {
+    const names = [...values].map((value, i) => { named[`${prefix}_${i}`] = value; return `(${filter} (param "${prefix}_${i}"))`; });
+    return names.length ? `(deny file-write* ${names.join(" ")})\n` : "";
+  };
+  const profile = HOST_PROFILE + rule("WRITE", writeProtected, "subpath") + rule("ANCESTOR", ancestors, "literal");
+  const params = Object.entries(named).flatMap(([name, value]) => ["-D", `${name}=${value}`]);
+  return { command: SANDBOX_EXEC, args: ["-p", profile, ...params, command, ...args] };
 }
