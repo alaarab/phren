@@ -467,6 +467,7 @@ export function mountAgents(root) {
       close() { chat.close(); consoleHandle?.close(); },
       focus() { if (mode === "console") consoleHandle?.focus?.(); else chat.focus?.(); },
       insert(text) { setMode("chat"); chat.insert?.(text); },
+      attach(files) { setMode("chat"); chat.attach?.(files); },
       toggleMode() { setMode(mode === "chat" ? "console" : "chat"); },
       setMode,
     };

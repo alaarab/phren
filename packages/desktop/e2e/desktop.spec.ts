@@ -965,3 +965,23 @@ test("⌘1–⌘9 open the titlebar's pills in order", async ({ page }) => {
   await page.keyboard.press(`${mod}+9`); // no ninth pill: nothing changes
   await expect(page.locator('.section-pill[data-section="home"]')).toHaveAttribute("aria-selected", "true");
 });
+
+test("a file dropped on a session row opens it and waits in its composer", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  const row = page.locator(".sb-row", { hasText: "Fix login" });
+  const image = await page.evaluateHandle(() => {
+    const d = new DataTransfer();
+    d.items.add(new File([Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="), (c) => c.charCodeAt(0))], "shot.png", { type: "image/png" }));
+    return d;
+  });
+  await row.dispatchEvent("dragover", { dataTransfer: image });
+  await expect(row).toHaveClass(/sb-drop/);
+  await row.dispatchEvent("drop", { dataTransfer: image });
+  await expect(row).not.toHaveClass(/sb-drop/);
+  await expect(page.locator(".pc-attach img[alt='shot.png']")).toBeVisible();
+
+  const text = await page.evaluateHandle(() => { const d = new DataTransfer(); d.items.add(new File(["notes"], "notes.md", { type: "text/markdown" })); return d; });
+  await row.dispatchEvent("drop", { dataTransfer: text });
+  await expect(page.getByText("Only images can be attached.")).toBeVisible();
+});
