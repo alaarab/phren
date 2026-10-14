@@ -504,7 +504,7 @@ export function mountAgents(root) {
       toastError(`Mirror tab: ${err.message}`);
       return;
     }
-    const rows = store.sessions().filter((row) => row.computer === computer);
+    const rows = store.sessions({ includeOffline: true }).filter((row) => row.computer === computer);
     const itemFor = (p) => {
       const row = rows.find((r) => r.child.target?.pane === p.pane_id && r.child.target?.server === target.server);
       return row ? { kind: "chat", computer, id: row.child.id } : { kind: "console", computer, server: target.server, pane: p.pane_id };

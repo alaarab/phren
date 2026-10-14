@@ -5,7 +5,7 @@ import { backgroundLabel, stallLabel, stalledMinutes } from "./shell/stalls.js";
 import { openMoveSheet } from "./shell/move.js";
 import { showSection } from "./shell/sections.js";
 import { hookPost, targetQuery } from "./api.js";
-import { store, projectOf } from "./shell/store.js";
+import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 
 // answerApproval is written in a parallel change under ui/chat/. Import it
 // lazily so a missing module never takes the whole sidebar down; the fallback
@@ -29,7 +29,7 @@ const GLYPHS = {
   copilot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="12" r="3.4"/><circle cx="16" cy="12" r="3.4"/><path d="M2.5 11h2.1M19.4 11h2.1" stroke-linecap="round"/></svg>',
   phren: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="5" r="2.1"/><circle cx="5" cy="17.5" r="2.1"/><circle cx="19" cy="17.5" r="2.1"/><path d="M10.7 6.9L6.3 15.5M13.3 6.9l4.4 8.6M7.1 17.5h9.8"/></svg>',
 };
-const BADGE = { needs: "!", working: "\u25CF", done: "\u2713", idle: "\u00B7" };
+const BADGE = { needs: "!", working: "\u25CF", done: "\u2713", error: "!", unknown: "?", idle: "\u00B7" };
 
 // Compact project-group header glyph.
 const FOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>';
@@ -67,14 +67,6 @@ function basename(p) {
   return parts[parts.length - 1] || String(p || "");
 }
 
-function kindOf(child) {
-  const s = child.agentStatus;
-  if (s === "blocked" || s === "waiting" || child.approvalPending === true) return "needs";
-  if (s === "working") return "working";
-  if (s === "done") return "done";
-  return "idle";
-}
-
 function hostColor(name) {
   const index = (store.merged?.computers ?? []).findIndex((c) => c.computer === name);
   if (index >= 0) return HOST_HUES[index % HOST_HUES.length];
@@ -107,18 +99,6 @@ function offlineReason(co) {
 
 function keyOf(computer, child) { return `${computer}/${child.id}`; }
 function rowId(computer, child) { return `r:${keyOf(computer, child)}`; }
-
-function sessionRows(merged) {
-  const rows = [];
-  for (const co of merged?.computers || []) {
-    for (const group of co.overview?.groups || []) {
-      for (const child of group.children || []) {
-        if (child && child.target) rows.push({ computer: co.computer, group, child });
-      }
-    }
-  }
-  return rows;
-}
 
 const newestFirst = (a, b) => (Date.parse(b.child.lastChangedAt) || 0) - (Date.parse(a.child.lastChangedAt) || 0);
 
@@ -227,7 +207,7 @@ function computerDesc(co, sessions) { return { id: `c:${co.computer}`, kind: "co
 
 function buildModel(sb) {
   const merged = sb.merged || {};
-  const rows = sessionRows(merged);
+  const rows = sessions(merged, { includeOffline: true });
   const computers = merged.computers || [];
   const desired = [];
 
@@ -251,7 +231,7 @@ function buildModel(sb) {
 
   if (sb.rows === "compact") return buildCompactModel(sb, rows);
 
-  const groups = { needs: [], working: [], idle: [], done: [] };
+  const groups = { needs: [], working: [], error: [], unknown: [], idle: [], done: [] };
   const pinned = [];
   for (const row of rows) {
     if (isPinned(sb, keyOf(row.computer, row.child))) pinned.push(row);
@@ -263,8 +243,8 @@ function buildModel(sb) {
     desired.push(header("pinned", "Pinned", pinned.length));
     for (const row of pinned) desired.push(rowDesc(sb, row));
   }
-  const titles = { needs: "Needs you", working: "Working", idle: "Idle", done: "Done" };
-  for (const kind of ["needs", "working", "idle", "done"]) {
+  const titles = { needs: "Needs you", working: "Working", error: "Error", unknown: "Unknown", idle: "Idle", done: "Done" };
+  for (const kind of ["needs", "working", "error", "unknown", "idle", "done"]) {
     if (!groups[kind].length) continue;
     desired.push(header(kind, titles[kind], groups[kind].length));
     for (const row of groups[kind]) desired.push(rowDesc(sb, row));
@@ -558,7 +538,7 @@ function compactRowContent(sb, node, desc) {
   dot.style.setProperty("--host-color", hostColor(computer));
   out.push(dot, el("span", unread ? "sb-title unread" : "sb-title", child.title || ""));
   if (kind === "working") out.push(el("span", "sb-cspin"));
-  else if (kind === "needs") out.push(el("span", "sb-cmark", BADGE.needs));
+  else if (["needs", "error", "unknown"].includes(kind)) out.push(el("span", "sb-cmark " + kind, BADGE[kind]));
   else out.push(el("span", "sb-cage", shortAge(child.lastChangedAt)));
   if (unread) out.push(el("span", "sb-unread"));
 
@@ -687,7 +667,7 @@ function statusUrl(computer, target) {
 
 function syncApprovals(sb, merged) {
   const pending = new Map();
-  for (const row of sessionRows(merged)) {
+  for (const row of sessions(merged)) {
     if (row.child.approvalPending === true) pending.set(keyOf(row.computer, row.child), row);
   }
   for (const [key, socket] of sb.approvalSockets) {
@@ -714,7 +694,7 @@ function syncApprovals(sb, merged) {
 }
 
 function syncPulls(sb, merged) {
-  const rows = sessionRows(merged);
+  const rows = sessions(merged, { includeOffline: true });
   for (const co of merged?.computers || []) {
     if (co.state !== "online" || sb.prInflight.has(co.computer)) continue;
     const cached = sb.prCache.get(co.computer);

@@ -1,6 +1,7 @@
 // Native notifications for sessions that start needing you. Clicking one opens
 // that session; on a Mac, one for an agent that finished its turn and waits on
 // you takes a typed reply, sent to its pane as the next prompt.
+import { approvals } from "./approvals.js";
 import { hookPost } from "../api.js";
 import { projectOf, sessions, store } from "./store.js";
 import { newlyStalled, stalledMinutes } from "./stalls.js";
@@ -37,6 +38,33 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
   if (!shell) return;
   let notified = null; // keys already announced; null until the first frame
   let stalled = null; // keys already reported stalled; null until the first frame
+  const baselineApprovals = new Set();
+  function noticeKey(row) {
+    if (!row.child.approvalPending) return row.key;
+    const actionId = approvals.approval(row.key)?.actionId;
+    return actionId ? JSON.stringify([row.key, actionId]) : null;
+  }
+  function updateNeeds() {
+    if (!store.merged) return;
+    const rows = store.needsYou();
+    if (notified === null) {
+      for (const row of rows) if (row.child.approvalPending && !noticeKey(row)) baselineApprovals.add(row.key);
+    } else {
+      for (const row of rows) {
+        const id = noticeKey(row);
+        if (!id || notified.has(id)) continue;
+        if (baselineApprovals.delete(row.key)) continue;
+        if (enabled()) {
+          const { title, body, key, reply } = needsNotice(row);
+          shell.notify(title, body, { key, reply });
+        }
+      }
+    }
+    notified = new Set(rows.map(noticeKey).filter(Boolean));
+    for (const key of baselineApprovals) {
+      if (!rows.some((row) => row.key === key && row.child.approvalPending)) baselineApprovals.delete(key);
+    }
+  }
   store.subscribe((merged) => {
     const all = sessions(merged);
     if (stalled && stallsEnabled()) {
@@ -46,16 +74,9 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
       }
     }
     stalled = new Set(all.filter((r) => stalledMinutes(r.child) !== null).map((r) => r.key));
-    const rows = store.needsYou();
-    if (notified && enabled()) {
-      for (const row of rows) {
-        if (notified.has(row.key)) continue;
-        const { title, body, key, reply } = needsNotice(row);
-        shell.notify(title, body, { key, reply });
-      }
-    }
-    notified = new Set(rows.map((r) => r.key));
+    updateNeeds();
   });
+  approvals.subscribe(updateNeeds);
   shell.onOpenSession?.((key) => {
     const row = store.sessions().find((s) => s.key === key);
     if (row) openSession(row.computer, row.child);
