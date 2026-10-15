@@ -636,3 +636,7 @@ present in that overview. Sidebar reconciliation includes the resolved decoratio
 so target renames and removals refresh existing rows without reordering them.
 `renderHandoffRow` shares tag rendering; `decorateHomeHandoff` keeps Home's
 chat and tag buttons as siblings for Working, Needs you and Finished sessions.
+
+Sidebar Enter/Space navigation leaves nested buttons, links and inputs their
+native activation, including hand-off tags. Enter on the row itself still opens
+that chat. Covered by `src/ui-keys.test.ts`.

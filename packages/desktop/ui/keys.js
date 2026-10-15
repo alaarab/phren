@@ -295,6 +295,8 @@ function onSidebarKey(ev) {
   const row = ev.target instanceof Element ? ev.target.closest(".sb-row") : null;
   if (!row || ev.ctrlKey || ev.metaKey || ev.altKey) return;
   const key = eventKey(ev);
+  const control = ev.target.closest("button, a, input");
+  if ((key === "enter" || key === " ") && control && control !== row && row.contains(control)) return;
   const list = rows();
   const at = list.indexOf(row);
   if (key === "down" || key === "j") { ev.preventDefault(); list[(at + 1) % list.length]?.focus(); }
