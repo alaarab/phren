@@ -2,7 +2,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { isConductorName, paneAgentName } from "./herdr.js";
-import { atomicInPrivateDir, bridgeRoot, id, type Json, objects, provider, serverName } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, id, type Json, objects, provider, serverName } from "./protocol.js";
 
 /**
  * Which pane is this computer's conductor, as the Hook keeps it
@@ -145,6 +145,25 @@ export function recordConductor(server: string, pane: Json, by: ConductorRecord[
     const state = await readRoleState() ?? { version: 1 as const };
     const record = recordFor(server, pane, by, session);
     await writeRoleState({ ...state, conductor: record });
+    return record;
+  });
+}
+
+/** Move only the captured role. The optional hand-over holds the receipt
+ * writer's queue while preparing routing and committing this role; it must
+ * roll routing back if commit fails. No role writer can interleave here. */
+export function transferConductor(expected: ConductorRecord, server: string, pane: Json, session?: string,
+  handOver: (commit: () => Promise<void>) => Promise<void> = commit => commit()): Promise<ConductorRecord> {
+  return serialized(async () => {
+    const state = await readRoleState();
+    const current = state?.conductor;
+    // Include the generation (since), terminal and session, so a stop/make
+    // or another move cannot be overwritten even if it used the same pane.
+    if (!current || !recordSchema.keyof().options.every(field => current[field] === expected[field])) {
+      throw new BridgeError(409, "The conductor changed during the move; nothing was transferred.");
+    }
+    const record = recordFor(server, pane, "owner", session);
+    await handOver(() => writeRoleState({ ...state, version: 1, conductor: record }));
     return record;
   });
 }

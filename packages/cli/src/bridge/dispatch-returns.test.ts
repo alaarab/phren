@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
 import { BACKGROUND_WAIT_MS, LAUNCH_GRACE_MS, DispatchReturns, hookWorkers, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
+import { repointDispatchOrigins } from "./dispatch.js";
 import { findPane } from "./herdr.js";
 import { LOST_TURN } from "./codex-servers.js";
 import { localHost } from "./dispatch-hosts.js";
@@ -349,6 +350,29 @@ describe("the dispatching Hook's returns loop", () => {
     const [saved] = await dispatchStatus();
     expect(saved.returned).toMatchObject({ state: "done", waited: 5 });
     expect(deliver).toHaveBeenCalledWith(expect.anything(), `Return: Devbox parser checks done (after 5 background tasks finished), Gate passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
+  });
+
+  it("does not let an in-flight old-chat notice acknowledge the new conductor's return", async () => {
+    const placed = await service().dispatch(brief, conductorPane);
+    remote = herdrSnapshot();
+    finalTurn = { completed: true, lastAssistant: "Done." };
+    const next = { ...conductorPane, tab: "w1P:t9", pane: "w1P:p9", agent: "codex" as const, terminal: "term-new" };
+    const destination = { ...next, source: "codex", session: "00000009-1111-4111-8111-111111111111" };
+    deliver.mockImplementationOnce(async () => {
+      await repointDispatchOrigins({ ...conductorPane, terminal: "term_65bfee7e1f1752" }, next, async () => {});
+      (local.panes as Json[]).push({ pane_id: next.pane, tab_id: next.tab, workspace_id: next.workspace,
+        agent: next.agent, terminal_id: next.terminal, agent_status: "idle",
+        agent_session: { kind: "id", value: destination.session } });
+      return { delivered: true };
+    });
+    const returns = loop();
+    await returns.tick();
+    expect((await dispatchStatus())[0].returned?.notifiedAt).toBeUndefined();
+    await returns.tick();
+    expect(deliver).toHaveBeenLastCalledWith(expect.objectContaining({ pane: next.pane, source: "codex", session: destination.session }),
+      expect.stringContaining(String(placed.id)), expect.any(String));
+    expect((await dispatchStatus())[0].returned?.notifiedAt).toBeDefined();
+    expect(deliver.mock.calls[1][2]).not.toBe(deliver.mock.calls[0][2]);
   });
 
   it("keeps the dispatching pane, follows the worker to done and tells an idle conductor once", async () => {

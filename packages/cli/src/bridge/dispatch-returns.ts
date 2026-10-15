@@ -577,9 +577,10 @@ export interface DispatchReturnsOptions {
 
 const originKey = (origin: OriginPane & { terminal: string }) => JSON.stringify([origin.server, origin.workspace, origin.tab, origin.pane, origin.terminal]);
 
-/** One notice's delivery id, named by what it reports: the same returns keep the same id on a retry. */
+/** The same returns to the same origin keep their id on retry. A role
+ * hand-over gets a fresh delivery instead of reusing the old chat's receipt. */
 export function noticeDeliveryId(receipts: readonly Receipt[]): string {
-  return `notice-${createHash("sha256").update(receipts.map(receipt => `${receipt.id}@${receipt.returned!.at}`).sort().join(",")).digest("hex").slice(0, 32)}`;
+  return `notice-${createHash("sha256").update(receipts.map(receipt => `${receipt.id}@${receipt.returned!.at}@${receipt.origin ? originKey(receipt.origin) : ""}`).sort().join(",")).digest("hex").slice(0, 32)}`;
 }
 
 /** Dispatching side: follows open dispatches and delivers their returns. */
@@ -777,6 +778,9 @@ export class DispatchReturns {
       const at = new Date(this.now()).toISOString();
       for (const receipt of receipts) {
         await updateReceipt(receipt.id, current => {
+          // An in-flight notice to the old chat must not acknowledge a return
+          // whose origin changed while delivery was pending.
+          if (!current.origin || originKey(current.origin) !== key) { busy = true; return false; }
           if (!current.returned || current.returned.read || current.returned.at !== receipt.returned!.at) return false;
           current.returned.notifiedAt = at; return true;
         }).catch(() => undefined);

@@ -13,7 +13,7 @@ import { findGrant, grantLabel, permissionModeAllowed, DEFAULT_MAX_PERMISSION_MO
 import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, releaseAction, type AuthorityCheck } from "./authority.js";
 import { hookPeers } from "./peers.js";
 import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
-import { recordedConductor } from "./conductor-role.js";
+import { recordedConductor, type ConductorRecord } from "./conductor-role.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
@@ -140,7 +140,11 @@ export async function dispatchProjectDirectory(project: unknown, home = homeDir(
   throw new BridgeError(404, `Project ${name} is not on this computer: the store names no folder for ${getMachineName()} that exists here, and there is no ~/Projects/${name} checkout.`);
 }
 
-async function save(receipt: Receipt): Promise<void> {
+function save(receipt: Receipt): Promise<void> {
+  return serializeReceiptUpdate(() => saveReceipt(receipt));
+}
+
+async function saveReceipt(receipt: Receipt): Promise<void> {
   const root = path.join(bridgeRoot(), "dispatches");
   await mkdir(root, { recursive: true, mode: 0o700 });
   await atomic(path.join(root, `${receipt.id}.json`), receipt);
@@ -156,19 +160,85 @@ let receiptUpdates: Promise<unknown> = Promise.resolve();
  * receipt still being placed (launching or sending) is never touched.
  */
 export function updateReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
-  const run = receiptUpdates.then(async () => {
-    const file = path.join(bridgeRoot(), "dispatches", `${z.string().uuid().parse(receiptID)}.json`);
-    const info = await lstat(file).catch(() => undefined);
-    if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) return undefined;
-    const receipt = receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
-    if (["launching", "sending"].includes(receipt.state)) return undefined;
-    if (!change(receipt)) return receipt;
-    receipt.updatedAt = new Date().toISOString();
-    await atomic(file, receiptSchema.parse(receipt));
-    return receipt;
-  });
+  return serializeReceiptUpdate(() => changeReceipt(receiptID, change));
+}
+
+function serializeReceiptUpdate<T>(change: () => Promise<T>): Promise<T> {
+  const run = receiptUpdates.then(change);
   receiptUpdates = run.catch(() => undefined);
   return run;
+}
+
+async function readReceipt(receiptID: string): Promise<Receipt | undefined> {
+  const file = path.join(bridgeRoot(), "dispatches", `${z.string().uuid().parse(receiptID)}.json`);
+  const info = await lstat(file).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return undefined;
+  });
+  if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) return undefined;
+  return receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
+}
+
+/** Caller holds receiptUpdates; ordinary polling never edits a placing receipt. */
+async function changeReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
+  const receipt = await readReceipt(receiptID);
+  if (!receipt || ["launching", "sending"].includes(receipt.state)) return undefined;
+  if (!change(receipt)) return receipt;
+  receipt.updatedAt = new Date().toISOString();
+  await saveReceipt(receiptSchema.parse(receipt));
+  return receipt;
+}
+
+/** Hand over all open worker routes using the receipt writer's own lock and
+ * update path. Commit the role last; any failure restores the old origins.
+ * Placing receipts are refused because placement can still overwrite them. */
+export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "pane" | "terminal">,
+  to: NonNullable<Receipt["origin"]>, commit: () => Promise<void>): Promise<void> {
+  return serializeReceiptUpdate(async () => {
+    const names = await readdir(path.join(bridgeRoot(), "dispatches")).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return [] as string[];
+    });
+    const matches = (origin: Receipt["origin"]) => origin?.server === from.server && origin.pane === from.pane
+      && (from.terminal === undefined || origin.terminal === from.terminal);
+    const selected: Receipt[] = [];
+    for (const name of names.filter(name => /^[a-f0-9-]{36}\.json$/.test(name))) {
+      const receipt = await readReceipt(name.slice(0, -5));
+      if (!receipt || receipt.closedAt || !matches(receipt.origin)) continue;
+      if (["launching", "sending"].includes(receipt.state)) throw new BridgeError(409, "A conductor dispatch is still being placed; retry the move after it settles.");
+      selected.push(receipt);
+    }
+    const changed: Receipt[] = [];
+    try {
+      for (const before of selected) {
+        await changeReceipt(before.id, receipt => {
+          if (receipt.closedAt || !matches(receipt.origin)) return false;
+          receipt.origin = to;
+          // Unread returns already announced to the old chat need a new notice.
+          if (receipt.returned && !receipt.returned.read) delete receipt.returned.notifiedAt;
+          return true;
+        });
+        changed.push(before);
+      }
+      await commit();
+    } catch (error) {
+      const failures: string[] = [];
+      for (const before of changed.reverse()) {
+        try {
+          await changeReceipt(before.id, receipt => {
+            receipt.origin = before.origin;
+            if (receipt.returned && receipt.returned.at === before.returned?.at) {
+              if (before.returned.notifiedAt) receipt.returned.notifiedAt = before.returned.notifiedAt;
+              else delete receipt.returned.notifiedAt;
+            }
+            return true;
+          });
+        } catch (rollback) { failures.push(`${before.id}: ${failureReason(rollback)}`); }
+      }
+      if (failures.length) throw new Error(`${failureReason(error)} Receipt routing rollback failed: ${failures.join("; ")}`);
+      throw error;
+    }
+  });
 }
 
 /** No ledger yet is normal; any other read failure is logged before it reads as empty. */

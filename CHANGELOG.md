@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Conductor moves always keep the old chat running, check the captured role before hand-over, transfer worker return and approval routing, and report post-transfer status-save failures as moved with a warning.
+
 ### Added
 
 - Move the conductor chat to another harness or account from the phone, transferring its role when the new agent lands and preserving the old role on transfer failure (`moveConductor` Hook capability).

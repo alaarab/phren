@@ -1276,11 +1276,15 @@ its id. The record's fields and the steps are in docs/conductor.md.
 
 `capabilities.moveConductor: true` advertises conductor moves alongside
 `sessionMove` and `moveNewChat` in `/v1/health`. The old pane retains its role
-until the new agent lands; an atomic role replacement makes the new pane the
-conductor when the move becomes `moved`. The hand-off names its conductor role.
-Both move modes support this, except that Copilot cannot be a conductor. If
-role transfer fails, `state: "failed"` and `error` explain why, and the old pane
-keeps its conductor role and stays open.
+until the new agent lands. Conductor moves always use `mode: "new-chat"` and
+record `modeForced: "conductor"`, regardless of the requested mode. The old
+chat stays running and open. A checked role hand-over also re-points open
+worker receipt origins, so returns and approvals reach the new conductor.
+The hand-off names its conductor role. Copilot cannot be a conductor.
+A changed role refuses the hand-over without modifying it; other transfer
+failures keep the old role and report `state: "failed"` with an `error`.
+A status-save failure after role and routing commit reports `state: "moved"`
+with a warning in `notice`. See [moving the conductor](conductor.md#move-a-session-to-another-agent).
 
 `mode` defaults to `"replace"`: the old agent exits and the target replaces it
 in place (or in an adjacent tab when its account needs a different shell).

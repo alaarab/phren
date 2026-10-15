@@ -23,9 +23,9 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { quoted, withOriginalBrief } from "./account-failover.js";
-import { recordConductor, runsAgent } from "./conductor-role.js";
+import { recordedConductor, runsAgent, transferConductor, type ConductorRecord } from "./conductor-role.js";
 import { DEFAULT_ACCOUNT } from "./claude-accounts.js";
-import { DISPATCH_HARNESSES, moveToSchema } from "./dispatch.js";
+import { DISPATCH_HARNESSES, moveToSchema, repointDispatchOrigins } from "./dispatch.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { findPane } from "./herdr.js";
 import { briefId, briefRoot, writeLaunchBrief } from "./launch-brief.js";
@@ -57,6 +57,7 @@ const moveRecordSchema = z.object({
   from: z.object({ target: targetSchema, account: z.string().max(64).optional(), label: z.string().max(200).optional() }).strict(),
   to: moveToSchema,
   mode: z.enum(["replace", "new-chat"]).optional(),
+  modeForced: z.literal("conductor").optional(),
   handedOffTo: z.object({ target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
   handedOffFrom: z.object({ target: targetSchema, title: z.string().max(200) }).strict().optional(),
   cwd: z.string().max(4096),
@@ -98,11 +99,15 @@ const recordFile = (id: string) => path.join(movesRoot(), `${z.string().uuid().p
 /** The hand-off sits beside the new agent's brief, in a folder Claude is given read access to. */
 export const handoffPath = (id: string) => path.join(briefRoot(), id, "handoff.md");
 
+// A committed hand-over remains observable even while its status file cannot
+// be written. Key by full path because one process may access multiple stores.
+const landedMoves = new Map<string, MoveRecord>();
 let writes: Promise<unknown> = Promise.resolve();
 async function saveMove(record: MoveRecord): Promise<void> {
   const run = writes.then(async () => {
     await mkdir(movesRoot(), { recursive: true, mode: 0o700 });
     await atomic(recordFile(record.id), moveRecordSchema.parse(record));
+    landedMoves.delete(recordFile(record.id));
   });
   writes = run.catch(() => undefined);
   return run;
@@ -110,6 +115,7 @@ async function saveMove(record: MoveRecord): Promise<void> {
 
 export async function readMove(id: string): Promise<MoveRecord | undefined> {
   const file = recordFile(id);
+  if (landedMoves.has(file)) return structuredClone(landedMoves.get(file)!);
   const info = await lstat(file).catch(() => undefined);
   if (!info?.isFile() || info.size > MAX_RECORD_BYTES) return undefined;
   try { return moveRecordSchema.parse(JSON.parse(await readFile(file, "utf8"))); } catch { return undefined; }
@@ -349,7 +355,7 @@ export function handoffDocument(record: MoveRecord, body: string, observed: stri
     ...(record.mode === "new-chat" ? ["## Previous chat", "",
       `Title: ${record.from.label ?? record.from.target.source}`,
       "Target (JSON, for opening the old chat):", "```json", JSON.stringify(record.from.target), "```", ""] : []),
-    ...(conductor ? ["## Conductor role", "", "You are now the conductor. Continue coordinating the owner’s work and existing workers. The Hook transfers the role when this move lands; if transfer fails, the move reports failure and the old pane remains conductor.", ""] : []),
+    ...(conductor ? ["## Conductor role", "", "You are now the conductor. Continue coordinating the owner’s work and existing workers. The Hook checks and transfers the role when this move lands; if transfer fails, the old chat stays running and the move explains why.", ""] : []),
     body.trim(),
     "",
     observed,
@@ -438,7 +444,11 @@ export class SessionMover {
     if (pane.agent !== target.source) throw new BridgeError(409, `That pane no longer runs ${HARNESS_NAMES[target.source] ?? target.source}.`);
     const session = await this.deps.identity(target.server, pane).catch(() => undefined);
     if (session && session !== target.session) throw new BridgeError(409, "That pane runs another conversation now.");
-    const conductor = await this.deps.isConductor?.(target.server, pane) ?? false;
+    const holdsRole = await this.deps.isConductor?.(target.server, pane) ?? false;
+    const conductor = holdsRole ? await recordedConductor() : undefined;
+    if (holdsRole && (!conductor || conductor.server !== target.server || conductor.pane !== target.pane)) {
+      throw new BridgeError(409, "The conductor changed during the move; nothing was transferred.");
+    }
     if (conductor && to.harness === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
     const account = target.source === "claude" ? this.deps.paneAccount?.(target.server, pane) ?? DEFAULT_ACCOUNT : undefined;
     const sameHarness = to.harness === target.source && (to.harness !== "claude" || (to.account ?? account) === account);
@@ -459,7 +469,7 @@ export class SessionMover {
     const label = [pane.label, pane.title, pane.terminal_title_stripped, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
     const at = new Date(this.now).toISOString();
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: "handing-off", createdAt: at, updatedAt: at,
-      mode: data.mode, from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd,
+      mode: conductor ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd,
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}) };
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
@@ -476,8 +486,9 @@ export class SessionMover {
     await saveMove(record);
   }
 
-  private async run(record: MoveRecord, handoffMs: number, conductor: boolean): Promise<void> {
+  private async run(record: MoveRecord, handoffMs: number, conductor: ConductorRecord | undefined): Promise<void> {
     const from = record.from.target;
+    let roleTransferred = false;
     try {
       // What the checkout and the agent's processes look like before it stops.
       const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
@@ -489,7 +500,7 @@ export class SessionMover {
       const body = "text" in written ? written.text : record.mode === "new-chat"
         ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
         : fallback!;
-      const document = handoffDocument(record, body, observedState(git, processes), new Date(this.now).toISOString(), conductor);
+      const document = handoffDocument(record, body, observedState(git, processes), new Date(this.now).toISOString(), !!conductor);
       const file = handoffPath(record.id);
       const prompt = briefText(continuePrompt(document, file));
       // The folder is the new agent's brief folder; the hand-off is written into it, whole.
@@ -502,17 +513,22 @@ export class SessionMover {
         await this.update(record, { state: "launching", exit });
         await this.deps.afterExit?.(from.server, from.pane).catch(() => undefined);
       }
-      const launched = await this.relaunch(record, prompt, conductor);
+      const launched = await this.relaunch(record, prompt);
       if (conductor) {
         try {
           const place = record.paneTarget;
           const next = place && findPane(await this.deps.snapshot(place.server), place);
           if (!place || !runsAgent(next) || next.agent !== record.to.harness) throw new Error("The new agent is no longer running in its launched pane.");
-          // One atomic replacement makes the new pane conductor and retires the
-          // old role. Never clear first: a failed write keeps the old record.
-          await recordConductor(place.server, next, "owner", launched.target && "session" in launched.target ? launched.target.session : undefined);
+          if (typeof next.terminal_id !== "string" || !next.terminal_id) throw new Error("The new pane has no terminal identity for worker returns.");
+          const origin = { server: place.server, workspace: place.workspace, tab: place.tab, pane: place.pane,
+            agent: record.to.harness, terminal: next.terminal_id };
+          await transferConductor(conductor, place.server, next,
+            launched.target && "session" in launched.target ? launched.target.session : undefined,
+            commit => repointDispatchOrigins(conductor, origin, commit));
+          roleTransferred = true;
         } catch (error) {
-          throw new Error(`Conductor role transfer failed; the old pane remains conductor. ${error instanceof Error ? error.message : String(error)}`);
+          if (error instanceof BridgeError) throw error;
+          throw new Error(`Conductor role transfer failed. The old chat was left running. ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), ...launched,
@@ -520,12 +536,21 @@ export class SessionMover {
           ...(launched.target ? { handedOffTo: { target: launched.target } } : {}),
           handedOffFrom: { target: from, title: record.from.label ?? from.source },
         } : {}) });
-      if (conductor && launched.placement === "adjacent-pane" && record.mode !== "new-chat") {
-        await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
-      }
       logger.info("move", `Moved ${from.source} in pane ${from.pane} to ${harnessName(record.to)} (${launched.placement}); hand-off ${record.handoff?.source}.`);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f\x7f]+/g, " ");
+      if (roleTransferred) {
+        // update() has already populated the complete moved record. The role
+        // and worker routes committed; a later status save cannot undo them.
+        record.state = "moved";
+        record.notice = `Conductor moved with worker routing, but saving move status failed: ${message}`.slice(0, 500);
+        delete record.error;
+        landedMoves.set(recordFile(record.id), record);
+        while (landedMoves.size > MAX_MOVES) landedMoves.delete(landedMoves.keys().next().value!);
+        await saveMove(record).catch(() => undefined);
+        logger.warn("move", record.notice);
+        return;
+      }
       const stopped = record.exit !== undefined;
       const hint = stopped && record.handoff ? ` The old agent has exited; start ${HARNESS_NAMES[record.to.harness]} in the pane with the hand-off at ${record.handoff.path}.` : "";
       await this.update(record, { state: "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
@@ -606,7 +631,7 @@ export class SessionMover {
   }
 
   /** Starts the target in the old pane when its shell has what the target needs, else in a new tab beside it. */
-  private async relaunch(record: MoveRecord, prompt: string, conductor: boolean): Promise<Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">> {
+  private async relaunch(record: MoveRecord, prompt: string): Promise<Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">> {
     const from = record.from.target;
     const s = await this.deps.snapshot(from.server);
     const pane = findPane(s, placeOf(from));
@@ -642,7 +667,7 @@ export class SessionMover {
         throw new Error(`${record.mode === "new-chat" ? "New chat" : "Target"} started but did not receive the hand-off. The launched pane was left open. ${reason}`);
       }
     }
-    if (!conductor && !samePane && record.mode !== "new-chat") await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
+    if (!samePane && record.mode !== "new-chat") await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
     // The account the new agent runs under, also when the move named none.
     const to = account ? { ...record.to, account } : record.to;
     return { to, placement: samePane ? "same-pane" : "adjacent-pane", ...await this.newTarget(record, launched, record.to.harness) };

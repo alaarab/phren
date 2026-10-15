@@ -672,15 +672,30 @@ and effort. The Hook:
    uses the same pane.
 
 The conductor can move too, including an account switch from the phone. With
-`capabilities.moveConductor: true` in `/v1/health`, the Hook keeps the old
-pane’s conductor role until the new agent lands, then atomically assigns the
-role to the new pane as the move becomes `moved`. Its hand-off says it is now
-the conductor. This works for both replacement and `mode: "new-chat"`; the
-latter keeps the old agent running with its conductor role removed. Copilot
-cannot be a conductor. A role-transfer failure records `state: "failed"` with
-a clear `error`, keeps the old pane as conductor, and leaves it open even when
-an account switch would otherwise close it. An exited old agent may need to
-be restarted there; the role remains assigned.
+`capabilities.moveConductor: true` in `/v1/health`, every conductor move uses
+`mode: "new-chat"`, even when the request asks for replacement. The record
+includes `modeForced: "conductor"`. The old chat stays running and open on both
+success and failure. On success it shows the same hand-off link as other new-chat
+moves, and the new chat’s hand-off says it is now the conductor. Copilot cannot
+be a conductor.
+
+At landing, the Hook compares the role with the exact record captured when the
+move started, inside the role writer’s serialized queue. A stop, reassignment,
+session change or competing hand-over refuses the move with
+"The conductor changed during the move; nothing was transferred." The current
+role is left untouched. Before committing the role, the Hook re-points open
+dispatch receipt origins under the receipt writer’s lock, including the new
+harness and terminal identity. Existing workers’ returns and approval requests
+then reach the new conductor; unread returns announced to the old chat are
+announced again. Closed and unrelated receipts keep their origins. An in-flight
+dispatch must settle before its conductor can move.
+
+A launch, receipt update or role-write failure records `state: "failed"` and a
+clear `error`; receipt updates are rolled back and the old conductor keeps
+running with its role. Once the role and routing have committed, a move-status
+save failure reports `state: "moved"` with a warning in `notice`, rather than
+claiming the old pane still holds the role. If the status file remains
+unwritable, the running Hook retains that moved-with-warning status in memory.
 
 Each move is recorded in `<bridge>/moves/<id>.json`: `state` (`handing-off`,
 `exiting`, `launching`, `linking`, `moved`, `failed`), `from`, `to`, `handoff` (`path`,
