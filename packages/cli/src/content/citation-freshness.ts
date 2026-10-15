@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { findPhrenPath, runtimeFile } from "../phren-paths.js";
@@ -16,10 +16,17 @@ export interface CitationFreshness {
 export interface CitationFreshnessOptions { phrenPath?: string; projectRemote?: string | null }
 export type FreshnessCitation = FindingCitation & { projectRemote?: string | null };
 interface Target { domain: string; repo: string; commit: string; file: string; key: string }
-type Cache = Record<string, CitationFreshness>;
+interface Repository { domain: string; path: string; root?: string }
+interface Resolution { checkedAt: string; value: Repository | null }
+type CacheEntry = CitationFreshness | Resolution;
+type Cache = Record<string, CacheEntry>;
 const MINUTE = 60_000;
 const RETENTION = 7 * 24 * 60 * MINUTE;
-const resolutions = new Map<string, { at: number; value: { domain: string; path: string; root?: string } | null }>();
+const RESOLUTION_TTL = 24 * 60 * MINUTE;
+const cacheMemo = new Map<string, { mtimeMs: number; size: number; entries: Cache }>();
+const isChanged = (entry?: CacheEntry): entry is CitationFreshness => !!entry && "state" in entry && entry.state === "changed";
+const resolutionKey = (citation: FreshnessCitation, opts: CitationFreshnessOptions) =>
+  `repo:${citation.repo ?? ""}\0${citation.projectRemote ?? opts.projectRemote ?? ""}`;
 const pending = new Map<string, Promise<void>>();
 const off = () => process.env.PHREN_CITATION_FRESHNESS?.trim().toLowerCase() === "off";
 
@@ -32,11 +39,11 @@ function git(root: string | undefined, timeoutMs: number, ...args: string[]): st
   } catch { return ""; }
 }
 
-function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions, deadline = Infinity) {
+function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions, entries: Cache, deadline: number) {
   const fallback = citation.projectRemote ?? opts.projectRemote;
-  const key = JSON.stringify([citation.repo, fallback]);
-  const cached = resolutions.get(key);
-  if (cached && Date.now() - cached.at < MINUTE) return cached.value;
+  const key = resolutionKey(citation, opts);
+  const cached = entries[key];
+  if (cached && "value" in cached && fresh(cached)) return cached.value;
   const local = citation.repo && existsSync(citation.repo) ? citation.repo : undefined;
   const read = (...args: string[]) => git(local, Math.min(200, deadline - Date.now()), ...args);
   const remote = local ? read("remote", "get-url", "origin") : "";
@@ -50,15 +57,14 @@ function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions,
     const kind = ["github", "gitlab", "gitboy"].includes(named) ? named : kindFromDomain(parsed.domain);
     if (kind === "gitboy") value = { ...parsed, root: remote ? read("rev-parse", "--show-toplevel") || local : citation.repo };
   }
-  if (resolutions.size >= 5000) resolutions.delete(resolutions.keys().next().value!);
-  resolutions.set(key, { at: Date.now(), value });
+  // A budget-limited git lookup must not become a day-long negative resolution.
+  if (Date.now() < deadline) entries[key] = { checkedAt: new Date().toISOString(), value };
   return value;
 }
 
-function target(citation: FreshnessCitation, opts: CitationFreshnessOptions, deadline = Infinity): Target | undefined {
+function target(citation: FreshnessCitation, repo: Repository | null | undefined): Target | undefined {
   if (!citation.file || !citation.commit || !/^[a-f0-9]{7,64}$/i.test(citation.commit)) return;
   if (citation.file.includes("\\") || citation.file.includes("\0") || citation.file.split("/").includes("..")) return;
-  const repo = repository(citation, opts, deadline);
   if (!repo) return;
   let file = citation.file;
   if (path.isAbsolute(file)) {
@@ -83,19 +89,28 @@ function cacheFile(opts: CitationFreshnessOptions): string | undefined {
 function readCache(file?: string): Cache {
   if (!file) return {};
   try {
+    const info = statSync(file);
+    const memo = cacheMemo.get(file);
+    if (memo && memo.mtimeMs === info.mtimeMs && memo.size === info.size) return memo.entries;
     const raw = JSON.parse(readFileSync(file, "utf8")) as Cache;
-    return Object.fromEntries(Object.entries(raw).filter(([, entry]) => {
-      const value = entry as CitationFreshness;
-      return value && ["current", "changed", "unknown"].includes(value.state)
-        && Number.isFinite(Date.parse(value.checkedAt)) && Date.now() - Date.parse(value.checkedAt) <= RETENTION;
-    }));
-  } catch { return {}; }
+    const entries = Object.fromEntries(Object.entries(raw).filter(([key, value]) => value
+      && Number.isFinite(Date.parse(value.checkedAt))
+      && (key.startsWith("repo:") ? "value" in value : "state" in value && ["current", "changed", "unknown"].includes(value.state))));
+    rememberCache(file, entries, info);
+    return entries;
+  } catch { cacheMemo.delete(file); return {}; }
 }
 
-function ttl(value: CitationFreshness): number {
-  return (value.state === "changed" ? 60 : value.state === "current" ? 15 : 5) * MINUTE;
+function rememberCache(file: string, entries: Cache, info = statSync(file)): void {
+  const { mtimeMs, size } = info;
+  if (cacheMemo.size >= 64) cacheMemo.delete(cacheMemo.keys().next().value!);
+  cacheMemo.set(file, { mtimeMs, size, entries });
 }
-function fresh(value?: CitationFreshness): boolean {
+
+function ttl(value: CacheEntry): number {
+  return "value" in value ? RESOLUTION_TTL : (value.state === "changed" ? 60 : value.state === "current" ? 15 : 5) * MINUTE;
+}
+function fresh(value?: CacheEntry): boolean {
   return !!value && Date.now() - Date.parse(value.checkedAt) < ttl(value);
 }
 function save(file: string | undefined, entries: Cache): void {
@@ -105,22 +120,29 @@ function save(file: string | undefined, entries: Cache): void {
     const previous = readCache(file);
     const merged = { ...previous, ...entries };
     for (const [key, value] of Object.entries(previous)) {
-      if (value.state === "changed" && merged[key]?.state !== "changed") merged[key] = value;
+      if (isChanged(value) && !isChanged(merged[key])) merged[key] = value;
     }
-    const sorted = Object.entries(merged).sort((a, b) => Date.parse(b[1].checkedAt) - Date.parse(a[1].checkedAt)).slice(0, 5000);
-    writeFileSync(temp, JSON.stringify(Object.fromEntries(sorted)), { mode: 0o600 });
+    const sorted = Object.entries(merged).filter(([, value]) =>
+      Date.now() - Date.parse(value.checkedAt) <= ("value" in value ? RESOLUTION_TTL : RETENTION)).sort((a, b) => Date.parse(b[1].checkedAt) - Date.parse(a[1].checkedAt)).slice(0, 5000);
+    const saved = Object.fromEntries(sorted);
+    writeFileSync(temp, JSON.stringify(saved), { mode: 0o600 });
     renameSync(temp, file);
+    rememberCache(file, saved);
   } catch { /* Cache failures never fail retrieval. */ }
   finally { try { unlinkSync(temp); } catch { /* Already renamed. */ } }
 }
 
-/** Synchronous and network-free. Changed evidence survives refresh failures for seven days. */
+/** Reads persisted resolutions and checks only; never runs git or accesses the network. Changed evidence survives refresh failures for seven days. */
 export function cachedCitationFreshness(citation: FreshnessCitation, opts: CitationFreshnessOptions = {}): CitationFreshness | undefined {
   if (off()) return;
   try {
-    const resolved = target(citation, opts);
-    const value = resolved ? readCache(cacheFile(opts))[resolved.key] : undefined;
-    return value && (value.state === "changed" || fresh(value)) ? value : undefined;
+    const entries = readCache(cacheFile(opts));
+    const resolution = entries[resolutionKey(citation, opts)];
+    if (!resolution || !("value" in resolution) || !fresh(resolution)) return;
+    const resolved = target(citation, resolution.value);
+    const value = resolved ? entries[resolved.key] : undefined;
+    return value && "state" in value && Date.now() - Date.parse(value.checkedAt) <= RETENTION
+      && (isChanged(value) || fresh(value)) ? value : undefined;
   } catch { return undefined; }
 }
 
@@ -164,10 +186,10 @@ async function request(batch: Target[], opts: RefreshOptions, remaining: number,
     const checkedAt = new Date().toISOString();
     for (const item of batch) {
       const value = answer(Array.isArray(body.paths) ? body.paths.find(row => row.path === item.file) : undefined, body.head, checkedAt);
-      if (entries[item.key]?.state !== "changed" || value.state === "changed") entries[item.key] = value;
+      if (!isChanged(entries[item.key]) || value.state === "changed") entries[item.key] = value;
     }
   } catch {
-    for (const item of batch) if (entries[item.key]?.state !== "changed") entries[item.key] = { state: "unknown", checkedAt: new Date().toISOString() };
+    for (const item of batch) if (!isChanged(entries[item.key])) entries[item.key] = { state: "unknown", checkedAt: new Date().toISOString() };
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", abort);
@@ -180,11 +202,11 @@ export async function refreshCitationFreshness(citations: readonly FreshnessCita
   if (off()) return result;
   try {
     const deadline = Date.now() + Math.max(0, opts.budgetMs);
-    const file = cacheFile(opts), entries = readCache(file);
+    const file = cacheFile(opts), entries = { ...readCache(file) };
     const resolved = new Map<FreshnessCitation, Target>();
     const groups = new Map<string, Map<string, Target>>();
     for (const citation of citations) {
-      const item = target(citation, opts, deadline);
+      const item = target(citation, repository(citation, opts, entries, deadline));
       if (!item) continue;
       resolved.set(citation, item);
       if (fresh(entries[item.key])) continue;
@@ -198,7 +220,7 @@ export async function refreshCitationFreshness(citations: readonly FreshnessCita
         const batch = items.slice(i, i + 100).filter(item => !pending.has(`${file}:${item.key}`));
         const remaining = deadline - Date.now();
         if (remaining <= 0 || opts.signal?.aborted) {
-          for (const item of items.slice(i)) if (entries[item.key]?.state !== "changed") entries[item.key] = { state: "unknown", checkedAt: new Date().toISOString() };
+          for (const item of items.slice(i)) if (!isChanged(entries[item.key])) entries[item.key] = { state: "unknown", checkedAt: new Date().toISOString() };
           break;
         }
         if (!batch.length) continue;
@@ -209,7 +231,10 @@ export async function refreshCitationFreshness(citations: readonly FreshnessCita
     }
     save(file, entries);
     const latest = { ...entries, ...readCache(file) };
-    for (const [citation, item] of resolved) if (latest[item.key]) result.set(citation, latest[item.key]);
+    for (const [citation, item] of resolved) {
+      const value = latest[item.key];
+      if (value && "state" in value) result.set(citation, value);
+    }
   } catch { /* Offline, invalid citations and disk failures must never fail retrieval. */ }
   return result;
 }

@@ -1,3 +1,4 @@
+import { runtimeFile } from "../phren-paths.js";
 import { refreshCitationFreshness } from "../content/citation-freshness.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -6,6 +7,11 @@ import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { clearProjectConfigCache, getProjectRemote } from "../project-config.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding, completeProjectTask, tasksForBranch } from "./project-memory.js";
+
+vi.mock("node:fs", async original => {
+  const actual = await original<typeof import("node:fs")>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 // The code index is a separate package; the files route only needs its symbol resolver.
 const codeIndex = vi.hoisted(() => ({ files: {} as Record<string, string>, calls: 0 }));
@@ -293,4 +299,23 @@ it("returns before a background gitboy check and exposes it on the next poll", a
     await new Promise(resolve => setImmediate(resolve));
     expect(network).toHaveBeenCalledTimes(1);
   } finally { network.mockRestore(); }
+});
+
+
+it("reads the freshness cache once for a request with 500 findings", async () => {
+  const cite = { created_at: "2026-10-15T00:00:00Z", file: "src/cache.ts", commit: "abcdef1" };
+  write("app/FINDINGS.md", `# app Findings\n\n## 2026-10-15\n\n${Array.from({ length: 500 }, (_, i) =>
+    `- Cache finding ${i} <!-- fid:${i.toString(16).padStart(8, "0")} -->\n  <!-- phren:cite ${JSON.stringify(cite)} -->`).join("\n")}\n`);
+  write("app/phren.project.yaml", "remote: https://gitboy.example/alice/app.git\n");
+  await refreshCitationFreshness([cite], { phrenPath: store, projectRemote: "https://gitboy.example/alice/app.git", budgetMs: 1500,
+    fetchImpl: async () => new Response(JSON.stringify({ head: "123456789", paths: [{ path: cite.file, changed: true, last_commit: null }] })) });
+  const cache = runtimeFile(store, "citation-freshness.json");
+  // An external writer invalidates the process memo before this request.
+  fs.appendFileSync(cache, "\n");
+  vi.mocked(fs.readFileSync).mockClear();
+  const result = await hookGet("/v1/projects/app/memory");
+  expect(result.body.findings).toHaveLength(500);
+  expect(result.body.findings.every((item: any) => item.citationFreshness?.state === "changed")).toBe(true);
+  expect(vi.mocked(fs.readFileSync).mock.calls.filter(([file]) => file === cache)).toHaveLength(1);
+  await new Promise(resolve => setImmediate(resolve));
 });

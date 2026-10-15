@@ -7,6 +7,11 @@ import { runtimeFile } from "../phren-paths.js";
 import { cachedCitationFreshness, refreshCitationFreshness, type FreshnessCitation } from "./citation-freshness.js";
 import { markStaleCitations } from "../shared/retrieval.js";
 
+vi.mock("node:child_process", async original => {
+  const actual = await original<typeof import("node:child_process")>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
+
 let tmp: ReturnType<typeof makeTempDir>;
 const citation = (file = "src/a.ts", extra = {}): FreshnessCitation => ({ created_at: "2026-10-15T00:00:00Z", file, commit: "abcdef1", projectRemote: "https://gitboy.example/alice/app.git", ...extra });
 const response = (url: URL | RequestInfo, changed = false) => {
@@ -19,6 +24,38 @@ beforeEach(() => { tmp = makeTempDir("citation-freshness-"); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); tmp.cleanup(); });
 
 describe("gitboy citation freshness", () => {
+  it("never invokes git on a cold cache-only lookup, or when reading a persisted resolution", async () => {
+    const repo = path.join(tmp.path, "checkout");
+    mkdirSync(repo);
+    execFileSync("git", ["init", repo], { stdio: "ignore" });
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@gitboy.local:alice/app.git"]);
+    const cite = citation("src/a.ts", { repo });
+    vi.mocked(execFileSync).mockClear();
+    expect(cachedCitationFreshness(cite, options())).toBeUndefined();
+    expect(execFileSync).not.toHaveBeenCalled();
+    await refreshCitationFreshness([cite], { ...options(), fetchImpl: async url => response(url) });
+    expect(execFileSync).toHaveBeenCalled();
+    vi.mocked(execFileSync).mockClear();
+    expect(cachedCitationFreshness(cite, options())?.state).toBe("current");
+    expect(execFileSync).not.toHaveBeenCalled();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 24 * 3600_000 + 1);
+    expect(cachedCitationFreshness(cite, options())).toBeUndefined();
+    expect(execFileSync).not.toHaveBeenCalled();
+    await refreshCitationFreshness([cite], { ...options(), fetchImpl: async url => response(url) });
+    expect(execFileSync).toHaveBeenCalled();
+  });
+
+  it("persists negative repository resolutions for 24 hours", async () => {
+    const cite = citation("src/a.ts", { projectRemote: "https://github.com/alice/app" });
+    await refreshCitationFreshness([cite], { ...options(), fetchImpl: vi.fn() });
+    const entries = JSON.parse(readFileSync(runtimeFile(tmp.path, "citation-freshness.json"), "utf8"));
+    expect(entries["repo:\0https://github.com/alice/app"].value).toBeNull();
+    vi.mocked(execFileSync).mockClear();
+    await refreshCitationFreshness([cite], { ...options(), fetchImpl: vi.fn() });
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
   it("groups repositories and commits, deduplicates paths and batches at 100", async () => {
     const fetchImpl = vi.fn(async (url: URL | RequestInfo) => response(url));
     const citations = Array.from({ length: 201 }, (_, i) => citation(`src/${i}.ts`));

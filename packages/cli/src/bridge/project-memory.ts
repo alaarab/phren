@@ -1,4 +1,4 @@
-import { cachedCitationFreshness, refreshCitationFreshness, type CitationFreshness } from "../content/citation-freshness.js";
+import { cachedCitationFreshness, refreshCitationFreshness, type CitationFreshness, type CitationFreshnessOptions } from "../content/citation-freshness.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readFindings, type FindingItem } from "../data/access.js";
@@ -42,9 +42,12 @@ const DATE = /^\d{4}-\d{2}-\d{2}/;
 /** Text that trips phren's credential detector is withheld whole, never cut. */
 const safe = (text: string) => redactSecretsForLog(text);
 
-function finding(item: FindingItem, root?: string, project?: string): MemoryFinding {
-  const opts = root && project ? { phrenPath: root, projectRemote: getProjectRemote(root, project, readProjectConfig(root, project)) } : undefined;
-  const citationFreshness = item.citationData && opts ? cachedCitationFreshness(item.citationData, opts) : undefined;
+function freshnessOptions(root: string, project: string): CitationFreshnessOptions {
+  return { phrenPath: root, projectRemote: getProjectRemote(root, project, readProjectConfig(root, project)) };
+}
+
+function finding(item: FindingItem, opts: CitationFreshnessOptions): MemoryFinding {
+  const citationFreshness = item.citationData ? cachedCitationFreshness(item.citationData, opts) : undefined;
   const tag = TAG.exec(item.text);
   const cite = item.citationData;
   const citation = cite && (cite.file || cite.line || cite.commit || cite.symbol)
@@ -80,13 +83,12 @@ function locate(base: string, rawProject: string): { project: string; root: stri
 }
 
 /** Newest first, so a cap drops the oldest. Undated findings sort last. */
-function sortedFindings(root: string, project: string): FindingItem[] {
+function sortedFindings(root: string, project: string, opts: CitationFreshnessOptions): FindingItem[] {
   const result = readFindings(root, project);
   if (!result.ok) throw new BridgeError(404, "Project not found.");
-  const projectRemote = getProjectRemote(root, project, readProjectConfig(root, project));
-  const citations = result.data.flatMap(item => item.citationData ? [{ ...item.citationData, projectRemote }] : []);
+  const citations = result.data.flatMap(item => item.citationData ? [item.citationData] : []);
   // One batch per poll, after the response has been shaped. Refresh deduplicates overlapping polls.
-  if (citations.length) setImmediate(() => { void refreshCitationFreshness(citations, { phrenPath: root, budgetMs: 1500 }); });
+  if (citations.length) setImmediate(() => { void refreshCitationFreshness(citations, { ...opts, budgetMs: 1500 }); });
   return result.data.map((item, index) => ({ item, index, date: DATE.test(item.date) ? item.date : "" }))
     .sort((a, b) => b.date.localeCompare(a.date) || a.index - b.index).map(entry => entry.item);
 }
@@ -98,7 +100,8 @@ function readTruths(root: string, project: string): string[] {
 
 export function projectMemory(base: string, rawProject: string): ProjectMemory {
   const { project, root, storeId } = locate(base, rawProject);
-  const allFindings = sortedFindings(root, project);
+  const opts = freshnessOptions(root, project);
+  const allFindings = sortedFindings(root, project, opts);
   const truths = readTruths(root, project).map(text => ({ text: safe(text) }));
 
   // Tasks are their own module; with it off the sections are empty.
@@ -108,8 +111,8 @@ export function projectMemory(base: string, rawProject: string): ProjectMemory {
   const truncated = allFindings.length > MEMORY_LIMITS.findings || items.Active.length > MEMORY_LIMITS.active
     || items.Queue.length > MEMORY_LIMITS.queue || items.Done.length > MEMORY_LIMITS.done;
   return {
-    project, store_id: storeId, remote: getProjectRemote(root, project, readProjectConfig(root, project)), truncated,
-    findings: allFindings.slice(0, MEMORY_LIMITS.findings).map(item => finding(item, root, project)),
+    project, store_id: storeId, remote: opts.projectRemote ?? null, truncated,
+    findings: allFindings.slice(0, MEMORY_LIMITS.findings).map(item => finding(item, opts)),
     truths,
     tasks: {
       active: items.Active.slice(0, MEMORY_LIMITS.active).map(task),
@@ -128,11 +131,12 @@ export interface FileFinding extends MemoryFinding { match: "file" | "symbol" }
  *  type or variable the code index places in one of them. */
 export async function memoryForFiles(base: string, rawProject: string, paths: string[]) {
   const { project, root, storeId } = locate(base, rawProject);
+  const opts = freshnessOptions(root, project);
   if (paths.length < 1 || paths.length > MAX_FILE_PATHS || !paths.every(isRepoPath)) {
     throw new BridgeError(400, `Send 1 to ${MAX_FILE_PATHS} repository-relative paths.`);
   }
   const wanted = new Set(paths);
-  const all = sortedFindings(root, project);
+  const all = sortedFindings(root, project, opts);
   const citedFile = (item: FindingItem) => item.citationData?.file?.replace(/^\.\//, "");
   const named = all.filter(item => item.citationData?.symbol && !wanted.has(citedFile(item) ?? ""));
   let symbols: "indexed" | "unavailable" = "unavailable";
@@ -147,8 +151,8 @@ export async function memoryForFiles(base: string, rawProject: string, paths: st
   const matches: FileFinding[] = [];
   for (const item of all) {
     const file = citedFile(item), name = item.citationData?.symbol;
-    if (file && wanted.has(file)) matches.push({ ...finding(item, root, project), match: "file" });
-    else if (name && files[name] && wanted.has(files[name])) matches.push({ ...finding(item, root, project), match: "symbol" });
+    if (file && wanted.has(file)) matches.push({ ...finding(item, opts), match: "file" });
+    else if (name && files[name] && wanted.has(files[name])) matches.push({ ...finding(item, opts), match: "symbol" });
   }
   return { project, store_id: storeId, symbols, truncated: matches.length > MEMORY_LIMITS.findings,
     findings: matches.slice(0, MEMORY_LIMITS.findings) };
@@ -171,10 +175,11 @@ export interface SearchHit {
  */
 export function memorySearch(base: string, rawProject: string, q: string, limit: number) {
   const { project, root } = locate(base, rawProject);
+  const opts = freshnessOptions(root, project);
   if (!isSearchText(q)) throw new BridgeError(400, "q must be 1 to 1000 characters of text.");
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_SEARCH_LIMIT) throw new BridgeError(400, `limit must be 1 to ${MAX_SEARCH_LIMIT}.`);
   const entries = [
-    ...sortedFindings(root, project).map(item => ({ kind: "finding" as const, text: item.text, item })),
+    ...sortedFindings(root, project, opts).map(item => ({ kind: "finding" as const, text: item.text, item })),
     ...readTruths(root, project).map(text => ({ kind: "truth" as const, text, item: undefined })),
   ];
   const tokens = tokenizeForOverlap(q, 64);
@@ -194,7 +199,7 @@ export function memorySearch(base: string, rawProject: string, q: string, limit:
     if (!best || best.distinct < minimum) continue;
     const inactive = entry.item && entry.item.status !== "active";
     const score = Math.round((best.rarity / weight) * (inactive ? 0.5 : 1) * 1000) / 1000;
-    const shaped = entry.item ? finding(entry.item, root, project) : null;
+    const shaped = entry.item ? finding(entry.item, opts) : null;
     hits.push({ kind: entry.kind, score, matched: best.distinct, text: shaped ? shaped.text : safe(entry.text), finding: shaped });
   }
   hits.sort((a, b) => b.score - a.score || b.matched - a.matched);
@@ -236,7 +241,8 @@ let writes: Promise<unknown> = Promise.resolve();
  *  project's write permission, duplicate and conflict checks, the secret
  *  scan and citation validation against the code index. */
 export async function saveFinding(base: string, rawProject: string, input: unknown) {
-  const { project } = locate(base, rawProject);
+  const { project, root } = locate(base, rawProject);
+  const opts = freshnessOptions(root, project);
   if (Buffer.byteLength(JSON.stringify(input ?? null)) > MAX_FINDING_BODY) throw new BridgeError(413, `The body must be at most ${MAX_FINDING_BODY} bytes.`);
   const body = findingWriteSchema.parse(input);
   const { handleAddFinding } = await import("../tools/finding.js");
@@ -255,9 +261,9 @@ export async function saveFinding(base: string, rawProject: string, input: unkno
     throw new BridgeError(/permission|denied|not allowed/i.test(error) ? 403 : 400, safe(error));
   }
   const status = result.data?.status === "skipped" ? "duplicate" : "saved";
-  const saved = status === "saved" ? sortedFindings(locate(base, rawProject).root, project)
+  const saved = status === "saved" ? sortedFindings(root, project, opts)
     .find(item => item.text === (result.data?.finding ?? "").replace(/^-\s+/, "").trim()) : undefined;
-  return { project, status, finding: saved ? finding(saved, locate(base, rawProject).root, project) : null };
+  return { project, status, finding: saved ? finding(saved, opts) : null };
 }
 
 // ── POST /tasks/complete ─────────────────────────────────────────────────────

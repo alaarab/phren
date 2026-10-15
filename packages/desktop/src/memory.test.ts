@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Computer, HookRequest, HookResponse } from "./contract.js";
 import { blobSha, createMemoryService } from "./memory.js";
 
@@ -286,7 +286,7 @@ describe("store writes", () => {
 
 it("adds the owning Hook's cached freshness to mirrored findings", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "desktop-freshness-"));
-  const store = fakeStore({ "proj-a/FINDINGS.md": '# proj-a Findings\n\n## 2026-10-15\n\n- Cache key collides <!-- fid:12345678 -->\n' });
+  const store = fakeStore({ "proj-a/FINDINGS.md": '# proj-a Findings\n\n## 2026-10-15\n\n- Cache key collides <!-- fid:12345678 -->\n  <!-- phren:cite {"created_at":"2026-10-15T00:00:00Z","file":"src/cache.ts","commit":"abcdef1"} -->\n' });
   const citationFreshness = { state: "changed", checkedAt: "2026-10-15T01:00:00Z", lastCommit: null };
   const hookRequest: HookRequest = async (computer, method, route, body) => route === "/v1/projects/proj-a/memory"
     ? json({ findings: [{ id: "fid:12345678", citationFreshness }] }) : store.request(computer, method, route, body);
@@ -294,4 +294,26 @@ it("adds the owning Hook's cached freshness to mirrored findings", async () => {
     const service = createMemoryService({ home, cacheDir: path.join(home, "cache"), hookRequest });
     expect((await service.findings(B, "proj-a")).items).toMatchObject([{ stableId: "12345678", citationFreshness }]);
   } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+
+it("returns findings after 1500 ms when the freshness Hook call hangs, and skips uncited files", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "desktop-freshness-timeout-"));
+  const text = '# proj-a Findings\n\n## 2026-10-15\n\n- Cache key collides <!-- fid:12345678 -->\n';
+  const store = fakeStore({ "proj-a/FINDINGS.md": text });
+  const memoryRequest = vi.fn(async () => await new Promise<never>(() => {}));
+  const hookRequest: HookRequest = async (computer, method, route, body) => route === "/v1/projects/proj-a/memory"
+    ? memoryRequest() : store.request(computer, method, route, body);
+  try {
+    const service = createMemoryService({ home, cacheDir: path.join(home, "cache"), hookRequest, syncMs: 0 });
+    expect((await service.findings(B, "proj-a")).items).toHaveLength(1);
+    expect(memoryRequest).not.toHaveBeenCalled();
+    store.change({ "proj-a/FINDINGS.md": `${text}  <!-- phren:cite {"created_at":"2026-10-15T00:00:00Z","file":"src/cache.ts","commit":"abcdef1"} -->\n` });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = service.findings(B, "proj-a");
+    await vi.waitFor(() => expect(memoryRequest).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(1500);
+    expect((await pending).items).toMatchObject([{ stableId: "12345678" }]);
+    expect((await pending).items[0]).not.toHaveProperty("citationFreshness");
+  } finally { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); }
 });

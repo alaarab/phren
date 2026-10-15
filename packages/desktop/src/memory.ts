@@ -422,8 +422,13 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       const file = path.join(dir, name, FINDINGS_FILENAME);
       const text = existsSync(file) ? readFileSync(file, "utf8") : "";
       const items = text ? parseFindingsContent(text) : [];
+      if (!text.includes("<!-- phren:cite")) return { items };
       // Freshness is runtime state on the owning computer, outside the mirrored store.
-      const memory = await hookJson(computer, `/v1/projects/${encodeURIComponent(name)}/memory`).catch(() => null);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const memory = await Promise.race([
+        hookJson(computer, `/v1/projects/${encodeURIComponent(name)}/memory`).catch(() => null),
+        new Promise<null>(resolve => { timeout = setTimeout(() => resolve(null), 1500); }),
+      ]).finally(() => clearTimeout(timeout));
       const findings = memory && Array.isArray(memory.findings) ? memory.findings as Array<{ id: string; citationFreshness?: unknown }> : [];
       const freshness = new Map(findings.map(item => [item.id, item.citationFreshness]));
       return { items: items.map(item => {

@@ -1,4 +1,4 @@
-import { cachedCitationFreshness, refreshCitationFreshness, citationFreshnessAnnotation } from "../content/citation-freshness.js";
+import { cachedCitationFreshness, refreshCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
 import { getProjectRemote, readProjectConfig } from "../project-config.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { projectMemoryCounts } from "../content/summarize.js";
@@ -480,10 +480,17 @@ async function handleSearchKnowledge(
       rows = rows.slice(0, maxResults);
     }
 
+    const citationOptionsByProject = new Map<string, CitationFreshnessOptions>();
     const citationOptions = (row: { project: string; path: string }) => {
       // Indexed paths also identify findings from registered secondary stores.
       const root = row.path ? path.dirname(path.dirname(row.path)) : phrenPath;
-      return { phrenPath, projectRemote: getProjectRemote(root, row.project, readProjectConfig(root, row.project)) };
+      const key = JSON.stringify([root, row.project]);
+      let opts = citationOptionsByProject.get(key);
+      if (!opts) {
+        opts = { phrenPath, projectRemote: getProjectRemote(root, row.project, readProjectConfig(root, row.project)) };
+        citationOptionsByProject.set(key, opts);
+      }
+      return opts;
     };
     const citationsByRow = rows.map(row => row.type === "findings" ? row.content.split("\n")
       .map(parseCitationComment).filter(cite => cite !== null)

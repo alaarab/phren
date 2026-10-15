@@ -1214,6 +1214,7 @@ export function selectSnippets(
   let usedTokens = 36;
   const queryTokens = tokenizeForOverlap(keywords);
   const seenBullets = new Set<string>();
+  const citationOptions = new Map<string, CitationFreshnessOptions>();
 
   // For each snippet being added, hash its bullet lines and skip duplicates
   function dedupSnippetBullets(snippet: string): string {
@@ -1235,10 +1236,17 @@ export function selectSnippets(
     const match = bestChunkMatch(queryTokens, doc);
     const source = match && match.distinct >= MIN_CHUNK_MATCHES ? match.chunk : extractSnippet(doc.content, keywords, 8);
     // Read cached freshness before compaction can cut a citation comment. No refresh here.
-    const root = doc.path ? path.dirname(path.dirname(doc.path)) : undefined;
-    const annotated = TRUST_FILTERED_TYPES.has(doc.type) ? markStaleCitations(source, root ? {
-      phrenPath: root, projectRemote: getProjectRemote(root, doc.project, readProjectConfig(root, doc.project)),
-    } : {}) : source;
+    let annotated = source;
+    if (TRUST_FILTERED_TYPES.has(doc.type)) {
+      const root = doc.path ? path.dirname(path.dirname(doc.path)) : undefined;
+      const optionsKey = JSON.stringify([root, doc.project]);
+      let opts = citationOptions.get(optionsKey);
+      if (!opts) {
+        opts = root ? { phrenPath: root, projectRemote: getProjectRemote(root, doc.project, readProjectConfig(root, doc.project)) } : {};
+        citationOptions.set(optionsKey, opts);
+      }
+      annotated = markStaleCitations(source, opts);
+    }
     let snippet = compactSnippet(annotated, lineBudget, charBudget);
     if (!snippet.trim()) continue;
     snippet = dedupSnippetBullets(snippet);
