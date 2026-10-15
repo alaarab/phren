@@ -6,7 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.9] - 2026-10-15
 
-- Account usage warnings sit above the composer without covering it, show each destination’s limiting window and reset, and offer a new hand-off chat for another harness when supported; related chats link back to each other. Settings and per-chat opt-outs persist across launches.
+- When the account a chat runs on nears its usage limit (90% of the 5-hour or weekly window by default; Settings › Notifications), a card above the composer shows the usage, when it resets and how much the other accounts and harnesses have left, with Switch, Not now and Don't ask again for this chat. Switching to another Claude account continues the chat in place; switching to Codex, OpenCode or Copilot opens a new chat with a hand-off (Hook 0.3.48), and the two chats link to each other. Settings and opt-outs persist across launches.
 - Narrow schedule editors wrap conflict notices and timing controls inside the scrolling body; unchanged schedule refreshes preserve list buttons and focus.
 - Schedule edits and Pause/Resume use the Hook's merge route when supported, preserving newer fields and showing the latest version after a conflict; removed schedules close the editor and validation errors stay on the form.
 - Settings › Computers shows each Hook's git writes without a repository check, counted by client since the Hook started, and identifies Hooks too old to report. Reads refresh when the page opens.
