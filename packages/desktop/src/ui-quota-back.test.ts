@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { quotaBackTransitions, startQuotaBack } from "../ui/shell/quota-back.js";
 
-const hooks = vi.hoisted(() => ({ usage: null as null | ((snapshot: unknown) => void), backOn: true }));
+const hooks = vi.hoisted(() => ({ usage: null as null | ((snapshot: unknown) => void), backOn: true, load: async () => {} }));
 vi.mock("../ui/shell/usage-rings.js", async (original) => ({
   ...await original<object>(),
   followUsage: (fn: (snapshot: unknown) => void) => { hooks.usage = fn; fn(null); return () => { hooks.usage = null; }; },
 }));
 vi.mock("../ui/shell/quota-warn-prefs.js", () => ({
-  loadQuotaState: async () => {}, quotaSettings: () => ({ backOn: hooks.backOn }),
+  loadQuotaState: () => hooks.load(), quotaSettings: () => ({ backOn: hooks.backOn }),
 }));
 
 const window = (usedPercent: number, id = "five_hour") => ({ id, usedPercent });
@@ -17,7 +17,7 @@ const account = (windows = [window(100)], computer = "Desk", id = "claude|work")
 const snapshot = (...accounts: object[]) => ({ accounts });
 const tick = (state: unknown, accounts = [account()], now = 0) => quotaBackTransitions(state, snapshot(...accounts), now);
 
-afterEach(() => { vi.useRealTimers(); hooks.backOn = true; });
+afterEach(() => { vi.useRealTimers(); hooks.backOn = true; hooks.load = async () => {}; });
 
 describe("account room transitions", () => {
   it("establishes silent baselines for exhausted and available accounts", () => {
@@ -139,5 +139,33 @@ describe("account room transitions", () => {
     expect(notify).toHaveBeenCalledTimes(1);
     stop();
     expect(hooks.usage).toBeNull();
+  });
+
+  it("consumes a recovery seen before preferences load instead of replaying it, and retries a failed load", async () => {
+    const loads: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+    hooks.load = () => new Promise<void>((resolve, reject) => { loads.push({ resolve, reject }); });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+    const notify = vi.fn();
+    const stop = startQuotaBack({ notify, enabled: () => true });
+    hooks.usage!(snapshot(account()));
+    hooks.usage!(snapshot(account([window(0)])));
+    expect(loads).toHaveLength(1);
+    // One read in flight at a time.
+    hooks.usage!(snapshot(account([window(0)])));
+    expect(loads).toHaveLength(1);
+    loads[0].reject(new Error("Could not load"));
+    await vi.waitFor(() => { hooks.usage!(snapshot(account([window(0)]))); expect(loads).toHaveLength(2); });
+    loads[1].resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    hooks.usage!(snapshot(account([window(0)])));
+    expect(notify).not.toHaveBeenCalled();
+    // After hydration and the unshown recovery's cooldown, a fresh exhaustion and recovery notifies once.
+    vi.setSystemTime(600_000);
+    hooks.usage!(snapshot(account()));
+    hooks.usage!(snapshot(account([window(0)])));
+    expect(notify).toHaveBeenCalledExactlyOnceWith("Claude · Work is available again", "5-hour limit reset on Desk");
+    stop();
   });
 });

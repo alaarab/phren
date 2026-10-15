@@ -4,11 +4,13 @@ const hooks = vi.hoisted(() => ({
   post: vi.fn(),
   merged: { computers: [{ computer: "Desk", state: "online" }] },
   changed: (_merged: unknown) => {},
+  caps: {} as Record<string, unknown>,
 }));
 vi.mock("../ui/api.js", () => ({ hookPost: hooks.post }));
 vi.mock("../ui/shell/store.js", () => ({ store: {
   get merged() { return hooks.merged; },
   sessions: () => [],
+  capabilities: async () => hooks.caps,
   subscribe: (fn: typeof hooks.changed) => { hooks.changed = fn; fn(hooks.merged); return () => {}; },
 } }));
 // @ts-expect-error plain ESM without type declarations
@@ -28,7 +30,7 @@ class Node {
   }
 }
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); hooks.post.mockReset(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); hooks.post.mockReset(); hooks.caps = {}; });
 
 function setup() {
   vi.useFakeTimers();
@@ -91,6 +93,55 @@ describe("Schedules list refresh", () => {
     if (kind === "enabled") expect(list.find("Resume")).toBeDefined();
     if (kind === "runtime") expect(list.find("running")).toBeDefined();
     if (kind === "removed" || kind === "offline") expect(list.find("Edit")).toBeUndefined();
+    handle.destroy();
+  });
+});
+
+describe("Schedules Pause through the Hook's merge route", () => {
+  const click = (node: Node | undefined) => (node!.listeners.get("click") as unknown as (ev: object) => void)({ stopPropagation() {} });
+  const updates = () => hooks.post.mock.calls.filter(([, route]) => route === "/v1/schedules/update");
+
+  it("sends only the enabled change with the stored revision when the Hook can merge", async () => {
+    hooks.caps = { scheduleUpdate: true };
+    const { nodes, schedule, handle } = setup();
+    const save = vi.fn();
+    vi.stubGlobal("fetch", save);
+    await vi.advanceTimersByTimeAsync(0);
+    click(nodes.get("[data-list]")!.find("Pause"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updates()).toEqual([["Desk", "/v1/schedules/update", {
+      project: "phren", id: "sweep", expectedUpdatedAt: schedule.updatedAt, changes: { enabled: false },
+    }]]);
+    expect(save).not.toHaveBeenCalled();
+    handle.destroy();
+  });
+
+  it("falls back to the whole-schedule store save on a Hook without the merge route", async () => {
+    const { nodes, handle } = setup();
+    const save = vi.fn(async () => new Response("{}"));
+    vi.stubGlobal("fetch", save);
+    await vi.advanceTimersByTimeAsync(0);
+    click(nodes.get("[data-list]")!.find("Pause"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updates()).toEqual([]);
+    expect(save).toHaveBeenCalledTimes(1);
+    const [url, request] = save.mock.calls[0] as unknown as [string, { body: string }];
+    expect(url).toBe("/api/memory/Desk/schedules");
+    expect(JSON.parse(request.body)).toMatchObject({ project: "phren", id: "sweep", schedule: { enabled: false } });
+    handle.destroy();
+  });
+
+  it("reports a schedule removed on another device instead of a raw Hook error", async () => {
+    hooks.caps = { scheduleUpdate: true };
+    const { nodes, schedule, handle } = setup();
+    hooks.post.mockImplementation(async (_computer: string, route: string) => {
+      if (route === "/v1/schedules/update") throw Object.assign(new Error("Schedule not found"), { status: 404 });
+      return { schedules: [{ ...schedule }] };
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    click(nodes.get("[data-list]")!.find("Pause"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(nodes.get("[data-error]")!.textContent).toBe("This schedule was removed on another device.");
     handle.destroy();
   });
 });
