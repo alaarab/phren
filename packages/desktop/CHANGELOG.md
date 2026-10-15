@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Agents and Home show hand-offs in session lists: dimmed original chats name their destination, with a harness tag that opens it, and new chats name their source. Closed destinations keep their label without a link.
+
 - Switch sheets keep keyboard focus inside, close with Escape and return focus to the invoking control. Home approval shortcuts pause while a dialog is open.
 
 - Home shows “Running low” chats at the configured usage-warning threshold, most constrained first, with account, reset time and Switch into the existing account or harness hand-off flow. The block hides when every open chat has room.

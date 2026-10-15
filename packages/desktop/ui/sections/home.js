@@ -1,3 +1,4 @@
+import { decorateHomeHandoff } from "../shell/handoff-view.js";
 // Home: the cockpit. Top to bottom, the conductor card, who needs you (with
 // keyboard answers), the turns that ended since you left, what is working (with each agent's activity line), the
 // checks on those sessions' pull requests, recent returns from dispatched
@@ -145,7 +146,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     if (age) metaEl.append(el("span", "home-age", age));
     shell.button.append(metaEl);
     shell.button.addEventListener("click", () => open(row.computer, child));
-    return shell.button;
+    return decorateHomeHandoff(shell.button, row.computer, child, sessions(merged, { includeOffline: true }));
   }
 
   function fill(name, rows, empty) {
@@ -331,7 +332,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       shell.button.append(meta);
       shell.button.disabled = !live;
       shell.button.addEventListener("click", () => { if (live) open(entry.computer, live.child); });
-      return shell.button;
+      return decorateHomeHandoff(shell.button, entry.computer, child, sessions(merged, { includeOffline: true }));
     })];
     renderFinished();
   }
@@ -397,7 +398,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       markSeen(entry.id);
       if (match) open(match.computer, match.child); else showSection("schedules");
     });
-    return shell.button;
+    return match ? decorateHomeHandoff(shell.button, match.computer, match.child, sessions(merged, { includeOffline: true })) : shell.button;
   }
 
   function markSeen(id) {
@@ -430,7 +431,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       markSeen(id);
       if (match) open(match.computer, match.child); else showSection("review");
     });
-    return shell.button;
+    return match ? decorateHomeHandoff(shell.button, match.computer, match.child, sessions(merged, { includeOffline: true })) : shell.button;
   }
 
   function renderReturns() {

@@ -897,3 +897,11 @@ button.handoff-link:hover { color: var(--accent); }
 .home-low { align-items: center; }
 .home-low-chat { border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; padding: 0; }
 .home-low-usage { color: var(--waiting); font-size: 12px; overflow-wrap: anywhere; }
+
+/* Hand-off history stays in its original list position. */
+.sb-row.handed-off .sb-main, .sb-row.handed-off > .sb-title,
+.sb-row.handed-off .sb-ring, .home-handoff-row.handed-off > .home-row { opacity: .6; }
+.handoff-tag { display: inline-block; padding: 1px 5px; border-radius: var(--radius); background: var(--surface); }
+.home-handoff-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.home-handoff-row > .home-row { flex: 1; min-width: 0; }
+.home-handoff-row > .sb-handoffs { max-width: 40%; }
