@@ -183,3 +183,12 @@
 @media (prefers-reduced-motion: reduce) {
   .launch-close, .launch-seg, .launch-computer, .launch-loadfill, .launch-btn { transition: none; }
 }
+
+/* A quota card is in the chat's flex layout, above the composer. */
+.quota-warning { position: static; width: 100%; max-width: none; max-height: none; border-radius: 10px; box-shadow: none; }
+.quota-warning .launch-head { padding: 8px 10px 0; }
+.quota-warning .launch-title { font-size: 13px; overflow-wrap: anywhere; }
+.quota-warning .launch-body { padding: 6px 10px; gap: 4px; }
+.quota-warning .launch-foot { padding: 6px 10px; gap: 6px; flex-wrap: wrap; }
+.quota-warning .launch-btn { height: auto; min-height: 30px; padding: 4px 10px; white-space: normal; }
+.quota-alternatives, .quota-warning .launch-hint { overflow-wrap: anywhere; }

@@ -327,3 +327,8 @@
 /* A worker row's message box appears on hover or focus, not on every row at once. */
 .chat-work-row .chat-work-send { display: none; }
 .chat-work-row:hover .chat-work-send, .chat-work-row:focus-within .chat-work-send { display: flex; }
+
+/* Bounded in-flow space: the transcript yields height; composer never shrinks. */
+.chat-quota-host { flex: 0 1 auto; min-height: 0; max-height: min(240px, 35%); overflow-y: auto; }
+.chat-quota-host:empty, .chat-handoffs:empty { display: none; }
+.chat-handoffs { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; }

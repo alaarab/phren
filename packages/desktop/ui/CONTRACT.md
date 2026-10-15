@@ -430,3 +430,95 @@ the digest file; the extension host frame runs on `{{uuid}}.localhost` and loads
 worker from the page origin, so the UI is served as `localhost` (its CSP allows
 `http://localhost:*`, not 127.0.0.1); `/editor-host/*` and `/extension-files/*` are
 public, read-only and served without the cookie.
+
+## Account quota warnings
+
+`shell/quota-warn.js` is pure: `quotaPreferences(value)` validates the enabled
+flag and 50–99 percent threshold (default 90); `quotaSessionKey(session)` keys
+computer/harness/conversation; `sessionUsage(session, accounts)` matches the
+session's exact local account; `quotaWindows(row, now)` settles 5-hour and weekly
+windows; `quotaWarnings(session, row, { preferences, suppressed, seen, now })`
+returns notices and their tokens without consuming them; `quotaDestinations`
+ranks the move inventory by remaining room, excluding the current login.
+
+`shell/quota-warn-prefs.js` exports `quotaSettings`, `saveQuotaSettings`,
+`quotaSuppressed`, `suppressQuotaChat`, `quotaSeen`, `markQuotaSeen`,
+`unmarkQuotaSeen` and `loadQuotaState`. Call `loadQuotaState()` before decisions
+or edits; mutation functions return promises. Settings › Notifications waits
+for hydration and reports read/write failures. State is stored by the daemon,
+independently of its HTTP port: authenticated `GET /api/settings/quota-warning`
+returns `{ settings: { on, threshold }, suppressed: string[], seen: string[] }`;
+`POST` merges `{ settings?, suppress?, markSeen?, unmarkSeen? }`. The daemon
+serializes merges and atomically writes `$XDG_CONFIG_HOME/phren/desktop-quota.json`
+(default `~/.config/phren/desktop-quota.json`, mode 0600). Both client and daemon
+retain the newest 512 distinct seen tokens. Opt-outs persist per session ID.
+A session/window/reset gets one threshold notice and one exhaustion notice;
+percentage corrections do not rearm it. First observing an already-high window
+counts as its crossing. Missing, stale, ambiguous or reset usage is skipped.
+
+`shell/quota-warn-sheet.js` exports `watchQuotaWarnings(currentSession)` returning
+`{ check, close }`, mounted once by Agents. It follows overview changes, active
+chat/section changes and `usage-rings.js`'s `followUsage(fn)` (immediate latest
+snapshot, then each successful shared minute poll; returns unsubscribe). The
+passive card leaves chat interactive and focus untouched. `openChat` exposes
+`quotaHost`, a bounded flex-layout slot between interactions and the composer;
+Agents supplies it as `currentSession().quotaHost`. The card mounts there,
+never on `document.body`, and reduces transcript space without overlaying the
+composer at narrow or desktop widths. Console mode suppresses the card. Switch opens
+`openMoveSheet({ computer, child, to?: { harness, account }, notice?, selectDefault?: boolean })` with the
+best destination selected from usage at click time; exhausted or unknown-room
+destinations are never preselected. When none has known room, the hand-off opens
+with `selectDefault: false` and explains why; Continue stays disabled until a
+destination is chosen. Exhaustion on either window replaces
+an open threshold notice; the sheet refreshes percentages and account room on
+usage updates. The user confirms the hand-off in Continue in.
+
+`openChat` accepts `opts.onInteractions(pending)` and reports the existing
+status stream's approval/question/password cards (initially pending until the
+first status). Agents carries this as `currentSession().interactionsPending`;
+overview `child.approvalPending` is an additional guard. `quotaInteractionPending`
+in the pure module shares the card status predicate. Pending interactions prevent
+opening; arriving interactions close the sheet and remove its seen token so it
+can reopen after the card clears. No extra status socket is opened.
+`moveChoices(inventory, current, currentAccount?)` allows the same Claude
+harness when another usable account exists; `moveAccounts(inventory,
+{ includeDefault?: boolean })` includes the default when requested.
+
+No Hook additions: `workspacesReader` in `server-routes.ts` assigns
+`paneAccountField` to `groups[].children[].account` (`{ id, label, key }`) and
+`target.source`/`target.session` identify the harness/conversation. The desktop
+OverviewHub forwards those rows unchanged. `/api/usage` (`src/usage.ts`) merges
+Hook `/v1/usage?accounts=all` reports into accounts whose `harness` and
+`computers[].{name,account}` match that session's computer and Claude account ID;
+`windows[]` supplies `usedPercent`/`leftPercent`, `resetsAt`, `exhausted` and
+`limited`. Claude sessions without an account reference are skipped. Other
+harnesses require exactly one account row on the session's computer. The quota
+on dispatch `live_sessions` rows is a separate surface and is not needed here.
+
+
+### Switch destinations and hand-off chats
+
+`quotaDestinationText(destination, now)` describes each destination's `limiting`
+window (tightest active window): percent left, window name, and its reset in
+local time (relative under 24 hours, weekday/time thereafter). Missing resets
+and exhausted accounts are explicit. The card's Switch target and the Continue
+in sheet share `shell/handoff.js`'s pure `movePlan(currentHarness, to,
+moveNewChat)` decision and outcome label. Same-family account moves continue in
+place. Cross-family moves send `mode: "new-chat"` to the existing
+`POST /v1/sessions/move` only when `store.capabilities(computer).moveNewChat`
+is true. Older Hooks keep the in-place route and the label explicitly says
+"Replaces this chat … (update the Hook for a new chat)". Capability is read again
+when confirming a move. The move sheet polls the existing GET route; after a
+new-chat move reaches `moved`, it waits for `move.target` in the overview and
+opens that chat without closing the original tab.
+
+`shell/handoff.js` also exports `sameChatTarget(a, b)` and
+`handoffNotices(child, rows)` for the Hook's optional `handedOffTo` /
+`handedOffFrom` references (`{ target, harness?, title? }`, or a target directly).
+`shell/handoff-view.js` exports `renderHandoffLinks(container, computer, child)`
+and `openHandoffChat(computer, target)`. The latter matches the full target in
+that computer's cached overview, opens it in Agents, and returns false while
+it is absent. Both sidebar styles and the chat header show "handed off to
+<harness>" / "handed off from <title>"; a reference with a target is a button
+opening that chat. `openChat.updateOverview(child)` refreshes these labels as
+live overview rows change. No Hook fields or routes are added by the desktop.

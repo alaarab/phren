@@ -14,6 +14,7 @@ import { ACTIONS, loadKeyConfig } from "./keys-config.js";
 import { linkComputer, revokeComputer } from "./keys.js";
 import { nodeExtensionsEnabled, rehStatus, setNodeExtensionsEnabled, stopReh } from "./reh.js";
 import { isolation } from "./reh-sandbox.js";
+import { loadQuotaConfig, updateQuotaConfig } from "./quota-config.js";
 import { collectUsage } from "./usage.js";
 import { listTraces, startTrace, stopTrace, traceStatus } from "./trace.js";
 import { closeAllPreviews, closePreview, listPreviews, openPreview } from "./web-preview.js";
@@ -681,6 +682,20 @@ export const startServer: StartServer = async (o) => {
       const status = await rehStatus();
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
       res.end(JSON.stringify(status));
+      return;
+    }
+
+    if (pathname === "/api/settings/quota-warning") {
+      try {
+        if (req.method === "GET") sendJson(res, await loadQuotaConfig());
+        else if (req.method === "POST") {
+          const body = await readJson(req);
+          let update;
+          try { update = updateQuotaConfig(body); }
+          catch { throw new ExtensionError(400, "Invalid quota warning update."); }
+          sendJson(res, await update);
+        } else sendJson(res, { error: "method not allowed" }, 405);
+      } catch (error) { sendError(res, error); }
       return;
     }
 

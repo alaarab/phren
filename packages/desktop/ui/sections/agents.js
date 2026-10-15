@@ -1,3 +1,4 @@
+import { watchQuotaWarnings } from "../shell/quota-warn-sheet.js";
 // The Agents section: sessions on the left, open documents (chats now; files
 // and diffs next) as centre tabs, the session's tools on the right
 // (Changes · Files · Search), and a bottom terminal panel toggled with ⌘J.
@@ -317,10 +318,15 @@ export function mountAgents(root) {
   root.querySelector(".terminal-close").addEventListener("click", closeTerminal);
 
   // ------------------------------------------------------------ documents
+  const quotaWarning = watchQuotaWarnings(() => {
+    if (root.hidden || !session || tabs.active()?.kind !== "chat" || tabs.active()?.chatVisible === false) return null;
+    const row = store.sessions().find((row) => row.computer === session.computer && row.child.id === session.child.id);
+    return row ? { ...row, quotaHost: tabs.active().quotaHost, interactionsPending: tabs.active().quotaInteractionPending !== false || row.child.approvalPending === true } : null;
+  });
   const tabs = createTiles(tilesRoot, {
     emptyText: "Pick a session, or press \u2318K.",
     onActivate(doc) {
-      if (!doc.child) return;
+      if (!doc.child) { quotaWarning.close(); return; }
       const key = `${doc.computer}/${doc.child.id}`;
       session = { computer: doc.computer, child: doc.child };
       setActiveSession(doc.computer, doc.child);
@@ -330,9 +336,11 @@ export function mountAgents(root) {
         showPane(bench.pane ?? "changes");
       }
       syncTerminal();
+      void quotaWarning.check();
     },
     onEmpty() {
       session = null;
+      quotaWarning.close();
       bench.sessionKey = null;
       resetBench();
       closePanel();
@@ -407,9 +415,15 @@ export function mountAgents(root) {
     consoleEl.className = "session-pane session-console";
     consoleEl.hidden = true;
     el.append(chatEl, consoleEl, bar);
-    const chat = openChat(chatEl, computer, child, { onConsole: () => setMode("console") });
+    const chat = openChat(chatEl, computer, child, {
+      onConsole: () => setMode("console"),
+      onInteractions(pending) { doc.quotaInteractionPending = pending; void quotaWarning.check(); },
+    });
+    doc.quotaHost = chat.quotaHost;
+    doc.updateOverview = chat.updateOverview;
     let consoleHandle = null;
     let mode = "chat";
+    doc.chatVisible = true;
 
     /** In chat the switch sits in the chat's own header row; over a console it floats top right. */
     function placeBar() {
@@ -450,6 +464,8 @@ export function mountAgents(root) {
         consoleEl.replaceChildren();
       }
       mode = next;
+      doc.chatVisible = mode === "chat";
+      void quotaWarning.check();
       placeBar();
       chatEl.hidden = mode !== "chat";
       consoleEl.hidden = mode !== "console";
@@ -596,6 +612,7 @@ export function mountAgents(root) {
     for (const doc of tabs.list()) {
       if (doc.kind !== "chat") continue;
       const row = store.find(doc.computer, doc.child.id);
+      if (row) doc.updateOverview?.(row.child);
       const title = row && (row.child.title || row.child.label || projectOf(row.child));
       if (title && title !== doc.title) { doc.title = title; tabs.setTitle(doc.id, title, doc.subtitle); }
     }

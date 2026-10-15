@@ -34,6 +34,14 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 
 ## Paths phren may write
 
+### Desktop account warnings
+
+- `$XDG_CONFIG_HOME/phren/desktop-quota.json` (default
+  `~/.config/phren/desktop-quota.json`): account warning settings, per-chat
+  opt-outs and the newest 512 shown-crossing tokens. The desktop daemon writes
+  mode 0600 through a temporary sibling and atomic rename; the file is local
+  configuration, independent of its HTTP port and the Phren store.
+
 ### Store (all presets)
 - `~/.phren/`, the store: projects, `global/`, `profiles/`, `.config/`,
   `.runtime/`, `.sessions/`, `.env` (feature flags), `machines.yaml`,

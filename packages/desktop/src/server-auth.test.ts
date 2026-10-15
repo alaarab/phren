@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { HookRequest, HookWebSocket, MergedOverview, OverviewHub } from "./contract.js";
 import { startServer, writeAllowed } from "./server.js";
 
@@ -470,5 +470,35 @@ describe("hardening", () => {
       else process.env.PHREN_DESKTOP_EXTENSIONS = previous;
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+
+describe("durable desktop quota settings", () => {
+  it("retains merged settings and chat choices across daemon ports and bounds saved crossings", async () => {
+    const config = await mkdtemp(path.join(tmpdir(), "quota-settings-"));
+    vi.stubEnv("XDG_CONFIG_HOME", config);
+    try {
+      const first = await startHarness();
+      const route = "/api/settings/quota-warning";
+      const send = (port: number, body: unknown) => rawRequest({ port, path: route, method: "POST", body: JSON.stringify(body),
+        headers: cookieHeaders({ "Content-Type": "application/json", "X-Phren-Desktop": "1", Origin: `http://127.0.0.1:${port}` }) });
+      const updates = await Promise.all([
+        send(first.port, { settings: { on: false, threshold: 95 } }),
+        send(first.port, { suppress: "chat-id" }), send(first.port, { markSeen: "crossing" }),
+      ]);
+      expect(updates.map((r) => r.status)).toEqual([200, 200, 200]);
+      const second = await startHarness();
+      expect(second.port).not.toBe(first.port);
+      const read = await rawRequest({ port: second.port, path: route, headers: cookieHeaders() });
+      expect(JSON.parse(read.body)).toEqual({ settings: { on: false, threshold: 95 }, suppressed: ["chat-id"], seen: ["crossing"] });
+      const tokens = Array.from({ length: 512 }, (_, i) => `old-${i}`);
+      await writeFile(path.join(config, "phren", "desktop-quota.json"), JSON.stringify({ settings: { on: false, threshold: 95 }, suppressed: ["chat-id"], seen: tokens }));
+      const capped = await send(second.port, { markSeen: "new-crossing" });
+      expect(JSON.parse(capped.body).seen).toEqual([...tokens.slice(1), "new-crossing"]);
+      const interrupted = await send(second.port, { unmarkSeen: "new-crossing" });
+      expect(JSON.parse(interrupted.body).seen).not.toContain("new-crossing");
+      expect((await send(second.port, { settings: { threshold: 100 } })).status).toBe(400);
+    } finally { vi.unstubAllEnvs(); await rm(config, { recursive: true, force: true }); }
   });
 });

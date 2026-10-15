@@ -885,3 +885,9 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .skel-item .skel:first-child { height: 12px; }
 @keyframes skel-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .skel { animation: none; opacity: .75; } }
+
+.handoff-link { border: 0; padding: 0; background: none; color: var(--muted); font: inherit; font-size: 11px; text-align: left; overflow-wrap: anywhere; }
+button.handoff-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+button.handoff-link:hover { color: var(--accent); }
+.sb-handoffs { display: flex; flex-wrap: wrap; min-width: 0; gap: 4px; }
+.sb-handoffs .handoff-link { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

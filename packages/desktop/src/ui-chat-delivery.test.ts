@@ -73,8 +73,29 @@ function chat(backlogLoaded = true) {
   if (backlogLoaded) socket.frame({ type: "backlog", totalLines: 0, entries: [] });
   const echoes = () => update.mock.calls.at(-1)![1]!.pendingEchoes;
   const send = async (text: string) => { el.find("pc-input")!.value = text; el.find("pc-input")!.fire("keydown"); await vi.advanceTimersByTimeAsync(0); };
-  return { el, socket, echoes, send };
+  return { el, socket, echoes, send, handle: views.at(-1)! };
 }
+
+it("places the quota card host between transcript interactions and the composer", () => {
+  const c = chat();
+  const host = c.el.find("chat-quota-host")!;
+  const composer = c.el.find("chat-composer")!;
+  const timeline = c.el.find("chat-timeline")!;
+  expect(c.el.children.indexOf(host)).toBeGreaterThan(c.el.children.indexOf(timeline));
+  expect(c.el.children.indexOf(host) + 1).toBe(c.el.children.indexOf(composer));
+});
+
+it("refreshes hand-off notices in an already open chat when overview metadata arrives", () => {
+  const c = chat();
+  const notices = c.el.find("chat-handoffs")!;
+  expect(notices.children).toHaveLength(0);
+  c.handle.updateOverview({ handedOffTo: { target: { ...target, source: "codex", session: "new" } } });
+  expect(notices.children[0].textContent).toBe("handed off to Codex");
+  c.handle.updateOverview({ handedOffFrom: { title: "Original task", target } });
+  expect(notices.children).toHaveLength(1);
+  expect(notices.children[0].textContent).toBe("handed off from Original task");
+  expect(notices.children[0].listeners.has("click")).toBe(true);
+});
 
 describe("chat delivery reconciliation", () => {
   it("keeps a removed send's place so its row cannot settle the next identical send", async () => {
