@@ -694,3 +694,9 @@ by computer, server and pane ID opens its current session with Home’s
 Unmatched panes and jobs without panes are plain text with an explanatory
 tooltip. Long names truncate, with full names on hover, and computer metadata
 wraps on narrow screens. Covered by `src/ui-home-jobs.test.ts`.
+
+### Home Active tasks
+
+`sections/home/active-tasks.js` renders after Up next and hides when empty. It shows unchecked Active tasks across every available store and project on online computers, newest `createdAt` first (undated tasks last), capped at six. Keyed rows retain Launch controls and focus across polls. Each row truncates its text, project and computer; Launch opens `shell/launch.js`'s `openLaunchSheet` with the task line as the editable brief and its project/computer prefilled. `+N more` opens Tasks and calls its `filterSection("Active")` handle; Show all tasks clears that filter.
+
+`shell/task-cache.js` shares store discovery and per-computer/store/project task reads between Home and Tasks, including in-flight requests, for 60 seconds. Home reads on show and every 60 seconds while visible, dropping offline rows immediately; hide/destroy stops its timer and ignores late answers. Tasks writes update the shared document cache; conflict/deletion reloads force a fresh read. Tasks retains its existing per-store/project navigation under the Active filter.
