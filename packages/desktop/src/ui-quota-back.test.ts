@@ -70,7 +70,7 @@ describe("account room transitions", () => {
   });
 
   it.each([
-    [], [{ ...account(), stale: true }], [{ ...account(), windows: [] }],
+    [], [{ ...account(), windows: [] }],
     [{ ...account(), windows: [{ id: "five_hour" }] }],
   ].map((rows) => [rows]))("does not mistake absent or unknown data for recovery: %j", (rows) => {
     const first = tick(undefined);
@@ -83,6 +83,47 @@ describe("account room transitions", () => {
     const first = tick(undefined);
     expect(tick(first.state, [account([window(0, "seven_day")])]).notices).toEqual([]);
     expect(quotaBackTransitions(first.state, { ...snapshot(account([window(0)])), unreachable: [{ computer: "Desk" }] }).notices).toEqual([]);
+  });
+
+  it("retains exhausted windows and reset times across stale polls until a fresh recovery", () => {
+    const windows = [{ ...window(100), resetsAt: "2026-10-15T18:00:00Z" }];
+    const first = tick(undefined, [account(windows)]);
+    const stale = tick(first.state, [{ ...account(windows), stale: true }], 16 * 60_000);
+    expect(stale.notices).toEqual([]);
+    expect([...stale.state.previous.values()]).toEqual([windows]);
+    const stillStale = tick(stale.state, [{ ...account([window(5)]), stale: true }], 17 * 60_000);
+    expect(stillStale.notices).toEqual([]);
+    expect([...stillStale.state.previous.values()]).toEqual([windows]);
+    const recovered = tick(stillStale.state, [account([window(5)])], 18 * 60_000);
+    expect(recovered.notices).toEqual([{ title: "Claude · Work is available again", body: "5-hour limit reset on Desk" }]);
+    expect(tick(recovered.state, [account([window(5)])], 19 * 60_000).notices).toEqual([]);
+  });
+
+  it.each([
+    { ...window(99.6), leftPercent: 0, exhausted: false },
+    { ...window(99.6), leftPercent: 0 },
+    { ...window(100), exhausted: false },
+  ])("does not manufacture exhaustion from rounded room or override an explicit flag: %j", (w) => {
+    const first = tick(undefined, [account([w])]);
+    expect(tick(first.state, [account([window(20)])], 60_000).notices).toEqual([]);
+  });
+
+  it("prunes cooldowns for absent computers/accounts and at the ten-minute boundary", () => {
+    const rows = [account(), account(undefined, "Laptop"), account(undefined, "Desk", "claude|personal")];
+    const first = tick(undefined, rows);
+    const available = rows.map((r) => ({ ...r, windows: [window(0)] }));
+    const recovered = tick(first.state, available, 1_000);
+    expect(recovered.notices).toHaveLength(3);
+    expect(recovered.state.notified.size).toBe(3);
+    const remaining = tick(recovered.state, [{ ...available[0], stale: true }], 2_000);
+    expect(remaining.state.notified.size).toBe(1);
+    expect(recovered.state.notified.size).toBe(3);
+    const active = tick(remaining.state, [available[0]], 600_999);
+    expect(active.state.notified.size).toBe(1);
+    const expired = tick(active.state, [available[0]], 601_000);
+    expect(expired.state.notified.size).toBe(0);
+    expect(expired.notices).toEqual([]);
+    expect(tick(recovered.state, [], 2_000).state.notified.size).toBe(0);
   });
 
   it("follows the shared poll, respects preferences and quiet periods, and unsubscribes", async () => {

@@ -532,11 +532,15 @@ returning `{ state, notices }` (initial state may be undefined), and
 `app.js`, it follows the shared usage poll without extra requests. Each
 computer/harness/account establishes a silent baseline; only an observed
 exhausted → available transition emits a notice, after every exhausted window
-has cleared. Missing, unknown or stale reports clear the baseline; explicit
-`reset` windows remain known room even when the merger flags them stale.
-Cooldowns survive missing reports and suppress repeated transitions for ten
-minutes. Disabled settings, quiet hours and unhydrated preferences consume
-transitions silently. Settings › Notifications exposes the independent
+has cleared. Stale reports retain the last known exhausted windows and their
+reset times, so later fresh room still emits a recovery. Missing or unknown
+reports clear the baseline; explicit `reset` windows remain known room even
+when the merger flags them stale. Only `exhausted: true`, or `usedPercent >= 100`
+when that flag is absent, establishes exhaustion; rounded `leftPercent` never
+does. Cooldowns suppress repeated transitions for ten minutes; each poll drops
+expired entries and keys for computers/accounts absent from the snapshot.
+Disabled settings, quiet hours and unhydrated preferences consume transitions
+silently. Settings › Notifications exposes the independent
 “Notify when an account has room again” toggle using the existing daemon quota
 settings route and file (`settings.backOn`, default true for older files).
 Notifications name the account, computer and window; their keyless shell click

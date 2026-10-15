@@ -4,25 +4,31 @@ import { loadQuotaState, quotaSettings } from "./quota-warn-prefs.js";
 
 const COOLDOWN_MS = 10 * 60_000;
 const names = { five_hour: "5-hour", seven_day: "Weekly", "codex:primary": "5-hour", "codex:secondary": "Weekly" };
-const exhausted = (w) => !w.reset && (w.exhausted === true || w.limited === true || w.usedPercent >= 100 || w.leftPercent === 0);
+const exhausted = (w) => !w.reset && (w.exhausted === true || w.exhausted === undefined && w.usedPercent >= 100);
 const known = (w) => w.reset || exhausted(w) || Number.isFinite(w.usedPercent) || Number.isFinite(w.leftPercent);
 
-/** Pure poll-to-poll transitions. Missing data forgets the baseline, never the cooldown. */
+/** Pure poll-to-poll transitions. Stale data retains the last known exhaustion. */
 export function quotaBackTransitions(state, snapshot, now = Date.now()) {
   const previous = new Map();
-  const notified = new Map(state?.notified ?? []);
+  const notified = new Map([...(state?.notified ?? [])].filter(([, at]) => now - at < COOLDOWN_MS));
+  const present = new Set();
   const notices = [];
   const titles = accountTitles(snapshot?.accounts);
   for (const row of snapshot?.accounts ?? []) {
     const windows = row.windows ?? [];
     // The merger marks explicit elapsed resets stale too: those are known room.
-    if (!windows.length || row.stale && !windows.some((w) => w.reset) || !windows.every(known)) continue;
+    const stale = row.stale && !windows.some((w) => w.reset);
     const blocked = windows.filter(exhausted);
     for (const computer of row.computers ?? []) {
-      if (snapshot.unreachable?.some((u) => u.computer === computer.name)) continue;
       const key = JSON.stringify([computer.name, row.harness, row.id, computer.account ?? ""]);
-      previous.set(key, blocked);
+      present.add(key);
       const before = state?.previous?.get(key);
+      if (stale) {
+        if (before?.length) previous.set(key, before);
+        continue;
+      }
+      if (!windows.length || !windows.every(known) || snapshot.unreachable?.some((u) => u.computer === computer.name)) continue;
+      previous.set(key, blocked);
       if (!before?.length || blocked.length || row.exhausted || !before.every((w) => windows.some((next) => next.id === w.id && known(next)))) continue;
       if (now - (notified.get(key) ?? -Infinity) < COOLDOWN_MS) continue;
       notified.set(key, now);
@@ -30,6 +36,7 @@ export function quotaBackTransitions(state, snapshot, now = Date.now()) {
       notices.push({ title: `${titles.get(row.id) ?? row.name ?? row.harness} is available again`, body: `${labels.join(" and ")} limit reset on ${computer.name}` });
     }
   }
+  for (const key of notified.keys()) if (!present.has(key)) notified.delete(key);
   return { state: { previous, notified }, notices };
 }
 

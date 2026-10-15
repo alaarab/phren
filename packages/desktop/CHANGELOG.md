@@ -6,6 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Quota recovery notifications retain exhausted accounts through stale reports, avoid treating rounded 0% room as exhaustion, and discard expired or removed-account cooldowns.
 - Native notifications announce when an exhausted account has room again, naming the computer and the limit that reset. Settings › Notifications can turn them off; first observations stay silent and repeated recoveries are quiet for ten minutes.
 
 ## [0.1.9] - 2026-10-15
