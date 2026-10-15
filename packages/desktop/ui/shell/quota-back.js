@@ -11,6 +11,7 @@ export function quotaBackTransitions(state, snapshot, now = Date.now()) {
   const notified = new Map([...(state?.notified ?? [])].filter(([, at]) => now - at < COOLDOWN_MS));
   const present = new Set();
   const notices = [];
+  const recoveries = [];
   const titles = accountTitles(snapshot?.accounts);
   for (const row of snapshot?.accounts ?? []) {
     const windows = row.windows ?? [];
@@ -31,11 +32,12 @@ export function quotaBackTransitions(state, snapshot, now = Date.now()) {
       if (now - (notified.get(key) ?? -Infinity) < COOLDOWN_MS) continue;
       notified.set(key, now);
       const labels = [...new Set(before.map((w) => windowNames[w.id]?.replace("weekly", "Weekly") || w.name || w.id))];
+      recoveries.push({ key, computer: computer.name, title: `${titles.get(row.id) ?? row.name ?? row.harness} is available again (${labels.join(" and ")} limit reset)` });
       notices.push({ title: `${titles.get(row.id) ?? row.name ?? row.harness} is available again`, body: `${labels.join(" and ")} limit reset on ${computer.name}` });
     }
   }
   for (const key of notified.keys()) if (!present.has(key)) notified.delete(key);
-  return { state: { previous, notified }, notices };
+  return { state: { previous, notified }, notices, recoveries };
 }
 
 /** Start once from app.js; disabled/quiet transitions are consumed without replay. */
