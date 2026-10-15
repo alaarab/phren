@@ -131,6 +131,7 @@ export function admitScopedRequest(scope: GatewayScope, rawHead: string, rest: B
   const head = parseHead(rawHead);
   if ("ok" in head) return head;
   const rule = findRule(scope, head);
+  if (!rule && head.path === "/v1/sessions/move") return refuse(403, "Only the owner can move the conductor.");
   if (!rule) return refuse(403, `This key only permits ${DESCRIBE[scope]}.`);
   let target = head.path;
   if (rule.query) {
@@ -156,6 +157,19 @@ export function admitScopedRequest(scope: GatewayScope, rawHead: string, rest: B
   return { ok: true, request: `${rule.method} ${target} HTTP/1.1\r\nHost: phren.local\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}` };
 }
 
+/** A computer key's forced scope rebuilds the HTTP envelope. Client headers
+ * cannot impersonate the owner gateway, and peer keys cannot open terminals. */
+export function admitPeerRequest(rawHead: string, rest: Buffer = Buffer.alloc(0)): Admission {
+  const head = parseHead(rawHead);
+  if ("ok" in head) return head;
+  if (!["GET", "POST", "DELETE"].includes(head.method) || !head.path.startsWith("/v1/")) return refuse(403, "This key only permits Hook API requests.");
+  if (head.contentLength > 8 * 1024 * 1024 || rest.length !== head.contentLength) return refuse(400, "Send one bounded request matching Content-Length.");
+  if (rest.length && !head.json) return refuse(415, "Send Content-Type: application/json.");
+  const body = rest.toString("utf8");
+  const target = head.path + (head.query === null ? "" : `?${head.query}`);
+  return { ok: true, request: `${head.method} ${target} HTTP/1.1\r\nHost: phren.local\r\nX-Phren-Origin: peer\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}` };
+}
+
 const REASONS: Record<number, string> = { 400: "Bad Request", 403: "Forbidden", 408: "Request Timeout", 413: "Content Too Large", 415: "Unsupported Media Type", 503: "Service Unavailable" };
 function httpResponse(status: number, error: string): string {
   const body = JSON.stringify({ error, code: status === 503 ? "hook-unavailable" : "scope-refused" });
@@ -167,8 +181,8 @@ type Read = { head: string; rest: Buffer } | { status: number; error: string };
 /** Read the head, then, when the scope has a body route and the head declares
  *  a body within its cap, exactly that many bytes. Stops at a limit, the
  *  timeout or EOF; bytes beyond the request make it refused. */
-function readRequest(scope: GatewayScope, input: Readable): Promise<Read> {
-  const bodyCap = Math.max(0, ...RULES[scope].map(rule => rule.body?.max ?? 0));
+function readRequest(scope: GatewayScope | "peer", input: Readable): Promise<Read> {
+  const bodyCap = scope === "peer" ? 8 * 1024 * 1024 : Math.max(0, ...RULES[scope].map(rule => rule.body?.max ?? 0));
   return new Promise(resolve => {
     let buffer = Buffer.alloc(0), headEnd = -1, wanted = 0;
     const finish = (value: Read) => {
@@ -205,10 +219,10 @@ export interface ScopedIO { input: Readable; output: Writable; socket: string; a
  * reads a normal response.
  */
 export async function scopedDispatch(scope: string, command: string, io: ScopedIO): Promise<void> {
-  if (!isGatewayScope(scope)) throw new BridgeError(403, "Unknown key scope.");
-  if (command !== SCOPED_COMMAND) throw new BridgeError(403, `This SSH key only permits \`${SCOPED_COMMAND}\` with ${DESCRIBE[scope]}.`);
+  if (scope !== "peer" && !isGatewayScope(scope)) throw new BridgeError(403, "Unknown key scope.");
+  if (command !== SCOPED_COMMAND) throw new BridgeError(403, `This SSH key only permits \`${SCOPED_COMMAND}\` with ${scope === "peer" ? "Hook API requests" : DESCRIBE[scope]}.`);
   const read = await readRequest(scope, io.input);
-  const admission = "head" in read ? admitScopedRequest(scope, read.head, read.rest) : refuse(read.status, read.error);
+  const admission = "head" in read ? (scope === "peer" ? admitPeerRequest(read.head, read.rest) : admitScopedRequest(scope, read.head, read.rest)) : refuse(read.status, read.error);
   if (!admission.ok) {
     await new Promise<void>(done => io.output.write(httpResponse(admission.status, admission.error), () => done()));
     return;

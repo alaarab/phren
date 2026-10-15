@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
+import { DispatchService, dispatchProjectDirectory, dispatchStatus, repointDispatchOrigins } from "./dispatch.js";
 import { getMachineName } from "../machine-identity.js";
 import { addGrant, removeGrant } from "./grants.js";
 import { confirmAuthority } from "./authority.js";
@@ -39,6 +39,40 @@ describe("dispatch receipts and selection", () => {
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
   });
   afterEach(async () => { vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
+
+  it("rewrites a first receipt saved after a hand-over while origin resolution was pending", async () => {
+    const old = { server: "default", workspace: "w1", tab: "t1", pane: "lead", agent: "claude" as const, terminal: "term-old" };
+    const next = { ...old, pane: "next", agent: "codex" as const, terminal: "term-next" };
+    let resume!: () => void;
+    const resolving = new Promise<void>(resolve => { resume = resolve; });
+    const originAgent = vi.fn(async () => { await resolving; return { agent: old.agent, terminal: old.terminal }; });
+    const service = new DispatchService({ computerID: localID, validateParentTarget: async () => ({}), originAgent });
+    const pending = service.dispatch(brief, { server: old.server, workspace: old.workspace, tab: old.tab, pane: old.pane });
+    await vi.waitFor(() => expect(originAgent).toHaveBeenCalled());
+    await repointDispatchOrigins(old, next, async () => {});
+    resume();
+    const result = await pending;
+    expect(result).toMatchObject({ state: "accepted", origin: next });
+    expect((await dispatchStatus())[0].origin).toEqual(next);
+  });
+
+  it.each([true, false])("keeps routing readers behind the whole hand-over (commit %s)", async succeeds => {
+    const old = { server: "default", workspace: "w1", tab: "t1", pane: "lead", agent: "claude" as const, terminal: "term-old" };
+    const next = { ...old, pane: "next", terminal: "term-next" };
+    const service = new DispatchService({ computerID: localID, validateParentTarget: async () => ({}), originAgent: async () => ({ agent: old.agent, terminal: old.terminal }) });
+    const place = { server: old.server, workspace: old.workspace, tab: old.tab, pane: old.pane };
+    await service.dispatch(brief, place); await service.dispatch(brief, place);
+    let reading!: Promise<Awaited<ReturnType<typeof dispatchStatus>>>;
+    let observed = false;
+    const transfer = repointDispatchOrigins(old, next, async () => {
+      reading = dispatchStatus().then(rows => { observed = true; return rows; });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(observed).toBe(false);
+      if (!succeeds) throw new Error("role failed");
+    });
+    if (succeeds) await transfer; else await expect(transfer).rejects.toThrow("role failed");
+    expect((await reading).map(row => row.origin?.pane)).toEqual([succeeds ? next.pane : old.pane, succeeds ? next.pane : old.pane]);
+  });
 
   it("chooses the least busy connected peer and sends a project slug and bound first prompt", async () => {
     const result = await new DispatchService().dispatch(brief);

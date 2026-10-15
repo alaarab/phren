@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { scopedGatewayScript } from "./install.js";
 import { acceptScopedKey, scopedKeyLine } from "./pair.js";
-import { admitScopedRequest, type GatewayScope, scopedDispatch } from "./scoped-gateway.js";
+import { admitPeerRequest, admitScopedRequest, type GatewayScope, scopedDispatch } from "./scoped-gateway.js";
 
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWhFCx/BoeHGP4KuXTnSU1szj0tNbYHo3BHMBe4YQ+h";
 const head = (line: string, headers: string[] = ["Host: phren.local"]) => `${line}\r\n${headers.map(h => `${h}\r\n`).join("")}\r\n`;
@@ -27,6 +27,27 @@ const READ_ROUTES = [
   "GET /v1/projects/my-app/memory/search?q=boom HTTP/1.1",
   "GET /v1/projects/my-app/tasks?branch=main HTTP/1.1",
 ];
+
+describe("conductor move gateway admission", () => {
+  it.each(["gitboy-read", "gitboy-write"] as const)("refuses conductor moves under the %s key scope", scope => {
+    expect(admit("POST /v1/sessions/move HTTP/1.1", ["Host: phren.local", "Content-Length: 0"], "", scope))
+      .toEqual({ ok: false, status: 403, error: "Only the owner can move the conductor." });
+  });
+
+  it("stamps computer-key requests as peers regardless of supplied owner headers", () => {
+    const body = JSON.stringify({ target: { pane: "lead" }, to: { harness: "codex" } });
+    const admitted = admitPeerRequest(head("POST /v1/sessions/move HTTP/1.1", [
+      "Host: phren.local", "X-Phren-Origin: owner", "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(body)}`,
+    ]), Buffer.from(body));
+    expect(admitted).toMatchObject({ ok: true });
+    if (!admitted.ok) throw new Error("Peer API should reach the Hook with its origin class.");
+    expect(admitted.request).toContain("X-Phren-Origin: peer\r\n");
+    expect(admitted.request).not.toContain("X-Phren-Origin: owner");
+    expect(admitted.request).toContain(body);
+    expect(admitPeerRequest(head("POST /v1/sessions/move HTTP/1.1", ["Content-Length: 0"]), Buffer.from("GET /v1/health HTTP/1.1\r\n\r\n")))
+      .toMatchObject({ ok: false });
+  });
+});
 
 describe("gitboy-read scope admission", () => {
   it("admits the four read routes and rebuilds each request", () => {

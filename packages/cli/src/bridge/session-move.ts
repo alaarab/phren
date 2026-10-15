@@ -28,7 +28,7 @@ import { DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { DISPATCH_HARNESSES, moveToSchema, repointDispatchOrigins } from "./dispatch.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { findPane } from "./herdr.js";
-import { briefId, briefRoot, writeLaunchBrief } from "./launch-brief.js";
+import { briefArrival, briefId, briefRoot, writeLaunchBrief } from "./launch-brief.js";
 import { atomic, BridgeError, bridgeRoot, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
 import { publicAssistant } from "./schedule-watch.js";
 import type { TerminalProvider } from "./terminal.js";
@@ -355,7 +355,7 @@ export function handoffDocument(record: MoveRecord, body: string, observed: stri
     ...(record.mode === "new-chat" ? ["## Previous chat", "",
       `Title: ${record.from.label ?? record.from.target.source}`,
       "Target (JSON, for opening the old chat):", "```json", JSON.stringify(record.from.target), "```", ""] : []),
-    ...(conductor ? ["## Conductor role", "", "You are now the conductor. Continue coordinating the owner’s work and existing workers. The Hook checks and transfers the role when this move lands; if transfer fails, the old chat stays running and the move explains why.", ""] : []),
+    ...(conductor ? ["## Conductor role", "", "You will become the conductor when the Hook confirms the hand-over; until then don't dispatch or answer workers.", ""] : []),
     body.trim(),
     "",
     observed,
@@ -424,11 +424,12 @@ export class SessionMover {
   private get poll(): number { return this.deps.pollMs ?? 2_000; }
 
   /** Checks the move can happen, records it and starts it. Refuses before anything is typed. */
-  async start(input: unknown): Promise<MoveRecord> {
+  async start(input: unknown, caller: { owner?: boolean } = {}): Promise<MoveRecord> {
     const data = moveRequestSchema.parse(input);
     if (data.id) {
       const earlier = await readMove(data.id);
       if (earlier) {
+        if (earlier.modeForced === "conductor" && !caller.owner) throw new BridgeError(403, "Only the owner can move the conductor.");
         const from = earlier.from.target;
         if (from.server !== data.target.server || from.pane !== data.target.pane || from.session !== data.target.session) throw new BridgeError(409, "This move id was already used for another session.");
         return earlier;
@@ -445,6 +446,7 @@ export class SessionMover {
     const session = await this.deps.identity(target.server, pane).catch(() => undefined);
     if (session && session !== target.session) throw new BridgeError(409, "That pane runs another conversation now.");
     const holdsRole = await this.deps.isConductor?.(target.server, pane) ?? false;
+    if (holdsRole && !caller.owner) throw new BridgeError(403, "Only the owner can move the conductor.");
     const conductor = holdsRole ? await recordedConductor() : undefined;
     if (holdsRole && (!conductor || conductor.server !== target.server || conductor.pane !== target.pane)) {
       throw new BridgeError(409, "The conductor changed during the move; nothing was transferred.");
@@ -516,9 +518,18 @@ export class SessionMover {
       const launched = await this.relaunch(record, prompt);
       if (conductor) {
         try {
+          if (launched.linkPending || !launched.target || !("session" in launched.target)) throw new Error("The new conductor conversation is not linked; the hand-over was not confirmed.");
+          const confirmedTarget = launched.target;
+          let accepted = false;
+          for (const until = this.now + 30_000; this.now < until; await this.sleep(this.poll)) {
+            const arrival = (await briefArrival(record.id))?.accepted?.target;
+            if (arrival && Object.keys(confirmedTarget).every(key => arrival[key as keyof Target] === confirmedTarget[key as keyof Target])) { accepted = true; break; }
+          }
+          if (!accepted) throw new Error("The new conductor's hand-off brief was not confirmed within 30 seconds.");
           const place = record.paneTarget;
           const next = place && findPane(await this.deps.snapshot(place.server), place);
           if (!place || !runsAgent(next) || next.agent !== record.to.harness) throw new Error("The new agent is no longer running in its launched pane.");
+          if (!["idle", "working"].includes(String(next.agent_status))) throw new Error(`The new conductor is not ready (${String(next.agent_status)}); answer its startup dialog before retrying.`);
           if (typeof next.terminal_id !== "string" || !next.terminal_id) throw new Error("The new pane has no terminal identity for worker returns.");
           const origin = { server: place.server, workspace: place.workspace, tab: place.tab, pane: place.pane,
             agent: record.to.harness, terminal: next.terminal_id };
@@ -526,6 +537,8 @@ export class SessionMover {
             launched.target && "session" in launched.target ? launched.target.session : undefined,
             commit => repointDispatchOrigins(conductor, origin, commit));
           roleTransferred = true;
+          const notice = await this.conductorNotice(record, "The Hook confirmed the hand-over; you are now the conductor. Continue coordinating the owner's work and existing workers.", "confirmed");
+          if (notice) record.notice = notice;
         } catch (error) {
           if (error instanceof BridgeError) throw error;
           throw new Error(`Conductor role transfer failed. The old chat was left running. ${error instanceof Error ? error.message : String(error)}`);
@@ -551,10 +564,34 @@ export class SessionMover {
         logger.warn("move", record.notice);
         return;
       }
+      if (conductor && record.paneTarget) {
+        record.notice = await this.conductorNotice(record,
+          "The conductor hand-over failed; you are not the conductor. The previous conductor keeps coordinating.", "failed")
+          ?? "The new chat was told the conductor hand-over failed; it is not the conductor.";
+      }
       const stopped = record.exit !== undefined;
       const hint = stopped && record.handoff ? ` The old agent has exited; start ${HARNESS_NAMES[record.to.harness]} in the pane with the hand-off at ${record.handoff.path}.` : "";
       await this.update(record, { state: "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
       logger.warn("move", `Moving pane ${from.pane} to ${record.to.harness} failed: ${message}`);
+    }
+  }
+
+  /** Uses the same durable prompt path as the hand-off and its first brief. */
+  private async conductorNotice(record: MoveRecord, text: string, outcome: "confirmed" | "failed"): Promise<string | undefined> {
+    try {
+      const target = targetSchema.safeParse(record.target);
+      if (target.success) {
+        const sent = await this.deps.deliver(target.data, text, `move-${record.id}-conductor-${outcome}`);
+        if (sent.state === "failed" || (sent.ok !== true && sent.queued !== true) || (sent.delivered === false && sent.queued !== true)) {
+          throw new Error(String(sent.error ?? "delivery was not confirmed"));
+        }
+      } else if (record.paneTarget) {
+        await this.deps.terminal.prompt(record.paneTarget.server, record.paneTarget.pane, text);
+        return `The conductor hand-over ${outcome} notice was typed to the new pane; conversation delivery is unconfirmed.`;
+      }
+      return undefined;
+    } catch (error) {
+      return `The conductor hand-over ${outcome}, but the new chat's notice could not be delivered: ${error instanceof Error ? error.message : String(error)}`.slice(0, 500);
     }
   }
 
@@ -644,7 +681,7 @@ export class SessionMover {
       ...(record.to.model ? { model: record.to.model } : {}), ...(record.to.effort ? { effort: record.to.effort } : {}), ...(account ? { account } : {}),
       brief: { id: record.id, text: prompt }, ...(samePane ? {} : { workspaceId: from.workspace }) };
     const into = samePane ? { workspaceId: from.workspace, tabId: from.tab, paneId: from.pane } : undefined;
-    const launched = await this.deps.launch(from.server, data, { ...(into ? { into } : {}), ...(record.dispatch ? { dispatchId: record.dispatch } : {}) });
+    const launched = await this.deps.launch(from.server, data, { ...(into ? { into } : {}), ...(record.dispatch && record.modeForced !== "conductor" ? { dispatchId: record.dispatch } : {}) });
     // Keep the launched location even if delivering its first prompt fails.
     const paneTarget = targetSchema.omit({ session: true }).parse({ server: from.server,
       workspace: launched.workspaceId, tab: launched.tabId, pane: launched.paneId, source: record.to.harness });

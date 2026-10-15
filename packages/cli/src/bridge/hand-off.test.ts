@@ -30,14 +30,14 @@ it("resolves an existing session and delivers one prompt through its live target
   ]);
 });
 
-it("moves the session in a pane named as the terminal shows it, by its live target", async () => {
+it.each([false, true])("moves a session with the trusted MCP caller class even outside a terminal (agent %s)", async agent => {
   const target = { server: "default", workspace: "wC9", tab: "wC9:t1", pane: "wC9:p1", source: "claude",
     session: "aaaaaaaa-1111-4111-8111-111111111111" };
   const other = { ...target, pane: "wC9:p2", session: "bbbbbbbb-1111-4111-8111-111111111111" };
   const move = { id: "50000000-0000-4000-8000-000000000005", state: "handing-off" };
   vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target: other }, { target }] }] }).mockResolvedValueOnce({ ok: true, move });
-  expect(await moveSession({ pane: "wC9:p1", harness: "codex", model: "gpt-6.1-sol", wait: false })).toEqual({ ok: true, move, settled: false });
-  expect(vi.mocked(hookRequest).mock.calls[1]).toEqual(["/v1/sessions/move", { target, to: { harness: "codex", model: "gpt-6.1-sol" } }]);
+  expect(await moveSession({ pane: "wC9:p1", harness: "codex", model: "gpt-6.1-sol", wait: false }, { agent })).toEqual({ ok: true, move, settled: false });
+  expect(vi.mocked(hookRequest).mock.calls[1]).toEqual(["/v1/sessions/move", { target, to: { harness: "codex", model: "gpt-6.1-sol" }, ...(agent ? { origin: "agent" } : {}) }]);
 });
 
 it("names the target by its project folder, from the overview it already read", async () => {

@@ -1278,9 +1278,20 @@ its id. The record's fields and the steps are in docs/conductor.md.
 `sessionMove` and `moveNewChat` in `/v1/health`. The old pane retains its role
 until the new agent lands. Conductor moves always use `mode: "new-chat"` and
 record `modeForced: "conductor"`, regardless of the requested mode. The old
-chat stays running and open. A checked role hand-over also re-points open
+chat stays running and open. Conductor moves are owner-only, using the same
+request class as conductor start/make/stop. MCP agents, peer Hooks and scoped
+keys are refused with 403 "Only the owner can move the conductor." Computer keys
+are forced through `dispatch-scoped peer`, which stamps the request origin and
+strips client-supplied origin headers; install/update migrates existing keys.
+A checked role hand-over also re-points open
 worker receipt origins, so returns and approvals reach the new conductor.
-The hand-off names its conductor role. Copilot cannot be a conductor.
+The launch prompt withholds conductor authority until the Hook confirms the
+hand-over. The destination must be idle or working, fully linked, and its
+brief must have a matching UserPromptSubmit acknowledgement within 30 seconds
+after linking. The Hook sends a confirmation after commit or a failure prompt
+on refusal; the move’s `notice` reports notification failures. Receipt readers
+and late saves share the hand-over lock and persisted origin seal. Copilot
+cannot be a conductor.
 A changed role refuses the hand-over without modifying it; other transfer
 failures keep the old role and report `state: "failed"` with an `error`.
 A status-save failure after role and routing commit reports `state: "moved"`

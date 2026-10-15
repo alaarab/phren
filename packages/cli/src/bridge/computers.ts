@@ -3,7 +3,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "n
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { forcedCommand } from "./install.js";
+import { forcedCommand, peerForcedCommand } from "./install.js";
 import { BridgeError, bridgeRoot, computerName } from "./protocol.js";
 
 const exec = promisify(execFile);
@@ -22,7 +22,7 @@ export function publicComputerKey(value: string): string {
 }
 
 export function computerKeyLine(name: string, publicKey: string): string {
-  return `restrict,pty,${forcedCommand} ${publicComputerKey(publicKey)} phren-computer:${computerName.parse(name)}`;
+  return `restrict,${peerForcedCommand} ${publicComputerKey(publicKey)} phren-computer:${computerName.parse(name)}`;
 }
 
 async function regularFile(file: string): Promise<boolean> {
@@ -61,9 +61,10 @@ export async function enrollComputer(name: string, root = bridgeRoot()): Promise
 /** Accept a public key, rebuilding the restrictions rather than trusting supplied options. */
 export async function acceptComputer(name: string, input: string, sshDirectory = path.join(homedir(), ".ssh")): Promise<void> {
   computerName.parse(name);
-  const prefix = `restrict,pty,${forcedCommand} `;
+  const prefixes = [`restrict,${peerForcedCommand} `, `restrict,pty,${forcedCommand} `];
   const raw = input.trim();
-  const publicKey = publicComputerKey(raw.startsWith(prefix) ? raw.slice(prefix.length) : raw);
+  const prefix = prefixes.find(value => raw.startsWith(value));
+  const publicKey = publicComputerKey(prefix ? raw.slice(prefix.length) : raw);
   const line = computerKeyLine(name, publicKey);
   const encoded = publicKey.split(" ")[1];
   await appendAuthorizedKey(line, existing => existing.endsWith(` phren-computer:${name}`) || existing.split(/\s+/).includes(encoded),

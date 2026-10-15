@@ -141,7 +141,17 @@ export async function dispatchProjectDirectory(project: unknown, home = homeDir(
 }
 
 function save(receipt: Receipt): Promise<void> {
-  return serializeReceiptUpdate(() => saveReceipt(receipt));
+  return serializeReceiptUpdate(async () => {
+    // Origin resolution may have started before a hand-over and finished
+    // after its scan. Resolve the sealed aliases inside this same lock.
+    const links = await readOriginHandovers();
+    const link = links.find(link => sameOriginPane(link.from, receipt.origin));
+    if (link && !receipt.closedAt) {
+      receipt.origin = link.to;
+      if (receipt.returned && !receipt.returned.read) delete receipt.returned.notifiedAt;
+    }
+    await saveReceipt(receipt);
+  });
 }
 
 async function saveReceipt(receipt: Receipt): Promise<void> {
@@ -189,12 +199,36 @@ async function changeReceipt(receiptID: string, change: (receipt: Receipt) => bo
   return receipt;
 }
 
+const originIdentity = originPaneSchema.pick({ server: true, pane: true }).extend({ terminal: z.string().min(1).max(200) });
+const originHandoverSchema = z.array(z.object({ from: originIdentity, to: receiptSchema.shape.origin.unwrap() }).strict()).max(1024);
+type OriginHandover = z.infer<typeof originHandoverSchema>[number];
+const originHandoverFile = () => path.join(bridgeRoot(), "dispatch-origin-handovers.json");
+const sameOriginPane = (left: { server: string; pane: string; terminal?: string }, right: Receipt["origin"] | OriginHandover["from"]) =>
+  !!right && left.server === right.server && left.pane === right.pane && left.terminal === right.terminal;
+async function readOriginHandovers(): Promise<OriginHandover[]> {
+  const file = originHandoverFile();
+  const info = await lstat(file).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return undefined;
+  });
+  if (!info) return [];
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) throw new Error("Dispatch origin hand-overs must be a bounded regular file.");
+  return originHandoverSchema.parse(JSON.parse(await readFile(file, "utf8")));
+}
+
 /** Hand over all open worker routes using the receipt writer's own lock and
  * update path. Commit the role last; any failure restores the old origins.
  * Placing receipts are refused because placement can still overwrite them. */
 export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "pane" | "terminal">,
   to: NonNullable<Receipt["origin"]>, commit: () => Promise<void>): Promise<void> {
   return serializeReceiptUpdate(async () => {
+    const identity = originIdentity.parse({ server: from.server, pane: from.pane, terminal: from.terminal });
+    const previous = await readOriginHandovers();
+    // Flatten chains and allow moving back into a still-open earlier pane.
+    const links = previous.filter(link => !sameOriginPane(link.from, to) && !sameOriginPane(link.from, identity))
+      .map(link => sameOriginPane(identity, link.to) ? { ...link, to } : link);
+    links.push({ from: identity, to });
+    const sealed = originHandoverSchema.parse(links);
     const names = await readdir(path.join(bridgeRoot(), "dispatches")).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       return [] as string[];
@@ -209,6 +243,7 @@ export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "p
       selected.push(receipt);
     }
     const changed: Receipt[] = [];
+    let markerSaved = false;
     try {
       for (const before of selected) {
         await changeReceipt(before.id, receipt => {
@@ -220,9 +255,16 @@ export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "p
         });
         changed.push(before);
       }
+      await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
+      await atomic(originHandoverFile(), sealed);
+      markerSaved = true;
       await commit();
     } catch (error) {
       const failures: string[] = [];
+      if (markerSaved) {
+        try { await atomic(originHandoverFile(), previous); }
+        catch (rollback) { failures.push(`origin seal: ${failureReason(rollback)}`); }
+      }
       for (const before of changed.reverse()) {
         try {
           await changeReceipt(before.id, receipt => {
@@ -257,7 +299,12 @@ export function failureReason(error: unknown): string {
   return `${typeof code === "string" && !(error instanceof BridgeError) ? `${code}: ` : ""}${message}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
 }
 
-export async function dispatchStatus(): Promise<Receipt[]> {
+export function dispatchStatus(): Promise<Receipt[]> {
+  return serializeReceiptUpdate(readDispatchStatus);
+}
+
+/** Caller holds receiptUpdates, including for the entire routing snapshot. */
+async function readDispatchStatus(): Promise<Receipt[]> {
   const root = path.join(bridgeRoot(), "dispatches");
   const names = (await receiptNames(root)).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).slice(0, 1024);
   const receipts: Receipt[] = [];

@@ -676,8 +676,24 @@ The conductor can move too, including an account switch from the phone. With
 `mode: "new-chat"`, even when the request asks for replacement. The record
 includes `modeForced: "conductor"`. The old chat stays running and open on both
 success and failure. On success it shows the same hand-off link as other new-chat
-moves, and the new chat’s hand-off says it is now the conductor. Copilot cannot
-be a conductor.
+moves. Only the owner, through the phone/desktop gateway or their local CLI,
+may move the conductor. Agent `move_session` calls, peer Hook requests and
+scoped keys receive 403 "Only the owner can move the conductor."
+Computer keys use the peer scope of `dispatch-scoped`; installing or updating
+the Hook migrates existing `phren-computer` key lines while preserving owner
+device keys. Conductor start, make and stop use the same owner request check.
+Copilot cannot be a conductor.
+
+The launch prompt says: "You will become the conductor when the Hook confirms
+the hand-over; until then don't dispatch or answer workers." The new pane must
+be idle or working, have a linked conversation without `linkPending`, and have
+its first brief confirmed by UserPromptSubmit for this move’s brief and target.
+A startup dialog, link timeout or missing brief acknowledgement fails the move
+and leaves the old conductor in charge. The Hook waits up to 30 seconds for the
+brief acknowledgement after linking. It sends a confirmation prompt only after
+the role commits. On failure, it sends: "The conductor hand-over failed; you
+are not the conductor. The previous conductor keeps coordinating." The move’s
+`notice` reports delivery or why it could not be confirmed.
 
 At landing, the Hook compares the role with the exact record captured when the
 move started, inside the role writer’s serialized queue. A stop, reassignment,
@@ -688,7 +704,13 @@ dispatch receipt origins under the receipt writer’s lock, including the new
 harness and terminal identity. Existing workers’ returns and approval requests
 then reach the new conductor; unread returns announced to the old chat are
 announced again. Closed and unrelated receipts keep their origins. An in-flight
-dispatch must settle before its conductor can move.
+dispatch already recorded as placing must settle before its conductor can move.
+The same lock covers receipt readers, so they see the routing before or after
+the entire hand-over. `<bridge>/dispatch-origin-handovers.json` seals old pane
+and terminal identities to the new origin; late first-receipt saves from a
+dispatch still awaiting capacity or origin resolution are rewritten under the
+lock. The seal persists across Hook restarts, supports successive hand-overs,
+and is rolled back if role commit fails.
 
 A launch, receipt update or role-write failure records `state: "failed"` and a
 clear `error`; receipt updates are rolled back and the old conductor keeps

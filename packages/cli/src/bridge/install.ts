@@ -24,6 +24,7 @@ import { type CodexServerEntry, serversInService } from "./codex-servers.js";
 const exec = promisify(execFile);
 const label = "com.phren.hook";
 const unit = "phren-hook.service";
+export const peerForcedCommand = 'command="sh ~/.local/share/phren/bridge/dispatch-scoped peer"';
 export const forcedCommand = 'command="sh ~/.local/share/phren/bridge/dispatch"';
 /** A scoped key's forced command. A separate script, so a key added before
  * the Hook can serve its scope fails closed instead of reaching `dispatch`. */
@@ -47,6 +48,12 @@ export function upgradeKeys(text: string): { text: string; changed: number } {
   let changed = 0;
   const result = text.split(/(?<=\n)/).map(line => {
     const parsed = keyOptions(line);
+    if (parsed && parsed.options[0] === "restrict" && /^\s+ssh-ed25519 [A-Za-z0-9+/=]+ phren-computer:[A-Za-z0-9_.-]+\s*$/.test(parsed.rest)
+      && parsed.options.includes(forcedCommand)) {
+      changed++;
+      return parsed.options.filter(option => option !== "pty" && option.toLowerCase() !== "port-forwarding" && !option.toLowerCase().startsWith("permitopen="))
+        .map(option => option === forcedCommand ? peerForcedCommand : option).join(",") + parsed.rest;
+    }
     if (!parsed || parsed.options[0] !== "restrict" || !/^\s+ssh-ed25519 [A-Za-z0-9+/=]+ phren-(?:iphone|android)\s*$/.test(parsed.rest)) return line;
     const old = /^command="(?:\/usr\/bin\/false|python3 ~\/\.local\/share\/phren\/chat-progress\.py|sh ~\/\.local\/share\/phren\/bridge\/dispatch)"$/;
     if (!parsed.options.some(option => old.test(option))) return line;
