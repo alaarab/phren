@@ -108,6 +108,84 @@ describe("away handoffs and account room", () => {
     expect(away.current()).toBeNull();
   });
 
+  it("baselines each computer after empty startup and reconnect, including cached offline rows", () => {
+    const c = clock();
+    const away = createAway({ now: c.now });
+    const moved = (computer: string, id: string) => ({
+      key: `${computer}/${id}`, computer,
+      child: { title: id, target: target(id), handedOffTo: target(`${id}-new`, "codex") },
+    });
+    const mini = moved("mini", "existing");
+    const laptop = moved("laptop", "dismissed-before-relaunch");
+    away.leave();
+    away.observe([], []);
+    away.observe([mini], ["mini"]);
+    away.observe([mini, laptop], ["mini", "laptop"]);
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()).toBeNull();
+    away.leave();
+    const fresh = moved("laptop", "new");
+    away.observe([mini, laptop, fresh], ["mini", "laptop"]);
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()?.events.map((event) => event.title)).toEqual(["new moved to Codex"]);
+    away.dismiss();
+    away.leave();
+    away.observe([mini, laptop, fresh], ["mini"]); // offline cached overview
+    const reconnect = moved("laptop", "existing-on-reconnect");
+    away.observe([mini, laptop, fresh, reconnect], ["mini", "laptop"]);
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()).toBeNull();
+  });
+
+  it("baselines an online computer's empty overview before its first handoff", () => {
+    const c = clock();
+    const away = createAway({ now: c.now });
+    away.observe([], ["mini"]);
+    away.leave();
+    away.observe([{ ...row("a", "idle"), child: { title: "First", target: target("a"), handedOffTo: target("b", "codex") } }], ["mini"]);
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()?.events.map((event) => event.title)).toEqual(["First moved to Codex"]);
+  });
+
+  it("retains more than 512 visible handoffs across scans and dismissal, bounding only absent history", () => {
+    const c = clock();
+    const away = createAway({ now: c.now });
+    const moved = (i: number) => ({ ...row(String(i), "idle"), child: {
+      title: `Task ${i}`, target: target(String(i)), handedOffTo: target(`${i}-new`, "codex"),
+    } });
+    away.observe([row("baseline", "idle")]);
+    const rows = Array.from({ length: 520 }, (_, i) => moved(i));
+    away.leave();
+    away.observe(rows);
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()?.events).toHaveLength(20);
+    away.dismiss();
+    away.leave();
+    away.observe([...rows].reverse());
+    away.observe(rows);
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()).toBeNull();
+    // Keep the computer online while references leave its overview. Only the
+    // newest 512 absent pairs survive; active pairs never use that allowance.
+    away.observe([row("baseline", "idle")]);
+    away.leave();
+    away.observe(rows.slice(8));
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()).toBeNull();
+    away.leave();
+    away.observe(rows);
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()?.events.map((event) => event.title)).toEqual(rows.slice(0, 8).map((entry) => `${entry.child.title} moved to Codex`));
+  });
+
   it("collects account recoveries through stale polls, newest first, without replay after dismissal", () => {
     const c = clock();
     const away = createAway({ now: c.now });
