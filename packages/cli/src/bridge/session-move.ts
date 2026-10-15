@@ -47,7 +47,7 @@ export const moveRequestSchema = z.object({
   handoffTimeoutMs: z.number().int().min(5_000).max(900_000).optional(),
 }).strict();
 
-const MOVE_STATES = ["handing-off", "exiting", "launching", "moved", "failed"] as const;
+const MOVE_STATES = ["handing-off", "exiting", "launching", "linking", "moved", "failed"] as const;
 const timestamp = z.string().datetime();
 const moveRecordSchema = z.object({
   id: z.string().uuid(),
@@ -66,6 +66,9 @@ const moveRecordSchema = z.object({
   exit: z.enum(["clean", "interrupted", "killed"]).optional(),
   placement: z.enum(["same-pane", "adjacent-pane"]).optional(),
   target: z.union([targetSchema, startingTargetSchema]).optional(),
+  paneTarget: targetSchema.omit({ session: true }).optional(),
+  linkPending: z.boolean().optional(),
+  notice: z.string().max(500).optional(),
   movedAt: timestamp.optional(),
   error: z.string().max(500).optional(),
 }).strict();
@@ -505,7 +508,7 @@ export class SessionMover {
       logger.info("move", `Moved ${from.source} in pane ${from.pane} to ${harnessName(record.to)} (${launched.placement}); hand-off ${record.handoff?.source}.`);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f\x7f]+/g, " ");
-      const stopped = record.mode !== "new-chat" && record.state === "launching";
+      const stopped = record.exit !== undefined;
       const hint = stopped && record.handoff ? ` The old agent has exited; start ${HARNESS_NAMES[record.to.harness]} in the pane with the hand-off at ${record.handoff.path}.` : "";
       await this.update(record, { state: "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
       logger.warn("move", `Moving pane ${from.pane} to ${record.to.harness} failed: ${message}`);
@@ -585,7 +588,7 @@ export class SessionMover {
   }
 
   /** Starts the target in the old pane when its shell has what the target needs, else in a new tab beside it. */
-  private async relaunch(record: MoveRecord, prompt: string): Promise<Pick<MoveRecord, "placement" | "target" | "to">> {
+  private async relaunch(record: MoveRecord, prompt: string): Promise<Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">> {
     const from = record.from.target;
     const s = await this.deps.snapshot(from.server);
     const pane = findPane(s, placeOf(from));
@@ -599,31 +602,51 @@ export class SessionMover {
       brief: { id: record.id, text: prompt }, ...(samePane ? {} : { workspaceId: from.workspace }) };
     const into = samePane ? { workspaceId: from.workspace, tabId: from.tab, paneId: from.pane } : undefined;
     const launched = await this.deps.launch(from.server, data, { ...(into ? { into } : {}), ...(record.dispatch ? { dispatchId: record.dispatch } : {}) });
+    // Keep the launched location even if delivering its first prompt fails.
+    const paneTarget = targetSchema.omit({ session: true }).parse({ server: from.server,
+      workspace: launched.workspaceId, tab: launched.tabId, pane: launched.paneId, source: record.to.harness });
+    const launchedTarget = z.union([targetSchema, startingTargetSchema]).safeParse(launched.target);
+    await this.update(record, { paneTarget, placement: samePane ? "same-pane" : "adjacent-pane",
+      ...(launchedTarget.success ? { target: launchedTarget.data } : {}) });
     // The target that takes no brief at launch (Copilot) gets it typed, as dispatch does.
     if (launched.briefLaunched === false) {
-      const typedTo = targetSchema.safeParse(launched.target);
-      if (typedTo.success) await this.deps.deliver(typedTo.data, prompt, `move-${record.id}-brief`).catch(() => undefined);
-      else await this.deps.terminal.prompt(from.server, String(launched.paneId), prompt).catch(() => undefined);
+      try {
+        const typedTo = targetSchema.safeParse(launched.target);
+        if (typedTo.success) {
+          const sent = await this.deps.deliver(typedTo.data, prompt, `move-${record.id}-brief`);
+          if (sent.state === "failed" || (sent.ok !== true && sent.queued !== true)
+            || (sent.delivered === false && sent.queued !== true)) {
+            throw new Error(String(sent.error ?? sent.state ?? "delivery was not confirmed"));
+          }
+        } else await this.deps.terminal.prompt(from.server, paneTarget.pane, prompt);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`${record.mode === "new-chat" ? "New chat" : "Target"} started but did not receive the hand-off. The launched pane was left open. ${reason}`);
+      }
     }
     if (!samePane && record.mode !== "new-chat") await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
     // The account the new agent runs under, also when the move named none.
     const to = account ? { ...record.to, account } : record.to;
-    return { to, placement: samePane ? "same-pane" : "adjacent-pane", ...await this.newTarget(from.server, launched, record.to.harness) };
+    return { to, placement: samePane ? "same-pane" : "adjacent-pane", ...await this.newTarget(record, launched, record.to.harness) };
   }
 
-  /** The new agent's full target, waiting a little for its conversation id when the launch did not have it yet. */
-  private async newTarget(server: string, launched: Json, source: string): Promise<Pick<MoveRecord, "target">> {
+  /** New chats remain open as linking while the harness establishes its conversation. */
+  private async newTarget(record: MoveRecord, launched: Json, source: string): Promise<Pick<MoveRecord, "target" | "linkPending" | "notice">> {
+    const server = record.from.target.server;
     const full = targetSchema.safeParse(launched.target);
     if (full.success) return { target: full.data };
     const place = { server, workspace: String(launched.workspaceId), tab: String(launched.tabId), pane: String(launched.paneId), source };
-    for (const until = this.now + 30_000; this.now < until; await this.sleep(this.poll)) {
+    const newChat = record.mode === "new-chat";
+    if (newChat) await this.update(record, { state: "linking" });
+    for (const until = this.now + (newChat ? 180_000 : 30_000); this.now < until; await this.sleep(this.poll)) {
       const pane = findPane(await this.deps.snapshot(server).catch(() => ({})), place);
       const session = pane && pane.agent === source ? await this.deps.identity(server, pane).catch(() => undefined) : undefined;
       const target = targetSchema.safeParse({ ...place, session });
       if (target.success) return { target: target.data };
     }
     const starting = startingTargetSchema.safeParse(launched.target);
-    return starting.success ? { target: starting.data } : {};
+    return { ...(starting.success ? { target: starting.data } : {}),
+      ...(newChat ? { linkPending: true, notice: "New chat started; the conversation link is pending after three minutes. Use the pane target to open it." } : {}) };
   }
 }
 

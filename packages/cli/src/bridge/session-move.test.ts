@@ -155,6 +155,77 @@ describe("moving a session to another agent", () => {
     expect(await readFile(path.join(path.dirname(record.handoff!.path), "brief.md"), "utf8")).toContain(prompt);
   });
 
+  it.each(["throw", "refused", "failed-state", "undelivered", "terminal-throw"])("fails a new-chat move when first-prompt delivery fails (%s)", async failure => {
+    const { deps, pane, panes, closed } = world({ reply: writes });
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      const result: Json = { ...await launch(...args), briefLaunched: false };
+      if (failure === "terminal-throw") delete result.target;
+      return result;
+    };
+    const deliver = deps.deliver;
+    deps.deliver = async (target, ...args) => {
+      if (target.pane === from.pane) return deliver(target, ...args);
+      if (failure === "throw") throw new Error("startup screen");
+      return failure === "failed-state" ? { ok: true, state: "failed", error: "submission refused" }
+        : failure === "undelivered" ? { ok: true, delivered: false, error: "submission refused" }
+        : { ok: false, error: "submission refused" };
+    };
+    deps.terminal.prompt = async () => { throw new Error("startup screen"); };
+    const record = await move(deps, { harness: "codex" }, { mode: "new-chat" });
+    expect(record).toMatchObject({ state: "failed", error: expect.stringContaining("New chat started but did not receive the hand-off") });
+    expect(record.error).toContain(failure === "throw" || failure === "terminal-throw" ? "startup screen" : "submission refused");
+    expect(pane.agent).toBe("claude");
+    expect(panes.find(item => item.pane_id === "w1:p2")?.agent).toBe("codex");
+    expect(closed).toEqual([]);
+    expect(record.paneTarget).toEqual({ server: "default", workspace: "w1", tab: "w1:t2", pane: "w1:p2", source: "codex" });
+    expect(record.handedOffTo).toBeUndefined();
+    expect(moveSessionFields([record], from)).toEqual({});
+  });
+
+  it.each([[45_000, true], [Infinity, true], [Infinity, false]] as const)("keeps linking a slow new chat until identity or the bounded deadline (%s ms, starting target %s)", async (delay, hasStartingTarget) => {
+    const { deps, pane, closed } = world({ reply: writes });
+    let now = Date.parse("2026-10-14T12:00:00Z"), launchedAt = 0;
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      const result = await launch(...args);
+      launchedAt = now;
+      const target: Json = { ...object(result.target), starting: true, startingToken: "a".repeat(64) };
+      delete target.session;
+      return { ...result, target: hasStartingTarget ? target : undefined };
+    };
+    deps.now = () => now;
+    deps.pollMs = 1_000;
+    deps.identity = async (_server, candidate) => candidate.pane_id === from.pane ? SESSION : now - launchedAt >= delay ? NEXT : undefined;
+    const linking: MoveRecord[] = [];
+    deps.sleep = async ms => {
+      now += ms;
+      const record = (await listMoves(now))[0];
+      if (record && record.state === "linking") linking.push(record);
+    };
+    const record = await move(deps, { harness: "codex" }, { mode: "new-chat" });
+    expect(linking.length).toBeGreaterThan(0);
+    expect(linking.some(row => Date.parse(row.updatedAt) >= launchedAt)).toBe(true);
+    expect(linking.every(row => !row.handedOffTo && !row.handedOffFrom)).toBe(true);
+    expect(record.state).toBe("moved");
+    expect(pane.agent).toBe("claude");
+    expect(closed).toEqual([]);
+    if (Number.isFinite(delay)) {
+      expect(now - launchedAt).toBeGreaterThanOrEqual(45_000);
+      expect(record.target).toMatchObject({ pane: "w1:p2", source: "codex", session: NEXT });
+      expect(object(record).linkPending).not.toBe(true);
+      expect(moveSessionFields([record], record.target as Target)).toEqual({ handedOffFrom: { target: from, title: "parser fix" } });
+      expect(record.handedOffTo).toEqual({ target: record.target });
+    } else {
+      expect(now - launchedAt).toBeGreaterThanOrEqual(120_000);
+      expect(now - launchedAt).toBeLessThanOrEqual(300_000);
+      if (hasStartingTarget) expect(record.target).toMatchObject({ pane: "w1:p2", starting: true });
+      else expect(record.target).toBeUndefined();
+      expect(record.paneTarget).toEqual({ server: "default", workspace: "w1", tab: "w1:t2", pane: "w1:p2", source: "codex" });
+      expect(object(record)).toMatchObject({ linkPending: true, notice: expect.stringContaining("link is pending") });
+    }
+  });
+
   it("keeps the source unlabelled and running when a new-chat launch fails", async () => {
     const { deps, pane, typed, closed } = world({ reply: writes });
     deps.launch = async () => { throw new Error("launch failed"); };

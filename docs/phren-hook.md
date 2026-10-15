@@ -1271,6 +1271,19 @@ and a title ending in ` (handed off to <harness>)`; rows for the new conversatio
 show `handedOffFrom: {target,title}`. These annotations use the move record and
 match the conversation, so a later chat in the old pane does not inherit them.
 A failed launch leaves the old chat running without a hand-off annotation.
+If the harness starts but delivery of its first prompt throws or is refused,
+the move is `failed` with an `error` explaining that the new chat started but
+did not receive the hand-off. The launched pane is left open, its location is
+kept in `paneTarget`, and the old chat gets no hand-off annotation.
+
+A new chat without a conversation id remains in `state: "linking"` while the
+Hook probes on its existing poll tick for up to three minutes. Once identified,
+`target` becomes the full conversation target and both hand-off links are recorded.
+If identity never arrives within that window, the move settles as `moved` with
+`linkPending: true` and a `notice` explaining that the conversation link is pending.
+`target` retains the starting target when supplied by the launcher; `paneTarget`
+always names the launched pane as `{server,workspace,tab,pane,source}`. The new
+row's conversation link remains unavailable until identity has been resolved.
 This option adds no CLI flag or store format change.
 
 ### Worker report and finish contract

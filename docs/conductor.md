@@ -672,11 +672,15 @@ and effort. The Hook:
    uses the same pane.
 
 Each move is recorded in `<bridge>/moves/<id>.json`: `state` (`handing-off`,
-`exiting`, `launching`, `moved`, `failed`), `from`, `to`, `handoff` (`path`,
+`exiting`, `launching`, `linking`, `moved`, `failed`), `from`, `to`, `handoff` (`path`,
 `source` `agent` or `fallback`, `reason`), `exit` (`clean`, `interrupted`,
 `killed`), `placement` (`same-pane`, `adjacent-pane`), the new `target`,
 `movedAt` and `error`. A failure after the old agent exited says so and names
-the hand-off file, so the owner can start the new agent by hand.
+the hand-off file, so the owner can start the new agent by hand. With
+`mode: "new-chat"`, first-prompt delivery failure leaves the launched pane open
+and the old chat unannotated. A slow new conversation stays `linking` for up to
+three minutes; timeout settles as `moved` with `linkPending: true`, a `notice`
+and `paneTarget` naming the pane. See the [Hook route contract](phren-hook.md#session-moves).
 
 A dispatched worker keeps its dispatch. The new agent gets the same
 `PHREN_DISPATCH_ID`. While the move runs, the worker reads as working, so the
