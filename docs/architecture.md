@@ -101,6 +101,8 @@ This gives Claude full native lifecycle parity while keeping other tools synchro
 
 Running MCP servers can poll shared Git stores on a configurable interval (off by default; enable with `phren config pull-interval 60` for one minute). A per-store process lock and shared timestamp coordinate checks across clients. `git ls-remote` compares the upstream commit before fetching; a shared Git-operation lock protects clean fast-forward updates against session hooks and pushes. Polling defers dirty or diverged stores and backs off network failures. Each server watches local HEAD changes to refresh its index and existing managed skill/instruction mirrors, including updates pulled by a sibling client. This runs only during the MCP server's lifetime, respects lifecycle-automation presets, and excludes project-local/workspace-Git installs.
 
+`sync/gitboy-webhook.ts` holds the transport-agnostic core for upcoming push-driven sync from stores hosted on gitboy: `X-Hub-Signature-256` HMAC verification over the exact body bytes, parsing of `push` deliveries (`repository.full_name`, `updates[]` with `changed_paths` / `changed_paths_truncated`), matching a push to a store's repository and `refs/heads/<branch>`, and a bounded log of delivery ids for retries. It is not wired to any listener, route, command or setting yet; polling above remains the only sync trigger.
+
 Local index freshness is independent of that remote polling. Before tool calls,
 the MCP server checks a process-owned snapshot of file and directory metadata
 at most once per second. External summary, document, store attachment and
