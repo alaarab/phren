@@ -1,12 +1,10 @@
+import { exhausted, usedPercent, windowNames } from "./usage-windows.js";
 // Observe the titlebar's shared usage poll; no additional timer or Hook reads.
 import { accountTitles, followUsage } from "./usage-rings.js";
 import { loadQuotaState, quotaSettings } from "./quota-warn-prefs.js";
 
 const COOLDOWN_MS = 10 * 60_000;
-const names = { five_hour: "5-hour", seven_day: "Weekly", "codex:primary": "5-hour", "codex:secondary": "Weekly" };
-const exhausted = (w) => !w.reset && (w.exhausted === true || w.exhausted === undefined && w.usedPercent >= 100);
-const known = (w) => w.reset || exhausted(w) || Number.isFinite(w.usedPercent) || Number.isFinite(w.leftPercent);
-
+const known = (w) => w.reset || exhausted(w) || usedPercent(w) !== null;
 /** Pure poll-to-poll transitions. Stale data retains the last known exhaustion. */
 export function quotaBackTransitions(state, snapshot, now = Date.now()) {
   const previous = new Map();
@@ -29,10 +27,10 @@ export function quotaBackTransitions(state, snapshot, now = Date.now()) {
       }
       if (!windows.length || !windows.every(known) || snapshot.unreachable?.some((u) => u.computer === computer.name)) continue;
       previous.set(key, blocked);
-      if (!before?.length || blocked.length || row.exhausted || !before.every((w) => windows.some((next) => next.id === w.id && known(next)))) continue;
+      if (!before?.length || blocked.length || exhausted(row) || !before.every((w) => windows.some((next) => next.id === w.id && known(next)))) continue;
       if (now - (notified.get(key) ?? -Infinity) < COOLDOWN_MS) continue;
       notified.set(key, now);
-      const labels = [...new Set(before.map((w) => names[w.id] || w.name || w.id))];
+      const labels = [...new Set(before.map((w) => windowNames[w.id]?.replace("weekly", "Weekly") || w.name || w.id))];
       notices.push({ title: `${titles.get(row.id) ?? row.name ?? row.harness} is available again`, body: `${labels.join(" and ")} limit reset on ${computer.name}` });
     }
   }

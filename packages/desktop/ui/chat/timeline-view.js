@@ -1,3 +1,4 @@
+import { exhausted } from "../shell/usage-windows.js";
 // The desktop chat timeline: draws the kit's prepared transcript rows the way
 // the phone does. Plain browser ES module. `render` is incremental: rows are
 // keyed by their stable id and only rebuilt when their render key changes; the
@@ -1004,7 +1005,7 @@ export function createTimelineView(container, ctx = {}) {
     const head = h("div", "ct-usage-head");
     head.append(h("span", "ct-usage-name", account.name));
     if (account.account) head.append(h("span", "ct-usage-sub", account.account));
-    if (account.exhausted) head.append(h("span", "ct-usage-out", account.availableIn ? `Out · back in ${account.availableIn}` : "Out of quota"));
+    if (exhausted(account)) head.append(h("span", "ct-usage-out", account.availableIn ? `Out · back in ${account.availableIn}` : "Out of quota"));
     else if (account.stale && account.age) head.append(h("span", "ct-usage-sub", `${account.age} old`));
     wrap.append(head);
     for (const window of account.windows) {
@@ -1012,7 +1013,7 @@ export function createTimelineView(container, ctx = {}) {
       row.append(h("span", "ct-usage-window", window.name));
       if (window.usedPercent !== null) {
         const bar = h("span", "ct-usage-bar");
-        const fill = h("span", `ct-usage-fill${window.exhausted || window.usedPercent >= 90 ? " danger" : window.usedPercent >= 70 ? " warning" : ""}`);
+        const fill = h("span", `ct-usage-fill${exhausted(window) || window.usedPercent >= 90 ? " danger" : window.usedPercent >= 70 ? " warning" : ""}`);
         fill.style.width = `${Math.max(0, Math.min(100, window.usedPercent))}%`;
         bar.append(fill);
         row.append(bar, h("span", "ct-usage-percent", `${window.usedPercent}%`));
