@@ -40,25 +40,57 @@ describe("continue in another agent", () => {
 });
 
 
-  class Node {
-    children: Node[] = [];
-    textContent = "";
-    className = "";
-    disabled = false;
-    style: Record<string, string> = {};
-    listeners = new Map<string, () => void>();
-    append(...children: Node[]) { this.children.push(...children); }
-    replaceChildren(...children: Node[]) { this.children = children; }
-    setAttribute() {}
-    addEventListener(event: string, fn: () => void) { this.listeners.set(event, fn); }
-    focus() {}
-    remove() {}
-    find(text: string): Node | undefined { return this.textContent === text ? this : this.children.map((n) => n.find(text)).find(Boolean); }
+// Minimal DOM behavior for modal keyboard tests, including disabled focus and ancestry.
+type KeyEvent = { key: string; shiftKey: boolean; preventDefault: ReturnType<typeof vi.fn>; stopPropagation: ReturnType<typeof vi.fn> };
+class Node {
+  children: Node[] = [];
+  parent: Node | null = null;
+  textContent = "";
+  className = "";
+  disabled = false;
+  hidden = false;
+  tagName: string;
+  style: Record<string, string> = {};
+  listeners = new Map<string, (event?: KeyEvent) => void>();
+  constructor(tag = "div") { this.tagName = tag.toUpperCase(); }
+  append(...children: Node[]) { for (const child of children) { child.parent = this; this.children.push(child); } }
+  replaceChildren(...children: Node[]) { for (const child of this.children) child.parent = null; this.children = []; this.append(...children); }
+  setAttribute() {}
+  addEventListener(event: string, fn: (event?: KeyEvent) => void) { this.listeners.set(event, fn); }
+  focus() { if (!this.disabled) { dom.activeElement = this; dom.listeners.get("focusin")?.(); } }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); this.parent = null; }
+  get isConnected(): boolean { return this === dom.body || !!this.parent?.isConnected; }
+  contains(node: Node): boolean { return node === this || this.children.some((child) => child.contains(node)); }
+  closest(): Node | null { return this.hidden ? this : this.parent?.closest() ?? null; }
+  querySelectorAll(): Node[] {
+    return this.children.flatMap((child) => [
+      ...(["BUTTON", "SELECT", "INPUT", "TEXTAREA"].includes(child.tagName) && !child.disabled ? [child] : []),
+      ...child.querySelectorAll(),
+    ]);
   }
+  find(text: string): Node | undefined { return this.textContent === text ? this : this.children.map((n) => n.find(text)).find(Boolean); }
+}
+let dom: ReturnType<typeof setupDom>;
+function setupDom() {
+  const body = new Node("body");
+  const doc = {
+    body, activeElement: body, listeners: new Map<string, (event?: KeyEvent) => void>(),
+    getElementById: () => ({}), createElement: (tag: string) => new Node(tag),
+    addEventListener(type: string, fn: (event?: KeyEvent) => void) { this.listeners.set(type, fn); },
+    removeEventListener(type: string, fn: (event?: KeyEvent) => void) { if (this.listeners.get(type) === fn) this.listeners.delete(type); },
+  };
+  dom = doc;
+  vi.stubGlobal("document", doc);
+  return doc;
+}
+function press(key: string, shiftKey = false) {
+  const event = { key, shiftKey, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+  dom.listeners.get("keydown")?.(event);
+  return event;
+}
 
 it("leaves Continue in unselected when no destination has room, until the user chooses", async () => {
-  const body = new Node();
-  vi.stubGlobal("document", { body, getElementById: () => ({}), createElement: () => new Node() });
+  const { body } = setupDom();
   vi.mocked(hookGet).mockResolvedValue({ harnesses: inventory });
   await openMoveSheet({ computer: "Desk", child: { target: { source: "claude" } }, selectDefault: false, notice: "No account has room." });
   expect(body.find("No account has room.")).toBeDefined();
@@ -75,8 +107,7 @@ it.each([
 ])("sends the correct move mode for %s with capability %s and opens a landed new chat", async (harness, capability, mode) => {
   vi.useFakeTimers();
   hooks.caps = { moveNewChat: capability };
-  const body = new Node();
-  vi.stubGlobal("document", { body, getElementById: () => ({}), createElement: () => new Node() });
+  const { body } = setupDom();
   const target = { server: "tmux", workspace: "w", tab: "old", pane: "old", source: "claude", session: "old" };
   const next = { ...target, tab: "new", pane: "new", source: harness, session: "new" };
   const oldChild = { title: "Original", account: { id: "work" }, target };
@@ -99,4 +130,51 @@ it.each([
     expect(hooks.open).toHaveBeenCalledWith("Desk", nextChild);
     expect(hooks.rows[0].child).toBe(oldChild);
   }
+});
+
+
+it("focuses an enabled control while loading, traps focus after rendering and restores Switch on Escape", async () => {
+  const { body } = setupDom();
+  const change = new Node("button");
+  change.textContent = "Switch";
+  body.append(change);
+  change.focus();
+  let resolveInventory!: (value: { harnesses: typeof inventory }) => void;
+  vi.mocked(hookGet).mockImplementation(() => new Promise((resolve) => { resolveInventory = resolve; }));
+  const opening = openMoveSheet({ computer: "Desk", child: { target: { source: "claude" } }, selectDefault: false });
+  const close = body.find("×")!;
+  expect(dom.activeElement).toBe(close);
+  expect(body.find("Continue")?.disabled).toBe(true);
+  resolveInventory({ harnesses: inventory });
+  await opening;
+  expect(press("Tab", true).preventDefault).toHaveBeenCalled();
+  expect(dom.activeElement).toBe(body.find("Codex"));
+  expect(press("Tab").preventDefault).toHaveBeenCalled();
+  expect(dom.activeElement).toBe(close);
+  change.focus();
+  expect(dom.activeElement).toBe(close);
+  body.find("Codex")!.listeners.get("click")!();
+  body.find("Continue")!.focus();
+  expect(press("Tab").preventDefault).toHaveBeenCalled();
+  expect(dom.activeElement).toBe(close);
+  body.find("Codex")!.focus();
+  expect(press("Escape").stopPropagation).toHaveBeenCalled();
+  expect(body.find("Continue")).toBeUndefined();
+  expect(dom.activeElement).toBe(change);
+  expect(dom.listeners.size).toBe(0);
+});
+
+it("restores the current Switch control when an overview refresh replaced the invoker", async () => {
+  const { body } = setupDom();
+  let change = new Node("button");
+  body.append(change);
+  change.focus();
+  vi.mocked(hookGet).mockResolvedValue({ harnesses: inventory });
+  await openMoveSheet({ computer: "Desk", child: { target: { source: "claude" } }, returnFocus: () => change.focus() });
+  change.remove();
+  change = new Node("button");
+  body.append(change);
+  body.find("×")!.listeners.get("click")!();
+  expect(dom.activeElement).toBe(change);
+  expect(dom.listeners.size).toBe(0);
 });

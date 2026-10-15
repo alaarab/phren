@@ -593,3 +593,11 @@ before rendering. Chat and Switch are separate keyboard buttons; overview and
 usage refreshes retain focus by session and action. `openQuotaSwitch` in
 `quota-warn-sheet.js` shares the warning card's destination selection and
 `openMoveSheet` flow, including cross-family new-chat capability handling.
+
+The shared move sheet focuses its first enabled control before loading inventory,
+traps Tab and programmatic focus inside the dialog, and closes with Escape from
+any control. Closing removes its listeners and returns focus to the invoker;
+`openMoveSheet` and `openQuotaSwitch` accept an optional `returnFocus` callback
+for callers whose controls can be replaced. Home resolves its current Switch
+button by session key on close and suspends its keyboard shortcuts while any
+sheet backdrop, visible dialog role or open native dialog is present.

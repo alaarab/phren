@@ -17,12 +17,12 @@ const node = (tag, cls, text) => {
 };
 
 /** Shared Switch entry point: rank fresh room, then use the capability-aware move sheet. */
-export function openQuotaSwitch(session, inventory, accounts) {
+export function openQuotaSwitch(session, inventory, accounts, { returnFocus } = {}) {
   const destinations = quotaDestinations(session,
     moveChoices(inventory ?? [], session.child.target?.source ?? session.child.agent),
     moveAccounts(inventory, { includeDefault: true }), accounts ?? []);
   const best = destinations.find((d) => !d.exhausted && d.left > 0);
-  return openMoveSheet({ ...session,
+  return openMoveSheet({ ...session, returnFocus,
     to: best ? { harness: best.harness, ...(best.account ? { account: best.account } : {}) } : undefined,
     ...(!best ? { selectDefault: false, notice: "No other account or harness has known room. Choose where to continue." } : {}),
   });

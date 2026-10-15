@@ -59,8 +59,9 @@ function installStyles() {
   document.head.append(link);
 }
 
-export async function openMoveSheet({ computer, child, to = {}, notice = "", selectDefault = true }) {
+export async function openMoveSheet({ computer, child, to = {}, notice = "", selectDefault = true, returnFocus }) {
   openSheet?.close();
+  returnFocus ??= document.activeElement;
   installStyles();
   const current = child.target?.source ?? child.agent;
   const state = { harness: to.harness ?? "", account: to.account ?? "", inventory: null, moveNewChat: false, mode: undefined, busy: false, timer: null };
@@ -68,6 +69,8 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   const backdrop = el("div", "launch-backdrop");
   const sheet = el("div", "launch-sheet move-sheet");
   sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.tabIndex = -1;
   sheet.setAttribute("aria-label", "Continue in another agent");
   const head = el("div", "launch-head");
   const closeBtn = el("button", "launch-close", "×");
@@ -98,13 +101,42 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   backdrop.append(sheet);
   document.body.append(backdrop);
 
-  const close = () => { clearTimeout(state.timer); backdrop.remove(); if (openSheet?.backdrop === backdrop) openSheet = null; };
+  const controls = () => [...sheet.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+    .filter((control) => !control.closest("[hidden], [inert]"));
+  const focusFirst = () => (controls()[0] ?? sheet).focus();
+  const keepFocus = () => { if (!sheet.contains(document.activeElement)) focusFirst(); };
+  const onKey = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    } else if (event.key === "Tab") {
+      const list = controls();
+      const index = list.indexOf(document.activeElement);
+      if (index < 0 || event.shiftKey && index === 0 || !event.shiftKey && index === list.length - 1) {
+        event.preventDefault();
+        (event.shiftKey ? list.at(-1) ?? sheet : list[0] ?? sheet).focus();
+      }
+    }
+  };
+  const close = () => {
+    if (openSheet?.backdrop !== backdrop) return;
+    clearTimeout(state.timer);
+    document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("focusin", keepFocus);
+    backdrop.remove();
+    openSheet = null;
+    if (typeof returnFocus === "function") returnFocus();
+    else if (returnFocus?.isConnected) returnFocus.focus();
+  };
   openSheet = { close, backdrop };
   closeBtn.addEventListener("click", close);
   backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop && !state.busy) close(); });
-  backdrop.addEventListener("keydown", (e) => { if (e.key === "Escape" && !state.busy) close(); });
+  document.addEventListener("keydown", onKey, true);
+  document.addEventListener("focusin", keepFocus);
 
   function render() {
+    const hadFocus = sheet.contains(document.activeElement);
     const choices = moveChoices(state.inventory, current, child.account?.id);
     if (!choices.some((c) => c.source === state.harness && c.usable)) state.harness = selectDefault ? choices.find((c) => c.usable)?.source ?? "" : "";
     harnessRow.replaceChildren(...choices.map((c) => {
@@ -125,12 +157,15 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
     const accountLabel = accounts.find((a) => a.id === state.account)?.label;
     outcome.textContent = movePlan(current, { harness: state.harness, account: state.account, accountLabel }, state.moveNewChat).label;
     go.disabled = !state.harness || state.busy;
+    if (hadFocus && (!sheet.contains(document.activeElement) || document.activeElement.disabled || document.activeElement.closest("[hidden], [inert]"))) focusFirst();
   }
   accountSelect.addEventListener("change", () => { state.account = accountSelect.value; render(); });
 
   async function follow(id, started) {
+    if (openSheet?.backdrop !== backdrop) return;
     let move = null;
     try { move = (await hookGet(computer, "/v1/sessions/move", { id })).move; } catch { /* keep asking */ }
+    if (openSheet?.backdrop !== backdrop) return;
     if (move) status.textContent = moveStatus(move);
     if (move?.state === "moved") {
       if (state.mode !== "new-chat" || move.target && openHandoffChat(computer, move.target)) {
@@ -166,7 +201,7 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   });
 
   go.disabled = true;
-  go.focus();
+  focusFirst();
   const [inventory, caps] = await Promise.all([
     hookGet(computer, "/v1/harnesses").catch(() => null),
     store.capabilities(computer),

@@ -250,7 +250,11 @@ export function mountHome(root, { openSession, openPulls } = {}) {
           try { inventory = (await hookGet(row.computer, "/v1/harnesses")).harnesses; } catch { /* allow choosing manually */ }
           const live = store.find(row.computer, row.child.id);
           if (!live || quotaSessionKey(live) !== quotaSessionKey(row) || !(merged?.computers ?? []).some((c) => c.computer === row.computer && c.state === "online")) return;
-          await openQuotaSwitch(live, inventory, usage?.accounts);
+          change.disabled = false;
+          await openQuotaSwitch(live, inventory, usage?.accounts, { returnFocus: () => {
+            // Overview updates can replace the invoking row while the sheet is open.
+            [...scope.querySelectorAll("button")].find((button) => button.dataset.key === row.key && button.dataset.action === "switch")?.focus();
+          } });
         } catch (error) {
           wrap.append(el("span", "home-row-sub", `Could not switch: ${error?.message || error}`));
         } finally { change.disabled = false; }
@@ -659,7 +663,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   }
 
   function onKeydown(event) {
-    if (!visible) return;
+    if (!visible || document.querySelector('.launch-backdrop, [role="dialog"]:not([hidden]), dialog[open]')) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     // Only when nothing else has focus, or focus is inside Home: Enter on another
     // control (a section pill, a sidebar row) must do that control's job, never approve.
