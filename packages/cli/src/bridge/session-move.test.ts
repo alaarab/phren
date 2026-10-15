@@ -142,6 +142,43 @@ describe("moving a session to another agent", () => {
     } else expect(await recordedConductor()).toMatchObject({ pane: "w1:p2" });
   });
 
+  it.each(["handoff", "exit-snapshot", "launch-snapshot", "landing"])("aborts an ordinary agent move if the owner promotes its pane at %s", async promotion => {
+    const { deps, pane, typed, keys, killed, closed, launches } = world({ reply: writes });
+    const promote = () => recordConductor(from.server, pane, "owner", SESSION);
+    if (promotion === "handoff") {
+      const deliver = deps.deliver;
+      deps.deliver = async (...args) => { const sent = await deliver(...args); await promote(); return sent; };
+    } else if (promotion === "landing") {
+      const launch = deps.launch;
+      deps.launch = async (...args) => { const launched = await launch(...args); await promote(); return launched; };
+    } else {
+      const snapshot = deps.snapshot;
+      let afterHandoff = false, afterExitState = false;
+      const transcript = deps.transcript;
+      deps.transcript = async (...args) => { afterHandoff = true; return transcript(...args); };
+      deps.snapshot = async (...args) => {
+        const seen = await snapshot(...args);
+        if (afterHandoff) {
+          const rows = await listMoves();
+          const row = rows.find(row => row.from.target.pane === from.pane);
+          if (promotion === "exit-snapshot" && row?.state === "exiting") await promote();
+          if (promotion === "launch-snapshot" && row?.state === "launching" && !afterExitState) { afterExitState = true; await promote(); }
+        }
+        return seen;
+      };
+    }
+    const mover = new SessionMover(deps);
+    const started = await mover.start({ target: from, to: { harness: "codex" }, mode: promotion === "handoff" || promotion === "exit-snapshot" ? "replace" : "new-chat" });
+    await mover.settled(from.server, from.pane);
+    const record = await readMove(started.id);
+    expect(record).toMatchObject({ state: "failed", error: "The pane became the conductor during the move; nothing was changed." });
+    expect(pane.agent).toBe("claude");
+    expect(await recordedConductor()).toMatchObject({ pane: from.pane, session: SESSION });
+    expect(typed.some(text => text === "/exit")).toBe(false);
+    expect([keys, killed, closed]).toEqual([[], [], []]);
+    if (promotion !== "landing") expect(launches).toEqual([]);
+  });
+
   it.each(["blocked", "waiting", "link-timeout", "brief-timeout"])("leaves the old conductor in charge when the new chat is %s", async readiness => {
     const { deps, pane, panes } = world({ reply: writes });
     await recordConductor(from.server, pane, "owner", SESSION);

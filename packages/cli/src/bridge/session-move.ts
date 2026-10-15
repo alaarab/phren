@@ -510,12 +510,14 @@ export class SessionMover {
       await atomic(file, document);
       await this.update(record, { state: record.mode === "new-chat" ? "launching" : "exiting", handoff: { path: file, source: "text" in written ? "agent" : "fallback",
         ...("reason" in written ? { reason: written.reason.slice(0, 300) } : {}), chars: document.length } });
+      await this.checkPromotion(record);
       if (record.mode !== "new-chat") {
         const exit = await this.exit(record);
         await this.update(record, { state: "launching", exit });
         await this.deps.afterExit?.(from.server, from.pane).catch(() => undefined);
       }
       const launched = await this.relaunch(record, prompt);
+      await this.checkPromotion(record);
       if (conductor) {
         try {
           if (launched.linkPending || !launched.target || !("session" in launched.target)) throw new Error("The new conductor conversation is not linked; the hand-over was not confirmed.");
@@ -573,6 +575,16 @@ export class SessionMover {
       const hint = stopped && record.handoff ? ` The old agent has exited; start ${HARNESS_NAMES[record.to.harness]} in the pane with the hand-off at ${record.handoff.path}.` : "";
       await this.update(record, { state: "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
       logger.warn("move", `Moving pane ${from.pane} to ${record.to.harness} failed: ${message}`);
+    }
+  }
+
+  /** An ordinary move never acquires permission to stop a conductor merely
+   * because the owner promoted its source while the hand-off was running. */
+  private async checkPromotion(record: MoveRecord): Promise<void> {
+    if (record.modeForced === "conductor") return;
+    const current = await recordedConductor();
+    if (current?.server === record.from.target.server && current.pane === record.from.target.pane) {
+      throw new BridgeError(409, "The pane became the conductor during the move; nothing was changed.");
     }
   }
 
@@ -650,17 +662,20 @@ export class SessionMover {
     const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
     // A turn still running (a hand-off that ran late) is stopped first, as Esc in the terminal would.
     if (pane?.agent_status === "working") {
+      await this.checkPromotion(record);
       await this.deps.terminal.sendKeys(from.server, from.pane, ["esc"]).catch(() => undefined);
       await this.sleep(1_000);
     }
+    await this.checkPromotion(record);
     await this.deps.terminal.prompt(from.server, from.pane, EXIT_COMMANDS[from.source] ?? "/exit").catch(() => undefined);
     if (await gone(exitMs)) return "clean";
-    for (let n = 0; n < 2; n++) { await this.deps.terminal.sendKeys(from.server, from.pane, ["ctrl+c"]).catch(() => undefined); await this.sleep(500); }
+    for (let n = 0; n < 2; n++) { await this.checkPromotion(record); await this.deps.terminal.sendKeys(from.server, from.pane, ["ctrl+c"]).catch(() => undefined); await this.sleep(500); }
     if (await gone(5_000)) return "interrupted";
     const { foregroundPids, shellPid } = await this.deps.terminal.processes(from.server, from.pane);
     const agent = foregroundPids.filter(pid => pid !== shellPid);
     const kill = this.deps.kill ?? ((pid: number, signal: NodeJS.Signals) => process.kill(pid, signal));
     for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+      await this.checkPromotion(record);
       for (const pid of agent) { try { kill(pid, signal); } catch { /* already gone */ } }
       if (await gone(5_000)) return "killed";
     }
@@ -681,6 +696,7 @@ export class SessionMover {
       ...(record.to.model ? { model: record.to.model } : {}), ...(record.to.effort ? { effort: record.to.effort } : {}), ...(account ? { account } : {}),
       brief: { id: record.id, text: prompt }, ...(samePane ? {} : { workspaceId: from.workspace }) };
     const into = samePane ? { workspaceId: from.workspace, tabId: from.tab, paneId: from.pane } : undefined;
+    await this.checkPromotion(record);
     const launched = await this.deps.launch(from.server, data, { ...(into ? { into } : {}), ...(record.dispatch && record.modeForced !== "conductor" ? { dispatchId: record.dispatch } : {}) });
     // Keep the launched location even if delivering its first prompt fails.
     const paneTarget = targetSchema.omit({ session: true }).parse({ server: from.server,
@@ -704,7 +720,10 @@ export class SessionMover {
         throw new Error(`${record.mode === "new-chat" ? "New chat" : "Target"} started but did not receive the hand-off. The launched pane was left open. ${reason}`);
       }
     }
-    if (!samePane && record.mode !== "new-chat") await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
+    if (!samePane && record.mode !== "new-chat") {
+      await this.checkPromotion(record);
+      await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
+    }
     // The account the new agent runs under, also when the move named none.
     const to = account ? { ...record.to, account } : record.to;
     return { to, placement: samePane ? "same-pane" : "adjacent-pane", ...await this.newTarget(record, launched, record.to.harness) };

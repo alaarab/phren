@@ -13,6 +13,7 @@ import { findGrant, grantLabel, permissionModeAllowed, DEFAULT_MAX_PERMISSION_MO
 import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, releaseAction, type AuthorityCheck } from "./authority.js";
 import { hookPeers } from "./peers.js";
 import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
+import { prepareDispatchOriginHandover, trackDispatchOrigin, type DispatchOriginWindow } from "./dispatch-origins.js";
 import { recordedConductor, type ConductorRecord } from "./conductor-role.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
@@ -140,14 +141,13 @@ export async function dispatchProjectDirectory(project: unknown, home = homeDir(
   throw new BridgeError(404, `Project ${name} is not on this computer: the store names no folder for ${getMachineName()} that exists here, and there is no ~/Projects/${name} checkout.`);
 }
 
-function save(receipt: Receipt): Promise<void> {
+function save(receipt: Receipt, originWindow: DispatchOriginWindow): Promise<void> {
   return serializeReceiptUpdate(async () => {
-    // Origin resolution may have started before a hand-over and finished
-    // after its scan. Resolve the sealed aliases inside this same lock.
-    const links = await readOriginHandovers();
-    const link = links.find(link => sameOriginPane(link.from, receipt.origin));
-    if (link && !receipt.closedAt) {
-      receipt.origin = link.to;
+    // Only this already-running dispatch can inherit a hand-over alias.
+    // Resolve it under the receipt lock, after any role change invalidation.
+    const origin = originWindow.rewrite(receipt.origin);
+    if (origin !== receipt.origin && !receipt.closedAt) {
+      receipt.origin = origin;
       if (receipt.returned && !receipt.returned.read) delete receipt.returned.notifiedAt;
     }
     await saveReceipt(receipt);
@@ -199,36 +199,13 @@ async function changeReceipt(receiptID: string, change: (receipt: Receipt) => bo
   return receipt;
 }
 
-const originIdentity = originPaneSchema.pick({ server: true, pane: true }).extend({ terminal: z.string().min(1).max(200) });
-const originHandoverSchema = z.array(z.object({ from: originIdentity, to: receiptSchema.shape.origin.unwrap() }).strict()).max(1024);
-type OriginHandover = z.infer<typeof originHandoverSchema>[number];
-const originHandoverFile = () => path.join(bridgeRoot(), "dispatch-origin-handovers.json");
-const sameOriginPane = (left: { server: string; pane: string; terminal?: string }, right: Receipt["origin"] | OriginHandover["from"]) =>
-  !!right && left.server === right.server && left.pane === right.pane && left.terminal === right.terminal;
-async function readOriginHandovers(): Promise<OriginHandover[]> {
-  const file = originHandoverFile();
-  const info = await lstat(file).catch(error => {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return undefined;
-  });
-  if (!info) return [];
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) throw new Error("Dispatch origin hand-overs must be a bounded regular file.");
-  return originHandoverSchema.parse(JSON.parse(await readFile(file, "utf8")));
-}
-
 /** Hand over all open worker routes using the receipt writer's own lock and
  * update path. Commit the role last; any failure restores the old origins.
  * Placing receipts are refused because placement can still overwrite them. */
 export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "pane" | "terminal">,
   to: NonNullable<Receipt["origin"]>, commit: () => Promise<void>): Promise<void> {
   return serializeReceiptUpdate(async () => {
-    const identity = originIdentity.parse({ server: from.server, pane: from.pane, terminal: from.terminal });
-    const previous = await readOriginHandovers();
-    // Flatten chains and allow moving back into a still-open earlier pane.
-    const links = previous.filter(link => !sameOriginPane(link.from, to) && !sameOriginPane(link.from, identity))
-      .map(link => sameOriginPane(identity, link.to) ? { ...link, to } : link);
-    links.push({ from: identity, to });
-    const sealed = originHandoverSchema.parse(links);
+    const seal = prepareDispatchOriginHandover(from, to);
     const names = await readdir(path.join(bridgeRoot(), "dispatches")).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       return [] as string[];
@@ -243,7 +220,6 @@ export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "p
       selected.push(receipt);
     }
     const changed: Receipt[] = [];
-    let markerSaved = false;
     try {
       for (const before of selected) {
         await changeReceipt(before.id, receipt => {
@@ -255,16 +231,10 @@ export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "p
         });
         changed.push(before);
       }
-      await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
-      await atomic(originHandoverFile(), sealed);
-      markerSaved = true;
       await commit();
+      seal();
     } catch (error) {
       const failures: string[] = [];
-      if (markerSaved) {
-        try { await atomic(originHandoverFile(), previous); }
-        catch (rollback) { failures.push(`origin seal: ${failureReason(rollback)}`); }
-      }
       for (const before of changed.reverse()) {
         try {
           await changeReceipt(before.id, receipt => {
@@ -581,6 +551,7 @@ export class DispatchService {
     if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
+    const originWindow = trackDispatchOrigin();
     let holding = true, placed: string | undefined;
     const release = () => { if (holding) { holding = false; this.active = false; } };
     try {
@@ -662,7 +633,7 @@ export class DispatchService {
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}) };
-      await save(receipt);
+      await save(receipt, originWindow);
       try {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
@@ -681,9 +652,9 @@ export class DispatchService {
         const ignored = data.permissionMode && launched.permissionMode !== data.permissionMode ? IGNORED_MODE : undefined;
         if (launched.briefLaunched === true) {
           receipt.brief = "launch";
-          await this.confirmLaunched(peer, receipt, launched);
+          await this.confirmLaunched(peer, receipt, launched, originWindow);
           if (ignored) receipt.error = [receipt.error, ignored].filter(Boolean).join(" ").slice(0, 500);
-          receipt.updatedAt = new Date().toISOString(); await save(receipt);
+          receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
           return { ok: receipt.state === "accepted", ...receipt };
         }
         receipt.brief = "typed";
@@ -695,7 +666,7 @@ export class DispatchService {
         const target = remoteTarget.parse(settled.target);
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
-        receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
+        receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
         if (!("starting" in target)) {
           const result = await sendBrief(peer, target, prompt, `dispatch-${receipt.id}`);
           receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
@@ -714,9 +685,10 @@ export class DispatchService {
           receipt.error = error instanceof BridgeError ? error.message.slice(0, 500) : "Remote delivery was not confirmed. Inspect this dispatch before retrying.";
         }
       }
-      receipt.updatedAt = new Date().toISOString(); await save(receipt);
+      receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
       return { ok: receipt.state === "accepted", ...receipt };
     } finally {
+      originWindow.finish();
       release();
       if (placed) { const left = this.inFlight(placed) - 1; if (left > 0) this.placing.set(placed, left); else this.placing.delete(placed); }
     }
@@ -774,10 +746,10 @@ export class DispatchService {
    * itself, so that is not a failure. Neither confirmed nor held reads
    * uncertain, and the returns loop keeps asking.
    */
-  private async confirmLaunched(peer: DispatchHost, receipt: Receipt, launched: Json): Promise<void> {
+  private async confirmLaunched(peer: DispatchHost, receipt: Receipt, launched: Json, originWindow: DispatchOriginWindow): Promise<void> {
     const known = remoteTarget.safeParse(launched.target);
     if (known.success && known.data.source === receipt.harness && known.data.server === peer.server) receipt.target = known.data;
-    receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
+    receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
     const held = (status: unknown) => ["blocked", "waiting"].includes(String(status));
     const arrival = held(launched.agentStatus) ? await arrivalOf(peer, receipt.id).catch(() => undefined) ?? {}
       : await awaitArrival(peer, receipt.id, this.settleIntervalMs);

@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { conductorOriginChanged } from "./dispatch-origins.js";
 import { isConductorName, paneAgentName } from "./herdr.js";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, id, type Json, objects, provider, serverName } from "./protocol.js";
 
@@ -56,6 +57,7 @@ async function writeRoleState(state: RoleState): Promise<void> {
   const file = roleFile();
   await atomicInPrivateDir(file, JSON.stringify(state, null, 2) + "\n");
   cached = { file, state };
+  conductorOriginChanged(state.conductor);
 }
 
 /** Every read-modify-write of the state runs one at a time: an overview poll

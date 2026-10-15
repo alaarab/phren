@@ -706,11 +706,21 @@ then reach the new conductor; unread returns announced to the old chat are
 announced again. Closed and unrelated receipts keep their origins. An in-flight
 dispatch already recorded as placing must settle before its conductor can move.
 The same lock covers receipt readers, so they see the routing before or after
-the entire hand-over. `<bridge>/dispatch-origin-handovers.json` seals old pane
-and terminal identities to the new origin; late first-receipt saves from a
-dispatch still awaiting capacity or origin resolution are rewritten under the
-lock. The seal persists across Hook restarts, supports successive hand-overs,
-and is rolled back if role commit fails.
+the entire hand-over. Only dispatch operations already in flight when hand-over
+completes inherit an origin alias; this includes ones still awaiting capacity
+or origin resolution. The alias is applied under the receipt lock and expires
+when that operation finishes. New dispatches from the retained old chat keep
+their own origin. Every conductor record change removes aliases pointing away
+from the newly selected conductor, so stopping B and making A conductor again
+after A → B cannot send A’s new workers’ returns or approvals to B. Aliases live
+only in memory; a Hook restart has no in-flight dispatch operations to resume.
+Legacy `dispatch-origin-handovers.json` files are ignored.
+
+An ordinary move also rechecks its source immediately before exit actions,
+replacement, pane closure and the role step. If the owner promoted that pane
+during the hand-off, the move aborts without touching the conductor:
+"The pane became the conductor during the move; nothing was changed."
+Only a move started by the owner as a conductor move can transfer that role.
 
 A launch, receipt update or role-write failure records `state: "failed"` and a
 clear `error`; receipt updates are rolled back and the old conductor keeps

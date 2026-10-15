@@ -1290,7 +1290,10 @@ hand-over. The destination must be idle or working, fully linked, and its
 brief must have a matching UserPromptSubmit acknowledgement within 30 seconds
 after linking. The Hook sends a confirmation after commit or a failure prompt
 on refusal; the move’s `notice` reports notification failures. Receipt readers
-and late saves share the hand-over lock and persisted origin seal. Copilot
+and late saves share the hand-over lock. Only dispatch operations already in
+flight at completion inherit aliases; new dispatches keep their own origin,
+and conductor changes invalidate aliases pointing elsewhere. An ordinary move
+aborts if its source becomes conductor before exit or replacement. Copilot
 cannot be a conductor.
 A changed role refuses the hand-over without modifying it; other transfer
 failures keep the old role and report `state: "failed"` with an `error`.
