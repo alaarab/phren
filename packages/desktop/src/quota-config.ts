@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 interface QuotaState {
-  settings: { on: boolean; threshold: number };
+  settings: { on: boolean; backOn: boolean; threshold: number };
   suppressed: string[];
   seen: string[];
 }
@@ -18,12 +18,12 @@ export async function loadQuotaConfig(): Promise<QuotaState> {
   try {
     const value = JSON.parse(await readFile(configFile(), "utf8"));
     return {
-      settings: { on: value.settings?.on !== false, threshold: Number.isInteger(value.settings?.threshold) && value.settings.threshold >= 50 && value.settings.threshold <= 99 ? value.settings.threshold : 90 },
+      settings: { on: value.settings?.on !== false, backOn: value.settings?.backOn !== false, threshold: Number.isInteger(value.settings?.threshold) && value.settings.threshold >= 50 && value.settings.threshold <= 99 ? value.settings.threshold : 90 },
       suppressed: strings(value.suppressed), seen: strings(value.seen).slice(-SEEN_LIMIT),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return { settings: { on: true, threshold: 90 }, suppressed: [], seen: [] };
+    return { settings: { on: true, backOn: true, threshold: 90 }, suppressed: [], seen: [] };
   }
 }
 
@@ -38,7 +38,8 @@ export function updateQuotaConfig(input: unknown): Promise<QuotaState> {
   }
   if (update.settings !== undefined) {
     const s = update.settings;
-    if (!s || typeof s !== "object" || Array.isArray(s) || Object.keys(s).some((key) => !["on", "threshold"].includes(key))
+    if (!s || typeof s !== "object" || Array.isArray(s) || Object.keys(s).some((key) => !["on", "backOn", "threshold"].includes(key))
+      || s.backOn !== undefined && typeof s.backOn !== "boolean"
       || s.on !== undefined && typeof s.on !== "boolean"
       || s.threshold !== undefined && (!Number.isInteger(s.threshold) || s.threshold < 50 || s.threshold > 99)) throw new Error("Invalid quota settings");
   }
