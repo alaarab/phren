@@ -8,7 +8,7 @@ import { hookGet, hookPost } from "../api.js";
 import { hostMark } from "../changes.js";
 import { loadBranchTasks, renderBranchTasks } from "../branch-tasks.js";
 import { capitalize, checksWord, fixItPrompt, hostTerms, tokenPage } from "../git-review.js";
-import { connectProjectHost, hostTokenError } from "../project-host-token.js";
+import { connectProjectHost, hostTokenError, tokenDestinationText } from "../project-host-token.js";
 import { openLaunchSheet } from "../shell/launch.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
@@ -867,7 +867,7 @@ export function mountProjects(root) {
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "true");
     panel.setAttribute("aria-label", `Connect ${host.name}`);
-    bodyEl.append(el("div", "pj-notice", `The token will be sent to ${host.domain} and saved only on ${detail.computer}.`));
+    bodyEl.append(el("div", "pj-notice", `${tokenDestinationText(host)}. Saved only on ${detail.computer}.`));
     const page = el("button", "pj-btn", "Open token page ↗");
     page.addEventListener("click", () => window.open(tokenPage(host), "_blank", "noopener"));
     bodyEl.append(el("div", "pj-notice", host.kind === "gitlab" ? "Create a personal access token with the api scope." : "Use gitboy's Phren Hook token preset (read:user, read:repo, write:repo)."), page);

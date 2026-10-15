@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Token Connect shows and confirms the API destination when it differs from the remote, including configured ports; a Changes refresh keeps the visible card's destination bound to its submit handler.
+
 - Connect a GitLab or gitboy token from a project's Code block on Hooks with `projectHostToken`; the sheet shows the destination host and refuses submission if the checkout's remote changed. Changes also binds Connect to the displayed host.
 
 - A service-refused usage window draws a full red ring labeled “Exhausted” with its own reset, even when its reported usage is below 100%.

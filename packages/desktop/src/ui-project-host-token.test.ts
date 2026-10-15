@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { connectProjectHost, hostTokenError, projectHostTokenRequest } from "../ui/project-host-token.js";
+import { connectProjectHost, hostTokenError, projectHostTokenRequest, tokenDestinationText } from "../ui/project-host-token.js";
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -17,6 +17,13 @@ describe("project host Connect", () => {
     expect(url).toBe("/hosts/dev%20box/v1/projects/app%20docs/git/host-token");
     expect(request.method).toBe("POST");
     expect(JSON.parse(request.body)).toEqual({ token: "secret", expectedHost: "gitlab.example.com" });
+  });
+
+  it("shows and sends the configured API destination instead of the remote domain", () => {
+    const host = { domain: "gitlab.example.com", apiHost: "other.example:8443" };
+    expect(tokenDestinationText(host)).toBe("Sends the token to other.example:8443");
+    expect(projectHostTokenRequest("app", host, "secret").body)
+      .toEqual({ token: "secret", expectedHost: "other.example:8443" });
   });
 
   it.each([

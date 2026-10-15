@@ -77,8 +77,8 @@ export const requestID = () => randomUUID();
 export async function atomic(file: string, value: unknown, mode = 0o600): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`;
   const text = typeof value === "string" ? value : JSON.stringify(value);
-  await writeFile(temporary, text, { mode, flag: "wx" });
   try {
+    await writeFile(temporary, text, { mode, flag: "wx" });
     await renameOver(temporary, file);
   } finally {
     await unlink(temporary).catch(() => {});

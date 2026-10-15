@@ -4,7 +4,7 @@ import { hookPost } from "./api.js";
 export function projectHostTokenRequest(project, host, token) {
   return {
     route: `/v1/projects/${encodeURIComponent(project)}/git/host-token`,
-    body: { token: token.trim(), expectedHost: host.domain },
+    body: { token: token.trim(), expectedHost: host.apiHost ?? host.domain },
   };
 }
 
@@ -20,4 +20,8 @@ export async function connectProjectHost(computer, project, host, token) {
   const result = await hookPost(computer, route, body);
   if (!result.ok) throw Object.assign(new Error(hostTokenError(result)), { reason: result.reason });
   return result;
+}
+
+export function tokenDestinationText(host) {
+  return `Sends the token to ${host.apiHost ?? host.domain}`;
 }

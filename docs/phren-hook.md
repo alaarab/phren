@@ -493,14 +493,21 @@ by `capabilities.projectHostToken: true`. No chat pane is needed.
 
 The pane route `POST /v1/git/host-token` accepts optional `expectedHost` alongside
 `token`, the pane target and `expectedRepository`. Both token routes resolve the
-remote host fresh and, when `expectedHost` is supplied, compare its domain
-case-insensitively with the domain the client displayed (for example
-`gitlab.example.com`). A difference, including a missing remote host, returns
+API destination fresh, including the global `phren.<remote-domain>.api`
+override, and, when `expectedHost` is supplied, compare its host and port
+case-insensitively with the destination the client displayed (for example
+`other.example:8443`). The resolved API URL is pinned through token validation;
+a config change after the check cannot redirect that validation call.
+Project git info, pane git status and pull-list responses include `host.apiHost`
+for this destination, alongside the remote's `host.domain`. API URL credentials
+are never exposed. Clients show “Sends the token to <api host>” and submit that
+`apiHost` as `expectedHost`. A difference, including a missing remote host, returns
 HTTP `409` with `code: "host-changed"` before any token-bearing network call or
 save. The client must reopen Connect to review the new host. Clients should
 always send `expectedHost`; omission remains compatible on the pane route only.
 Tokens are validated with the resolved GitLab or gitboy host and saved privately
-on that computer, never logged or returned. An empty token disconnects, with the
+on that computer, never logged or returned. Credential temp files are created
+with mode 0600 and removed even when a write fails partway through. An empty token disconnects, with the
 same host guard. GitHub continues to use `gh auth login` on the computer.
 
 The `code` module serves the phone's indexed file tree, search, outlines,

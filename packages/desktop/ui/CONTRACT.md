@@ -586,15 +586,22 @@ refreshes on resize and usage renders; closing removes the resize listener.
 Projects' Code block lives in `sections/projects.js`. When its project git
 read reports `available: false`, `reason: "auth"` for GitLab or gitboy, it shows
 Connect only when `store.capabilities(computer).projectHostToken` is true.
-The project sheet shows the displayed host domain, links to the same token page
+The project sheet shows the displayed host domain and “Sends the token to <api host>”, links to the same token page
 as Changes and accepts a password field, clearing it on submission or close.
 `project-host-token.js` exports `projectHostTokenRequest(project, host, token)`,
 `connectProjectHost(computer, project, host, token)` and `hostTokenError(error)`.
-Connect posts `{ token, expectedHost: host.domain }` to
+Connect posts `{ token, expectedHost: host.apiHost ?? host.domain }` to
 `/v1/projects/:project/git/host-token` on the selected computer, without a pane.
 Success refreshes the Code block; `host-changed` says "The project's remote
 changed. Reopen to review the new host." and disables retry in that sheet.
 The Hook uses the GET route's checkout lookup, refuses `409 host-changed`
 before token use, and returns `404 no-checkout` when no checkout exists.
-Changes' existing Connect also sends the displayed host as `expectedHost` to
+Changes' existing Connect captures a copy of the host on its rendered card and
+sends that card's API destination as `expectedHost` to
 `/v1/git/host-token`. Unit coverage: `src/ui-project-host-token.test.ts`.
+
+The Hook returns `host.apiHost` in project git info, pane git status and pull
+lists, resolved from the global API override (including port) or the default
+API address. The Hook pins the checked endpoint through validation. A Changes
+refresh awaiting status cannot replace the destination attached to the still
+visible card's submit handler. Coverage: `src/ui-changes-connect.test.ts`.

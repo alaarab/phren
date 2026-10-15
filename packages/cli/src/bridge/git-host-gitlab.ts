@@ -225,9 +225,9 @@ export const gitlab: GitHostProvider = {
     }
   },
 
-  async whoami(root, host, token) {
+  async whoami(root, host, token, checkedApi) {
     if (!host.domain) throw new HostApiError("failed", "This repository has no GitLab remote.");
-    const base = await apiRoot(root, host.domain, `https://${host.domain}/api/v4`);
+    const base = checkedApi ?? await apiRoot(root, host.domain, `https://${host.domain}/api/v4`);
     const { json } = await hostJson<Json>(`${base}/user`, { token, scheme: "private-token" });
     return { user: String(obj(json).username ?? "") };
   },

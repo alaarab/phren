@@ -7,7 +7,7 @@ import { defaultBranch, invalidatePulls, invalidateTree } from "./git.js";
 import { z } from "zod";
 import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
 import { writeHostToken } from "./git-host-auth.js";
-import { HostApiError } from "./git-host-http.js";
+import { HostApiError, tokenDestination } from "./git-host-http.js";
 
 /** Finishing a session from the phone: commit what is staged, push the
  * current branch, open a pull request. Each acts on the repository the
@@ -201,17 +201,19 @@ export async function gitHostToken(cwd: string, data: unknown): Promise<Json> {
   const root = await repository(cwd);
   const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
   const host = await detectHost(root, branch);
-  // Use this freshly resolved host for both comparison and token validation.
-  if (expectedHost !== undefined && host.domain !== expectedHost.toLowerCase()) {
+  const { api, apiHost } = await tokenDestination(root, host);
+  host.apiHost = apiHost;
+  // Pin the resolved endpoint through validation, even if config changes now.
+  if (expectedHost !== undefined && apiHost !== expectedHost.toLowerCase()) {
     throw new BridgeError(409, "The project's remote changed. Reopen to review the new host.", { code: "host-changed" });
   }
   const provider = providerFor(host);
   if (!provider || !host.domain || !host.kind) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
-  if (host.kind === "github" || !provider.whoami) return { ok: false, reason: "unsupported", message: "GitHub uses the GitHub CLI's sign-in: run gh auth login on this computer.", host };
+  if (host.kind === "github" || !provider.whoami || !api) return { ok: false, reason: "unsupported", message: "GitHub uses the GitHub CLI's sign-in: run gh auth login on this computer.", host };
   const kind = host.kind;
   if (!token.trim()) { await writeHostToken(host.domain, kind, ""); return { ok: true, disconnected: true, domain: host.domain, host }; }
   try {
-    const identity = await provider.whoami(root, host, token.trim());
+    const identity = await provider.whoami(root, host, token.trim(), api);
     const user = identity.user.replaceAll(token.trim(), "[redacted]");
     await writeHostToken(host.domain, kind, token.trim(), user || undefined);
     return { ok: true, domain: host.domain, kind, ...(user ? { user } : {}), host };

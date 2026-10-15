@@ -54,6 +54,18 @@ describe("GET /v1/projects/:project/git", () => {
     expect(body.host).toMatchObject({ domain: "git.example.com", source: "none" });
   });
 
+  it("returns the actual API host in project git info without exposing URL credentials", async () => {
+    const repo = checkout("forge-api");
+    register("forge-api", repo);
+    vi.stubEnv("GIT_CONFIG_GLOBAL", path.join(work, "global.gitconfig"));
+    execFileSync("git", ["-C", repo, "remote", "set-url", "origin", "https://gitlab.example.com/me/forge.git"]);
+    execFileSync("git", ["-C", repo, "config", "--global", "phren.gitlab.example.com.api", "https://api-user:api-secret@other.example:8443/api/v4"]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("[]")));
+    const response = await hookGet("/v1/projects/forge-api/git");
+    expect(response).toMatchObject({ status: 200, body: { host: { domain: "gitlab.example.com", apiHost: "other.example:8443" } } });
+    expect(JSON.stringify(response)).not.toContain("api-secret");
+  });
+
   it("falls back to the folder a session ran in when the recorded path is another computer's", async () => {
     const repo = checkout("forge-elsewhere");
     register("forge-elsewhere", "/nowhere/forge-elsewhere");

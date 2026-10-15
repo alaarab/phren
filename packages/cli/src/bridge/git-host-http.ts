@@ -22,6 +22,16 @@ export async function apiRoot(root: string, domain: string, fallback: string): P
   return (configured || fallback).replace(/\/+$/, "");
 }
 
+/** Resolve the exact endpoint once, so Connect can check and use the same URL.
+ * Only the hostname/port is exposed to clients, never API URL credentials. */
+export async function tokenDestination(root: string, host: { kind: string | null; domain: string | null }): Promise<{ api: string | null; apiHost: string | null }> {
+  if (!host.domain || (host.kind !== "gitlab" && host.kind !== "gitboy")) return { api: null, apiHost: host.domain };
+  const api = await apiRoot(root, host.domain, `https://${host.domain}/api/${host.kind === "gitlab" ? "v4" : "v1"}`);
+  const url = new URL(api);
+  if (!["https:", "http:"].includes(url.protocol) || !url.host) throw new HostApiError("failed", "Invalid git host API address.");
+  return { api, apiHost: url.host.toLowerCase() };
+}
+
 export interface HostRequest {
   token?: string;
   /** How the token is sent: GitLab's PRIVATE-TOKEN header or a bearer token. */

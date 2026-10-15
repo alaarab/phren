@@ -4,6 +4,7 @@ import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
 import { git, gitHead, gitRoot, withGitReadDeadline, withIndependentGitReadDeadline, withoutGitReadDeadline } from "./projects.js";
+import { tokenDestination } from "./git-host-http.js";
 import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
 import { hostCredentialIdentity } from "./git-host-auth.js";
 import { LookupCache } from "./lookup-cache.js";
@@ -110,6 +111,7 @@ export interface GitStatus {
   staged: number; unstaged: number; untracked: number; additions: number; deletions: number; files: GitStatusFile[];
   /** The branch a push guards: the upstream remote's `HEAD`, else `main`/`master`. */
   defaultBranch: string | null;
+  host: Awaited<ReturnType<typeof detectHost>>;
 }
 
 async function repository(cwd: string): Promise<string> {
@@ -129,6 +131,9 @@ async function readGitStatus(cwd: string, untrackedPath?: string): Promise<GitSt
   treeCache.delete(root);
   const data = await collect(root);
   const fallback = await defaultBranch(root, data.upstream?.split("/")[0] || "origin");
+  const host = await detectHost(root, data.branch);
+  const { apiHost } = await tokenDestination(root, host);
+  host.apiHost = apiHost;
   if (untrackedPath !== undefined) {
     const prefix = await repositoryPath(root, untrackedPath);
     if (!data.untracked.some(file => file.endsWith("/") && (prefix + "/").startsWith(file))
@@ -169,7 +174,7 @@ async function readGitStatus(cwd: string, untrackedPath?: string): Promise<GitSt
     branch: data.branch, upstream: data.upstream ?? null, ahead: data.ahead, behind: data.behind,
     staged: data.staged.size, unstaged: data.unstaged.size, untracked: data.untracked.length,
     additions: files.reduce((total, file) => total + file.additions, 0), deletions: files.reduce((total, file) => total + file.deletions, 0), files,
-    defaultBranch: fallback };
+    defaultBranch: fallback, host };
 }
 
 /** The repository's remotes, so a branch ref can be told from a remote-tracking
@@ -303,7 +308,9 @@ export async function gitPulls(cwd: string, retried = false): Promise<Json> {
   const { root, branch, host } = await withIndependentGitReadDeadline(async () => {
     const root = await repository(cwd);
     const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
-    return { root, branch, host: await detectHost(root, branch) };
+    const host = await detectHost(root, branch);
+    const { apiHost } = await tokenDestination(root, host);
+    return { root, branch, host: { ...host, apiHost } };
   });
   const provider = providerFor(host);
   const credential = await credentialIdentity(host);

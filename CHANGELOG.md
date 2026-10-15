@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook Connect confirms and pins the actual API destination, including global overrides; Changes submits the host shown on its rendered card. Failed credential writes remove partially written private temp files.
+
 ### Added
 
 - Hook project token Connect (`POST /v1/projects/:project/git/host-token`, `projectHostToken` capability) and an `expectedHost` guard on token saves that refuses changed remotes before sending credentials.

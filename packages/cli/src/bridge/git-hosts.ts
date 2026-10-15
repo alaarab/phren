@@ -30,6 +30,8 @@ export interface GitHost {
   name: string;
   /** The remote's domain and the repository's web address, when known. */
   domain: string | null;
+  /** Actual token destination (including a configured API port), when resolved. */
+  apiHost?: string | null;
   webUrl: string | null;
   remote: string | null;
   /** How the kind was found: from the URL, from an override, or not at all. */
@@ -57,7 +59,7 @@ export interface GitHostProvider {
    * comes back as `{ ok: false, reason: "blocked", message }`. */
   merge(root: string, request: MergeRequest, host: GitHost): Promise<Json>;
   /** Who a token signs in as, for Connect; HTTP hosts only. */
-  whoami?(root: string, host: GitHost, token: string): Promise<{ user: string }>;
+  whoami?(root: string, host: GitHost, token: string, api?: string): Promise<{ user: string }>;
 }
 
 export type MergeMethod = "merge" | "squash" | "rebase";
