@@ -320,7 +320,8 @@ export function mountAgents(root) {
   // ------------------------------------------------------------ documents
   const quotaWarning = watchQuotaWarnings(() => {
     if (root.hidden || !session || tabs.active()?.kind !== "chat") return null;
-    return store.sessions().find((row) => row.computer === session.computer && row.child.id === session.child.id) ?? null;
+    const row = store.sessions().find((row) => row.computer === session.computer && row.child.id === session.child.id);
+    return row ? { ...row, interactionsPending: tabs.active().quotaInteractionPending !== false || row.child.approvalPending === true } : null;
   });
   const tabs = createTiles(tilesRoot, {
     emptyText: "Pick a session, or press \u2318K.",
@@ -414,7 +415,10 @@ export function mountAgents(root) {
     consoleEl.className = "session-pane session-console";
     consoleEl.hidden = true;
     el.append(chatEl, consoleEl, bar);
-    const chat = openChat(chatEl, computer, child, { onConsole: () => setMode("console") });
+    const chat = openChat(chatEl, computer, child, {
+      onConsole: () => setMode("console"),
+      onInteractions(pending) { doc.quotaInteractionPending = pending; void quotaWarning.check(); },
+    });
     let consoleHandle = null;
     let mode = "chat";
 

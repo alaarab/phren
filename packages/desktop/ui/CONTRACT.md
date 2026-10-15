@@ -442,10 +442,16 @@ returns notices and their tokens without consuming them; `quotaDestinations`
 ranks the move inventory by remaining room, excluding the current login.
 
 `shell/quota-warn-prefs.js` exports `quotaSettings`, `saveQuotaSettings`,
-`quotaSuppressed`, `suppressQuotaChat`, `quotaSeen`, `markQuotaSeen`. Settings ›
-Notifications saves the switch and threshold in `phren.desktop.quota-warning`;
-`phren.desktop.quota-warning-chats` persists opt-outs and
-`phren.desktop.quota-warning-seen` persists shown crossings across relaunches.
+`quotaSuppressed`, `suppressQuotaChat`, `quotaSeen`, `markQuotaSeen`,
+`unmarkQuotaSeen` and `loadQuotaState`. Call `loadQuotaState()` before decisions
+or edits; mutation functions return promises. Settings › Notifications waits
+for hydration and reports read/write failures. State is stored by the daemon,
+independently of its HTTP port: authenticated `GET /api/settings/quota-warning`
+returns `{ settings: { on, threshold }, suppressed: string[], seen: string[] }`;
+`POST` merges `{ settings?, suppress?, markSeen?, unmarkSeen? }`. The daemon
+serializes merges and atomically writes `$XDG_CONFIG_HOME/phren/desktop-quota.json`
+(default `~/.config/phren/desktop-quota.json`, mode 0600). Both client and daemon
+retain the newest 512 distinct seen tokens. Opt-outs persist per session ID.
 A session/window/reset gets one threshold notice and one exhaustion notice;
 percentage corrections do not rearm it. First observing an already-high window
 counts as its crossing. Missing, stale, ambiguous or reset usage is skipped.
@@ -455,8 +461,21 @@ counts as its crossing. Missing, stale, ambiguous or reset usage is skipped.
 chat/section changes and `usage-rings.js`'s `followUsage(fn)` (immediate latest
 snapshot, then each successful shared minute poll; returns unsubscribe). The
 passive sheet leaves chat interactive and focus untouched. Switch opens
-`openMoveSheet({ computer, child, to?: { harness, account } })` with the best
-available destination selected; the user confirms the hand-off there.
+`openMoveSheet({ computer, child, to?: { harness, account }, notice?, selectDefault?: boolean })` with the
+best destination selected from usage at click time; exhausted or unknown-room
+destinations are never preselected. When none has known room, the hand-off opens
+with `selectDefault: false` and explains why; Continue stays disabled until a
+destination is chosen. Exhaustion on either window replaces
+an open threshold notice; the sheet refreshes percentages and account room on
+usage updates. The user confirms the hand-off in Continue in.
+
+`openChat` accepts `opts.onInteractions(pending)` and reports the existing
+status stream's approval/question/password cards (initially pending until the
+first status). Agents carries this as `currentSession().interactionsPending`;
+overview `child.approvalPending` is an additional guard. `quotaInteractionPending`
+in the pure module shares the card status predicate. Pending interactions prevent
+opening; arriving interactions close the sheet and remove its seen token so it
+can reopen after the card clears. No extra status socket is opened.
 `moveChoices(inventory, current, currentAccount?)` allows the same Claude
 harness when another usable account exists; `moveAccounts(inventory,
 { includeDefault?: boolean })` includes the default when requested.

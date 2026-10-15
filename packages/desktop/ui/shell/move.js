@@ -56,7 +56,7 @@ function installStyles() {
   document.head.append(link);
 }
 
-export async function openMoveSheet({ computer, child, to = {} }) {
+export async function openMoveSheet({ computer, child, to = {}, notice = "", selectDefault = true }) {
   openSheet?.close();
   installStyles();
   const current = child.target?.source ?? child.agent;
@@ -73,6 +73,7 @@ export async function openMoveSheet({ computer, child, to = {} }) {
   head.append(el("h2", "launch-title", "Continue in another agent"), closeBtn);
   const body = el("div", "launch-body");
   body.append(el("div", "launch-note", `${child.title || child.label || "This session"} on ${computer}. It writes a hand-off and exits; the new agent starts in the same folder with that hand-off. Uncommitted changes stay where they are.`));
+  if (notice) body.append(el("div", "launch-note", notice));
   const harnessRow = el("div", "launch-segments");
   const harnessField = el("div", "launch-field");
   harnessField.append(el("span", "launch-label", "Continue in"), harnessRow);
@@ -100,7 +101,7 @@ export async function openMoveSheet({ computer, child, to = {} }) {
 
   function render() {
     const choices = moveChoices(state.inventory, current, child.account?.id);
-    if (!state.harness || !choices.some((c) => c.source === state.harness && c.usable)) state.harness = choices.find((c) => c.usable)?.source ?? "";
+    if (!choices.some((c) => c.source === state.harness && c.usable)) state.harness = selectDefault ? choices.find((c) => c.usable)?.source ?? "" : "";
     harnessRow.replaceChildren(...choices.map((c) => {
       const b = el("button", `launch-seg${c.source === state.harness ? " selected" : ""}`, c.label);
       b.type = "button";

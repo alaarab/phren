@@ -38,7 +38,7 @@ export function quotaWarnings(session, row, { preferences = {}, suppressed = [],
     const stage = w.used >= 100 ? "exhausted" : "near";
     const token = `${base}/${stage}`;
     return seen.includes(token) || (stage === "near" && seen.includes(`${base}/exhausted`)) ? [] : [{ ...w, token, stage }];
-  });
+  }).sort((a, b) => Number(b.stage === "exhausted") - Number(a.stage === "exhausted") || b.used - a.used);
 }
 
 /** Rank only signed-in move destinations on this computer by their tightest
@@ -56,7 +56,14 @@ export function quotaDestinations(session, choices, accounts, usage, now = Date.
     const row = rows.length === 1 && !rows[0].stale ? rows[0] : null;
     const known = (row?.windows ?? []).filter((w) => !w.reset && !(Date.parse(w.resetsAt) <= now)).map((w) => ({ used: w.exhausted || w.limited ? 100 : Number.isFinite(w.usedPercent) ? w.usedPercent : Number.isFinite(w.leftPercent) ? 100 - w.leftPercent : null })).filter((w) => w.used !== null);
     const left = known.length ? Math.max(0, 100 - Math.max(...known.map((w) => w.used))) : null;
-    const exhausted = left === 0 || Boolean(row?.exhausted && !(row.windows ?? []).length);
+    const exhausted = left === 0 || Boolean(row?.exhausted);
     return { ...candidate, row, left, exhausted, sameAccount: Boolean(row && current && row.id === current.id) };
   }).filter((c) => !c.sameAccount).sort((a, b) => Number(a.exhausted) - Number(b.exhausted) || (b.left ?? -1) - (a.left ?? -1) || a.label.localeCompare(b.label));
+}
+
+/** The same status fields that renderInteractions uses for inline cards. */
+export function quotaInteractionPending(status) {
+  return !status || Boolean(status.pendingApproval || status.passwordPrompt
+    || status.pendingQuestions?.some((prompt) => prompt.questions?.length)
+    || status.terminalPrompt?.questions?.length);
 }

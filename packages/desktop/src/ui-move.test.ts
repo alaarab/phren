@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { moveAccounts, moveChoices, moveStatus } from "../ui/shell/move.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { moveAccounts, moveChoices, moveStatus, openMoveSheet } from "../ui/shell/move.js";
+
+import { hookGet } from "../ui/api.js";
+vi.mock("../ui/api.js", () => ({ hookGet: vi.fn(), hookPost: vi.fn() }));
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 const inventory = [
   { source: "claude", installed: true, usable: true, accounts: [{ id: "default", usable: true }, { id: "work", label: "Work", usable: true }, { id: "old", usable: false }] },
@@ -30,4 +34,33 @@ describe("continue in another agent", () => {
     expect(moveStatus({ state: "moved", handoff: { source: "fallback" } })).toBe("Moved (Phren wrote the hand-off from the transcript)");
     expect(moveStatus({ state: "failed", error: "pane closed" })).toBe("The move failed: pane closed");
   });
+});
+
+
+it("leaves Continue in unselected when no destination has room, until the user chooses", async () => {
+  class Node {
+    children: Node[] = [];
+    textContent = "";
+    className = "";
+    disabled = false;
+    style: Record<string, string> = {};
+    listeners = new Map<string, () => void>();
+    append(...children: Node[]) { this.children.push(...children); }
+    replaceChildren(...children: Node[]) { this.children = children; }
+    setAttribute() {}
+    addEventListener(event: string, fn: () => void) { this.listeners.set(event, fn); }
+    focus() {}
+    remove() {}
+    find(text: string): Node | undefined { return this.textContent === text ? this : this.children.map((n) => n.find(text)).find(Boolean); }
+  }
+  const body = new Node();
+  vi.stubGlobal("document", { body, getElementById: () => ({}), createElement: () => new Node() });
+  vi.mocked(hookGet).mockResolvedValue({ harnesses: inventory });
+  await openMoveSheet({ computer: "Desk", child: { target: { source: "claude" } }, selectDefault: false, notice: "No account has room." });
+  expect(body.find("No account has room.")).toBeDefined();
+  expect(body.find("Continue")?.disabled).toBe(true);
+  expect(body.find("Codex")?.className).not.toContain("selected");
+  body.find("Codex")!.listeners.get("click")!();
+  expect(body.find("Continue")?.disabled).toBe(false);
+  expect(body.find("Codex")?.className).toContain("selected");
 });

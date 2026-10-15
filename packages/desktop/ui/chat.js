@@ -1,3 +1,4 @@
+import { quotaInteractionPending } from "./shell/quota-warn.js";
 // The chat pane: the phone's chat on the desktop. Plain browser ES module.
 // Reads the transcript through @phren/desktop-kit (every harness), keeps
 // history and older pages, draws interaction cards and the phone's composer.
@@ -66,6 +67,7 @@ function ensureStyle() {
  */
 export function openChat(el, computerName, child, opts = {}) {
   ensureStyle();
+  opts.onInteractions?.(true);
   const target = (child && child.target) || {};
   const source = String(target.source || "").toLowerCase();
   const provider = providerName(source);
@@ -301,6 +303,7 @@ export function openChat(el, computerName, child, opts = {}) {
     composer.setStatus(agentStatus);
     updateContextRing();
     renderCards();
+    opts.onInteractions?.(quotaInteractionPending(agentStatus));
     maybeFetchSudo();
     maybeFetchSubagents();
     render();

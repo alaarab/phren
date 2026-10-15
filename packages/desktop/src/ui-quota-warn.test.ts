@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { quotaDestinations, quotaPreferences, quotaSessionKey, quotaWarnings, sessionUsage } from "../ui/shell/quota-warn.js";
-import { markQuotaSeen, quotaSeen, quotaSettings, quotaSuppressed, saveQuotaSettings, suppressQuotaChat } from "../ui/shell/quota-warn-prefs.js";
+import { quotaDestinations, quotaPreferences, quotaSessionKey, quotaWarnings, quotaInteractionPending, sessionUsage } from "../ui/shell/quota-warn.js";
+import { loadQuotaState, markQuotaSeen, quotaSeen, quotaSettings, quotaSuppressed, saveQuotaSettings, suppressQuotaChat } from "../ui/shell/quota-warn-prefs.js";
 
 const now = Date.parse("2026-10-14T12:00:00Z");
 const reset = "2026-10-14T14:00:00Z";
@@ -66,7 +66,7 @@ describe("chat quota decisions", () => {
     const codex = { ...session, child: { id: "tab2", target: { source: "codex", session: "c2" } } };
     const usage = { id: "codex|login", harness: "codex", computers: [{ name: "Desk" }], windows: [{ id: "codex:primary", usedPercent: 93 }, { id: "codex:secondary", exhausted: true }] };
     expect(sessionUsage(codex, [usage])).toBe(usage);
-    expect(quotaWarnings(codex, usage, { now }).map((w) => [w.label, w.stage])).toEqual([["5-hour", "near"], ["weekly", "exhausted"]]);
+    expect(quotaWarnings(codex, usage, { now }).map((w) => [w.label, w.stage])).toEqual([["weekly", "exhausted"], ["5-hour", "near"]]);
   });
 
   it("ranks available destinations by the tightest window, keeping exhausted and unknown explicit", () => {
@@ -78,15 +78,24 @@ describe("chat quota decisions", () => {
     ]);
   });
 
-  it("defaults to enabled at 90 and validates saved thresholds", () => {
+  it.each([
+    [undefined, true], [{}, false], [{ pendingApproval: { actionId: "a" } }, true],
+    [{ pendingQuestions: [{ questions: [{ question: "Choose" }] }] }, true],
+    [{ terminalPrompt: { questions: [{ question: "Continue?" }] } }, true],
+    [{ passwordPrompt: true }, true], [{ pendingQuestions: [] }, false],
+  ])("gives interaction cards priority for status %j", (status, expected) => {
+    expect(quotaInteractionPending(status)).toBe(expected);
+  });
+
+  it("defaults to enabled at 90 and validates saved thresholds", async () => {
     expect(quotaPreferences()).toEqual({ on: true, threshold: 90 });
     for (const threshold of [null, "bad", 49, 100]) expect(quotaPreferences({ threshold }).threshold).toBe(90);
-    const data = new Map<string, string>();
-    vi.stubGlobal("localStorage", { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v) });
-    saveQuotaSettings({ threshold: 95, on: false });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ settings: { on: true, threshold: 90 }, suppressed: [], seen: [] }) })));
+    await loadQuotaState();
+    await saveQuotaSettings({ threshold: 95, on: false });
     expect(quotaSettings()).toEqual({ on: false, threshold: 95 });
-    suppressQuotaChat(quotaSessionKey(session));
-    markQuotaSeen("shown-token");
+    await suppressQuotaChat(quotaSessionKey(session));
+    await markQuotaSeen("shown-token");
     expect(quotaSuppressed()).toContain(quotaSessionKey(session));
     expect(quotaSeen()).toContain("shown-token");
   });
