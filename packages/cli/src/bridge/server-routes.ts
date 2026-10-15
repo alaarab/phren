@@ -36,7 +36,7 @@ import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
-import { PROJECT_GIT_ROUTE, projectGit } from "./project-git.js";
+import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
 import { liveBackground, markBackground, paneRecord, recordTitle, replyExcerpt } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
@@ -151,7 +151,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -384,9 +384,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         else if (route === "tasks/complete") result = completeProjectTask(modules.store, project, await body(request));
         else result = await saveFinding(modules.store, project, await body(request));
       } else if (PROJECT_GIT_ROUTE.test(url.pathname)) {
-        if (request.method !== "GET") throw new BridgeError(405, "Unsupported request method.");
+        const [, project, tokenRoute] = PROJECT_GIT_ROUTE.exec(url.pathname)!;
+        if (request.method !== (tokenRoute ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
         if (!modules.has("git")) throw new BridgeError(404, disabledHint("git"));
-        result = await projectGit(modules.store, PROJECT_GIT_ROUTE.exec(url.pathname)![1], await journal.recent());
+        result = tokenRoute
+          ? await projectHostToken(modules.store, project, await journal.recent(), await body(request))
+          : await projectGit(modules.store, project, await journal.recent());
       } else if (url.pathname.startsWith("/v1/store/")) {
         result = await storeRoute(modules.store, request.method ?? "", url, request.method === "POST" ? await body(request) : undefined);
       } else if (request.method === "GET") {

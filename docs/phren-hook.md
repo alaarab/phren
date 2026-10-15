@@ -486,6 +486,23 @@ checkout this computer recorded for the project, else the first folder
 `code: "no-checkout"`. It needs the `git` module. Phren desktop's Projects page
 shows it as the project's Code block.
 
+`POST /v1/projects/:project/git/host-token` takes `{ token, expectedHost }`
+(both required), using exactly the same checkout lookup and `404` with
+`code: "no-checkout"` as that GET. It needs the `git` module and is advertised
+by `capabilities.projectHostToken: true`. No chat pane is needed.
+
+The pane route `POST /v1/git/host-token` accepts optional `expectedHost` alongside
+`token`, the pane target and `expectedRepository`. Both token routes resolve the
+remote host fresh and, when `expectedHost` is supplied, compare its domain
+case-insensitively with the domain the client displayed (for example
+`gitlab.example.com`). A difference, including a missing remote host, returns
+HTTP `409` with `code: "host-changed"` before any token-bearing network call or
+save. The client must reopen Connect to review the new host. Clients should
+always send `expectedHost`; omission remains compatible on the pane route only.
+Tokens are validated with the resolved GitLab or gitboy host and saved privately
+on that computer, never logged or returned. An empty token disconnects, with the
+same host guard. GitHub continues to use `gh auth login` on the computer.
+
 The `code` module serves the phone's indexed file tree, search, outlines,
 definitions with linked findings, where each function or type is used, what
 changed, the full most-used ranking and per-file change chips. Code opens from the project, a session's Changes band or chat

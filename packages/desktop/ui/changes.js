@@ -6,6 +6,7 @@ import { isShown, watchShown } from "./shown.js";
 import { hookGet, hookPost, readRepoFile } from "./api.js";
 import { projectOf } from "./shell/store.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
+import { hostTokenError } from "./project-host-token.js";
 import { branchProblem, capitalize, checksSummary, checksWord, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
@@ -1079,13 +1080,13 @@ export function openChanges(el, ctx) {
     if (state.busy) return;
     state.busy = "connect"; render();
     try {
-      const res = await hookPost(computer, "/v1/git/host-token", scopeBody({ token: String(token || "").trim(), expectedRepository: repo() }));
+      const res = await hookPost(computer, "/v1/git/host-token", scopeBody({ token: String(token || "").trim(), expectedRepository: repo(), expectedHost: state.pulls?.host?.domain }));
       if (res && res.ok) {
         state.connect = null;
         toast(res.disconnected ? `Disconnected ${res.domain}` : `Connected${res.user ? ` as @${res.user}` : ""}`);
         state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody());
       } else (state.connect || (state.connect = { token: "" })).error = (res && res.message) || "The host refused that token.";
-    } catch (e) { (state.connect || (state.connect = { token: "" })).error = newerHook(e, "host-token"); }
+    } catch (e) { (state.connect || (state.connect = { token: "" })).error = e?.code === "host-changed" ? hostTokenError(e) : newerHook(e, "host-token"); }
     finally { state.busy = null; render(); }
   }
 

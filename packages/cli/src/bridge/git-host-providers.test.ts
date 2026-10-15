@@ -233,9 +233,15 @@ describe("GitLab and gitboy providers", () => {
     const repo = await repository("git@gitboy.example.com:sam/app.git", "gitboy.example.com", `${host.origin}/api/v1`);
     const file = path.join(process.env.PHREN_BRIDGE_HOME!, "git-hosts.json");
 
+    // The checkout changed after the client displayed a different host.
+    await expect(gitHostToken(repo, { token: "gbp_good", expectedHost: "gitlab.example.com" }))
+      .rejects.toMatchObject({ status: 409, details: { code: "host-changed" } });
+    expect(host.seen).toEqual([]);
+    await expect(stat(file)).rejects.toThrow();
+
     expect(await gitHostToken(repo, { token: "gbp_bad" })).toMatchObject({ ok: false, reason: "auth" });
     await expect(stat(file)).rejects.toThrow();
-    expect(await gitHostToken(repo, { token: "gbp_good" })).toMatchObject({ ok: true, user: "sam", kind: "gitboy" });
+    expect(await gitHostToken(repo, { token: "gbp_good", expectedHost: "GITBOY.EXAMPLE.COM" })).toMatchObject({ ok: true, user: "sam", kind: "gitboy" });
     if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(file, "utf8")).hosts["gitboy.example.com"]).toMatchObject({ kind: "gitboy", token: "gbp_good", user: "sam" });
     expect(await gitPulls(repo)).toMatchObject({ available: true, account: { source: "file", user: "sam" } });

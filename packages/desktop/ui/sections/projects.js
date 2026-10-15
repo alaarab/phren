@@ -7,7 +7,8 @@ import { extractKnowsBlock } from "../chat/knows.js";
 import { hookGet, hookPost } from "../api.js";
 import { hostMark } from "../changes.js";
 import { loadBranchTasks, renderBranchTasks } from "../branch-tasks.js";
-import { capitalize, checksWord, fixItPrompt, hostTerms } from "../git-review.js";
+import { capitalize, checksWord, fixItPrompt, hostTerms, tokenPage } from "../git-review.js";
+import { connectProjectHost, hostTokenError } from "../project-host-token.js";
 import { openLaunchSheet } from "../shell/launch.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
@@ -532,7 +533,11 @@ export function mountProjects(root) {
     project.forge = { loading: true };
     renderDetail();
     try {
-      project.forge = { data: await hookGet(detail.computer, `/v1/projects/${encodeURIComponent(project.name)}/git`) };
+      const [data, capabilities] = await Promise.all([
+        hookGet(detail.computer, `/v1/projects/${encodeURIComponent(project.name)}/git`),
+        store.capabilities(detail.computer),
+      ]);
+      project.forge = { data, projectHostToken: capabilities.projectHostToken === true };
       void loadForgeTasks(detail, project, project.forge);
     } catch (err) {
       const code = err?.body?.code;
@@ -679,6 +684,12 @@ export function mountProjects(root) {
     list.append(branch);
     if (forge.tasks) list.append(renderBranchTasks({ computer: state.detail.computer, project: project.name, branch: res.branch, state: forge.tasks, rerender: renderDetail }));
     if (res.available === false) {
+      if (res.reason === "auth" && forge.projectHostToken && tokenPage(host)) {
+        const connect = el("button", "pj-btn primary", "Connect");
+        const detail = state.detail;
+        connect.addEventListener("click", () => openHostConnect(detail, host));
+        list.append(connect);
+      }
       list.append(el("div", "pj-empty slim", res.message || `${capitalize(terms.long)}s are not available from this computer.`));
       return block;
     }
@@ -810,6 +821,7 @@ export function mountProjects(root) {
   function closeSheet() {
     if (!openSheetEl) return;
     document.removeEventListener("keydown", openSheetEl.onKey);
+    openSheetEl.onClose?.();
     openSheetEl.backdrop.remove();
     openSheetEl = null;
   }
@@ -843,6 +855,63 @@ export function mountProjects(root) {
     box.textContent = text;
     box.className = danger ? "pj-notice danger" : "pj-notice";
     box.hidden = !text;
+  }
+
+  function openHostConnect(detail, displayedHost) {
+    const host = { ...displayedHost };
+    const { bodyEl, footer } = openSheet(`Connect ${host.name}`);
+    const sheet = openSheetEl;
+    const previousFocus = document.activeElement;
+    sheet.onClose = () => { input.value = ""; previousFocus?.focus(); };
+    const panel = sheet.backdrop.querySelector(".pj-sheet");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", `Connect ${host.name}`);
+    bodyEl.append(el("div", "pj-notice", `The token will be sent to ${host.domain} and saved only on ${detail.computer}.`));
+    const page = el("button", "pj-btn", "Open token page ↗");
+    page.addEventListener("click", () => window.open(tokenPage(host), "_blank", "noopener"));
+    bodyEl.append(el("div", "pj-notice", host.kind === "gitlab" ? "Create a personal access token with the api scope." : "Use gitboy's Phren Hook token preset (read:user, read:repo, write:repo)."), page);
+    const input = el("input", "pj-input");
+    input.type = "password"; input.autocomplete = "off"; input.spellcheck = false;
+    bodyEl.append(field("Token", input));
+    const notice = noticeBox();
+    notice.setAttribute("role", "status");
+    bodyEl.append(notice);
+    const cancel = el("button", "pj-btn", "Cancel");
+    cancel.addEventListener("click", closeSheet);
+    const connect = el("button", "pj-btn primary", "Connect");
+    connect.disabled = true;
+    let busy = false, changed = false;
+    input.addEventListener("input", () => { connect.disabled = busy || changed || !input.value.trim(); });
+    async function submit() {
+      if (busy || changed || !input.value.trim()) return;
+      busy = true; connect.disabled = true; connect.textContent = "Checking…";
+      setNotice(notice, "", false);
+      try {
+        await connectProjectHost(detail.computer, detail.name, host, input.value);
+        if (openSheetEl === sheet) closeSheet();
+        if (state.detail === detail) await loadForge();
+      } catch (error) {
+        changed = error?.code === "host-changed";
+        setNotice(notice, hostTokenError(error), true);
+        if (changed && state.detail === detail) await loadForge();
+      } finally {
+        input.value = ""; busy = false;
+        connect.textContent = "Connect"; connect.disabled = true;
+      }
+    }
+    connect.addEventListener("click", submit);
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); void submit(); } });
+    // Keep keyboard focus inside the modal while it is open.
+    sheet.backdrop.addEventListener("keydown", (event) => {
+      if (event.key !== "Tab") return;
+      const controls = [...sheet.backdrop.querySelectorAll("button:not(:disabled), input")];
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+    footer.append(cancel, connect);
+    input.focus();
   }
 
   function openAddProject() {

@@ -2,20 +2,20 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearProjectConfigCache } from "../project-config.js";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { createRouteHandler } from "./server-routes.js";
 
 let store: string, work: string, cleanups: (() => void)[] = [];
 
-async function hookGet(url: string, { git = true, activity = [] as unknown[] } = {}): Promise<{ status: number; body: any }> {
+async function hookGet(url: string, { git = true, activity = [] as unknown[], data = undefined as unknown } = {}): Promise<{ status: number; body: any }> {
   const handler = createRouteHandler({ modules: { has: (name: string) => name !== "git" || git, store }, info: {}, streams: {},
     agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set() }, journal: { record: async () => {}, recent: async () => activity },
     tabActivity: { observe: async () => new Map() }, contextUsage: { read: async () => new Map() } } as never);
   let result = "";
   const response = { statusCode: 200, setHeader() {}, end(value: string) { result = value; } };
-  await handler({ url, method: "GET", [Symbol.asyncIterator]: async function* () {} } as unknown as IncomingMessage, response as unknown as ServerResponse);
+  await handler({ url, method: data === undefined ? "GET" : "POST", headers: {}, [Symbol.asyncIterator]: async function* () { if (data !== undefined) yield Buffer.from(JSON.stringify(data)); } } as unknown as IncomingMessage, response as unknown as ServerResponse);
   return { status: response.statusCode, body: JSON.parse(result) };
 }
 
@@ -42,7 +42,7 @@ beforeEach(() => {
   initTestPhrenRoot(store);
   clearProjectConfigCache();
 });
-afterEach(() => { for (const cleanup of cleanups) cleanup(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const cleanup of cleanups) cleanup(); });
 
 describe("GET /v1/projects/:project/git", () => {
   it("reads the registered checkout's branch and host", async () => {
@@ -67,5 +67,48 @@ describe("GET /v1/projects/:project/git", () => {
     expect(await hookGet("/v1/projects/forge-missing/git")).toMatchObject({ status: 404, body: { code: "no-checkout" } });
     expect((await hookGet("/v1/projects/forge-missing/git", { git: false })).status).toBe(404);
     expect((await hookGet("/v1/projects/..%2Fetc/git")).status).toBe(400);
+  });
+});
+
+describe("POST /v1/projects/:project/git/host-token", () => {
+  it("uses the same checkout lookup and no-checkout refusal, with the git module required", async () => {
+    register("forge-missing", "/nowhere/forge-missing");
+    const data = { token: "private-test-token", expectedHost: "gitlab.example.com" };
+    expect(await hookGet("/v1/projects/forge-missing/git/host-token", { data }))
+      .toEqual({ status: 404, body: { error: "No checkout of this project on this computer.", code: "no-checkout" } });
+    expect((await hookGet("/v1/projects/forge-missing/git/host-token", { data, git: false })).status).toBe(404);
+  });
+
+  it("checks the fresh host before contacting it, saves only a matching token, and keeps secrets out of replies and logs", async () => {
+    const repo = checkout("forge-connect");
+    register("forge-connect", "/nowhere/forge-connect");
+    execFileSync("git", ["-C", repo, "remote", "set-url", "origin", "https://gitlab.example.com/me/forge.git"]);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(work, "bridge"));
+    const token = "private-test-token";
+    const logs = ["log", "warn", "error", "info", "debug"].map(method => vi.spyOn(console, method as "log").mockImplementation(() => {}));
+    const fetchHost = vi.fn().mockResolvedValue(new Response(JSON.stringify({ username: "sam" })));
+    vi.stubGlobal("fetch", fetchHost);
+    const route = "/v1/projects/forge-connect/git/host-token";
+    const activity = [{ directory: path.join(repo, "src"), at: "2026-10-12T00:00:00Z" }];
+    const file = path.join(work, "bridge", "git-hosts.json");
+    const mismatch = await hookGet(route, { activity, data: { token, expectedHost: "gitlab.old.example.com" } });
+    expect(mismatch).toEqual({ status: 409, body: { error: "The project's remote changed. Reopen to review the new host.", code: "host-changed" } });
+    expect(fetchHost).not.toHaveBeenCalled();
+    expect(fs.existsSync(file)).toBe(false);
+    const missingHost = await hookGet(route, { activity, data: { token } });
+    expect(missingHost.status).toBe(400);
+    expect(fetchHost).not.toHaveBeenCalled();
+    const success = await hookGet(route, { activity, data: { token, expectedHost: "gitlab.example.com" } });
+    expect(success).toMatchObject({ status: 200, body: { ok: true, domain: "gitlab.example.com", user: "sam" } });
+    expect(fetchHost).toHaveBeenCalledTimes(1);
+    expect(fetchHost.mock.calls[0][1].headers["PRIVATE-TOKEN"]).toBe(token);
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).hosts["gitlab.example.com"].token).toBe(token);
+    fetchHost.mockResolvedValue(new Response(JSON.stringify({ message: `invalid token ${token}` }), { status: 500 }));
+    const refused = await hookGet(route, { activity, data: { token, expectedHost: "gitlab.example.com" } });
+    expect(refused).toMatchObject({ status: 200, body: { ok: false, reason: "failed" } });
+    fetchHost.mockResolvedValue(new Response(JSON.stringify({ username: token })));
+    const echoed = await hookGet(route, { activity, data: { token, expectedHost: "gitlab.example.com" } });
+    expect(echoed).toMatchObject({ status: 200, body: { ok: true, user: "[redacted]" } });
+    expect(JSON.stringify([mismatch, missingHost, success, refused, echoed, ...logs.map(log => log.mock.calls)])).not.toContain(token);
   });
 });

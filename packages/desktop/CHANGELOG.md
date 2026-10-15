@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Connect a GitLab or gitboy token from a project's Code block on Hooks with `projectHostToken`; the sheet shows the destination host and refuses submission if the checkout's remote changed. Changes also binds Connect to the displayed host.
+
 - A service-refused usage window draws a full red ring labeled “Exhausted” with its own reset, even when its reported usage is below 100%.
 
 - Usage reset labels share the warning's wording: whole hours omit zero minutes, partial minutes round up, and resets a day or more away show the local weekday and time in warnings, account usage and ring tooltips.
