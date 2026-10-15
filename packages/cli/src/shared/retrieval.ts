@@ -1,4 +1,5 @@
 // shared-retrieval.ts — shared retrieval core used by hooks and MCP search.
+import { getProjectRemote, readProjectConfig } from "../project-config.js";
 import {
   type RetentionPolicy,
   getQualityMultiplier,
@@ -20,6 +21,7 @@ import {
 import {
   filterTrustedFindingsDetailed,
 } from "./content.js";
+import { cachedCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
 import { parseCitationComment } from "../content/citation.js";
 import { getHighImpactFindings } from "../finding/impact.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
@@ -827,6 +829,23 @@ export type TrustFilterQueueItem = { project: string; section: "Stale" | "Confli
 
 export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueItem[]; auditEntries: string[] };
 
+/** Restore only citation metadata for retained bullets; the FTS index omits comments. */
+function restoreCitationComments(content: string, sourceFile: string): string {
+  try {
+    const key = (line: string) => /<!--\s*fid:([a-z0-9]{8})/i.exec(line)?.[1]
+      ?? line.replace(/<!--[\s\S]*?-->/g, "").trim();
+    const source = fs.readFileSync(sourceFile, "utf8").split("\n");
+    const citations = new Map<string, string>();
+    for (let i = 0; i < source.length - 1; i++) {
+      if (source[i].startsWith("- ") && parseCitationComment(source[i + 1])) citations.set(key(source[i]), source[i + 1]);
+    }
+    return content.split("\n").map((line, index, lines) => {
+      const citation = line.startsWith("- ") ? citations.get(key(line)) : undefined;
+      return citation && !parseCitationComment(lines[index + 1] ?? "") ? `${line}\n${citation}` : line;
+    }).join("\n");
+  } catch { return content; }
+}
+
 /** Apply trust filter to rows. Returns filtered rows plus any queue/audit items to be written
  * by the caller — retrieval itself should remain side-effect-free.
  *
@@ -861,7 +880,7 @@ export function applyTrustFilter(
         if (conflicts.length) queueItems.push({ project: doc.project, section: "Conflicts", items: conflicts });
         auditEntries.push(`project=${doc.project} type=${doc.type} stale=${stale.length} invalid_citation=${conflicts.length}`);
       }
-      return { ...doc, content: trust.content };
+      return { ...doc, content: restoreCitationComments(trust.content, doc.path) };
     })
     .filter((doc) => {
       return !TRUST_FILTERED_TYPES.has(doc.type) || Boolean(doc.content.trim());
@@ -1093,16 +1112,17 @@ export interface SelectedSnippet {
 
 /** Mark snippet lines with stale citations (cited file missing or line content changed).
  * @internal Exported for tests. */
-export function markStaleCitations(snippet: string): string {
+export function markStaleCitations(snippet: string, opts: CitationFreshnessOptions = {}): string {
   const lines = snippet.split("\n");
   const result: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    let line = lines[i];
     // Check if the next line is a citation comment
     const nextLine = lines[i + 1];
     if (nextLine) {
       const citation = parseCitationComment(nextLine);
       if (citation && citation.file) {
+        line += citationFreshnessAnnotation(citation, cachedCitationFreshness(citation, opts));
         const resolvedFile = citation.repo
           ? path.resolve(citation.repo, citation.file)
           : (path.isAbsolute(citation.file) ? citation.file : null);
@@ -1214,12 +1234,13 @@ export function selectSnippets(
     // The bullet that matched, not the doc's opening lines.
     const match = bestChunkMatch(queryTokens, doc);
     const source = match && match.distinct >= MIN_CHUNK_MATCHES ? match.chunk : extractSnippet(doc.content, keywords, 8);
-    let snippet = compactSnippet(source, lineBudget, charBudget);
+    // Read cached freshness before compaction can cut a citation comment. No refresh here.
+    const root = doc.path ? path.dirname(path.dirname(doc.path)) : undefined;
+    const annotated = TRUST_FILTERED_TYPES.has(doc.type) ? markStaleCitations(source, root ? {
+      phrenPath: root, projectRemote: getProjectRemote(root, doc.project, readProjectConfig(root, doc.project)),
+    } : {}) : source;
+    let snippet = compactSnippet(annotated, lineBudget, charBudget);
     if (!snippet.trim()) continue;
-    // Mark findings with stale citations before injection
-    if (TRUST_FILTERED_TYPES.has(doc.type)) {
-      snippet = markStaleCitations(snippet);
-    }
     snippet = dedupSnippetBullets(snippet);
     if (!snippet.trim()) continue;
     let focusScore = queryTokens.length > 0

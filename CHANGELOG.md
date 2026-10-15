@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Search marks findings whose cited file changed on gitboy since the cited commit as may be out of date.
+
 ## [0.3.49] - 2026-10-15
 
 ### Fixed

@@ -282,3 +282,16 @@ describe("store writes", () => {
     expect((await svc.notes(B, "proj-a")).items).toEqual([]);
   });
 });
+
+
+it("adds the owning Hook's cached freshness to mirrored findings", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "desktop-freshness-"));
+  const store = fakeStore({ "proj-a/FINDINGS.md": '# proj-a Findings\n\n## 2026-10-15\n\n- Cache key collides <!-- fid:12345678 -->\n' });
+  const citationFreshness = { state: "changed", checkedAt: "2026-10-15T01:00:00Z", lastCommit: null };
+  const hookRequest: HookRequest = async (computer, method, route, body) => route === "/v1/projects/proj-a/memory"
+    ? json({ findings: [{ id: "fid:12345678", citationFreshness }] }) : store.request(computer, method, route, body);
+  try {
+    const service = createMemoryService({ home, cacheDir: path.join(home, "cache"), hookRequest });
+    expect((await service.findings(B, "proj-a")).items).toMatchObject([{ stableId: "12345678", citationFreshness }]);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

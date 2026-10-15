@@ -557,6 +557,8 @@ Fetch the full content of a specific memory entry by its ID. Use it to expand a 
 
 ### `search_knowledge`
 
+Search marks a finding whose cited file changed on gitboy since the cited commit as `[may be out of date: <file> changed in <sha7> "<summary>"]`, or `changed since cited` when commit details are unavailable. Checks share a 1,500 ms budget and a runtime cache; failures are `unknown` and show no warning. Document results include citation freshness alongside each citation. Hook memory findings expose optional `citationFreshness` (`state`, `checkedAt`, optional `head` and `lastCommit` with `sha`, `summary`, `authoredAt`); Hook responses use the cache and refresh in the background. Prompt injection only reads cached checks. Set `PHREN_CITATION_FRESHNESS=off` to disable.
+
 Search the user's personal project store using FTS5 full-text search with synonym expansion.
 
 | Parameter | Type | Required | Description |

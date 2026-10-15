@@ -421,7 +421,15 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       const dir = await storeDir(computer);
       const file = path.join(dir, name, FINDINGS_FILENAME);
       const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-      return { items: text ? parseFindingsContent(text) : [] };
+      const items = text ? parseFindingsContent(text) : [];
+      // Freshness is runtime state on the owning computer, outside the mirrored store.
+      const memory = await hookJson(computer, `/v1/projects/${encodeURIComponent(name)}/memory`).catch(() => null);
+      const findings = memory && Array.isArray(memory.findings) ? memory.findings as Array<{ id: string; citationFreshness?: unknown }> : [];
+      const freshness = new Map(findings.map(item => [item.id, item.citationFreshness]));
+      return { items: items.map(item => {
+        const citationFreshness = freshness.get(item.stableId ? `fid:${item.stableId}` : item.id);
+        return citationFreshness ? { ...item, citationFreshness } : item;
+      }) };
     },
 
     async review(computer, project) {
