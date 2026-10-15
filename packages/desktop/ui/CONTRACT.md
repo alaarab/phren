@@ -540,3 +540,10 @@ and unknown windows follow active known usage, with stable ties. Off macOS,
 Ctrl+Alt bindings match the reported character without physical-key fallback;
 Ctrl+Alt letters pass through editable fields, terminals and the editor.
 AltGraph events are ignored by key matching and dispatch on every platform.
+
+The usage popover uses viewport-fixed positioning, clamped to 16 px horizontal
+gutters and at most the viewport width minus 32 px. Below 600 px it fills that
+width; account names, window names and values wrap. Ring clicks retain the
+ring group's right anchor and normal 320 px size on wide windows. Keyboard
+and palette opens have no anchor and center under the titlebar. Positioning
+refreshes on resize and usage renders; closing removes the resize listener.

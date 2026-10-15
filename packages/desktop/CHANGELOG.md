@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Account usage fits narrow windows with 16 px gutters and wrapping labels and values; keyboard and palette opens center under the titlebar, while ring clicks keep their wide-window anchor.
+
 - Preserve AltGr character input in fields, terminals and the editor; account usage windows now show the most constrained first within each account.
 
 - Open account usage with Cmd/Ctrl+Alt+U or “Show account usage” in the command palette; the shared overview lists accounts and windows with the most constrained first, and Escape closes it and returns focus.

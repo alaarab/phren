@@ -72,7 +72,9 @@ class UsageNode {
   children: UsageNode[] = [];
   hidden = false;
   isConnected = true;
-  style = {};
+  style = { left: "", top: "", setProperty: vi.fn() };
+  bounds = { left: 0, right: 320, bottom: 29, width: 320 };
+  getBoundingClientRect() { return this.bounds; }
   textContent = "";
   className = "";
   classList = { add() {}, remove() {}, toggle() {} };
@@ -90,7 +92,10 @@ async function usagePopover(snapshot = { accounts: [] as object[], computers: []
   vi.useFakeTimers();
   const events = new Map<string, (ev: unknown) => void>();
   const origin = new UsageNode();
+  const viewport = { innerWidth: 1280, innerHeight: 800, addEventListener: (event: string, fn: (ev: unknown) => void) => events.set(event, fn), removeEventListener: (event: string) => events.delete(event) };
+  vi.stubGlobal("window", viewport);
   vi.stubGlobal("document", {
+    querySelector: () => ({ getBoundingClientRect: () => ({ bottom: 40 }) }),
     activeElement: origin,
     createElement: () => new UsageNode(), createElementNS: () => new UsageNode(),
     addEventListener: (event: string, fn: (ev: unknown) => void) => events.set(event, fn),
@@ -102,7 +107,7 @@ async function usagePopover(snapshot = { accounts: [] as object[], computers: []
   openUsage();
   const popover = host.children[1];
   await vi.advanceTimersByTimeAsync(0);
-  return { popover, origin, events, handle };
+  return { popover, origin, events, handle, host, viewport };
 }
 
 it("opens without rings and returns focus on Escape after rendering the latest shared usage", async () => {
@@ -134,5 +139,37 @@ it("renders every account window most constrained first without changing report 
   const list = card.children.find(node => node.className === "usage-windows")!;
   expect(list.children.map(node => node.children[0].textContent)).toEqual(["Limited", "Exhausted", "Weekly", "Tie", "Remaining", "Roomy", "Unknown", "Reset"]);
   expect(windows.map(w => w.name)).toEqual(["Roomy", "Weekly", "Exhausted", "Limited", "Unknown", "Reset", "Remaining", "Tie"]);
+  handle.close();
+});
+
+it("centers keyboard usage under the titlebar and repositions on resize", async () => {
+  const { popover, viewport, events, handle } = await usagePopover();
+  expect(popover.style.left).toBe("480px");
+  expect(popover.style.top).toBe("50px");
+  for (const width of [420, 320, 240]) {
+    viewport.innerWidth = width;
+    popover.bounds.width = width - 32;
+    events.get("resize")!({});
+    expect(popover.style.left).toBe("16px");
+  }
+  handle.close();
+  expect(events.has("resize")).toBe(false);
+});
+
+it("keeps the wide ring anchor and clamps either edge on narrow windows", async () => {
+  const { popover, viewport, events, handle, host } = await usagePopover({ accounts: [{ id: "a", name: "Claude", harness: "claude", windows: [] }], computers: ["Mini"] });
+  const dismiss = () => events.get("keydown")!({ key: "Escape", preventDefault() {}, stopImmediatePropagation() {} });
+  dismiss();
+  host.bounds = { left: 1160, right: 1200, width: 40, bottom: 29 };
+  host.children[0].children[0].listeners.get("click")!({ stopPropagation() {} });
+  expect(popover.style.left).toBe("880px");
+  expect(popover.style.top).toBe("39px");
+  viewport.innerWidth = 420;
+  popover.bounds.width = 388;
+  for (const right of [292, 800]) {
+    host.bounds.right = right;
+    events.get("resize")!({});
+    expect(popover.style.left).toBe("16px");
+  }
   handle.close();
 });

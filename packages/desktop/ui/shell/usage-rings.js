@@ -300,6 +300,7 @@ export function mountUsageRings(el) {
   let snapshot = null;
   let timer = null;
   let returnFocus = null;
+  let anchored = false;
 
   const closePopover = () => {
     if (pop.hidden) return;
@@ -308,6 +309,7 @@ export function mountUsageRings(el) {
     if (returnFocus?.isConnected) returnFocus.focus();
     else row.querySelector("button")?.focus();
     returnFocus = null;
+    window.removeEventListener("resize", positionPopover);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
   };
@@ -315,13 +317,28 @@ export function mountUsageRings(el) {
   const onKey = (ev) => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopImmediatePropagation(); closePopover(); } };
   const onOutside = (ev) => { if (!el.contains(ev.target)) closePopover(); };
 
-  const openPopover = () => {
-    if (!pop.hidden) { pop.focus(); return; }
+  function positionPopover() {
+    const gutter = 16;
+    const width = pop.getBoundingClientRect().width;
+    const anchor = el.getBoundingClientRect();
+    const titlebar = document.querySelector(".titlebar")?.getBoundingClientRect();
+    const desired = anchored ? anchor.right - width : (window.innerWidth - width) / 2;
+    pop.style.left = `${Math.max(gutter, Math.min(desired, window.innerWidth - width - gutter))}px`;
+    const top = (anchored ? anchor.bottom : titlebar?.bottom ?? anchor.bottom) + 10;
+    pop.style.top = `${top}px`;
+    pop.style.setProperty("--usage-top", `${top}px`);
+  }
+
+  const openPopover = (anchor = null) => {
+    anchored = Boolean(anchor);
+    if (!pop.hidden) { positionPopover(); pop.focus(); return; }
     returnFocus = document.activeElement;
     renderPopover();
     el.classList.add("usage-open");
     pop.hidden = false;
+    positionPopover();
     pop.focus();
+    window.addEventListener("resize", positionPopover);
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("pointerdown", onOutside, true);
   };
@@ -361,10 +378,10 @@ export function mountUsageRings(el) {
       if (account.stale) button.style.opacity = "0.4";
       const reset = tight?.resetsIn || (tight?.resetsAt ? resetsIn(tight.resetsAt) : "");
       button.title = `${titles.get(account.id) ?? title(account)} · ${used === null ? "no limit" : `${used}% used`}${reset ? `, resets in ${reset}` : ""}`;
-      button.addEventListener("click", (ev) => { ev.stopPropagation(); if (pop.hidden) openPopover(); else closePopover(); });
+      button.addEventListener("click", (ev) => { ev.stopPropagation(); if (pop.hidden) openPopover(button); else closePopover(); });
       row.append(button);
     }
-    if (!pop.hidden) renderPopover();
+    if (!pop.hidden) { renderPopover(); positionPopover(); }
   }
 
   async function load() {
