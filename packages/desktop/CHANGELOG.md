@@ -8,6 +8,10 @@ GitHub release notes, and the app shows them when that version is available.
 
 - The titlebar fits windows from 360 px with accessible section icons, compact status counts and navigation that scrolls within the bar; wide windows keep their labels. Keyboard navigation, deep links and compact resizes reveal the active tab, and screen readers hear “computers online” with the count.
 
+- Home job links match server and pane IDs across workspace labels, hide cached jobs when offline, keep Hook update focus through resource polls, and label elapsed time as “seen”.
+
+- Home lists each computer’s three busiest jobs with CPU and time observed, links known panes to chat, and preserves focus across resource updates.
+
 - Fixed missing usage-limit switch warnings on single-login Claude computers when the chat has no account ID; weekly limits show the weekly wording, and the current login is excluded from switch destinations.
 
 - Home shows Up next: the scheduled prompts due in the next 12 hours on every online computer, soonest first, with harness, project, computer and how long until each runs. Clicking one opens Schedules. Read from the schedules Home already fetches, so no extra Hook calls.
