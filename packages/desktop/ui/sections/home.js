@@ -14,6 +14,7 @@ import { createComputers } from "./home/computers.js";
 import { createConductor } from "./home/conductor.js";
 
 const RETURN_POLL_MS = 30_000;
+// index.html loads home.css before first paint (Home is the first screen); this covers other hosts.
 function ensureCss() {
   if (!document.head || document.getElementById("home-css")) return;
   const link = document.createElement("link");
