@@ -33,10 +33,10 @@ describe("chat quota decisions", () => {
     expect(quotaWarnings({ ...session, child: { ...session.child, target: { source: "claude", session: "chat2" } } }, row(), { now, seen })).toHaveLength(1);
   });
 
-  it("warns on service refusal and leftPercent-only windows, skipping expired or unknown windows", () => {
+  it("warns on explicit exhaustion and leftPercent-only windows, skipping expired or unknown windows", () => {
     const usage = row();
     usage.windows = [
-      { id: "five_hour", limited: true, resetsAt: reset },
+      { id: "five_hour", exhausted: true, resetsAt: reset },
       { id: "seven_day", leftPercent: 8, resetsAt: reset },
     ];
     expect(warnings(usage).map((w) => [w.label, w.stage])).toEqual([["5-hour", "exhausted"], ["weekly", "near"]]);
@@ -86,7 +86,6 @@ describe("chat quota decisions", () => {
       { id: "seven_day", usedPercent: 22, resetsAt: reset.toISOString() },
     ] }], at);
     expect(quotaDestinationText(destinations[0], at)).toBe("Claude · Personal · 78% left of weekly · resets Thu 09:00");
-    expect(quotaDestinationText({ label: "Codex", left: 60, limiting: { id: "codex:primary", resetsAt: new Date(at + 3 * 3600_000).toISOString() } }, at)).toBe("Codex · 60% left of 5-hour · resets in 3h");
   });
 
   it.each([

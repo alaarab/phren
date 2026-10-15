@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { accountTitles, creditsValue, sortUsageAccounts, metaLine, mountUsageRings, openUsage, subscriptionSummary, windowText } from "../ui/shell/usage-rings.js";
+import { accountTitles, creditsValue, sortUsageAccounts, metaLine, mountUsageRings, openUsage, subscriptionSummary } from "../ui/shell/usage-rings.js";
 
 const now = Date.parse("2026-10-11T12:00:00.000Z");
-const later = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
 
 describe("usage popover text", () => {
   it("names each card by email, adds the plan when one email has two plans, and numbers unnamed accounts", () => {
@@ -26,16 +25,6 @@ describe("usage popover text", () => {
     expect(subscriptionSummary(undefined)).toBe("");
     expect(metaLine({ computers: [{ name: "Mini" }, { name: "Mini", account: "work" }, { name: "Workstation" }], updatedAt: new Date(now - 60_000).toISOString() }, now))
       .toBe("Mini, Workstation · updated 1m ago");
-  });
-
-  it("gives every window its reset, a 5-hour window without one 'not started', and an API credit its dollars and expiry", () => {
-    expect(windowText({ id: "seven_day", name: "7-day", usedPercent: 40, resetsAt: later(50) }, now)).toMatchObject({ value: "40%", caption: "resets in 2d 2h" });
-    expect(windowText({ id: "five_hour", name: "5-hour limit", usedPercent: 0 }, now)).toMatchObject({ value: "0%", caption: "not started" });
-    expect(windowText({ id: "five_hour", name: "5-hour limit", reset: true }, now)).toMatchObject({ value: "reset", caption: "" });
-    const credit = windowText({ id: "credit:abcd1234", name: "Promo, estimate", usedPercent: 31, usedUSD: 31, limitUSD: 100, resetsAt: "2026-12-31T12:00:00.000Z" }, now);
-    expect(credit.value).toBe("$31.00 of $100.00");
-    expect(credit.caption).toMatch(/^expires Dec 31$/);
-    expect(windowText({ id: "codex:primary", name: "5-hour limit", usedPercent: 100, limited: true, resetsAt: later(1) }, now).caption).toBe("Limit reached · resets in 1h 0m");
   });
 
   it("shows Codex credits only when the account has them", () => {
@@ -62,9 +51,7 @@ describe("usage account ordering", () => {
     expect(sortUsageAccounts(undefined)).toEqual([]);
   });
 
-  it("labels exhaustion even without the limited flag and identifies unknown resets", () => {
-    expect(windowText({ usedPercent: 100, exhausted: true }, now)).toMatchObject({ value: "100%", caption: "Exhausted · reset time unknown" });
-  });
+
 });
 
 // Minimal DOM for the popover lifecycle, with real rendering and event handlers.
@@ -140,6 +127,23 @@ it("renders every account window most constrained first without changing report 
   expect(list.children.map(node => node.children[0].textContent)).toEqual(["Limited", "Exhausted", "Weekly", "Tie", "Remaining", "Roomy", "Unknown", "Reset"]);
   expect(windows.map(w => w.name)).toEqual(["Roomy", "Weekly", "Exhausted", "Limited", "Unknown", "Reset", "Remaining", "Tie"]);
   handle.close();
+});
+
+it("draws an OpenCode Go service-refused 5-hour window as exhausted despite its lower reported usage", async () => {
+  const at = Date.now();
+  const { host, handle } = await usagePopover({ accounts: [{
+    id: "opencode|go", name: "OpenCode Go", harness: "opencode", exhausted: true,
+    windows: [
+      { id: "five_hour", name: "5-hour", usedPercent: 30, exhausted: true, resetsAt: new Date(at + 80 * 60_000).toISOString() },
+      { id: "seven_day", name: "Weekly", usedPercent: 80, resetsAt: new Date(at + 48 * 3_600_000).toISOString() },
+    ],
+  }], computers: ["Mini"] });
+  try {
+    const ring = host.children[0].children[0];
+    const arc = ring.children[0].children[1];
+    expect(arc.style).toMatchObject({ strokeDashoffset: "0", stroke: "var(--danger)" });
+    expect((ring as UsageNode & { title: string }).title).toBe("OpenCode Go · Exhausted, resets in 1h 20m");
+  } finally { handle.close(); }
 });
 
 it("centers keyboard usage under the titlebar and repositions on resize", async () => {

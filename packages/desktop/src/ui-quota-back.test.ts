@@ -99,15 +99,6 @@ describe("account room transitions", () => {
     expect(tick(recovered.state, [account([window(5)])], 19 * 60_000).notices).toEqual([]);
   });
 
-  it.each([
-    { ...window(99.6), leftPercent: 0, exhausted: false },
-    { ...window(99.6), leftPercent: 0 },
-    { ...window(100), exhausted: false },
-  ])("does not manufacture exhaustion from rounded room or override an explicit flag: %j", (w) => {
-    const first = tick(undefined, [account([w])]);
-    expect(tick(first.state, [account([window(20)])], 60_000).notices).toEqual([]);
-  });
-
   it("prunes cooldowns for absent computers/accounts and at the ten-minute boundary", () => {
     const rows = [account(), account(undefined, "Laptop"), account(undefined, "Desk", "claude|personal")];
     const first = tick(undefined, rows);

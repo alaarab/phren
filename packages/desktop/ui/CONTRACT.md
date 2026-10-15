@@ -524,6 +524,13 @@ it is absent. Both sidebar styles and the chat header show "handed off to
 opening that chat. `openChat.updateOverview(child)` refreshes these labels as
 live overview rows change. No Hook fields or routes are added by the desktop.
 
+`shell/usage-windows.js` owns pure `exhausted(windowOrAccount)`, `limitingWindow(account, now?)`,
+`leftPercent`, `usedPercent`, `activeWindow`, `compareUsage`, `windowNames`, `resetLabel` and
+`windowText` (moved from `usage-rings.js`; `quotaWindows` was removed from `quota-warn.js`).
+Limiting windows skip resets/unknown usage and elapsed dates with `now`, retaining first ties.
+Reset labels ceil minutes below 24 hours, omit zero components, then use local weekday/time;
+credit expiry stays separate. Shared coverage: `src/ui-usage-windows.test.ts`.
+
 ### Account room notifications
 
 `shell/quota-back.js` exports pure `quotaBackTransitions(state, snapshot, now?)`
@@ -547,6 +554,9 @@ Notifications name the account, computer and window; their keyless shell click
 focuses the desktop and leaves its current chat and section in place. Covered
 by `src/ui-quota-back.test.ts`.
 ### Account usage overview
+
+Rings show the limiting window. An exhausted window draws a full danger-coloured
+ring labeled "Exhausted" with that window’s reset, regardless of its reported percentage.
 
 `shell/usage-rings.js` exports `openUsage()`, which opens the existing titlebar
 usage popover even without account rings. Both the `usage` app action

@@ -1,9 +1,10 @@
+import { windowText } from "./usage-windows.js";
 import { movePlan } from "./handoff.js";
 // Passive sheet: no backdrop or focus grab, and never launches a move itself.
 import { hookGet } from "../api.js";
 import { store } from "./store.js";
 import { onSectionChange } from "./sections.js";
-import { followUsage, windowText } from "./usage-rings.js";
+import { followUsage } from "./usage-rings.js";
 import { moveAccounts, moveChoices, openMoveSheet } from "./move.js";
 import { quotaDestinations, quotaDestinationText, quotaSessionKey, quotaWarnings, sessionUsage } from "./quota-warn.js";
 import { loadQuotaState, unmarkQuotaSeen, markQuotaSeen, quotaSeen, quotaSettings, quotaSuppressed, suppressQuotaChat } from "./quota-warn-prefs.js";

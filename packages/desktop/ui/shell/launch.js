@@ -1,3 +1,4 @@
+import { exhausted, leftPercent } from "./usage-windows.js";
 // The launch sheet: one modal to start any agent anywhere. Project, computer,
 // harness, model, effort, permission mode, worktree/branch, Claude account and
 // role (worker or conductor), with the least-loaded computer that has the
@@ -560,11 +561,11 @@ function supportsModel(kind) { return ["codex", "claude", "copilot", "opencode"]
 function supportsEffort(kind) { return ["codex", "claude", "copilot", "opencode", "phren"].includes(kind); }
 
 function accountRoom(usage) {
-  const rows = (usage ?? []).filter((row) => row && (typeof row.leftPercent === "number" || row.exhausted));
+  const rows = (usage ?? []).filter((row) => row && (leftPercent(row) !== null || exhausted(row)));
   if (!rows.length) return "";
   const min = rows.reduce((a, b) => ((a.leftPercent ?? 101) <= (b.leftPercent ?? 101) ? a : b));
-  if (min.exhausted) return `${min.source} out of quota`;
-  return `${min.source} ${Math.round(min.leftPercent)}% left`;
+  if (exhausted(min)) return `${min.source} out of quota`;
+  return `${min.source} ${Math.round(leftPercent(min))}% left`;
 }
 
 function firstUsable(ui, computer) {
@@ -573,13 +574,13 @@ function firstUsable(ui, computer) {
   const harnesses = profile?.harnesses;
   const kinds = ui.state.role === "conductor" ? HARNESS_ORDER.filter((kind) => kind !== "phren") : HARNESS_ORDER;
   // Prefer a harness whose account still has quota on that computer.
-  const exhausted = new Set((profile?.capacity?.usage ?? []).filter((row) => row?.exhausted).map((row) => String(row.source)));
+  const out = new Set((profile?.capacity?.usage ?? []).filter(exhausted).map((row) => String(row.source)));
   if (harnesses) {
-    for (const kind of kinds) if (harnessUsable(harnesses, kind) && !exhausted.has(kind)) return kind;
+    for (const kind of kinds) if (harnessUsable(harnesses, kind) && !out.has(kind)) return kind;
     for (const kind of kinds) if (harnessUsable(harnesses, kind)) return kind;
     return "";
   }
-  return kinds.find((kind) => !exhausted.has(kind)) ?? "codex";
+  return kinds.find((kind) => !out.has(kind)) ?? "codex";
 }
 
 function someUsable(harnesses) {
@@ -615,7 +616,7 @@ function renderRecommendation(ui) {
   if (state.recommended) parts.push(`Recommended: ${state.recommended}`);
   const usage = state.usage;
   if (usage?.accounts?.length) {
-    const out = usage.accounts.filter((account) => account.exhausted).length;
+    const out = usage.accounts.filter(exhausted).length;
     parts.push(`${usage.accounts.length} account${usage.accounts.length === 1 ? "" : "s"}${out ? `, ${out} out of quota` : ""}`);
   }
   ui.computerHint.textContent = parts.join(" \u00b7 ");
