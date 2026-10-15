@@ -1,0 +1,164 @@
+.section-home { overflow-y: auto; }
+
+/* Home */
+.home { display: grid; gap: 24px; max-width: 880px; margin: 0 auto; padding: 28px 24px; }
+.home .section-label { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.home .count:not(:empty) { padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); }
+.home-list { display: grid; gap: 4px; }
+.home-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 6px 12px; border: 0; border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+button.home-row:hover { background: var(--card); }
+.home-row.tone-waiting { box-shadow: inset 3px 0 0 var(--waiting); }
+.home-row.tone-working { box-shadow: inset 3px 0 0 var(--working); }
+/* A working session the Hook sees no output from (stalled). */
+.home-row.tone-stalled { box-shadow: inset 3px 0 0 var(--danger); }
+.home-stalled { color: var(--danger); font-size: 12px; white-space: nowrap; }
+.home-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-row-meta { display: flex; gap: 8px; flex: none; color: var(--muted); font-size: 12px; }
+.home-project { color: var(--accent); font-family: var(--mono); }
+.home-why { color: var(--waiting); }
+.home-passed { color: var(--done); }
+.home-failed { color: var(--danger); }
+.home-row.tone-failed { box-shadow: inset 3px 0 0 var(--danger); }
+/* Since you left: turns that ended while the window was away. */
+.home-row.tone-done { box-shadow: inset 3px 0 0 var(--done); }
+button.home-row:disabled { cursor: default; opacity: .6; }
+.home-block[data-block="finished"] { position: relative; }
+.home-away-for { color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.home-away-dismiss { position: absolute; top: -3px; right: 0; padding: 2px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.home-away-dismiss:hover { background: var(--raised); color: var(--text); }
+.home-computer.state-online .home-row-meta { color: var(--done); }
+.home-empty { padding: 10px 12px; color: var(--muted); }
+/* Checks: the open pull requests of working and recent sessions, failing first. */
+.home-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.home-check { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-height: 32px; padding: 4px 12px 4px 10px; border: 0; border-radius: 999px; background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.home-check:hover { background: var(--card); }
+.home-check-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.home-check.failing { box-shadow: inset 0 0 0 1px rgba(239,152,152,0.45); }
+.home-check.failing .home-check-dot { background: var(--danger); }
+.home-check.pending .home-check-dot { background: var(--waiting); animation: home-check-pulse 1.6s ease-in-out infinite; }
+.home-check.passing .home-check-dot { background: var(--done); }
+.home-check-ref { flex: none; color: var(--muted); font-family: var(--mono); }
+.home-check-title { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes home-check-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .home-check.pending .home-check-dot { animation: none; } }
+/* Home cockpit: conductor card, needs-you keyboard, working activity, returns and computer load. */
+.home-conductor { display: grid; gap: 10px; padding: 14px; border-radius: 10px; background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); }
+.home-conductor-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.home-conductor-title { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font: 600 14px system-ui; }
+.home-conductor-session { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 13px; }
+.home-more { justify-self: start; margin-top: 2px; padding: 4px 2px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; }
+.home-more:hover { color: var(--accent-hover); }
+.home-keys[hidden] { display: none; }
+.home-conductor-meta { flex: none; margin-left: auto; display: inline-flex; gap: 8px; color: var(--muted); font-size: 12px; }
+.home-conductor-state { color: var(--working); }
+.home-conductor-state.waiting { color: var(--waiting); }
+.home-conductor-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
+.home-conductor-line.muted { color: var(--muted); }
+.home-conductor-actions { display: flex; align-items: center; gap: 8px; }
+.home-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.home-field-label { color: var(--muted); font-size: 12px; }
+.home-select { height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--sunken); color: var(--text); font: 12.5px system-ui; }
+.home-btn { height: 32px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent-solid); color: var(--text); font: 600 12.5px system-ui; cursor: pointer; transition: background .18s ease; }
+.home-btn:hover { background: var(--accent); color: #1E1E1E; }
+.home-btn:disabled { background: rgba(116,80,167,0.35); color: var(--muted); cursor: default; }
+.home-btn.ghost { background: var(--raised); color: var(--text-2); }
+.home-keys { margin: 0 0 8px; color: var(--dim); font-size: 11.5px; }
+.home-keys kbd { padding: 1px 5px; border-radius: 5px; background: var(--raised); color: var(--text-2); font: 11px "JetBrains Mono", ui-monospace, monospace; }
+
+.home-row { align-items: flex-start; }
+/* A waiting row's reply box sits under it. */
+.home-reply-row { display: grid; gap: 0; background: var(--surface); border-radius: 10px; }
+.home-reply-row > .home-row { background: transparent; }
+.home-reply { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; }
+.home-reply-input { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+.home-reply-input:focus { outline: none; border-color: var(--accent); }
+.home-reply-note { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.home-reply-note.error { color: var(--danger); white-space: normal; }
+.home-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.home-row-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+/* What the agent said last: up to two lines. */
+.home-row-sub.reply { display: -webkit-box; white-space: normal; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--text-2); }
+.home-row-sub.activity { color: var(--text-2); font-family: "JetBrains Mono", ui-monospace, monospace; }
+.home-row.selected { background: var(--card); box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px var(--accent); }
+.home-age { color: var(--dim); font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+.home-chip { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--raised); color: var(--muted); }
+.home-chip.done { background: rgba(138,200,172,0.16); color: var(--done); }
+.home-chip.needs { background: rgba(224,188,127,0.16); color: var(--waiting); }
+.home-chip.failed { background: rgba(239,152,152,0.16); color: var(--danger); }
+.home-chip.gone { background: var(--raised); color: var(--dim); }
+
+.home-computer { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name state" "load load"; gap: 6px 12px; }
+.home-computer-name { grid-area: name; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.home-computer-meta { grid-area: state; display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
+.home-load { grid-area: load; display: flex; align-items: center; gap: 8px; }
+.home-load-bar { flex: 1 1 auto; height: 5px; border-radius: 999px; background: var(--sunken); overflow: hidden; }
+.home-load-fill { display: block; height: 100%; border-radius: 999px; background: var(--done); transition: width .18s ease; }
+.home-load-fill.busy { background: var(--waiting); }
+.home-load-fill.stressed { background: var(--danger); }
+.home-load-text { flex: none; color: var(--muted); font-size: 11.5px; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.home-error { color: var(--danger); font-size: 12px; }
+/* Hook version on a computer row; an older one than the newest seen offers its update command. */
+.home-hook { font-family: var(--mono); }
+.home-hook.behind { color: var(--waiting); }
+.home-hook-update { padding: 1px 8px; border: 1px solid var(--waiting); border-radius: 999px; background: none; color: var(--waiting); font: inherit; font-size: 11px; cursor: pointer; }
+.home-hook-update:hover { background: var(--raised); }
+.home-start-note { color: var(--muted); font-size: 12px; }
+
+/* Home: long return text and activity lines never widen the column. */
+.home { grid-template-columns: minmax(0, 1fr); width: 100%; }
+.home-list, .home-block { min-width: 0; }
+.home-row { min-width: 0; }
+.home-row-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Home inbox: unread dot and the Scheduled tag. */
+.home-unread { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); align-self: center; }
+.home-tag { flex: none; padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11px; }
+button.home-quota-row .handoff-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+button.home-quota-row:hover .handoff-link { color: var(--accent); }
+
+/* Home's usage inventory keeps chat and Switch as separate keyboard controls. */
+.home-low { align-items: center; }
+.home-low-chat { border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; padding: 0; }
+.home-low-usage { color: var(--waiting); font-size: 12px; overflow-wrap: anywhere; }
+.home-handoff-row.handed-off > .home-handoff-chat { opacity: .6; }
+.home-handoff-row { flex-direction: column; align-items: stretch; gap: 4px; width: 100%; box-sizing: border-box; }
+.home-handoff-row:hover, .home-handoff-row:focus-within { background: var(--card); }
+.home-handoff-chat { display: flex; min-width: 0; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.home-handoff-chat:disabled { cursor: default; opacity: .6; }
+.home-handoff-row .home-row-meta { flex-wrap: wrap; align-items: center; overflow-wrap: anywhere; }
+.home-handoff-row .home-handoff-sub { display: -webkit-box; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Quota recoveries give the account and reset two lines before the usage tag. */
+.home-quota-row { flex-direction: column; align-items: stretch; gap: 4px; }
+.home-quota-row .home-row-title { display: -webkit-box; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.home-quota-row .home-row-meta { flex-wrap: wrap; align-items: center; }
+
+/* Up next: scheduled prompts due in the next hours; the time is the row's anchor. */
+.home-upnext-when { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 600px) {
+  .home-upnext { flex-direction: column; align-items: stretch; gap: 4px; }
+  .home-upnext .home-row-meta { flex-wrap: wrap; align-items: center; }
+}
+/* Long project and computer names shrink and truncate instead of widening the row. */
+.home-upnext .home-row-meta { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.home-upnext .home-tag, .home-upnext-when { flex: none; }
+.home-upnext-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Home resource jobs share the overview reading; keep their controls stable. */
+.home-computer-card { min-width: 0; }
+.home-computer-resources { display: contents; }
+.home-jobs { display: grid; gap: 4px; padding: 0 12px 10px; }
+.home-jobs[hidden] { display: none; }
+.home-job { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; width: 100%; min-width: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: var(--card); color: var(--text); text-align: left; font: inherit; font-size: 12px; }
+button.home-job { cursor: pointer; }
+button.home-job:hover { background: var(--raised); }
+button.home-job:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-job-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-job-cpu, .home-job-duration, .home-jobs-more { color: var(--muted); font-size: 11px; }
+.home-jobs-more { padding: 2px 8px; }
+@media (max-width: 600px) {
+  .home-computer { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "state" "load"; }
+  .home-computer-meta { flex-wrap: wrap; }
+  .home-job { gap: 6px; }
+}
