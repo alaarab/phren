@@ -280,9 +280,9 @@ export const gitboy: GitHostProvider = {
     }
   },
 
-  async whoami(root, host, token) {
+  async whoami(root, host, token, checkedApi) {
     if (!host.domain) throw new HostApiError("failed", "This repository has no gitboy remote.");
-    const api = await apiRoot(root, host.domain, `https://${host.domain}/api/v1`);
+    const api = checkedApi ?? await apiRoot(root, host.domain, `https://${host.domain}/api/v1`);
     const { json } = await hostJson<Json>(`${api}/user`, { token, scheme: "bearer" });
     return { user: String(obj(json).username ?? "") };
   },

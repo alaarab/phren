@@ -9,6 +9,9 @@ GitHub release notes, and the app shows them when that version is available.
 - Switch sheets keep keyboard focus inside, close with Escape and return focus to the invoking control. Home approval shortcuts pause while a dialog is open.
 
 - Home shows “Running low” chats at the configured usage-warning threshold, most constrained first, with account, reset time and Switch into the existing account or harness hand-off flow. The block hides when every open chat has room.
+- Token Connect shows and confirms the API destination when it differs from the remote, including configured ports; a Changes refresh keeps the visible card's destination bound to its submit handler.
+
+- Connect a GitLab or gitboy token from a project's Code block on Hooks with `projectHostToken`; the sheet shows the destination host and refuses submission if the checkout's remote changed. Changes also binds Connect to the displayed host.
 
 - A service-refused usage window draws a full red ring labeled “Exhausted” with its own reset, even when its reported usage is below 100%.
 

@@ -6,6 +6,7 @@ import { isShown, watchShown } from "./shown.js";
 import { hookGet, hookPost, readRepoFile } from "./api.js";
 import { projectOf } from "./shell/store.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
+import { hostTokenError, tokenDestinationText } from "./project-host-token.js";
 import { branchProblem, capitalize, checksSummary, checksWord, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
@@ -1029,7 +1030,7 @@ export function openChanges(el, ctx) {
     const line = account && account.user ? `@${account.user}${via ? ` · ${via}` : ""}` : via;
     if (line || (account && account.source === "file")) {
       const sub = div("chg-host-sub", line);
-      if (account && account.source === "file") { const out = button("Disconnect", "chg-host-link", () => doConnect("")); sub.appendChild(out); }
+      if (account && account.source === "file") { const out = button("Disconnect", "chg-host-link", () => doConnect("", { ...host })); sub.appendChild(out); }
       who.appendChild(sub);
     }
     bar.appendChild(who);
@@ -1038,7 +1039,7 @@ export function openChanges(el, ctx) {
   }
 
   function renderConnect(res) {
-    const host = res.host;
+    const host = { ...res.host };
     const c = state.connect || (state.connect = { token: "", error: "" });
     const card = div("chg-connect");
     const head = div("chg-connect-h");
@@ -1046,6 +1047,7 @@ export function openChanges(el, ctx) {
     const words = div("");
     words.appendChild(div("chg-connect-title", `Connect ${host.name}`));
     words.appendChild(div("chg-connect-sub", `See ${hostTerms(host).long}s, pipelines and reviews for ${host.domain} here, and merge from this pane.`));
+    words.appendChild(div("chg-connect-sub", tokenDestinationText(host)));
     head.appendChild(words);
     card.appendChild(head);
     const steps = div("chg-connect-steps");
@@ -1065,9 +1067,9 @@ export function openChanges(el, ctx) {
     input.type = "password"; input.className = "chg-connect-input"; input.placeholder = host.kind === "gitlab" ? "glpat-…" : "gbp_…";
     input.autocomplete = "off"; input.spellcheck = false; input.value = c.token;
     input.oninput = () => { c.token = input.value; c.error = ""; };
-    input.onkeydown = (e) => { if (e.key === "Enter") doConnect(c.token); };
+    input.onkeydown = (e) => { if (e.key === "Enter") doConnect(c.token, host); };
     twoBody.appendChild(input);
-    twoBody.appendChild(button(state.busy === "connect" ? "Checking…" : "Connect", "chg-btn commit", () => doConnect(c.token)));
+    twoBody.appendChild(button(state.busy === "connect" ? "Checking…" : "Connect", "chg-btn commit", () => doConnect(c.token, host)));
     steps.appendChild(two);
     card.appendChild(steps);
     if (c.error) card.appendChild(div("chg-error", c.error));
@@ -1075,17 +1077,17 @@ export function openChanges(el, ctx) {
     return card;
   }
 
-  async function doConnect(token) {
+  async function doConnect(token, host) {
     if (state.busy) return;
     state.busy = "connect"; render();
     try {
-      const res = await hookPost(computer, "/v1/git/host-token", scopeBody({ token: String(token || "").trim(), expectedRepository: repo() }));
+      const res = await hookPost(computer, "/v1/git/host-token", scopeBody({ token: String(token || "").trim(), expectedRepository: repo(), expectedHost: host.apiHost ?? host.domain }));
       if (res && res.ok) {
         state.connect = null;
         toast(res.disconnected ? `Disconnected ${res.domain}` : `Connected${res.user ? ` as @${res.user}` : ""}`);
         state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody());
       } else (state.connect || (state.connect = { token: "" })).error = (res && res.message) || "The host refused that token.";
-    } catch (e) { (state.connect || (state.connect = { token: "" })).error = newerHook(e, "host-token"); }
+    } catch (e) { (state.connect || (state.connect = { token: "" })).error = e?.code === "host-changed" ? hostTokenError(e) : newerHook(e, "host-token"); }
     finally { state.busy = null; render(); }
   }
 

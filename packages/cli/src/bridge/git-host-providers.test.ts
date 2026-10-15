@@ -5,8 +5,9 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
-import { gitPulls } from "./git.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PROVIDERS } from "./git-hosts.js";
+import { gitPulls, gitStatus } from "./git.js";
 import { gitHostToken, gitMergeRequest, gitPullRequest } from "./git-publish.js";
 
 const execFileAsync = promisify(execFile);
@@ -39,6 +40,7 @@ describe("GitLab and gitboy providers", () => {
   let host: Awaited<ReturnType<typeof fakeHost>> | undefined;
   const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME, GITLAB_TOKEN: process.env.GITLAB_TOKEN, GITLAB_HOST: process.env.GITLAB_HOST, GITBOY_TOKEN: process.env.GITBOY_TOKEN, GITBOY_HOST: process.env.GITBOY_HOST };
   afterEach(async () => {
+    vi.restoreAllMocks();
     for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
     await host?.close(); host = undefined;
     if (created) await rm(created, { recursive: true, force: true });
@@ -215,6 +217,36 @@ describe("GitLab and gitboy providers", () => {
     });
   });
 
+  it.each(["gitlab", "gitboy"])("binds %s Connect to its API override, including its port", async kind => {
+    const version = kind === "gitlab" ? "v4" : "v1";
+    host = await fakeHost(({ path: p }) => p === `/api/${version}/user` ? { json: { username: "sam" } } : { json: [] });
+    const domain = `${kind}.example.com`;
+    const repo = await repository(`https://${domain}/sam/app.git`, domain, `${host.origin}/api/${version}`);
+    const apiHost = new URL(host.origin).host;
+    // A remote-only confirmation cannot authorize sending a token elsewhere.
+    await expect(gitHostToken(repo, { token: "private-token", expectedHost: domain }))
+      .rejects.toMatchObject({ status: 409, details: { code: "host-changed" } });
+    expect(host.seen).toEqual([]);
+    expect(await gitStatus(repo)).toMatchObject({ host: { domain, apiHost } });
+    const provider = PROVIDERS[kind as "gitlab" | "gitboy"];
+    const whoami = provider.whoami!;
+    vi.spyOn(provider, "whoami").mockImplementationOnce(async (...args) => {
+      // Change global config after the guard, just before the real HTTP call.
+      await execFileAsync("git", ["-C", repo, "config", "--global", `phren.${domain}.api`, "https://other.example/api"]);
+      return whoami(...args);
+    });
+    expect(await gitHostToken(repo, { token: "private-token", expectedHost: apiHost }))
+      .toMatchObject({ ok: true, host: { domain, apiHost } });
+    expect(host.seen).toHaveLength(1);
+    expect(host.seen[0].headers[kind === "gitlab" ? "private-token" : "authorization"])
+      .toBe(kind === "gitlab" ? "private-token" : "Bearer private-token");
+    // A later API destination change must require a new confirmation too.
+    await execFileAsync("git", ["-C", repo, "config", "--global", `phren.${domain}.api`, "https://other.example/api"]);
+    await expect(gitHostToken(repo, { token: "private-token", expectedHost: apiHost }))
+      .rejects.toMatchObject({ status: 409, details: { code: "host-changed" } });
+    expect(host.seen).toHaveLength(1);
+  });
+
   it("never sends a token to an API address a repository's own config names", async () => {
     host = await fakeHost(() => ({ json: [] }));
     const repo = await repository("git@gitlab.example.com:team/app.git", "gitlab.example.com", "https://gitlab.invalid/api/v4");
@@ -233,9 +265,15 @@ describe("GitLab and gitboy providers", () => {
     const repo = await repository("git@gitboy.example.com:sam/app.git", "gitboy.example.com", `${host.origin}/api/v1`);
     const file = path.join(process.env.PHREN_BRIDGE_HOME!, "git-hosts.json");
 
+    // The checkout changed after the client displayed a different host.
+    await expect(gitHostToken(repo, { token: "gbp_good", expectedHost: "gitlab.example.com" }))
+      .rejects.toMatchObject({ status: 409, details: { code: "host-changed" } });
+    expect(host.seen).toEqual([]);
+    await expect(stat(file)).rejects.toThrow();
+
     expect(await gitHostToken(repo, { token: "gbp_bad" })).toMatchObject({ ok: false, reason: "auth" });
     await expect(stat(file)).rejects.toThrow();
-    expect(await gitHostToken(repo, { token: "gbp_good" })).toMatchObject({ ok: true, user: "sam", kind: "gitboy" });
+    expect(await gitHostToken(repo, { token: "gbp_good", expectedHost: new URL(host.origin).host })).toMatchObject({ ok: true, user: "sam", kind: "gitboy" });
     if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(file, "utf8")).hosts["gitboy.example.com"]).toMatchObject({ kind: "gitboy", token: "gbp_good", user: "sam" });
     expect(await gitPulls(repo)).toMatchObject({ available: true, account: { source: "file", user: "sam" } });
