@@ -5,9 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.50] - 2026-10-15
+
 ### Added
 
-- Search marks findings whose cited file changed on gitboy since the cited commit as may be out of date.
+- Citation freshness against gitboy: findings whose cited file changed on gitboy since the cited commit are marked "may be out of date" in `search_knowledge` (bounded 1.5 s check, cached), and the Hook's project memory routes return an optional `citationFreshness` per finding for the desktop and phone. Prompt injection reads the cache only. `PHREN_CITATION_FRESHNESS=off` turns the checks off.
 
 ## [0.3.49] - 2026-10-15
 
