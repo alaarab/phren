@@ -58,6 +58,9 @@ describe.skipIf(!binary || process.platform === "win32")("tmux scrolling for the
     await chmod(folder, 0o700);
     // -f /dev/null: tmux's own defaults, whatever the owner's config says.
     execFileSync(binary!, ["-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "main", "-x", "100", "-y", "30", "sh"]);
+    // Some CI images ship a tmux that comes up with `mouse on` despite -f; the
+    // tests are about tmux's default, so set it rather than assume it.
+    tmux("set-option", "-g", "mouse", "off");
     expect(tmux("show-options", "-gv", "mouse")).toBe("off");
   });
   afterAll(async () => {
