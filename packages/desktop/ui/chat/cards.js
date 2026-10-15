@@ -1,11 +1,10 @@
 import { el as h } from "../dom.js";
+import { harnessLabel } from "../harness.js";
 // Interaction cards: ways an agent asks the owner something, drawn as the
 // phone's cards and answered through answers.js. Replaces its container's
 // content on every render; the caller owns the WebSocket status frame.
 
 import { answerApproval, answerQuestion, sendSecret, answerSudo, dismissSideAnswer, buildClaudeUpdatedInput, buildQuestionAnswers } from "./answers.js";
-
-const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
 
 let styleLinked = false;
 function ensureStyle() {
@@ -15,10 +14,6 @@ function ensureStyle() {
   link.href = new URL("./cards.css", import.meta.url).href;
   document.head.appendChild(link);
   styleLinked = true;
-}
-
-function providerName(source) {
-  return PROVIDERS[String(source || "").toLowerCase()] || "Agent";
 }
 
 function parseJson(value) {
@@ -543,7 +538,7 @@ export function renderInteractions(container, agentStatus, { computer, target, o
   ensureStyle();
   container.classList.add("cards");
   const status = agentStatus || {};
-  const ctx = { computer, target, provider: providerName(target?.source), onAnswered };
+  const ctx = { computer, target, provider: harnessLabel(String(target?.source || "").toLowerCase(), "Agent"), onAnswered };
   const cards = [];
 
   const approval = status.pendingApproval;

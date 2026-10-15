@@ -1,4 +1,5 @@
 import { el as node } from "../dom.js";
+import { harnessLabel } from "../harness.js";
 // Phren desktop talk mode, dictation and read-aloud. Plain browser ES module,
 // no framework. Mirrors the phone's talk slice (TalkTurnMachine, SpokenReply,
 // ChatReadAloud) over the Hook's speech routes:
@@ -644,8 +645,6 @@ function speakReply({ computer, text, voice, onWord } = {}) {
 
 // ---------------------------------------------------------------- talk mode
 
-const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
-function providerName(source) { return PROVIDERS[String(source || "").toLowerCase()] || "Agent"; }
 
 function nowSeconds() { return (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000; }
 
@@ -666,7 +665,7 @@ export function createTalkMode({ computer, target, provider, send, onState } = {
   panel.hidden = true;
   const dot = node("div", "pt-dot off");
   const stateEl = node("div", "pt-state", stateLabel(TALK_PHASES.off));
-  const who = node("div", "pt-who", providerName(provider));
+  const who = node("div", "pt-who", harnessLabel(String(provider || "").toLowerCase(), "Agent"));
   const stopBtn = node("button", "pt-stop", "Stop");
   const head = node("div", "pt-head");
   head.append(dot, stateEl, who, stopBtn);
