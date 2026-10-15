@@ -21,6 +21,8 @@ interface Resolution { checkedAt: string; value: Repository | null }
 type CacheEntry = CitationFreshness | Resolution;
 type Cache = Record<string, CacheEntry>;
 const MINUTE = 60_000;
+// Refresh path only. Process spawns on Windows runners often exceed 200 ms.
+const GIT_TIMEOUT_MS = 1000;
 const RETENTION = 7 * 24 * 60 * MINUTE;
 const RESOLUTION_TTL = 24 * 60 * MINUTE;
 const cacheMemo = new Map<string, { mtimeMs: number; size: number; entries: Cache }>();
@@ -43,11 +45,12 @@ function checkoutRoot(repo: string | undefined, deadline: number): string | unde
   if (!repo || !path.isAbsolute(repo)) return;
   try {
     const root = realpathSync(repo);
-    const toplevel = git(root, Math.min(200, deadline - Date.now()), "rev-parse", "--show-toplevel");
+    const toplevel = git(root, Math.min(GIT_TIMEOUT_MS, deadline - Date.now()), "rev-parse", "--show-toplevel");
     if (!toplevel || !path.isAbsolute(toplevel)) return;
-    // Git uses forward slashes on Windows; realpath also expands 8.3 aliases.
+    // Git prints forward slashes and long names on Windows; compare canonical forms.
     const canonical = (value: string) => {
-      const resolved = path.resolve(realpathSync(value));
+      // The JS realpath keeps 8.3 short names (RUNNER~1); the native one expands them.
+      const resolved = path.resolve((realpathSync.native ?? realpathSync)(value));
       return process.platform === "win32" ? resolved.toLowerCase() : resolved;
     };
     return canonical(toplevel) === canonical(root) ? root : undefined;
@@ -65,7 +68,7 @@ function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions,
   const cached = entries[key];
   if (cached && "value" in cached && fresh(cached)) return cached.value;
   const local = checkoutRoot(citation.repo, deadline);
-  const read = (...args: string[]) => git(local, Math.min(200, deadline - Date.now()), ...args);
+  const read = (...args: string[]) => git(local, Math.min(GIT_TIMEOUT_MS, deadline - Date.now()), ...args);
   const remote = local ? read("remote", "get-url", "origin") : "";
   const parsed = parseRemoteUrl(remote || fallback || "");
   let value = null;
