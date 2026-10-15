@@ -1,5 +1,5 @@
 import { el as h } from "../dom.js";
-import { harnessLabel } from "../harness.js";
+import { agentLabel } from "../harness.js";
 // Interaction cards: ways an agent asks the owner something, drawn as the
 // phone's cards and answered through answers.js. Replaces its container's
 // content on every render; the caller owns the WebSocket status frame.
@@ -538,7 +538,7 @@ export function renderInteractions(container, agentStatus, { computer, target, o
   ensureStyle();
   container.classList.add("cards");
   const status = agentStatus || {};
-  const ctx = { computer, target, provider: harnessLabel(String(target?.source || "").toLowerCase(), "Agent"), onAnswered };
+  const ctx = { computer, target, provider: agentLabel(target?.source), onAnswered };
   const cards = [];
 
   const approval = status.pendingApproval;

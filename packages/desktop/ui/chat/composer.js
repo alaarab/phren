@@ -1,5 +1,5 @@
 import { el as node } from "../dom.js";
-import { harnessLabel } from "../harness.js";
+import { agentLabel } from "../harness.js";
 // Phren desktop chat composer. Plain browser ES module, no framework.
 // Ports the phone's ChatComposerBar behaviour: a collapsible Background strip,
 // a multiline editor above one row of inline-SVG icon buttons, send with
@@ -23,7 +23,7 @@ import { createRecall } from "./recall.js";
 
 /** Provider display name. */
 export function providerLabel(provider) {
-  return harnessLabel(String(provider || "").toLowerCase(), "Agent");
+  return agentLabel(provider);
 }
 
 /** The phone's suggestion catalogue (AgentSlashCommand.swift). */

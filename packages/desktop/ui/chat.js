@@ -1,5 +1,5 @@
 import { el as node } from "./dom.js";
-import { harnessLabel } from "./harness.js";
+import { agentLabel } from "./harness.js";
 import { renderHandoffLinks } from "./shell/handoff-view.js";
 import { quotaInteractionPending } from "./shell/quota-warn.js";
 // The chat pane: the phone's chat on the desktop. Plain browser ES module.
@@ -23,7 +23,7 @@ import { renderMarkdownInto } from "./chat/markdown.js";
 import { projectOf } from "./shell/store.js";
 
 function providerLetter(source) {
-  return harnessLabel(String(source || "").toLowerCase(), "Agent").charAt(0).toUpperCase();
+  return agentLabel(source).charAt(0).toUpperCase();
 }
 function basename(p) {
   const parts = String(p || "").split(/[\\/]/).filter(Boolean);
@@ -62,7 +62,7 @@ export function openChat(el, computerName, child, opts = {}) {
   opts.onInteractions?.(true);
   const target = (child && child.target) || {};
   const source = String(target.source || "").toLowerCase();
-  const provider = harnessLabel(source, "Agent");
+  const provider = agentLabel(source);
   const qs = new URLSearchParams(target).toString();
 
   el.classList.add("chat-pane");
@@ -729,7 +729,7 @@ export function openChat(el, computerName, child, opts = {}) {
     const top = node("div", "chat-work-top");
     const main = node("div", "chat-work-main");
     main.append(node("div", "chat-work-title", workTitle(agent)));
-    const meta = [harnessLabel(String(agent.provider || "").toLowerCase(), "Agent"), agent.branch, agent.computer && agent.computer.name].filter(Boolean).join(" \u00b7 ");
+    const meta = [agentLabel(agent.provider), agent.branch, agent.computer && agent.computer.name].filter(Boolean).join(" \u00b7 ");
     if (meta) main.append(node("div", "chat-work-sub", meta));
     top.append(node("div", "chat-work-glyph", providerLetter(agent.provider)), main);
     top.append(node("div", `chat-work-state ${workStateClass(agent)}`, `${workStateText(agent)}${workElapsed(agent)}`));
