@@ -20,20 +20,20 @@ function el(tag, cls, text) {
 }
 
 /** Which harnesses can take the session: installed and usable on that
- * computer (when the Hook says), never the one it already runs. */
-export function moveChoices(inventory, current) {
+ * computer (when the Hook says), including Claude on another account. */
+export function moveChoices(inventory, current, currentAccount) {
   const known = Array.isArray(inventory) ? new Map(inventory.map((h) => [h.source, h])) : null;
-  return HARNESSES.filter(([source]) => source !== current).map(([source, label]) => {
+  return HARNESSES.filter(([source]) => (source !== current || source === "claude" && currentAccount && moveAccounts(inventory, { includeDefault: true }).some((a) => a.id !== currentAccount))).map(([source, label]) => {
     const entry = known?.get(source);
     const usable = !known || (entry?.installed && entry?.usable);
     return { source, label, usable: Boolean(usable), reason: usable ? "" : entry?.reason || "Not installed" };
   });
 }
 
-/** The Claude accounts a move can continue on (other than the default). */
-export function moveAccounts(inventory) {
+/** Usable Claude accounts; includeDefault enables returning to the default home. */
+export function moveAccounts(inventory, { includeDefault = false } = {}) {
   const claude = Array.isArray(inventory) ? inventory.find((h) => h.source === "claude") : null;
-  return (claude?.accounts ?? []).filter((a) => a.usable && a.id !== "default");
+  return (claude?.accounts ?? []).filter((a) => a.usable && (includeDefault || a.id !== "default"));
 }
 
 /** What the sheet says for a move record. */
@@ -56,11 +56,11 @@ function installStyles() {
   document.head.append(link);
 }
 
-export async function openMoveSheet({ computer, child }) {
+export async function openMoveSheet({ computer, child, to = {} }) {
   openSheet?.close();
   installStyles();
   const current = child.target?.source ?? child.agent;
-  const state = { harness: "", account: "", inventory: null, busy: false, timer: null };
+  const state = { harness: to.harness ?? "", account: to.account ?? "", inventory: null, busy: false, timer: null };
 
   const backdrop = el("div", "launch-backdrop");
   const sheet = el("div", "launch-sheet move-sheet");
@@ -99,7 +99,7 @@ export async function openMoveSheet({ computer, child }) {
   backdrop.addEventListener("keydown", (e) => { if (e.key === "Escape" && !state.busy) close(); });
 
   function render() {
-    const choices = moveChoices(state.inventory, current);
+    const choices = moveChoices(state.inventory, current, child.account?.id);
     if (!state.harness || !choices.some((c) => c.source === state.harness && c.usable)) state.harness = choices.find((c) => c.usable)?.source ?? "";
     harnessRow.replaceChildren(...choices.map((c) => {
       const b = el("button", `launch-seg${c.source === state.harness ? " selected" : ""}`, c.label);
@@ -109,9 +109,11 @@ export async function openMoveSheet({ computer, child }) {
       b.addEventListener("click", () => { state.harness = c.source; render(); });
       return b;
     }));
-    const accounts = state.harness === "claude" ? moveAccounts(state.inventory) : [];
+    const accounts = state.harness === "claude" ? moveAccounts(state.inventory, { includeDefault: true }).filter((a) => current !== "claude" || a.id !== child.account?.id) : [];
     accountField.hidden = accounts.length === 0;
-    accountSelect.replaceChildren(...[["", "Default"], ...accounts.map((a) => [a.id, a.label || a.id])].map(([v, l]) => { const o = el("option", null, l); o.value = v; return o; }));
+    const accountOptions = accounts.length ? accounts.map((a) => [a.id, a.label || a.id]) : [["", "Default"]];
+    accountSelect.replaceChildren(...accountOptions.map(([v, l]) => { const o = el("option", null, l); o.value = v; return o; }));
+    if (state.harness === "claude" && !accounts.some((a) => a.id === state.account)) state.account = accounts.find((a) => a.id === "default")?.id ?? accounts[0]?.id ?? "";
     accountSelect.value = accounts.some((a) => a.id === state.account) ? state.account : "";
     accountSelect.disabled = state.busy;
     go.disabled = !state.harness || state.busy;
@@ -148,7 +150,7 @@ export async function openMoveSheet({ computer, child }) {
     }
   });
 
-  render();
+  go.disabled = true;
   go.focus();
   try { state.inventory = (await hookGet(computer, "/v1/harnesses")).harnesses ?? null; } catch { /* offer every harness */ }
   if (openSheet?.backdrop === backdrop) render();

@@ -19,6 +19,12 @@ describe("continue in another agent", () => {
     expect(moveAccounts(inventory).map((a) => a.id)).toEqual(["work"]);
   });
 
+  it("offers Claude again only for a different usable account, including a return to default", () => {
+    expect(moveChoices(inventory, "claude", "work").find((c) => c.source === "claude")?.usable).toBe(true);
+    expect(moveAccounts(inventory, { includeDefault: true }).map((a) => a.id)).toEqual(["default", "work"]);
+    expect(moveChoices([{ source: "claude", installed: true, usable: true, accounts: [{ id: "work", usable: true }] }], "claude", "work").some((c) => c.source === "claude")).toBe(false);
+  });
+
   it("words each move state", () => {
     expect(moveStatus({ state: "handing-off" })).toBe("Writing a hand-off…");
     expect(moveStatus({ state: "moved", handoff: { source: "fallback" } })).toBe("Moved (Phren wrote the hand-off from the transcript)");

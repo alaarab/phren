@@ -1,3 +1,4 @@
+import { watchQuotaWarnings } from "../shell/quota-warn-sheet.js";
 // The Agents section: sessions on the left, open documents (chats now; files
 // and diffs next) as centre tabs, the session's tools on the right
 // (Changes · Files · Search), and a bottom terminal panel toggled with ⌘J.
@@ -317,10 +318,14 @@ export function mountAgents(root) {
   root.querySelector(".terminal-close").addEventListener("click", closeTerminal);
 
   // ------------------------------------------------------------ documents
+  const quotaWarning = watchQuotaWarnings(() => {
+    if (root.hidden || !session || tabs.active()?.kind !== "chat") return null;
+    return store.sessions().find((row) => row.computer === session.computer && row.child.id === session.child.id) ?? null;
+  });
   const tabs = createTiles(tilesRoot, {
     emptyText: "Pick a session, or press \u2318K.",
     onActivate(doc) {
-      if (!doc.child) return;
+      if (!doc.child) { quotaWarning.close(); return; }
       const key = `${doc.computer}/${doc.child.id}`;
       session = { computer: doc.computer, child: doc.child };
       setActiveSession(doc.computer, doc.child);
@@ -330,9 +335,11 @@ export function mountAgents(root) {
         showPane(bench.pane ?? "changes");
       }
       syncTerminal();
+      void quotaWarning.check();
     },
     onEmpty() {
       session = null;
+      quotaWarning.close();
       bench.sessionKey = null;
       resetBench();
       closePanel();

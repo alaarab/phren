@@ -430,3 +430,44 @@ the digest file; the extension host frame runs on `{{uuid}}.localhost` and loads
 worker from the page origin, so the UI is served as `localhost` (its CSP allows
 `http://localhost:*`, not 127.0.0.1); `/editor-host/*` and `/extension-files/*` are
 public, read-only and served without the cookie.
+
+## Account quota warnings
+
+`shell/quota-warn.js` is pure: `quotaPreferences(value)` validates the enabled
+flag and 50–99 percent threshold (default 90); `quotaSessionKey(session)` keys
+computer/harness/conversation; `sessionUsage(session, accounts)` matches the
+session's exact local account; `quotaWindows(row, now)` settles 5-hour and weekly
+windows; `quotaWarnings(session, row, { preferences, suppressed, seen, now })`
+returns notices and their tokens without consuming them; `quotaDestinations`
+ranks the move inventory by remaining room, excluding the current login.
+
+`shell/quota-warn-prefs.js` exports `quotaSettings`, `saveQuotaSettings`,
+`quotaSuppressed`, `suppressQuotaChat`, `quotaSeen`, `markQuotaSeen`. Settings ›
+Notifications saves the switch and threshold in `phren.desktop.quota-warning`;
+`phren.desktop.quota-warning-chats` persists opt-outs and
+`phren.desktop.quota-warning-seen` persists shown crossings across relaunches.
+A session/window/reset gets one threshold notice and one exhaustion notice;
+percentage corrections do not rearm it. First observing an already-high window
+counts as its crossing. Missing, stale, ambiguous or reset usage is skipped.
+
+`shell/quota-warn-sheet.js` exports `watchQuotaWarnings(currentSession)` returning
+`{ check, close }`, mounted once by Agents. It follows overview changes, active
+chat/section changes and `usage-rings.js`'s `followUsage(fn)` (immediate latest
+snapshot, then each successful shared minute poll; returns unsubscribe). The
+passive sheet leaves chat interactive and focus untouched. Switch opens
+`openMoveSheet({ computer, child, to?: { harness, account } })` with the best
+available destination selected; the user confirms the hand-off there.
+`moveChoices(inventory, current, currentAccount?)` allows the same Claude
+harness when another usable account exists; `moveAccounts(inventory,
+{ includeDefault?: boolean })` includes the default when requested.
+
+No Hook additions: `workspacesReader` in `server-routes.ts` assigns
+`paneAccountField` to `groups[].children[].account` (`{ id, label, key }`) and
+`target.source`/`target.session` identify the harness/conversation. The desktop
+OverviewHub forwards those rows unchanged. `/api/usage` (`src/usage.ts`) merges
+Hook `/v1/usage?accounts=all` reports into accounts whose `harness` and
+`computers[].{name,account}` match that session's computer and Claude account ID;
+`windows[]` supplies `usedPercent`/`leftPercent`, `resetsAt`, `exhausted` and
+`limited`. Claude sessions without an account reference are skipped. Other
+harnesses require exactly one account row on the session's computer. The quota
+on dispatch `live_sessions` rows is a separate surface and is not needed here.

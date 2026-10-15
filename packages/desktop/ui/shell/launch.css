@@ -183,3 +183,9 @@
 @media (prefers-reduced-motion: reduce) {
   .launch-close, .launch-seg, .launch-computer, .launch-loadfill, .launch-btn { transition: none; }
 }
+
+/* A quota warning leaves the chat usable and never takes keyboard focus. */
+.quota-warning { position: fixed; right: 24px; bottom: 24px; z-index: 79; width: min(560px, calc(100vw - 32px)); max-height: min(70vh, 560px); }
+.quota-warning .launch-body { overflow-y: auto; }
+.quota-warning .launch-foot { flex-wrap: wrap; }
+.quota-warning .launch-btn { height: auto; min-height: 34px; white-space: normal; }

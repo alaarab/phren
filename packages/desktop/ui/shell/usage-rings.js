@@ -5,6 +5,10 @@
 // @phren/cli/client/account-usage, reimplemented here because the browser
 // imports nothing from the CLI.
 
+const usageListeners = new Set();
+let latestUsage = null;
+export function followUsage(fn) { usageListeners.add(fn); fn(latestUsage); return () => usageListeners.delete(fn); }
+
 const POLL_MS = 60_000;
 const SIZE = 18;
 const RADIUS = 7;
@@ -321,7 +325,11 @@ export function mountUsageRings(el) {
   async function load() {
     try {
       const res = await fetch("/api/usage", { cache: "no-store" });
-      if (res.ok) snapshot = await res.json();
+      if (res.ok) {
+        snapshot = await res.json();
+        latestUsage = snapshot;
+        for (const fn of usageListeners) fn(snapshot);
+      }
     } catch {
       // Keep the last drawing; the next poll retries.
     }

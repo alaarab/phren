@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.9] - unreleased
 
+- Configurable account usage warnings offer to continue the open chat on another signed-in account or harness at the threshold and exhaustion, with a per-chat opt-out.
+
 - Narrow schedule editors wrap conflict notices and timing controls inside the scrolling body; unchanged schedule refreshes preserve list buttons and focus.
 - Schedule edits and Pause/Resume use the Hook's merge route when supported, preserving newer fields and showing the latest version after a conflict; removed schedules close the editor and validation errors stay on the form.
 - Settings › Computers shows each Hook's git writes without a repository check, counted by client since the Hook started, and identifies Hooks too old to report. Reads refresh when the page opens.

@@ -1,3 +1,4 @@
+import { quotaSettings, saveQuotaSettings } from "../../shell/quota-warn-prefs.js";
 // Settings › Notifications: what notifies, quiet hours, and where the needs-you count shows.
 import { quietSettings, saveQuietSettings } from "../../shell/quiet.js";
 import { setTrayEnabled, trayAvailable, trayEnabled } from "../../shell/tray.js";
@@ -13,6 +14,22 @@ export function buildNotifications(page) {
   notify.append(toggleRow("An agent needs me", notifyEnabled(), (on) => writeFlag(NOTIFY_KEY, on)));
   notify.append(toggleRow("An agent stalls", stallNotifyEnabled(), (on) => writeFlag(STALL_KEY, on)));
   notify.append(toggleRow("A session's pull request checks pass or fail", ciNotifyEnabled(), (on) => writeFlag(CI_KEY, on)));
+  const quota = el("div", "settings-list");
+  const prefs = quotaSettings();
+  quota.append(toggleRow("Account usage warnings", prefs.on, (on) => { saveQuotaSettings({ on }); threshold.disabled = !on; }));
+  const quotaLabel = el("label", "settings-toggle");
+  const threshold = el("input", "settings-input");
+  threshold.type = "number";
+  threshold.min = "50";
+  threshold.max = "99";
+  threshold.step = "1";
+  threshold.value = String(prefs.threshold);
+  threshold.disabled = !prefs.on;
+  threshold.setAttribute("aria-label", "Account usage warning percentage");
+  threshold.style.width = "80px";
+  threshold.addEventListener("change", () => { saveQuotaSettings({ threshold: threshold.value }); threshold.value = String(quotaSettings().threshold); });
+  quotaLabel.append(el("span", "settings-toggle-label", "Warn when an account reaches"), threshold, el("span", "settings-note", "% of its limit"));
+  quota.append(quotaLabel);
   const quiet = el("div", "settings-list");
   quiet.append(quietRow());
   const show = el("div", "settings-list");
@@ -23,6 +40,7 @@ export function buildNotifications(page) {
   }
   page.append(head,
     el("div", "settings-group-label", "Notify me when"), notify,
+    el("div", "settings-group-label", "Account usage"), quota,
     el("div", "settings-group-label", "Quiet hours"), quiet,
     el("div", "settings-group-label", "Show the needs-you count"), show);
   return null;
