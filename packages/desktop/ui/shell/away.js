@@ -1,8 +1,7 @@
-// "Since you left": finished turns, settled checks, handoffs and account room
+// "Since you left": finished turns, settled checks and account room
 // observed while Home is hidden or the window is unfocused. A minute away
 // publishes the bounded summary to Home until dismissed.
 import { onChecksSettled } from "./ci-watch.js";
-import { harnessName, sameChatTarget } from "./handoff.js";
 import { quotaBackTransitions } from "./quota-back.js";
 import { onSectionChange } from "./sections.js";
 import { followUsage } from "./usage-rings.js";
@@ -10,12 +9,10 @@ import { sessions, store } from "./store.js";
 
 export const MIN_AWAY_MS = 60_000;
 const MAX_ROWS = 20;
-const MAX_SEEN = 512;
-const targetKey = (target) => ["server", "workspace", "tab", "pane", "source", "session"].map((field) => target?.[field] ?? null);
-function keep(map, key, value, max = MAX_ROWS) {
+function keep(map, key, value) {
   map.delete(key);
   map.set(key, value);
-  if (map.size > max) map.delete(map.keys().next().value);
+  if (map.size > MAX_ROWS) map.delete(map.keys().next().value);
 }
 
 /** Rows whose turn ended between two looks: working before, anything else now. */
@@ -30,8 +27,6 @@ export function createAway({ now = () => Date.now() } = {}) {
   let checks = new Map(); // computer/project/number -> the CI watch's pull, with `at`
   let statuses = new Map();
   let events = new Map();
-  const handoffs = new Map();
-  let observedComputers = new Set();
   let quotaState;
   let summary = null; // { since, back, rows } once back
   const listeners = new Set();
@@ -39,39 +34,11 @@ export function createAway({ now = () => Date.now() } = {}) {
 
   return {
     /** A new overview: remember who finished while away. */
-    observe(rows, computers = [...new Set(rows.map((row) => row.computer))]) {
-      const online = new Set(computers);
-      const liveRows = rows.filter((row) => online.has(row.computer));
-      const present = new Set();
+    observe(rows) {
       if (awaySince !== null) {
-        for (const row of endedTurns(statuses, liveRows)) keep(finished, row.key, { key: row.key, computer: row.computer, child: row.child, at: now() });
+        for (const row of endedTurns(statuses, rows)) keep(finished, row.key, { key: row.key, computer: row.computer, child: row.child, at: now() });
       }
-      for (const row of rows) {
-        for (const direction of ["to", "from"]) {
-          const ref = direction === "to" ? row.child.handedOffTo : row.child.handedOffFrom;
-          if (!ref || typeof ref !== "object") continue;
-          const related = ref.target ?? ref;
-          const source = direction === "to" ? row.child.target : related;
-          const target = direction === "to" ? related : row.child.target;
-          if (!source?.session || !target?.session) continue;
-          const key = JSON.stringify([row.computer, targetKey(source), targetKey(target)]);
-          present.add(key);
-          if (handoffs.has(key)) continue;
-          handoffs.set(key, true);
-          if (!online.has(row.computer) || !observedComputers.has(row.computer) || awaySince === null) continue;
-          const local = rows.filter((other) => other.computer === row.computer);
-          const original = local.find((other) => sameChatTarget(other.child.target, source));
-          const title = original?.child.title || original?.child.label || (direction === "from" ? ref.title : row.child.title || row.child.label) || "Chat";
-          const harness = harnessName((direction === "to" ? ref.harness : row.child.agent) ?? target.source);
-          keep(events, key, { kind: "handoff", key, computer: row.computer, target, title: `${title} moved to ${harness}`, at: now() });
-        }
-      }
-      // Visible references are the baseline, however large the overview is.
-      // Only absent history is bounded, and pruning waits for the complete scan.
-      const absent = [...handoffs.keys()].filter((key) => !present.has(key));
-      for (const key of absent.slice(0, Math.max(0, absent.length - MAX_SEEN))) handoffs.delete(key);
-      observedComputers = online;
-      statuses = new Map(liveRows.map((row) => [row.key, row.child.agentStatus]));
+      statuses = new Map(rows.map((row) => [row.key, row.child.agentStatus]));
     },
     /** Consume every usage poll, including visible recoveries, so dismissal never replays one. */
     observeUsage(snapshot) {
@@ -125,11 +92,7 @@ export function startAway() {
   window.addEventListener("blur", update);
   window.addEventListener("focus", update);
   document.addEventListener("visibilitychange", update);
-  const stopStore = store.subscribe((merged) => {
-    if (!merged) return;
-    const online = merged.computers.filter((computer) => computer.state === "online" && computer.overview).map((computer) => computer.computer);
-    away.observe(sessions(merged, { includeOffline: true }), online);
-  });
+  const stopStore = store.subscribe((merged) => { if (merged) away.observe(sessions(merged)); });
   const stopChecks = onChecksSettled((pull) => away.noteChecks(pull));
   update();
   return () => {

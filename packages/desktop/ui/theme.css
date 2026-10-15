@@ -888,8 +888,8 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 @media (prefers-reduced-motion: reduce) { .skel { animation: none; opacity: .75; } }
 
 .handoff-link { border: 0; padding: 0; background: none; color: var(--muted); font: inherit; font-size: 11px; text-align: left; overflow-wrap: anywhere; }
-button.handoff-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-button.handoff-link:hover { color: var(--accent); }
+button.handoff-link, button.home-quota-row .handoff-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+button.handoff-link:hover, button.home-quota-row:hover .handoff-link { color: var(--accent); }
 .sb-handoffs { display: flex; flex-wrap: wrap; min-width: 0; gap: 4px; }
 .sb-handoffs .handoff-link { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
@@ -908,3 +908,8 @@ button.handoff-link:hover { color: var(--accent); }
 .home-handoff-chat:disabled { cursor: default; opacity: .6; }
 .home-handoff-row .home-row-meta { flex-wrap: wrap; align-items: center; overflow-wrap: anywhere; }
 .home-handoff-row .home-handoff-sub { display: -webkit-box; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Quota recoveries give the account and reset two lines before the usage tag. */
+.home-quota-row { flex-direction: column; align-items: stretch; gap: 4px; }
+.home-quota-row .home-row-title { display: -webkit-box; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.home-quota-row .home-row-meta { flex-wrap: wrap; align-items: center; }

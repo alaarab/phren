@@ -1,5 +1,4 @@
-import { sameChatTarget } from "../shell/handoff.js";
-import { openHandoffChat, decorateHomeHandoff } from "../shell/handoff-view.js";
+import { decorateHomeHandoff } from "../shell/handoff-view.js";
 // Home: the cockpit. Top to bottom, the conductor card, who needs you (with
 // keyboard answers), the turns that ended since you left, what is working (with each agent's activity line), the
 // checks on those sessions' pull requests, recent returns from dispatched
@@ -321,14 +320,16 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     });
     const activity = [...summary.rows, ...(summary.events ?? [])].sort((a, b) => b.at - a.at).slice(0, 20);
     awayRows = [...checkRows, ...activity.map((entry) => {
-      if (entry.kind) {
+      if (entry.kind === "quota") {
         const shell = rowShell({ tone: "done" });
+        shell.button.classList.add("home-quota-row");
         shell.title.textContent = entry.title;
         const meta = el("span", "home-row-meta");
         meta.append(el("span", "home-host", entry.computer), el("span", "home-age", age(new Date(entry.at).toISOString())));
         shell.button.append(meta);
-        shell.button.disabled = entry.kind === "handoff" && !sessions(merged, { includeOffline: true }).some((row) => row.computer === entry.computer && sameChatTarget(row.child.target, entry.target));
-        shell.button.addEventListener("click", () => entry.kind === "handoff" ? openHandoffChat(entry.computer, entry.target) : openUsage());
+        const usage = el("span", "handoff-link handoff-tag", "Usage ↗");
+        meta.append(usage);
+        shell.button.addEventListener("click", () => openUsage());
         return shell.button;
       }
       // The row as it is now, when the session is still there.

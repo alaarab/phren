@@ -6,9 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
-- Since-you-left hand-offs stay dismissed across delayed computer connections, reconnects and overviews with more than 512 hand-offs.
-
-- Home’s Finished feed includes chats handed off and accounts available again while you were away or in another section, with links to the new chat or account usage and the same Dismiss action.
+- Home’s Finished feed includes accounts available again while you were away or in another section, with two-line titles, an underlined Usage tag opening account usage and the same Dismiss action. Hand-offs keep their existing session row and tag without a duplicate move item.
 
 - Home hand-off tags sit inside full-width session rows alongside their metadata, with destination subtitles wrapping to two lines on narrow windows.
 

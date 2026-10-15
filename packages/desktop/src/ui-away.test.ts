@@ -66,124 +66,20 @@ describe("away", () => {
 });
 
 
-describe("away handoffs and account room", () => {
-  it.each(["to", "from", "both"])("collects new %s references once, links the new chat and does not replay dismissed handoffs", (direction) => {
+describe("away account room", () => {
+  it("keeps handed-off turns in the session list without adding a separate move item", () => {
     const c = clock();
     const away = createAway({ now: c.now });
-    const old = { ...row("a", "idle"), child: { ...row("a", "idle").child, title: "Fix login", target: target("a") } };
-    const next = { ...row("b", "idle"), child: { ...row("b", "idle").child, agent: "codex", target: target("b", "codex") } };
-    away.observe([old]);
+    away.observe([{ ...row("a", "working"), child: { ...row("a", "working").child, target: target("a") } }]);
     away.leave();
-    c.tick(MIN_AWAY_MS);
-    const rows = [
-      { ...old, child: { ...old.child, ...(direction !== "from" ? { handedOffTo: { target: next.child.target } } : {}) } },
-      { ...next, child: { ...next.child, ...(direction !== "to" ? { handedOffFrom: { target: old.child.target } } : {}) } },
-    ];
-    away.observe(rows);
-    away.back();
-    expect(away.current()?.events).toMatchObject([{ kind: "handoff", computer: "mini", title: "Fix login moved to Codex", target: next.child.target }]);
-    away.dismiss();
-    away.leave();
-    away.observe([]); // a reconnect must not reintroduce old references
-    away.observe(rows);
+    away.observe([
+      { ...row("a", "idle"), child: { ...row("a", "idle").child, target: target("a"), handedOffTo: target("b", "codex") } },
+      { ...row("b", "working"), child: { ...row("b", "working").child, target: target("b", "codex"), handedOffFrom: target("a") } },
+    ]);
     c.tick(MIN_AWAY_MS);
     away.back();
-    expect(away.current()).toBeNull();
-  });
-
-  it("silently baselines existing handoffs and ignores references seen while Home is attended", () => {
-    const c = clock();
-    const away = createAway({ now: c.now });
-    const moved = (id: string) => ({ ...row(id, "idle"), child: { target: target(id), handedOffTo: target(`${id}-new`, "codex") } });
-    away.leave();
-    away.observe([moved("a")]);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()).toBeNull();
-    away.observe([moved("a"), moved("b")]);
-    away.leave();
-    away.observe([moved("a"), moved("b")]);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()).toBeNull();
-  });
-
-  it("baselines each computer after empty startup and reconnect, including cached offline rows", () => {
-    const c = clock();
-    const away = createAway({ now: c.now });
-    const moved = (computer: string, id: string) => ({
-      key: `${computer}/${id}`, computer,
-      child: { title: id, target: target(id), handedOffTo: target(`${id}-new`, "codex") },
-    });
-    const mini = moved("mini", "existing");
-    const laptop = moved("laptop", "dismissed-before-relaunch");
-    away.leave();
-    away.observe([], []);
-    away.observe([mini], ["mini"]);
-    away.observe([mini, laptop], ["mini", "laptop"]);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()).toBeNull();
-    away.leave();
-    const fresh = moved("laptop", "new");
-    away.observe([mini, laptop, fresh], ["mini", "laptop"]);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()?.events.map((event) => event.title)).toEqual(["new moved to Codex"]);
-    away.dismiss();
-    away.leave();
-    away.observe([mini, laptop, fresh], ["mini"]); // offline cached overview
-    const reconnect = moved("laptop", "existing-on-reconnect");
-    away.observe([mini, laptop, fresh, reconnect], ["mini", "laptop"]);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()).toBeNull();
-  });
-
-  it("baselines an online computer's empty overview before its first handoff", () => {
-    const c = clock();
-    const away = createAway({ now: c.now });
-    away.observe([], ["mini"]);
-    away.leave();
-    away.observe([{ ...row("a", "idle"), child: { title: "First", target: target("a"), handedOffTo: target("b", "codex") } }], ["mini"]);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()?.events.map((event) => event.title)).toEqual(["First moved to Codex"]);
-  });
-
-  it("retains more than 512 visible handoffs across scans and dismissal, bounding only absent history", () => {
-    const c = clock();
-    const away = createAway({ now: c.now });
-    const moved = (i: number) => ({ ...row(String(i), "idle"), child: {
-      title: `Task ${i}`, target: target(String(i)), handedOffTo: target(`${i}-new`, "codex"),
-    } });
-    away.observe([row("baseline", "idle")]);
-    const rows = Array.from({ length: 520 }, (_, i) => moved(i));
-    away.leave();
-    away.observe(rows);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()?.events).toHaveLength(20);
-    away.dismiss();
-    away.leave();
-    away.observe([...rows].reverse());
-    away.observe(rows);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()).toBeNull();
-    // Keep the computer online while references leave its overview. Only the
-    // newest 512 absent pairs survive; active pairs never use that allowance.
-    away.observe([row("baseline", "idle")]);
-    away.leave();
-    away.observe(rows.slice(8));
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()).toBeNull();
-    away.leave();
-    away.observe(rows);
-    c.tick(MIN_AWAY_MS);
-    away.back();
-    expect(away.current()?.events.map((event) => event.title)).toEqual(rows.slice(0, 8).map((entry) => `${entry.child.title} moved to Codex`));
+    expect(away.current()?.rows.map((entry) => entry.child.id)).toEqual(["a"]);
+    expect(away.current()?.events).toEqual([]);
   });
 
   it("collects account recoveries through stale polls, newest first, without replay after dismissal", () => {
@@ -213,23 +109,22 @@ describe("away handoffs and account room", () => {
     expect(away.current()).toBeNull();
   });
 
-  it("bounds away events to the newest twenty and orders handoffs with quota recoveries", () => {
+  it("bounds quota recoveries to the newest twenty", () => {
     const c = clock();
     const away = createAway({ now: c.now });
-    away.observe([]);
-    away.observeUsage(usage(100));
+    const accounts = Array.from({ length: 25 }, (_, i) => ({ ...usage(100).accounts[0], id: `claude|${i}`, account: `Work ${i}` }));
+    away.observeUsage({ accounts });
     away.leave();
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < accounts.length; i++) {
       c.tick(1000);
-      away.observe([{ ...row(String(i), "idle"), child: { title: `Task ${i}`, target: target(String(i)), handedOffTo: target(`${i}-new`, "codex") } }]);
+      accounts[i] = { ...accounts[i], windows: [{ id: "five_hour", usedPercent: 0 }] };
+      away.observeUsage({ accounts });
     }
     c.tick(MIN_AWAY_MS);
-    away.observeUsage(usage(0));
     away.back();
     expect(away.current()?.events).toHaveLength(20);
-    expect(away.current()?.events[0].kind).toBe("quota");
-    expect(away.current()?.events[1].title).toBe("Task 24 moved to Codex");
-    expect(away.current()?.events.at(-1).title).toBe("Task 6 moved to Codex");
+    expect(away.current()?.events[0].title).toBe("Claude · Work 24 is available again (5-hour limit reset)");
+    expect(away.current()?.events.at(-1).title).toBe("Claude · Work 5 is available again (5-hour limit reset)");
   });
 
   it.each(["section", "focus"])("records recovery on the shared usage feed while away by %s", (reason) => {
