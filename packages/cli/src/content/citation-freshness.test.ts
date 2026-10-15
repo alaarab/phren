@@ -87,8 +87,9 @@ describe("gitboy citation freshness", () => {
     writeFileSync(file, JSON.stringify(entries));
     let finish!: (response: Response) => void;
     const fetchImpl = vi.fn(async () => await new Promise<Response>(resolve => { finish = resolve; }));
-    const pending = refreshCitationFreshness([cite], { ...options(), fetchImpl });
-    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    const pending = refreshCitationFreshness([cite], { ...options(), budgetMs: 10_000, fetchImpl });
+    // Git spawns before the fetch can take over a second on Windows runners.
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     entries[key] = { state: diskState, checkedAt: new Date(Date.now() + 1000).toISOString(), head: "newer-head", lastCommit: null };
     writeFileSync(file, JSON.stringify(entries));
     finish(response(new URL("https://gitboy.example/?path=src/a.ts"), incomingState === "changed"));
