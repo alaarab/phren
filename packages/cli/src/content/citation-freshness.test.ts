@@ -61,7 +61,7 @@ describe("gitboy citation freshness", () => {
     vi.mocked(execFileSync).mockClear();
     const fetchImpl = vi.fn(async (url: URL | RequestInfo) => response(url));
     const nested = path.join(repo, "nested");
-    await refreshCitationFreshness([citation("a.ts", { repo: nested }), citation("b.ts", { repo: path.relative(process.cwd(), repo) })], { ...options(), fetchImpl });
+    await refreshCitationFreshness([citation("a.ts", { repo: nested }), citation("b.ts", { repo: path.join("relative", "checkout") })], { ...options(), fetchImpl });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(new URL(String(fetchImpl.mock.calls[0][0])).pathname).toBe("/api/v1/repos/alice/app/changed");
     const localCalls = vi.mocked(execFileSync).mock.calls.filter(([, args]) => (args as string[]).includes("-C"));
@@ -123,7 +123,9 @@ describe("gitboy citation freshness", () => {
     execFileSync("git", ["init", repo], { stdio: "ignore" });
     execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@gitboy.local:alice/app.git"]);
     const valid = citation(path.join(repo, "src/a.ts"), { repo, projectRemote: "https://github.com/wrong/repo" });
-    const inputs = [valid, citation("./src/b.ts"), citation("../escape"), citation("src/../escape"), citation("/outside", { repo }), citation("a\\b"), citation("x", { projectRemote: "https://github.com/a/b" })];
+    const inputs = [valid, citation(`.${path.sep}${path.join("src", "b.ts")}`), citation("../escape"), citation("src/../escape"),
+      citation(path.resolve(tmp.path, "outside"), { repo }), citation("src\\..\\escape"),
+      citation(["src", "..", "escape"].join(path.sep)), citation("x", { projectRemote: "https://github.com/a/b" })];
     const result = await refreshCitationFreshness(inputs, { ...options(), fetchImpl });
     expect(result.size).toBe(2);
     expect(fetchImpl.mock.calls.map(([url]) => [new URL(String(url)).host, new URL(String(url)).searchParams.getAll("path")])).toEqual([
@@ -163,10 +165,16 @@ describe("gitboy citation freshness", () => {
   });
 
   it("bounds a hung fetch, aborts it and returns unknown without throwing", async () => {
+    // Freeze setup time and avoid credential-file IO so the deadline exercises fetch.
+    vi.useFakeTimers();
+    vi.stubEnv("GITBOY_HOST", "gitboy.example");
+    vi.stubEnv("GITBOY_TOKEN", "test-token");
     const cite = citation();
     let signal: AbortSignal | undefined;
     const fetchImpl = vi.fn((_url, init) => { signal = init?.signal as AbortSignal; return new Promise<Response>(() => {}); }) as unknown as typeof fetch;
-    const result = await refreshCitationFreshness([cite], { ...options(), budgetMs: 40, fetchImpl });
+    const pending = refreshCitationFreshness([cite], { ...options(), budgetMs: 40, fetchImpl });
+    await vi.advanceTimersByTimeAsync(40);
+    const result = await pending;
     expect(result.get(cite)?.state).toBe("unknown");
     expect(signal?.aborted).toBe(true);
   });
