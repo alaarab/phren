@@ -13,7 +13,7 @@ import { away } from "../shell/away.js";
 import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
 import { backgroundLabel, stallLabel, stalledMinutes } from "../shell/stalls.js";
 import { runningLow } from "../shell/home-usage.js";
-import { followUsage } from "../shell/usage-rings.js";
+import { openUsage, followUsage } from "../shell/usage-rings.js";
 import { loadQuotaState, quotaSettings } from "../shell/quota-warn-prefs.js";
 import { openQuotaSwitch } from "../shell/quota-warn-sheet.js";
 import { quotaSessionKey } from "../shell/quota-warn.js";
@@ -318,7 +318,20 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       shell.button.addEventListener("click", () => openPrs(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child));
       return shell.button;
     });
-    awayRows = [...checkRows, ...summary.rows.map((entry) => {
+    const activity = [...summary.rows, ...(summary.events ?? [])].sort((a, b) => b.at - a.at).slice(0, 20);
+    awayRows = [...checkRows, ...activity.map((entry) => {
+      if (entry.kind === "quota") {
+        const shell = rowShell({ tone: "done" });
+        shell.button.classList.add("home-quota-row");
+        shell.title.textContent = entry.title;
+        const meta = el("span", "home-row-meta");
+        meta.append(el("span", "home-host", entry.computer), el("span", "home-age", age(new Date(entry.at).toISOString())));
+        shell.button.append(meta);
+        const usage = el("span", "handoff-link handoff-tag", "Usage ↗");
+        meta.append(usage);
+        shell.button.addEventListener("click", () => openUsage());
+        return shell.button;
+      }
       // The row as it is now, when the session is still there.
       const live = store.find(entry.computer, entry.child.id);
       const child = live?.child ?? entry.child;
