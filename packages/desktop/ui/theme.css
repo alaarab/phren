@@ -892,3 +892,8 @@ button.handoff-link { cursor: pointer; text-decoration: underline; text-underlin
 button.handoff-link:hover { color: var(--accent); }
 .sb-handoffs { display: flex; flex-wrap: wrap; min-width: 0; gap: 4px; }
 .sb-handoffs .handoff-link { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Home's usage inventory keeps chat and Switch as separate keyboard controls. */
+.home-low { align-items: center; }
+.home-low-chat { border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; padding: 0; }
+.home-low-usage { color: var(--waiting); font-size: 12px; overflow-wrap: anywhere; }

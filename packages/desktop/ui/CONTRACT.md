@@ -580,3 +580,24 @@ width; account names, window names and values wrap. Ring clicks retain the
 ring group's right anchor and normal 320 px size on wide windows. Keyboard
 and palette opens have no anchor and center under the titlebar. Positioning
 refreshes on resize and usage renders; closing removes the resize listener.
+
+### Home running low
+
+`shell/home-usage.js` exports pure `runningLow(overview, usage, preferences, now)`:
+open online chats matched by `sessionUsage`, at the configured threshold or
+exhausted, ordered exhausted first then by usage with stable ties. Stale,
+ambiguous, reset, expired and unknown windows are omitted. This live inventory
+is independent of notification enablement, seen tokens and chat opt-outs.
+Home follows the shared usage feed while visible and hydrates quota settings
+before rendering. Chat and Switch are separate keyboard buttons; overview and
+usage refreshes retain focus by session and action. `openQuotaSwitch` in
+`quota-warn-sheet.js` shares the warning card's destination selection and
+`openMoveSheet` flow, including cross-family new-chat capability handling.
+
+The shared move sheet focuses its first enabled control before loading inventory,
+traps Tab and programmatic focus inside the dialog, and closes with Escape from
+any control. Closing removes its listeners and returns focus to the invoker;
+`openMoveSheet` and `openQuotaSwitch` accept an optional `returnFocus` callback
+for callers whose controls can be replaced. Home resolves its current Switch
+button by session key on close and suspends its keyboard shortcuts while any
+sheet backdrop, visible dialog role or open native dialog is present.
