@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { quotaDestinations, quotaPreferences, quotaSessionKey, quotaWarnings, quotaInteractionPending, sessionUsage } from "../ui/shell/quota-warn.js";
+import { quotaDestinations, quotaDestinationText, quotaPreferences, quotaSessionKey, quotaWarnings, quotaInteractionPending, sessionUsage } from "../ui/shell/quota-warn.js";
 import { loadQuotaState, markQuotaSeen, quotaSeen, quotaSettings, quotaSuppressed, saveQuotaSettings, suppressQuotaChat } from "../ui/shell/quota-warn-prefs.js";
 
 const now = Date.parse("2026-10-14T12:00:00Z");
@@ -76,6 +76,17 @@ describe("chat quota decisions", () => {
     expect(destinations.map((d) => [d.harness, d.account, d.left, d.exhausted])).toEqual([
       ["codex", undefined, 70, false], ["claude", "spare", 60, false], ["claude", "default", 20, false], ["opencode", undefined, null, false], ["claude", "empty", 0, true],
     ]);
+  });
+
+  it("describes the tightest window with its own reset rather than another window's", () => {
+    const reset = new Date(2026, 9, 15, 9, 0);
+    const at = new Date(2026, 9, 14, 8, 0).getTime();
+    const destinations = quotaDestinations(session, [], [{ id: "personal", label: "Personal" }], [{ id: "personal", harness: "claude", computers: [{ name: "Desk", account: "personal" }], windows: [
+      { id: "five_hour", usedPercent: 10, resetsAt: new Date(at + 3 * 3600_000).toISOString() },
+      { id: "seven_day", usedPercent: 22, resetsAt: reset.toISOString() },
+    ] }], at);
+    expect(quotaDestinationText(destinations[0], at)).toBe("Claude · Personal · 78% left of weekly · resets Thu 09:00");
+    expect(quotaDestinationText({ label: "Codex", left: 60, limiting: { id: "codex:primary", resetsAt: new Date(at + 3 * 3600_000).toISOString() } }, at)).toBe("Codex · 60% left of 5-hour · resets in 3h");
   });
 
   it.each([

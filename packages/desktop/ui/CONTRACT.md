@@ -460,7 +460,11 @@ counts as its crossing. Missing, stale, ambiguous or reset usage is skipped.
 `{ check, close }`, mounted once by Agents. It follows overview changes, active
 chat/section changes and `usage-rings.js`'s `followUsage(fn)` (immediate latest
 snapshot, then each successful shared minute poll; returns unsubscribe). The
-passive sheet leaves chat interactive and focus untouched. Switch opens
+passive card leaves chat interactive and focus untouched. `openChat` exposes
+`quotaHost`, a bounded flex-layout slot between interactions and the composer;
+Agents supplies it as `currentSession().quotaHost`. The card mounts there,
+never on `document.body`, and reduces transcript space without overlaying the
+composer at narrow or desktop widths. Console mode suppresses the card. Switch opens
 `openMoveSheet({ computer, child, to?: { harness, account }, notice?, selectDefault?: boolean })` with the
 best destination selected from usage at click time; exhausted or unknown-room
 destinations are never preselected. When none has known room, the hand-off opens
@@ -490,3 +494,31 @@ Hook `/v1/usage?accounts=all` reports into accounts whose `harness` and
 `limited`. Claude sessions without an account reference are skipped. Other
 harnesses require exactly one account row on the session's computer. The quota
 on dispatch `live_sessions` rows is a separate surface and is not needed here.
+
+
+### Switch destinations and hand-off chats
+
+`quotaDestinationText(destination, now)` describes each destination's `limiting`
+window (tightest active window): percent left, window name, and its reset in
+local time (relative under 24 hours, weekday/time thereafter). Missing resets
+and exhausted accounts are explicit. The card's Switch target and the Continue
+in sheet share `shell/handoff.js`'s pure `movePlan(currentHarness, to,
+moveNewChat)` decision and outcome label. Same-family account moves continue in
+place. Cross-family moves send `mode: "new-chat"` to the existing
+`POST /v1/sessions/move` only when `store.capabilities(computer).moveNewChat`
+is true. Older Hooks keep the in-place route and the label explicitly says
+"Replaces this chat … (update the Hook for a new chat)". Capability is read again
+when confirming a move. The move sheet polls the existing GET route; after a
+new-chat move reaches `moved`, it waits for `move.target` in the overview and
+opens that chat without closing the original tab.
+
+`shell/handoff.js` also exports `sameChatTarget(a, b)` and
+`handoffNotices(child, rows)` for the Hook's optional `handedOffTo` /
+`handedOffFrom` references (`{ target, harness?, title? }`, or a target directly).
+`shell/handoff-view.js` exports `renderHandoffLinks(container, computer, child)`
+and `openHandoffChat(computer, target)`. The latter matches the full target in
+that computer's cached overview, opens it in Agents, and returns false while
+it is absent. Both sidebar styles and the chat header show "handed off to
+<harness>" / "handed off from <title>"; a reference with a target is a button
+opening that chat. `openChat.updateOverview(child)` refreshes these labels as
+live overview rows change. No Hook fields or routes are added by the desktop.

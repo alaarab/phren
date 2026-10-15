@@ -1,10 +1,11 @@
+import { movePlan } from "./handoff.js";
 // Passive sheet: no backdrop or focus grab, and never launches a move itself.
 import { hookGet } from "../api.js";
 import { store } from "./store.js";
 import { onSectionChange } from "./sections.js";
 import { followUsage, windowText } from "./usage-rings.js";
 import { moveAccounts, moveChoices, openMoveSheet } from "./move.js";
-import { quotaDestinations, quotaSessionKey, quotaWarnings, sessionUsage } from "./quota-warn.js";
+import { quotaDestinations, quotaDestinationText, quotaSessionKey, quotaWarnings, sessionUsage } from "./quota-warn.js";
 import { loadQuotaState, unmarkQuotaSeen, markQuotaSeen, quotaSeen, quotaSettings, quotaSuppressed, suppressQuotaChat } from "./quota-warn-prefs.js";
 
 const node = (tag, cls, text) => {
@@ -36,7 +37,7 @@ export function watchQuotaWarnings(currentSession) {
       if (token) await unmarkQuotaSeen(token).catch(reportFailure);
       return;
     }
-    if (!session) { close(); return; }
+    if (!session?.quotaHost) { close(); return; }
     try { await loadQuotaState(); } catch (error) { reportFailure(error); return; }
     session = currentSession();
     if (!session || blocked(session) || !quotaSettings().on || quotaSuppressed().includes(quotaSessionKey(session))) { close(); return; }
@@ -51,7 +52,10 @@ export function watchQuotaWarnings(currentSession) {
     if (reading || !warning) return;
     reading = true;
     let inventory;
-    try { inventory = (await hookGet(session.computer, "/v1/harnesses")).harnesses; }
+    try {
+      const [profile] = await Promise.all([hookGet(session.computer, "/v1/harnesses"), store.capabilities(session.computer)]);
+      inventory = profile.harnesses;
+    }
     catch { /* the warning still explains the limit when inventory is unavailable */ }
     finally { reading = false; }
     const latest = currentSession();
@@ -60,13 +64,14 @@ export function watchQuotaWarnings(currentSession) {
     const freshRow = sessionUsage(latest, usage.accounts);
     const fresh = pending(latest, freshRow);
     if (!fresh || open || document.querySelector(".launch-backdrop")) return;
+    if (!latest.quotaHost) return;
     const sheet = node("aside", "launch-sheet quota-warning");
     sheet.dataset.session = quotaSessionKey(latest);
     sheet.dataset.window = fresh.id;
     sheet.dataset.reset = fresh.resetsAt ?? "";
     sheet.dataset.stage = fresh.stage;
     sheet.dataset.token = fresh.token;
-    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("role", "region");
     sheet.setAttribute("aria-labelledby", "quota-warning-title");
     const head = node("div", "launch-head");
     const title = node("h2", "launch-title", `${freshRow.name} is at ${Math.round(fresh.used)}% of its ${fresh.label} limit`);
@@ -77,14 +82,16 @@ export function watchQuotaWarnings(currentSession) {
     body.append(caption);
     const alternatives = node("div", "quota-alternatives");
     body.append(alternatives);
+    const switchNote = node("div", "launch-hint");
     sheet.refreshDestinations = () => {
       alternatives.replaceChildren();
       const destinations = destinationsFor(currentSession() ?? latest, inventory);
       for (const dest of destinations) {
-        const room = dest.exhausted ? `Exhausted${dest.row?.availableIn ? ` · back in ${dest.row.availableIn}` : ""}` : dest.left === null ? "Usage unknown" : `${Math.round(dest.left)}% remaining`;
-        alternatives.append(node("div", `launch-note${dest.exhausted ? " launch-error" : ""}`, `${dest.label} · ${room}`));
+        alternatives.append(node("div", `launch-note${dest.exhausted ? " launch-error" : ""}`, quotaDestinationText(dest)));
       }
-      if (!destinations.some((d) => !d.exhausted && d.left > 0)) alternatives.append(node("div", "launch-note", "No other account or harness has known room. Choose where to continue."));
+      const best = destinations.find((d) => !d.exhausted && d.left > 0);
+      switchNote.textContent = best ? `${best.label} · ${movePlan(latest.child.target?.source ?? latest.child.agent, best, store.can(latest.computer, "moveNewChat")).label}` : "";
+      if (!best) alternatives.append(node("div", "launch-note", "No other account or harness has known room. Choose where to continue."));
     };
     sheet.refreshUsage = (row, warning) => {
       title.textContent = `${row.name} is at ${Math.round(warning.used)}% of its ${warning.label} limit`;
@@ -111,6 +118,7 @@ export function watchQuotaWarnings(currentSession) {
       });
     }, true);
     foot.append(change, button("Not now", close), button("Don't ask again for this chat", () => { void suppressQuotaChat(quotaSessionKey(latest)).catch(reportFailure); close(); }));
+    body.append(switchNote);
     sheet.append(head, body, foot);
     sheet.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
     if (!document.getElementById("launch-styles")) {
@@ -118,7 +126,7 @@ export function watchQuotaWarnings(currentSession) {
       link.id = "launch-styles"; link.rel = "stylesheet"; link.href = new URL("launch.css", import.meta.url).href;
       document.head.append(link);
     }
-    document.body.append(sheet);
+    latest.quotaHost.append(sheet);
     open = sheet;
     void markQuotaSeen(fresh.token).catch(reportFailure);
   }

@@ -1,3 +1,4 @@
+import { renderHandoffLinks } from "./shell/handoff-view.js";
 // Sessions sidebar: the phone's Live sessions list at desktop density.
 // See CONTRACT.md: export renderSidebar(el, merged, handlers). The row keeps
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
@@ -460,7 +461,7 @@ function rowSig(sb, desc) {
   const c = desc.child;
   const approval = sb.approvals.get(keyOf(desc.computer, c));
   return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "", c.stalled ? c.stalledSince : "", c.backgroundTasks ?? "",
-    c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
+    JSON.stringify([c.handedOffTo, c.handedOffFrom]), c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : ""].join("|");
 }
@@ -504,6 +505,11 @@ function rowContent(sb, node, desc) {
   if (child.branch) bottom.append(el("span", "sb-branch", child.branch));
   if (desc.pr != null) bottom.append(el("span", "sb-pr", "#" + desc.pr));
   main.append(bottom);
+  if (child.handedOffTo || child.handedOffFrom) {
+    const handoffs = el("span", "sb-handoffs");
+    renderHandoffLinks(handoffs, computer, child);
+    main.append(handoffs);
+  }
   // A session waiting on you says what it asked: its last reply (Hook 0.3.45+), one line.
   if (kind === "needs" && !child.approvalPending && child.lastReply) {
     const reply = el("span", "sb-reply", child.lastReply);
@@ -537,6 +543,11 @@ function compactRowContent(sb, node, desc) {
   const dot = el("span", "sb-cdot");
   dot.style.setProperty("--host-color", hostColor(computer));
   out.push(dot, el("span", unread ? "sb-title unread" : "sb-title", child.title || ""));
+  if (child.handedOffTo || child.handedOffFrom) {
+    const handoffs = el("span", "sb-handoffs");
+    renderHandoffLinks(handoffs, computer, child);
+    out.push(handoffs);
+  }
   if (kind === "working") out.push(el("span", "sb-cspin"));
   else if (["needs", "error", "unknown"].includes(kind)) out.push(el("span", "sb-cmark " + kind, BADGE[kind]));
   else out.push(el("span", "sb-cage", shortAge(child.lastChangedAt)));

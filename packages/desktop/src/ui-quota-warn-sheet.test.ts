@@ -5,7 +5,7 @@ const hooks = vi.hoisted(() => ({
   usage: (_value: unknown) => {}, overview: () => {}, section: () => {},
 }));
 vi.mock("../ui/api.js", () => ({ hookGet: hooks.get }));
-vi.mock("../ui/shell/store.js", () => ({ store: { subscribe: (fn: () => void) => { hooks.overview = fn; return () => {}; } } }));
+vi.mock("../ui/shell/store.js", () => ({ store: { capabilities: async () => ({ moveNewChat: true }), can: () => true, subscribe: (fn: () => void) => { hooks.overview = fn; return () => {}; } } }));
 vi.mock("../ui/shell/sections.js", () => ({ onSectionChange: (fn: () => void) => { hooks.section = fn; } }));
 vi.mock("../ui/shell/usage-rings.js", async (original) => ({ ...await original<object>(), followUsage: (fn: typeof hooks.usage) => { hooks.usage = fn; return () => {}; } }));
 vi.mock("../ui/shell/move.js", async (original) => ({ ...await original<object>(), openMoveSheet: hooks.move }));
@@ -36,6 +36,8 @@ async function setup(pending = false, saved = { settings: { on: true, threshold:
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-14T12:00:00Z"));
   const body = new Node();
+  const quotaHost = new Node();
+  body.append(quotaHost);
   vi.stubGlobal("document", { body, head: new Node(), createElement: () => new Node(), getElementById: () => ({}), querySelector: () => null });
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => saved })));
   let session: object | null = { interactionsPending: pending, computer: "Desk", child: { id: "tab", account: { id: "work" }, target: { source: "claude", session: "chat" } } };
@@ -48,10 +50,10 @@ async function setup(pending = false, saved = { settings: { on: true, threshold:
     { id: "personal", harness: "claude", computers: [{ name: "Desk", account: "default" }], windows: [{ id: "five_hour", usedPercent: 10 }] },
     { id: "codex", harness: "codex", exhausted: true, computers: [{ name: "Desk" }], windows: [{ id: "codex:primary", exhausted: true }] },
   ] };
-  const watcher = watchQuotaWarnings(() => session);
+  const watcher = watchQuotaWarnings(() => session ? { ...session, quotaHost } : null);
   hooks.usage(usage);
-  const sheets = () => body.children.filter((n) => !n.removed);
-  return { usage, watcher, sheets, recreate: watchQuotaWarnings, setPending: (value: boolean) => { Object.assign(session!, { interactionsPending: value }); hooks.overview(); }, setSession: (next: object | null) => { session = next; } };
+  const sheets = () => quotaHost.children.filter((n) => !n.removed);
+  return { usage, watcher, sheets, body, quotaHost, recreate: (fn: () => object) => watchQuotaWarnings(() => ({ ...fn(), quotaHost })), setPending: (value: boolean) => { Object.assign(session!, { interactionsPending: value }); hooks.overview(); }, setSession: (next: object | null) => { session = next; } };
 }
 
 describe("quota sheet lifecycle", () => {
@@ -59,10 +61,12 @@ describe("quota sheet lifecycle", () => {
     const ui = await setup();
     await vi.advanceTimersByTimeAsync(0);
     const sheet = ui.sheets()[0];
+    expect(ui.quotaHost.children).toContain(sheet);
+    expect(ui.body.children).not.toContain(sheet);
     expect(sheet.find("Claude is at 92% of its 5-hour limit")).toBeDefined();
     expect(sheet.find("resets in 1h 20m")).toBeDefined();
-    expect(sheet.find("Claude · Personal · 90% remaining")).toBeDefined();
-    expect(sheet.find("Codex · Exhausted")).toBeDefined();
+    expect(sheet.find("Claude · Personal · 90% left of 5-hour · reset time unknown")).toBeDefined();
+    expect(sheet.find("Codex · Exhausted of 5-hour · reset time unknown")).toBeDefined();
     sheet.find("Switch")!.click();
     expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ to: { harness: "claude", account: "default" } }));
     expect(ui.sheets()).toHaveLength(0);

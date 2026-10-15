@@ -1,6 +1,9 @@
+import { movePlan } from "./handoff.js";
+import { openHandoffChat } from "./handoff-view.js";
+import { store } from "./store.js";
 // "Continue in…": move a live session to another harness or Claude account in
-// the same pane (Hook `POST /v1/sessions/move`, session-move.ts). The agent
-// writes a hand-off and exits; the chosen one starts in the same folder with
+// a pane or a new chat (Hook `POST /v1/sessions/move`, session-move.ts). The agent
+// writes a hand-off; the chosen one starts in the same folder with
 // the hand-off as its first prompt. Uncommitted work stays in the checkout.
 // The sheet follows the move (`GET /v1/sessions/move?id=`) until it lands.
 import { hookGet, hookPost } from "../api.js";
@@ -60,7 +63,7 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   openSheet?.close();
   installStyles();
   const current = child.target?.source ?? child.agent;
-  const state = { harness: to.harness ?? "", account: to.account ?? "", inventory: null, busy: false, timer: null };
+  const state = { harness: to.harness ?? "", account: to.account ?? "", inventory: null, moveNewChat: false, mode: undefined, busy: false, timer: null };
 
   const backdrop = el("div", "launch-backdrop");
   const sheet = el("div", "launch-sheet move-sheet");
@@ -72,7 +75,9 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   closeBtn.style.marginLeft = "auto";
   head.append(el("h2", "launch-title", "Continue in another agent"), closeBtn);
   const body = el("div", "launch-body");
-  body.append(el("div", "launch-note", `${child.title || child.label || "This session"} on ${computer}. It writes a hand-off and exits; the new agent starts in the same folder with that hand-off. Uncommitted changes stay where they are.`));
+  body.append(el("div", "launch-note", `${child.title || child.label || "This session"} on ${computer}. The agent writes a hand-off; work continues in the same folder. Uncommitted changes stay where they are.`));
+  const outcome = el("div", "launch-hint");
+  body.append(outcome);
   if (notice) body.append(el("div", "launch-note", notice));
   const harnessRow = el("div", "launch-segments");
   const harnessField = el("div", "launch-field");
@@ -117,15 +122,22 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
     if (state.harness === "claude" && !accounts.some((a) => a.id === state.account)) state.account = accounts.find((a) => a.id === "default")?.id ?? accounts[0]?.id ?? "";
     accountSelect.value = accounts.some((a) => a.id === state.account) ? state.account : "";
     accountSelect.disabled = state.busy;
+    const accountLabel = accounts.find((a) => a.id === state.account)?.label;
+    outcome.textContent = movePlan(current, { harness: state.harness, account: state.account, accountLabel }, state.moveNewChat).label;
     go.disabled = !state.harness || state.busy;
   }
-  accountSelect.addEventListener("change", () => { state.account = accountSelect.value; });
+  accountSelect.addEventListener("change", () => { state.account = accountSelect.value; render(); });
 
   async function follow(id, started) {
     let move = null;
     try { move = (await hookGet(computer, "/v1/sessions/move", { id })).move; } catch { /* keep asking */ }
     if (move) status.textContent = moveStatus(move);
-    if (move?.state === "moved") { state.busy = false; render(); setTimeout(close, 1500); return; }
+    if (move?.state === "moved") {
+      if (state.mode !== "new-chat" || move.target && openHandoffChat(computer, move.target)) {
+        state.busy = false; render(); setTimeout(close, 1500); return;
+      }
+      status.textContent = "Hand-off ready; waiting for the new chat to appear…";
+    }
     if (move?.state === "failed") { status.classList.add("launch-error"); state.busy = false; render(); return; }
     if (Date.now() - started > GIVE_UP_MS) { status.textContent = "Still moving; check the session in a moment."; state.busy = false; render(); return; }
     state.timer = setTimeout(() => void follow(id, started), POLL_MS);
@@ -140,7 +152,9 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
     const id = crypto.randomUUID();
     const to = { harness: state.harness, ...(state.harness === "claude" && state.account ? { account: state.account } : {}) };
     try {
-      const res = await hookPost(computer, "/v1/sessions/move", { target: child.target, to, id });
+      const caps = await store.capabilities(computer);
+      state.mode = movePlan(current, to, caps.moveNewChat).mode;
+      const res = await hookPost(computer, "/v1/sessions/move", { target: child.target, to, id, ...(state.mode ? { mode: state.mode } : {}) });
       status.textContent = moveStatus(res.move) || "Moving…";
       void follow(res.move?.id ?? id, Date.now());
     } catch (err) {
@@ -153,7 +167,12 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
 
   go.disabled = true;
   go.focus();
-  try { state.inventory = (await hookGet(computer, "/v1/harnesses")).harnesses ?? null; } catch { /* offer every harness */ }
+  const [inventory, caps] = await Promise.all([
+    hookGet(computer, "/v1/harnesses").catch(() => null),
+    store.capabilities(computer),
+  ]);
+  state.inventory = inventory?.harnesses ?? null;
+  state.moveNewChat = caps.moveNewChat === true;
   if (openSheet?.backdrop === backdrop) render();
 }
 

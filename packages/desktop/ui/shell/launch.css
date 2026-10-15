@@ -184,8 +184,11 @@
   .launch-close, .launch-seg, .launch-computer, .launch-loadfill, .launch-btn { transition: none; }
 }
 
-/* A quota warning leaves the chat usable and never takes keyboard focus. */
-.quota-warning { position: fixed; right: 24px; bottom: 24px; z-index: 79; width: min(560px, calc(100vw - 32px)); max-height: min(70vh, 560px); }
-.quota-warning .launch-body { overflow-y: auto; }
-.quota-warning .launch-foot { flex-wrap: wrap; }
-.quota-warning .launch-btn { height: auto; min-height: 34px; white-space: normal; }
+/* A quota card is in the chat's flex layout, above the composer. */
+.quota-warning { position: static; width: 100%; max-width: none; max-height: none; border-radius: 10px; box-shadow: none; }
+.quota-warning .launch-head { padding: 8px 10px 0; }
+.quota-warning .launch-title { font-size: 13px; overflow-wrap: anywhere; }
+.quota-warning .launch-body { padding: 6px 10px; gap: 4px; }
+.quota-warning .launch-foot { padding: 6px 10px; gap: 6px; flex-wrap: wrap; }
+.quota-warning .launch-btn { height: auto; min-height: 30px; padding: 4px 10px; white-space: normal; }
+.quota-alternatives, .quota-warning .launch-hint { overflow-wrap: anywhere; }

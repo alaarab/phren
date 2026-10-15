@@ -1,3 +1,4 @@
+import { renderHandoffLinks } from "./shell/handoff-view.js";
 import { quotaInteractionPending } from "./shell/quota-warn.js";
 // The chat pane: the phone's chat on the desktop. Plain browser ES module.
 // Reads the transcript through @phren/desktop-kit (every harness), keeps
@@ -99,6 +100,9 @@ export function openChat(el, computerName, child, opts = {}) {
   const header = node("div", "chat-header");
   header.append(ring, dot, title, sub, more, trailing);
 
+  const handoffs = node("div", "chat-handoffs");
+  const updateOverview = (row) => renderHandoffLinks(handoffs, computerName, row);
+  updateOverview(child);
   const notice = node("div", "chat-notice");
 
   // ---- interaction cards ----
@@ -153,6 +157,7 @@ export function openChat(el, computerName, child, opts = {}) {
     talkReplyLine = replies[replies.length - 1].line;
     talk.feedReply(replies.map((m) => m.text).join("\n\n"));
   }
+  const quotaHost = node("div", "chat-quota-host");
   const composerHost = node("div", "chat-composer");
   composerHost.append(composer.el);
 
@@ -181,7 +186,7 @@ export function openChat(el, computerName, child, opts = {}) {
   });
 
   const error = node("div", "chat-error");
-  el.append(header, notice, timelineEl, interactions, composerHost, error);
+  el.append(header, handoffs, notice, timelineEl, interactions, quotaHost, composerHost, error);
 
   // ---- state ----
   const history = new AgentChatHistory();
@@ -862,6 +867,8 @@ export function openChat(el, computerName, child, opts = {}) {
 
   return {
     /** Append review text (a diff line, a selection) to the draft and focus it, without sending. */
+    quotaHost,
+    updateOverview,
     insert(text) { composer.insert(text); },
     /** Add dropped Files to the composer's pending attachments. */
     attach(files) { composer.attach(files); },

@@ -6,7 +6,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.9] - unreleased
 
-- Configurable account usage warnings offer to continue the open chat on another signed-in account or harness, with settings and per-chat opt-outs saved across launches; exhausted windows take priority, Switch checks current room, and approval or question cards defer the warning.
+- Account usage warnings sit above the composer without covering it, show each destination’s limiting window and reset, and offer a new hand-off chat for another harness when supported; related chats link back to each other. Settings and per-chat opt-outs persist across launches.
 
 - Narrow schedule editors wrap conflict notices and timing controls inside the scrolling body; unchanged schedule refreshes preserve list buttons and focus.
 - Schedule edits and Pause/Resume use the Hook's merge route when supported, preserving newer fields and showing the latest version after a conflict; removed schedules close the editor and validation errors stay on the form.
