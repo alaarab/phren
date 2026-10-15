@@ -14,8 +14,11 @@ vi.mock("node:child_process", async original => {
 
 vi.mock("node:fs", async original => {
   const actual = await original<typeof import("node:fs")>();
-  return { ...actual, realpathSync: vi.fn(actual.realpathSync) };
+  return { ...actual, realpathSync: Object.assign(vi.fn(actual.realpathSync), { native: actual.realpathSync.native }) };
 });
+
+// No credential lookup: a CLI fallback can take seconds to spawn on Windows runners.
+vi.mock("../bridge/git-host-auth.js", () => ({ resolveHostToken: vi.fn(async () => undefined) }));
 
 let tmp: ReturnType<typeof makeTempDir>;
 const citation = (file = "src/a.ts", extra = {}): FreshnessCitation => ({ created_at: "2026-10-15T00:00:00Z", file, commit: "abcdef1", projectRemote: "https://gitboy.example/alice/app.git", ...extra });
