@@ -555,6 +555,9 @@ focuses the desktop and leaves its current chat and section in place. Covered
 by `src/ui-quota-back.test.ts`.
 ### Account usage overview
 
+Rings show the limiting window. An exhausted window draws a full danger-coloured
+ring labeled "Exhausted" with that window’s reset, regardless of its reported percentage.
+
 `shell/usage-rings.js` exports `openUsage()`, which opens the existing titlebar
 usage popover even without account rings. Both the `usage` app action
 (Cmd/Ctrl+Alt+U; Ctrl+Shift+U is reserved for Linux Unicode input) and

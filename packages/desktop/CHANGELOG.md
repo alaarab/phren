@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- A service-refused usage window draws a full red ring labeled “Exhausted” with its own reset, even when its reported usage is below 100%.
+
 - Usage reset labels share the warning's wording: whole hours omit zero minutes, partial minutes round up, and resets a day or more away show the local weekday and time in warnings, account usage and ring tooltips.
 
 - Quota recovery notifications retain exhausted accounts through stale reports, avoid treating rounded 0% room as exhaustion, and discard expired or removed-account cooldowns.

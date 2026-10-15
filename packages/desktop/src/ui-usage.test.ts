@@ -129,6 +129,23 @@ it("renders every account window most constrained first without changing report 
   handle.close();
 });
 
+it("draws an OpenCode Go service-refused 5-hour window as exhausted despite its lower reported usage", async () => {
+  const at = Date.now();
+  const { host, handle } = await usagePopover({ accounts: [{
+    id: "opencode|go", name: "OpenCode Go", harness: "opencode", exhausted: true,
+    windows: [
+      { id: "five_hour", name: "5-hour", usedPercent: 30, exhausted: true, resetsAt: new Date(at + 80 * 60_000).toISOString() },
+      { id: "seven_day", name: "Weekly", usedPercent: 80, resetsAt: new Date(at + 48 * 3_600_000).toISOString() },
+    ],
+  }], computers: ["Mini"] });
+  try {
+    const ring = host.children[0].children[0];
+    const arc = ring.children[0].children[1];
+    expect(arc.style).toMatchObject({ strokeDashoffset: "0", stroke: "var(--danger)" });
+    expect((ring as UsageNode & { title: string }).title).toBe("OpenCode Go · Exhausted, resets in 1h 20m");
+  } finally { handle.close(); }
+});
+
 it("centers keyboard usage under the titlebar and repositions on resize", async () => {
   const { popover, viewport, events, handle } = await usagePopover();
   expect(popover.style.left).toBe("480px");

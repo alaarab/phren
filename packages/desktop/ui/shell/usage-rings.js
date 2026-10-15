@@ -307,11 +307,12 @@ export function mountUsageRings(el) {
       button.type = "button";
       button.className = "usage-ring";
       const tight = limitingWindow(account);
-      const used = usedPercent(tight);
+      const out = exhausted(tight);
+      const used = out ? 100 : usedPercent(tight);
       button.append(drawRing(used));
       if (account.stale) button.style.opacity = "0.4";
       const reset = tight?.resetsIn || Date.parse(tight?.resetsAt) > Date.now() ? resetLabel(tight) : "";
-      button.title = `${titles.get(account.id) ?? title(account)} · ${used === null ? "no limit" : `${used}% used`}${reset ? `, ${reset}` : ""}`;
+      button.title = `${titles.get(account.id) ?? title(account)} · ${out ? "Exhausted" : used === null ? "no limit" : `${used}% used`}${reset ? `, ${reset}` : ""}`;
       button.addEventListener("click", (ev) => { ev.stopPropagation(); if (pop.hidden) openPopover(button); else closePopover(); });
       row.append(button);
     }
