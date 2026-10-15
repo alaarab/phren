@@ -99,12 +99,15 @@ describe("chat quota decisions", () => {
   });
 
   it("defaults to enabled at 90 and validates saved thresholds", async () => {
-    expect(quotaPreferences()).toEqual({ on: true, threshold: 90 });
+    expect(quotaPreferences()).toEqual({ on: true, backOn: true, threshold: 90 });
     for (const threshold of [null, "bad", 49, 100]) expect(quotaPreferences({ threshold }).threshold).toBe(90);
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ settings: { on: true, threshold: 90 }, suppressed: [], seen: [] }) })));
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ settings: { on: true, backOn: true, threshold: 90 }, suppressed: [], seen: [] }) })));
     await loadQuotaState();
     await saveQuotaSettings({ threshold: 95, on: false });
-    expect(quotaSettings()).toEqual({ on: false, threshold: 95 });
+    expect(quotaSettings()).toEqual({ on: false, backOn: true, threshold: 95 });
+    await saveQuotaSettings({ backOn: false });
+    expect(quotaSettings()).toEqual({ on: false, backOn: false, threshold: 95 });
+    expect(JSON.parse(vi.mocked(fetch).mock.calls.at(-1)![1]!.body as string).settings.backOn).toBe(false);
     await suppressQuotaChat(quotaSessionKey(session));
     await markQuotaSeen("shown-token");
     expect(quotaSuppressed()).toContain(quotaSessionKey(session));
