@@ -3,7 +3,7 @@ import { decorateHomeHandoff } from "../shell/handoff-view.js";
 // Home: the cockpit. Top to bottom, the conductor card, who needs you (with
 // keyboard answers), the turns that ended since you left, what is working (with each agent's activity line), the
 // checks on those sessions' pull requests, recent returns from dispatched
-// workers, and how every computer is doing.
+// workers, the scheduled prompts due next, and how every computer is doing.
 import { hookGet, hookPost } from "../api.js";
 import { needsYou, projectOf, sessions, store } from "../shell/store.js";
 import { showSection } from "../shell/sections.js";
@@ -19,6 +19,8 @@ import { loadQuotaState, quotaSettings } from "../shell/quota-warn-prefs.js";
 import { openQuotaSwitch } from "../shell/quota-warn-sheet.js";
 import { quotaSessionKey } from "../shell/quota-warn.js";
 import { sendReply } from "../shell/needs-notify.js";
+import { clockLabel, promptLine, untilLabel, upNext } from "../shell/up-next.js";
+import { harnessLabel } from "../harness.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
@@ -88,6 +90,10 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         <h2 class="section-label">Checks <span class="count"></span></h2>
         <div class="home-checks"></div>
       </section>
+      <section class="home-block" data-block="upnext" hidden>
+        <h2 class="section-label">Up next <span class="count"></span></h2>
+        <div class="home-list"></div>
+      </section>
       <section class="home-block" data-block="computers">
         <h2 class="section-label">Computers <span class="count"></span></h2>
         <div class="home-list"></div>
@@ -101,6 +107,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   let pollTimer = null;
   const receipts = new Map(); // computer -> [{ receipt, computer }]
   const runs = new Map(); // computer -> finished scheduled runs
+  const scheduleLists = new Map(); // computer -> its Hook's /v1/schedules answer
   const seen = loadSeen();
   // On the first launch everything already there counts as read.
   let seedSeen = (() => { try { return localStorage.getItem(SEEN_KEY) === null; } catch { return false; } })();
@@ -451,6 +458,35 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     renderFinished();
   }
 
+  // ---- up next --------------------------------------------------------
+
+  /** The scheduled prompts due in the next hours, from the schedules Home already reads. */
+  function renderUpNext() {
+    const scope = block("upnext");
+    const now = Date.now();
+    const rows = upNext(scheduleLists, now);
+    scope.hidden = !rows.length;
+    fill("upnext", rows.map((entry) => {
+      const { schedule } = entry;
+      const line = promptLine(schedule);
+      const shell = rowShell({ sub: line ? el("span", "home-row-sub", line) : undefined });
+      shell.button.classList.add("home-upnext");
+      shell.button.dataset.key = entry.key;
+      shell.title.textContent = schedule.name || "Scheduled prompt";
+      const meta = el("span", "home-row-meta");
+      if (schedule.harness) meta.append(el("span", "home-tag", harnessLabel(schedule.harness)));
+      if (schedule.project) meta.append(el("span", "home-project", schedule.project));
+      meta.append(el("span", "home-host", entry.computer));
+      const when = el("span", "home-upnext-when", untilLabel(entry.at, now));
+      when.title = clockLabel(entry.at, now);
+      meta.append(when);
+      shell.button.append(meta);
+      shell.button.setAttribute("aria-label", `${schedule.name || "Scheduled prompt"}, runs ${untilLabel(entry.at, now)} at ${clockLabel(entry.at, now)} on ${entry.computer}`);
+      shell.button.addEventListener("click", () => showSection("schedules"));
+      return shell.button;
+    }), "");
+  }
+
   // ---- computers ------------------------------------------------------
 
   /** The Hook's version, and when it is older than the newest seen, a chip that copies its update command. */
@@ -622,7 +658,9 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       try {
         const body = await hookPost(c.computer, "/v1/schedules", {});
         const out = [];
-        for (const schedule of Array.isArray(body.schedules) ? body.schedules : []) {
+        const list = Array.isArray(body.schedules) ? body.schedules : [];
+        scheduleLists.set(c.computer, list);
+        for (const schedule of list) {
           if (schedule.owned === false) continue;
           for (const run of Array.isArray(schedule.lastRuns) ? schedule.lastRuns : []) {
             if (run.status === "launched" || run.status === "running") continue;
@@ -631,9 +669,11 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         }
         return [c.computer, out];
       } catch {
+        scheduleLists.delete(c.computer);
         return [c.computer, []];
       }
     }));
+    for (const computer of [...scheduleLists.keys()]) if (!online.some((c) => c.computer === computer)) scheduleLists.delete(computer);
     runs.clear();
     for (const [computer, list] of scheduled) runs.set(computer, list);
     if (seedSeen && online.length) {
@@ -643,6 +683,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       saveSeen(seen);
     }
     renderReturns();
+    renderUpNext();
     renderConductor();
   }
 
@@ -667,6 +708,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     renderWorking();
     renderChecks();
     renderReturns();
+    renderUpNext();
     renderComputers();
   }
 

@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Home shows Up next: the scheduled prompts due in the next 12 hours on every online computer, soonest first, with harness, project, computer and how long until each runs. Clicking one opens Schedules. Read from the schedules Home already fetches, so no extra Hook calls.
+
 - Memory and chat recall mark findings whose cited file changed on gitboy since it was written as May be out of date
 
 - Home’s Finished feed includes accounts available again while you were away or in another section, with two-line titles, an underlined Usage tag opening account usage and the same Dismiss action. Hand-offs keep their existing session row and tag without a duplicate move item.

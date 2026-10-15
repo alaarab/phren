@@ -107,7 +107,7 @@ The titlebar pills:
 
 | Section | What it holds |
 |---|---|
-| Home | The conductor (open or start one), who needs you (Enter approves, P allows for this project, D denies, O opens), working agents, recent worker returns, each computer's load |
+| Home | The conductor (open or start one), who needs you (Enter approves, P allows for this project, D denies, O opens), working agents, recent worker returns, the scheduled prompts due in the next 12 hours (Up next), each computer's load |
 | Agents | Sessions by status or by computer, centre tiles, the right tool panel (Changes, Files, Search), a bottom terminal |
 | Review | Worker returns with reports and diffs, line comments sent back as one prompt; Trains: open pull requests per repository with checks and release authority |
 | Conductor | The running conductor, dispatches and returns, the owner inbox, standing grants, computer sets, release authority |

@@ -100,6 +100,22 @@ function defaultHealth() {
   };
 }
 
+/** Scheduled prompts this Hook owns: two due within Home's Up next window, one paused and one tomorrow evening. */
+function defaultSchedules() {
+  const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+  const base = { computer: "This computer", owned: true, running: false, lastRun: null, lastRuns: [], createdAt: "2026-10-01T09:00:00Z", updatedAt: "2026-10-01T09:00:00Z" };
+  return { schedules: [
+    { ...base, id: "nightly-triage", name: "Nightly triage", project: "phren", harness: "claude", enabled: true, every: "daily", at: "22:00",
+      prompt: "Triage the issues opened today and file Phren tasks for the real ones.", nextRun: at(42) },
+    { ...base, id: "deps-check", name: "Dependency check", project: "phren", harness: "codex", enabled: true, every: "interval", interval: "6h",
+      prompt: "Check for outdated dependencies and open one PR with safe bumps.", nextRun: at(185) },
+    { ...base, id: "release-notes", name: "Draft release notes", project: "phren", harness: "claude", enabled: false, every: "weekly", days: ["fri"], at: "16:00",
+      prompt: "Draft the release notes from merged PRs.", nextRun: null },
+    { ...base, id: "weekly-review", name: "Weekly review", project: "phren", harness: "opencode", enabled: true, every: "interval", interval: "24h",
+      prompt: "Summarize the week's findings.", nextRun: at(26 * 60) },
+  ] };
+}
+
 function defaultGitStatus() {
   return {
     repository: "/Users/you/phren",
@@ -293,6 +309,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
+    "POST /v1/schedules": () => ({ status: 200, json: defaultSchedules() }),
 
     "GET /v1/files/range": (_req, _body, url) => {
       const requested = url.searchParams.get("path") ?? "";
