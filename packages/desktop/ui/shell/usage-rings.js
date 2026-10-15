@@ -243,6 +243,12 @@ function line(className, text) {
   return node;
 }
 
+function windowConstraint(w) {
+  if (w.reset) return [0, -1];
+  const used = typeof w.usedPercent === "number" ? w.usedPercent : typeof w.leftPercent === "number" ? 100 - w.leftPercent : -1;
+  return [w.exhausted || w.limited || used >= 100 ? 1 : 0, used];
+}
+
 function accountBlock(row, cardTitle, now) {
   const block = document.createElement("div");
   block.className = "usage-account";
@@ -258,7 +264,10 @@ function accountBlock(row, cardTitle, now) {
   const meta = metaLine(row, now);
   if (meta) head.append(line("usage-account-meta", meta));
   block.append(head);
-  const windows = row.windows ?? [];
+  const windows = [...(row.windows ?? [])].sort((a, b) => {
+    const x = windowConstraint(a), y = windowConstraint(b);
+    return y[0] - x[0] || y[1] - x[1];
+  });
   const showCredits = Boolean(creditsValue(row.credits));
   if (windows.length || showCredits) {
     const list = document.createElement("div");

@@ -86,7 +86,7 @@ class UsageNode {
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-it("opens without rings and returns focus on Escape after rendering the latest shared usage", async () => {
+async function usagePopover(snapshot = { accounts: [] as object[], computers: [] as string[] }) {
   vi.useFakeTimers();
   const events = new Map<string, (ev: unknown) => void>();
   const origin = new UsageNode();
@@ -96,11 +96,17 @@ it("opens without rings and returns focus on Escape after rendering the latest s
     addEventListener: (event: string, fn: (ev: unknown) => void) => events.set(event, fn),
     removeEventListener: (event: string) => events.delete(event),
   });
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ accounts: [], computers: [] }) })));
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => snapshot })));
   const host = new UsageNode();
   const handle = mountUsageRings(host);
   openUsage();
   const popover = host.children[1];
+  await vi.advanceTimersByTimeAsync(0);
+  return { popover, origin, events, handle };
+}
+
+it("opens without rings and returns focus on Escape after rendering the latest shared usage", async () => {
+  const { popover, origin, events, handle } = await usagePopover();
   expect(popover.hidden).toBe(false);
   expect(popover.focus).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(0);
@@ -109,5 +115,24 @@ it("opens without rings and returns focus on Escape after rendering the latest s
   expect(popover.hidden).toBe(true);
   expect(origin.focus).toHaveBeenCalledOnce();
   expect(events.size).toBe(0);
+  handle.close();
+});
+
+it("renders every account window most constrained first without changing report order", async () => {
+  const windows = [
+    { name: "Roomy", usedPercent: 10 },
+    { name: "Weekly", usedPercent: 95 },
+    { name: "Exhausted", exhausted: true, usedPercent: 30 },
+    { name: "Limited", limited: true, usedPercent: 100 },
+    { name: "Unknown" },
+    { name: "Reset", reset: true, usedPercent: 100 },
+    { name: "Remaining", leftPercent: 8 },
+    { name: "Tie", usedPercent: 95 },
+  ];
+  const { popover, handle } = await usagePopover({ accounts: [{ id: "a", name: "Claude", harness: "claude", windows }], computers: ["Mini"] });
+  const card = popover.children.find(node => node.className === "usage-account")!;
+  const list = card.children.find(node => node.className === "usage-windows")!;
+  expect(list.children.map(node => node.children[0].textContent)).toEqual(["Limited", "Exhausted", "Weekly", "Tie", "Remaining", "Roomy", "Unknown", "Reset"]);
+  expect(windows.map(w => w.name)).toEqual(["Roomy", "Weekly", "Exhausted", "Limited", "Unknown", "Reset", "Remaining", "Tie"]);
   handle.close();
 });

@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Preserve AltGr character input in fields, terminals and the editor; account usage windows now show the most constrained first within each account.
+
 - Open account usage with Cmd/Ctrl+Alt+U or “Show account usage” in the command palette; the shared overview lists accounts and windows with the most constrained first, and Escape closes it and returns focus.
 
 ## [0.1.9] - 2026-10-15

@@ -534,4 +534,9 @@ returns focus; the palette restores its invoking focus before running a command.
 then the highest active window percentage, unknown usage last, ties in report
 order. Reset windows do not constrain the order. The overview retains merged
 account cards with harness names, all reporting computers, every window,
-reset times, exhaustion, missing data and unreachable computers.
+reset times, exhaustion, missing data and unreachable computers. Within each
+card, windows use the same exhausted-first, highest-percent ordering; reset
+and unknown windows follow active known usage, with stable ties. Off macOS,
+Ctrl+Alt bindings match the reported character without physical-key fallback;
+Ctrl+Alt letters pass through editable fields, terminals and the editor.
+AltGraph events are ignored by key matching and dispatch on every platform.
