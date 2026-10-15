@@ -10,9 +10,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Move the conductor chat to another harness or account from the phone or desktop (`moveConductor` Hook capability). Owner-only; the move always opens a new chat, keeps the old conductor running until the new one is ready, transfers the conductor role with a check that nothing changed meanwhile, and hands existing workers' returns and approvals to the new chat. On failure the old conductor keeps its role.
-
-### Fixed
-
 - The gitboy push-webhook verification core (signature, delivery de-duplication, store branch matching) is in the CLI for upcoming webhook sync; not wired yet.
 
 ## [0.3.50] - 2026-10-15
