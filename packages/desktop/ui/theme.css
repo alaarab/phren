@@ -927,6 +927,7 @@ button.handoff-link:hover, button.home-quota-row:hover .handoff-link { color: va
 
 /* Home resource jobs share the overview reading; keep their controls stable. */
 .home-computer-card { min-width: 0; }
+.home-computer-resources { display: contents; }
 .home-jobs { display: grid; gap: 4px; padding: 0 12px 10px; }
 .home-jobs[hidden] { display: none; }
 .home-job { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; width: 100%; min-width: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: var(--card); color: var(--text); text-align: left; font: inherit; font-size: 12px; }

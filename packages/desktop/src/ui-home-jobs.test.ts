@@ -71,8 +71,8 @@ function stubDocument() {
   }));
 }
 
-const pane = { server: "default", workspace: "1", pane: "1" };
-const child = { id: "chat", title: "Build app", target: { ...pane, session: "chat" } };
+const pane = { server: "default", workspace: "Build workspace", pane: "1" };
+const child = { id: "chat", title: "Build app", target: { ...pane, workspace: "workspace-id", session: "chat" } };
 const job = (pid: number, cpuPercent: number, extra: object = {}) => ({ pid, name: `Job ${pid}`, cpuPercent, ...extra });
 function publish(heavy: object[], extraComputers: object[] = []) {
   hooks.publish!({ computers: [{ computer: "Desk", state: "online", resources: { heavy }, overview: { groups: [{ children: [child] }] } }, ...extraComputers] });
@@ -97,14 +97,14 @@ it("shows the three highest CPU jobs, overflow and observed time from overview d
     expect(jobs.children[0].children[1].textContent).toBe("180.3% CPU");
     vi.advanceTimersByTime(180_000);
     publish([job(2, 160, { name: "xcodebuild" })]);
-    expect(jobs.children[0].children[2].textContent).toBe("3m observed");
+    expect(jobs.children[0].children[2].textContent).toBe("seen 3m");
     expect(jobs.children[0].children[2].title).toContain("process start time is unavailable");
     publish([]);
     expect(jobs.hidden).toBe(true);
     expect(jobs.children).toHaveLength(0);
     publish([job(2, 60)]);
     expect(jobs.hidden).toBe(false);
-    expect(jobs.children[0].children[2].textContent).toBe("now observed");
+    expect(jobs.children[0].children[2].textContent).toBe("seen now");
     expect(hooks.get).not.toHaveBeenCalled();
     expect(hooks.post).not.toHaveBeenCalled();
   } finally { home.destroy(); vi.useRealTimers(); }
@@ -113,7 +113,7 @@ it("shows the three highest CPU jobs, overflow and observed time from overview d
 it("opens only the attributed session on the matching computer and explains unavailable panes", () => {
   const { list, home, openSession } = setup();
   try {
-    publish([job(1, 100, { pane }), job(2, 80), job(3, 60, { pane: { ...pane, workspace: "other" } })], [
+    publish([job(1, 100, { pane }), job(2, 80), job(3, 60, { pane: { ...pane, server: "other" } })], [
       { computer: "Laptop", state: "online", resources: { heavy: [job(1, 100, { pane })] }, overview: { groups: [] } },
     ]);
     const [linked, unowned, gone] = jobsOf(list).children;
@@ -151,5 +151,48 @@ it("preserves keyed computer and job controls and focus through resource updates
     publish([job(2, 90)]);
     expect(jobs.children).toHaveLength(1);
     expect(doc.activeElement).toBeNull();
+  } finally { home.destroy(); }
+});
+
+it("clears cached jobs and their observation time when a computer disconnects", () => {
+  vi.useFakeTimers();
+  const { list, home } = setup();
+  try {
+    const heavy = [job(1, 100, { pane: { ...pane, workspace: child.target.workspace } })];
+    publish(heavy);
+    const jobs = jobsOf(list);
+    expect(jobs.children[0].tagName).toBe("BUTTON");
+    vi.advanceTimersByTime(300_000);
+    hooks.publish!({ computers: [{ computer: "Desk", state: "offline", resources: { heavy }, overview: { groups: [{ children: [child] }] } }] });
+    expect(jobs.hidden).toBe(true);
+    expect(jobs.children).toHaveLength(0);
+    publish(heavy);
+    expect(jobs.children[0].children[2].textContent).toBe("seen now");
+    publish([]);
+    expect(jobs.children).toHaveLength(0);
+  } finally { home.destroy(); vi.useRealTimers(); }
+});
+
+it("keeps the focused Hook update button while resource timestamps, load and job CPU change", () => {
+  const { list, home } = setup();
+  const publishResources = (collectedAt: string, load1: number, cpuPercent: number) => hooks.publish!({ computers: [
+    { computer: "Desk", state: "online", resources: { collectedAt, cpu: { cores: 8, load1 }, heavy: [job(1, cpuPercent, { pane })] }, overview: { phren: { version: "0.3.50" }, groups: [{ children: [child] }] } },
+    { computer: "Laptop", state: "online", overview: { phren: { version: "0.3.51" }, groups: [] } },
+  ] });
+  const find = (node: FakeNode): FakeNode | undefined => node.className === "home-hook-update" ? node : node.children.map(find).find(Boolean);
+  try {
+    publishResources("2026-10-15T12:00:00Z", 1, 70);
+    const button = find(list)!;
+    expect(button?.tagName).toBe("BUTTON");
+    button.focus();
+    publishResources("2026-10-15T12:00:10Z", 1, 70);
+    expect(find(list)).toBe(button);
+    expect(doc.activeElement).toBe(button);
+    publishResources("2026-10-15T12:00:20Z", 3, 190);
+    expect(find(list)).toBe(button);
+    expect(doc.activeElement).toBe(button);
+    const texts = (node: FakeNode): string[] => [node.textContent, ...node.children.flatMap(texts)];
+    expect(texts(list)).toContain("load 3.0 / 8 cores");
+    expect(texts(list)).toContain("190.0% CPU");
   } finally { home.destroy(); }
 });

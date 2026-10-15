@@ -670,12 +670,15 @@ Memory browser smoke test.
 
 Home’s Computers block reads `computer.resources.heavy` from the shared overview
 store, as Settings › Computers does, with no extra Hook requests. Jobs sort by
-CPU descending, show at most three plus “+N more”, and hide when empty. Each
-shows its name, CPU percentage (100% is one core) and time observed continuously
-by this mounted Home (the Hook does not provide process start time). The tooltip
-explains the duration. Computer and PID keyed job rows preserve focus through
-polls and reordering. A pane matched by computer, server, workspace when given,
-and pane opens its current session with Home’s `openSession`; unmatched panes
-and jobs without panes are plain text with an explanatory tooltip. Long names
-truncate, with full names on hover, and computer metadata wraps on narrow screens.
-Covered by `src/ui-home-jobs.test.ts`.
+CPU descending, show at most three plus “+N more”, and hide when empty or the
+computer is offline. A disconnect clears observation times, and each reading
+removes jobs absent from it. Each shows its name, CPU percentage (100% is one
+core) and “seen 5m” for time observed continuously by this mounted Home (the Hook
+does not provide process start time). The tooltip explains the duration.
+Computer and PID keyed job rows preserve focus through polls and reordering.
+Hook update controls stay mounted while resource readings change. A pane matched
+by computer, server and pane ID opens its current session with Home’s
+`openSession`. Resource workspace labels differ from session workspace IDs.
+Unmatched panes and jobs without panes are plain text with an explanatory
+tooltip. Long names truncate, with full names on hover, and computer metadata
+wraps on narrow screens. Covered by `src/ui-home-jobs.test.ts`.

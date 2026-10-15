@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Home job links match server and pane IDs across workspace labels, hide cached jobs when offline, keep Hook update focus through resource polls, and label elapsed time as “seen”.
+
 - Home lists each computer’s three busiest jobs with CPU and time observed, links known panes to chat, and preserves focus across resource updates.
 
 - Fixed missing usage-limit switch warnings on single-login Claude computers when the chat has no account ID; weekly limits show the weekly wording, and the current login is excluded from switch destinations.

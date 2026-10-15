@@ -545,37 +545,40 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     row.append(el("span", "home-computer-name", c.computer));
     const meta = el("span", "home-computer-meta");
     meta.append(...hookMeta(c, drift));
-    const r = c.resources && typeof c.resources === "object" ? c.resources : null;
     if (c.state === "online") meta.append(el("span", null, "Online"));
-    else {
-      meta.append(el("span", "home-error", c.error ? `${c.state}: ${c.error}` : c.state));
-    }
-    if (r) {
-      const jobs = Array.isArray(r.heavy) ? r.heavy.length : 0;
-      meta.append(el("span", "home-age", jobs ? `${jobs} heavy` : "no heavy jobs"));
-      if (r.disk) meta.append(el("span", "home-age", `${gb(r.disk.freeBytes)} free`));
-    } else if (c.state === "online") meta.append(el("span", "home-age", "no resources"));
-    row.append(meta);
+    else meta.append(el("span", "home-error", c.error ? `${c.state}: ${c.error}` : c.state));
+    // Resource readings change independently of the Hook version controls.
+    const resourceMeta = el("span", "home-computer-resources");
+    meta.append(resourceMeta);
     const load = el("div", "home-load");
-    const bar = el("div", "home-load-bar");
-    const fillEl = el("span", "home-load-fill");
-    const cores = r?.cpu?.cores ? Number(r.cpu.cores) : 0;
-    const load1 = r?.cpu?.load1 !== undefined ? Number(r.cpu.load1) : 0;
-    const fraction = cores > 0 ? Math.min(1, Math.max(0, load1 / cores)) : 0;
-    fillEl.style.width = `${Math.round(fraction * 100)}%`;
-    if (r?.level === "stressed") fillEl.classList.add("stressed");
-    else if (r?.level === "busy") fillEl.classList.add("busy");
-    bar.append(fillEl);
-    load.append(bar);
-    if (r && cores > 0) load.append(el("span", "home-load-text", `load ${load1.toFixed(1)} / ${cores} cores`));
-    row.append(load);
-    return row;
+    row.append(meta, load);
+    function updateResources(r) {
+      const details = [];
+      if (r && c.state === "online") {
+        const jobs = Array.isArray(r.heavy) ? r.heavy.length : 0;
+        details.push(el("span", "home-age", jobs ? `${jobs} heavy` : "no heavy jobs"));
+        if (r.disk) details.push(el("span", "home-age", `${gb(r.disk.freeBytes)} free`));
+      } else if (c.state === "online") details.push(el("span", "home-age", "no resources"));
+      resourceMeta.replaceChildren(...details);
+      const bar = el("div", "home-load-bar");
+      const fillEl = el("span", "home-load-fill");
+      const cores = r?.cpu?.cores ? Number(r.cpu.cores) : 0;
+      const load1 = r?.cpu?.load1 !== undefined ? Number(r.cpu.load1) : 0;
+      const fraction = cores > 0 ? Math.min(1, Math.max(0, load1 / cores)) : 0;
+      fillEl.style.width = `${Math.round(fraction * 100)}%`;
+      if (r?.level === "stressed") fillEl.classList.add("stressed");
+      else if (r?.level === "busy") fillEl.classList.add("busy");
+      bar.append(fillEl);
+      load.replaceChildren(bar);
+      if (r && cores > 0) load.append(el("span", "home-load-text", `load ${load1.toFixed(1)} / ${cores} cores`));
+    }
+    return { row, updateResources };
   }
 
   const computerRows = new Map();
 
   function renderJobs(record, c) {
-    const heavy = Array.isArray(c.resources?.heavy) ? [...c.resources.heavy] : [];
+    const heavy = c.state === "online" && Array.isArray(c.resources?.heavy) ? [...c.resources.heavy] : [];
     heavy.sort((a, b) => (b.cpuPercent ?? 0) - (a.cpuPercent ?? 0) || a.pid - b.pid);
     const now = Date.now();
     const next = new Map();
@@ -583,10 +586,11 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     const observed = new Map(heavy.map((job) => [job.pid, record.observed.get(job.pid) ?? now]));
     const nodes = heavy.slice(0, 3).map((job) => {
       const pane = job.pane;
-      const match = pane && sessions(merged, { includeOffline: true }).find((entry) => {
+      // Resource workspace is a label; targets use IDs. Pane IDs belong to the server.
+      const match = pane && sessions(merged).find((entry) => {
         const target = entry.child.target;
         return entry.computer === c.computer && target?.server === pane.server
-          && target.pane === pane.pane && (!pane.workspace || target.workspace === pane.workspace);
+          && target.pane === pane.pane;
       });
       let item = record.jobs.get(job.pid);
       const clickable = Boolean(match);
@@ -608,7 +612,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       item.name.textContent = job.name;
       item.name.title = job.name;
       item.cpu.textContent = `${(job.cpuPercent ?? 0).toFixed(1)}% CPU`;
-      item.duration.textContent = `${age(new Date(observed.get(job.pid)).toISOString())} observed`;
+      item.duration.textContent = `seen ${age(new Date(observed.get(job.pid)).toISOString())}`;
       item.duration.title = "Time observed by Home; process start time is unavailable";
       item.node.title = match ? `Open ${match.child.title || match.child.label || "session"}`
         : pane ? "The starting pane has no known session" : "No starting pane is known for this job";
@@ -647,8 +651,14 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         record = { row, summary, list: jobs, jobs: new Map(), observed: new Map(), more: el("div", "home-jobs-more") };
         computerRows.set(c.computer, record);
       }
-      const sig = JSON.stringify([c.state, c.error, hookVersion(c), drift.newest, c.resources]);
-      if (record.sig !== sig) { record.summary.replaceChildren(computerRow(c, drift)); record.sig = sig; }
+      const sig = JSON.stringify([c.state, c.error, hookVersion(c), drift.newest]);
+      if (record.sig !== sig) {
+        const summary = computerRow(c, drift);
+        record.summary.replaceChildren(summary.row);
+        record.updateResources = summary.updateResources;
+        record.sig = sig;
+      }
+      record.updateResources(c.state === "online" ? c.resources : null);
       renderJobs(record, c);
       return record.row;
     });
