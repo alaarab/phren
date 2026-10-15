@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook new-chat moves report first-prompt delivery failures without marking the old chat handed off, and wait up to three minutes for a slow conversation to link, reporting a pending link on timeout.
+
+### Added
+
+- Hook session moves accept `mode: "new-chat"` to continue with another harness in a new chat, keeping the old agent running and linking both chats in overview and move status (`moveNewChat`).
+
 ## [0.3.47] - 2026-10-14
 
 ### Fixed

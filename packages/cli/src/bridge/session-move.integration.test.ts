@@ -88,7 +88,8 @@ describe.skipIf(!binary || process.platform === "win32")("moving a session on a 
     await rm(folder, { recursive: true, force: true }).catch(() => undefined);
   });
 
-  it("asks Claude for its hand-off, lets it exit and starts Codex in the same pane with it", async () => {
+  it.each(["replace", "new-chat"])("hands off on real tmux with mode %s", async mode => {
+    await rm(path.join(folder, "codex-args.json"), { force: true });
     // A first session starts the private tmux server.
     await tmuxTerminal.create(server, { label: "base", cwd: repo });
     const launched = await launchSession(server, { cwd: repo, label: "parser fix", kind: "claude" });
@@ -108,14 +109,21 @@ describe.skipIf(!binary || process.platform === "win32")("moving a session on a 
       pollMs: 200,
       exitMs: 10_000,
     });
-    const started = await mover.start({ target: { ...place, source: "claude", session: SESSION }, to: { harness: "codex", model: "gpt-5.5" }, handoffTimeoutMs: 30_000 });
+    const started = await mover.start({ target: { ...place, source: "claude", session: SESSION }, to: { harness: "codex", model: "gpt-5.5" }, handoffTimeoutMs: 30_000, mode });
     await mover.settled(server, place.pane);
     const record = (await readMove(started.id))!;
 
-    expect(record).toMatchObject({ state: "moved", exit: "clean", placement: "same-pane", handoff: { source: "agent" },
-      target: { pane: place.pane, source: "codex", session: NEXT } });
+    expect(record).toMatchObject({ state: "moved", mode, placement: mode === "replace" ? "same-pane" : "adjacent-pane", handoff: { source: "agent" },
+      target: { source: "codex", session: NEXT } });
+    if (mode === "replace") expect(record.exit).toBe("clean");
+    else {
+      expect(record.exit).toBeUndefined();
+      expect(record.target?.pane).not.toBe(place.pane);
+      expect(record.handedOffTo).toEqual({ target: record.target });
+      expect(record.handedOffFrom?.target).toEqual({ ...place, source: "claude", session: SESSION });
+    }
     const pane = objects((await snapshot(server)).panes).find(row => row.pane_id === place.pane) as Json;
-    expect(pane.agent).toBe("codex");
+    expect(pane.agent).toBe(mode === "replace" ? "codex" : "claude");
     const handoff = await readFile(record.handoff!.path, "utf8");
     expect(handoff).toContain("## Goal\nFix the parser.");
     expect(handoff).toContain("M parser.ts");

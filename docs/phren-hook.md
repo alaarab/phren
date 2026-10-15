@@ -1240,7 +1240,7 @@ transcript are unchanged while working for `PHREN_STALL_MS`.
 ### Session moves
 
 With capability `sessionMove`, `POST /v1/sessions/move` takes
-`{target, to: {harness, account?, model?, effort?}, id?, handoffTimeoutMs?}`
+`{target, to: {harness, account?, model?, effort?}, mode?: "replace" | "new-chat", id?, handoffTimeoutMs?}`
 and answers once the move is checked and recorded, with `{ok, move}`. The
 hand-off, exit and relaunch continue after the answer. `GET
 /v1/sessions/move?id=<uuid>` returns `{move}`, and `GET /v1/sessions/moves`
@@ -1249,6 +1249,42 @@ usable here is refused with 409 `harness_unavailable` or `account_unavailable`;
 a pane already moving with 409 `move_in_progress`. The phone and desktop offer
 only harnesses `/v1/harnesses` reports as usable, and follow a move by polling
 its id. The record's fields and the steps are in docs/conductor.md.
+
+`mode` defaults to `"replace"`: the old agent exits and the target replaces it
+in place (or in an adjacent tab when its account needs a different shell).
+With `capabilities.moveNewChat: true`, apps may send `mode: "new-chat"`, for
+example when switching from Claude to Codex, OpenCode or Copilot. The Hook asks
+for the same hand-off, retaining the transcript fallback, and launches a new
+tab/pane in the same project folder through the launch-brief path. The old
+agent stays running. The first prompt carries the goal, current state, branch,
+open/changed files and next steps, plus a `Previous chat` section with its title
+and full JSON target `{server,workspace,tab,pane,source,session}` for app links.
+Open files come from the agent's note; the Hook also appends observed Git changes.
+A long note is supplied by a hand-off file referenced in the first prompt.
+
+The finished `{move}` has `mode: "new-chat"`, `placement: "adjacent-pane"`,
+`target` naming the new chat, `handedOffTo: {target}` and
+`handedOffFrom: {target: <old target>, title: <old title>}`. Polling
+`GET /v1/sessions/move?id=<uuid>` returns that record when the launch lands.
+Overview tab and pane rows for the old conversation show `handedOffTo: {target}`
+and a title ending in ` (handed off to <harness>)`; rows for the new conversation
+show `handedOffFrom: {target,title}`. These annotations use the move record and
+match the conversation, so a later chat in the old pane does not inherit them.
+A failed launch leaves the old chat running without a hand-off annotation.
+If the harness starts but delivery of its first prompt throws or is refused,
+the move is `failed` with an `error` explaining that the new chat started but
+did not receive the hand-off. The launched pane is left open, its location is
+kept in `paneTarget`, and the old chat gets no hand-off annotation.
+
+A new chat without a conversation id remains in `state: "linking"` while the
+Hook probes on its existing poll tick for up to three minutes. Once identified,
+`target` becomes the full conversation target and both hand-off links are recorded.
+If identity never arrives within that window, the move settles as `moved` with
+`linkPending: true` and a `notice` explaining that the conversation link is pending.
+`target` retains the starting target when supplied by the launcher; `paneTarget`
+always names the launched pane as `{server,workspace,tab,pane,source}`. The new
+row's conversation link remains unavailable until identity has been resolved.
+This option adds no CLI flag or store format change.
 
 ### Worker report and finish contract
 
