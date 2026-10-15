@@ -920,3 +920,7 @@ button.handoff-link:hover, button.home-quota-row:hover .handoff-link { color: va
   .home-upnext { flex-direction: column; align-items: stretch; gap: 4px; }
   .home-upnext .home-row-meta { flex-wrap: wrap; align-items: center; }
 }
+/* Long project and computer names shrink and truncate instead of widening the row. */
+.home-upnext .home-row-meta { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.home-upnext .home-tag, .home-upnext-when { flex: none; }
+.home-upnext-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -4,6 +4,7 @@ const hooks = vi.hoisted(() => ({
   schedules: new Map<string, unknown>(),
   showSection: vi.fn(),
   merged: { computers: [{ computer: "Desk", state: "online" }, { computer: "Laptop", state: "online" }] },
+  publish: null as null | ((value: unknown) => void),
 }));
 vi.mock("../ui/api.js", () => ({
   hookGet: vi.fn(async () => ({ dispatches: [] })),
@@ -14,7 +15,7 @@ vi.mock("../ui/api.js", () => ({
   }),
 }));
 vi.mock("../ui/shell/store.js", () => ({
-  store: { subscribe: (fn: (value: unknown) => void) => { fn(hooks.merged); return () => {}; }, find: () => null },
+  store: { subscribe: (fn: (value: unknown) => void) => { hooks.publish = fn; fn(hooks.merged); return () => {}; }, find: () => null },
   sessions: () => [], needsYou: () => [], projectOf: () => "project",
 }));
 vi.mock("../ui/shell/sections.js", () => ({ showSection: hooks.showSection }));
@@ -68,8 +69,10 @@ describe("upNext", () => {
   });
 });
 
-// Home's mount needs only these DOM operations.
-class Node {
+// Home's mount needs only these DOM operations. Focus follows the DOM's rule:
+// replacing a list's children blurs a focused child, even one put back.
+const doc = { activeElement: null as unknown };
+class FakeNode {
   className = "";
   textContent = "";
   hidden = false;
@@ -79,35 +82,74 @@ class Node {
   attributes = new Map<string, string>();
   classList = { add: (name: string) => { this.className += ` ${name}`; }, toggle: () => {} };
   listeners = new Map<string, (event: object) => void>();
-  children: Node[] = [];
-  selectors = new Map<string, Node>();
-  append(...nodes: Node[]) { this.children.push(...nodes); }
-  replaceChildren(...nodes: Node[]) { this.children = nodes; }
+  children: FakeNode[] = [];
+  selectors = new Map<string, FakeNode>();
+  append(...nodes: FakeNode[]) { this.children.push(...nodes); }
+  replaceChildren(...nodes: FakeNode[]) {
+    if (this.children.some((child) => child.contains(doc.activeElement))) doc.activeElement = null;
+    this.children = nodes;
+  }
+  focus() { doc.activeElement = this; }
+  closest() { return null; }
   setAttribute(name: string, value: string) { this.attributes.set(name, value); }
   addEventListener(type: string, fn: (event: object) => void) { this.listeners.set(type, fn); }
-  contains(node: unknown): boolean { return node === this || this.children.some((child) => child.contains(node)); }
-  querySelector(selector: string): Node {
-    if (!this.selectors.has(selector)) this.selectors.set(selector, new Node());
+  contains(node: unknown): boolean {
+    return node === this || [...this.children, ...this.selectors.values()].some((child) => child.contains(node));
+  }
+  querySelector(selector: string): FakeNode {
+    if (!this.selectors.has(selector)) this.selectors.set(selector, new FakeNode());
     return this.selectors.get(selector)!;
   }
   querySelectorAll() { return []; }
 }
 
-afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); hooks.schedules.clear(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); hooks.schedules.clear(); doc.activeElement = null; });
+
+function stubDocument() {
+  vi.stubGlobal("HTMLElement", FakeNode);
+  vi.stubGlobal("document", Object.assign(doc, {
+    body: new FakeNode(), createElement: () => new FakeNode(), querySelector: () => null,
+    addEventListener: vi.fn(), removeEventListener: vi.fn(),
+  }));
+}
+
+it("keeps a focused Up next row, and its focus, across re-renders and polls", async () => {
+  stubDocument();
+  const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+  hooks.schedules.set("Desk", { schedules: [schedule("triage", null, { nextRun: at(42) }), schedule("deps", null, { nextRun: at(185) })] });
+  const root = new FakeNode();
+  const scope = root.querySelector('[data-block="upnext"]');
+  const list = scope.querySelector(".home-list");
+  const home = mountHome(root);
+  try {
+    home.show();
+    await vi.waitFor(() => expect(list.children).toHaveLength(2));
+    const [first, second] = list.children;
+    second.focus();
+    hooks.publish!(hooks.merged); // an overview update re-renders Home with identical schedules
+    expect(list.children[1] === second, "same row element").toBe(true);
+    expect(doc.activeElement === second, "focus kept").toBe(true);
+
+    // A changed schedule rebuilds only its own row, and focus returns to the same schedule.
+    hooks.schedules.set("Desk", { schedules: [schedule("triage", null, { nextRun: at(42), name: "Renamed" }), schedule("deps", null, { nextRun: at(185) })] });
+    home.hide();
+    home.show(); // show() reads the schedules again
+    await vi.waitFor(() => expect(list.children[0] === first, "changed row rebuilt").toBe(false));
+    expect(list.children[0].children[0].children[0].textContent).toBe("Renamed");
+    expect(list.children[1] === second, "same row element").toBe(true);
+    expect(doc.activeElement === second, "focus kept").toBe(true);
+  } finally { home.destroy(); }
+});
 
 it("Home lists the schedules due next from the schedules it already reads, and opens Schedules", async () => {
-  vi.stubGlobal("HTMLElement", Node);
-  vi.stubGlobal("document", {
-    body: new Node(), activeElement: null, createElement: () => new Node(), querySelector: () => null,
-    addEventListener: vi.fn(), removeEventListener: vi.fn(),
-  });
+  stubDocument();
   const soon = Date.now() + 42 * 60_000;
   hooks.schedules.set("Desk", { schedules: [
     { ...schedule("triage", null), name: "Nightly triage", harness: "codex", nextRun: new Date(soon).toISOString(), prompt: "Triage today's issues.\nThen file tasks." },
     { ...schedule("paused", null), enabled: false, nextRun: new Date(soon).toISOString() },
   ] });
   hooks.schedules.set("Laptop", new Error("offline"));
-  const root = new Node();
+  const root = new FakeNode();
   const scope = root.querySelector('[data-block="upnext"]');
   const home = mountHome(root);
   try {
