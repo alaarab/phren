@@ -20,6 +20,13 @@ so changes redraw the cards while identical status frames preserve typed answers
 `#conn-count`) and `#sections`. `app.js` registers sections and wires keys,
 badge and notifications; nothing else lives there.
 
+The titlebar navigation (`.section-nav`) shrinks and scrolls horizontally within
+its own container, including the current group’s page tabs. Below 761 px, main
+pills show icons with full titles and accessible names; needs-you shows its count
+and computers shows online/total, retaining full accessible labels. The wordmark
+and duplicate Home count hide at that width. Status and Settings stay outside
+the scrolling navigation. At 1280 px the labels and spacing are unchanged.
+
 ## Daemon connections
 
 The overview uses each computer's configured `server` and reconnects when its

@@ -9,6 +9,8 @@
 // group's last section. An `icon` section (Settings) is a button at the end of
 // the titlebar instead of a pill.
 
+import { el } from "../dom.js";
+
 const sections = new Map();
 let current = null;
 let pillsEl = null;
@@ -173,7 +175,18 @@ function renderPills() {
       b.setAttribute("aria-label", group.label);
     } else {
       b.setAttribute("role", "tab");
-      b.textContent = group.label;
+      b.setAttribute("aria-label", group.label);
+      const paths = {
+        home: "M2 7 8 2l6 5v7H9v-4H7v4H2Z",
+        agents: "M3 4h10v9H3ZM6 1v3M10 1v3M5 7h1M10 7h1M6 10h4",
+        review: "M3 2h10v12H3ZM5 6l2 2 4-4M5 11h6",
+        work: "M1 4h5l2 2h7v8H1Z",
+        fleet: "M2 2h12v8H2ZM5 14h6M8 10v4",
+      };
+      const icon = el("span", "section-symbol");
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="${paths[group.key] ?? paths.work}"/></svg>`;
+      b.append(icon, el("span", "section-name", group.label));
     }
     b.title = shortcut ? `${group.label} (${shortcut})` : group.label;
     if (shortcut) b.setAttribute("aria-keyshortcuts", shortcut.replace("\u2318", "Meta+").replace("Ctrl+", "Control+"));
