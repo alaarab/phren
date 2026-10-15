@@ -230,7 +230,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const agents = agentsByTab.get(key) ?? [];
       agents.push(pane); agentsByTab.set(key, agents);
     }
-    const moves = await listMoves();
+    // Move records are decoration: read alongside the rest, inside the budget.
+    const movesRead = listMoves().catch(() => []);
     const tabs = objects(workspaces.groups).flatMap(group => objects(group.children).map(tab => ({ group, tab })));
     // What a chat needs to open (the exact conversation) comes straight from the
     // chat states; everything below it is decoration.
@@ -274,7 +275,11 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       if (expired) return;
       Object.assign(tab, stall);
       tab.title = title;
-      if (target.success) Object.assign(tab, moveSessionFields(moves, target.data, title));
+      if (target.success) {
+        const moves = await movesRead;
+        if (expired) return;
+        Object.assign(tab, moveSessionFields(moves, target.data, title));
+      }
       // What a finished turn said last; a row still working (background work) has no last word yet.
       const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
       if (reply) tab.lastReply = reply;
