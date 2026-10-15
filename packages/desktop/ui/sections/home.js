@@ -11,6 +11,11 @@ import { approvals } from "../shell/approvals.js";
 import { away } from "../shell/away.js";
 import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
 import { backgroundLabel, stallLabel, stalledMinutes } from "../shell/stalls.js";
+import { runningLow } from "../shell/home-usage.js";
+import { followUsage } from "../shell/usage-rings.js";
+import { loadQuotaState, quotaSettings } from "../shell/quota-warn-prefs.js";
+import { openQuotaSwitch } from "../shell/quota-warn-sheet.js";
+import { quotaSessionKey } from "../shell/quota-warn.js";
 import { sendReply } from "../shell/needs-notify.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
@@ -74,6 +79,10 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       <section class="home-block" data-block="finished">
         <h2 class="section-label">Finished <span class="count"></span><span class="home-away-for"></span></h2>
         <button class="home-away-dismiss" type="button" hidden>Dismiss</button>
+        <div class="home-list"></div>
+      </section>
+      <section class="home-block" data-block="low" hidden>
+        <h2 class="section-label">Running low <span class="count"></span></h2>
         <div class="home-list"></div>
       </section>
       <section class="home-block" data-block="working">
@@ -207,6 +216,52 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     if (selected >= rows.length) selected = Math.max(0, rows.length - 1);
     fill("needs", rows.map(needsRow), "Nothing needs you.");
     block("needs").querySelector(".home-keys").hidden = !rows.length;
+  }
+
+  let usage = null;
+  let stopUsage = null;
+  let quotaReady = false;
+  function renderLow() {
+    const scope = block("low");
+    const rows = quotaReady ? runningLow(merged, usage, quotaSettings()) : [];
+    const focused = scope.contains(document.activeElement) ? document.activeElement : null;
+    const focusKey = focused?.dataset.key;
+    const focusAction = focused?.dataset.action;
+    scope.hidden = !rows.length;
+    fill("low", rows.map((row) => {
+      const wrap = el("div", "home-row home-low");
+      const chat = el("button", "home-low-chat home-row-main");
+      chat.type = "button";
+      chat.dataset.key = row.key;
+      chat.dataset.action = "open";
+      chat.append(el("span", "home-row-title", row.child.title || row.child.label || projectOf(row.child)),
+        el("span", "home-row-sub", [row.account.name || row.account.harness, row.child.account?.label || row.account.account || row.child.account?.id, row.computer].filter(Boolean).join(" · ")),
+        el("span", "home-low-usage", row.text));
+      chat.addEventListener("click", () => open(row.computer, row.child));
+      const change = el("button", "home-btn ghost", "Switch");
+      change.type = "button";
+      change.dataset.key = row.key;
+      change.dataset.action = "switch";
+      change.setAttribute("aria-label", `Switch ${row.child.title || row.child.label || "chat"}`);
+      change.addEventListener("click", async () => {
+        change.disabled = true;
+        try {
+          let inventory;
+          try { inventory = (await hookGet(row.computer, "/v1/harnesses")).harnesses; } catch { /* allow choosing manually */ }
+          const live = store.find(row.computer, row.child.id);
+          if (!live || quotaSessionKey(live) !== quotaSessionKey(row) || !(merged?.computers ?? []).some((c) => c.computer === row.computer && c.state === "online")) return;
+          await openQuotaSwitch(live, inventory, usage?.accounts);
+        } catch (error) {
+          wrap.append(el("span", "home-row-sub", `Could not switch: ${error?.message || error}`));
+        } finally { change.disabled = false; }
+      });
+      wrap.append(chat, change);
+      return wrap;
+    }), "");
+    if (focusKey) {
+      const next = [...scope.querySelectorAll("button")].find((button) => button.dataset.key === focusKey && button.dataset.action === focusAction);
+      (next ?? root.querySelector("button"))?.focus();
+    }
   }
 
   function renderWorking() {
@@ -596,6 +651,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     renderConductor();
     renderNeeds();
     renderAway();
+    renderLow();
     renderWorking();
     renderChecks();
     renderReturns();
@@ -648,18 +704,24 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       visible = true;
       startPolling();
       followPulls();
+      stopUsage = followUsage((snapshot) => { usage = snapshot; renderLow(); });
+      void loadQuotaState().then(() => { quotaReady = true; if (visible) renderLow(); }).catch((error) => console.warn("Home usage preferences:", error));
       document.addEventListener("keydown", onKeydown);
     },
     hide() {
       visible = false;
       stopPolling();
       unfollowPulls();
+      stopUsage?.();
+      stopUsage = null;
       document.removeEventListener("keydown", onKeydown);
     },
     destroy() {
       visible = false;
       stopPolling();
       unfollowPulls();
+      stopUsage?.();
+      stopUsage = null;
       unsubscribe();
       unsubscribeAway();
       unsubscribeApprovals();

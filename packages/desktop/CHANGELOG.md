@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Home shows “Running low” chats at the configured usage-warning threshold, most constrained first, with account, reset time and Switch into the existing account or harness hand-off flow. The block hides when every open chat has room.
+
 - A service-refused usage window draws a full red ring labeled “Exhausted” with its own reset, even when its reported usage is below 100%.
 
 - Usage reset labels share the warning's wording: whole hours omit zero minutes, partial minutes round up, and resets a day or more away show the local weekday and time in warnings, account usage and ring tooltips.
