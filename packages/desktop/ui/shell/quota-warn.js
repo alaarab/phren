@@ -2,7 +2,7 @@
 // until a notice is actually displayed; polling never consumes unseen notices.
 export function quotaPreferences(value = {}) {
   const threshold = Number(value.threshold);
-  return { on: value.on !== false, threshold: Number.isFinite(threshold) && threshold >= 50 && threshold <= 99 ? Math.round(threshold) : 90 };
+  return { on: value.on !== false, backOn: value.backOn !== false, threshold: Number.isFinite(threshold) && threshold >= 50 && threshold <= 99 ? Math.round(threshold) : 90 };
 }
 
 export const quotaSessionKey = ({ computer, child }) => JSON.stringify([computer, child.target?.source ?? child.agent, child.target?.session ?? child.id]);

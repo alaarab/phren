@@ -19,6 +19,9 @@ export function buildNotifications(page) {
   const quotaToggle = toggleRow("Account usage warnings", prefs.on, (on) => {
     void saveQuotaSettings({ on }).then(refreshQuota).catch(quotaError);
   });
+  const backToggle = toggleRow("Notify when an account has room again", prefs.backOn, (backOn) => {
+    void saveQuotaSettings({ backOn }).then(refreshQuota).catch(quotaError);
+  });
   quota.append(quotaToggle);
   const quotaLabel = el("label", "settings-toggle");
   const threshold = el("input", "settings-input");
@@ -37,16 +40,20 @@ export function buildNotifications(page) {
   const quotaNotice = el("div", "settings-error");
   const quotaSwitch = quotaToggle.querySelector("input");
   quotaSwitch.disabled = true;
+  const backSwitch = backToggle.querySelector("input");
+  backSwitch.disabled = true;
   function refreshQuota() {
     const settings = quotaSettings();
     quotaSwitch.checked = settings.on;
     quotaSwitch.disabled = false;
+    backSwitch.checked = settings.backOn;
+    backSwitch.disabled = false;
     threshold.value = String(settings.threshold);
     threshold.disabled = !settings.on;
     quotaNotice.textContent = "";
   }
   function quotaError() { quotaNotice.textContent = "Account warning preferences could not be saved or loaded. Reopen this page to retry."; }
-  quota.append(quotaLabel, quotaNotice);
+  quota.append(quotaLabel, backToggle, quotaNotice);
   const refresh = () => { void loadQuotaState().then(refreshQuota).catch(quotaError); };
   refresh();
   const quiet = el("div", "settings-list");

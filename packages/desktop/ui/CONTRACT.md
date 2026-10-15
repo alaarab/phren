@@ -434,7 +434,8 @@ public, read-only and served without the cookie.
 ## Account quota warnings
 
 `shell/quota-warn.js` is pure: `quotaPreferences(value)` validates the enabled
-flag and 50–99 percent threshold (default 90); `quotaSessionKey(session)` keys
+flag and 50–99 percent threshold (default 90), plus the independent default-on
+`backOn` recovery notification flag; `quotaSessionKey(session)` keys
 computer/harness/conversation; `sessionUsage(session, accounts)` matches the
 session's exact local account; `quotaWindows(row, now)` settles 5-hour and weekly
 windows; `quotaWarnings(session, row, { preferences, suppressed, seen, now })`
@@ -447,7 +448,7 @@ ranks the move inventory by remaining room, excluding the current login.
 or edits; mutation functions return promises. Settings › Notifications waits
 for hydration and reports read/write failures. State is stored by the daemon,
 independently of its HTTP port: authenticated `GET /api/settings/quota-warning`
-returns `{ settings: { on, threshold }, suppressed: string[], seen: string[] }`;
+returns `{ settings: { on, threshold, backOn }, suppressed: string[], seen: string[] }`;
 `POST` merges `{ settings?, suppress?, markSeen?, unmarkSeen? }`. The daemon
 serializes merges and atomically writes `$XDG_CONFIG_HOME/phren/desktop-quota.json`
 (default `~/.config/phren/desktop-quota.json`, mode 0600). Both client and daemon
@@ -522,3 +523,22 @@ it is absent. Both sidebar styles and the chat header show "handed off to
 <harness>" / "handed off from <title>"; a reference with a target is a button
 opening that chat. `openChat.updateOverview(child)` refreshes these labels as
 live overview rows change. No Hook fields or routes are added by the desktop.
+
+### Account room notifications
+
+`shell/quota-back.js` exports pure `quotaBackTransitions(state, snapshot, now?)`
+returning `{ state, notices }` (initial state may be undefined), and
+`startQuotaBack({ notify, enabled })` returning unsubscribe. Started once by
+`app.js`, it follows the shared usage poll without extra requests. Each
+computer/harness/account establishes a silent baseline; only an observed
+exhausted → available transition emits a notice, after every exhausted window
+has cleared. Missing, unknown or stale reports clear the baseline; explicit
+`reset` windows remain known room even when the merger flags them stale.
+Cooldowns survive missing reports and suppress repeated transitions for ten
+minutes. Disabled settings, quiet hours and unhydrated preferences consume
+transitions silently. Settings › Notifications exposes the independent
+“Notify when an account has room again” toggle using the existing daemon quota
+settings route and file (`settings.backOn`, default true for older files).
+Notifications name the account, computer and window; their keyless shell click
+focuses the desktop and leaves its current chat and section in place. Covered
+by `src/ui-quota-back.test.ts`.

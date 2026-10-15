@@ -4,6 +4,10 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## [0.1.10] - unreleased
+
+- Native notifications announce when an exhausted account has room again, naming the computer and the limit that reset. Settings › Notifications can turn them off; first observations stay silent and repeated recoveries are quiet for ten minutes.
+
 ## [0.1.9] - 2026-10-15
 
 - When the account a chat runs on nears its usage limit (90% of the 5-hour or weekly window by default; Settings › Notifications), a card above the composer shows the usage, when it resets and how much the other accounts and harnesses have left, with Switch, Not now and Don't ask again for this chat. Switching to another Claude account continues the chat in place; switching to Codex, OpenCode or Copilot opens a new chat with a hand-off (Hook 0.3.48), and the two chats link to each other. Settings and opt-outs persist across launches.

@@ -22,6 +22,7 @@ import { initTheme } from "./shell/theme.js";
 import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, stallNotifyEnabled } from "./sections/settings.js";
 import { quietNow } from "./shell/quiet.js";
 import { startCiWatch } from "./shell/ci-watch.js";
+import { startQuotaBack } from "./shell/quota-back.js";
 import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
 import { startSummon } from "./shell/summon.js";
@@ -92,6 +93,7 @@ store.subscribe(() => {
 // and the last look behind Home's Checks strip.
 startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() && !quietNow() });
 startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
+startQuotaBack({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && !quietNow() });
 startSummon(shell);
 // Notifications for new needs-you rows; they and the tray menu open sessions by key.
 startNeedsNotify(shell, {
