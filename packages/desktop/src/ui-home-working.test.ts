@@ -87,8 +87,8 @@ it("stops the selected target without opening chat, with a focusable busy contro
     expect(hooks.post).toHaveBeenCalledOnce();
     finish();
     await pending;
-    expect(stop.attributes.get("aria-busy")).toBe("false");
-    expect(stop.textContent).toBe("■");
+    expect(stop.attributes.get("aria-busy")).toBe("true");
+    expect(stop.textContent).toBe("…");
   } finally { working.destroy(); }
 });
 
@@ -136,4 +136,35 @@ it("omits idle and offline stop controls and retains Stop focus across changed a
     expect(list.children[0].className).toBe("home-empty");
     expect(hooks.post).not.toHaveBeenCalled();
   } finally { working.destroy(); }
+});
+
+it.each(["overview", "timeout"])("blocks a second Escape after a fast response until %s releases Stop", async (releaseBy) => {
+  vi.useFakeTimers();
+  hooks.post.mockResolvedValue(undefined);
+  const { list, publish, working } = setup();
+  try {
+    const stop = list.children[0].children[1];
+    const click = () => stop.listeners.get("click")!({ stopPropagation: vi.fn() });
+    await click();
+    await click();
+    expect(hooks.post).toHaveBeenCalledOnce();
+    expect(stop.attributes.get("aria-disabled")).toBe("true");
+    publish();
+    await click();
+    expect(hooks.post).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(4999);
+    expect(stop.attributes.get("aria-busy")).toBe("true");
+    if (releaseBy === "overview") {
+      publish([child("one", "idle"), child("two")]);
+      expect(stop.attributes.get("aria-busy")).toBe("false");
+      publish();
+    } else {
+      vi.advanceTimersByTime(1);
+      expect(stop.attributes.get("aria-busy")).toBe("false");
+    }
+    const available = list.children[0].children[1];
+    expect(available.attributes.get("aria-disabled")).not.toBe("true");
+    await available.listeners.get("click")!({ stopPropagation: vi.fn() });
+    expect(hooks.post).toHaveBeenCalledTimes(2);
+  } finally { working.destroy(); vi.useRealTimers(); }
 });

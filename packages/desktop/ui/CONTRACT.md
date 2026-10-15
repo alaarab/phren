@@ -701,6 +701,7 @@ wraps on narrow screens. Covered by `src/ui-home-jobs.test.ts`.
 Stop buttons. Stop is a square icon at the end, titled and named `Stop <session
 title>`, and calls `shell/pause-all.js`'s `liveStop` (Escape to that row's target).
 Clicks stop propagation. The control stays focusable while busy, ignores repeat
-activation, and reports failures inline for four seconds. Polls retain Stop and
+activation until an overview leaves working or five seconds pass, and reports
+failures inline for four seconds. Polls retain Stop and
 restore chat focus when metadata or row order changes. Idle and offline sessions
 have no Stop control. Home's existing approval keyboard shortcuts are unchanged.

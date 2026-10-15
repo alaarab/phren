@@ -25,11 +25,18 @@ export function createWorking({ state, block, sessionRow }) {
         error.setAttribute("role", "status");
         error.hidden = true;
         wrap.append(content, stop, error);
-        entry = { wrap, content, stop, error, row, timer: null, busy: false, disposed: false };
+        entry = { wrap, content, stop, error, row, timer: null, busyTimer: null, busy: false, disposed: false };
         const current = entry;
+        current.releaseStop = () => {
+          clearTimeout(current.busyTimer);
+          current.busy = false;
+          stop.setAttribute("aria-busy", "false");
+          stop.setAttribute("aria-disabled", "false");
+          stop.textContent = "■";
+        };
         stop.addEventListener("click", async (event) => {
           event.stopPropagation();
-          if (current.busy) return;
+          if (current.busy || current.disposed) return;
           clearTimeout(current.timer);
           error.hidden = true;
           error.textContent = "";
@@ -37,6 +44,9 @@ export function createWorking({ state, block, sessionRow }) {
           stop.setAttribute("aria-busy", "true");
           stop.setAttribute("aria-disabled", "true");
           stop.textContent = "…";
+          // A fast keys response does not mean the harness has stopped yet.
+          // Retain the guard through overview polls, with a bounded retry wait.
+          current.busyTimer = setTimeout(current.releaseStop, 5000);
           try {
             await liveStop(current.row);
           } catch (failure) {
@@ -44,11 +54,6 @@ export function createWorking({ state, block, sessionRow }) {
             error.textContent = failure?.message || "Could not stop this session.";
             error.hidden = false;
             current.timer = setTimeout(() => { error.hidden = true; error.textContent = ""; }, 4000);
-          } finally {
-            current.busy = false;
-            stop.setAttribute("aria-busy", "false");
-            stop.setAttribute("aria-disabled", "false");
-            stop.textContent = "■";
           }
         });
       }
@@ -71,7 +76,7 @@ export function createWorking({ state, block, sessionRow }) {
       next.set(row.key, entry);
       return entry.wrap;
     });
-    for (const [key, entry] of keyed) if (!next.has(key)) { entry.disposed = true; clearTimeout(entry.timer); }
+    for (const [key, entry] of keyed) if (!next.has(key)) { entry.disposed = true; entry.releaseStop(); clearTimeout(entry.timer); }
     keyed = next;
     const active = document.activeElement;
     const keepFocus = nodes.some((node) => node.contains(active));
@@ -83,5 +88,5 @@ export function createWorking({ state, block, sessionRow }) {
     if (!rows.length) list.replaceChildren(el("div", "home-empty", "No agent is working."));
   }
 
-  return { render, destroy() { for (const entry of keyed.values()) { entry.disposed = true; clearTimeout(entry.timer); } keyed.clear(); } };
+  return { render, destroy() { for (const entry of keyed.values()) { entry.disposed = true; entry.releaseStop(); clearTimeout(entry.timer); } keyed.clear(); } };
 }
