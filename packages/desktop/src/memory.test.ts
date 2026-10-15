@@ -333,6 +333,7 @@ describe("citation freshness forwarding from an older or failing Hook", () => {
     ["a Hook error (500)", raw(500, '{"error":"boom"}')],
     ["a non-JSON body", raw(200, "<html>proxy</html>")],
     ["findings that are not a list", json({ findings: "nope" })],
+    ["findings with non-object entries", json({ findings: [null, 7, "x", { id: 5 }] })],
     ["a rejected request", null],
   ])("still returns every mirrored finding, without freshness, for %s", async (_label, response) => {
     const home = await mkdtemp(path.join(tmpdir(), "desktop-freshness-old-"));
