@@ -16,6 +16,18 @@ const node = (tag, cls, text) => {
   return el;
 };
 
+/** Shared Switch entry point: rank fresh room, then use the capability-aware move sheet. */
+export function openQuotaSwitch(session, inventory, accounts, { returnFocus } = {}) {
+  const destinations = quotaDestinations(session,
+    moveChoices(inventory ?? [], session.child.target?.source ?? session.child.agent),
+    moveAccounts(inventory, { includeDefault: true }), accounts ?? []);
+  const best = destinations.find((d) => !d.exhausted && d.left > 0);
+  return openMoveSheet({ ...session, returnFocus,
+    to: best ? { harness: best.harness, ...(best.account ? { account: best.account } : {}) } : undefined,
+    ...(!best ? { selectDefault: false, notice: "No other account or harness has known room. Choose where to continue." } : {}),
+  });
+}
+
 export function watchQuotaWarnings(currentSession) {
   let usage = null;
   let open = null;
@@ -111,12 +123,8 @@ export function watchQuotaWarnings(currentSession) {
       const session = currentSession();
       if (!session || blocked(session) || quotaSessionKey(session) !== quotaSessionKey(latest)) { void check(); return; }
       // A destination can run out while the notice is open. Never reuse its old rank.
-      const best = destinationsFor(session, inventory).find((d) => !d.exhausted && d.left > 0);
       close();
-      void openMoveSheet({ ...session,
-        to: best ? { harness: best.harness, ...(best.account ? { account: best.account } : {}) } : undefined,
-        ...(!best ? { selectDefault: false, notice: "No other account or harness has known room. Choose where to continue." } : {}),
-      });
+      void openQuotaSwitch(session, inventory, usage?.accounts);
     }, true);
     foot.append(change, button("Not now", close), button("Don't ask again for this chat", () => { void suppressQuotaChat(quotaSessionKey(latest)).catch(reportFailure); close(); }));
     body.append(switchNote);
