@@ -1,5 +1,7 @@
 // Phren desktop's UI entry: the titlebar, the section registry and the
 // overview store. Sections live in ./sections, shared plumbing in ./shell.
+import { el } from "./dom.js";
+import { renderComputerCount } from "./shell/titlebar.js";
 import { installKeys } from "./keys.js";
 import { hookPost } from "./api.js";
 import { connectStore, store } from "./shell/store.js";
@@ -69,12 +71,13 @@ mountUsageRings(document.getElementById("usage-rings"));
 // Titlebar status: computers online and the needs-you count.
 store.subscribe((merged) => {
   const computers = merged?.computers ?? [];
-  const online = computers.filter((c) => c.state === "online").length;
-  countEl.textContent = `${online}/${computers.length} computers`;
-  countEl.title = computers.map((c) => `${c.computer}: ${c.state}`).join("\n");
+  renderComputerCount(countEl, computers);
   const needs = store.needsYou().length;
   needsEl.hidden = !needs;
-  needsEl.textContent = `${needs} need${needs === 1 ? "s" : ""} you`;
+  const needsLabel = `${needs} need${needs === 1 ? "s" : ""} you`;
+  needsEl.replaceChildren(el("span", "", String(needs)), el("span", "status-long", ` need${needs === 1 ? "s" : ""} you`));
+  needsEl.title = needsLabel;
+  needsEl.setAttribute("aria-label", needsLabel);
   setSectionBadge("home", needs);
 });
 needsEl.addEventListener("click", () => {
