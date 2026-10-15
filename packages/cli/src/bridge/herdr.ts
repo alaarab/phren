@@ -1,5 +1,4 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { listMoves, moveSessionFields } from "./session-move.js";
 import { paneAccount, paneAccountKey, notePaneTranscript } from "./pane-accounts.js";
 import type { AccountRef } from "./claude-accounts.js";
 import { execFile } from "node:child_process";
@@ -533,6 +532,8 @@ export async function panes(server: string, workspace: string, tab: string): Pro
   const s = await snapshot(server);
   if (!objects(s.tabs).some(t => t.tab_id === tab && t.workspace_id === workspace)) throw new BridgeError(409, "This terminal tab has changed. Refresh the computer.");
   const mux = (await terminal()).terminalMux(server);
+  // Loaded lazily: session-move imports this module, and a static import back makes a cycle.
+  const { listMoves, moveSessionFields } = await import("./session-move.js");
   const moves = await listMoves();
   return { kind: mux.kind, mux, groupId: workspace, childId: tab, panes: await Promise.all(objects(s.panes)
     .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => {
