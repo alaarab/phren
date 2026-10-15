@@ -61,6 +61,9 @@ export function installSections(pills, host, { sub = null, icons = null } = {}) 
   iconEl = icons;
   hostEl = host;
   renderPills();
+  window.addEventListener("resize", () => {
+    if (window.innerWidth <= 760) revealActiveSection();
+  });
   window.addEventListener("hashchange", () => {
     const id = location.hash.replace(/^#\/?/, "");
     if (sections.has(id) && id !== current) showSection(id);
@@ -91,6 +94,7 @@ export function showSection(id, ctx = {}) {
   lastInGroup.set(groupOf(id), id);
   remember(id);
   markSelected();
+  revealActiveSection();
   for (const fn of changeListeners) fn(id);
   return def.handle;
 }
@@ -206,6 +210,13 @@ function renderPills() {
     (group.icon && iconEl ? iconEl : pillsEl).append(b);
   }
   markSelected();
+}
+
+// Group pages share the navigation scroller with the main pills. Reveal the
+// specific page when present; otherwise reveal the selected main pill.
+function revealActiveSection() {
+  const active = subEl?.querySelector(".section-sub.selected") ?? pillsEl?.querySelector(".section-pill.selected");
+  active?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 function markSelected() {

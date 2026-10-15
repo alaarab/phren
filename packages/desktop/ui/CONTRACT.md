@@ -25,7 +25,11 @@ its own container, including the current group’s page tabs. Below 761 px, main
 pills show icons with full titles and accessible names; needs-you shows its count
 and computers shows online/total, retaining full accessible labels. The wordmark
 and duplicate Home count hide at that width. Status and Settings stay outside
-the scrolling navigation. At 1280 px the labels and spacing are unchanged.
+the scrolling navigation. Section changes and compact-window resizes reveal the
+active page tab (or main pill) with nearest inline scrolling. The computers
+fraction has screen-reader text “computers online” at every width, rendered by
+`shell/titlebar.js` without relying on an accessible name on a generic span.
+At 1280 px the labels and spacing are unchanged.
 
 ## Daemon connections
 
