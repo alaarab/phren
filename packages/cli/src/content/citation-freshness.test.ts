@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { makeTempDir } from "../test-helpers.js";
 import { runtimeFile } from "../phren-paths.js";
@@ -28,6 +28,14 @@ const response = (url: URL | RequestInfo, changed = false) => {
     last_commit: changed ? { sha: "1234567890", summary: "Fix cache", authored_at: "2026-10-15T01:00:00Z" } : null })) }));
 };
 const options = () => ({ phrenPath: tmp.path, budgetMs: 1500 });
+/** An outside writer's change: same-size rewrites in the same tick keep the mtime on
+ * Windows, and the in-process cache memo is keyed by mtime and size. */
+let outsideWrites = 0;
+const writeOutside = (file: string, entries: unknown) => {
+  writeFileSync(file, JSON.stringify(entries));
+  const when = new Date(Date.now() + ++outsideWrites * 1000);
+  utimesSync(file, when, when);
+};
 beforeEach(() => { tmp = makeTempDir("citation-freshness-"); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); tmp.cleanup(); });
 
@@ -84,14 +92,14 @@ describe("gitboy citation freshness", () => {
     const entries = JSON.parse(readFileSync(file, "utf8"));
     const key = Object.keys(entries).find(key => !key.startsWith("repo:"))!;
     entries[key].checkedAt = new Date(Date.now() - 2 * 3600_000).toISOString();
-    writeFileSync(file, JSON.stringify(entries));
+    writeOutside(file, entries);
     let finish!: (response: Response) => void;
     const fetchImpl = vi.fn(async () => await new Promise<Response>(resolve => { finish = resolve; }));
     const pending = refreshCitationFreshness([cite], { ...options(), budgetMs: 10_000, fetchImpl });
     // Git spawns before the fetch can take over a second on Windows runners.
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     entries[key] = { state: diskState, checkedAt: new Date(Date.now() + 1000).toISOString(), head: "newer-head", lastCommit: null };
-    writeFileSync(file, JSON.stringify(entries));
+    writeOutside(file, entries);
     finish(response(new URL("https://gitboy.example/?path=src/a.ts"), incomingState === "changed"));
     await pending;
     const saved = JSON.parse(readFileSync(file, "utf8"))[key];
@@ -160,7 +168,7 @@ describe("gitboy citation freshness", () => {
   it("evicts the oldest entries beyond 5000", async () => {
     const file = runtimeFile(tmp.path, "citation-freshness.json");
     const entries = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`old-${i}`, { state: "current", checkedAt: new Date(Date.now() - 5000 + i).toISOString() }]));
-    writeFileSync(file, JSON.stringify(entries));
+    writeOutside(file, entries);
     await refreshCitationFreshness([citation()], { ...options(), fetchImpl: async url => response(url) });
     const saved = JSON.parse(readFileSync(file, "utf8"));
     expect(Object.keys(saved)).toHaveLength(5000);
@@ -216,7 +224,7 @@ describe("gitboy citation freshness", () => {
     const file = runtimeFile(tmp.path, "citation-freshness.json");
     const entries = JSON.parse(readFileSync(file, "utf8"));
     Object.values(entries).forEach(value => { (value as { lastCommit: null }).lastCommit = null; });
-    writeFileSync(file, JSON.stringify(entries));
+    writeOutside(file, entries);
     expect(markStaleCitations(snippet, { ...options(), projectRemote: cite.projectRemote })).toContain("[may be out of date: src/a.ts changed since cited]");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
