@@ -162,3 +162,17 @@ button.home-job:focus-visible { outline: 2px solid var(--accent); outline-offset
   .home-computer-meta { flex-wrap: wrap; }
   .home-job { gap: 6px; }
 }
+
+/* Separate chat and Stop buttons keep both controls reachable without nesting. */
+.home-working { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-width: 0; }
+.home-working-content { min-width: 0; }
+.home-working-content > .home-row { width: 100%; box-sizing: border-box; }
+.home-working-stop { flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: var(--surface); color: var(--text-2); font: inherit; cursor: pointer; }
+.home-working-stop:hover { background: var(--raised); color: var(--danger); }
+.home-working-stop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-working-stop[aria-busy="true"] { color: var(--muted); cursor: wait; }
+.home-working-error { grid-column: 1 / -1; padding: 0 12px 4px; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .home-working-content .home-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .home-working-content .home-row-meta { flex-wrap: wrap; overflow-wrap: anywhere; }
+}

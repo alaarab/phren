@@ -68,6 +68,7 @@ function defaultSession() {
     title: "Fix login",
     agent: "claude",
     agentStatus: "working",
+    currentStep: "Checking the login guard",
     cwd: "/Users/you/phren",
     branch: "main",
     lastChangedAt: new Date().toISOString(),
@@ -325,6 +326,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
+    "POST /v1/keys": () => ({ json: { ok: true } }),
     "POST /v1/schedules": () => ({ status: 200, json: defaultSchedules() }),
 
     "GET /v1/files/range": (_req, _body, url) => {
