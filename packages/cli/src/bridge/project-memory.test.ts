@@ -1,3 +1,5 @@
+import { runtimeFile } from "../phren-paths.js";
+import { refreshCitationFreshness } from "../content/citation-freshness.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -5,6 +7,11 @@ import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { clearProjectConfigCache, getProjectRemote } from "../project-config.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding, completeProjectTask, tasksForBranch } from "./project-memory.js";
+
+vi.mock("node:fs", async original => {
+  const actual = await original<typeof import("node:fs")>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 // The code index is a separate package; the files route only needs its symbol resolver.
 const codeIndex = vi.hoisted(() => ({ files: {} as Record<string, string>, calls: 0 }));
@@ -248,4 +255,67 @@ describe("POST /v1/projects/:project/findings", () => {
     expect((await hookGet("/v1/projects/app/findings", "GET")).status).toBe(405);
     expect((await hookGet("/v1/projects/app/findings", "POST", true, { text: "y".repeat(9000) })).status).toBe(413);
   });
+});
+
+
+it("serves cached citation freshness on Hook memory, files and search responses", async () => {
+  const cite = { created_at: "2026-10-15T00:00:00Z", file: "src/cache.ts", commit: "abcdef1" };
+  write("app/FINDINGS.md", `# app Findings\n\n## 2026-10-15\n\n- Cache key collides <!-- fid:12345678 -->\n  <!-- phren:cite ${JSON.stringify(cite)} -->\n`);
+  write("app/phren.project.yaml", "remote: https://gitboy.example/alice/app.git\n");
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ head: "123456789", paths: [{ path: "src/cache.ts", changed: true, last_commit: null }] })));
+  await refreshCitationFreshness([cite], { phrenPath: store, projectRemote: "https://gitboy.example/alice/app.git", budgetMs: 1500, fetchImpl });
+  const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected network"));
+  try {
+    for (const url of ["/v1/projects/app/memory", "/v1/projects/app/memory/files?path=src/cache.ts", "/v1/projects/app/memory/search?q=cache%20key"]) {
+      const response = await hookGet(url);
+      expect(response.status).toBe(200);
+      const item = response.body.findings?.[0] ?? response.body.results[0].finding;
+      expect(item.citationFreshness).toMatchObject({ state: "changed", head: "123456789", lastCommit: null });
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    expect(network).not.toHaveBeenCalled();
+  } finally { network.mockRestore(); }
+});
+
+
+it("returns before a background gitboy check and exposes it on the next poll", async () => {
+  const cite = { created_at: "2026-10-15T00:00:00Z", file: "src/pay.ts", commit: "abcdef2" };
+  write("app/FINDINGS.md", `# app Findings\n\n## 2026-10-15\n\n- Payment retries double charge <!-- fid:87654321 -->\n  <!-- phren:cite ${JSON.stringify(cite)} -->\n`);
+  write("app/phren.project.yaml", "remote: https://gitboy.example/alice/app.git\n");
+  let finish!: (response: Response) => void;
+  const network = vi.spyOn(globalThis, "fetch").mockImplementation(async () => await new Promise<Response>(resolve => { finish = resolve; }));
+  try {
+    const first = await hookGet("/v1/projects/app/memory");
+    expect(first.body.findings[0]).not.toHaveProperty("citationFreshness");
+    await vi.waitFor(() => expect(network).toHaveBeenCalledTimes(1));
+    const overlapping = await hookGet("/v1/projects/app/memory");
+    expect(overlapping.body.findings[0]).not.toHaveProperty("citationFreshness");
+    await new Promise(resolve => setImmediate(resolve));
+    expect(network).toHaveBeenCalledTimes(1);
+    finish(new Response(JSON.stringify({ head: "123456789", paths: [{ path: "src/pay.ts", changed: true, last_commit: null }] })));
+    await vi.waitFor(async () => {
+      expect((await hookGet("/v1/projects/app/memory")).body.findings[0].citationFreshness).toMatchObject({ state: "changed" });
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(network).toHaveBeenCalledTimes(1);
+  } finally { network.mockRestore(); }
+});
+
+
+it("reads the freshness cache once for a request with 500 findings", async () => {
+  const cite = { created_at: "2026-10-15T00:00:00Z", file: "src/cache.ts", commit: "abcdef1" };
+  write("app/FINDINGS.md", `# app Findings\n\n## 2026-10-15\n\n${Array.from({ length: 500 }, (_, i) =>
+    `- Cache finding ${i} <!-- fid:${i.toString(16).padStart(8, "0")} -->\n  <!-- phren:cite ${JSON.stringify(cite)} -->`).join("\n")}\n`);
+  write("app/phren.project.yaml", "remote: https://gitboy.example/alice/app.git\n");
+  await refreshCitationFreshness([cite], { phrenPath: store, projectRemote: "https://gitboy.example/alice/app.git", budgetMs: 1500,
+    fetchImpl: async () => new Response(JSON.stringify({ head: "123456789", paths: [{ path: cite.file, changed: true, last_commit: null }] })) });
+  const cache = runtimeFile(store, "citation-freshness.json");
+  // An external writer invalidates the process memo before this request.
+  fs.appendFileSync(cache, "\n");
+  vi.mocked(fs.readFileSync).mockClear();
+  const result = await hookGet("/v1/projects/app/memory");
+  expect(result.body.findings).toHaveLength(500);
+  expect(result.body.findings.every((item: any) => item.citationFreshness?.state === "changed")).toBe(true);
+  expect(vi.mocked(fs.readFileSync).mock.calls.filter(([file]) => file === cache)).toHaveLength(1);
+  await new Promise(resolve => setImmediate(resolve));
 });

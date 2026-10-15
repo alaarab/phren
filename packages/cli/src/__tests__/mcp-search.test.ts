@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
@@ -67,6 +67,45 @@ describe("mcp-search: project filter", () => {
     delete process.env.PHREN_ACTOR;
     db.close();
     tmp.cleanup();
+  });
+
+  it.each([false, true])("marks changed gitboy citations in search (clanker=%s)", async clanker => {
+    writeFile(path.join(tmp.path, "project-a", "FINDINGS.md"), `# project-a Findings\n\n## 2026-10-15\n\n- Redis cache keeps old keys <!-- fid:12345678 -->\n  <!-- phren:cite {"created_at":"2026-10-15T00:00:00Z","file":"src/cache.ts","commit":"abcdef1"} -->\n`);
+    writeFile(path.join(tmp.path, "project-a", "phren.project.yaml"), "remote: https://gitboy.example/alice/app.git\n");
+    db.close();
+    db = await buildIndex(tmp.path);
+    vi.stubEnv("PHREN_CLANKER", clanker ? "on" : "off");
+    const network = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ head: "123456789", paths: [
+      { path: "src/cache.ts", changed: true, last_commit: { sha: "123456789", summary: "Fix cache", authored_at: "2026-10-15T01:00:00Z" } },
+    ] })));
+    try {
+      const result = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
+      expect(result.ok).toBe(true);
+      expect(result.message).toContain('[may be out of date: src/cache.ts changed in 1234567 "Fix cache"]');
+      if (!clanker) expect(result.data.results.find((item: any) => item.type === "findings").citations[0].citationFreshness.state).toBe("changed");
+      expect(network).toHaveBeenCalledTimes(1);
+    } finally { network.mockRestore(); vi.unstubAllEnvs(); }
+  });
+
+  it("limits citation metadata to the returned snippet of a 500-citation document", async () => {
+    const content = `# project-a Findings\n\n## 2026-10-15\n\n${Array.from({ length: 500 }, (_, i) =>
+      `- Redis cache entry ${i} <!-- fid:${i.toString(16).padStart(8, "0")} -->\n  <!-- phren:cite {"created_at":"2026-10-15T00:00:00Z","file":"src/cache-${i}.ts","commit":"abcdef1"} -->`).join("\n")}\n`;
+    writeFile(path.join(tmp.path, "project-a", "FINDINGS.md"), content);
+    writeFile(path.join(tmp.path, "project-a", "phren.project.yaml"), "remote: https://gitboy.example/alice/app.git\n");
+    db.close();
+    db = await buildIndex(tmp.path);
+    vi.stubEnv("PHREN_CLANKER", "off");
+    const network = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify({ head: "123456789",
+      paths: new URL(String(url)).searchParams.getAll("path").map(path => ({ path, changed: false })) })));
+    try {
+      const result = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
+      expect(result.ok).toBe(true);
+      const finding = result.data.results.find((item: any) => item.type === "findings");
+      expect(finding.citations.length).toBeGreaterThan(0);
+      expect(finding.citations.length).toBeLessThanOrEqual(20);
+      for (const citation of finding.citations) expect(finding.snippet).toContain(`"file":"${citation.file}"`);
+      expect(JSON.stringify(result).length).toBeLessThan(60_000);
+    } finally { network.mockRestore(); vi.unstubAllEnvs(); }
   });
 
   it("search with project filter returns only results from that project", async () => {

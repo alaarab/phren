@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { refreshCitationFreshness } from "../content/citation-freshness.js";
+import { selectSnippets } from "../shared/retrieval.js";
+import { describe, it, expect, vi } from "vitest";
 import { buildHookOutput } from "../cli/hooks-output.js";
 import type { SelectedSnippet } from "../shared/retrieval.js";
 import * as fs from "fs";
@@ -102,4 +104,27 @@ describe("cli-hooks-output", () => {
       expect(snippetBlocks.length).toBeLessThan(4);
     });
   });
+});
+
+
+it("keeps cached citation warnings in the Clanker compact index without network", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "clanker-freshness-"));
+  const project = "test-project";
+  const citation = { created_at: "2026-10-15T00:00:00Z", file: "src/cache.ts", commit: "abcdef1" };
+  fs.mkdirSync(path.join(root, project));
+  fs.writeFileSync(path.join(root, project, "phren.project.yaml"), "remote: https://gitboy.example/alice/app.git\n");
+  const content = `- Redis cache avoids double charges <!-- fid:12345678 -->\n  <!-- phren:cite ${JSON.stringify(citation)} -->`;
+  const doc = { project, filename: "FINDINGS.md", type: "findings", content, path: path.join(root, project, "FINDINGS.md") };
+  await refreshCitationFreshness([citation], { phrenPath: root, projectRemote: "https://gitboy.example/alice/app.git", budgetMs: 1500,
+    fetchImpl: async () => new Response(JSON.stringify({ paths: [{ path: citation.file, changed: true, last_commit: null }] })) });
+  vi.stubEnv("PHREN_CLANKER", "on");
+  const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No network"));
+  try {
+    const { selected, usedTokens } = selectSnippets([doc], "Redis cache", 2000, 8, 1200);
+    const output = buildHookOutput(selected, usedTokens, "query", null, project, {}, 2000, root, undefined, "Redis cache").join("\n");
+    expect(output).toContain('fid:12345678');
+    expect(output).toContain('[may be out of date: src/cache.ts changed since cited]');
+    expect(output.match(/\[may be out of date:/g)).toHaveLength(1);
+    expect(network).not.toHaveBeenCalled();
+  } finally { network.mockRestore(); vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: true }); }
 });

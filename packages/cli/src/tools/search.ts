@@ -1,3 +1,5 @@
+import { cachedCitationFreshness, refreshCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
+import { getProjectRemote, readProjectConfig } from "../project-config.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { projectMemoryCounts } from "../content/summarize.js";
 import { moduleEnabled } from "../modules/runtime.js";
@@ -39,8 +41,8 @@ import { runCustomHooks } from "../hooks.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy, recordLookupEvents } from "../shared/governance.js";
 import { bestFindingNodeId } from "../finding-graph-id.js";
 import { callLlm } from "../content/dedup.js";
-import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
-import { formatActorAttribution, parseScopeComment, parseSourceComment, collectSymbolCitations } from "../content/citation.js";
+import { markStaleCitations, rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
+import { parseCitationComment, formatActorAttribution, parseScopeComment, parseSourceComment, collectSymbolCitations } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
 import { CLANKER_FETCH_HINT, type ClankerRow, clankerEnabled, findEntry, formatRow, queryTerms, rowKeywords, rowTitle, rowsForDoc } from "../clanker.js";
@@ -478,11 +480,32 @@ async function handleSearchKnowledge(
       rows = rows.slice(0, maxResults);
     }
 
+    const citationOptionsByProject = new Map<string, CitationFreshnessOptions>();
+    const citationOptions = (row: { project: string; path: string }) => {
+      // Indexed paths also identify findings from registered secondary stores.
+      const root = row.path ? path.dirname(path.dirname(row.path)) : phrenPath;
+      const key = JSON.stringify([root, row.project]);
+      let opts = citationOptionsByProject.get(key);
+      if (!opts) {
+        opts = { phrenPath, projectRemote: getProjectRemote(root, row.project, readProjectConfig(root, row.project)) };
+        citationOptionsByProject.set(key, opts);
+      }
+      return opts;
+    };
+    const citationsByRow = rows.map(row => row.type === "findings" ? row.content.split("\n")
+      .map(parseCitationComment).filter(cite => cite !== null)
+      .map(cite => ({ ...cite, projectRemote: citationOptions(row).projectRemote })) : []);
+    await refreshCitationFreshness(citationsByRow.flat(), { phrenPath, budgetMs: 1500 });
+
     // Snippets share one character budget so a response stays well under the
     // client's tool-result limit however long the matched lines are.
     const perResultChars = snippetBudget(rows.length);
     const results = rows.map((row) => {
-      const snippet = extractSnippet(row.content, query, 5, perResultChars);
+      const excerpt = extractSnippet(row.content, query, 5, perResultChars);
+      const snippet = row.type === "findings" ? markStaleCitations(excerpt, citationOptions(row)) : excerpt;
+      const citations = row.type === "findings" ? snippet.split("\n").map(parseCitationComment)
+        .filter(citation => citation !== null).slice(0, 20).map(citation => ({ file: citation.file, commit: citation.commit,
+          citationFreshness: cachedCitationFreshness(citation, citationOptions(row)) })) : [];
       const lifecycle = row.type === "findings" ? lifecycleByRowKey.get(findingRowKey(row)) : undefined;
       const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
       const symbols = row.type === "findings" ? collectSymbolCitations(row.content) : [];
@@ -493,6 +516,7 @@ async function handleSearchKnowledge(
         filename: row.filename,
         type: row.type,
         snippet,
+        ...(citations.length ? { citations } : {}),
         truncated: snippet.length < row.content.length,
         path: row.path,
         status: lifecycle?.primaryStatus,
@@ -559,7 +583,13 @@ async function handleSearchKnowledge(
         const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
         const docId = federationSource ? `${federationSource}:${row.project}/${row.filename}` : `mem:${getDocSourceKey(row, phrenPath)}`;
         const bestLine = extractSnippet(row.content, query, 1, 400);
-        clankerRows.push(...rowsForDoc(row, docId, terms, bestLine, Math.min(3, rowCap - clankerRows.length)));
+        const selected = rowsForDoc(row, docId, terms, bestLine, Math.min(3, rowCap - clankerRows.length));
+        for (const hit of selected) {
+          const entry = findEntry(row.content, hit.id);
+          const citation = entry?.text.split("\n").map(parseCitationComment).find(cite => cite !== null);
+          if (citation) hit.title += citationFreshnessAnnotation(citation, cachedCitationFreshness(citation, citationOptions(row)));
+        }
+        clankerRows.push(...selected);
       }
       runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: query, PHREN_RESULT_COUNT: String(clankerRows.length) });
       return mcpResponse({

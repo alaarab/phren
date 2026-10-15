@@ -276,3 +276,7 @@ export PHREN_FEATURE_AUTO_CAPTURE=1
 The `isFeatureEnabled(envName, defaultValue)` helper (`utils-helpers.ts`, re-exported via `utils.ts`) reads the named environment variable. If the value is `0`, `false`, `off`, or `no` (case-insensitive, trimmed), the feature is disabled regardless of `defaultValue`. If the variable is not set at all, the feature falls back to `defaultValue` — `true` for flags that ship on, `false` for flags that ship off (see each flag's **Default** above).
 
 This convention applies to all `PHREN_FEATURE_*` variables. `PHREN_FEATURE_HYBRID_SEARCH` (`shared/search-fallback.ts`) implements the same on/off check inline instead of calling the shared helper, but follows the identical `0`/`false`/`off`/`no`-disables, default-otherwise convention.
+
+### Citation freshness
+
+`PHREN_CITATION_FRESHNESS=off` disables gitboy citation freshness checks and annotations. MCP search refreshes selected findings within 1.5 seconds; Hook memory routes refresh in the background, and prompt injection uses the cache only.

@@ -107,7 +107,7 @@ export type OpenHookPipe = (c: Computer) => Promise<Duplex>;
 export interface HookResponse { status: number; headers: Record<string, string>; body: Buffer }
 /** One HTTP/1.1 request over a fresh pipe: Host: phren.local, Connection: close,
  * Content-Type application/json when body is set. 60 s timeout. */
-export type HookRequest = (c: Computer, method: string, path: string, body?: unknown) => Promise<HookResponse>;
+export type HookRequest = (c: Computer, method: string, path: string, body?: unknown, signal?: AbortSignal) => Promise<HookResponse>;
 /** A `ws` WebSocket client over a fresh pipe (use the `createConnection` option
  * to return the pipe; url `ws://phren.local<path>`, perMessageDeflate:false). */
 export type HookWebSocket = (c: Computer, path: string) => Promise<import("ws").WebSocket>;
