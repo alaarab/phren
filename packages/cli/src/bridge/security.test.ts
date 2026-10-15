@@ -7,7 +7,7 @@ import { once } from "node:events";
 import path from "node:path";
 import { decodeShellDirectory, dispatch, shellEnvironment } from "./transport.js";
 import { homedir } from "node:os";
-import { forcedCommand, upgradeKeys } from "./install.js";
+import { forcedCommand, peerForcedCommand, upgradeKeys } from "./install.js";
 
 const hookBundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/cli/dist/bridge-hook.mjs");
 
@@ -19,6 +19,14 @@ describe("Phren device key restrictions", () => {
       expect(upgradeKeys(before)).toEqual({ text: after, changed: 1 });
       expect(upgradeKeys(after)).toEqual({ text: after, changed: 0 });
     }
+  });
+
+  it("moves existing computer keys onto the peer scope without changing owner device keys", () => {
+    const computer = `restrict,pty,${forcedCommand} ssh-ed25519 AAAA phren-computer:Desk\n`;
+    const owner = `restrict,pty,${forcedCommand} ssh-ed25519 BBBB phren-iphone\n`;
+    const upgraded = `restrict,${peerForcedCommand} ssh-ed25519 AAAA phren-computer:Desk\n`;
+    expect(upgradeKeys(computer + owner)).toEqual({ text: upgraded + owner, changed: 1 });
+    expect(upgradeKeys(upgraded + owner)).toEqual({ text: upgraded + owner, changed: 0 });
   });
 
   it("migrates an Android device key the same way", () => {

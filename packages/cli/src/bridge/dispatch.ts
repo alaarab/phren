@@ -13,7 +13,8 @@ import { findGrant, grantLabel, permissionModeAllowed, DEFAULT_MAX_PERMISSION_MO
 import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, releaseAction, type AuthorityCheck } from "./authority.js";
 import { hookPeers } from "./peers.js";
 import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
-import { recordedConductor } from "./conductor-role.js";
+import { prepareDispatchOriginHandover, trackDispatchOrigin, type DispatchOriginWindow } from "./dispatch-origins.js";
+import { recordedConductor, type ConductorRecord } from "./conductor-role.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
@@ -140,7 +141,20 @@ export async function dispatchProjectDirectory(project: unknown, home = homeDir(
   throw new BridgeError(404, `Project ${name} is not on this computer: the store names no folder for ${getMachineName()} that exists here, and there is no ~/Projects/${name} checkout.`);
 }
 
-async function save(receipt: Receipt): Promise<void> {
+function save(receipt: Receipt, originWindow: DispatchOriginWindow): Promise<void> {
+  return serializeReceiptUpdate(async () => {
+    // Only this already-running dispatch can inherit a hand-over alias.
+    // Resolve it under the receipt lock, after any role change invalidation.
+    const origin = originWindow.rewrite(receipt.origin);
+    if (origin !== receipt.origin && !receipt.closedAt) {
+      receipt.origin = origin;
+      if (receipt.returned && !receipt.returned.read) delete receipt.returned.notifiedAt;
+    }
+    await saveReceipt(receipt);
+  });
+}
+
+async function saveReceipt(receipt: Receipt): Promise<void> {
   const root = path.join(bridgeRoot(), "dispatches");
   await mkdir(root, { recursive: true, mode: 0o700 });
   await atomic(path.join(root, `${receipt.id}.json`), receipt);
@@ -156,19 +170,87 @@ let receiptUpdates: Promise<unknown> = Promise.resolve();
  * receipt still being placed (launching or sending) is never touched.
  */
 export function updateReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
-  const run = receiptUpdates.then(async () => {
-    const file = path.join(bridgeRoot(), "dispatches", `${z.string().uuid().parse(receiptID)}.json`);
-    const info = await lstat(file).catch(() => undefined);
-    if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) return undefined;
-    const receipt = receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
-    if (["launching", "sending"].includes(receipt.state)) return undefined;
-    if (!change(receipt)) return receipt;
-    receipt.updatedAt = new Date().toISOString();
-    await atomic(file, receiptSchema.parse(receipt));
-    return receipt;
-  });
+  return serializeReceiptUpdate(() => changeReceipt(receiptID, change));
+}
+
+function serializeReceiptUpdate<T>(change: () => Promise<T>): Promise<T> {
+  const run = receiptUpdates.then(change);
   receiptUpdates = run.catch(() => undefined);
   return run;
+}
+
+async function readReceipt(receiptID: string): Promise<Receipt | undefined> {
+  const file = path.join(bridgeRoot(), "dispatches", `${z.string().uuid().parse(receiptID)}.json`);
+  const info = await lstat(file).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return undefined;
+  });
+  if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) return undefined;
+  return receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
+}
+
+/** Caller holds receiptUpdates; ordinary polling never edits a placing receipt. */
+async function changeReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
+  const receipt = await readReceipt(receiptID);
+  if (!receipt || ["launching", "sending"].includes(receipt.state)) return undefined;
+  if (!change(receipt)) return receipt;
+  receipt.updatedAt = new Date().toISOString();
+  await saveReceipt(receiptSchema.parse(receipt));
+  return receipt;
+}
+
+/** Hand over all open worker routes using the receipt writer's own lock and
+ * update path. Commit the role last; any failure restores the old origins.
+ * Placing receipts are refused because placement can still overwrite them. */
+export function repointDispatchOrigins(from: Pick<ConductorRecord, "server" | "pane" | "terminal">,
+  to: NonNullable<Receipt["origin"]>, commit: () => Promise<void>): Promise<void> {
+  return serializeReceiptUpdate(async () => {
+    const seal = prepareDispatchOriginHandover(from, to);
+    const names = await readdir(path.join(bridgeRoot(), "dispatches")).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return [] as string[];
+    });
+    const matches = (origin: Receipt["origin"]) => origin?.server === from.server && origin.pane === from.pane
+      && (from.terminal === undefined || origin.terminal === from.terminal);
+    const selected: Receipt[] = [];
+    for (const name of names.filter(name => /^[a-f0-9-]{36}\.json$/.test(name))) {
+      const receipt = await readReceipt(name.slice(0, -5));
+      if (!receipt || receipt.closedAt || !matches(receipt.origin)) continue;
+      if (["launching", "sending"].includes(receipt.state)) throw new BridgeError(409, "A conductor dispatch is still being placed; retry the move after it settles.");
+      selected.push(receipt);
+    }
+    const changed: Receipt[] = [];
+    try {
+      for (const before of selected) {
+        await changeReceipt(before.id, receipt => {
+          if (receipt.closedAt || !matches(receipt.origin)) return false;
+          receipt.origin = to;
+          // Unread returns already announced to the old chat need a new notice.
+          if (receipt.returned && !receipt.returned.read) delete receipt.returned.notifiedAt;
+          return true;
+        });
+        changed.push(before);
+      }
+      await commit();
+      seal();
+    } catch (error) {
+      const failures: string[] = [];
+      for (const before of changed.reverse()) {
+        try {
+          await changeReceipt(before.id, receipt => {
+            receipt.origin = before.origin;
+            if (receipt.returned && receipt.returned.at === before.returned?.at) {
+              if (before.returned.notifiedAt) receipt.returned.notifiedAt = before.returned.notifiedAt;
+              else delete receipt.returned.notifiedAt;
+            }
+            return true;
+          });
+        } catch (rollback) { failures.push(`${before.id}: ${failureReason(rollback)}`); }
+      }
+      if (failures.length) throw new Error(`${failureReason(error)} Receipt routing rollback failed: ${failures.join("; ")}`);
+      throw error;
+    }
+  });
 }
 
 /** No ledger yet is normal; any other read failure is logged before it reads as empty. */
@@ -187,7 +269,12 @@ export function failureReason(error: unknown): string {
   return `${typeof code === "string" && !(error instanceof BridgeError) ? `${code}: ` : ""}${message}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
 }
 
-export async function dispatchStatus(): Promise<Receipt[]> {
+export function dispatchStatus(): Promise<Receipt[]> {
+  return serializeReceiptUpdate(readDispatchStatus);
+}
+
+/** Caller holds receiptUpdates, including for the entire routing snapshot. */
+async function readDispatchStatus(): Promise<Receipt[]> {
   const root = path.join(bridgeRoot(), "dispatches");
   const names = (await receiptNames(root)).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).slice(0, 1024);
   const receipts: Receipt[] = [];
@@ -464,6 +551,7 @@ export class DispatchService {
     if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
+    const originWindow = trackDispatchOrigin();
     let holding = true, placed: string | undefined;
     const release = () => { if (holding) { holding = false; this.active = false; } };
     try {
@@ -545,7 +633,7 @@ export class DispatchService {
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}) };
-      await save(receipt);
+      await save(receipt, originWindow);
       try {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
@@ -564,9 +652,9 @@ export class DispatchService {
         const ignored = data.permissionMode && launched.permissionMode !== data.permissionMode ? IGNORED_MODE : undefined;
         if (launched.briefLaunched === true) {
           receipt.brief = "launch";
-          await this.confirmLaunched(peer, receipt, launched);
+          await this.confirmLaunched(peer, receipt, launched, originWindow);
           if (ignored) receipt.error = [receipt.error, ignored].filter(Boolean).join(" ").slice(0, 500);
-          receipt.updatedAt = new Date().toISOString(); await save(receipt);
+          receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
           return { ok: receipt.state === "accepted", ...receipt };
         }
         receipt.brief = "typed";
@@ -578,7 +666,7 @@ export class DispatchService {
         const target = remoteTarget.parse(settled.target);
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
-        receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
+        receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
         if (!("starting" in target)) {
           const result = await sendBrief(peer, target, prompt, `dispatch-${receipt.id}`);
           receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
@@ -597,9 +685,10 @@ export class DispatchService {
           receipt.error = error instanceof BridgeError ? error.message.slice(0, 500) : "Remote delivery was not confirmed. Inspect this dispatch before retrying.";
         }
       }
-      receipt.updatedAt = new Date().toISOString(); await save(receipt);
+      receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
       return { ok: receipt.state === "accepted", ...receipt };
     } finally {
+      originWindow.finish();
       release();
       if (placed) { const left = this.inFlight(placed) - 1; if (left > 0) this.placing.set(placed, left); else this.placing.delete(placed); }
     }
@@ -657,10 +746,10 @@ export class DispatchService {
    * itself, so that is not a failure. Neither confirmed nor held reads
    * uncertain, and the returns loop keeps asking.
    */
-  private async confirmLaunched(peer: DispatchHost, receipt: Receipt, launched: Json): Promise<void> {
+  private async confirmLaunched(peer: DispatchHost, receipt: Receipt, launched: Json, originWindow: DispatchOriginWindow): Promise<void> {
     const known = remoteTarget.safeParse(launched.target);
     if (known.success && known.data.source === receipt.harness && known.data.server === peer.server) receipt.target = known.data;
-    receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
+    receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
     const held = (status: unknown) => ["blocked", "waiting"].includes(String(status));
     const arrival = held(launched.agentStatus) ? await arrivalOf(peer, receipt.id).catch(() => undefined) ?? {}
       : await awaitArrival(peer, receipt.id, this.settleIntervalMs);

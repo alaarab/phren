@@ -649,7 +649,7 @@ another signed-in account, Codex, OpenCode or Copilot, with an optional model
 and effort. The Hook:
 
 1. Checks the target harness and account are signed in and usable there, and
-   refuses a conductor pane, a pane already moving, or a move to the same place.
+   refuses a pane already moving or a move to the same place.
 2. Asks the agent, through the same queue `hand_off` uses, to reply with a
    hand-off between two marker lines: goal, done, current state, decisions,
    next steps, open questions and key files. A reply never waits on a
@@ -670,6 +670,64 @@ and effort. The Hook:
    created, so a Claude account the pane's shell does not already carry starts
    in a new tab of the same workspace and the old pane is closed. tmux always
    uses the same pane.
+
+The conductor can move too, including an account switch from the phone. With
+`capabilities.moveConductor: true` in `/v1/health`, every conductor move uses
+`mode: "new-chat"`, even when the request asks for replacement. The record
+includes `modeForced: "conductor"`. The old chat stays running and open on both
+success and failure. On success it shows the same hand-off link as other new-chat
+moves. Only the owner, through the phone/desktop gateway or their local CLI,
+may move the conductor. Agent `move_session` calls, peer Hook requests and
+scoped keys receive 403 "Only the owner can move the conductor."
+Computer keys use the peer scope of `dispatch-scoped`; installing or updating
+the Hook migrates existing `phren-computer` key lines while preserving owner
+device keys. Conductor start, make and stop use the same owner request check.
+Copilot cannot be a conductor.
+
+The launch prompt says: "You will become the conductor when the Hook confirms
+the hand-over; until then don't dispatch or answer workers." The new pane must
+be idle or working, have a linked conversation without `linkPending`, and have
+its first brief confirmed by UserPromptSubmit for this move’s brief and target.
+A startup dialog, link timeout or missing brief acknowledgement fails the move
+and leaves the old conductor in charge. The Hook waits up to 30 seconds for the
+brief acknowledgement after linking. It sends a confirmation prompt only after
+the role commits. On failure, it sends: "The conductor hand-over failed; you
+are not the conductor. The previous conductor keeps coordinating." The move’s
+`notice` reports delivery or why it could not be confirmed.
+
+At landing, the Hook compares the role with the exact record captured when the
+move started, inside the role writer’s serialized queue. A stop, reassignment,
+session change or competing hand-over refuses the move with
+"The conductor changed during the move; nothing was transferred." The current
+role is left untouched. Before committing the role, the Hook re-points open
+dispatch receipt origins under the receipt writer’s lock, including the new
+harness and terminal identity. Existing workers’ returns and approval requests
+then reach the new conductor; unread returns announced to the old chat are
+announced again. Closed and unrelated receipts keep their origins. An in-flight
+dispatch already recorded as placing must settle before its conductor can move.
+The same lock covers receipt readers, so they see the routing before or after
+the entire hand-over. Only dispatch operations already in flight when hand-over
+completes inherit an origin alias; this includes ones still awaiting capacity
+or origin resolution. The alias is applied under the receipt lock and expires
+when that operation finishes. New dispatches from the retained old chat keep
+their own origin. Every conductor record change removes aliases pointing away
+from the newly selected conductor, so stopping B and making A conductor again
+after A → B cannot send A’s new workers’ returns or approvals to B. Aliases live
+only in memory; a Hook restart has no in-flight dispatch operations to resume.
+Legacy `dispatch-origin-handovers.json` files are ignored.
+
+An ordinary move also rechecks its source immediately before exit actions,
+replacement, pane closure and the role step. If the owner promoted that pane
+during the hand-off, the move aborts without touching the conductor:
+"The pane became the conductor during the move; nothing was changed."
+Only a move started by the owner as a conductor move can transfer that role.
+
+A launch, receipt update or role-write failure records `state: "failed"` and a
+clear `error`; receipt updates are rolled back and the old conductor keeps
+running with its role. Once the role and routing have committed, a move-status
+save failure reports `state: "moved"` with a warning in `notice`, rather than
+claiming the old pane still holds the role. If the status file remains
+unwritable, the running Hook retains that moved-with-warning status in memory.
 
 Each move is recorded in `<bridge>/moves/<id>.json`: `state` (`handing-off`,
 `exiting`, `launching`, `linking`, `moved`, `failed`), `from`, `to`, `handoff` (`path`,

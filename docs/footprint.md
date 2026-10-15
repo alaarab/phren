@@ -230,6 +230,10 @@ nothing to that checkout.
   `<store>/.sessions/` while a reply streams, and removes it once the reply is
   logged. Sidecars and staging files a killed agent left there are removed
   when the next interactive session starts, once they are 30 minutes old.
+- Conductor origin aliases live only in memory on dispatch operations already
+  in flight at hand-over. They expire when those operations finish; conductor
+  changes remove aliases pointing elsewhere. The Hook ignores legacy
+  `<bridge>/dispatch-origin-handovers.json` files.
 - `<bridge>/dispatches/` holds dispatch receipts without prompt text;
   on the computer that runs a dispatched Claude or Codex worker (or a
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)

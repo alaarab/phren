@@ -1,16 +1,23 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Receipt } from "./dispatch.js";
-import { observe, workerStates } from "./dispatch-returns.js";
+import * as protocol from "./protocol.js";
+import { clearConductor, conductorPane, noteConductorSession, recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
+import { BUILTIN_MODULES } from "../modules/registry.js";
+import { recordBriefArrival } from "./launch-brief.js";
+import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
+import { dispatchStatus, type Receipt } from "./dispatch.js";
+import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { Json, Target } from "./protocol.js";
 import { listMoves, moveSessionFields, readMove, SessionMover, type MoverDeps, type MoveRecord } from "./session-move.js";
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-move-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
-afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); resetRoleState(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 
 const SESSION = "00000003-1111-4111-8111-111111111111";
 const NEXT = "00000004-2222-4222-8222-222222222222";
@@ -61,9 +68,11 @@ function world(options: { reply?: (request: string) => string | undefined; exits
       launches.push({ data, options: launchOptions as Json });
       const into = launchOptions.into;
       const place = into ?? { workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2" };
-      if (!into) panes.push({ pane_id: place.paneId, tab_id: place.tabId, workspace_id: place.workspaceId, agent: data.kind, agent_status: "working" });
+      if (!into) panes.push({ pane_id: place.paneId, tab_id: place.tabId, workspace_id: place.workspaceId, agent: data.kind, agent_status: "idle", terminal_id: "term-2" });
       else pane.agent = data.kind;
-      return { ok: true, ...place, briefLaunched: true, target: { server: "default", workspace: place.workspaceId, tab: place.tabId, pane: place.paneId, source: data.kind, session: NEXT } };
+      const target = { server: "default", workspace: place.workspaceId, tab: place.tabId, pane: place.paneId, source: data.kind, session: NEXT } as Target;
+      await recordBriefArrival(String(object(data.brief).id), "UserPromptSubmit", target);
+      return { ok: true, ...place, briefLaunched: true, target };
     },
     inventory: async () => inventory,
     transcript: async () => transcript,
@@ -72,6 +81,7 @@ function world(options: { reply?: (request: string) => string | undefined; exits
     paneAccount: () => "default",
     paneDispatch: async () => DISPATCH,
     brief: async id => id === DISPATCH ? "Original brief: fix the parser, open a PR, do not merge." : undefined,
+    isConductor: async (server, candidate) => (await conductorPane(server, { panes }))?.pane_id === candidate.pane_id,
     envAtStart: () => options.tmux === true,
     kill: (pid, signal) => { killed.push(`${signal} ${pid}`); if (signal === "SIGKILL") delete pane.agent; },
     sleep: async () => {},
@@ -86,9 +96,22 @@ function world(options: { reply?: (request: string) => string | undefined; exits
 
 async function move(deps: MoverDeps, to: Json, extra: Json = {}): Promise<MoveRecord> {
   const mover = new SessionMover(deps);
-  const started = await mover.start({ target: from, to, ...extra });
+  const started = await mover.start({ target: from, to, ...extra }, { owner: true });
   await mover.settled(from.server, from.pane);
   return (await readMove(started.id))!;
+}
+
+async function seedReceipt(overrides: Partial<Receipt> = {}): Promise<void> {
+  await mkdir(path.join(root, "dispatches"), { recursive: true });
+  const at = new Date().toISOString();
+  await writeFile(path.join(root, "dispatches", `${overrides.id ?? DISPATCH}.json`), JSON.stringify({
+    id: DISPATCH, computer: "local", project: "phren", harness: "claude", label: "existing worker",
+    createdAt: at, updatedAt: at, state: "accepted",
+    target: { ...from, pane: "w1:p8" },
+    origin: { server: from.server, workspace: from.workspace, tab: from.tab, pane: from.pane, agent: "claude", terminal: "term-1" },
+    returned: { state: "needs-you", at, read: false, notifiedAt: at },
+    approval: { actionId: "act-1", tool: "Bash", at }, ...overrides,
+  }));
 }
 
 const writes = (request: string) => {
@@ -97,6 +120,279 @@ const writes = (request: string) => {
 };
 
 describe("moving a session to another agent", () => {
+  it.each([
+    ["phone", {}, {}, 200], ["desktop", { "x-phren-client": "desktop" }, {}, 200],
+    ["MCP", {}, { origin: "agent" }, 403], ["peer", { "x-phren-origin": "peer" }, {}, 403],
+  ] as const)("admits conductor moves only from the owner (%s)", async (_caller, headers, origin, status) => {
+    const { deps, pane, launches } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    const mover = new SessionMover(deps);
+    const handler = createRouteHandler({ mover, modules: { has: () => true }, info: {}, streams: {} } as unknown as RouteContext);
+    const request = Readable.from([Buffer.from(JSON.stringify({ target: from, to: { harness: "codex" }, ...origin }))]) as IncomingMessage;
+    request.method = "POST"; request.url = "/v1/sessions/move"; request.headers = headers;
+    let payload = "";
+    const response = { statusCode: 200, setHeader() {}, end(value: string) { payload = value; } };
+    await handler(request, response as unknown as ServerResponse);
+    await mover.settled(from.server, from.pane);
+    expect(response.statusCode, payload).toBe(status);
+    if (status === 403) {
+      expect(JSON.parse(payload).error).toBe("Only the owner can move the conductor.");
+      expect(launches).toEqual([]);
+      expect(await recordedConductor()).toMatchObject({ pane: from.pane });
+    } else expect(await recordedConductor()).toMatchObject({ pane: "w1:p2" });
+  });
+
+  it.each(["handoff", "exit-snapshot", "launch-snapshot", "landing"])("aborts an ordinary agent move if the owner promotes its pane at %s", async promotion => {
+    const { deps, pane, typed, keys, killed, closed, launches } = world({ reply: writes });
+    const promote = () => recordConductor(from.server, pane, "owner", SESSION);
+    if (promotion === "handoff") {
+      const deliver = deps.deliver;
+      deps.deliver = async (...args) => { const sent = await deliver(...args); await promote(); return sent; };
+    } else if (promotion === "landing") {
+      const launch = deps.launch;
+      deps.launch = async (...args) => { const launched = await launch(...args); await promote(); return launched; };
+    } else {
+      const snapshot = deps.snapshot;
+      let afterHandoff = false, afterExitState = false;
+      const transcript = deps.transcript;
+      deps.transcript = async (...args) => { afterHandoff = true; return transcript(...args); };
+      deps.snapshot = async (...args) => {
+        const seen = await snapshot(...args);
+        if (afterHandoff) {
+          const rows = await listMoves();
+          const row = rows.find(row => row.from.target.pane === from.pane);
+          if (promotion === "exit-snapshot" && row?.state === "exiting") await promote();
+          if (promotion === "launch-snapshot" && row?.state === "launching" && !afterExitState) { afterExitState = true; await promote(); }
+        }
+        return seen;
+      };
+    }
+    const mover = new SessionMover(deps);
+    const started = await mover.start({ target: from, to: { harness: "codex" }, mode: promotion === "handoff" || promotion === "exit-snapshot" ? "replace" : "new-chat" });
+    await mover.settled(from.server, from.pane);
+    const record = await readMove(started.id);
+    expect(record).toMatchObject({ state: "failed", error: "The pane became the conductor during the move; nothing was changed." });
+    expect(pane.agent).toBe("claude");
+    expect(await recordedConductor()).toMatchObject({ pane: from.pane, session: SESSION });
+    expect(typed.some(text => text === "/exit")).toBe(false);
+    expect([keys, killed, closed]).toEqual([[], [], []]);
+    if (promotion !== "landing") expect(launches).toEqual([]);
+  });
+
+  it.each(["blocked", "waiting", "link-timeout", "brief-timeout"])("leaves the old conductor in charge when the new chat is %s", async readiness => {
+    const { deps, pane, panes } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      const result = await launch(...args);
+      if (readiness === "blocked" || readiness === "waiting") panes[1].agent_status = readiness;
+      if (readiness === "link-timeout") { delete result.target; deps.identity = async (_server, candidate) => candidate.pane_id === from.pane ? SESSION : undefined; }
+      if (readiness === "brief-timeout") await rm(path.join(root, "briefs", String(object(args[1].brief).id), "arrival.json"));
+      return result;
+    };
+    const record = await move(deps, { harness: "codex" });
+    expect(record).toMatchObject({ state: "failed", error: expect.stringMatching(/not ready|not confirmed|conversation.*not linked/) });
+    expect(pane.agent).toBe("claude");
+    expect(await recordedConductor()).toMatchObject({ pane: from.pane });
+    expect(record.notice).toContain("hand-over failed");
+  });
+
+  it.each([true, false])("reports a failed new-chat notice truthfully after hand-over (committed %s)", async committed => {
+    const { deps, pane, panes } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      const launched = await launch(...args);
+      if (!committed) panes[1].agent_status = "blocked";
+      return launched;
+    };
+    const deliver = deps.deliver;
+    deps.deliver = async (target, ...args) => {
+      if (target.pane !== from.pane) throw new Error("new chat delivery refused");
+      return deliver(target, ...args);
+    };
+    const record = await move(deps, { harness: "codex" });
+    expect(record.state).toBe(committed ? "moved" : "failed");
+    expect(record.notice).toContain("notice could not be delivered: new chat delivery refused");
+    expect(await recordedConductor()).toMatchObject({ pane: committed ? "w1:p2" : from.pane });
+    expect(pane.agent).toBe("claude");
+  });
+
+  it.each([
+    ["replace", "codex", "adjacent-pane"],
+    ["replace", "claude", "adjacent-pane"],
+    ["new-chat", "codex", "adjacent-pane"],
+  ])("moves the conductor with its role (%s to %s, %s)", async (mode, harness, placement) => {
+    const { deps, pane, panes, typed, keys, killed, closed } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      expect(await recordedConductor()).toMatchObject({ pane: from.pane, session: SESSION });
+      return launch(...args);
+    };
+    const record = await move(deps, { harness, ...(harness === "claude" ? { account: "work" } : {}) }, { mode });
+    expect(record).toMatchObject({ state: "moved", mode: "new-chat", modeForced: "conductor", placement, target: { session: NEXT } });
+    expect(record.exit).toBeUndefined();
+    expect(pane.agent).toBe("claude");
+    expect(typed).toHaveLength(2);
+    expect(typed[1]).toContain("The Hook confirmed the hand-over");
+    expect([keys, killed, closed]).toEqual([[], [], []]);
+    expect(record.handedOffTo).toEqual({ target: record.target });
+    expect(record.handedOffFrom?.target).toEqual(from);
+    resetRoleState(); // Verify the role persisted, rather than just the cached state.
+    expect(await recordedConductor()).toMatchObject({ server: from.server, pane: record.target!.pane, source: harness, session: NEXT });
+    expect((await conductorPane(from.server, { panes }))?.pane_id).toBe(record.target!.pane);
+    expect(await readFile(record.handoff!.path, "utf8")).toContain("You will become the conductor when the Hook confirms the hand-over; until then don't dispatch or answer workers.");
+    expect(closed).toEqual([]);
+    const modules = { modules: BUILTIN_MODULES, has: () => true };
+    expect(capabilitiesForModules(modules as never).moveConductor).toBe(true);
+  });
+
+  it.each(["replace", "new-chat"])("keeps the old conductor and reports a role-transfer failure (%s)", async mode => {
+    const { deps, pane, closed } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    const old = await recordedConductor();
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      const launched = await launch(...args);
+      vi.spyOn(protocol, "atomicInPrivateDir").mockRejectedValueOnce(new Error("role disk full"));
+      return launched;
+    };
+    const record = await move(deps, { harness: "claude", account: "work" }, { mode });
+    expect(record).toMatchObject({ state: "failed", error: expect.stringContaining("Conductor role transfer failed") });
+    expect(record.error).toContain("role disk full");
+    expect(record.error).not.toContain("old agent has exited");
+    expect(pane.agent).toBe("claude");
+    expect(record.movedAt).toBeUndefined();
+    resetRoleState();
+    expect(await recordedConductor()).toEqual(old);
+    expect(closed).toEqual([]);
+  });
+
+  it.each(["launch", "receipt", "role"])("keeps the old conductor running when %s fails", async failure => {
+    const { deps, pane, typed, closed } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    await seedReceipt();
+    await seedReceipt({ id: "40000000-0000-4000-8000-000000000002" });
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      if (failure === "launch") throw new Error("launch refused");
+      const result = await launch(...args);
+      if (failure === "role") vi.spyOn(protocol, "atomicInPrivateDir").mockRejectedValueOnce(new Error("role disk full"));
+      if (failure === "receipt") {
+        const atomic = protocol.atomic;
+        let changes = 0;
+        vi.spyOn(protocol, "atomic").mockImplementation(async (file, ...rest) => {
+          if (file.includes("dispatches") && ++changes === 2) throw new Error("receipt disk full");
+          return atomic(file, ...rest);
+        });
+      }
+      return result;
+    };
+    const record = await move(deps, { harness: "codex" });
+    expect(record.state).toBe("failed");
+    expect(pane.agent).toBe("claude");
+    expect(typed).toHaveLength(failure === "launch" ? 1 : 2);
+    if (failure !== "launch") expect(typed[1]).toBe("The conductor hand-over failed; you are not the conductor. The previous conductor keeps coordinating.");
+    expect(closed).toEqual([]);
+    resetRoleState();
+    expect(await recordedConductor()).toMatchObject({ pane: from.pane, session: SESSION });
+    const receipts = await dispatchStatus();
+    expect(receipts).toHaveLength(2);
+    for (const receipt of receipts) {
+      expect(receipt.origin).toMatchObject({ pane: from.pane, terminal: "term-1" });
+      expect(receipt.returned?.notifiedAt).toBeDefined();
+    }
+  });
+
+  it.each(["stop", "reassign", "session"])("refuses a stale conductor hand-over after a %s during launch", async change => {
+    const { deps, pane } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    await seedReceipt();
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      const result = await launch(...args);
+      if (change === "stop") await clearConductor();
+      if (change === "reassign") await recordConductor(from.server, { ...pane, pane_id: "w1:p9" }, "owner", "other-session");
+      if (change === "session") await noteConductorSession(from.server, from.pane, "other-session");
+      return result;
+    };
+    const record = await move(deps, { harness: "codex" });
+    expect(record).toMatchObject({ state: "failed", error: "The conductor changed during the move; nothing was transferred." });
+    expect(pane.agent).toBe("claude");
+    expect((await dispatchStatus())[0].origin?.pane).toBe(from.pane);
+    const held = await recordedConductor();
+    if (change === "stop") expect(held).toBeUndefined();
+    else expect(held).toMatchObject(change === "session" ? { pane: from.pane, session: "other-session" } : { pane: "w1:p9" });
+  });
+
+  it("routes existing worker returns and approvals to the new conductor", async () => {
+    const { deps, pane, panes } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    await seedReceipt();
+    const record = await move(deps, { harness: "codex" });
+    const [receipt] = await dispatchStatus();
+    expect(receipt.origin).toEqual({ server: "default", workspace: "w1", tab: "w1:t2", pane: "w1:p2", agent: "codex", terminal: "term-2" });
+    const deliver = vi.fn(async () => ({ delivered: true }));
+    const answer = vi.fn(async () => {});
+    const returns = new DispatchReturns({ peers: async () => [], isLocal: () => true, localAnswer: answer,
+      snapshot: async () => ({ panes }), identity: async () => NEXT, deliver,
+      localWorkers: async () => ({ workers: [] }) });
+    await expect(returns.answerApproval(DISPATCH, "approve", "act-1", from)).rejects.toMatchObject({ status: 403 });
+    await returns.answerApproval(DISPATCH, "approve", "act-1", record.target as Target);
+    expect(answer).toHaveBeenCalledTimes(1);
+    await returns.tick();
+    expect(deliver).toHaveBeenCalledWith(record.target, expect.stringContaining("Return:"), expect.any(String));
+  });
+
+  it("leaves unrelated and closed receipt origins alone and refuses an in-flight dispatch", async () => {
+    const { deps, pane } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    await seedReceipt({ state: "launching" });
+    const refused = await move(deps, { harness: "codex" });
+    expect(refused).toMatchObject({ state: "failed", error: expect.stringContaining("dispatch is still being placed") });
+    expect(await recordedConductor()).toMatchObject({ pane: from.pane });
+    await seedReceipt({ closedAt: new Date().toISOString() });
+    await seedReceipt({ id: "40000000-0000-4000-8000-000000000002", origin: {
+      server: from.server, workspace: from.workspace, tab: from.tab, pane: "w1:p9", agent: "claude", terminal: "term-9",
+    } });
+    const moved = await move(deps, { harness: "codex" });
+    expect(moved.state).toBe("moved");
+    expect((await dispatchStatus()).map(receipt => receipt.origin?.pane).sort()).toEqual([from.pane, "w1:p9"]);
+    expect(pane.agent).toBe("claude");
+  });
+
+  it.each([false, true])("reports moved with a warning when status saving fails after role transfer (persistent %s)", async persistent => {
+    const { deps, pane } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    await seedReceipt();
+    const atomic = protocol.atomic;
+    vi.spyOn(protocol, "atomic").mockImplementation(async (file, value, ...rest) => {
+      if (file.includes("moves") && typeof value === "object" && object(value).state === "moved") {
+        if (persistent || !object(value).notice) throw new Error("move status disk full");
+      }
+      return atomic(file, value, ...rest);
+    });
+    const record = await move(deps, { harness: "codex" });
+    expect(record).toMatchObject({ state: "moved", notice: expect.stringContaining("move status disk full"), target: { pane: "w1:p2" } });
+    expect(record.error).toBeUndefined();
+    expect(await recordedConductor()).toMatchObject({ pane: "w1:p2", session: NEXT });
+    expect((await dispatchStatus())[0].origin?.pane).toBe("w1:p2");
+    expect((await listMoves(Date.parse(record.updatedAt)))[0].state).toBe("moved");
+    expect(pane.agent).toBe("claude");
+  });
+
+  it("keeps an unrelated conductor when a worker moves", async () => {
+    const { deps, panes } = world({ reply: writes });
+    const conductor = { ...panes[0], pane_id: "w1:p9", terminal_id: "term-9" };
+    panes.push(conductor);
+    await recordConductor(from.server, conductor, "owner", "other-session");
+    const old = await recordedConductor();
+    expect(await move(deps, { harness: "codex" })).toMatchObject({ state: "moved" });
+    resetRoleState();
+    expect(await recordedConductor()).toEqual(old);
+  });
+
   it.each([undefined, "replace"])("saves the hand-off and replaces the agent in place (mode %s)", async mode => {
     const { deps, typed, launches, closed } = world({ reply: writes });
     const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" }, mode ? { mode } : {});

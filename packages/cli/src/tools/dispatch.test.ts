@@ -25,6 +25,17 @@ describe("dispatch entry points", () => {
     expect(hookRequest).toHaveBeenCalledWith("/v1/dispatch", brief, undefined, 180_000);
   });
 
+  it.each(["core", "full"] as const)("always identifies move_session as an agent call in the %s profile", async profile => {
+    const exposed = new Map<string, ToolHandler>();
+    const gate = createToolGate({ profile, register: (name, _config, handler) => exposed.set(name, handler) });
+    register({ registerTool: gate.registerTool } as unknown as McpServer); gate.finish();
+    vi.mocked(hookRequest).mockRejectedValue(new Error("Only the owner can move the conductor."));
+    const input = { target, harness: "claude", wait: false, ...(profile === "core" ? { action: "move_session" } : {}) };
+    const result = await exposed.get(profile === "full" ? "move_session" : "phren_admin")!(input);
+    expect(hookRequest).toHaveBeenCalledWith("/v1/sessions/move", { target, to: { harness: "claude" }, origin: "agent" });
+    expect(JSON.parse((result as { content: { text: string }[] }).content[0].text)).toMatchObject({ ok: false, error: "Only the owner can move the conductor." });
+  });
+
   it.each(["core", "full"] as const)("adds and resolves owner work through the %s MCP profile", async profile => {
     const exposed = new Map<string, ToolHandler>();
     const gate = createToolGate({ profile, register: (name, _config, handler) => exposed.set(name, handler) });

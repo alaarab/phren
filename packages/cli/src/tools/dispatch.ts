@@ -131,7 +131,7 @@ export function register(server: McpServer): void {
     inputSchema: moveSessionSchema,
   }, async input => {
     try {
-      const result = await moveSession(input);
+      const result = await moveSession(input, { agent: true });
       const move = result.move;
       const message = move.state === "moved" ? `Moved to ${String(object(move.to).harness)} (${String(move.placement)}); hand-off at ${String(object(move.handoff).path)}.`
         : move.state === "failed" ? `Move failed: ${String(move.error ?? "unknown error")}` : `Move ${String(move.id)} is ${String(move.state)}; check again with status:true.`;

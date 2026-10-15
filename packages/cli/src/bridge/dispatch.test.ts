@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
+import { DispatchService, dispatchProjectDirectory, dispatchStatus, repointDispatchOrigins } from "./dispatch.js";
 import { getMachineName } from "../machine-identity.js";
 import { addGrant, removeGrant } from "./grants.js";
 import { confirmAuthority } from "./authority.js";
@@ -11,7 +11,7 @@ import { hookPeers, peerRequest } from "./peers.js";
 import { hookRequest } from "./client.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { DispatchReturns } from "./dispatch-returns.js";
-import { resetRoleState } from "./conductor-role.js";
+import { clearConductor, recordConductor, resetRoleState } from "./conductor-role.js";
 
 vi.mock("./peers.js", () => {
   const hookPeers = vi.fn();
@@ -39,6 +39,65 @@ describe("dispatch receipts and selection", () => {
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
   });
   afterEach(async () => { vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
+
+  it.each([true, false])("rewrites a late first receipt while origin resolution was pending (recorded terminal %s)", async hasTerminal => {
+    const old = { server: "default", workspace: "w1", tab: "t1", pane: "lead", agent: "claude" as const, terminal: "term-old" };
+    const next = { ...old, pane: "next", agent: "codex" as const, terminal: "term-next" };
+    let resume!: () => void;
+    const resolving = new Promise<void>(resolve => { resume = resolve; });
+    const originAgent = vi.fn(async () => { await resolving; return { agent: old.agent, terminal: old.terminal }; });
+    const service = new DispatchService({ computerID: localID, validateParentTarget: async () => ({}), originAgent });
+    const pending = service.dispatch(brief, { server: old.server, workspace: old.workspace, tab: old.tab, pane: old.pane });
+    await vi.waitFor(() => expect(originAgent).toHaveBeenCalled());
+    await repointDispatchOrigins(hasTerminal ? old : { server: old.server, pane: old.pane }, next, async () => {});
+    resume();
+    const result = await pending;
+    expect(result).toMatchObject({ state: "accepted", origin: next });
+    expect((await dispatchStatus())[0].origin).toEqual(next);
+  });
+
+  it.each(["keep-B", "stop-B", "restore-A", "replace-with-A"])("bounds aliases to in-flight dispatches and forgets them on conductor changes (%s)", async change => {
+    const old = { server: "default", workspace: "w1", tab: "t1", pane: "lead", agent: "claude" as const, terminal: "term-old" };
+    const next = { ...old, pane: "next", agent: "codex" as const, terminal: "term-next" };
+    const asPane = (origin: typeof old | typeof next) => ({ pane_id: origin.pane, workspace_id: origin.workspace, tab_id: origin.tab,
+      terminal_id: origin.terminal, agent: origin.agent, agent_status: "idle" });
+    const request = vi.mocked(peerRequest).getMockImplementation()!;
+    vi.mocked(peerRequest).mockImplementation((peer, route, ...rest) => request(peer, route.split("?")[0], ...rest));
+    let resume!: () => void;
+    const resolving = new Promise<void>(resolve => { resume = resolve; });
+    const originAgent = vi.fn(async () => ({ agent: old.agent, terminal: old.terminal }));
+    originAgent.mockImplementationOnce(async () => { await resolving; return { agent: old.agent, terminal: old.terminal }; });
+    const service = new DispatchService({ computerID: localID, validateParentTarget: async () => ({}), originAgent });
+    const place = { server: old.server, workspace: old.workspace, tab: old.tab, pane: old.pane };
+    const pending = service.dispatch(brief, place);
+    await vi.waitFor(() => expect(originAgent).toHaveBeenCalled());
+    await recordConductor(old.server, asPane(old), "owner", "session-A");
+    await repointDispatchOrigins(old, next, async () => { await recordConductor(next.server, asPane(next), "owner", "session-B"); });
+    if (change === "stop-B" || change === "restore-A") await clearConductor();
+    if (change === "restore-A" || change === "replace-with-A") await recordConductor(old.server, asPane(old), "owner", "session-A");
+    resume();
+    expect(await pending).toMatchObject({ state: "accepted", origin: change === "keep-B" ? next : old });
+    // A retained chat's newly created workers never inherit an older move's alias.
+    expect(await service.dispatch(brief, place)).toMatchObject({ state: "accepted", origin: old });
+  });
+
+  it.each([true, false])("keeps routing readers behind the whole hand-over (commit %s)", async succeeds => {
+    const old = { server: "default", workspace: "w1", tab: "t1", pane: "lead", agent: "claude" as const, terminal: "term-old" };
+    const next = { ...old, pane: "next", terminal: "term-next" };
+    const service = new DispatchService({ computerID: localID, validateParentTarget: async () => ({}), originAgent: async () => ({ agent: old.agent, terminal: old.terminal }) });
+    const place = { server: old.server, workspace: old.workspace, tab: old.tab, pane: old.pane };
+    await service.dispatch(brief, place); await service.dispatch(brief, place);
+    let reading!: Promise<Awaited<ReturnType<typeof dispatchStatus>>>;
+    let observed = false;
+    const transfer = repointDispatchOrigins(old, next, async () => {
+      reading = dispatchStatus().then(rows => { observed = true; return rows; });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(observed).toBe(false);
+      if (!succeeds) throw new Error("role failed");
+    });
+    if (succeeds) await transfer; else await expect(transfer).rejects.toThrow("role failed");
+    expect((await reading).map(row => row.origin?.pane)).toEqual([succeeds ? next.pane : old.pane, succeeds ? next.pane : old.pane]);
+  });
 
   it("chooses the least busy connected peer and sends a project slug and bound first prompt", async () => {
     const result = await new DispatchService().dispatch(brief);

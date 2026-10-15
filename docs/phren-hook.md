@@ -1274,6 +1274,32 @@ a pane already moving with 409 `move_in_progress`. The phone and desktop offer
 only harnesses `/v1/harnesses` reports as usable, and follow a move by polling
 its id. The record's fields and the steps are in docs/conductor.md.
 
+`capabilities.moveConductor: true` advertises conductor moves alongside
+`sessionMove` and `moveNewChat` in `/v1/health`. The old pane retains its role
+until the new agent lands. Conductor moves always use `mode: "new-chat"` and
+record `modeForced: "conductor"`, regardless of the requested mode. The old
+chat stays running and open. Conductor moves are owner-only, using the same
+request class as conductor start/make/stop. MCP agents, peer Hooks and scoped
+keys are refused with 403 "Only the owner can move the conductor." Computer keys
+are forced through `dispatch-scoped peer`, which stamps the request origin and
+strips client-supplied origin headers; install/update migrates existing keys.
+A checked role hand-over also re-points open
+worker receipt origins, so returns and approvals reach the new conductor.
+The launch prompt withholds conductor authority until the Hook confirms the
+hand-over. The destination must be idle or working, fully linked, and its
+brief must have a matching UserPromptSubmit acknowledgement within 30 seconds
+after linking. The Hook sends a confirmation after commit or a failure prompt
+on refusal; the move’s `notice` reports notification failures. Receipt readers
+and late saves share the hand-over lock. Only dispatch operations already in
+flight at completion inherit aliases; new dispatches keep their own origin,
+and conductor changes invalidate aliases pointing elsewhere. An ordinary move
+aborts if its source becomes conductor before exit or replacement. Copilot
+cannot be a conductor.
+A changed role refuses the hand-over without modifying it; other transfer
+failures keep the old role and report `state: "failed"` with an `error`.
+A status-save failure after role and routing commit reports `state: "moved"`
+with a warning in `notice`. See [moving the conductor](conductor.md#move-a-session-to-another-agent).
+
 `mode` defaults to `"replace"`: the old agent exits and the target replaces it
 in place (or in an adjacent tab when its account needs a different shell).
 With `capabilities.moveNewChat: true`, apps may send `mode: "new-chat"`, for

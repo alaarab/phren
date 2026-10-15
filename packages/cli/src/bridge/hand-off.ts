@@ -150,7 +150,7 @@ async function paneTarget(request: Request, pane: string, server?: string): Prom
  * with it. Answers with the move record; a dispatched worker's receipt follows
  * the move on its next poll.
  */
-export async function moveSession(input: unknown, options: { waitMs?: number; pollMs?: number } = {}): Promise<{ ok: boolean; move: Json; settled: boolean }> {
+export async function moveSession(input: unknown, options: { waitMs?: number; pollMs?: number; agent?: boolean } = {}): Promise<{ ok: boolean; move: Json; settled: boolean }> {
   const data = moveSessionSchema.parse(input);
   const { request, peer } = await hookFor(data.computer);
   const read = async (id: string) => object((await request(`/v1/sessions/move?id=${encodeURIComponent(id)}`)).move);
@@ -161,7 +161,7 @@ export async function moveSession(input: unknown, options: { waitMs?: number; po
     const target = data.target ?? (data.session ? (await targetFromOverview(request, data.session, peer?.server)).target : await paneTarget(request, data.pane!, peer?.server));
     if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
     const to = { harness: data.harness, ...(data.account ? { account: data.account } : {}), ...(data.model ? { model: data.model } : {}), ...(data.effort ? { effort: data.effort } : {}) };
-    move = object((await request("/v1/sessions/move", { target, to: moveToSchema.parse(to), ...(data.id ? { id: data.id } : {}) })).move);
+    move = object((await request("/v1/sessions/move", { target, to: moveToSchema.parse(to), ...(options.agent ? { origin: "agent" } : {}), ...(data.id ? { id: data.id } : {}) })).move);
     if (data.wait !== false && typeof move.id === "string") {
       const until = Date.now() + (options.waitMs ?? MOVE_WAIT_MS);
       while (!settled(move) && Date.now() < until) {

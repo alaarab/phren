@@ -1,3 +1,4 @@
+import { ownerRequest } from "./request-origin.js";
 import { listMoves, moveSessionFields, readMove, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
@@ -151,7 +152,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -677,7 +678,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/sessions/move") {
           // Answers once the move is checked and recorded; the hand-off and relaunch run on, and GET says where it is.
           if (!ctx.mover) throw new BridgeError(503, "This Hook cannot move sessions.");
-          result = { ok: true, move: await ctx.mover.start(data) };
+          const { origin: _origin, ...input } = data;
+          result = { ok: true, move: await ctx.mover.start(input, { owner: ownerRequest(request, data) }) };
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/jobs/cleanup") {
@@ -738,9 +740,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = url.pathname === "/v1/authority" ? { ok: true, authority: await setProjectAuthority(data, "phone") }
             : { ok: true, confirmation: await confirmAuthority(data, "phone") };
         } else if (url.pathname === "/v1/conductor/make") {
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change the conductor.");
           // Serialized with launches, so a conductor launch and a make cannot both pass the set check.
           result = await launches.run(async () => makeConductor(selectedServer(url), data));
         } else if (url.pathname === "/v1/conductor/stop") {
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change the conductor.");
           result = await launches.run(async () => stopConductor(data));
         } else if (url.pathname === "/v1/sets/name") {
           result = await nameSet(data);
@@ -786,6 +790,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launches.run(async () => {
+            if (data.role === "conductor" && !ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change the conductor.");
             if (data.role === "conductor" && !modules.has("conductor")) throw new BridgeError(404, disabledHint("conductor"));
             if (data.agentFolder === true && (data.role === "conductor" || data.project !== undefined || (data.cwd !== undefined && data.cwd !== "") || data.worktree != null)) {
               throw new BridgeError(400, "An agent folder is for a projectless agent without cwd or worktree.");

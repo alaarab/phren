@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearConductor, conductorPane, readRoleState, readSetName, recordConductor, resetRoleState, saveSetName } from "./conductor-role.js";
+import { clearConductor, conductorPane, readRoleState, readSetName, recordConductor, resetRoleState, saveSetName, transferConductor } from "./conductor-role.js";
 import { resetSharedHerdrState, workspaceSnapshot } from "./herdr.js";
 import { objects, type Json } from "./protocol.js";
 import { setTmuxDeps, tmuxSnapshot } from "./terminal-tmux.js";
@@ -93,6 +93,20 @@ describe("the conductor role on Herdr", () => {
     expect((await saved()).conductor).toBeNull();
     resetRoleState();
     expect((await readRoleState())?.conductor).toBeNull();
+  });
+
+  it("serializes competing hand-overs so only one captured role can win", async () => {
+    const pane = objects(herdr().panes)[0];
+    const expected = await recordConductor("default", pane, "owner", "old-session");
+    const next = { ...pane, pane_id: "w1:p2", terminal_id: "term-2", agent: "codex" };
+    const results = await Promise.allSettled([
+      transferConductor(expected, "default", next, "next-session"),
+      transferConductor(expected, "default", { ...next, pane_id: "w1:p3" }, "other-session"),
+    ]);
+    expect(results[0].status).toBe("fulfilled");
+    expect(results[1]).toMatchObject({ status: "rejected", reason: { message: "The conductor changed during the move; nothing was transferred." } });
+    resetRoleState();
+    expect((await saved()).conductor).toMatchObject({ pane: "w1:p2", terminal: "term-2", session: "next-session" });
   });
 
   it("reads a damaged, oversized or linked role file as no conductor, never a crash or a return to names", async () => {

@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Conductor hand-over aliases apply only to dispatches already in flight and are invalidated when the conductor changes. Ordinary session moves recheck promotion before exit, replacement and role handling.
+
+- Conductor moves require the owner gateway, seal late dispatch receipt origins and routing readers, and wait for a ready pane and acknowledged brief. The new chat receives conductor authority only after a successful hand-over, or an explicit failure notice.
+
+- Conductor moves always keep the old chat running, check the captured role before hand-over, transfer worker return and approval routing, and report post-transfer status-save failures as moved with a warning.
+
+### Added
+
+- Move the conductor chat to another harness or account from the phone, transferring its role when the new agent lands and preserving the old role on transfer failure (`moveConductor` Hook capability).
+
 ## [0.3.50] - 2026-10-15
 
 ### Added
