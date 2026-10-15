@@ -72,6 +72,23 @@ describe("quota sheet lifecycle", () => {
     expect(ui.sheets()).toHaveLength(0);
   });
 
+  it("shows the weekly warning for an unaccounted conductor on a single-login computer", async () => {
+    const ui = await setup();
+    ui.setSession({ computer: "Desk", child: { id: "tab", role: "conductor", target: { source: "claude", session: "chat" } } });
+    ui.usage.accounts.splice(1, 1);
+    Object.assign(ui.usage.accounts[0], { computers: [{ name: "Desk", account: null }], windows: [{ id: "seven_day", usedPercent: 96 }] });
+    hooks.get.mockResolvedValue({ harnesses: [
+      { source: "claude", installed: true, usable: true, accounts: [{ id: "default", usable: true }] },
+      { source: "codex", installed: true, usable: true },
+    ] });
+    hooks.usage(ui.usage);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ui.sheets()[0]?.find("Claude is at 96% of its weekly limit")).toBeDefined();
+    expect(ui.sheets()[0]?.find("Claude · default · Usage unknown · reset time unknown")).toBeUndefined();
+    ui.sheets()[0].find("Switch")!.click();
+    expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ child: expect.objectContaining({ role: "conductor" }) }));
+  });
+
   it("dismisses until exhaustion, then persists the chat opt-out across watcher recreation", async () => {
     const ui = await setup();
     await vi.advanceTimersByTimeAsync(0);
