@@ -924,3 +924,21 @@ button.handoff-link:hover, button.home-quota-row:hover .handoff-link { color: va
 .home-upnext .home-row-meta { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .home-upnext .home-tag, .home-upnext-when { flex: none; }
 .home-upnext-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Home resource jobs share the overview reading; keep their controls stable. */
+.home-computer-card { min-width: 0; }
+.home-computer-resources { display: contents; }
+.home-jobs { display: grid; gap: 4px; padding: 0 12px 10px; }
+.home-jobs[hidden] { display: none; }
+.home-job { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; width: 100%; min-width: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: var(--card); color: var(--text); text-align: left; font: inherit; font-size: 12px; }
+button.home-job { cursor: pointer; }
+button.home-job:hover { background: var(--raised); }
+button.home-job:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.home-job-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-job-cpu, .home-job-duration, .home-jobs-more { color: var(--muted); font-size: 11px; }
+.home-jobs-more { padding: 2px 8px; }
+@media (max-width: 600px) {
+  .home-computer { grid-template-columns: minmax(0, 1fr); grid-template-areas: "name" "state" "load"; }
+  .home-computer-meta { flex-wrap: wrap; }
+  .home-job { gap: 6px; }
+}

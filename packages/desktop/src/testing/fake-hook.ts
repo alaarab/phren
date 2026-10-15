@@ -86,6 +86,21 @@ function defaultOverview() {
   };
 }
 
+function defaultResources() {
+  return {
+    collectedAt: new Date().toISOString(), platform: "darwin", uptimeSeconds: 18_000,
+    cpu: { cores: 8, load1: 3.2, load5: 2.8, load15: 2.1, loadPerCore: 0.4 },
+    memory: { totalBytes: 16 * 1024 ** 3, availablePercent: 45 },
+    pressure: { cpu: 0.4, memory: 0.55, disk: 0, overall: 0.55 }, level: "busy", warnings: [],
+    heavy: [
+      { kind: "xcodebuild", name: "xcodebuild · Sample app", pid: 4101, processes: 6, cpuPercent: 185.4, memoryBytes: 800 * 1024 ** 2,
+        pane: { server: "default", workspace: "1", pane: "1", agent: "claude", label: "Fix login" } },
+      { kind: "simulator", name: "Simulator · Sample phone", pid: 4102, processes: 3, cpuPercent: 72.3, memoryBytes: 600 * 1024 ** 2 },
+      { kind: "gradle", name: "Gradle daemon · Sample project", pid: 4103, processes: 2, cpuPercent: 54.6, memoryBytes: 400 * 1024 ** 2 },
+    ],
+  };
+}
+
 function defaultHealth() {
   return {
     ok: true,
@@ -297,7 +312,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   const overviewSockets = new Set<WebSocket>();
   const transcriptSockets = new Set<{ ws: WebSocket; session: string }>();
   const statusSockets = new Set<WebSocket>();
-  const overviewFrames = options.overviewFrames ?? [defaultOverview()];
+  const overviewFrames = options.overviewFrames ?? [defaultOverview(), { type: "resources", resources: defaultResources() }];
   const transcriptFrames = options.transcriptFrames ?? defaultTranscript();
 
   // One text file the editor can read and save; version bumps on every write.
@@ -308,6 +323,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   const defaults: Record<string, FakeHookHandler> = {
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
+    "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
     "POST /v1/schedules": () => ({ status: 200, json: defaultSchedules() }),
 
