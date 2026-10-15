@@ -83,9 +83,9 @@ function stderrLine(diagnostic: string): string {
   return diagnostic.split(/\r?\n/).map(text => text.replace(/[\x00-\x1f\x7f]/g, " ").trim()).filter(Boolean).pop() ?? "";
 }
 
-export const hookRequest: HookRequest = async (c, method, requestPath, body) => {
+export const hookRequest: HookRequest = async (c, method, requestPath, body, signal) => {
   try {
-    const response = await requestOnce(c, method, requestPath, body);
+    const response = await requestOnce(c, method, requestPath, body, signal);
     recordHttp(c, method, requestPath, body, response);
     return response;
   } catch (error) {
@@ -94,9 +94,15 @@ export const hookRequest: HookRequest = async (c, method, requestPath, body) => 
   }
 };
 
-async function requestOnce(c: Computer, method: string, requestPath: string, body?: unknown): Promise<HookResponse> {
+async function requestOnce(c: Computer, method: string, requestPath: string, body?: unknown, signal?: AbortSignal): Promise<HookResponse> {
   const controller = new AbortController();
   let pipe: Duplex | undefined;
+  const abort = () => {
+    controller.abort(signal?.reason);
+    pipe?.destroy();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   const timer = setTimeout(() => {
     controller.abort(new Error(pipe ? "Hook request timed out after 60 s." : "Hook request timed out waiting for a channel after 60 s."));
     pipe?.destroy(controller.signal.reason);
@@ -106,9 +112,11 @@ async function requestOnce(c: Computer, method: string, requestPath: string, bod
     controller.signal.throwIfAborted();
     const connection = pipe;
     return await new Promise<HookResponse>((resolve, reject) => {
+      const fail = (error: Error) => reject(controller.signal.aborted ? controller.signal.reason : error);
       const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
       const req = request({
         createConnection: () => connection,
+        signal: controller.signal,
         method,
         path: requestPath,
         headers: {
@@ -125,14 +133,15 @@ async function requestOnce(c: Computer, method: string, requestPath: string, bod
           if (size > MAX_BODY) req.destroy(new Error("Hook response exceeds 16 MiB."));
           else chunks.push(chunk);
         });
-        response.on("error", reject);
+        response.on("error", fail);
         response.on("end", () => resolve({ status: response.statusCode ?? 0, headers: lowerHeaders(response.headers), body: Buffer.concat(chunks) }));
       });
-      req.on("error", reject);
+      req.on("error", fail);
       req.end(payload);
     });
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
     if (controller.signal.aborted) pipe?.destroy();
   }
 }

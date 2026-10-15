@@ -208,8 +208,8 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
     return existsSync(fallback) ? fallback : null;
   }
 
-  async function hookJson(computer: Computer, requestPath: string): Promise<Record<string, unknown>> {
-    const res = await opts.hookRequest(computer, "GET", requestPath);
+  async function hookJson(computer: Computer, requestPath: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const res = await opts.hookRequest(computer, "GET", requestPath, undefined, signal);
     if (res.status !== 200) throw new MemoryHttpError(res.status === 404 ? 404 : 502, `This computer's Hook returned ${res.status}.`);
     try {
       return JSON.parse(res.body.toString("utf8")) as Record<string, unknown>;
@@ -424,10 +424,11 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       const items = text ? parseFindingsContent(text) : [];
       if (!text.includes("<!-- phren:cite")) return { items };
       // Freshness is runtime state on the owning computer, outside the mirrored store.
+      const controller = new AbortController();
       let timeout: ReturnType<typeof setTimeout> | undefined;
       const memory = await Promise.race([
-        hookJson(computer, `/v1/projects/${encodeURIComponent(name)}/memory`).catch(() => null),
-        new Promise<null>(resolve => { timeout = setTimeout(() => resolve(null), 1500); }),
+        hookJson(computer, `/v1/projects/${encodeURIComponent(name)}/memory`, controller.signal).catch(() => null),
+        new Promise<null>(resolve => { timeout = setTimeout(() => { controller.abort(); resolve(null); }, 1500); }),
       ]).finally(() => clearTimeout(timeout));
       const findings = memory && Array.isArray(memory.findings) ? memory.findings as Array<{ id: string; citationFreshness?: unknown }> : [];
       const freshness = new Map(findings.map(item => [item.id, item.citationFreshness]));

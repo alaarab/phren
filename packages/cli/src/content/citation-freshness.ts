@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { findPhrenPath, runtimeFile } from "../phren-paths.js";
@@ -39,23 +39,36 @@ function git(root: string | undefined, timeoutMs: number, ...args: string[]): st
   } catch { return ""; }
 }
 
+function checkoutRoot(repo: string | undefined, deadline: number): string | undefined {
+  if (!repo || !path.isAbsolute(repo)) return;
+  try {
+    const root = realpathSync(repo);
+    return git(root, Math.min(200, deadline - Date.now()), "rev-parse", "--show-toplevel") === root ? root : undefined;
+  } catch { return undefined; }
+}
+
+function validDomain(domain: string): boolean {
+  const match = /^([a-z0-9-]+(?:\.[a-z0-9-]+)*)(?::([0-9]+))?$/.exec(domain);
+  return !!match && (!match[2] || (Number(match[2]) >= 1 && Number(match[2]) <= 65535));
+}
+
 function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions, entries: Cache, deadline: number) {
   const fallback = citation.projectRemote ?? opts.projectRemote;
   const key = resolutionKey(citation, opts);
   const cached = entries[key];
   if (cached && "value" in cached && fresh(cached)) return cached.value;
-  const local = citation.repo && existsSync(citation.repo) ? citation.repo : undefined;
+  const local = checkoutRoot(citation.repo, deadline);
   const read = (...args: string[]) => git(local, Math.min(200, deadline - Date.now()), ...args);
   const remote = local ? read("remote", "get-url", "origin") : "";
   const parsed = parseRemoteUrl(remote || fallback || "");
   let value = null;
-  if (parsed && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(parsed.path)
+  if (parsed && validDomain(parsed.domain) && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(parsed.path)
     && !parsed.path.split("/").some(part => part === "." || part === "..")) {
     const override = (remote ? read("config", "--get", "remote.origin.phrenHost") : "")
-      || read("config", "--get", `phren.${parsed.domain}.host`);
+      || read("config", ...(local ? [] : ["--global"]), "--get", `phren.${parsed.domain}.host`);
     const named = override.trim().toLowerCase();
     const kind = ["github", "gitlab", "gitboy"].includes(named) ? named : kindFromDomain(parsed.domain);
-    if (kind === "gitboy") value = { ...parsed, root: remote ? read("rev-parse", "--show-toplevel") || local : citation.repo };
+    if (kind === "gitboy") value = { ...parsed, root: remote ? local : undefined };
   }
   // A budget-limited git lookup must not become a day-long negative resolution.
   if (Date.now() < deadline) entries[key] = { checkedAt: new Date().toISOString(), value };
@@ -65,13 +78,14 @@ function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions,
 function target(citation: FreshnessCitation, repo: Repository | null | undefined): Target | undefined {
   if (!citation.file || !citation.commit || !/^[a-f0-9]{7,64}$/i.test(citation.commit)) return;
   if (citation.file.includes("\\") || citation.file.includes("\0") || citation.file.split("/").includes("..")) return;
-  if (!repo) return;
+  if (!repo || !validDomain(repo.domain) || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo.path)
+    || repo.path.split("/").some(part => part === "." || part === "..")) return;
   let file = citation.file;
   if (path.isAbsolute(file)) {
     if (!repo.root || !path.isAbsolute(repo.root)) return;
     // git canonicalizes macOS /var and other checkout aliases; citations may retain the alias.
-    const absolute = citation.repo && existsSync(citation.repo)
-      ? path.resolve(realpathSync(citation.repo), path.relative(citation.repo, file)) : file;
+    const absolute = citation.repo && path.isAbsolute(citation.repo)
+      ? path.resolve(repo.root, path.relative(citation.repo, file)) : file;
     file = path.relative(repo.root, absolute);
     if (file === ".." || file.startsWith("../") || path.isAbsolute(file)) return;
   }
@@ -120,7 +134,10 @@ function save(file: string | undefined, entries: Cache): void {
     const previous = readCache(file);
     const merged = { ...previous, ...entries };
     for (const [key, value] of Object.entries(previous)) {
-      if (isChanged(value) && !isChanged(merged[key])) merged[key] = value;
+      const incoming = entries[key];
+      if (Date.now() - Date.parse(value.checkedAt) > ("value" in value ? RESOLUTION_TTL : RETENTION)) continue;
+      if (!incoming || (isChanged(value) && !isChanged(incoming))
+        || (isChanged(value) === isChanged(incoming) && Date.parse(value.checkedAt) > Date.parse(incoming.checkedAt))) merged[key] = value;
     }
     const sorted = Object.entries(merged).filter(([, value]) =>
       Date.now() - Date.parse(value.checkedAt) <= ("value" in value ? RESOLUTION_TTL : RETENTION)).sort((a, b) => Date.parse(b[1].checkedAt) - Date.parse(a[1].checkedAt)).slice(0, 5000);
@@ -166,9 +183,11 @@ async function request(batch: Target[], opts: RefreshOptions, remaining: number,
   let timer: ReturnType<typeof setTimeout> | undefined;
   const work = async () => {
     const first = batch[0];
+    if (!validDomain(first.domain)) throw new Error("Invalid git host");
+    const url = new URL("https://" + first.domain);
+    url.pathname = `/api/v1/repos/${first.repo.split("/").map(encodeURIComponent).join("/")}/changed`;
     const token = await resolveHostToken("gitboy", first.domain);
     if (controller.signal.aborted) throw new Error("Aborted");
-    const url = new URL(`https://${first.domain}/api/v1/repos/${first.repo.split("/").map(encodeURIComponent).join("/")}/changed`);
     url.searchParams.set("since", first.commit);
     for (const item of batch) url.searchParams.append("path", item.file);
     const response = await (opts.fetchImpl ?? fetch)(url, { redirect: "manual", signal: controller.signal,

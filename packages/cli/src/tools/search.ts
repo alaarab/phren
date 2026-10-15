@@ -500,11 +500,12 @@ async function handleSearchKnowledge(
     // Snippets share one character budget so a response stays well under the
     // client's tool-result limit however long the matched lines are.
     const perResultChars = snippetBudget(rows.length);
-    const results = rows.map((row, index) => {
+    const results = rows.map((row) => {
       const excerpt = extractSnippet(row.content, query, 5, perResultChars);
       const snippet = row.type === "findings" ? markStaleCitations(excerpt, citationOptions(row)) : excerpt;
-      const citations = citationsByRow[index].map(citation => ({ file: citation.file, commit: citation.commit,
-        citationFreshness: cachedCitationFreshness(citation, { phrenPath }) }));
+      const citations = row.type === "findings" ? snippet.split("\n").map(parseCitationComment)
+        .filter(citation => citation !== null).slice(0, 20).map(citation => ({ file: citation.file, commit: citation.commit,
+          citationFreshness: cachedCitationFreshness(citation, citationOptions(row)) })) : [];
       const lifecycle = row.type === "findings" ? lifecycleByRowKey.get(findingRowKey(row)) : undefined;
       const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
       const symbols = row.type === "findings" ? collectSymbolCitations(row.content) : [];

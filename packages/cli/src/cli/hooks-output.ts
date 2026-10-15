@@ -1,3 +1,7 @@
+import * as path from "node:path";
+import { cachedCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
+import { parseCitationComment } from "../content/citation.js";
+import { getProjectRemote, readProjectConfig } from "../project-config.js";
 import {
   recordInjection,
   recordRetrieval,
@@ -20,6 +24,7 @@ import { logger } from "../logger.js";
 
 function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string, terms: string[]): string[] {
   const lines: string[] = [];
+  const options = new Map<string, CitationFreshnessOptions>();
   for (const { doc, snippet, key } of selected) {
     // A snippet that is one finding or task gets that entry's own id, so
     // expanding it returns the entry rather than the whole file.
@@ -30,15 +35,28 @@ function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string, 
     const candidates = textLines.filter((l) => !/^\s*(#|\|?[\s:|-]+\|?\s*$)/.test(l));
     const firstLine = candidates.reduce<string | undefined>((best, l) => (best === undefined || termScore(l, terms) > termScore(best, terms) ? l : best), undefined) ?? textLines[0] ?? "";
     const bullets = snippet.split("\n").filter((l) => /^-\s/.test(l));
-    const prefix = bullets.length === 1 ? bullets[0].replace(/…$/, "").slice(0, 120) : "";
+    const prefix = bullets.length === 1 ? bullets[0].replace(/ \[may be out of date:[\s\S]*$/, "").replace(/…$/, "").slice(0, 120) : "";
     const entry = prefix ? docEntries(doc.content).find((e) => e.line.startsWith(prefix)) : undefined;
     const id = entry ? entry.id : `mem:${getDocSourceKey(doc, phrenPathLocal)}`;
-    const text = entry ? entry.line : firstLine;
+    const text = (entry ? entry.line : firstLine).replace(/ \[may be out of date:[\s\S]*$/, "");
+    const citation = entry ? entry.text.split("\n").map(parseCitationComment).find(cite => cite !== null)
+      : parseCitationComment(snippet.split("\n")[snippet.split("\n").indexOf(firstLine) + 1] ?? "");
+    let annotation = "";
+    if (citation) {
+      const root = doc.path ? path.dirname(path.dirname(doc.path)) : phrenPathLocal;
+      const optionsKey = JSON.stringify([root, doc.project]);
+      let opts = options.get(optionsKey);
+      if (!opts) {
+        opts = { phrenPath: root, projectRemote: getProjectRemote(root, doc.project, readProjectConfig(root, doc.project)) };
+        options.set(optionsKey, opts);
+      }
+      annotation = citationFreshnessAnnotation(citation, cachedCitationFreshness(citation, opts));
+    }
     const keywords = rowKeywords(text, terms);
     // The fb: key rides here too. memory_feedback's description promises it
     // appears in injected headers without qualification, and this path renders
     // instead of the full one whenever clanker mode is on.
-    lines.push(`${id} fb:${key} ${rowTitle(text, HOOK_TITLE_CHARS)}${keywords.length ? ` [${keywords.join(", ")}]` : ""}`);
+    lines.push(`${id} fb:${key} ${rowTitle(text, HOOK_TITLE_CHARS)}${annotation}${keywords.length ? ` [${keywords.join(", ")}]` : ""}`);
   }
   return lines;
 }

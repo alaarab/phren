@@ -302,8 +302,12 @@ it("returns findings after 1500 ms when the freshness Hook call hangs, and skips
   const text = '# proj-a Findings\n\n## 2026-10-15\n\n- Cache key collides <!-- fid:12345678 -->\n';
   const store = fakeStore({ "proj-a/FINDINGS.md": text });
   const memoryRequest = vi.fn(async () => await new Promise<never>(() => {}));
-  const hookRequest: HookRequest = async (computer, method, route, body) => route === "/v1/projects/proj-a/memory"
-    ? memoryRequest() : store.request(computer, method, route, body);
+  let requestSignal: AbortSignal | undefined;
+  const hookRequest: HookRequest = async (computer, method, route, body, signal) => {
+    if (route !== "/v1/projects/proj-a/memory") return store.request(computer, method, route, body);
+    requestSignal = signal;
+    return memoryRequest();
+  };
   try {
     const service = createMemoryService({ home, cacheDir: path.join(home, "cache"), hookRequest, syncMs: 0 });
     expect((await service.findings(B, "proj-a")).items).toHaveLength(1);
@@ -315,5 +319,6 @@ it("returns findings after 1500 ms when the freshness Hook call hangs, and skips
     await vi.advanceTimersByTimeAsync(1500);
     expect((await pending).items).toMatchObject([{ stableId: "12345678" }]);
     expect((await pending).items[0]).not.toHaveProperty("citationFreshness");
+    expect(requestSignal?.aborted).toBe(true);
   } finally { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); }
 });

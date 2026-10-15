@@ -87,6 +87,27 @@ describe("mcp-search: project filter", () => {
     } finally { network.mockRestore(); vi.unstubAllEnvs(); }
   });
 
+  it("limits citation metadata to the returned snippet of a 500-citation document", async () => {
+    const content = `# project-a Findings\n\n## 2026-10-15\n\n${Array.from({ length: 500 }, (_, i) =>
+      `- Redis cache entry ${i} <!-- fid:${i.toString(16).padStart(8, "0")} -->\n  <!-- phren:cite {"created_at":"2026-10-15T00:00:00Z","file":"src/cache-${i}.ts","commit":"abcdef1"} -->`).join("\n")}\n`;
+    writeFile(path.join(tmp.path, "project-a", "FINDINGS.md"), content);
+    writeFile(path.join(tmp.path, "project-a", "phren.project.yaml"), "remote: https://gitboy.example/alice/app.git\n");
+    db.close();
+    db = await buildIndex(tmp.path);
+    vi.stubEnv("PHREN_CLANKER", "off");
+    const network = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify({ head: "123456789",
+      paths: new URL(String(url)).searchParams.getAll("path").map(path => ({ path, changed: false })) })));
+    try {
+      const result = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
+      expect(result.ok).toBe(true);
+      const finding = result.data.results.find((item: any) => item.type === "findings");
+      expect(finding.citations.length).toBeGreaterThan(0);
+      expect(finding.citations.length).toBeLessThanOrEqual(20);
+      for (const citation of finding.citations) expect(finding.snippet).toContain(`"file":"${citation.file}"`);
+      expect(JSON.stringify(result).length).toBeLessThan(60_000);
+    } finally { network.mockRestore(); vi.unstubAllEnvs(); }
+  });
+
   it("search with project filter returns only results from that project", async () => {
     const res = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
     expect(res.ok).toBe(true);

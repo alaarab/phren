@@ -62,3 +62,17 @@ describe("Hook request deadline", () => {
     expect(ssh.kill).toHaveBeenCalled();
   });
 });
+
+
+it.each([false, true])("cancels a Hook request and releases SSH resources (active=%s)", async active => {
+  if (active) held[0].release();
+  const controller = new AbortController();
+  const pending = hookRequest(computer, "GET", "/v1/health", undefined, controller.signal);
+  const rejected = expect(pending).rejects.toThrow(/cancelled|aborted/i);
+  await vi.advanceTimersByTimeAsync(0);
+  controller.abort(new Error("Freshness lookup cancelled"));
+  await rejected;
+  expect(channelPool.stats(masterKey(computer)).waiting).toBe(0);
+  if (active) expect(ssh.kill).toHaveBeenCalled();
+  else expect(ssh.spawn).not.toHaveBeenCalled();
+});
