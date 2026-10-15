@@ -625,3 +625,21 @@ lists, resolved from the global API override (including port) or the default
 API address. The Hook pins the checked endpoint through validation. A Changes
 refresh awaiting status cannot replace the destination attached to the still
 visible card's submit handler. Coverage: `src/ui-changes-connect.test.ts`.
+
+### Session list hand-offs
+
+`handoffRow(child, rows)` in `shell/handoff.js` derives row dimming, the
+“Handed off to <title>” subtitle and “→ <harness>” / “← from <title>” tags.
+Callers supply rows from the same computer; current overview titles take
+precedence over saved reference titles. Tags link only to exact targets still
+present in that overview. Sidebar reconciliation includes the resolved decoration
+so target renames and removals refresh existing rows without reordering them.
+`renderHandoffRow` shares tag rendering; `decorateHomeHandoff` keeps Home's
+chat and tag buttons separate inside a full-width row for Working, Needs you
+and Finished sessions. Tags follow the subtitle in the shared metadata line;
+destination subtitles wrap to at most two lines. Rendering is covered by
+`src/ui-handoff-view.test.ts`.
+
+Sidebar Enter/Space navigation leaves nested buttons, links and inputs their
+native activation, including hand-off tags. Enter on the row itself still opens
+that chat. Covered by `src/ui-keys.test.ts`.

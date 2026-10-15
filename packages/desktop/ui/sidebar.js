@@ -1,4 +1,5 @@
-import { renderHandoffLinks } from "./shell/handoff-view.js";
+import { handoffRow } from "./shell/handoff.js";
+import { renderHandoffRow } from "./shell/handoff-view.js";
 // Sessions sidebar: the phone's Live sessions list at desktop density.
 // See CONTRACT.md: export renderSidebar(el, merged, handlers). The row keeps
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
@@ -457,11 +458,15 @@ function makeRow(sb, desc) {
   return node;
 }
 
+function rowHandoff(sb, desc) {
+  return desc.handoff ??= handoffRow(desc.child, sessions(sb.merged, { includeOffline: true }).filter((row) => row.computer === desc.computer));
+}
+
 function rowSig(sb, desc) {
   const c = desc.child;
   const approval = sb.approvals.get(keyOf(desc.computer, c));
   return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "", c.stalled ? c.stalledSince : "", c.backgroundTasks ?? "",
-    JSON.stringify([c.handedOffTo, c.handedOffFrom]), c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
+    JSON.stringify(rowHandoff(sb, desc)), c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : ""].join("|");
 }
@@ -472,6 +477,7 @@ function updateRow(sb, node, desc) {
   const sig = rowSig(sb, desc);
   if (node.__sig === sig && node.firstChild) return;
   node.__sig = sig;
+  node.classList.toggle("handed-off", rowHandoff(sb, desc).dimmed);
   node.replaceChildren(...rowContent(sb, node, desc));
 }
 
@@ -507,8 +513,10 @@ function rowContent(sb, node, desc) {
   main.append(bottom);
   if (child.handedOffTo || child.handedOffFrom) {
     const handoffs = el("span", "sb-handoffs");
-    renderHandoffLinks(handoffs, computer, child);
+    renderHandoffRow(handoffs, computer, rowHandoff(sb, desc));
     main.append(handoffs);
+    const subtitle = rowHandoff(sb, desc).subtitle;
+    if (subtitle) main.append(el("span", "sb-reply", subtitle));
   }
   // A session waiting on you says what it asked: its last reply (Hook 0.3.45+), one line.
   if (kind === "needs" && !child.approvalPending && child.lastReply) {
@@ -542,10 +550,16 @@ function compactRowContent(sb, node, desc) {
 
   const dot = el("span", "sb-cdot");
   dot.style.setProperty("--host-color", hostColor(computer));
-  out.push(dot, el("span", unread ? "sb-title unread" : "sb-title", child.title || ""));
+  const title = el("span", unread ? "sb-title unread" : "sb-title", child.title || "");
+  const subtitle = rowHandoff(sb, desc).subtitle;
+  if (subtitle) {
+    const main = el("span", "sb-main");
+    main.append(title, el("span", "sb-reply", subtitle));
+    out.push(dot, main);
+  } else out.push(dot, title);
   if (child.handedOffTo || child.handedOffFrom) {
     const handoffs = el("span", "sb-handoffs");
-    renderHandoffLinks(handoffs, computer, child);
+    renderHandoffRow(handoffs, computer, rowHandoff(sb, desc));
     out.push(handoffs);
   }
   if (kind === "working") out.push(el("span", "sb-cspin"));

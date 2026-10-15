@@ -1,6 +1,6 @@
 import { store } from "./store.js";
 import { sectionHandle, showSection } from "./sections.js";
-import { handoffNotices, sameChatTarget } from "./handoff.js";
+import { handoffNotices, handoffRow, sameChatTarget } from "./handoff.js";
 
 export function openHandoffChat(computer, target) {
   const row = store.sessions({ includeOffline: true }).find((row) => row.computer === computer && sameChatTarget(row.child.target, target));
@@ -23,4 +23,45 @@ export function renderHandoffLinks(container, computer, child) {
     }
     container.append(link);
   }
+}
+
+export function renderHandoffRow(container, computer, decoration) {
+  container.replaceChildren();
+  for (const tag of decoration.tags) {
+    const link = document.createElement(tag.target ? "button" : "span");
+    link.className = "handoff-link handoff-tag";
+    link.textContent = tag.text;
+    if (tag.target) {
+      link.type = "button";
+      link.addEventListener("click", (event) => { event.stopPropagation(); openHandoffChat(computer, tag.target); });
+    }
+    container.append(link);
+  }
+}
+
+// A full-width Home row owns its chat button and a shared metadata line.
+export function decorateHomeHandoff(button, computer, child, rows) {
+  const decoration = handoffRow(child, rows.filter((row) => row.computer === computer));
+  if (!decoration.tags.length) return button;
+  const wrap = document.createElement("div");
+  wrap.className = button.className + " home-handoff-row" + (decoration.dimmed ? " handed-off" : "");
+  button.className = "home-handoff-chat";
+  if (decoration.subtitle) {
+    const main = button.querySelector(".home-row-main");
+    for (const sub of main.querySelectorAll(".home-row-sub")) sub.remove();
+    const sub = document.createElement("span");
+    sub.className = "home-row-sub home-handoff-sub";
+    sub.textContent = decoration.subtitle;
+    main.append(sub);
+  }
+  const tags = document.createElement("span");
+  tags.className = "sb-handoffs";
+  renderHandoffRow(tags, computer, decoration);
+  const meta = button.querySelector(".home-row-meta");
+  meta.append(...tags.children);
+  wrap.append(button, meta);
+  wrap.addEventListener("click", (event) => {
+    if (!event.target.closest("button, a, input") && !button.disabled) button.click();
+  });
+  return wrap;
 }

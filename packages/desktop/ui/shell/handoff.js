@@ -26,3 +26,22 @@ export function handoffNotices(child, rows = []) {
     return [{ text, target: target.session ? target : null }];
   });
 }
+
+/** Row decoration from one computer's overview; absent chats never become links. */
+export function handoffRow(child, rows = []) {
+  const tags = [];
+  let subtitle = "";
+  let dimmed = false;
+  for (const [direction, ref] of [["to", child.handedOffTo], ["from", child.handedOffFrom]]) {
+    if (!ref || typeof ref !== "object") continue;
+    const target = ref.target ?? ref;
+    const related = rows.find((row) => sameChatTarget(row.child.target, target))?.child;
+    const title = related?.title || related?.label || ref.title || harnessName(ref.harness ?? target.source);
+    if (direction === "to") {
+      dimmed = true;
+      subtitle = `Handed off to ${title}`;
+    }
+    tags.push({ text: direction === "to" ? `→ ${harnessName(ref.harness ?? target.source ?? related?.agent)}` : `← from ${title}`, target: related ? related.target : null });
+  }
+  return { dimmed, subtitle, tags };
+}
