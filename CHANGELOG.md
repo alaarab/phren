@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.49] - 2026-10-15
+
 ### Fixed
 
 - Hook Connect confirms and pins the actual API destination, including global overrides; Changes submits the host shown on its rendered card. Failed credential writes remove partially written private temp files.
