@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { harnessLabel } from "../harness.js";
 // Schedules: every scheduled prompt across computers with its next run, last
 // result, Run now, history and editor, plus a "Tonight" strip of the next
 // runs. Ports the phone's Schedules screen (Features/Schedules) and the Hook's
@@ -14,7 +15,6 @@ const CSS_HREF = "./sections/schedules.css";
 const MAX_NAME = 80;
 const MAX_PROMPT = 8000;
 const HARNESSES = ["claude", "codex", "opencode", "copilot"];
-const HARNESS_TITLE = { claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot" };
 const DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]; // cron index = getDay()
 const SHORT_DAY = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
@@ -542,7 +542,7 @@ export function mountSchedules(root) {
     main.append(el("div", "sch-row-title", schedule.name));
     const sub = el("div", "sch-row-sub");
     sub.append(el("span", "sch-timing", describe(schedule)));
-    sub.append(el("span", "sch-harness", HARNESS_TITLE[schedule.harness] ?? schedule.harness));
+    sub.append(el("span", "sch-harness", harnessLabel(schedule.harness)));
     if (schedule.model) sub.append(el("span", "sch-model", schedule.model));
     main.append(sub);
     row.append(main);
@@ -882,7 +882,7 @@ export function mountSchedules(root) {
     body.append(targets);
 
     const harnessRow = el("div", "sch-fields-2");
-    harnessRow.append(field("Harness", select(HARNESSES.map((h) => ({ value: h, label: HARNESS_TITLE[h] })), form.harness,
+    harnessRow.append(field("Harness", select(HARNESSES.map((h) => ({ value: h, label: harnessLabel(h) })), form.harness,
       (value) => { form.harness = value; refresh(); })));
     const modelInput = input({ value: form.model, placeholder: "Harness default", spellcheck: false });
     modelInput.style.fontFamily = "var(--mono)";

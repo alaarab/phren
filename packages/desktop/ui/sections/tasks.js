@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { harnessLabel } from "../harness.js";
 // Tasks: every online computer's Phren stores, their projects, and each
 // project's tasks grouped Active / Queue / Done with readiness lanes. Create,
 // inline edit, complete, move, pin and "Launch as agent" are written through
@@ -10,7 +11,7 @@ import { skeleton } from "../shell/skeleton.js";
 import { sectionHandle } from "../shell/sections.js";
 
 const CSS_ID = "tasks-css";
-const HARNESSES = [["claude", "Claude"], ["codex", "Codex"], ["opencode", "OpenCode"]];
+const HARNESSES = ["claude", "codex", "opencode"].map((source) => [source, harnessLabel(source)]);
 const READINESS = {
   ready: { label: "ready", cls: "ready" },
   "waiting-on-human": { label: "waiting on human", cls: "human" },

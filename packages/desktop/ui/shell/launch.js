@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { harnessLabel } from "../harness.js";
 import { exhausted, leftPercent } from "./usage-windows.js";
 // The launch sheet: one modal to start any agent anywhere. Project, computer,
 // harness, model, effort, permission mode, worktree/branch, Claude account and
@@ -14,7 +15,6 @@ import { sectionHandle, showSection } from "./sections.js";
 const CSS_ID = "launch-styles";
 
 // ---------------------------------------------------------------- constants
-const HARNESS_LABELS = { claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot", phren: "Phren" };
 const HARNESS_ORDER = ["codex", "claude", "opencode", "copilot", "phren"];
 const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"]];
 const PERMISSIONS = [
@@ -418,7 +418,7 @@ function renderHarness(ui) {
     const conductorBlocked = state.role === "conductor" && kind === "phren";
     const disabled = !can || conductorBlocked;
     if (can && !conductorBlocked) usable++;
-    const btn = el("button", "launch-seg", HARNESS_LABELS[kind] ?? kind);
+    const btn = el("button", "launch-seg", harnessLabel(kind));
     btn.type = "button";
     if (state.harness === kind && !disabled) btn.classList.add("selected");
     btn.disabled = disabled;
@@ -722,7 +722,7 @@ async function doLaunch(ui) {
   if (state.worktree && state.role !== "conductor") body.worktree = { branch: state.branch.trim() };
 
   state.launching = true;
-  state.status = `Starting ${HARNESS_LABELS[kind] ?? kind}\u2026`;
+  state.status = `Starting ${harnessLabel(kind)}\u2026`;
   refreshLaunch(ui);
   // A new agent in a folder that already has one must not match that one.
   const before = new Set(allSessions(store.merged).filter((row) => row.computer === state.computer).map((row) => row.child.id));

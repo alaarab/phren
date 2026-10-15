@@ -1,5 +1,6 @@
 // Shared, pure hand-off decisions and overview labels.
-const harnessName = (source) => ({ claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot" })[source] ?? source ?? "agent";
+import { harnessLabel } from "../harness.js";
+const harnessName = (source) => harnessLabel(source, source ?? "agent");
 
 export function movePlan(current, to, moveNewChat) {
   if (!to?.harness) return { label: "Choose where to continue" };

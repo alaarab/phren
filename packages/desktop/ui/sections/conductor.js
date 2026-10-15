@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { HARNESS_LABELS } from "../harness.js";
 // Conductor: the running conductor and its dispatches, the owner inbox,
 // standing grants, linked computer sets and the release authority policy.
 // This is the phone's Conductor screens, drawn with the desktop shell's CSS.
@@ -12,7 +13,7 @@ import { readAhead } from "../shell/read-ahead.js";
 const CSS_ID = "conductor-css";
 const POLL_MS = 15_000;
 const MAX_DISPATCHES = 60;
-const HARNESSES = [["codex", "Codex"], ["claude", "Claude"], ["opencode", "OpenCode"]];
+const HARNESSES = ["codex", "claude", "opencode"].map((source) => [source, HARNESS_LABELS[source]]);
 const TABS = [
   ["dispatches", "Dispatches"],
   ["inbox", "Inbox"],

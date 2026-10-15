@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { harnessLabel } from "../harness.js";
 import { movePlan } from "./handoff.js";
 import { openHandoffChat } from "./handoff-view.js";
 import { store } from "./store.js";
@@ -11,7 +12,7 @@ import { hookGet, hookPost } from "../api.js";
 import { registerCommand } from "./palette.js";
 import { sectionHandle } from "./sections.js";
 
-const HARNESSES = [["claude", "Claude"], ["codex", "Codex"], ["opencode", "OpenCode"], ["copilot", "Copilot"]];
+const HARNESSES = ["claude", "codex", "opencode", "copilot"].map((source) => [source, harnessLabel(source)]);
 const STATE_WORDS = { "handing-off": "Writing a hand-off…", exiting: "Ending the old agent…", launching: "Starting the new agent…", moved: "Moved", failed: "The move failed" };
 const POLL_MS = 2000;
 const GIVE_UP_MS = 15 * 60_000;
