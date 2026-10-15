@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.48] - 2026-10-14
+
 ### Fixed
 
 - Hook new-chat moves report first-prompt delivery failures without marking the old chat handed off, and wait up to three minutes for a slow conversation to link, reporting a pending link on timeout.
