@@ -427,27 +427,28 @@ button.settings-summon-key.recording { color: var(--text); border-color: var(--a
 .settings-switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Titlebar usage rings: one small ring per account, with a popover. */
 #usage-rings { position: relative; display: flex; align-items: center; }
-#usage-rings.empty { display: none; }
+#usage-rings.empty:not(.usage-open) { display: none; }
 .usage-rings-row { display: flex; align-items: center; gap: 4px; }
 .usage-ring { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: transparent; display: grid; place-items: center; cursor: pointer; transition: background .18s ease, opacity .18s ease; -webkit-app-region: no-drag; }
 .usage-ring:hover { background: var(--raised); }
 .usage-ring svg { display: block; }
-.usage-pop { position: absolute; top: calc(100% + 10px); right: 0; z-index: 50; width: 320px; max-height: 70vh; overflow-y: auto; padding: 12px; display: grid; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); -webkit-app-region: no-drag; }
+.usage-pop { position: fixed; z-index: 50; width: 320px; max-width: calc(100vw - 32px); min-width: 0; max-height: min(70vh, calc(100dvh - var(--usage-top, 50px) - 16px)); overflow-wrap: anywhere; white-space: normal; overflow-y: auto; padding: 12px; display: grid; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); -webkit-app-region: no-drag; }
 .usage-pop[hidden] { display: none; }
+@media (max-width: 600px) { .usage-pop { width: calc(100vw - 32px); } }
 .usage-pop-summary { color: var(--muted); font-size: 12px; line-height: 1.4; }
-.usage-account { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.usage-account { min-width: 0; display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
 .usage-pop-summary + .usage-account { border-top: 0; padding-top: 0; }
 .usage-account-head { display: grid; gap: 2px; min-width: 0; }
-.usage-account-name { color: var(--text); font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-account-name { min-width: 0; color: var(--text); font-size: 12.5px; font-weight: 600; }
 .usage-account-meta { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .usage-account-meta.warn { color: var(--waiting); }
-.usage-windows { display: grid; gap: 8px; }
-.usage-window { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name value" "bar bar" "reset reset"; gap: 3px 8px; align-items: baseline; }
+.usage-windows { min-width: 0; display: grid; gap: 8px; }
+.usage-window { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); grid-template-areas: "name value" "bar bar" "reset reset"; gap: 3px 8px; align-items: baseline; }
 .usage-credits { grid-template-areas: "name value" "reset reset"; }
-.usage-window-name { grid-area: name; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.usage-window-value { grid-area: value; color: var(--text); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-window-name { min-width: 0; grid-area: name; color: var(--text-2); font-size: 12px; }
+.usage-window-value { min-width: 0; text-align: right; grid-area: value; color: var(--text); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-window-value.muted { color: var(--muted); font-weight: 400; }
-.usage-window-value.danger, .usage-window-reset.danger { color: var(--danger); }
+.usage-account-meta.danger, .usage-window-value.danger, .usage-window-reset.danger { color: var(--danger); }
 .usage-bar { grid-area: bar; height: 5px; border-radius: 999px; background: var(--sunken); overflow: hidden; }
 .usage-bar-fill { display: block; height: 100%; border-radius: 999px; transition: width .18s ease; }
 .usage-window-reset { grid-area: reset; color: var(--muted); font-size: 11px; line-height: 1.3; }

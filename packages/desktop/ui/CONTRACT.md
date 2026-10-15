@@ -546,3 +546,27 @@ settings route and file (`settings.backOn`, default true for older files).
 Notifications name the account, computer and window; their keyless shell click
 focuses the desktop and leaves its current chat and section in place. Covered
 by `src/ui-quota-back.test.ts`.
+### Account usage overview
+
+`shell/usage-rings.js` exports `openUsage()`, which opens the existing titlebar
+usage popover even without account rings. Both the `usage` app action
+(Cmd/Ctrl+Alt+U; Ctrl+Shift+U is reserved for Linux Unicode input) and
+“Show account usage” in the palette call it. Escape closes the dialog and
+returns focus; the palette restores its invoking focus before running a command.
+`sortUsageAccounts(accounts)` returns a sorted copy: exhausted accounts first,
+then the highest active window percentage, unknown usage last, ties in report
+order. Reset windows do not constrain the order. The overview retains merged
+account cards with harness names, all reporting computers, every window,
+reset times, exhaustion, missing data and unreachable computers. Within each
+card, windows use the same exhausted-first, highest-percent ordering; reset
+and unknown windows follow active known usage, with stable ties. Off macOS,
+Ctrl+Alt bindings match the reported character without physical-key fallback;
+Ctrl+Alt letters pass through editable fields, terminals and the editor.
+AltGraph events are ignored by key matching and dispatch on every platform.
+
+The usage popover uses viewport-fixed positioning, clamped to 16 px horizontal
+gutters and at most the viewport width minus 32 px. Below 600 px it fills that
+width; account names, window names and values wrap. Ring clicks retain the
+ring group's right anchor and normal 320 px size on wide windows. Keyboard
+and palette opens have no anchor and center under the titlebar. Positioning
+refreshes on resize and usage renders; closing removes the resize listener.

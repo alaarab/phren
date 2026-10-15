@@ -6,6 +6,8 @@
 import { hookPost } from "./api.js";
 import { closePalette, isPaletteOpen, openPalette, registerCommand } from "./shell/palette.js";
 
+import { openUsage } from "./shell/usage-rings.js";
+
 let config = null; // { bindings, sources, files, errors, actions }
 let app = null; // actions supplied by app.js
 let prefixUntil = 0;
@@ -53,18 +55,21 @@ function eventKey(ev) {
 /** Does this key press match the binding (ignoring the prefix part)? Returns
  * true, false, or the digit for a 1..9 range binding. */
 export function matches(spec, ev) {
+  if (ev.getModifierState?.("AltGraph")) return false;
   if (spec.ctrl !== ev.ctrlKey || spec.alt !== ev.altKey || spec.cmd !== ev.metaKey) return false;
   const key = eventKey(ev);
+  // AltGr can be reported as Ctrl+Alt without an AltGraph modifier.
+  const physicalAllowed = IS_MAC || !(ev.ctrlKey && ev.altKey);
   const letter = /^[a-z]$/.test(spec.key);
   // Letters and named keys care about shift; "?" or "&" already imply it.
   if ((letter || spec.key.length > 1) && spec.shift !== ev.shiftKey) return false;
   if (spec.range) {
-    const n = Number(/^\d$/.test(key) ? key : codeKey(ev));
+    const n = Number(/^\d$/.test(key) ? key : physicalAllowed ? codeKey(ev) : NaN);
     return Number.isInteger(n) && n >= spec.range[0] && n <= spec.range[1] ? n : false;
   }
   if (key === spec.key) return true;
   // The character differs from the key's own (⌥ or ⇧ changed it): match the physical key, shift exactly.
-  return codeKey(ev) === spec.key && spec.shift === ev.shiftKey;
+  return physicalAllowed && codeKey(ev) === spec.key && spec.shift === ev.shiftKey;
 }
 
 /** How a binding reads on the shortcut sheet: "⌃B  ⇧T". */
@@ -142,7 +147,11 @@ function showHint(on) {
 }
 
 function onKeyDown(ev) {
-  if (!config || ev.isComposing) return;
+  if (!config || ev.isComposing || ev.getModifierState?.("AltGraph")) return;
+  // Leave layout-specific character input to fields, editors and terminals,
+  // before either direct shortcuts or an active prefix can consume it.
+  if (!IS_MAC && ev.ctrlKey && ev.altKey && (/^[a-z]$/i.test(ev.key) || /^Key[A-Z]$/.test(ev.code || ""))
+    && (typing(ev.target) || inTerminal(ev.target))) return;
   // While the palette is open its input owns the keyboard.
   if (isPaletteOpen()) return;
   if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Alt" || ev.key === "Meta") return;
@@ -233,6 +242,7 @@ function run(action, arg) {
     case "close_tab": return app.closeTab ? app.closeTab() : app.closePanel();
     case "new_tab":
     case "terminal": return app.showPane("terminal");
+    case "usage": return openUsage();
     case "palette": return isPaletteOpen() ? closePalette() : openPalette();
     case "open_file": return openQuickFile();
     case "show_changes": return app.showPane("changes");
@@ -466,6 +476,7 @@ function flash(text) {
 // ------------------------------------------------------------ palette commands
 // The existing key actions as concise palette commands, showing their shortcuts.
 const BUILTINS = [
+  ["usage", "Show account usage"],
   ["show_changes", "Show Changes"],
   ["show_files", "Show Files"],
   ["show_search", "Show Search"],
