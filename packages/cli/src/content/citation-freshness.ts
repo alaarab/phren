@@ -43,7 +43,14 @@ function checkoutRoot(repo: string | undefined, deadline: number): string | unde
   if (!repo || !path.isAbsolute(repo)) return;
   try {
     const root = realpathSync(repo);
-    return git(root, Math.min(200, deadline - Date.now()), "rev-parse", "--show-toplevel") === root ? root : undefined;
+    const toplevel = git(root, Math.min(200, deadline - Date.now()), "rev-parse", "--show-toplevel");
+    if (!toplevel || !path.isAbsolute(toplevel)) return;
+    // Git uses forward slashes on Windows; realpath also expands 8.3 aliases.
+    const canonical = (value: string) => {
+      const resolved = path.resolve(realpathSync(value));
+      return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    };
+    return canonical(toplevel) === canonical(root) ? root : undefined;
   } catch { return undefined; }
 }
 
@@ -77,16 +84,16 @@ function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions,
 
 function target(citation: FreshnessCitation, repo: Repository | null | undefined): Target | undefined {
   if (!citation.file || !citation.commit || !/^[a-f0-9]{7,64}$/i.test(citation.commit)) return;
-  if (citation.file.includes("\\") || citation.file.includes("\0") || citation.file.split("/").includes("..")) return;
+  let file = citation.file.split(path.sep).join("/");
+  if (file.includes("\\") || file.includes("\0") || file.split("/").includes("..")) return;
   if (!repo || !validDomain(repo.domain) || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo.path)
     || repo.path.split("/").some(part => part === "." || part === "..")) return;
-  let file = citation.file;
   if (path.isAbsolute(file)) {
     if (!repo.root || !path.isAbsolute(repo.root)) return;
     // git canonicalizes macOS /var and other checkout aliases; citations may retain the alias.
     const absolute = citation.repo && path.isAbsolute(citation.repo)
       ? path.resolve(repo.root, path.relative(citation.repo, file)) : file;
-    file = path.relative(repo.root, absolute);
+    file = path.relative(repo.root, absolute).split(path.sep).join("/");
     if (file === ".." || file.startsWith("../") || path.isAbsolute(file)) return;
   }
   file = path.posix.normalize(file);
