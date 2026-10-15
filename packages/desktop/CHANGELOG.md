@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Home lists each computer’s three busiest jobs with CPU and time observed, links known panes to chat, and preserves focus across resource updates.
+
 - Fixed missing usage-limit switch warnings on single-login Claude computers when the chat has no account ID; weekly limits show the weekly wording, and the current login is excluded from switch destinations.
 
 - Home shows Up next: the scheduled prompts due in the next 12 hours on every online computer, soonest first, with harness, project, computer and how long until each runs. Clicking one opens Schedules. Read from the schedules Home already fetches, so no extra Hook calls.
