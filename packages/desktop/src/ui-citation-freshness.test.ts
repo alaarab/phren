@@ -26,4 +26,34 @@ describe("citation freshness", () => {
     expect(freshnessNote({ citation: "<!-- phren:cite {broken} -->", citationFreshness: { state: "changed" } }))
       .toEqual({ label: "May be out of date", detail: "Cited file changed since this was written" });
   });
+
+  it.each([
+    { sha: 123 },
+    { sha: { value: "3f2a9c1" } },
+    { sha: "not-a-commit" },
+    { summary: 123 },
+    { summary: { text: "Changed" } },
+    { authoredAt: 20261014 },
+    { authoredAt: { toString: () => "2026-10-14" } },
+  ])("falls back for malformed commit fields %j", (fields) => {
+    expect(freshnessNote({
+      citationData: { file: "src/router.ts" },
+      citationFreshness: { state: "changed", lastCommit: {
+        sha: "3f2a9c1abcdef", summary: "Changed", authoredAt: "2026-10-14T00:01:00Z", ...fields,
+      } },
+    })).toEqual({ label: "May be out of date", detail: "src/router.ts changed since this was written" });
+  });
+
+  it.each([123, { path: "src/router.ts" }])("uses a safe file label for %j", (file) => {
+    expect(freshnessNote({ citationData: { file }, citationFreshness: { state: "changed" } }))
+      .toEqual({ label: "May be out of date", detail: "Cited file changed since this was written" });
+  });
+
+  it("parses a closing brace inside a quoted citation filename", () => {
+    expect(freshnessNote({
+      citation: '<!-- phren:cite {"file":"src/a}b.ts","commit":"abc1234"} -->',
+      citationFreshness: { state: "changed" },
+    })).toEqual({ label: "May be out of date", detail: "src/a}b.ts changed since this was written" });
+  });
+
 });

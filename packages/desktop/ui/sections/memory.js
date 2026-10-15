@@ -1,5 +1,5 @@
 import { el } from "../dom.js";
-import { freshnessChip } from "../citation-freshness.js";
+import { citationData, freshnessChip } from "../citation-freshness.js";
 // Memory: the phone's Memory screen at desktop scale. A rail of online
 // computers and their projects (review counts in amber) beside one segment
 // control over Findings, Review, Notes, Truths, Topics and the 3D graph.
@@ -85,14 +85,6 @@ function findingBody(item) {
     .replace(/^\[[A-Za-z][A-Za-z0-9_-]*\]\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-/** The parsed citation meta, from citationData or by reading the raw comment. */
-function citationData(item) {
-  if (item?.citationData && typeof item.citationData === "object") return item.citationData;
-  const match = String(item?.citation ?? "").match(/phren:cite\s+(\{[\s\S]*\})/);
-  if (!match) return null;
-  try { return JSON.parse(match[1]); } catch { return null; }
 }
 
 function citeInfo(item) {
