@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
+import { listMoves, moveSessionFields } from "./session-move.js";
 import { paneAccount, paneAccountKey, notePaneTranscript } from "./pane-accounts.js";
 import type { AccountRef } from "./claude-accounts.js";
 import { execFile } from "node:child_process";
@@ -532,14 +533,18 @@ export async function panes(server: string, workspace: string, tab: string): Pro
   const s = await snapshot(server);
   if (!objects(s.tabs).some(t => t.tab_id === tab && t.workspace_id === workspace)) throw new BridgeError(409, "This terminal tab has changed. Refresh the computer.");
   const mux = (await terminal()).terminalMux(server);
+  const moves = await listMoves();
   return { kind: mux.kind, mux, groupId: workspace, childId: tab, panes: await Promise.all(objects(s.panes)
     .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => {
       const chat = await paneChatState(server, p);
       const record = await paneRecord(server, p, typeof chat.sessionId === "string" ? chat.sessionId : undefined);
       const t = objects(s.tabs).find(candidate => candidate.tab_id === tab && candidate.workspace_id === workspace);
       const w = objects(s.workspaces).find(candidate => candidate.workspace_id === workspace);
+      const title = await recordTitle(record, { paneLabel: p.label, harnessTitle: p.title || p.terminal_title_stripped, tabLabel: t?.label, workspaceLabel: w?.label, fallbackLabel: p.label || p.pane_id });
+      const moveFields = typeof chat.sessionId === "string" && provider.safeParse(p.agent).success
+        ? moveSessionFields(moves, { server, workspace, tab, pane: String(p.pane_id), source: p.agent as Target["source"], session: chat.sessionId }, title) : {};
       return { id: p.pane_id, label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
-        title: await recordTitle(record, { paneLabel: p.label, harnessTitle: p.title || p.terminal_title_stripped, tabLabel: t?.label, workspaceLabel: w?.label, fallbackLabel: p.label || p.pane_id }),
+        title, ...moveFields,
         cwd: p.foreground_cwd || p.cwd, ...chat, ...paneAccountField(server, p) };
     })) };
 }

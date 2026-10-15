@@ -1,6 +1,6 @@
 // Moving a live session to another agent: the agent in the pane writes a
 // hand-off, exits the way it normally does, and the target harness starts in
-// the same pane, in the same folder, with that hand-off as its first prompt.
+// the same pane by default, or a new chat that keeps the old agent running.
 //
 // The hand-off is asked for through the same durable prompt path `hand_off`
 // uses, as a reply between two marker lines; the Hook reads it from the
@@ -40,6 +40,7 @@ export type MoveTo = z.infer<typeof moveToSchema>;
 export const moveRequestSchema = z.object({
   target: targetSchema,
   to: moveToSchema,
+  mode: z.enum(["replace", "new-chat"]).default("replace"),
   /** Kept on a retry: the same id returns the move already under way. */
   id: z.string().uuid().optional(),
   /** How long the agent gets to write its hand-off before Phren builds one. */
@@ -54,6 +55,9 @@ const moveRecordSchema = z.object({
   createdAt: timestamp, updatedAt: timestamp,
   from: z.object({ target: targetSchema, account: z.string().max(64).optional(), label: z.string().max(200).optional() }).strict(),
   to: moveToSchema,
+  mode: z.enum(["replace", "new-chat"]).optional(),
+  handedOffTo: z.object({ target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
+  handedOffFrom: z.object({ target: targetSchema, title: z.string().max(200) }).strict().optional(),
   cwd: z.string().max(4096),
   /** The dispatch the moved worker was launched for, as its turn record names it. */
   dispatch: briefId.optional(),
@@ -128,6 +132,19 @@ export function moveFrom(records: readonly MoveRecord[], target: { server: strin
   });
 }
 
+/** Conversation-bound annotations shared by tab and pane overview rows. */
+export function moveSessionFields(records: readonly MoveRecord[], target: Target, title?: string): Json {
+  const matches = (other: Target | StartingTarget) => other.server === target.server && other.workspace === target.workspace
+    && other.tab === target.tab && other.pane === target.pane && other.source === target.source
+    && "session" in other && other.session === target.session;
+  const outgoing = records.find(record => record.state === "moved" && record.mode === "new-chat" && matches(record.from.target));
+  const incoming = records.find(record => record.state === "moved" && record.mode === "new-chat" && record.target && matches(record.target));
+  const suffix = outgoing ? ` (handed off to ${outgoing.to.harness})` : "";
+  return { ...(outgoing?.handedOffTo ? { handedOffTo: outgoing.handedOffTo,
+    title: `${(title ?? outgoing.from.label ?? outgoing.from.target.source).replace(/ \(handed off to [^)]+\)$/, "")}${suffix}` } : {}),
+    ...(incoming?.handedOffFrom ? { handedOffFrom: incoming.handedOffFrom } : {}) };
+}
+
 /** The receipt fields for a finished move. */
 export function movedWorker(record: MoveRecord): MovedWorker | undefined {
   if (record.state !== "moved" || !record.target) return undefined;
@@ -147,7 +164,7 @@ const markers = (id: string) => {
 };
 
 /** What the moving agent is asked to write. */
-export function handoffRequest(id: string, to: MoveTo): string {
+export function handoffRequest(id: string, to: MoveTo, mode: "replace" | "new-chat" = "replace"): string {
   const { begin, end } = markers(id);
   return [
     `Phren is moving this session to ${harnessName(to)}, which continues the work in this same folder. Write a hand-off for it now.`,
@@ -165,7 +182,8 @@ export function handoffRequest(id: string, to: MoveTo): string {
     "## Decisions: what you chose and why, including approaches you ruled out",
     "## Next steps: in order",
     "## Open questions: for the owner, or still undecided",
-    "## Key files: paths, a few words each",
+    "## Key files: paths, a few words each, including files you had open or changed",
+    ...(mode === "new-chat" ? ["The target starts in a new chat. Keep this agent running; do not exit after the hand-off."] : []),
     "",
     "Write it in full; do not shorten it. Use no tools once you start it. Phren saves it to a file and starts the next agent with it.",
   ].join("\n");
@@ -324,6 +342,9 @@ export function handoffDocument(record: MoveRecord, body: string, observed: stri
     "",
     `Moved by Phren at ${at} (move ${record.id}) in ${record.cwd}.${record.dispatch ? ` Dispatch ${record.dispatch}.` : ""}`,
     "",
+    ...(record.mode === "new-chat" ? ["## Previous chat", "",
+      `Title: ${record.from.label ?? record.from.target.source}`,
+      "Target (JSON, for opening the old chat):", "```json", JSON.stringify(record.from.target), "```", ""] : []),
     body.trim(),
     "",
     observed,
@@ -429,10 +450,10 @@ export class SessionMover {
     const cwd = String(pane.foreground_cwd || pane.cwd || "");
     if (!path.isAbsolute(cwd)) throw new BridgeError(409, "The pane's folder is unknown, so the new agent could not start there.");
     const dispatch = await this.deps.paneDispatch?.(target.server, pane).catch(() => undefined);
-    const label = [pane.label, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
+    const label = [pane.label, pane.title, pane.terminal_title_stripped, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
     const at = new Date(this.now).toISOString();
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: "handing-off", createdAt: at, updatedAt: at,
-      from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd,
+      mode: data.mode, from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd,
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}) };
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
@@ -458,24 +479,33 @@ export class SessionMover {
       const [git, processes] = await Promise.all([(this.deps.git ?? readGitState)(record.cwd).catch(() => undefined),
         (this.deps.processesBelow ?? processesBelow)(pids).catch(() => [] as string[])]);
       const written = await this.askForHandoff(record, handoffMs);
-      const body = "text" in written ? written.text : await this.fallback(record, written.reason);
+      const fallback = "text" in written ? undefined : await this.fallback(record, written.reason);
+      const body = "text" in written ? written.text : record.mode === "new-chat"
+        ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
+        : fallback!;
       const document = handoffDocument(record, body, observedState(git, processes), new Date(this.now).toISOString());
       const file = handoffPath(record.id);
       const prompt = briefText(continuePrompt(document, file));
       // The folder is the new agent's brief folder; the hand-off is written into it, whole.
       await writeLaunchBrief({ id: record.id, text: prompt }, this.now, record.from.label);
       await atomic(file, document);
-      await this.update(record, { state: "exiting", handoff: { path: file, source: "text" in written ? "agent" : "fallback",
+      await this.update(record, { state: record.mode === "new-chat" ? "launching" : "exiting", handoff: { path: file, source: "text" in written ? "agent" : "fallback",
         ...("reason" in written ? { reason: written.reason.slice(0, 300) } : {}), chars: document.length } });
-      const exit = await this.exit(record);
-      await this.update(record, { state: "launching", exit });
-      await this.deps.afterExit?.(from.server, from.pane).catch(() => undefined);
+      if (record.mode !== "new-chat") {
+        const exit = await this.exit(record);
+        await this.update(record, { state: "launching", exit });
+        await this.deps.afterExit?.(from.server, from.pane).catch(() => undefined);
+      }
       const launched = await this.relaunch(record, prompt);
-      await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), ...launched });
+      await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), ...launched,
+        ...(record.mode === "new-chat" ? {
+          ...(launched.target ? { handedOffTo: { target: launched.target } } : {}),
+          handedOffFrom: { target: from, title: record.from.label ?? from.source },
+        } : {}) });
       logger.info("move", `Moved ${from.source} in pane ${from.pane} to ${harnessName(record.to)} (${launched.placement}); hand-off ${record.handoff?.source}.`);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f\x7f]+/g, " ");
-      const stopped = record.state === "launching";
+      const stopped = record.mode !== "new-chat" && record.state === "launching";
       const hint = stopped && record.handoff ? ` The old agent has exited; start ${HARNESS_NAMES[record.to.harness]} in the pane with the hand-off at ${record.handoff.path}.` : "";
       await this.update(record, { state: "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
       logger.warn("move", `Moving pane ${from.pane} to ${record.to.harness} failed: ${message}`);
@@ -487,7 +517,7 @@ export class SessionMover {
     const from = record.from.target;
     const deadline = this.now + handoffMs;
     try {
-      const sent = await this.deps.deliver(from, handoffRequest(record.id, record.to), `move-${record.id}`);
+      const sent = await this.deps.deliver(from, handoffRequest(record.id, record.to, record.mode), `move-${record.id}`);
       if (sent.ok !== true && sent.queued !== true) return { reason: `the request could not be delivered (${String(sent.error ?? sent.state ?? "not confirmed")}).` };
     } catch (error) { return { reason: `the request could not be delivered (${error instanceof Error ? error.message : String(error)}).` }; }
     while (this.now < deadline) {
@@ -563,7 +593,7 @@ export class SessionMover {
     // A Claude target with no account keeps the pane's own, so its shell's CLAUDE_CONFIG_DIR is right.
     const shellAccount = record.from.account ?? DEFAULT_ACCOUNT;
     const account = record.to.harness === "claude" ? record.to.account ?? shellAccount : undefined;
-    const samePane = (this.deps.envAtStart?.(from.server) ?? false) || record.to.harness !== "claude" || account === shellAccount;
+    const samePane = record.mode !== "new-chat" && ((this.deps.envAtStart?.(from.server) ?? false) || record.to.harness !== "claude" || account === shellAccount);
     const data: Json = { kind: record.to.harness, label: record.from.label ?? HARNESS_NAMES[record.to.harness], cwd: record.cwd,
       ...(record.to.model ? { model: record.to.model } : {}), ...(record.to.effort ? { effort: record.to.effort } : {}), ...(account ? { account } : {}),
       brief: { id: record.id, text: prompt }, ...(samePane ? {} : { workspaceId: from.workspace }) };
@@ -575,7 +605,7 @@ export class SessionMover {
       if (typedTo.success) await this.deps.deliver(typedTo.data, prompt, `move-${record.id}-brief`).catch(() => undefined);
       else await this.deps.terminal.prompt(from.server, String(launched.paneId), prompt).catch(() => undefined);
     }
-    if (!samePane) await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
+    if (!samePane && record.mode !== "new-chat") await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
     // The account the new agent runs under, also when the move named none.
     const to = account ? { ...record.to, account } : record.to;
     return { to, placement: samePane ? "same-pane" : "adjacent-pane", ...await this.newTarget(from.server, launched, record.to.harness) };

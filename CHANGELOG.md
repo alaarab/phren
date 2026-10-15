@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Hook session moves accept `mode: "new-chat"` to continue with another harness in a new chat, keeping the old agent running and linking both chats in overview and move status (`moveNewChat`).
+
 ## [0.3.47] - 2026-10-14
 
 ### Fixed

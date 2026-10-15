@@ -6,7 +6,7 @@ import type { Receipt } from "./dispatch.js";
 import { observe, workerStates } from "./dispatch-returns.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { Json, Target } from "./protocol.js";
-import { listMoves, readMove, SessionMover, type MoverDeps, type MoveRecord } from "./session-move.js";
+import { listMoves, moveSessionFields, readMove, SessionMover, type MoverDeps, type MoveRecord } from "./session-move.js";
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-move-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
@@ -97,9 +97,9 @@ const writes = (request: string) => {
 };
 
 describe("moving a session to another agent", () => {
-  it("saves the agent's hand-off, exits it cleanly and starts the target in the same pane under the same dispatch", async () => {
+  it.each([undefined, "replace"])("saves the hand-off and replaces the agent in place (mode %s)", async mode => {
     const { deps, typed, launches, closed } = world({ reply: writes });
-    const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" });
+    const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" }, mode ? { mode } : {});
 
     expect(record).toMatchObject({ state: "moved", placement: "same-pane", exit: "clean", dispatch: DISPATCH,
       handoff: { source: "agent" }, target: { pane: "w1:p1", source: "codex", session: NEXT } });
@@ -117,6 +117,53 @@ describe("moving a session to another agent", () => {
     // The first prompt is the whole hand-off plus the instruction to continue.
     expect(String(object(launches[0].data.brief).text)).toMatch(/Continue from here[\s\S]*## Goal\nFix the parser\./);
     expect(closed).toEqual([]);
+  });
+
+  it.each([
+    ["codex", true], ["codex", false], ["opencode", true], ["copilot", true],
+  ] as const)("new-chat preserves the old agent and links both chats (%s, agent reply %s)", async (harness, replies) => {
+    const { deps, pane, typed, keys, killed, closed, launches } = world({ reply: replies ? writes : undefined });
+    const afterExit = vi.fn();
+    deps.afterExit = afterExit;
+    deps.inventory = async () => undefined;
+    const launch = deps.launch;
+    deps.launch = async (...args) => ({ ...await launch(...args), briefLaunched: harness !== "copilot" });
+    const record = await move(deps, { harness, model: "target-model" }, { mode: "new-chat", handoffTimeoutMs: 5_000 });
+    expect(record).toMatchObject({ state: "moved", mode: "new-chat", placement: "adjacent-pane",
+      handoff: { source: replies ? "agent" : "fallback" },
+      target: { pane: "w1:p2", session: NEXT, source: harness },
+      handedOffFrom: { target: from, title: "parser fix" } });
+    expect(record.handedOffTo).toEqual({ target: record.target });
+    expect(record.exit).toBeUndefined();
+    expect(pane.agent).toBe("claude");
+    expect(typed).toHaveLength(harness === "copilot" ? 2 : 1);
+    expect(typed[0]).toContain("Keep this agent running");
+    expect([keys, killed, closed]).toEqual([[], [], []]);
+    expect(afterExit).not.toHaveBeenCalled();
+    expect(launches).toHaveLength(1);
+    expect(launches[0].options.into).toBeUndefined();
+    expect(launches[0].data).toMatchObject({ kind: harness, cwd: "/work/repo", workspaceId: "w1" });
+    const prompt = String(object(launches[0].data.brief).text);
+    if (harness === "copilot") expect(typed[1]).toBe(prompt);
+    for (const text of ["## Goal", "Fix the parser", "fix/parser", "src/parser.ts", "## Next steps", "parser fix", JSON.stringify(from)]) {
+      expect(prompt).toContain(text);
+    }
+    const records = await listMoves(Date.parse(record.updatedAt));
+    expect(moveSessionFields(records, from, "parser fix")).toEqual({ title: `parser fix (handed off to ${harness})`, handedOffTo: { target: record.target } });
+    expect(moveSessionFields(records, record.target as Target)).toEqual({ handedOffFrom: { target: from, title: "parser fix" } });
+    expect(moveSessionFields(records, { ...from, session: NEXT })).toEqual({});
+    expect(await readFile(path.join(path.dirname(record.handoff!.path), "brief.md"), "utf8")).toContain(prompt);
+  });
+
+  it("keeps the source unlabelled and running when a new-chat launch fails", async () => {
+    const { deps, pane, typed, closed } = world({ reply: writes });
+    deps.launch = async () => { throw new Error("launch failed"); };
+    const record = await move(deps, { harness: "codex" }, { mode: "new-chat" });
+    expect(record).toMatchObject({ state: "failed", error: "launch failed" });
+    expect(pane.agent).toBe("claude");
+    expect(typed).toHaveLength(1);
+    expect(closed).toEqual([]);
+    expect(moveSessionFields([record], from)).toEqual({});
   });
 
   it("builds the hand-off from the transcript, git state and original brief when the agent writes none in time", async () => {
