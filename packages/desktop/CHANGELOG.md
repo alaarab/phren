@@ -4,6 +4,10 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## [0.1.10] - unreleased
+
+- Open account usage with Cmd/Ctrl+Alt+U or “Show account usage” in the command palette; the shared overview lists accounts and windows with the most constrained first, and Escape closes it and returns focus.
+
 ## [0.1.9] - 2026-10-15
 
 - When the account a chat runs on nears its usage limit (90% of the 5-hour or weekly window by default; Settings › Notifications), a card above the composer shows the usage, when it resets and how much the other accounts and harnesses have left, with Switch, Not now and Don't ask again for this chat. Switching to another Claude account continues the chat in place; switching to Codex, OpenCode or Copilot opens a new chat with a hand-off (Hook 0.3.48), and the two chats link to each other. Settings and opt-outs persist across launches.

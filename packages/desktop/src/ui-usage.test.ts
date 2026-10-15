@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { accountTitles, creditsValue, metaLine, subscriptionSummary, windowText } from "../ui/shell/usage-rings.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { accountTitles, creditsValue, sortUsageAccounts, metaLine, mountUsageRings, openUsage, subscriptionSummary, windowText } from "../ui/shell/usage-rings.js";
 
 const now = Date.parse("2026-10-11T12:00:00.000Z");
 const later = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
@@ -44,4 +44,70 @@ describe("usage popover text", () => {
     expect(creditsValue({ hasCredits: false, balance: 0 })).toBe("");
     expect(creditsValue(undefined)).toBe("");
   });
+});
+
+describe("usage account ordering", () => {
+  it("puts exhausted accounts first, then the tightest active window, unknown last, without changing reports", () => {
+    const rows = [
+      { id: "unknown" },
+      { id: "roomy", windows: [{ usedPercent: 20 }, { usedPercent: 100, reset: true }] },
+      { id: "weekly", windows: [{ usedPercent: 10 }, { usedPercent: 95 }] },
+      { id: "exhausted", exhausted: true },
+      { id: "limited", windows: [{ usedPercent: 100, limited: true }] },
+      { id: "remaining", windows: [{ leftPercent: 8 }] },
+      { id: "tie", windows: [{ usedPercent: 95 }] },
+    ];
+    expect(sortUsageAccounts(rows).map(r => r.id)).toEqual(["limited", "exhausted", "weekly", "tie", "remaining", "roomy", "unknown"]);
+    expect(rows[0].id).toBe("unknown");
+    expect(sortUsageAccounts(undefined)).toEqual([]);
+  });
+
+  it("labels exhaustion even without the limited flag and identifies unknown resets", () => {
+    expect(windowText({ usedPercent: 100, exhausted: true }, now)).toMatchObject({ value: "100%", caption: "Exhausted · reset time unknown" });
+  });
+});
+
+// Minimal DOM for the popover lifecycle, with real rendering and event handlers.
+class UsageNode {
+  children: UsageNode[] = [];
+  hidden = false;
+  isConnected = true;
+  style = {};
+  textContent = "";
+  className = "";
+  classList = { add() {}, remove() {}, toggle() {} };
+  listeners = new Map<string, (ev: unknown) => void>();
+  append(...nodes: UsageNode[]) { this.children.push(...nodes); }
+  replaceChildren(...nodes: UsageNode[]) { this.children = nodes; }
+  setAttribute() {}
+  addEventListener(event: string, fn: (ev: unknown) => void) { this.listeners.set(event, fn); }
+  focus = vi.fn(() => { Object.assign(document, { activeElement: this }); });
+}
+
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+it("opens without rings and returns focus on Escape after rendering the latest shared usage", async () => {
+  vi.useFakeTimers();
+  const events = new Map<string, (ev: unknown) => void>();
+  const origin = new UsageNode();
+  vi.stubGlobal("document", {
+    activeElement: origin,
+    createElement: () => new UsageNode(), createElementNS: () => new UsageNode(),
+    addEventListener: (event: string, fn: (ev: unknown) => void) => events.set(event, fn),
+    removeEventListener: (event: string) => events.delete(event),
+  });
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ accounts: [], computers: [] }) })));
+  const host = new UsageNode();
+  const handle = mountUsageRings(host);
+  openUsage();
+  const popover = host.children[1];
+  expect(popover.hidden).toBe(false);
+  expect(popover.focus).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(popover.children[0].textContent).toBe("0 accounts across 0 computers.");
+  events.get("keydown")!({ key: "Escape", preventDefault() {}, stopImmediatePropagation() {} });
+  expect(popover.hidden).toBe(true);
+  expect(origin.focus).toHaveBeenCalledOnce();
+  expect(events.size).toBe(0);
+  handle.close();
 });

@@ -522,3 +522,16 @@ it is absent. Both sidebar styles and the chat header show "handed off to
 <harness>" / "handed off from <title>"; a reference with a target is a button
 opening that chat. `openChat.updateOverview(child)` refreshes these labels as
 live overview rows change. No Hook fields or routes are added by the desktop.
+
+### Account usage overview
+
+`shell/usage-rings.js` exports `openUsage()`, which opens the existing titlebar
+usage popover even without account rings. Both the `usage` app action
+(Cmd/Ctrl+Alt+U; Ctrl+Shift+U is reserved for Linux Unicode input) and
+“Show account usage” in the palette call it. Escape closes the dialog and
+returns focus; the palette restores its invoking focus before running a command.
+`sortUsageAccounts(accounts)` returns a sorted copy: exhausted accounts first,
+then the highest active window percentage, unknown usage last, ties in report
+order. Reset windows do not constrain the order. The overview retains merged
+account cards with harness names, all reporting computers, every window,
+reset times, exhaustion, missing data and unreachable computers.

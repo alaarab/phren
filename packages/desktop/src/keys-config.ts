@@ -52,6 +52,7 @@ export const ACTIONS: KeyAction[] = [
   { action: "show_changes", group: "Panel", label: "Open Changes", herdr: false },
   { action: "show_files", group: "Panel", label: "Open Files", herdr: false },
   { action: "show_search", group: "Panel", label: "Open Search", herdr: false },
+  { action: "usage", group: "Direct", label: "Show account usage", herdr: false, app: true },
   { action: "palette", group: "Direct", label: "Open the command palette", herdr: false, app: true },
   { action: "open_file", group: "Direct", label: "Quick open a file", herdr: false, app: true },
   { action: "terminal", group: "Direct", label: "Show the terminal pane", herdr: false, app: true },
@@ -87,6 +88,8 @@ export const DEFAULTS: Record<string, string[]> = {
 /** Direct (prefix-free) bindings under [keys.app]. "cmd" is Command on macOS and
  * Control elsewhere; the UI resolves that when it matches presses. */
 export const DEFAULTS_APP: Record<string, string[]> = {
+  // Ctrl+Shift+U starts Unicode input on Linux; keep usage free on both platforms.
+  usage: ["cmd+alt+u"],
   palette: ["cmd+k"], open_file: ["cmd+p"],
   terminal: ["cmd+j"], sidebar: ["cmd+b"],
   next_needs_you: ["cmd+shift+a"], close_tab: ["cmd+w"],

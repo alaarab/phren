@@ -305,6 +305,7 @@ function openFileInPane(path) {
 }
 
 // ------------------------------------------------------------ overlay
+let returnFocus = null;
 let overlayEl = null;
 let inputEl = null;
 let listEl = null;
@@ -320,6 +321,7 @@ export function isPaletteOpen() { return !!overlayEl; }
  * Each item is { id, title, meta?, icon?, kind?, shortcut?, run() }. */
 export function openPalette({ sources = [] } = {}) {
   closePalette();
+  returnFocus = document.activeElement;
   filePool = [];
   const session = activeSession();
 
@@ -372,6 +374,8 @@ export function openPalette({ sources = [] } = {}) {
 
 export function closePalette() {
   overlayEl?.remove();
+  if (returnFocus?.isConnected) returnFocus.focus();
+  returnFocus = null;
   overlayEl = null; inputEl = null; listEl = null;
   items = []; rowEls = []; selected = 0; lastQuery = ""; filePool = [];
   clearTimeout(memory.timer);

@@ -6,6 +6,8 @@
 import { hookPost } from "./api.js";
 import { closePalette, isPaletteOpen, openPalette, registerCommand } from "./shell/palette.js";
 
+import { openUsage } from "./shell/usage-rings.js";
+
 let config = null; // { bindings, sources, files, errors, actions }
 let app = null; // actions supplied by app.js
 let prefixUntil = 0;
@@ -233,6 +235,7 @@ function run(action, arg) {
     case "close_tab": return app.closeTab ? app.closeTab() : app.closePanel();
     case "new_tab":
     case "terminal": return app.showPane("terminal");
+    case "usage": return openUsage();
     case "palette": return isPaletteOpen() ? closePalette() : openPalette();
     case "open_file": return openQuickFile();
     case "show_changes": return app.showPane("changes");
@@ -466,6 +469,7 @@ function flash(text) {
 // ------------------------------------------------------------ palette commands
 // The existing key actions as concise palette commands, showing their shortcuts.
 const BUILTINS = [
+  ["usage", "Show account usage"],
   ["show_changes", "Show Changes"],
   ["show_files", "Show Files"],
   ["show_search", "Show Search"],

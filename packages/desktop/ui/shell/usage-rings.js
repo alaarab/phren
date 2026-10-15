@@ -5,6 +5,24 @@
 // @phren/cli/client/account-usage, reimplemented here because the browser
 // imports nothing from the CLI.
 
+let openOverview = null;
+/** Open the titlebar's shared overview, including when there are no rings. */
+export function openUsage() { openOverview?.(); }
+
+/** Exhausted accounts first, then the highest active window percent; unknown last. */
+export function sortUsageAccounts(accounts) {
+  const constraint = (row) => {
+    const windows = (row.windows ?? []).filter((w) => !w.reset);
+    const exhausted = row.exhausted || windows.some((w) => w.exhausted || w.limited || w.usedPercent >= 100 || w.leftPercent === 0);
+    const used = windows.map((w) => typeof w.usedPercent === "number" ? w.usedPercent : typeof w.leftPercent === "number" ? 100 - w.leftPercent : -1);
+    return [exhausted ? 1 : 0, Math.max(-1, ...used)];
+  };
+  return [...(accounts ?? [])].sort((a, b) => {
+    const x = constraint(a), y = constraint(b);
+    return y[0] - x[0] || y[1] - x[1];
+  });
+}
+
 const usageListeners = new Set();
 let latestUsage = null;
 export function followUsage(fn) { usageListeners.add(fn); fn(latestUsage); return () => usageListeners.delete(fn); }
@@ -104,11 +122,11 @@ export function creditsValue(credits) {
  * a 5-hour window with no reset time has not started.
  */
 export function windowText(w, now = Date.now()) {
-  const used = typeof w.usedPercent === "number" ? w.usedPercent : null;
+  const used = typeof w.usedPercent === "number" ? w.usedPercent : typeof w.leftPercent === "number" ? 100 - w.leftPercent : null;
   const credit = isCredit(w);
   const value = (credit || used === null) && w.usedUSD !== undefined
     ? `${dollars(w.usedUSD)}${w.limitUSD !== undefined ? ` of ${dollars(w.limitUSD)}` : ""}`
-    : w.reset ? "reset" : used !== null ? `${Math.round(used * 10) / 10}%` : "";
+    : w.reset ? "reset" : used !== null ? `${Math.round(used * 10) / 10}%` : "unknown";
   let when = "";
   if (credit) {
     if (w.resetsAt && dayLocal(w.resetsAt)) when = `${Date.parse(w.resetsAt) > now ? "expires" : "expired"} ${dayLocal(w.resetsAt)}`;
@@ -116,7 +134,7 @@ export function windowText(w, now = Date.now()) {
     const until = w.resetsIn || (w.resetsAt ? resetsIn(w.resetsAt, now) : "");
     when = until ? `resets in ${until}` : w.id === "five_hour" && !w.resetsAt ? "not started" : "";
   }
-  const caption = [w.limited ? "Limit reached" : "", when].filter(Boolean).join(" · ");
+  const caption = [w.exhausted ? "Exhausted" : w.limited ? "Limit reached" : "", when || (!w.reset ? "reset time unknown" : "")].filter(Boolean).join(" · ");
   return { value, caption, used };
 }
 
@@ -178,20 +196,20 @@ function windowLine(w, now) {
   const value = document.createElement("span");
   value.className = "usage-window-value";
   if (w.reset) value.classList.add("muted");
-  if (w.limited) value.classList.add("danger");
+  if (w.limited || w.exhausted) value.classList.add("danger");
   value.textContent = text.value;
   const bar = document.createElement("span");
   bar.className = "usage-bar";
   const fill = document.createElement("span");
   fill.className = "usage-bar-fill";
   fill.style.width = `${text.used === null ? 0 : Math.max(0, Math.min(100, text.used))}%`;
-  fill.style.background = w.limited ? "var(--danger)" : tone(text.used);
+  fill.style.background = w.limited || w.exhausted ? "var(--danger)" : tone(text.used);
   bar.append(fill);
   row.append(label, value, bar);
   if (text.caption) {
     const caption = document.createElement("span");
     caption.className = "usage-window-reset";
-    if (w.limited) caption.classList.add("danger");
+    if (w.limited || w.exhausted) caption.classList.add("danger");
     caption.textContent = text.caption;
     row.append(caption);
   }
@@ -232,6 +250,7 @@ function accountBlock(row, cardTitle, now) {
   const head = document.createElement("div");
   head.className = "usage-account-head";
   head.append(line("usage-account-name", cardTitle));
+  if (row.exhausted) head.append(line("usage-account-meta danger", "Exhausted"));
   const plan = subscriptionSummary(row.subscription, now);
   if (plan) head.append(line("usage-account-meta", plan));
   // A window that reset since its report already says so on its own line.
@@ -264,26 +283,41 @@ export function mountUsageRings(el) {
   const pop = document.createElement("div");
   pop.className = "usage-pop";
   pop.hidden = true;
+  pop.tabIndex = -1;
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", "Account usage");
   el.append(pop);
 
   let snapshot = null;
   let timer = null;
+  let returnFocus = null;
 
   const closePopover = () => {
+    if (pop.hidden) return;
     pop.hidden = true;
+    el.classList.remove("usage-open");
+    if (returnFocus?.isConnected) returnFocus.focus();
+    else row.querySelector("button")?.focus();
+    returnFocus = null;
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
   };
 
-  const onKey = (ev) => { if (ev.key === "Escape") closePopover(); };
+  const onKey = (ev) => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopImmediatePropagation(); closePopover(); } };
   const onOutside = (ev) => { if (!el.contains(ev.target)) closePopover(); };
 
   const openPopover = () => {
+    if (!pop.hidden) { pop.focus(); return; }
+    returnFocus = document.activeElement;
     renderPopover();
+    el.classList.add("usage-open");
     pop.hidden = false;
+    pop.focus();
     document.addEventListener("keydown", onKey, true);
     document.addEventListener("pointerdown", onOutside, true);
   };
+
+  openOverview = openPopover;
 
   function renderPopover() {
     pop.replaceChildren();
@@ -292,7 +326,9 @@ export function mountUsageRings(el) {
     header.textContent = usageSummary(snapshot);
     pop.append(header);
     const titles = accountTitles(snapshot?.accounts);
-    for (const account of snapshot?.accounts ?? []) pop.append(accountBlock(account, titles.get(account.id) ?? title(account), Date.now()));
+    if (!snapshot) pop.append(line("usage-pop-nodata", "Loading account usage…"));
+    for (const account of sortUsageAccounts(snapshot?.accounts)) pop.append(accountBlock(account, titles.get(account.id) ?? title(account), Date.now()));
+    for (const item of snapshot?.unreachable ?? []) pop.append(line("usage-pop-nodata", `${item.computer}: unreachable`));
     for (const item of snapshot?.noData ?? []) {
       const note = document.createElement("div");
       note.className = "usage-pop-nodata";
@@ -340,5 +376,5 @@ export function mountUsageRings(el) {
   void load();
   timer = setInterval(load, POLL_MS);
 
-  return { close() { if (timer) clearInterval(timer); closePopover(); } };
+  return { close() { if (openOverview === openPopover) openOverview = null; if (timer) clearInterval(timer); closePopover(); } };
 }

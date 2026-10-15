@@ -427,7 +427,7 @@ button.settings-summon-key.recording { color: var(--text); border-color: var(--a
 .settings-switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Titlebar usage rings: one small ring per account, with a popover. */
 #usage-rings { position: relative; display: flex; align-items: center; }
-#usage-rings.empty { display: none; }
+#usage-rings.empty:not(.usage-open) { display: none; }
 .usage-rings-row { display: flex; align-items: center; gap: 4px; }
 .usage-ring { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: transparent; display: grid; place-items: center; cursor: pointer; transition: background .18s ease, opacity .18s ease; -webkit-app-region: no-drag; }
 .usage-ring:hover { background: var(--raised); }
@@ -447,7 +447,7 @@ button.settings-summon-key.recording { color: var(--text); border-color: var(--a
 .usage-window-name { grid-area: name; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-window-value { grid-area: value; color: var(--text); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-window-value.muted { color: var(--muted); font-weight: 400; }
-.usage-window-value.danger, .usage-window-reset.danger { color: var(--danger); }
+.usage-account-meta.danger, .usage-window-value.danger, .usage-window-reset.danger { color: var(--danger); }
 .usage-bar { grid-area: bar; height: 5px; border-radius: 999px; background: var(--sunken); overflow: hidden; }
 .usage-bar-fill { display: block; height: 100%; border-radius: 999px; transition: width .18s ease; }
 .usage-window-reset { grid-area: reset; color: var(--muted); font-size: 11px; line-height: 1.3; }
