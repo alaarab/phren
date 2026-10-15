@@ -23,6 +23,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { quoted, withOriginalBrief } from "./account-failover.js";
+import { recordConductor, runsAgent } from "./conductor-role.js";
 import { DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { DISPATCH_HARNESSES, moveToSchema } from "./dispatch.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
@@ -339,7 +340,7 @@ export function fallbackHandoff(input: { reason: string; from: string; entries: 
 }
 
 /** The hand-off file: who moved where and when, the body, then what Phren saw. */
-export function handoffDocument(record: MoveRecord, body: string, observed: string, at: string): string {
+export function handoffDocument(record: MoveRecord, body: string, observed: string, at: string, conductor = false): string {
   return [
     `# Hand-off from ${harnessName({ harness: record.from.target.source, account: record.from.account })} to ${harnessName(record.to)}`,
     "",
@@ -348,6 +349,7 @@ export function handoffDocument(record: MoveRecord, body: string, observed: stri
     ...(record.mode === "new-chat" ? ["## Previous chat", "",
       `Title: ${record.from.label ?? record.from.target.source}`,
       "Target (JSON, for opening the old chat):", "```json", JSON.stringify(record.from.target), "```", ""] : []),
+    ...(conductor ? ["## Conductor role", "", "You are now the conductor. Continue coordinating the owner’s work and existing workers. The Hook transfers the role when this move lands; if transfer fails, the move reports failure and the old pane remains conductor.", ""] : []),
     body.trim(),
     "",
     observed,
@@ -436,7 +438,8 @@ export class SessionMover {
     if (pane.agent !== target.source) throw new BridgeError(409, `That pane no longer runs ${HARNESS_NAMES[target.source] ?? target.source}.`);
     const session = await this.deps.identity(target.server, pane).catch(() => undefined);
     if (session && session !== target.session) throw new BridgeError(409, "That pane runs another conversation now.");
-    if (await this.deps.isConductor?.(target.server, pane).catch(() => false)) throw new BridgeError(409, "This pane is the conductor. Stop it as conductor first, or make the new agent the conductor after starting it.");
+    const conductor = await this.deps.isConductor?.(target.server, pane) ?? false;
+    if (conductor && to.harness === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
     const account = target.source === "claude" ? this.deps.paneAccount?.(target.server, pane) ?? DEFAULT_ACCOUNT : undefined;
     const sameHarness = to.harness === target.source && (to.harness !== "claude" || (to.account ?? account) === account);
     if (sameHarness && !to.model && !to.effort) throw new BridgeError(400, "The session already runs there. Choose another harness, account, model or effort.");
@@ -460,7 +463,7 @@ export class SessionMover {
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}) };
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
-    const work = this.run(record, data.handoffTimeoutMs ?? DEFAULT_HANDOFF_MS).finally(() => this.running.delete(key));
+    const work = this.run(record, data.handoffTimeoutMs ?? DEFAULT_HANDOFF_MS, conductor).finally(() => this.running.delete(key));
     this.running.set(key, work);
     return record;
   }
@@ -473,7 +476,7 @@ export class SessionMover {
     await saveMove(record);
   }
 
-  private async run(record: MoveRecord, handoffMs: number): Promise<void> {
+  private async run(record: MoveRecord, handoffMs: number, conductor: boolean): Promise<void> {
     const from = record.from.target;
     try {
       // What the checkout and the agent's processes look like before it stops.
@@ -486,7 +489,7 @@ export class SessionMover {
       const body = "text" in written ? written.text : record.mode === "new-chat"
         ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
         : fallback!;
-      const document = handoffDocument(record, body, observedState(git, processes), new Date(this.now).toISOString());
+      const document = handoffDocument(record, body, observedState(git, processes), new Date(this.now).toISOString(), conductor);
       const file = handoffPath(record.id);
       const prompt = briefText(continuePrompt(document, file));
       // The folder is the new agent's brief folder; the hand-off is written into it, whole.
@@ -499,12 +502,27 @@ export class SessionMover {
         await this.update(record, { state: "launching", exit });
         await this.deps.afterExit?.(from.server, from.pane).catch(() => undefined);
       }
-      const launched = await this.relaunch(record, prompt);
+      const launched = await this.relaunch(record, prompt, conductor);
+      if (conductor) {
+        try {
+          const place = record.paneTarget;
+          const next = place && findPane(await this.deps.snapshot(place.server), place);
+          if (!place || !runsAgent(next) || next.agent !== record.to.harness) throw new Error("The new agent is no longer running in its launched pane.");
+          // One atomic replacement makes the new pane conductor and retires the
+          // old role. Never clear first: a failed write keeps the old record.
+          await recordConductor(place.server, next, "owner", launched.target && "session" in launched.target ? launched.target.session : undefined);
+        } catch (error) {
+          throw new Error(`Conductor role transfer failed; the old pane remains conductor. ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), ...launched,
         ...(record.mode === "new-chat" ? {
           ...(launched.target ? { handedOffTo: { target: launched.target } } : {}),
           handedOffFrom: { target: from, title: record.from.label ?? from.source },
         } : {}) });
+      if (conductor && launched.placement === "adjacent-pane" && record.mode !== "new-chat") {
+        await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
+      }
       logger.info("move", `Moved ${from.source} in pane ${from.pane} to ${harnessName(record.to)} (${launched.placement}); hand-off ${record.handoff?.source}.`);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f\x7f]+/g, " ");
@@ -588,7 +606,7 @@ export class SessionMover {
   }
 
   /** Starts the target in the old pane when its shell has what the target needs, else in a new tab beside it. */
-  private async relaunch(record: MoveRecord, prompt: string): Promise<Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">> {
+  private async relaunch(record: MoveRecord, prompt: string, conductor: boolean): Promise<Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">> {
     const from = record.from.target;
     const s = await this.deps.snapshot(from.server);
     const pane = findPane(s, placeOf(from));
@@ -624,7 +642,7 @@ export class SessionMover {
         throw new Error(`${record.mode === "new-chat" ? "New chat" : "Target"} started but did not receive the hand-off. The launched pane was left open. ${reason}`);
       }
     }
-    if (!samePane && record.mode !== "new-chat") await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
+    if (!conductor && !samePane && record.mode !== "new-chat") await this.deps.terminal.closePane(from.server, from.pane).catch(() => undefined);
     // The account the new agent runs under, also when the move named none.
     const to = account ? { ...record.to, account } : record.to;
     return { to, placement: samePane ? "same-pane" : "adjacent-pane", ...await this.newTarget(record, launched, record.to.harness) };

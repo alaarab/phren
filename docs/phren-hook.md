@@ -1274,6 +1274,14 @@ a pane already moving with 409 `move_in_progress`. The phone and desktop offer
 only harnesses `/v1/harnesses` reports as usable, and follow a move by polling
 its id. The record's fields and the steps are in docs/conductor.md.
 
+`capabilities.moveConductor: true` advertises conductor moves alongside
+`sessionMove` and `moveNewChat` in `/v1/health`. The old pane retains its role
+until the new agent lands; an atomic role replacement makes the new pane the
+conductor when the move becomes `moved`. The hand-off names its conductor role.
+Both move modes support this, except that Copilot cannot be a conductor. If
+role transfer fails, `state: "failed"` and `error` explain why, and the old pane
+keeps its conductor role and stays open.
+
 `mode` defaults to `"replace"`: the old agent exits and the target replaces it
 in place (or in an adjacent tab when its account needs a different shell).
 With `capabilities.moveNewChat: true`, apps may send `mode: "new-chat"`, for

@@ -2,6 +2,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as protocol from "./protocol.js";
+import { conductorPane, recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
+import { BUILTIN_MODULES } from "../modules/registry.js";
+import { capabilitiesForModules } from "./server-routes.js";
 import type { Receipt } from "./dispatch.js";
 import { observe, workerStates } from "./dispatch-returns.js";
 import type { HarnessInventory } from "./harnesses.js";
@@ -10,7 +14,7 @@ import { listMoves, moveSessionFields, readMove, SessionMover, type MoverDeps, t
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-move-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
-afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); resetRoleState(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 
 const SESSION = "00000003-1111-4111-8111-111111111111";
 const NEXT = "00000004-2222-4222-8222-222222222222";
@@ -72,6 +76,7 @@ function world(options: { reply?: (request: string) => string | undefined; exits
     paneAccount: () => "default",
     paneDispatch: async () => DISPATCH,
     brief: async id => id === DISPATCH ? "Original brief: fix the parser, open a PR, do not merge." : undefined,
+    isConductor: async (server, candidate) => (await conductorPane(server, { panes }))?.pane_id === candidate.pane_id,
     envAtStart: () => options.tmux === true,
     kill: (pid, signal) => { killed.push(`${signal} ${pid}`); if (signal === "SIGKILL") delete pane.agent; },
     sleep: async () => {},
@@ -97,6 +102,60 @@ const writes = (request: string) => {
 };
 
 describe("moving a session to another agent", () => {
+  it.each([
+    ["replace", "codex", "same-pane"],
+    ["replace", "claude", "adjacent-pane"],
+    ["new-chat", "codex", "adjacent-pane"],
+  ])("moves the conductor with its role (%s to %s, %s)", async (mode, harness, placement) => {
+    const { deps, pane, panes, closed } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      expect(await recordedConductor()).toMatchObject({ pane: from.pane, session: SESSION });
+      return launch(...args);
+    };
+    const record = await move(deps, { harness, ...(harness === "claude" ? { account: "work" } : {}) }, { mode });
+    expect(record).toMatchObject({ state: "moved", placement, target: { session: NEXT } });
+    resetRoleState(); // Verify the role persisted, rather than just the cached state.
+    expect(await recordedConductor()).toMatchObject({ server: from.server, pane: record.target!.pane, source: harness, session: NEXT });
+    expect((await conductorPane(from.server, { panes }))?.pane_id).toBe(record.target!.pane);
+    expect(await readFile(record.handoff!.path, "utf8")).toContain("You are now the conductor");
+    expect(closed).toEqual(mode === "replace" && placement === "adjacent-pane" ? [from.pane] : []);
+    const modules = { modules: BUILTIN_MODULES, has: () => true };
+    expect(capabilitiesForModules(modules as never).moveConductor).toBe(true);
+  });
+
+  it.each(["replace", "new-chat"])("keeps the old conductor and reports a role-transfer failure (%s)", async mode => {
+    const { deps, pane, closed } = world({ reply: writes });
+    await recordConductor(from.server, pane, "owner", SESSION);
+    const old = await recordedConductor();
+    const launch = deps.launch;
+    deps.launch = async (...args) => {
+      const launched = await launch(...args);
+      vi.spyOn(protocol, "atomicInPrivateDir").mockRejectedValueOnce(new Error("role disk full"));
+      return launched;
+    };
+    const record = await move(deps, { harness: "claude", account: "work" }, { mode });
+    expect(record).toMatchObject({ state: "failed", error: expect.stringContaining("Conductor role transfer failed") });
+    expect(record.error).toContain("role disk full");
+    expect(record.error).toContain("old pane remains conductor");
+    expect(record.movedAt).toBeUndefined();
+    resetRoleState();
+    expect(await recordedConductor()).toEqual(old);
+    expect(closed).toEqual([]);
+  });
+
+  it("keeps an unrelated conductor when a worker moves", async () => {
+    const { deps, panes } = world({ reply: writes });
+    const conductor = { ...panes[0], pane_id: "w1:p9", terminal_id: "term-9" };
+    panes.push(conductor);
+    await recordConductor(from.server, conductor, "owner", "other-session");
+    const old = await recordedConductor();
+    expect(await move(deps, { harness: "codex" })).toMatchObject({ state: "moved" });
+    resetRoleState();
+    expect(await recordedConductor()).toEqual(old);
+  });
+
   it.each([undefined, "replace"])("saves the hand-off and replaces the agent in place (mode %s)", async mode => {
     const { deps, typed, launches, closed } = world({ reply: writes });
     const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" }, mode ? { mode } : {});

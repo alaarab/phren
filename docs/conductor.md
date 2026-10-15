@@ -649,7 +649,7 @@ another signed-in account, Codex, OpenCode or Copilot, with an optional model
 and effort. The Hook:
 
 1. Checks the target harness and account are signed in and usable there, and
-   refuses a conductor pane, a pane already moving, or a move to the same place.
+   refuses a pane already moving or a move to the same place.
 2. Asks the agent, through the same queue `hand_off` uses, to reply with a
    hand-off between two marker lines: goal, done, current state, decisions,
    next steps, open questions and key files. A reply never waits on a
@@ -670,6 +670,17 @@ and effort. The Hook:
    created, so a Claude account the pane's shell does not already carry starts
    in a new tab of the same workspace and the old pane is closed. tmux always
    uses the same pane.
+
+The conductor can move too, including an account switch from the phone. With
+`capabilities.moveConductor: true` in `/v1/health`, the Hook keeps the old
+pane’s conductor role until the new agent lands, then atomically assigns the
+role to the new pane as the move becomes `moved`. Its hand-off says it is now
+the conductor. This works for both replacement and `mode: "new-chat"`; the
+latter keeps the old agent running with its conductor role removed. Copilot
+cannot be a conductor. A role-transfer failure records `state: "failed"` with
+a clear `error`, keeps the old pane as conductor, and leaves it open even when
+an account switch would otherwise close it. An exited old agent may need to
+be restarted there; the role remains assigned.
 
 Each move is recorded in `<bridge>/moves/<id>.json`: `state` (`handing-off`,
 `exiting`, `launching`, `linking`, `moved`, `failed`), `from`, `to`, `handoff` (`path`,
