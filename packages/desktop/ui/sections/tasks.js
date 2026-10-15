@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Tasks: every online computer's Phren stores, their projects, and each
 // project's tasks grouped Active / Queue / Done with readiness lanes. Create,
 // inline edit, complete, move, pin and "Launch as agent" are written through
@@ -26,13 +27,6 @@ function ensureCss() {
   link.rel = "stylesheet";
   link.href = "./sections/tasks.css";
   document.head.append(link);
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 function hex8() {

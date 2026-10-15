@@ -1,3 +1,4 @@
+import { el as h } from "../dom.js";
 // A small, safe Markdown renderer for the chat transcript. `parseMarkdown`
 // is pure and returns a node-description tree (no DOM), so it runs under Node
 // in src/ui-markdown.test.ts; the render helpers below build DOM nodes from it
@@ -143,13 +144,6 @@ export function parseMarkdown(text) {
 }
 
 const SAFE_HREF = /^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i;
-
-function h(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
-}
 
 function inlineNodes(inline, out) {
   for (const node of inline) {

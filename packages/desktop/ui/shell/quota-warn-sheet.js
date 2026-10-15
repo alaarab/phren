@@ -1,3 +1,4 @@
+import { el as node } from "../dom.js";
 import { windowText } from "./usage-windows.js";
 import { movePlan } from "./handoff.js";
 // Passive sheet: no backdrop or focus grab, and never launches a move itself.
@@ -8,13 +9,6 @@ import { followUsage } from "./usage-rings.js";
 import { moveAccounts, moveChoices, openMoveSheet } from "./move.js";
 import { quotaDestinations, quotaDestinationText, quotaSessionKey, quotaWarnings, sessionUsage } from "./quota-warn.js";
 import { loadQuotaState, unmarkQuotaSeen, markQuotaSeen, quotaSeen, quotaSettings, quotaSuppressed, suppressQuotaChat } from "./quota-warn-prefs.js";
-
-const node = (tag, cls, text) => {
-  const el = document.createElement(tag);
-  el.className = cls;
-  if (text !== undefined) el.textContent = text;
-  return el;
-};
 
 /** Shared Switch entry point: rank fresh room, then use the capability-aware move sheet. */
 export function openQuotaSwitch(session, inventory, accounts, { returnFocus } = {}) {

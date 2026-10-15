@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Previews: each computer's running web servers (Vite, Next, anything on a
 // loopback port) opened in an embedded iframe, and its booted iOS simulators
 // with a live screen and Home / Screenshot / Open app. Ports the phone's
@@ -36,13 +37,6 @@ function ensureCss() {
   link.href = CSS_HREF;
   link.dataset.pvCss = "1";
   document.head.append(link);
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 function screenshotUrl(computer, udid) {

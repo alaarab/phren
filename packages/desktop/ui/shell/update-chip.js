@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // The titlebar's update chip: when the shell finds a newer Phren desktop it
 // shows "Phren <version>"; clicking opens What's new (the release notes, from
 // packages/desktop/CHANGELOG.md) with Restart to update (a downloaded update)
@@ -5,13 +6,6 @@
 // next version. Absent in a browser.
 
 const SKIP_KEY = "phren.desktop.update-skipped";
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /** What the popover says for an offer from the shell. */
 export function updateView(state) {

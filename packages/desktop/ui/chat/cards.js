@@ -1,3 +1,4 @@
+import { el as h } from "../dom.js";
 // Interaction cards: ways an agent asks the owner something, drawn as the
 // phone's cards and answered through answers.js. Replaces its container's
 // content on every render; the caller owns the WebSocket status frame.
@@ -14,13 +15,6 @@ function ensureStyle() {
   link.href = new URL("./cards.css", import.meta.url).href;
   document.head.appendChild(link);
   styleLinked = true;
-}
-
-function h(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
 }
 
 function providerName(source) {

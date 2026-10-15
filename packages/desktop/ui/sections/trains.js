@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Trains: release trains. Groups the open PRs waiting to ship per repository,
 // along with the head commit's checks, the integrator for that computer and the
 // owner's release authority. Merge and Publish appear only where the policy is
@@ -17,13 +18,6 @@ function ensureCss() {
   link.rel = "stylesheet";
   link.href = "./sections/trains.css";
   document.head.append(link);
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 /** A short age: "now", "5m", "3h", "2d". */

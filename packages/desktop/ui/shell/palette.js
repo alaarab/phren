@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // ⌘K command palette: one ranked list across sessions (every computer), the
 // open pull requests the CI watch last saw, the projects on every computer, the
 // active session's repository files, registered commands and top-level
@@ -71,7 +72,6 @@ function kindOf(child) {
   if (s === "working") return "working";
   return "idle";
 }
-
 
 // ------------------------------------------------------------ sources
 function sessionItems() {
@@ -497,12 +497,5 @@ function highlight(className, text, query) {
   }
   if (cur < text.length) frag.append(document.createTextNode(text.slice(cur)));
   node.replaceChildren(frag);
-  return node;
-}
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
   return node;
 }

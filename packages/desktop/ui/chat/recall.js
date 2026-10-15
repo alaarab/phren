@@ -1,3 +1,4 @@
+import { el as node } from "../dom.js";
 // Composer recall: while a prompt is typed, the session project's findings
 // and truths that match it, as up to three chips above the editor. A click
 // adds the finding to the prompt. Plain browser ES module; the pure helpers
@@ -31,13 +32,6 @@ export function recallHits(results, draft) {
 export function withRecall(draft, text) {
   const base = String(draft || "").replace(/\s+$/, "");
   return `${base}${base ? "\n\n" : ""}Phren remembers: ${text}`;
-}
-
-function node(tag, cls, text) {
-  const el = document.createElement(tag);
-  if (cls) el.className = cls;
-  if (text != null) el.textContent = text;
-  return el;
 }
 
 /** The chip strip. `draft()` reads the editor, `attach(text)` replaces it. */

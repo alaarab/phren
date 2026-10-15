@@ -1,3 +1,4 @@
+import { el as node } from "./dom.js";
 // One diff as a centre-tab document: Monaco's diff editor over two whole
 // versions of a file (HEAD, the index, the working file, or a commit and its
 // parent) read through /v1/git/file. Side by side or inline, syntax and
@@ -49,13 +50,6 @@ function injectStyle() {
   style.id = "diff-doc-style";
   style.textContent = CSS;
   document.head.appendChild(style);
-}
-
-function node(tag, cls, text) {
-  const el = document.createElement(tag);
-  if (cls) el.className = cls;
-  if (text != null) el.textContent = text;
-  return el;
 }
 
 function button(cls, label, title, onClick) {

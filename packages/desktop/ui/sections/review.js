@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Review: the review station. Every finished worker return across the online
 // computers becomes a queue item; each opens to its report and its diff, where
 // the owner leaves line comments that go back to that worker as one prompt, or
@@ -39,13 +40,6 @@ function ensureCss() {
     trains.href = "./sections/trains.css";
     document.head.append(trains);
   }
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 /** A short age: "now", "5m", "3h", "2d". */

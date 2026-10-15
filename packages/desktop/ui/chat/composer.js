@@ -1,3 +1,4 @@
+import { el as node } from "../dom.js";
 // Phren desktop chat composer. Plain browser ES module, no framework.
 // Ports the phone's ChatComposerBar behaviour: a collapsible Background strip,
 // a multiline editor above one row of inline-SVG icon buttons, send with
@@ -212,13 +213,6 @@ export function permissionModeLabel(mode) {
 }
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-
-function node(tag, className, text) {
-  const n = document.createElement(tag);
-  if (className) n.className = className;
-  if (text != null) n.textContent = text;
-  return n;
-}
 
 function ensureStyles() {
   if (typeof document === "undefined") return;

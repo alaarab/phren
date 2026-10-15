@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // The "Phren knows" drawer for a session's project and "Remember this" for a
 // selected line of text. Plain browser ES module. Reads the project's summary,
 // findings, tasks and topics; saves a finding with or without a code location.
@@ -13,13 +14,6 @@ function ensureStyle() {
   link.href = new URL("./knows.css", import.meta.url).href;
   document.head.appendChild(link);
   styleLinked = true;
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text != null) node.textContent = text;
-  return node;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

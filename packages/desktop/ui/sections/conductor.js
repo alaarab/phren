@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Conductor: the running conductor and its dispatches, the owner inbox,
 // standing grants, linked computer sets and the release authority policy.
 // This is the phone's Conductor screens, drawn with the desktop shell's CSS.
@@ -28,13 +29,6 @@ function ensureCss() {
   link.rel = "stylesheet";
   link.href = "./sections/conductor.css";
   document.head.append(link);
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 /** A short age: "now", "5m", "3h", "2d". */
