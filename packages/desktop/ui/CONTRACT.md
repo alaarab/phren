@@ -648,3 +648,21 @@ destination subtitles wrap to at most two lines. Rendering is covered by
 Sidebar Enter/Space navigation leaves nested buttons, links and inputs their
 native activation, including hand-off tags. Enter on the row itself still opens
 that chat. Covered by `src/ui-keys.test.ts`.
+
+## Citation freshness
+
+Finding items may include `citationFreshness: { state: "current" | "changed" |
+"unknown", checkedAt: string, head?: string, lastCommit?: { sha: string,
+summary: string, authoredAt: string } | null }`. Dates are ISO UTC. The field is
+omitted when never checked or not checkable; `unknown` means gitboy could not
+answer. This additive field does not change a finding's lifecycle status.
+
+`citation-freshness.js` exports `freshnessNote(item)` → `{ label, detail } | null`
+and `freshnessChip(item, className)`, using `dom.js`. Only `changed` shows the
+warning chip “May be out of date” in Memory beside the lifecycle chip and in
+chat recall. Its title is `<file> changed in <sha7> “<summary>” (<date>)`, with
+the file from `citationData` or the raw `phren:cite` comment and a short UTC date
+such as `Oct 14`. Without `lastCommit`, it reads `<file> changed since this was
+written`. Current, unknown and missing fields are silent. Chip rows wrap on
+narrow windows. Covered by `src/ui-citation-freshness.test.ts` and the desktop
+Memory browser smoke test.

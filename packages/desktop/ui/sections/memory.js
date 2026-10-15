@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { freshnessChip } from "../citation-freshness.js";
 // Memory: the phone's Memory screen at desktop scale. A rail of online
 // computers and their projects (review counts in amber) beside one segment
 // control over Findings, Review, Notes, Truths, Topics and the 3D graph.
@@ -441,6 +442,8 @@ export function mountMemory(root) {
     if (tag) meta.append(el("span", `mem-tag type ${tag}`, tag));
     const life = LIFECYCLE_CHIP[status];
     if (life) meta.append(el("span", `mem-tag ${life.cls}`, life.label));
+    const freshness = freshnessChip(item, "mem-tag warn");
+    if (freshness) meta.append(freshness);
     if (item.confidence != null) meta.append(confidenceTag(item.confidence));
     if (item.machine) meta.append(el("span", "mem-meta-dim", item.machine));
     const cite = citeInfo(item);

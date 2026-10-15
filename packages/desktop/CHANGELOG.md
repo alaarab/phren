@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Memory and chat recall mark findings whose cited file changed on gitboy since it was written as May be out of date
+
 - Home’s Finished feed includes accounts available again while you were away or in another section, with two-line titles, an underlined Usage tag opening account usage and the same Dismiss action. Hand-offs keep their existing session row and tag without a duplicate move item.
 
 - Home hand-off tags sit inside full-width session rows alongside their metadata, with destination subtitles wrapping to two lines on narrow windows.

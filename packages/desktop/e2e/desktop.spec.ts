@@ -8,7 +8,7 @@ import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
 import { hookRequest, hookWebSocket } from "../src/hook-client.js";
 import { createOverviewHub } from "../src/overview.js";
 import { startServer } from "../src/server.js";
-import { startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
+import { SAMPLE_FINDING, startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
 
 const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
 const TOKEN = "desktop-smoke-token";
@@ -1172,4 +1172,26 @@ test("a file dropped on a session row opens it and waits in its composer", async
   const text = await page.evaluateHandle(() => { const d = new DataTransfer(); d.items.add(new File(["notes"], "notes.md", { type: "text/markdown" })); return d; });
   await row.dispatchEvent("drop", { dataTransfer: text });
   await expect(page.getByText("Only images can be attached.")).toBeVisible();
+});
+
+test("Memory and chat recall show citation freshness with a tooltip at narrow widths", async ({ page }) => {
+  // Memory is read by the daemon's store mirror; recall comes from the Hook.
+  await page.route("**/api/memory/*/projects", route => route.fulfill({ json: { projects: [{ name: "phren", findings: 1 }] } }));
+  await page.route("**/api/memory/*/findings?*", route => route.fulfill({ json: { items: [SAMPLE_FINDING] } }));
+  await page.setViewportSize({ width: 420, height: 900 });
+  await page.goto(`${url}#/memory`, { waitUntil: "domcontentloaded" });
+  const tooltip = "src/router.ts changed in 3f2a9c1 “Split the router into per-host modules” (Oct 14)";
+  const warning = page.locator(".mem-tag.warn");
+  await expect(warning).toHaveText("May be out of date");
+  await expect(warning).toHaveAttribute("title", tooltip);
+  expect(await warning.evaluate(el => el.getBoundingClientRect().right <= el.parentElement!.getBoundingClientRect().right)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("desktop-memory-freshness.png") });
+
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await page.locator(".pc-input").fill("Explain the router");
+  const recallWarning = page.locator(".pc-recall-freshness");
+  await expect(recallWarning).toHaveText("May be out of date");
+  await expect(recallWarning).toHaveAttribute("title", tooltip);
+  expect(await recallWarning.evaluate(el => el.getBoundingClientRect().right)).toBeLessThanOrEqual(420);
 });
