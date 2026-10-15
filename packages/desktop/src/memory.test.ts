@@ -322,3 +322,50 @@ it("returns findings after 1500 ms when the freshness Hook call hangs, and skips
     expect(requestSignal?.aborted).toBe(true);
   } finally { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); }
 });
+
+
+describe("citation freshness forwarding from an older or failing Hook", () => {
+  const cited = '# proj-a Findings\n\n## 2026-10-15\n\n- Cache key collides <!-- fid:12345678 -->\n  <!-- phren:cite {"created_at":"2026-10-15T00:00:00Z","file":"src/cache.ts","commit":"abcdef1"} -->\n- Second finding <!-- fid:87654321 -->\n';
+  const raw = (status: number, text: string): HookResponse => ({ status, headers: {}, body: Buffer.from(text) });
+
+  it.each([
+    ["a Hook without the memory route (404)", raw(404, '{"error":"not found"}')],
+    ["a Hook error (500)", raw(500, '{"error":"boom"}')],
+    ["a non-JSON body", raw(200, "<html>proxy</html>")],
+    ["findings that are not a list", json({ findings: "nope" })],
+    ["a rejected request", null],
+  ])("still returns every mirrored finding, without freshness, for %s", async (_label, response) => {
+    const home = await mkdtemp(path.join(tmpdir(), "desktop-freshness-old-"));
+    const store = fakeStore({ "proj-a/FINDINGS.md": cited });
+    const memoryCalls: string[] = [];
+    const hookRequest: HookRequest = async (computer, method, route, body) => {
+      if (!route.startsWith("/v1/projects/")) return store.request(computer, method, route, body);
+      memoryCalls.push(`${method} ${route}`);
+      if (!response) throw new Error("SSH channel closed");
+      return response;
+    };
+    try {
+      const service = createMemoryService({ home, cacheDir: path.join(home, "cache"), hookRequest });
+      const items = (await service.findings(B, "proj-a")).items;
+      expect(items.map((item) => item.stableId)).toEqual(["12345678", "87654321"]);
+      for (const item of items) expect(item).not.toHaveProperty("citationFreshness");
+      expect(memoryCalls).toEqual(["GET /v1/projects/proj-a/memory"]);
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
+  it("attaches freshness only to the finding whose fid the Hook reports, never by position", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "desktop-freshness-match-"));
+    const store = fakeStore({ "proj-a/FINDINGS.md": cited });
+    const changed = { state: "changed", checkedAt: "2026-10-15T01:00:00Z" };
+    const hookRequest: HookRequest = async (computer, method, route, body) => route === "/v1/projects/proj-a/memory"
+      // Reported out of order, with an unknown fid and a bare stable id that must not match.
+      ? json({ findings: [{ id: "fid:00000000", citationFreshness: changed }, { id: "87654321", citationFreshness: changed }, { id: "fid:12345678", citationFreshness: changed }] })
+      : store.request(computer, method, route, body);
+    try {
+      const service = createMemoryService({ home, cacheDir: path.join(home, "cache"), hookRequest });
+      const items = (await service.findings(B, "proj-a")).items;
+      expect(items[0]).toMatchObject({ stableId: "12345678", citationFreshness: changed });
+      expect(items[1]).not.toHaveProperty("citationFreshness");
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+});

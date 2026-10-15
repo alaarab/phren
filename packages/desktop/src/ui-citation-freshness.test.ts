@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { freshnessNote } from "../ui/citation-freshness.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { freshnessChip, freshnessNote } from "../ui/citation-freshness.js";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("citation freshness", () => {
   it.each([undefined, "current", "unknown"])("keeps %s freshness silent", (state) => {
@@ -56,4 +58,22 @@ describe("citation freshness", () => {
     })).toEqual({ label: "May be out of date", detail: "src/a}b.ts changed since this was written" });
   });
 
+  it("builds the chip with the surface's classes and keeps commit text out of markup", () => {
+    const created: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("document", { createElement: (tagName: string) => {
+      const node = { tagName, className: "", textContent: "", title: "", set innerHTML(_value: string) { throw new Error("chip must not write HTML"); } };
+      created.push(node);
+      return node;
+    } });
+    const summary = '<img src=x onerror="alert(1)">';
+    const chip = freshnessChip({
+      citationData: { file: "src/<b>router</b>.ts" },
+      citationFreshness: { state: "changed", lastCommit: { sha: "3f2a9c1abcdef", summary, authoredAt: "2026-10-14T18:30:00Z" } },
+    }, "mem-tag warn");
+    expect(chip).toMatchObject({ tagName: "span", className: "mem-tag warn", textContent: "May be out of date" });
+    expect(chip.title).toBe(`src/<b>router</b>.ts changed in 3f2a9c1 “${summary}” (Oct 14)`);
+    expect(created).toHaveLength(1);
+    expect(freshnessChip({ citationFreshness: { state: "current" } }, "mem-tag warn")).toBeNull();
+    expect(created).toHaveLength(1);
+  });
 });
