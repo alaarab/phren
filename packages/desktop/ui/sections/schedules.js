@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Schedules: every scheduled prompt across computers with its next run, last
 // result, Run now, history and editor, plus a "Tonight" strip of the next
 // runs. Ports the phone's Schedules screen (Features/Schedules) and the Hook's
@@ -26,13 +27,6 @@ function ensureCss() {
   link.href = CSS_HREF;
   link.dataset.schCss = "1";
   document.head.append(link);
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 const pad2 = (n) => String(n).padStart(2, "0");

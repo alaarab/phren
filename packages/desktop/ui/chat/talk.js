@@ -1,3 +1,4 @@
+import { el as node } from "../dom.js";
 // Phren desktop talk mode, dictation and read-aloud. Plain browser ES module,
 // no framework. Mirrors the phone's talk slice (TalkTurnMachine, SpokenReply,
 // ChatReadAloud) over the Hook's speech routes:
@@ -645,13 +646,6 @@ function speakReply({ computer, text, voice, onWord } = {}) {
 
 const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
 function providerName(source) { return PROVIDERS[String(source || "").toLowerCase()] || "Agent"; }
-
-function node(tag, className, text) {
-  const el = document.createElement(tag);
-  if (className) el.className = className;
-  if (text != null) el.textContent = text;
-  return el;
-}
 
 function nowSeconds() { return (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000; }
 

@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 import { decorateHomeHandoff } from "../shell/handoff-view.js";
 // Home: the cockpit. Top to bottom, the conductor card, who needs you (with
 // keyboard answers), the turns that ended since you left, what is working (with each agent's activity line), the
@@ -33,13 +34,6 @@ function saveSeen(seen) {
   try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen].slice(-1000))); } catch { /* private window */ }
 }
 const RETURN_STATE = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" };
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /** A short age: "now", "5m", "3h", "2d". */
 function age(iso) {

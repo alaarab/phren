@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Code: a project's code index in the desktop. A rail of every online
 // computer and the projects its store holds, then Files (a lazy tree of the
 // checkout beside one file's outline), What changed (the functions, types and
@@ -40,13 +41,6 @@ function ensureCss() {
   link.rel = "stylesheet";
   link.href = "./sections/code.css";
   document.head.append(link);
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 function svgPath(d, fill = "currentColor") {

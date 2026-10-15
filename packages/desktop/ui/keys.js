@@ -1,3 +1,4 @@
+import { el } from "./dom.js";
 // Herdr-style keyboard shortcuts for Phren desktop. The daemon merges the
 // defaults, the owner's Herdr [keys] and ~/.config/phren/desktop.toml into
 // /api/keys; this module matches key presses against them. A terminal panel
@@ -320,13 +321,6 @@ function overlay(className) {
   return card;
 }
 function closeOverlay() { document.querySelector(".keys-overlay")?.remove(); }
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /** help: every action, its keys and where the binding came from. */
 function showSheet() {

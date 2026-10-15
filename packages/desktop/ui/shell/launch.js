@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 import { exhausted, leftPercent } from "./usage-windows.js";
 // The launch sheet: one modal to start any agent anywhere. Project, computer,
 // harness, model, effort, permission mode, worktree/branch, Claude account and
@@ -22,12 +23,6 @@ const PERMISSIONS = [
 const PERMISSION_HARNESSES = new Set(["claude", "codex"]);
 
 // ---------------------------------------------------------------- helpers
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function installStyles() {
   if (document.getElementById(CSS_ID)) return;

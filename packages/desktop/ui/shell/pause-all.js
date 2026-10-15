@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // "Pause all agents": interrupts the turn of every working agent on every
 // computer with one Escape each, the same stop the chat's stop button sends.
 // Agents stay open and keep their conversations. It only runs from the inline
@@ -6,13 +7,6 @@
 import { hookPost } from "../api.js";
 import { registerCommand } from "./palette.js";
 import { projectOf, store } from "./store.js";
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /** The working rows in a session list, as pause targets. */
 export function workingSessions(rows) {

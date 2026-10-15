@@ -1,3 +1,4 @@
+import { el as h, el } from "./dom.js";
 import { handoffRow } from "./shell/handoff.js";
 import { renderHandoffRow } from "./shell/handoff-view.js";
 // Sessions sidebar: the phone's Live sessions list at desktop density.
@@ -50,19 +51,12 @@ const OFFLINE_LABELS = {
 };
 
 // ---------------------------------------------------------------- helpers
-function h(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
-}
 
 function glyph(source) {
   const wrap = el("span", "sb-glyph");
   wrap.innerHTML = GLYPHS[source] || GLYPHS.phren;
   return wrap;
 }
-function el(tag, className, text) { return h(tag, className, text); }
 
 function basename(p) {
   const parts = String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/);
@@ -773,5 +767,4 @@ export function renderSidebar(element, merged, handlers = {}) {
   syncApprovals(sb, merged);
   syncPulls(sb, merged);
 }
-
 

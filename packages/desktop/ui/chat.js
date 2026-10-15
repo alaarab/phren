@@ -1,3 +1,4 @@
+import { el as node } from "./dom.js";
 import { renderHandoffLinks } from "./shell/handoff-view.js";
 import { quotaInteractionPending } from "./shell/quota-warn.js";
 // The chat pane: the phone's chat on the desktop. Plain browser ES module.
@@ -38,12 +39,6 @@ function statusColor(status) {
   if (s === "working") return "var(--working)";
   if (s === "blocked" || s === "waiting") return "var(--waiting)";
   return "var(--done)";
-}
-function node(tag, className, text) {
-  const n = document.createElement(tag);
-  if (className) n.className = className;
-  if (text != null) n.textContent = text;
-  return n;
 }
 function firstLine(text) {
   const line = String(text || "").split("\n")[0];

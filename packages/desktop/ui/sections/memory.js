@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Memory: the phone's Memory screen at desktop scale. A rail of online
 // computers and their projects (review counts in amber) beside one segment
 // control over Findings, Review, Notes, Truths, Topics and the 3D graph.
@@ -34,13 +35,6 @@ function ensureCss() {
   link.rel = "stylesheet";
   link.href = "./sections/memory.css";
   document.head.append(link);
-}
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
 }
 
 async function parseResponse(res) {

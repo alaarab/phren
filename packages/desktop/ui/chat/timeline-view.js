@@ -1,3 +1,4 @@
+import { el as h } from "../dom.js";
 import { exhausted } from "../shell/usage-windows.js";
 // The desktop chat timeline: draws the kit's prepared transcript rows the way
 // the phone does. Plain browser ES module. `render` is incremental: rows are
@@ -18,13 +19,6 @@ function ensureStyle() {
   link.href = new URL("./timeline.css", import.meta.url).href;
   document.head.appendChild(link);
   styleLinked = true;
-}
-
-function h(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
 }
 
 // SF Symbols the kit names, as text glyphs (there is no icon font here).

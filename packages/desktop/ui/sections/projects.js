@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 // Projects: every project across the computers as a grid of cards. Each card
 // opens a detail page with the project's memory (summary, open work, live
 // sessions, skills, knobs). Add a repository to a computer, or launch an agent
@@ -29,13 +30,6 @@ const KNOBS = {
 const STYLE_ID = "projects-styles";
 
 // ---------------------------------------------------------------- helpers
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 function clear(node) { node.replaceChildren(); }
 

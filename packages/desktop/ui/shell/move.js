@@ -1,3 +1,4 @@
+import { el } from "../dom.js";
 import { movePlan } from "./handoff.js";
 import { openHandoffChat } from "./handoff-view.js";
 import { store } from "./store.js";
@@ -14,13 +15,6 @@ const HARNESSES = [["claude", "Claude"], ["codex", "Codex"], ["opencode", "OpenC
 const STATE_WORDS = { "handing-off": "Writing a hand-off…", exiting: "Ending the old agent…", launching: "Starting the new agent…", moved: "Moved", failed: "The move failed" };
 const POLL_MS = 2000;
 const GIVE_UP_MS = 15 * 60_000;
-
-function el(tag, cls, text) {
-  const node = document.createElement(tag);
-  if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /** Which harnesses can take the session: installed and usable on that
  * computer (when the Hook says), including Claude on another account. */

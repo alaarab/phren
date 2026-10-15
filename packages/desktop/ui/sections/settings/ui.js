@@ -1,3 +1,5 @@
+import { el } from "../../dom.js";
+export { el };
 // Small DOM and request helpers shared by the Settings pages.
 export async function api(path, options = {}) {
   const method = (options.method || "GET").toUpperCase();
@@ -17,13 +19,6 @@ export async function api(path, options = {}) {
 }
 
 export const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
-
-export function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 export function input(placeholder, className) {
   const field = document.createElement("input");
