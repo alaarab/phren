@@ -430,8 +430,10 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
         hookJson(computer, `/v1/projects/${encodeURIComponent(name)}/memory`, controller.signal).catch(() => null),
         new Promise<null>(resolve => { timeout = setTimeout(() => { controller.abort(); resolve(null); }, 1500); }),
       ]).finally(() => clearTimeout(timeout));
-      const findings = memory && Array.isArray(memory.findings) ? memory.findings as Array<{ id: string; citationFreshness?: unknown }> : [];
-      const freshness = new Map(findings.map(item => [item.id, item.citationFreshness]));
+      const findings = memory && Array.isArray(memory.findings) ? memory.findings as unknown[] : [];
+      // A malformed entry only loses freshness; the mirrored list still loads.
+      const freshness = new Map(findings.flatMap(item => item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string"
+        ? [[(item as { id: string }).id, (item as { citationFreshness?: unknown }).citationFreshness] as const] : []));
       return { items: items.map(item => {
         const citationFreshness = freshness.get(item.stableId ? `fid:${item.stableId}` : item.id);
         return citationFreshness ? { ...item, citationFreshness } : item;
