@@ -39,23 +39,29 @@ export function renderHandoffRow(container, computer, decoration) {
   }
 }
 
-// Home keeps the chat button and hand-off buttons as siblings.
+// A full-width Home row owns its chat button and a shared metadata line.
 export function decorateHomeHandoff(button, computer, child, rows) {
   const decoration = handoffRow(child, rows.filter((row) => row.computer === computer));
   if (!decoration.tags.length) return button;
   const wrap = document.createElement("div");
-  wrap.className = "home-handoff-row" + (decoration.dimmed ? " handed-off" : "");
+  wrap.className = button.className + " home-handoff-row" + (decoration.dimmed ? " handed-off" : "");
+  button.className = "home-handoff-chat";
   if (decoration.subtitle) {
     const main = button.querySelector(".home-row-main");
     for (const sub of main.querySelectorAll(".home-row-sub")) sub.remove();
     const sub = document.createElement("span");
-    sub.className = "home-row-sub";
+    sub.className = "home-row-sub home-handoff-sub";
     sub.textContent = decoration.subtitle;
     main.append(sub);
   }
   const tags = document.createElement("span");
   tags.className = "sb-handoffs";
   renderHandoffRow(tags, computer, decoration);
-  wrap.append(button, tags);
+  const meta = button.querySelector(".home-row-meta");
+  meta.append(...tags.children);
+  wrap.append(button, meta);
+  wrap.addEventListener("click", (event) => {
+    if (!event.target.closest("button, a, input") && !button.disabled) button.click();
+  });
   return wrap;
 }

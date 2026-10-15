@@ -635,7 +635,10 @@ precedence over saved reference titles. Tags link only to exact targets still
 present in that overview. Sidebar reconciliation includes the resolved decoration
 so target renames and removals refresh existing rows without reordering them.
 `renderHandoffRow` shares tag rendering; `decorateHomeHandoff` keeps Home's
-chat and tag buttons as siblings for Working, Needs you and Finished sessions.
+chat and tag buttons separate inside a full-width row for Working, Needs you
+and Finished sessions. Tags follow the subtitle in the shared metadata line;
+destination subtitles wrap to at most two lines. Rendering is covered by
+`src/ui-handoff-view.test.ts`.
 
 Sidebar Enter/Space navigation leaves nested buttons, links and inputs their
 native activation, including hand-off tags. Enter on the row itself still opens

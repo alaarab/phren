@@ -900,8 +900,11 @@ button.handoff-link:hover { color: var(--accent); }
 
 /* Hand-off history stays in its original list position. */
 .sb-row.handed-off .sb-main, .sb-row.handed-off > .sb-title,
-.sb-row.handed-off .sb-ring, .home-handoff-row.handed-off > .home-row { opacity: .6; }
+.sb-row.handed-off .sb-ring, .home-handoff-row.handed-off > .home-handoff-chat { opacity: .6; }
 .handoff-tag { display: inline-block; padding: 1px 5px; border-radius: var(--radius); background: var(--surface); }
-.home-handoff-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.home-handoff-row > .home-row { flex: 1; min-width: 0; }
-.home-handoff-row > .sb-handoffs { max-width: 40%; }
+.home-handoff-row { flex-direction: column; align-items: stretch; gap: 4px; width: 100%; box-sizing: border-box; }
+.home-handoff-row:hover, .home-handoff-row:focus-within { background: var(--card); }
+.home-handoff-chat { display: flex; min-width: 0; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.home-handoff-chat:disabled { cursor: default; opacity: .6; }
+.home-handoff-row .home-row-meta { flex-wrap: wrap; align-items: center; overflow-wrap: anywhere; }
+.home-handoff-row .home-handoff-sub { display: -webkit-box; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
