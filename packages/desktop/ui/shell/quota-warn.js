@@ -8,13 +8,18 @@ export function quotaPreferences(value = {}) {
 
 export const quotaSessionKey = ({ computer, child }) => JSON.stringify([computer, child.target?.source ?? child.agent, child.target?.session ?? child.id]);
 
-/** Match local account IDs, never a display email or a guessed default Claude login. */
-export function sessionUsage(session, accounts = []) {
-  const source = session.child.target?.source ?? session.child.agent;
-  const account = session.child.account?.id;
-  if (source === "claude" && !account) return null;
-  const matches = accounts.filter((row) => row.harness === source && row.computers?.some((c) => c.name === session.computer && (source !== "claude" || c.account === account)));
+/** Match local IDs, or the sole unaccounted Claude row on this computer. */
+function usageRow(computer, source, account, accounts) {
+  let matches = accounts.filter((row) => row.harness === source && row.computers?.some((c) => c.name === computer));
+  if (source === "claude") {
+    if (account != null) matches = matches.filter((row) => row.computers.some((c) => c.name === computer && c.account === account));
+    else if (matches.length !== 1 || !matches[0].computers.some((c) => c.name === computer && c.account == null)) return null;
+  }
   return matches.length === 1 && !matches[0].stale ? matches[0] : null;
+}
+
+export function sessionUsage(session, accounts = []) {
+  return usageRow(session.computer, session.child.target?.source ?? session.child.agent, session.child.account?.id, accounts);
 }
 
 /** Once at the threshold and once at exhaustion, per session/window/reset.
@@ -44,8 +49,10 @@ export function quotaDestinations(session, choices, accounts, usage, now = Date.
     candidates.push({ harness: "claude", account: account.id, accountLabel: account.label || account.id, label: `Claude · ${account.label || account.id}` });
   }
   return candidates.map((candidate) => {
-    const rows = usage.filter((r) => r.harness === candidate.harness && r.computers?.some((c) => c.name === session.computer && (candidate.harness !== "claude" || c.account === candidate.account)));
-    const row = rows.length === 1 && !rows[0].stale ? rows[0] : null;
+    // A sole inventory login can be the unaccounted current row; never map
+    // that row onto one of several named destinations.
+    const account = source === "claude" && session.child.account?.id == null && current && accounts.length === 1 ? undefined : candidate.account;
+    const row = usageRow(session.computer, candidate.harness, account, usage);
     const limiting = limitingWindow(row, now);
     const left = leftPercent(limiting);
     const out = exhausted(row && { ...row, windows: row.windows?.filter((w) => activeWindow(w, now)) });

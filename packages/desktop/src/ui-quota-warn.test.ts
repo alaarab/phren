@@ -62,6 +62,34 @@ describe("chat quota decisions", () => {
     expect(sessionUsage(session, [{ ...work, stale: true }])).toBeNull();
   });
 
+  it.each([null, undefined])("warns weekly for a single unaccounted Claude login (%s)", (account) => {
+    const chat = { ...session, child: { ...session.child, account: undefined } };
+    const usage = { ...row(96, "seven_day"), computers: [{ name: "Desk", account }] };
+    const matched = sessionUsage(chat, [usage, { ...row(), computers: [{ name: "Laptop" }] }]);
+    expect(quotaWarnings(chat, matched, { now, preferences: { threshold: 90 } })).toMatchObject([
+      { label: "weekly", used: 96, stage: "near" },
+    ]);
+    expect(sessionUsage(session, [usage])).toBeNull();
+    expect(sessionUsage(chat, [{ ...usage, stale: true }])).toBeNull();
+  });
+
+  it.each([undefined, "work"])("does not guess among two Claude rows on the computer (%s)", (account) => {
+    const chat = { ...session, child: { ...session.child, account: undefined } };
+    const usage = { ...row(96, "seven_day"), computers: [{ name: "Desk" }] };
+    const matched = sessionUsage(chat, [usage, { ...row(), id: "other", computers: [{ name: "Desk", account }] }]);
+    expect(matched).toBeNull();
+    expect(quotaWarnings(chat, matched, { now })).toEqual([]);
+  });
+
+  it("excludes the single unaccounted current login from destinations without guessing an explicit ID", () => {
+    const chat = { ...session, child: { ...session.child, account: undefined } };
+    const usage = { ...row(96, "seven_day"), computers: [{ name: "Desk", account: null }] };
+    const choices = [{ source: "codex", label: "Codex", usable: true }];
+    expect(quotaDestinations(chat, choices, [{ id: "default" }], [usage], now).map((d) => d.harness)).toEqual(["codex"]);
+    const destinations = quotaDestinations(session, choices, [{ id: "default" }], [usage], now);
+    expect(destinations.find((d) => d.harness === "claude")?.row).toBeNull();
+  });
+
   it("uses a unique Codex account on this computer and recognises both windows", () => {
     const codex = { ...session, child: { id: "tab2", target: { source: "codex", session: "c2" } } };
     const usage = { id: "codex|login", harness: "codex", computers: [{ name: "Desk" }], windows: [{ id: "codex:primary", usedPercent: 93 }, { id: "codex:secondary", exhausted: true }] };
