@@ -117,6 +117,7 @@
 .mem-tag.type.pattern { background: rgba(138,200,172,.16); color: var(--done); }
 .mem-tag.type.workaround { background: rgba(127,182,240,.16); color: var(--path); }
 .mem-tag.type.bug { background: rgba(239,152,152,.16); color: var(--danger); }
+.mem-tag.warn { max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; background: color-mix(in srgb, var(--waiting) 16%, transparent); color: var(--waiting); text-transform: none; }
 .mem-tag.life { background: var(--raised); color: var(--muted); }
 .mem-tag.danger { background: rgba(239,152,152,.16); color: var(--danger); }
 .mem-tag.commit { background: var(--raised); color: var(--dim); font: 10.5px var(--mono); letter-spacing: .02em; }

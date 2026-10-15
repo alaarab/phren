@@ -4,6 +4,7 @@ import { el as node } from "../dom.js";
 // adds the finding to the prompt. Plain browser ES module; the pure helpers
 // carry no DOM so they import and test in Node.
 
+import { freshnessChip } from "../citation-freshness.js";
 import { hookGet } from "../api.js";
 
 const DEBOUNCE_MS = 500;
@@ -54,6 +55,8 @@ export function createRecall({ computer, project, draft, attach }) {
       chip.type = "button";
       chip.title = `Add to the prompt: ${hit.text}`;
       chip.append(node("span", "pc-recall-icon", hit.kind === "truth" ? "★" : "◆"), node("span", "pc-recall-text", hit.text));
+      const freshness = freshnessChip(hit.finding ?? hit, "pc-recall-freshness warn");
+      if (freshness) chip.append(freshness);
       chip.onclick = () => { attach(withRecall(draft(), hit.text)); render(); };
       el.append(chip);
     }

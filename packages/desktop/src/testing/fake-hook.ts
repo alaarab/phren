@@ -48,6 +48,15 @@ export interface FakeHook {
   close(): Promise<void>;
 }
 
+export const SAMPLE_FINDING = {
+  id: "fid:router", text: "[pattern] Route requests by host before choosing a handler.",
+  citationData: { repo: "https://git.example.com/you/phren", file: "src/router.ts", line: 12, commit: "a1b2c3d" },
+  citationFreshness: {
+    state: "changed", checkedAt: "2026-10-15T12:00:00Z", head: "3f2a9c1abcdef0123456789abcdef0123456789abc",
+    lastCommit: { sha: "3f2a9c1abcdef0123456789abcdef0123456789abc", summary: "Split the router into per-host modules", authoredAt: "2026-10-14T18:30:00Z" },
+  },
+};
+
 const VERSION = "0.3.33";
 const APP_PATH = "src/app.ts";
 const README_PATH = "README.md";
@@ -281,6 +290,8 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     : [[APP_PATH, { content: "export const app = \"new\";\nexport const ready = true;\n", version: "v1" }]]);
 
   const defaults: Record<string, FakeHookHandler> = {
+    "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
+    "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
 
     "GET /v1/files/range": (_req, _body, url) => {
