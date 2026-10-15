@@ -44,8 +44,8 @@ export function createActiveTasks({ block, state }) {
         launch.type = "button";
         row = { node, title, project, computer, launch, entry };
         launch.addEventListener("click", () => {
-          const { item, source, project } = row.entry;
-          void openLaunchSheet({ project, computer: source.computer, prompt: item.line, title: "Launch as agent" });
+          const { item, source, project, revision } = row.entry;
+          void openLaunchSheet({ project, computer: source.computer, storeId: source.id, task: { stableId: item.stableId ?? item.id, expectedRevision: revision }, prompt: item.line, title: "Launch as agent" });
         });
         node.append(main, launch);
       }
@@ -72,7 +72,7 @@ export function createActiveTasks({ block, state }) {
       try {
         const doc = await loadTaskDoc(source, project);
         return (doc.items?.Active ?? []).filter((item) => !item.checked).map((item) => ({
-          source, project, item, key: `${taskSourceKey(source)}:${project}:${item.stableId ?? item.id}`,
+          source, project, item, revision: doc.revision, key: `${taskSourceKey(source)}:${project}:${item.stableId ?? item.id}`,
         }));
       } catch { return []; }
     })));

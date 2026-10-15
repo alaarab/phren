@@ -70,7 +70,7 @@ beforeEach(() => {
   hooks.show.mockReturnValue({ filterSection: hooks.filter });
   hooks.get.mockImplementation(async (_computer, route, query) => route === "/v1/tasks/stores"
     ? { stores: [{ id: "personal", primary: true, projects: ["phren", "website"] }] }
-    : { project: query.project, items: { Active: items[query.project], Queue: [{ line: "queued" }] } });
+    : { revision: "revision", project: query.project, items: { Active: items[query.project], Queue: [{ line: "queued" }] } });
 });
 const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const task = (n: number) => ({ id: `A${n}`, stableId: `task${n}`, line: `Task ${n}`, createdAt: `2026-10-${String(n).padStart(2, "0")}T12:00:00Z` });
@@ -111,7 +111,7 @@ it("launches the right task brief, preserves focused controls through polls and 
   const launch = list.children[0].children[1];
   launch.focus();
   launch.listeners.get("click")!({});
-  expect(hooks.launch).toHaveBeenCalledWith({ project: "phren", computer, prompt: "Task 2", title: "Launch as agent" });
+  expect(hooks.launch).toHaveBeenCalledWith({ project: "phren", computer, storeId: "personal", task: { stableId: "task2", expectedRevision: "revision" }, prompt: "Task 2", title: "Launch as agent" });
   block.hide(); block.show();
   await settle();
   await vi.advanceTimersByTimeAsync(59_999);
@@ -163,4 +163,26 @@ it("loads tasks when the first overview arrives after Home becomes visible and i
   block.show(); await settle(); block.hide();
   answer({ stores: [] }); await settle();
   expect(list.children).toHaveLength(1);
+});
+
+it("refreshes at the first 60s poll despite a delayed Hook response", async () => {
+  items.phren = [task(1)];
+  const { list, block } = setup();
+  const original = hooks.get.getMockImplementation()!;
+  hooks.get.mockImplementation(async (...args) => {
+    const reply = await original(...args);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return reply;
+  });
+  block.show();
+  await vi.advanceTimersByTimeAsync(1_000);
+  await settle();
+  expect(list.children).toHaveLength(1);
+  items.phren = [task(1), task(2)];
+  await vi.advanceTimersByTimeAsync(59_000);
+  await vi.advanceTimersByTimeAsync(1_000);
+  await settle();
+  expect(list.children.map((row) => row.children[0].children[0].textContent)).toEqual(["Task 2", "Task 1"]);
+  expect(hooks.get).toHaveBeenCalledTimes(6);
+  block.hide();
 });

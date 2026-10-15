@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.10] - unreleased
 
+- Home task launches retain their store and computer so same-named projects open the correct checkout; task refreshes expire from request start so latency cannot skip the next minute’s poll.
+
 - Home shows the six newest Active tasks across online computers and projects, with Launch and a link to all Active tasks; Home and Tasks share cached reads for 60 seconds.
 
 - The titlebar fits windows from 360 px with accessible section icons, compact status counts and navigation that scrolls within the bar; wide windows keep their labels. Keyboard navigation, deep links and compact resizes reveal the active tab, and screen readers hear “computers online” with the count.

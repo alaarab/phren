@@ -8,7 +8,7 @@ function read(key, fetch, force = false) {
   const cached = reads.get(key);
   if (cached && (cached.pending || (!force && Date.now() - cached.at < TASK_FRESH_MS))) return cached.promise;
   const entry = { at: Date.now(), pending: true };
-  entry.promise = fetch().then((value) => { entry.at = Date.now(); entry.pending = false; return value; }, (error) => {
+  entry.promise = fetch().then((value) => { entry.pending = false; return value; }, (error) => {
     if (reads.get(key) === entry) reads.delete(key);
     throw error;
   });
