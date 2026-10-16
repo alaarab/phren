@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
-import { sshArgs } from "./hosts.js";
+import { channelPool, type AcquiredChannel } from "./channel-pool.js";
+import { masterKey, sshArgs } from "./hosts.js";
 import type { AttachTerminal, Computer, TerminalSession } from "./contract.js";
 
 // No leading dot or dash: the name is an argv entry for tmux or herdr.
@@ -81,6 +82,66 @@ function wrap(p: pty.IPty): TerminalSession {
   };
 }
 
+/** A remote ssh terminal that holds one pooled channel for its life, like a
+ * chat pipe, so terminals share the computer's master slots. The session is
+ * returned at once; the pty starts when the pool grants a channel, with input,
+ * resizes and listeners held until then. The channel is released exactly once:
+ * on exit, on kill (including before the pty started), or on a spawn failure. */
+function pooledSession(c: Computer, command: string, cols: number, rows: number): TerminalSession {
+  const controller = new AbortController();
+  const dataListeners: Array<(data: string) => void> = [];
+  const exitListeners: Array<(code: number) => void> = [];
+  const pending: Array<(p: pty.IPty) => void> = [];
+  let channel: AcquiredChannel | undefined;
+  let released = false;
+  let ended = false;
+  let p: pty.IPty | undefined;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    channel?.release();
+  };
+  const end = (code: number): void => {
+    if (ended) return;
+    ended = true;
+    release();
+    for (const listener of exitListeners) listener(code);
+  };
+  const run = (action: (p: pty.IPty) => void): void => {
+    if (p) action(p);
+    else if (!ended) pending.push(action);
+  };
+  channelPool.acquire(masterKey(c), { signal: controller.signal }).then((acquired) => {
+    channel = acquired;
+    if (ended) { release(); return; }
+    try {
+      p = spawnPty("ssh", sshArgs(c, command, { tty: true, slot: acquired.slot }), cols, rows, false);
+    } catch {
+      end(1);
+      return;
+    }
+    p.onData((data) => { for (const listener of dataListeners) listener(data); });
+    p.onExit(({ exitCode }) => end(exitCode));
+    for (const action of pending.splice(0)) action(p);
+  }, () => end(1));
+  return {
+    write: (data) => run((live) => live.write(data)),
+    resize: (w, h) => run((live) => live.resize(clamp(w, 2, 500), clamp(h, 2, 200))),
+    onData: (listener) => { dataListeners.push(listener); },
+    onExit: (listener) => { exitListeners.push(listener); },
+    kill: () => {
+      controller.abort();
+      try {
+        p?.kill();
+      } catch {
+        // Already exited.
+      }
+      if (!p) end(0);
+      else release();
+    },
+  };
+}
+
 /** Herdr pane ids ("w5Y:p1") and tmux pane ids ("%12"). */
 const PANE_RE = /^[A-Za-z0-9_][A-Za-z0-9_:%.-]{0,99}$/;
 
@@ -97,7 +158,7 @@ export function attachShell(c: Computer, folder: string, cols: number, rows: num
   if (typeof folder !== "string" || !folder.startsWith("/") || folder.length > 4096 || /[\x00-\x1f\x7f]/.test(folder)) throw new Error("invalid folder");
   if (!c.local) {
     const encoded = Buffer.from(folder, "utf8").toString("base64url");
-    return wrap(spawnPty("ssh", sshArgs(c, `phren-hook v1 shell ${encoded}`, { tty: true }), cols, rows, false));
+    return pooledSession(c, `phren-hook v1 shell ${encoded}`, cols, rows);
   }
   const shell = process.env.SHELL && process.env.SHELL.startsWith("/") ? process.env.SHELL : "/bin/zsh";
   ensureSpawnHelper();
@@ -110,7 +171,7 @@ export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols
   if (pane !== undefined && !PANE_RE.test(pane)) throw new Error(`invalid pane: ${pane}`);
   if (!c.local) {
     const command = pane === undefined ? `phren-hook v1 terminal ${server}` : `phren-hook v1 pane ${server} ${pane}`;
-    return wrap(spawnPty("ssh", sshArgs(c, command, { tty: true }), cols, rows, false));
+    return pooledSession(c, command, cols, rows);
   }
   if (pane !== undefined) {
     if (server === "tmux" || server.startsWith("tmux-")) {
