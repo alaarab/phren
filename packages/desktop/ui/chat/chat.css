@@ -332,3 +332,15 @@
 .chat-quota-host { flex: 0 1 auto; min-height: 0; max-height: min(240px, 35%); overflow-y: auto; }
 .chat-quota-host:empty, .chat-handoffs:empty { display: none; }
 .chat-handoffs { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Narrow panes (a phone-width window or a split tile; the pane is the .session-doc
+   container): the title and its menu take the first line, the Chat/Console switch
+   and "Phren knows" the second; the project, branch and computer give way
+   (they stay in the title's tooltip). */
+@container chat (max-width: 460px) {
+  .chat-pane { padding: 8px; }
+  .chat-header { flex-wrap: wrap; gap: 6px; padding: 6px 0 8px; }
+  .chat-title { flex: 1 1 80px; min-width: 80px; }
+  .chat-sub { display: none; }
+  .chat-trailing { flex: 0 1 auto; min-width: 0; gap: 4px; margin-inline-start: auto; }
+}
