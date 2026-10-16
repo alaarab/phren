@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { longTranscript } from "../src/testing/fake-hook.js";
 import { chatRow, linkUi, openChat, overviewFrame, startHarness, type Harness } from "./helpers.js";
 
-let h: Harness;
+let h: Harness | undefined;
 let unlinkUi: () => void;
 let url: string;
 
@@ -22,7 +22,8 @@ test.beforeEach(async ({}, testInfo) => {
 
 test.afterEach(async ({ page }) => {
   await page.close();
-  await h.close();
+  await h?.close();
+  h = undefined;
 });
 
 async function openLongChat(page: Page, width: number, height: number, last = "Step 9 of answer 6") {
@@ -95,7 +96,7 @@ test("a jump lands while the reply streams, and following the bottom resumes onc
   let line = 12;
   const stream = (text: string) => {
     line += 1;
-    h.hook.pushTranscript(undefined, { type: "append", totalLines: line, entries: [{ line, raw: { type: "assistant", uuid: `s${line}`, message: { role: "assistant", content: [{ type: "text", text }] } } }] });
+    h!.hook.pushTranscript(undefined, { type: "append", totalLines: line, entries: [{ line, raw: { type: "assistant", uuid: `s${line}`, message: { role: "assistant", content: [{ type: "text", text }] } } }] });
   };
   // Entries keep arriving while the reader jumps to a folded prompt.
   let n = 0;
@@ -191,7 +192,7 @@ test("with earlier prompts on the Hook the rail offers ↑ earlier, which loads 
   await expect(ticks).toHaveCount(3);
   await expect(earlier).toBeVisible();
   await expect(earlier).toHaveAttribute("aria-label", "Load earlier prompts");
-  const olderCalls = () => h.hook.calls.filter((call) => call.path.startsWith("/v1/transcripts/history") && call.path.includes("beforeLine")).length;
+  const olderCalls = () => h!.hook.calls.filter((call) => call.path.startsWith("/v1/transcripts/history") && call.path.includes("beforeLine")).length;
   expect(olderCalls()).toBe(0);
 
   await earlier.click();

@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { chatRow, linkUi, overviewFrame, startHarness, type Harness } from "./helpers.js";
 
-let h: Harness;
+let h: Harness | undefined;
 let unlinkUi: () => void;
 let url: string;
 
@@ -31,7 +31,8 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ page }) => {
   await page.close();
-  await h.close();
+  await h?.close();
+  h = undefined;
 });
 
 const active = (page: Page) => page.locator(".doc-tab.selected .doc-tab-title");

@@ -34,30 +34,36 @@ export interface Harness {
 /** A fake Hook plus the real daemon over it, in a short temp directory (a Unix socket path must stay under ~100 bytes). */
 export async function startHarness(name: string, options: Omit<FakeHookOptions, "dir"> = {}): Promise<Harness> {
   const saved = { bridge: process.env.PHREN_BRIDGE_HOME, config: process.env.XDG_CONFIG_HOME };
-  const dir = await mkdtemp(path.join(tmpdir(), `desktop-${name}-`));
-  process.env.PHREN_BRIDGE_HOME = dir;
-  process.env.XDG_CONFIG_HOME = dir;
-  const hook = await startFakeHook({ dir, ...options });
-  const hub: OverviewHub = createOverviewHub([LOCAL], hookWebSocket);
-  const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
-  hub.start();
-  await ready;
-  const server = await startServer({
-    port: 0, token: `desktop-${name}-token`, computers: [LOCAL], hub, hookRequest, hookWebSocket,
-    attachTerminal: () => ({ write() {}, resize() {}, onData() {}, onExit() {}, kill() {} }),
-  });
-  return {
-    url: server.url, hook,
-    async close() {
-      hub.stop();
-      await server.close();
-      await hook.close();
-      await rm(dir, { recursive: true, force: true });
-      for (const [key, value] of [["PHREN_BRIDGE_HOME", saved.bridge], ["XDG_CONFIG_HOME", saved.config]] as const) {
-        if (value === undefined) delete process.env[key]; else process.env[key] = value;
-      }
-    },
+  const undo: Array<() => unknown> = [];
+  // Closes whatever has started, newest first, then restores the environment; one failing step does not skip the rest.
+  const close = async () => {
+    for (const step of undo.splice(0).reverse()) { try { await step(); } catch { /* keep tearing down */ } }
+    for (const [key, value] of [["PHREN_BRIDGE_HOME", saved.bridge], ["XDG_CONFIG_HOME", saved.config]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
   };
+  try {
+    const dir = await mkdtemp(path.join(tmpdir(), `desktop-${name}-`));
+    undo.push(() => rm(dir, { recursive: true, force: true }));
+    process.env.PHREN_BRIDGE_HOME = dir;
+    process.env.XDG_CONFIG_HOME = dir;
+    const hook = await startFakeHook({ dir, ...options });
+    undo.push(() => hook.close());
+    const hub: OverviewHub = createOverviewHub([LOCAL], hookWebSocket);
+    undo.push(() => hub.stop());
+    const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
+    hub.start();
+    await ready;
+    const server = await startServer({
+      port: 0, token: `desktop-${name}-token`, computers: [LOCAL], hub, hookRequest, hookWebSocket,
+      attachTerminal: () => ({ write() {}, resize() {}, onData() {}, onExit() {}, kill() {} }),
+    });
+    undo.push(() => server.close());
+    return { url: server.url, hook, close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
 
 /** One session row of an overview frame; `fields` override any of it. */

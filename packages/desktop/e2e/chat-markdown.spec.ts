@@ -55,6 +55,7 @@ test.describe("a chat with earlier pages", () => {
   let h: Harness;
   let release: () => void = () => {};
   let gate: Promise<void> = Promise.resolve();
+  let answered = 0; // older pages the Hook has let go of
   const olderCalls = () => h.hook.calls.filter((call) => call.path.startsWith("/v1/transcripts/history") && call.path.includes("beforeLine")).length;
   const toastOf = (page: Page) => page.locator(".pt-toast");
   const hold = () => { gate = new Promise<void>((resolve) => { release = resolve; }); };
@@ -66,9 +67,10 @@ test.describe("a chat with earlier pages", () => {
 
   test.beforeEach(async ({ context }) => {
     gate = Promise.resolve();
+    answered = 0;
     h = await startHarness("cmd-pages", {
       overviewFrames: [overviewFrame([chatRow("fix", "Fix login", "idle")])],
-      transcriptFrames: ENTRIES, transcriptPageSize: PAGE, holdOlderPages: () => gate,
+      transcriptFrames: ENTRIES, transcriptPageSize: PAGE, holdOlderPages: async () => { await gate; answered += 1; },
     });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   });
@@ -95,7 +97,8 @@ test.describe("a chat with earlier pages", () => {
     await toastOf(page).getByRole("button", { name: "Cancel" }).click();
     await expect(toastOf(page)).toHaveCount(0);
     release();
-    // The answer to the cancelled request lands on nobody: no copy, no toast.
+    // The held request is answered now (the client has already given up on it): no copy, no toast.
+    await expect.poll(() => answered).toBe(1);
     await nextFrames(page);
     await expect(toastOf(page)).toHaveCount(0);
     expect(await clipboard(page)).toBe("untouched");
@@ -114,6 +117,7 @@ test.describe("a chat with earlier pages", () => {
     await page.locator(".doc-tab.selected .doc-tab-close").click();
     await expect(page.locator(".chat-title")).toHaveCount(0);
     release();
+    await expect.poll(() => answered).toBe(1);
     await nextFrames(page);
     await expect(toastOf(page).filter({ hasText: /Copied|Saved/ })).toHaveCount(0);
     expect(await clipboard(page)).toBe("untouched");

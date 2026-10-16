@@ -4,8 +4,9 @@ import { balanceFences, chatToMarkdown, escapeTitle, exportFilename } from "../u
 // @ts-expect-error Plain browser ESM.
 import { redactExport, redactNotice } from "../ui/redact.js";
 
-// A quadratic pattern needs seconds on these inputs, so a budget this wide still catches one yet leaves a loaded CI runner room.
-const ADVERSARIAL_BUDGET_MS = 1000;
+// The token-repeat inputs below are big enough that a quadratic pattern needs seconds, so this still catches one
+// while leaving a loaded CI runner room (a linear pass takes a few milliseconds).
+const ADVERSARIAL_BUDGET_MS = 300;
 
 const row = (over: Record<string, unknown>) => ({
   id: String(over.line), line: 0, role: "assistant", title: null, text: "", imageBlocks: [], resultImages: [], uploadImages: [],
@@ -100,10 +101,10 @@ describe("redactExport", () => {
   it("stays linear on 64 KB adversarial inputs for every pattern", () => {
     const k = 64 * 1024;
     const inputs: Record<string, string> = {
-      password: "password ".repeat(7000),
-      aPassword: `${"a password ".repeat(5000)}=`,
+      password: "password ".repeat(20000),
+      aPassword: `${"a password ".repeat(15000)}=`,
       dashes: `--${"-".repeat(k)}`,
-      flagWords: `--${"token".repeat(13000)}`,
+      flagWords: `--${"token".repeat(40000)}`,
       flagSep: `--token${" ".repeat(k)}`,
       headerDashes: `${"a-".repeat(k / 2)}\n`,
       mysql: `mysql ${"-p".repeat(k / 2)}`,
@@ -116,9 +117,9 @@ describe("redactExport", () => {
       authSpaces: `auth${" ".repeat(k)}`,
       upper: `${"A".repeat(k)}=`,
       upperUnderscore: `${"A_".repeat(k / 2)}`,
-      camel: `${"authToken".repeat(7000)}`,
+      camel: `${"authToken".repeat(20000)}`,
       urlCreds: `http://${"a".repeat(k)}`,
-      key: `-----BEGIN PRIVATE KEY-----${"-----BEGIN PRIVATE KEY-----".repeat(2400)}`,
+      key: `-----BEGIN PRIVATE KEY-----${"-----BEGIN PRIVATE KEY-----".repeat(7000)}`,
       long: "A1b2".repeat(k / 4),
       quotes: `password="${"\\".repeat(k)}`,
       cookie: `Cookie:${" ".repeat(k)}`,
@@ -138,9 +139,16 @@ describe("redactExport", () => {
   }
   it("keeps ordinary command lines and runs in linear time", () => {
     expect(redactExport("pnpm test -- auth")).toBe("pnpm test -- auth");
-    const start = Date.now();
-    redactExport(`${"a-".repeat(50_000)}\n${"-p".repeat(50_000)}`);
-    expect(Date.now() - start).toBeLessThan(ADVERSARIAL_BUDGET_MS * 5);
+    // Doubling the input must not much more than double the time (best of three, so one slow slice does not decide it).
+    const best = (n: number) => Math.min(...[0, 1, 2].map(() => {
+      const input = `${"a-".repeat(n)}\n${"-p".repeat(n)}`;
+      const start = performance.now();
+      redactExport(input);
+      return performance.now() - start;
+    }));
+    const small = best(50_000);
+    const large = best(100_000);
+    expect(large).toBeLessThan(small * 4 + 50);
   });
   it("leaves redactNotice output unchanged", () => {
     expect(redactNotice("token: abc123 see ghp_" + "a".repeat(36) + " ok")).toBe("token: [redacted] see [redacted] ok");

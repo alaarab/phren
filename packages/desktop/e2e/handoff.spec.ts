@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { chatRow, linkUi, overviewFrame, startHarness, type Harness } from "./helpers.js";
 
-let h: Harness;
+let h: Harness | undefined;
 let unlinkUi: () => void;
 let url: string;
 
@@ -28,7 +28,8 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ page }) => {
   await page.close();
-  await h.close();
+  await h?.close();
+  h = undefined;
 });
 
 async function sidebar(page: Page) {
@@ -104,7 +105,7 @@ test("Home Working hand-off rows fill the list with tags on their metadata line"
 test("removing the destination leaves an informational tag without a link", async ({ page }) => {
   const row = await sidebar(page);
   await expect(row.getByRole("button", { name: "→ Codex", exact: true })).toBeVisible();
-  h.hook.pushOverview(overview([children[0]]));
+  h!.hook.pushOverview(overview([children[0]]));
   await expect(page.locator(".sb-row")).toHaveCount(1);
   await expect(row.locator(".handoff-tag")).toHaveText("→ Codex");
   await expect(row.getByRole("button", { name: "→ Codex", exact: true })).toHaveCount(0);

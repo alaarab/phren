@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { chatRow, linkUi, overviewFrame, startHarness, type Harness } from "./helpers.js";
 
-let h: Harness;
+let h: Harness | undefined;
 let unlinkUi: () => void;
 let url: string;
 
@@ -28,7 +28,8 @@ test.beforeEach(async () => {
 
 test.afterEach(async ({ page }) => {
   await page.close();
-  await h.close();
+  await h?.close();
+  h = undefined;
 });
 
 async function openHome(page: Page) {
@@ -96,12 +97,12 @@ test("a new message on a snoozed chat brings it back at once", async ({ page }) 
   await expect(page.locator("#needs-pill")).toHaveText("3 need you");
   // The same frame again changes nothing. Frames arrive in order, so once an unrelated change in the
   // next one has drawn, the identical frame before it has been handled too.
-  h.hook.pushOverview(frame());
-  h.hook.pushOverview(frame({}, { lastReply: "Which section first? (edited)" }));
+  h!.hook.pushOverview(frame());
+  h!.hook.pushOverview(frame({}, { lastReply: "Which section first? (edited)" }));
   await expect(rowOf(page, "Review the docs")).toContainText("(edited)");
   await expect(page.locator("#needs-pill")).toHaveText("3 need you");
   // A new reply from the agent is a new need.
-  h.hook.pushOverview(frame({ lastReply: "Actually, CI failed. Should I fix it?", lastChangedAt: "2026-10-16T09:30:00.000Z" }));
+  h!.hook.pushOverview(frame({ lastReply: "Actually, CI failed. Should I fix it?", lastChangedAt: "2026-10-16T09:30:00.000Z" }));
   await expect(page.locator("#needs-pill")).toHaveText("4 need you");
   await expect(needs(page).locator(".home-reply-row", { hasText: "Fix login" })).toContainText("CI failed");
   await expect(needs(page).locator(".home-snoozed")).toBeHidden();
