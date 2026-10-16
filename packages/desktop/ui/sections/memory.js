@@ -8,6 +8,7 @@ import { citationData, freshnessChip, isStale, staleCount } from "../citation-fr
 // the only writes here, and only through POST /api/memory/<computer>/review.
 import { store } from "../shell/store.js";
 import { skeleton } from "../shell/skeleton.js";
+import { createSyncControl } from "../store-sync.js";
 
 const CSS_ID = "memory-css";
 const SEGMENTS = [
@@ -131,6 +132,7 @@ export function mountMemory(root) {
     <div class="mem">
       <aside class="mem-rail">
         <div class="mem-computer" data-computer></div>
+        <div data-sync></div>
         <div class="mem-rail-head">
           <span class="section-label">Projects</span>
           <span class="mem-rail-count" data-pcount></span>
@@ -153,6 +155,7 @@ export function mountMemory(root) {
   const computerEl = root.querySelector("[data-computer]");
   const projectsEl = root.querySelector("[data-projects]");
   const noteEl = root.querySelector("[data-note]");
+  const syncHost = root.querySelector("[data-sync]");
   const pcountEl = root.querySelector("[data-pcount]");
   const titleEl = root.querySelector("[data-title]");
   const subEl = root.querySelector("[data-sub]");
@@ -176,6 +179,15 @@ export function mountMemory(root) {
     graph: { mounted: false },
   };
 
+  // Pull the computer's store on demand, then read the Memory view again.
+  const sync = createSyncControl({
+    el,
+    getComputer: () => state.computer,
+    onSynced: (computer) => { if (computer === state.computer) return loadProjects(); },
+  });
+  syncHost.append(sync.el);
+  let syncFor = null;
+
   // ── Rail ───────────────────────────────────────────────────────────────
   let lastComputerSig = null;
   function refreshComputers() {
@@ -195,6 +207,7 @@ export function mountMemory(root) {
 
   function renderComputer() {
     computerEl.replaceChildren();
+    if (syncFor !== state.computer) { syncFor = state.computer; sync.reset(state.computer); }
     if (!state.computers.length) {
       computerEl.append(el("div", "mem-rail-note", "No computer is online."));
       return;

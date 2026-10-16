@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- **Sync now** pulls a computer's Phren store on demand and shows what changed.
 - **Pull requests on Home**: every open pull or merge request across your projects, the ones that need you first.
 - Notifications when a pull request you're working on gets changes requested, is approved, or hits conflicts.
 - **Snooze** a chat that's waiting on you from Home; it comes back when the time's up or something new happens.

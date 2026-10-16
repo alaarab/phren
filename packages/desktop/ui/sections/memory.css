@@ -23,6 +23,15 @@
   border-radius: 10px; color: var(--text); font: inherit; outline: none;
 }
 .mem-computer-select:focus { border-color: var(--accent); }
+.mem-sync { margin: -4px 4px 12px; display: grid; gap: 6px; justify-items: start; }
+.mem-sync-btn {
+  min-height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.mem-sync-btn:hover:not(:disabled) { background: var(--raised); }
+.mem-sync-btn:disabled { opacity: .6; cursor: default; }
+.mem-sync-status { color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.mem-sync-status.error { color: var(--danger, #e5534b); }
 .mem-rail-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px; }
 .mem-rail-count:not(:empty) {
   padding: 0 7px; border-radius: 999px; background: var(--raised);
