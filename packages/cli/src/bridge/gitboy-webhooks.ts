@@ -122,7 +122,9 @@ export class GitboyWebhooks {
           if (!candidates.length) { reply(401, "unauthorized"); return; }
           const repo = push.repository;
           const duplicateId = this.deliveries.seen(JSON.stringify([repo.owner.toLowerCase(), repo.name.toLowerCase(), push.deliveryId]));
-          const duplicateBody = this.bodies.seen(createHash("sha256").update(raw).digest("hex"));
+          // Per verified store set: the same body signed with another stores secret is that stores delivery.
+          const storeKey = candidates.map(store => store.storeId).sort().join("\u0000");
+          const duplicateBody = this.bodies.seen(`${storeKey}\u0000${createHash("sha256").update(raw).digest("hex")}`);
           if (duplicateId || duplicateBody) { reply(200, "duplicate"); return; }
           const matching = candidates.filter(store => storePushMatches(push, store));
           if (!matching.length) { reply(200, "non-matching"); return; }

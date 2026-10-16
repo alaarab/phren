@@ -180,3 +180,15 @@ it("coalesces peer fan-out for distinct signed pushes into one round per ten sec
   await vi.advanceTimersByTimeAsync(1); expect(transport.send).toHaveBeenCalledTimes(4);
   await vi.advanceTimersByTimeAsync(20_000); expect(transport.send).toHaveBeenCalledTimes(4);
 });
+
+it("pulls each store when the same push body arrives once per store secret", async () => {
+  await configure([
+    { storeId: "1234abcd", owner: "alice", name: "memory", branch: "main", secret: "private-secret" },
+    { storeId: "5678ef90", owner: "alice", name: "memory", branch: "main", secret: "other-secret" },
+  ]);
+  const body = push();
+  expect(await send(body, sign(body, "private-secret"), "delivery-a")).toBe(202);
+  expect(await send(body, sign(body, "other-secret"), "delivery-b")).toBe(202);
+  await vi.waitFor(() => expect(pull.mock.calls.map(call => call[0]).sort()).toEqual(["1234abcd", "5678ef90"]));
+  expect(await send(body, sign(body, "other-secret"), "delivery-c")).toBe(200);
+});
