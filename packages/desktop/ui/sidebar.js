@@ -321,6 +321,7 @@ function reconcile(sb, container, desired) {
     node.remove();
     sb.nodes.delete(id);
   }
+  sb.rowDrop.sweep();
 }
 
 function makeNode(sb, desc) {
@@ -445,6 +446,9 @@ function makeRow(sb, desc) {
   node.addEventListener("dragover", (event) => {
     const row = node.__row;
     if (!row || !carriesFiles(event.dataTransfer)) return;
+    // An offline computer can't take a chat's files, same as a non-chat row.
+    const co = (sb.merged?.computers || []).find((c) => c.computer === row.computer);
+    if (co && co.state !== "online") return;
     event.preventDefault();
     sb.rowDrop.over(node, row.child?.title);
   });

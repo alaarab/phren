@@ -1242,14 +1242,13 @@ test("dragging files over a chat row shows its hint, Escape clears it, and the c
 
   await row.dispatchEvent("dragover", { dataTransfer: files });
   await expect(row).toHaveClass(/sb-drop/);
-  await expect(row).toHaveAttribute("data-drop-hint", "Attach to Fix login");
-  await expect(page.locator(".sb-drop-hint")).toHaveText("Attach to Fix login");
+  await expect(page.locator(".sb-drop-hint.show")).toHaveText("Attach to Fix login");
   const tip = await page.locator(".sb-drop-hint").boundingBox();
   expect(tip!.x).toBeGreaterThanOrEqual(0);
   expect(tip!.x + tip!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   await page.keyboard.press("Escape");
   await expect(row).not.toHaveClass(/sb-drop/);
-  await expect(page.locator(".sb-drop-hint")).toHaveCount(0);
+  await expect(page.locator(".sb-drop-hint.show")).toHaveCount(0);
   await row.dispatchEvent("dragover", { dataTransfer: files });
   await expect(row).toHaveClass(/sb-drop/);
   await row.dispatchEvent("dragleave");

@@ -8,7 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
-- Drop files onto a chat in the sidebar to attach them to its message box.
+- Dragging files over a chat in the sidebar now says which chat they'll attach to, and tab drags no longer look like file drops.
 - **Saved today on Home**: what you and your agents saved to memory or tasks today, across projects and computers.
 - Chats open instantly when you rest the pointer on them in the sidebar first: Phren loads the conversation ahead of the click.
 
