@@ -327,7 +327,7 @@ function pullsSignature(root: string): string {
   let common = gitDir;
   try { common = path.resolve(gitDir, readFileSync(path.join(gitDir, "commondir"), "utf8").trim()); } catch { /* gitDir is the common one */ }
   let head: string;
-  try { head = readFileSync(path.join(gitDir, "HEAD"), "utf8"); } catch { head = `?${Math.random()}`; }
+  try { head = readFileSync(path.join(gitDir, "HEAD"), "utf8"); } catch { head = "?"; }
   const home = homedir();
   parts.push(head, fileStamp(path.join(common, "config")), fileStamp(path.join(gitDir, "config.worktree")),
     fileStamp(process.env.GIT_CONFIG_GLOBAL || path.join(home, ".gitconfig")),
