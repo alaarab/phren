@@ -12,6 +12,7 @@ import { openFileTree, openEditorDoc } from "../editor.js";
 import { openSearch } from "../search.js";
 import { setActiveSession } from "../keys.js";
 import { store, projectOf } from "../shell/store.js";
+import { noteActiveSession } from "../shell/recent.js";
 import { createTiles } from "../shell/tiles.js";
 import { openLaunchSheet } from "../shell/launch.js";
 import { layoutTree } from "../shell/herdr-layout.js";
@@ -354,6 +355,7 @@ export function mountAgents(root) {
       session = { computer: doc.computer, child: doc.child };
       activeDoc = doc;
       setActiveSession(doc.computer, doc.child);
+      noteActiveSession(doc.computer, doc.child);
       const changed = bench.sessionKey !== key;
       if (changed) {
         bench.sessionKey = key;

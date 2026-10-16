@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- **Switch between recent chats with Ctrl+Tab**: hold Ctrl to see your last eight chats and their status.
 - **Today on each project page**: the project's chats, pull requests and memory from today in one place.
 - Memory can show only findings that may be out of date, so you can review what changed under them.
 - Dragging files over a chat in the sidebar now says which chat they'll attach to, and tab drags no longer look like file drops.
