@@ -3,15 +3,23 @@
 // each accepted connection rides `ssh … "phren-hook v1 web 127.0.0.1 <port>"`,
 // for this computer it connects straight to the loopback port. Closing happens
 // after 30 idle minutes so a forgotten tab does not hold an SSH channel open.
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { Duplex } from "node:stream";
+import { sideChannelPool, type AcquiredChannel } from "./channel-pool.js";
 import type { Computer } from "./contract.js";
-import { sshArgs } from "./hosts.js";
+import { masterKey, sshArgs } from "./hosts.js";
 
 const IDLE_MS = 30 * 60_000;
 const MAX_HEAD = 16 * 1024;
+/** Idle time after which a remote preview connection (and its SSH channel) is closed. */
+const IDLE_CONNECTION_MS = 60_000;
+
+/** Whether a request head asks to switch protocols (a WebSocket). Exported for tests. */
+export function isUpgrade(head: string): boolean {
+  return head.split("\r\n").slice(1).some((line) => /^upgrade:\s*\S/i.test(line));
+}
 
 /** Whether a request head names exactly `127.0.0.1:<port>` as its Host. Exported for tests. */
 export function hostMatches(head: string, port: number): boolean {
@@ -105,6 +113,13 @@ class Relay {
       release();
       remote.destroy();
     });
+    // A remote connection holds a pooled channel: drop idle keep-alive
+    // connections quickly; the browser reconnects on demand. Upgraded
+    // connections (a dev server's HMR socket) idle legitimately, and closing
+    // one makes the page reload, so they keep their channel.
+    if (!this.computer.local && !isUpgrade(head.subarray(0, head.indexOf("\r\n\r\n")).toString("latin1"))) {
+      socket.setTimeout(IDLE_CONNECTION_MS, () => socket.destroy());
+    }
     remote.write(head);
     socket.pipe(remote).pipe(socket);
     socket.resume();
@@ -112,22 +127,66 @@ class Relay {
 
   private connect(): Duplex {
     if (this.computer.local) return connect({ host: "127.0.0.1", port: this.port });
-    const child = spawn("ssh", sshArgs(this.computer, `phren-hook v1 web 127.0.0.1 ${this.port}`), {
-      stdio: ["pipe", "pipe", "pipe"],
+    // One pooled channel per relayed connection, like a chat pipe, so previews
+    // share the computer's master slots instead of piling onto slot 0.
+    const computer = this.computer;
+    const port = this.port;
+    const controller = new AbortController();
+    let channel: AcquiredChannel | undefined;
+    let child: ChildProcess | undefined;
+    let released = false;
+    let destroyed = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      channel?.release();
+    };
+    const started = sideChannelPool.acquire(masterKey(computer), { signal: controller.signal }).then((acquired) => {
+      channel = acquired;
+      if (destroyed) { release(); throw new Error("Preview connection closed."); }
+      let spawned: ChildProcess;
+      try {
+        spawned = spawn("ssh", sshArgs(computer, `phren-hook v1 web 127.0.0.1 ${port}`, { slot: acquired.slot }), {
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch (error) {
+        release();
+        throw error;
+      }
+      child = spawned;
+      const stdout = spawned.stdout!;
+      stdout.on("data", (chunk: Buffer) => { if (!pipe.push(chunk)) stdout.pause(); });
+      stdout.on("end", () => pipe.push(null));
+      stdout.on("error", (error) => pipe.destroy(error));
+      spawned.stdin!.on("error", (error) => pipe.destroy(error));
+      spawned.on("error", (error) => { release(); pipe.destroy(error); });
+      spawned.on("exit", () => release());
+      return spawned;
     });
-    const stdout = child.stdout!;
-    const stdin = child.stdin!;
-    const pipe = new Duplex({
-      read() { stdout.resume(); },
-      write(chunk, encoding, callback) { stdin.write(chunk, encoding, callback); },
-      final(callback) { stdin.end(callback); },
-      destroy(error, callback) { child.kill(); callback(error); },
+    started.catch((error) => {
+      if (destroyed) return;
+      // Answer the browser instead of dropping the connection silently.
+      const body = `No free SSH channel to ${computer.name}; close a terminal or preview.`;
+      pipe.push(Buffer.from(`HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`));
+      pipe.push(null);
+      void error;
     });
-    stdout.on("data", (chunk: Buffer) => { if (!pipe.push(chunk)) stdout.pause(); });
-    stdout.on("end", () => pipe.push(null));
-    stdout.on("error", (error) => pipe.destroy(error));
-    stdin.on("error", (error) => pipe.destroy(error));
-    child.on("error", (error) => pipe.destroy(error));
+    const pipe: Duplex = new Duplex({
+      read() { child?.stdout?.resume(); },
+      write(chunk, encoding, callback) {
+        started.then((spawned) => { spawned.stdin!.write(chunk, encoding, callback); }, () => callback());
+      },
+      final(callback) {
+        started.then((spawned) => { spawned.stdin!.end(callback); }, () => callback());
+      },
+      destroy(error, callback) {
+        destroyed = true;
+        controller.abort(error ?? new Error("Preview connection closed."));
+        child?.kill();
+        release();
+        callback(error);
+      },
+    });
     return pipe;
   }
 

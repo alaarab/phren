@@ -3,8 +3,8 @@
 // connection, so the pool keeps the desktop under that with headroom for the
 // master's own session. Pure logic: it never touches ssh.
 
-const MAX_SLOTS = 4;
-const MAX_CHANNELS = 8;
+export const MAX_SLOTS = 4;
+export const MAX_CHANNELS = 8;
 
 export interface AcquiredChannel {
   /** Master slot (0..3) the channel was assigned to. */
@@ -109,3 +109,85 @@ export function createChannelPool(maxSlots = MAX_SLOTS, maxChannels = MAX_CHANNE
 
 /** The process-wide pool: one set of master slots per computer. */
 export const channelPool = createChannelPool();
+
+/** Channels terminals and web previews may hold per computer, out of the 32 the
+ * pool has: they keep a channel for their whole life, so without a cap a few
+ * previews or terminals would starve chat requests and sockets. */
+export const SIDE_CHANNEL_BUDGET = (MAX_SLOTS * MAX_CHANNELS) / 2;
+
+export interface ChannelBudget {
+  acquire: ChannelPool["acquire"];
+  /** Channels currently held through the budget for a computer. */
+  held(computerName: string): number;
+}
+
+/** A per-computer cap with its own wait queue over a pool: at most `max`
+ * channels are held through it at once, so the rest of the pool keeps headroom. */
+export function createBudget(pool: ChannelPool, max: number): ChannelBudget {
+  const counts = new Map<string, number>();
+  const queues = new Map<string, Array<() => void>>();
+  const count = (name: string): number => counts.get(name) ?? 0;
+  const drain = (name: string): void => {
+    const queue = queues.get(name) ?? [];
+    while (queue.length > 0 && count(name) < max) {
+      counts.set(name, count(name) + 1);
+      queue.shift()!();
+    }
+  };
+  // The budget slot is already counted; it is given back if the pool fails.
+  const take = async (name: string, options: { timeoutMs?: number; signal?: AbortSignal }): Promise<AcquiredChannel> => {
+    try {
+      const channel = await pool.acquire(name, options);
+      let released = false;
+      return {
+        slot: channel.slot,
+        release(): void {
+          if (released) return;
+          released = true;
+          channel.release();
+          counts.set(name, count(name) - 1);
+          drain(name);
+        },
+      };
+    } catch (error) {
+      counts.set(name, count(name) - 1);
+      drain(name);
+      throw error;
+    }
+  };
+  return {
+    held: count,
+    acquire(name, options = {}) {
+      const { signal, timeoutMs = 60_000 } = options;
+      if (signal?.aborted) return Promise.reject(signal.reason);
+      if (count(name) < max) {
+        counts.set(name, count(name) + 1);
+        return take(name, options);
+      }
+      return new Promise((resolve, reject) => {
+        const queue = queues.get(name) ?? [];
+        queues.set(name, queue);
+        const start = Date.now();
+        const cleanup = (): void => { clearTimeout(timer); signal?.removeEventListener("abort", abort); };
+        const go = (): void => {
+          cleanup();
+          take(name, { signal, timeoutMs: Math.max(1, timeoutMs - (Date.now() - start)) }).then(resolve, reject);
+        };
+        const cancel = (error: unknown): void => {
+          const index = queue.indexOf(go);
+          if (index === -1) return;
+          queue.splice(index, 1);
+          cleanup();
+          reject(error);
+        };
+        const abort = (): void => cancel(signal?.reason);
+        const timer = setTimeout(() => cancel(new Error("Timed out waiting for a Hook channel.")), timeoutMs);
+        signal?.addEventListener("abort", abort, { once: true });
+        queue.push(go);
+      });
+    },
+  };
+}
+
+/** The budget terminals and web previews share, per computer. */
+export const sideChannelPool = createBudget(channelPool, SIDE_CHANNEL_BUDGET);

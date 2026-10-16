@@ -5,13 +5,18 @@ import { dirname, join } from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
-import { sshArgs } from "./hosts.js";
+import { sideChannelPool, type AcquiredChannel } from "./channel-pool.js";
+import { masterKey, sshArgs } from "./hosts.js";
 import type { AttachTerminal, Computer, TerminalSession } from "./contract.js";
 
 // No leading dot or dash: the name is an argv entry for tmux or herdr.
 const SERVER_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const require = createRequire(import.meta.url);
 let helperChecked = false;
+/** Queued this long for an SSH channel, a terminal says so. */
+const WAIT_NOTICE_MS = 2_000;
+/** Input held for a terminal that has not started yet. */
+const MAX_PENDING_BYTES = 1024 * 1024;
 
 /** node-pty 1.1.0 prebuilds ship spawn-helper without +x under pnpm; fix once. */
 function ensureSpawnHelper(): void {
@@ -81,6 +86,86 @@ function wrap(p: pty.IPty): TerminalSession {
   };
 }
 
+/** A remote ssh terminal that holds one pooled channel for its life, like a
+ * chat pipe, so terminals share the computer's master slots. The session is
+ * returned at once; the pty starts when the pool grants a channel, with input,
+ * resizes and listeners held until then. The channel is released exactly once:
+ * on exit, on kill (including before the pty started), or on a spawn failure. */
+function pooledSession(c: Computer, command: string, cols: number, rows: number): TerminalSession {
+  const controller = new AbortController();
+  const dataListeners: Array<(data: string) => void> = [];
+  const exitListeners: Array<(code: number) => void> = [];
+  const pending: Array<(p: pty.IPty) => void> = [];
+  let channel: AcquiredChannel | undefined;
+  let released = false;
+  let ended = false;
+  let p: pty.IPty | undefined;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    channel?.release();
+  };
+  const end = (code: number): void => {
+    if (ended) return;
+    ended = true;
+    release();
+    for (const listener of exitListeners) listener(code);
+  };
+  const say = (text: string): void => { for (const listener of dataListeners) listener(`\r\n${text}\r\n`); };
+  let pendingBytes = 0;
+  let dropped = false;
+  let size = { cols, rows };
+  // Tell the user while queued: a terminal that shows nothing looks hung.
+  const waitingNotice = setTimeout(() => say(`Waiting for a free SSH channel to ${c.name}…`), WAIT_NOTICE_MS);
+  sideChannelPool.acquire(masterKey(c), { signal: controller.signal }).then((acquired) => {
+    clearTimeout(waitingNotice);
+    channel = acquired;
+    if (ended) { release(); return; }
+    try {
+      p = spawnPty("ssh", sshArgs(c, command, { tty: true, slot: acquired.slot }), size.cols, size.rows, false);
+    } catch {
+      end(1);
+      return;
+    }
+    p.onData((data) => { for (const listener of dataListeners) listener(data); });
+    p.onExit(({ exitCode }) => end(exitCode));
+    if (dropped) say("Input typed while waiting for an SSH channel was too large and was dropped.");
+    for (const action of pending.splice(0)) action(p);
+  }, () => {
+    clearTimeout(waitingNotice);
+    if (!ended) say(`No free SSH channel to ${c.name}; close a terminal or preview.`);
+    end(1);
+  });
+  return {
+    write: (data) => {
+      if (p) { p.write(data); return; }
+      if (ended) return;
+      // Bound what is held before the pty starts.
+      if (pendingBytes + data.length > MAX_PENDING_BYTES) { dropped = true; return; }
+      pendingBytes += data.length;
+      pending.push((live) => live.write(data));
+    },
+    resize: (w, h) => {
+      const next = { cols: clamp(w, 2, 500), rows: clamp(h, 2, 200) };
+      if (p) p.resize(next.cols, next.rows);
+      else size = next;
+    },
+    onData: (listener) => { dataListeners.push(listener); },
+    onExit: (listener) => { exitListeners.push(listener); },
+    kill: () => {
+      clearTimeout(waitingNotice);
+      controller.abort();
+      try {
+        p?.kill();
+      } catch {
+        // Already exited.
+      }
+      if (!p) end(0);
+      else release();
+    },
+  };
+}
+
 /** Herdr pane ids ("w5Y:p1") and tmux pane ids ("%12"). */
 const PANE_RE = /^[A-Za-z0-9_][A-Za-z0-9_:%.-]{0,99}$/;
 
@@ -97,7 +182,7 @@ export function attachShell(c: Computer, folder: string, cols: number, rows: num
   if (typeof folder !== "string" || !folder.startsWith("/") || folder.length > 4096 || /[\x00-\x1f\x7f]/.test(folder)) throw new Error("invalid folder");
   if (!c.local) {
     const encoded = Buffer.from(folder, "utf8").toString("base64url");
-    return wrap(spawnPty("ssh", sshArgs(c, `phren-hook v1 shell ${encoded}`, { tty: true }), cols, rows, false));
+    return pooledSession(c, `phren-hook v1 shell ${encoded}`, cols, rows);
   }
   const shell = process.env.SHELL && process.env.SHELL.startsWith("/") ? process.env.SHELL : "/bin/zsh";
   ensureSpawnHelper();
@@ -110,7 +195,7 @@ export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols
   if (pane !== undefined && !PANE_RE.test(pane)) throw new Error(`invalid pane: ${pane}`);
   if (!c.local) {
     const command = pane === undefined ? `phren-hook v1 terminal ${server}` : `phren-hook v1 pane ${server} ${pane}`;
-    return wrap(spawnPty("ssh", sshArgs(c, command, { tty: true }), cols, rows, false));
+    return pooledSession(c, command, cols, rows);
   }
   if (pane !== undefined) {
     if (server === "tmux" || server.startsWith("tmux-")) {

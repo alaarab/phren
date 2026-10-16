@@ -1,7 +1,7 @@
 import { connect, createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Computer } from "./contract.js";
-import { closeAllPreviews, closePreview, getPreview, listPreviews, openPreview } from "./web-preview.js";
+import { closeAllPreviews, closePreview, getPreview, isUpgrade, listPreviews, openPreview } from "./web-preview.js";
 
 const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
 
@@ -104,5 +104,13 @@ describe("openPreview", () => {
     } finally {
       await echo.close();
     }
+  });
+});
+
+describe("isUpgrade", () => {
+  it("keeps WebSocket upgrades (a dev server's HMR socket) out of the idle close", () => {
+    expect(isUpgrade("GET /_hmr HTTP/1.1\r\nHost: 127.0.0.1:5173\r\nUpgrade: websocket\r\nConnection: Upgrade")).toBe(true);
+    expect(isUpgrade("GET / HTTP/1.1\r\nHost: 127.0.0.1:5173\r\nConnection: keep-alive")).toBe(false);
+    expect(isUpgrade("GET /upgrade: HTTP/1.1\r\nHost: x")).toBe(false);
   });
 });
