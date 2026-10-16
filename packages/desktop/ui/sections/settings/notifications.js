@@ -3,7 +3,7 @@ import { loadQuotaState, quotaSettings, saveQuotaSettings } from "../../shell/qu
 import { quietSettings, saveQuietSettings } from "../../shell/quiet.js";
 import { setTrayEnabled, trayAvailable, trayEnabled } from "../../shell/tray.js";
 import { el, heading, toggleRow } from "./ui.js";
-import { BADGE_KEY, CI_KEY, NOTIFY_KEY, STALL_KEY, badgeEnabled, ciNotifyEnabled, notifyEnabled, stallNotifyEnabled, writeFlag } from "./prefs.js";
+import { BADGE_KEY, CI_KEY, NOTIFY_KEY, PR_KEY, STALL_KEY, badgeEnabled, ciNotifyEnabled, notifyEnabled, prNotifyEnabled, stallNotifyEnabled, writeFlag } from "./prefs.js";
 
 // ------------------------------------------------------------ page: Notifications
 
@@ -14,6 +14,7 @@ export function buildNotifications(page) {
   notify.append(toggleRow("An agent needs me", notifyEnabled(), (on) => writeFlag(NOTIFY_KEY, on)));
   notify.append(toggleRow("An agent stalls", stallNotifyEnabled(), (on) => writeFlag(STALL_KEY, on)));
   notify.append(toggleRow("A session's pull request checks pass or fail", ciNotifyEnabled(), (on) => writeFlag(CI_KEY, on)));
+  notify.append(toggleRow("Pull request reviews and conflicts", prNotifyEnabled(), (on) => writeFlag(PR_KEY, on)));
   const quota = el("div", "settings-list");
   const prefs = quotaSettings();
   const quotaToggle = toggleRow("Account usage warnings", prefs.on, (on) => {

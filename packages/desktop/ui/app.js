@@ -23,7 +23,7 @@ import "./chat/export-command.js"; // registers "Copy / Save chat as Markdown" i
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
 import { initTheme } from "./shell/theme.js";
-import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, stallNotifyEnabled, recentSwitchEnabled } from "./sections/settings.js";
+import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, prNotifyEnabled, stallNotifyEnabled, recentSwitchEnabled } from "./sections/settings.js";
 import { quietNow } from "./shell/quiet.js";
 import { startCiWatch } from "./shell/ci-watch.js";
 import { startQuotaBack } from "./shell/quota-back.js";
@@ -98,7 +98,11 @@ store.subscribe(() => {
 
 // Native notifications when a session branch's pull request checks settle,
 // and the last look behind Home's Checks strip.
-startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() && !quietNow() });
+startCiWatch({
+  notify: shell ? (title, body, opts) => shell.notify(title, body, opts) : null,
+  enabled: () => notifyEnabled() && ciNotifyEnabled() && !quietNow(),
+  reviewEnabled: () => notifyEnabled() && prNotifyEnabled() && !quietNow(),
+});
 startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
 startQuotaBack({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && !quietNow() });
 startSummon(shell);
@@ -108,6 +112,13 @@ startNeedsNotify(shell, {
   enabled: () => notifyEnabled() && !quietNow(),
   stallsEnabled: () => notifyEnabled() && stallNotifyEnabled() && !quietNow(),
   openSession,
+  openPulls: (computer, child) => { showSection("agents"); agents().openPulls(computer, child); },
+  openProject: (computer, name) => {
+    showSection("projects");
+    const projects = sectionHandle("projects");
+    if (name && projects?.open) projects.open({ computer, name });
+    else showSection("home");
+  },
 });
 startApprovals();
 startTray(shell);
