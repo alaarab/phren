@@ -8,6 +8,7 @@ export function redactPeerHandoff(prompt: string): string {
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s?#]+@/gi, "$1[redacted]@")
     .replace(/(\bAuthorization[\t ]*:[\t ]*)[^\r\n]*/gi, "$1[redacted]")
     .replace(new RegExp(String.raw`(\bBearer[\t ]+)${value}`, "gi"), "$1[redacted]")
+    .replace(new RegExp(String.raw`((?<![\w-])--${names}[\t ]+-p[\t ]+)${value}`, "gi"), "$1[redacted]")
     .replace(new RegExp(String.raw`((?<![\w-])--${names}(?:[\t ]*=[\t ]*|[\t ]+))${value}`, "gi"), "$1[redacted]")
     .replace(new RegExp(String.raw`((?<![\w-])["']?${names}["']?[\t ]*[:=][\t ]*)${value}`, "gi"), "$1[redacted]");
 }
