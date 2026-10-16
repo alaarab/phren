@@ -4,52 +4,28 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
-## [0.1.10] - unreleased
+## [0.1.10] - 2026-10-16
 
-- Home task launches retain their store and computer so same-named projects open the correct checkout; task refreshes expire from request start so latency cannot skip the next minute’s poll.
+### New
 
-- Home shows the six newest Active tasks across online computers and projects, with Launch and a link to all Active tasks; Home and Tasks share cached reads for 60 seconds.
+- **Home shows what's next and what's running.** Up next lists the scheduled prompts due in the next 12 hours on every online computer. Active tasks shows the six newest open tasks across projects, each with Launch. Each computer lists its busiest jobs (builds, simulators, workers), and clicking one opens the chat that started it. Working rows get a Stop button that stops an agent without opening it.
+- **Running low and Switch.** Home shows chats at your usage-warning threshold, most constrained first, with Switch into another account or harness. The warning now also appears on computers with a single Claude login, including weekly limits. A native notification says when an exhausted account has room again (Settings › Notifications).
+- **Account usage overview.** Open it with Cmd/Ctrl+Alt+U or "Show account usage" in the command palette; accounts and windows list the most constrained first, exhausted windows draw a full red ring, and reset times read the same everywhere.
+- **Hand-offs in session lists.** Original chats name their destination with a tag that opens it, new chats name their source, and Home's Finished feed includes hand-offs and accounts that got room back while you were away.
+- **Citation freshness.** Memory and chat recall mark findings whose cited file changed on gitboy since they were written as "May be out of date".
+- **Connect a GitLab or gitboy token from a project's Code block**, with the destination host shown and confirmed before anything is sent.
 
-- Stop an online working session from its Home row, with busy feedback, brief inline errors and focus preserved across polls.
+### Improved
 
-- The titlebar fits windows from 360 px with accessible section icons, compact status counts and navigation that scrolls within the bar; wide windows keep their labels. Keyboard navigation, deep links and compact resizes reveal the active tab, and screen readers hear “computers online” with the count.
+- The titlebar fits windows from 360 px: section icons, compact counts and navigation that scrolls within the bar; wide windows keep their labels.
+- Sheets keep keyboard focus inside, close with Escape and return focus; Home rows keep focus across polls; Home approval shortcuts pause while a dialog is open.
+- Account usage fits narrow windows; AltGr character input works in fields, terminals and the editor.
 
-- Home job links match server and pane IDs across workspace labels, hide cached jobs when offline, keep Hook update focus through resource polls, and label elapsed time as “seen”.
+### Fixed
 
-- Home lists each computer’s three busiest jobs with CPU and time observed, links known panes to chat, and preserves focus across resource updates.
-
-- Fixed missing usage-limit switch warnings on single-login Claude computers when the chat has no account ID; weekly limits show the weekly wording, and the current login is excluded from switch destinations.
-
-- Home shows Up next: the scheduled prompts due in the next 12 hours on every online computer, soonest first, with harness, project, computer and how long until each runs. Clicking one opens Schedules. Read from the schedules Home already fetches, so no extra Hook calls.
-
-- Memory and chat recall mark findings whose cited file changed on gitboy since it was written as May be out of date
-
-- Home’s Finished feed includes accounts available again while you were away or in another section, with two-line titles, an underlined Usage tag opening account usage and the same Dismiss action. Hand-offs keep their existing session row and tag without a duplicate move item.
-
-- Home hand-off tags sit inside full-width session rows alongside their metadata, with destination subtitles wrapping to two lines on narrow windows.
-
-- Keyboard activation of sidebar hand-off tags opens the destination chat; nested buttons, links and inputs retain Enter/Space behavior.
-
-- Agents and Home show hand-offs in session lists: dimmed original chats name their destination, with a harness tag that opens it, and new chats name their source. Closed destinations keep their label without a link.
-
-- Switch sheets keep keyboard focus inside, close with Escape and return focus to the invoking control. Home approval shortcuts pause while a dialog is open.
-
-- Home shows “Running low” chats at the configured usage-warning threshold, most constrained first, with account, reset time and Switch into the existing account or harness hand-off flow. The block hides when every open chat has room.
-- Token Connect shows and confirms the API destination when it differs from the remote, including configured ports; a Changes refresh keeps the visible card's destination bound to its submit handler.
-
-- Connect a GitLab or gitboy token from a project's Code block on Hooks with `projectHostToken`; the sheet shows the destination host and refuses submission if the checkout's remote changed. Changes also binds Connect to the displayed host.
-
-- A service-refused usage window draws a full red ring labeled “Exhausted” with its own reset, even when its reported usage is below 100%.
-
-- Usage reset labels share the warning's wording: whole hours omit zero minutes, partial minutes round up, and resets a day or more away show the local weekday and time in warnings, account usage and ring tooltips.
-
-- Quota recovery notifications retain exhausted accounts through stale reports, avoid treating rounded 0% room as exhaustion, and discard expired or removed-account cooldowns.
-- Native notifications announce when an exhausted account has room again, naming the computer and the limit that reset. Settings › Notifications can turn them off; first observations stay silent and repeated recoveries are quiet for ten minutes.
-- Account usage fits narrow windows with 16 px gutters and wrapping labels and values; keyboard and palette opens center under the titlebar, while ring clicks keep their wide-window anchor.
-
-- Preserve AltGr character input in fields, terminals and the editor; account usage windows now show the most constrained first within each account.
-
-- Open account usage with Cmd/Ctrl+Alt+U or “Show account usage” in the command palette; the shared overview lists accounts and windows with the most constrained first, and Escape closes it and returns focus.
+- Task launches from Home keep their store and computer, so same-named projects open the right checkout.
+- Home job links, offline computers and usage switch destinations (the current login is never offered).
+- Quota recovery notifications through stale reports and rounded 0% values.
 
 ## [0.1.9] - 2026-10-15
 
