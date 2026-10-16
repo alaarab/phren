@@ -4,19 +4,18 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
-## [0.1.11] - unreleased
+## [0.1.11] - 2026-10-16
 
-- Continue in shows compact local reset times and scrolls all rows and the complete login hint above its pinned footer, including on narrow windows.
+### New
 
-- Continue in maps peer identities to desktop connections, recovers local choices from incomplete inventories, releases controls after a moved chat cannot be opened, and keeps account-login actions focused, unique and usable on narrow windows.
+- **Continue on another computer, by Claude account.** Continue in… lists every Claude login on this and linked computers with email, plan, 5-hour and weekly remaining and reset time, then the other agents. Pick one to open the chat there with a hand-off. Conductor chats move with their role (needs Phren Hook 0.3.54).
+- **Add a Claude account** from the same sheet: it opens a sign-in pane on that computer for you to log in, and computers with a single login show the `phren bridge accounts add <name>` command to copy.
+- **Search memory across projects** from the command palette with `??` (or `?` without a project scope), with ranked, labelled results.
+- **Run now from Home's Up next**, with inline confirmation, launch status and errors.
 
-- Continue in lists Claude accounts across computers first, with email, plan and usage; add an account through an interactive login pane, gate conductor transfers on Hook support, and resolve nested session folders to their registered project.
+### Fixed
 
-- Continue a chat on another computer with harness/account usage, unavailable-computer reasons and a copyable single-Claude-login hint (Hook `moveToComputer`).
-
-- Search memory across projects on online computers from the command palette with `??`, or `?` without a project scope, with ranked, labelled results and cancellable searches.
-
-- Home’s Up next rows offer Run now with inline confirmation, launch status and errors; Working rows omit blank activity lines.
+- Home's Working rows no longer show blank activity lines.
 
 ## [0.1.10] - 2026-10-16
 
