@@ -10,6 +10,7 @@ import * as kit from "/vendor/kit/index.js";
 import { parsePatch, wordSegments } from "../patch.js";
 import { renderMarkdownInto } from "./markdown.js";
 import { hookGet } from "../api.js";
+import { createOutline } from "./outline.js";
 
 let styleLinked = false;
 function ensureStyle() {
@@ -150,12 +151,18 @@ function countsAsMessage(entry) {
   return message.role === "user" || message.role === "assistant";
 }
 
+/** A prompt the outline lists: a user bubble with text (not a tool result or a queued echo). */
+function isPrompt(entry) {
+  return countsAsMessage(entry) && entry.messages[0].role === "user" && !!String(entry.messages[0].text || "").trim();
+}
+
 /**
  * The timeline view.
  * @param {HTMLElement} container element to fill and own
  * @param {{computer:string, source?:string, target?:object,
  *          openFile?:(path:string, opts?:object)=>void,
- *          openSubagent?:(child:any)=>void, insert?:(text:string)=>void}} ctx
+ *          openSubagent?:(child:any)=>void, insert?:(text:string)=>void,
+ *          hasOlder?:()=>boolean, loadOlder?:()=>void}} ctx
  */
 export function createTimelineView(container, ctx = {}) {
   ensureStyle();
@@ -165,6 +172,7 @@ export function createTimelineView(container, ctx = {}) {
   const scroll = h("div", "ct-scroll");
   const column = h("div", "ct-column");
   scroll.append(column);
+  scroll.tabIndex = -1; // a click in the transcript puts focus here, so Alt+Up/Down reach the outline
   const jump = h("button", "ct-jump", "Jump to latest");
   jump.type = "button";
   jump.hidden = true;
@@ -181,6 +189,11 @@ export function createTimelineView(container, ctx = {}) {
   let foldHidden = false;     // this render hid turns behind the fold
   let lastPreparation = null; // re-render arguments for the fold's click
   let lastPreview = null;
+  let detached = false;       // a prompt jump is in flight: renders neither stick to the bottom nor re-anchor the scroll
+  let detachTimer = 0;
+  let jumpCap = 0;
+  let jumpGoal = null;        // the scrollTop the jump is heading for
+  let promptRows = [];        // every loaded user prompt: { id, el, text }; el is null behind the fold
 
   const distanceFromBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
   const isAtBottom = () => distanceFromBottom() < 40;
@@ -191,7 +204,43 @@ export function createTimelineView(container, ctx = {}) {
     jump.hidden = atBottom;
   }
 
+  /** A prompt jump begins: the reader leaves the bottom and nothing may move the view until it lands. */
+  function beginJump(goal = null) {
+    detached = true;
+    atBottom = false;
+    jumpGoal = goal;
+    clearTimeout(jumpCap);
+    jumpCap = setTimeout(endJump, 3000);       // whatever happens, a jump never holds the view longer than this
+    armLanding();
+  }
+  /** The fallback for a missing `scrollend`: the view has stopped at (or near) where the jump was heading. */
+  function armLanding() {
+    clearTimeout(detachTimer);
+    detachTimer = setTimeout(() => {
+      if (jumpGoal === null || Math.abs(scroll.scrollTop - jumpGoal) <= 4) endJump(); else armLanding();
+    }, 200);
+  }
+  /** The jump landed, or the reader took over: anchor again, and follow the bottom if that is where they are. */
+  function endJump() {
+    if (!detached) return;
+    detached = false;
+    jumpGoal = null;
+    clearTimeout(detachTimer);
+    clearTimeout(jumpCap);
+    updateJump();
+    if (atBottom) scrollToBottom();
+  }
+  // A scrollend can be the tail of an earlier scroll (a streamed reply followed to the bottom): only one at the goal lands the jump.
+  scroll.addEventListener("scrollend", () => { if (jumpGoal === null || Math.abs(scroll.scrollTop - jumpGoal) <= 4) endJump(); });
+  for (const type of ["wheel", "touchstart", "pointerdown"]) scroll.addEventListener(type, endJump, { passive: true });
+  scroll.addEventListener("keydown", (event) => { if (!(event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown"))) endJump(); });
+
   scroll.addEventListener("scroll", () => {
+    if (detached) {
+      // Landing is decided by the scroll settling, not by position: the view is not "at the bottom" mid-jump.
+      armLanding();
+      return;
+    }
     updateJump();
     // Collapsed, the fold is the top: nothing hidden above it to load.
     if (foldHidden) { reachTopFired = false; return; }
@@ -201,18 +250,29 @@ export function createTimelineView(container, ctx = {}) {
       reachTopFired = false;
     }
   });
-  jump.addEventListener("click", () => { scrollToBottom(); updateJump(); });
+  jump.addEventListener("click", () => { detached = false; clearTimeout(detachTimer); clearTimeout(jumpCap); scrollToBottom(); updateJump(); });
 
   // Content that grows after a render (an image loading, a card opening) or a
   // pane shown again keeps a reader who was at the bottom there, instead of
   // leaving them a "Jump to latest" they never scrolled away from.
   const follow = new ResizeObserver(() => {
-    if (!atBottom) return;
+    if (!atBottom || detached) return;
     scrollToBottom();
     jump.hidden = true;
   });
   follow.observe(column);
   follow.observe(scroll);
+
+  // The prompt outline: a rail of ticks along the right edge (chat/outline.js).
+  const outline = createOutline({
+    root: container, scroll,
+    prompts: () => promptRows,
+    reveal: (id) => revealPrompt(id),
+    onJump: (goal) => { beginJump(goal); jump.hidden = false; },
+    earlier: () => (ctx.hasOlder?.() ? () => ctx.loadOlder?.() : null),
+  });
+  const outlineObserver = new ResizeObserver(() => outline.schedule());
+  outlineObserver.observe(column);
 
   // Images: transcript attachments and tool-result pictures, fetched through the
   // daemon only once their row scrolls into view. Object URLs are revoked with
@@ -331,9 +391,10 @@ export function createTimelineView(container, ctx = {}) {
     const entries = (preparation && preparation.entries) || [];
     const jobs = (preparation && preparation.jobs) || [];
     // Where the reader last was, not where growth since then left the view.
-    const stick = atBottom || isAtBottom();
+    const stick = !detached && (atBottom || isAtBottom());
     const beforeHeight = scroll.scrollHeight;
     const beforeTop = scroll.scrollTop;
+    const anchor = stick || detached ? null : readingAnchor();
 
     const ordered = [];
     jobsEl = updateJobs(jobsEl, jobs);
@@ -355,10 +416,14 @@ export function createTimelineView(container, ctx = {}) {
 
     const live = [];
     const seen = new Set();
+    promptRows = [];
     entries.forEach((entry, index) => {
       const id = ids[index];
       seen.add(id); // hidden rows keep their cache so expanding is instant
-      if (hidden.has(entry)) return;
+      if (hidden.has(entry)) {
+        if (isPrompt(entry)) promptRows.push({ id, el: null, text: kit.VoiceMarker.hidden(entry.messages[0].text) });
+        return;
+      }
       const key = entryKey(entry);
       let row = rows.get(id);
       if (!row || row.key !== key) {
@@ -373,6 +438,7 @@ export function createTimelineView(container, ctx = {}) {
       if (row.live) live.push(row.live);
       row.el.setAttribute("data-row-id", id); // find in chat keeps its place across a re-rendered row
       ordered.push(row.el);
+      if (isPrompt(entry)) promptRows.push({ id, el: row.el, text: kit.VoiceMarker.hidden(entry.messages[0].text) });
     });
     for (const [id, row] of [...rows]) if (!seen.has(id)) { row.cleanup?.(); row.el.remove(); rows.delete(id); }
 
@@ -384,12 +450,42 @@ export function createTimelineView(container, ctx = {}) {
     reconcile(ordered);
 
     liveUpdaters = live;
-    if (stick) {
+    if (detached) {
+      // A jump is in flight: leave the scroll to it (an append below does not move what the reader is heading for).
+    } else if (stick) {
       scrollToBottom();
     } else {
-      scroll.scrollTop = beforeTop + (scroll.scrollHeight - beforeHeight);
+      // Keep the row the reader is looking at where it was: growth below (a streamed reply) must not move them.
+      const moved = anchor ? anchorShift(anchor) : null;
+      scroll.scrollTop = moved === null ? beforeTop + (scroll.scrollHeight - beforeHeight) : scroll.scrollTop + moved;
     }
-    updateJump();
+    if (!detached) updateJump();
+    outline.schedule();
+  }
+
+  /** The first row reaching into the view, and how far below the view's top it starts. */
+  function readingAnchor() {
+    const top = scroll.getBoundingClientRect().top;
+    for (const el of column.children) {
+      const id = el.getAttribute("data-row-id");
+      const rect = el.getBoundingClientRect();
+      if (id && rect.bottom > top) return { id, offset: rect.top - top };
+    }
+    return null;
+  }
+  /** How far that row has moved since `anchor` was read (null when it is gone). */
+  function anchorShift(anchor) {
+    const el = column.querySelector(`[data-row-id="${CSS.escape(anchor.id)}"]`);
+    if (!el) return null;
+    return el.getBoundingClientRect().top - scroll.getBoundingClientRect().top - anchor.offset;
+  }
+
+  /** Open the fold if the prompt is behind it (the reader's place stays), then scroll to it and flash it. */
+  function revealPrompt(id) {
+    // Detached first: opening the fold must not stick to the bottom or re-anchor under the jump.
+    beginJump(null);
+    if (foldHidden) { expandedAll = true; render(lastPreparation, lastPreview); }
+    outline.jumpToId(id);
   }
 
   /** The fold row at the top of the column: N previous messages, or hide earlier. */
@@ -1202,14 +1298,19 @@ export function createTimelineView(container, ctx = {}) {
 
   return {
     render,
-    scrollToBottom,
-    isAtBottom,
+    // The pane's own render asks before and after drawing: a prompt jump in flight is not "at the bottom".
+    scrollToBottom: () => { if (!detached) scrollToBottom(); },
+    isAtBottom: () => !detached && isAtBottom(),
     /** Earlier turns are behind the fold (find searches only what is drawn). */
     isFolded: () => foldHidden,
     onScrollTop(fn) { onTop.push(fn); },
     destroy() {
       clearInterval(tick);
       follow.disconnect();
+      outlineObserver.disconnect();
+      clearTimeout(detachTimer);
+      clearTimeout(jumpCap);
+      outline.destroy();
       imageObserver.disconnect();
       for (const row of rows.values()) row.cleanup?.();
       rows.clear();
