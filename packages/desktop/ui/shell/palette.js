@@ -12,6 +12,7 @@ import { sectionHandle, sectionIds, sectionLabel, showSection } from "./sections
 import { projectOf, store } from "./store.js";
 import { checksStrip, lastChecks } from "./ci-watch.js";
 import { checksWord } from "../git-review.js";
+import { blend, clearRecent, readRecent, recentRows, recordPick, weights } from "./palette-recent.js";
 
 // ------------------------------------------------------------ commands
 const commands = new Map(); // id -> { id, title, keys?, run, group?, meta?, when? }
@@ -25,7 +26,7 @@ export function registerCommand(cmd) {
 }
 
 const PROVIDER = { claude: "C", codex: "X", opencode: "O", copilot: "G", phren: "P" };
-const GROUP_ORDER = { Sessions: 0, "Pull requests": 1, Projects: 2, "Go to": 3, Commands: 4, Files: 5 };
+const GROUP_ORDER = { Recent: -1, Sessions: 0, "Pull requests": 1, Projects: 2, "Go to": 3, Commands: 4, Files: 5 };
 const CHECK_ICON = { failing: "✕", pending: "●", passing: "✓" };
 const MAX_ROWS = 200;
 const MEMORY_LIMIT = 20;
@@ -135,6 +136,14 @@ function openPullsTab(computer, child) {
   showSection("agents");
   sectionHandle("agents")?.openPulls(computer, child);
 }
+
+registerCommand({
+  id: "palette.clear-recent",
+  title: "Clear recent",
+  meta: "Forget what the palette remembers you using",
+  when: () => readRecent().length > 0,
+  run: () => clearRecent(),
+});
 
 function sectionItems() {
   return sectionIds().map((id) => ({
@@ -449,16 +458,26 @@ function render(sources) {
 
   if (memory.key) cancelMemory();
   const scored = [];
-  for (const item of collect(sources, query, commandsOnly)) {
+  const now = Date.now();
+  const picks = readRecent(now);
+  const heat = weights(picks, now);
+  const pool = collect(sources, query, commandsOnly);
+  for (const item of pool) {
     const score = bestScore(query, item);
     if (score < 0) continue;
-    scored.push({ item, score: score + (query ? 0 : (item.boost || 0)) });
+    scored.push({ item, score: query ? blend(score, item.id, heat) : score + (item.boost || 0) });
   }
   scored.sort((a, b) =>
     b.score - a.score
     || (GROUP_ORDER[a.item.group] ?? 9) - (GROUP_ORDER[b.item.group] ?? 9)
     || a.item.title.localeCompare(b.item.title));
   items = scored.slice(0, MAX_ROWS).map((s) => s.item);
+  if (!query && !commandsOnly) {
+    // Recent: copies under their own row ids; picking one still counts for the original.
+    const byId = new Map(pool.map((it) => [it.id, it]));
+    const recent = recentRows(picks, byId, now).map((it) => ({ ...it, id: `recent:${it.id}`, pickId: it.id, group: "Recent" }));
+    items = [...recent, ...items];
+  }
   if (selected >= items.length) selected = Math.max(0, items.length - 1);
   paint();
 }
@@ -519,6 +538,7 @@ function activate(i) {
   const item = items[i];
   if (!item) return;
   closePalette();
+  recordPick(item.pickId ?? item.id);
   try { item.run(); } catch (err) { console.error(err); }
 }
 
