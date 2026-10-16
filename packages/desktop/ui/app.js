@@ -19,6 +19,7 @@ import { mountReview } from "./sections/review.js";
 import { mountCode } from "./sections/code.js";
 import "./shell/launch.js"; // registers "New agent…" in the palette
 import "./chat/find-command.js"; // registers "Find in chat" in the palette
+import "./chat/export-command.js"; // registers "Copy / Save chat as Markdown" in the palette
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
 import { initTheme } from "./shell/theme.js";

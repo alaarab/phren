@@ -16,9 +16,10 @@ import {
 import { hookPost, hookGet } from "./api.js";
 import { createTimelineView } from "./chat/timeline-view.js";
 import { createFindBar } from "./chat/find-bar.js";
+import { chatToMarkdown, downloadText, exportFilename, setExportPane, clearExportPane } from "./chat/markdown-export.js";
 import { createComposer, contextPercent } from "./chat/composer.js";
 import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
-import { startDictation, createTalkMode } from "./chat/talk.js";
+import { startDictation, createTalkMode, toast } from "./chat/talk.js";
 import { openKnowsDrawer, installRememberSelection } from "./chat/knows.js";
 import { renderMarkdownInto } from "./chat/markdown.js";
 import { projectOf } from "./shell/store.js";
@@ -83,8 +84,44 @@ export function openChat(el, computerName, child, opts = {}) {
   sub.append(node("span", "chat-computer", computerName));
   const more = node("button", "chat-more", "⋯");
   more.type = "button";
-  more.title = "Rename";
-  more.addEventListener("click", () => startRename());
+  more.title = "Chat menu";
+  more.setAttribute("aria-haspopup", "menu");
+  more.setAttribute("aria-expanded", "false");
+  const menu = node("div", "chat-menu");
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  const menuItem = (label, run) => {
+    const item = node("button", null, label);
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.addEventListener("click", () => { closeMenu(); run(); });
+    return item;
+  };
+  menu.append(
+    menuItem("Rename", () => startRename()),
+    menuItem("Copy as Markdown", () => copyMarkdown()),
+    menuItem("Save as Markdown\u2026", () => saveMarkdown()),
+  );
+  const moreWrap = node("div", "chat-more-wrap");
+  moreWrap.append(more, menu);
+  function closeMenu() {
+    menu.hidden = true;
+    more.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", onMenuOutside, true);
+    document.removeEventListener("keydown", onMenuKey, true);
+  }
+  function onMenuOutside(ev) { if (!moreWrap.contains(ev.target)) closeMenu(); }
+  function onMenuKey(ev) { if (ev.key === "Escape") { ev.stopPropagation(); closeMenu(); more.focus(); } }
+  more.addEventListener("click", () => {
+    if (!menu.hidden) { closeMenu(); return; }
+    menu.hidden = false;
+    // Near the right edge (a narrow window) the menu opens leftwards instead of off screen.
+    menu.classList.toggle("end", moreWrap.getBoundingClientRect().left + menu.offsetWidth > document.documentElement.clientWidth - 8);
+    more.setAttribute("aria-expanded", "true");
+    document.addEventListener("pointerdown", onMenuOutside, true);
+    document.addEventListener("keydown", onMenuKey, true);
+    menu.querySelector("button")?.focus();
+  });
   const contextRing = node("div", "chat-context-ring");
   const knowsBtn = node("button", "chat-knows-btn", "Phren knows");
   knowsBtn.type = "button";
@@ -92,7 +129,7 @@ export function openChat(el, computerName, child, opts = {}) {
   const trailing = node("div", "chat-trailing");
   trailing.append(knowsBtn, contextRing);
   const header = node("div", "chat-header");
-  header.append(ring, dot, title, sub, more, trailing);
+  header.append(ring, dot, title, sub, moreWrap, trailing);
 
   const handoffs = node("div", "chat-handoffs");
   const updateOverview = (row) => renderHandoffLinks(handoffs, computerName, row);
@@ -787,19 +824,103 @@ export function openChat(el, computerName, child, opts = {}) {
     if (workPopover) drawWork(workPopover.kind, workPopover.el, id);
   }
 
+  // ---- copy or save as Markdown ----
+  // Older history is loaded first (through the same history route the scroll-up uses) until
+  // none is left or EXPORT_MAX rows are held; if rows are still missing the file says so.
+  // Closing the pane, or Cancel, aborts the requests and nothing is written afterwards.
+  const EXPORT_MAX = 2000;
+  const paneAbort = new AbortController();
+  let exportRun = null;
+  let olderLoad = null;
+  const plural = (n) => `${n} message${n === 1 ? "" : "s"}`;
+  async function loadAllHistory(signal, progress) {
+    // A scroll-up page already in flight: wait for it rather than exporting partial history.
+    if (olderLoad) await olderLoad;
+    if (!backlogLoaded) return { complete: !history.hasMore, failed: false };
+    let failed = false;
+    loadingOlder = true;
+    try {
+      while (history.hasMore && history.startLine !== null && history.messages.length < EXPORT_MAX) {
+        if (signal.aborted) break;
+        progress(history.messages.length);
+        const before = history.startLine;
+        let read = null;
+        try { read = readFrame(await hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(before) }, { signal })); }
+        catch { if (signal.aborted) break; }
+        if (!read) { failed = true; break; }
+        history.receive(read);
+        if (history.startLine === before) { failed = true; break; }
+      }
+    } finally { loadingOlder = false; if (!closed) render(); }
+    return { complete: !history.hasMore, failed };
+  }
+  async function exportMarkdown() {
+    if (exportRun) { toast("Already exporting\u2026"); return null; }
+    const run = new AbortController();
+    const stopRun = () => run.abort();
+    paneAbort.signal.addEventListener("abort", stopRun);
+    exportRun = run;
+    let progress = null;
+    try {
+      const wait = history.hasMore || olderLoad;
+      if (wait) {
+        progress = toast("Loading earlier messages\u2026", { ms: 10 * 60_000 });
+        const cancel = node("button", "pt-toast-action", "Cancel");
+        cancel.type = "button";
+        cancel.addEventListener("click", stopRun);
+        progress.el.append(cancel);
+      }
+      const { failed } = await loadAllHistory(run.signal, (n) => progress?.update(`Loading earlier messages\u2026 ${n}`));
+      if (run.signal.aborted || closed) return null;
+      const rows = history.messages.slice(-EXPORT_MAX);
+      const earlierMissing = history.hasMore || rows.length < history.messages.length;
+      const out = chatToMarkdown(rows, {
+        title: title.textContent, project: projectOf(child) || basename(child && child.cwd),
+        computer: computerName, harness: provider, agent: provider, earlierMissing,
+      });
+      return { ...out, name: exportFilename(out.title), failed, earlierMissing };
+    } catch {
+      if (!run.signal.aborted && !closed) toast("Could not read the chat history", { tone: "danger" });
+      return null;
+    } finally {
+      paneAbort.signal.removeEventListener("abort", stopRun);
+      progress?.();
+      exportRun = null;
+    }
+  }
+  const failNote = (out) => out.failed ? `Couldn't load earlier messages; exported ${out.messages}` : null;
+  async function copyMarkdown() {
+    const out = await exportMarkdown();
+    if (!out || closed) return;
+    try {
+      await navigator.clipboard.writeText(out.markdown);
+      toast(failNote(out) || `Copied ${plural(out.messages)}`, out.failed ? { tone: "danger" } : {});
+    } catch { toast("Could not copy to the clipboard", { tone: "danger" }); }
+  }
+  async function saveMarkdown() {
+    const out = await exportMarkdown();
+    if (!out || closed) return;
+    downloadText(out.name, out.markdown);
+    toast(failNote(out) || `Saved ${plural(out.messages)} as ${out.name}`, out.failed ? { tone: "danger" } : {});
+  }
+  const exportHandle = { isUsable: () => el.isConnected && el.getClientRects().length > 0, copy: copyMarkdown, save: saveMarkdown };
+  el.addEventListener("focusin", () => setExportPane(exportHandle));
+  el.addEventListener("pointerdown", () => setExportPane(exportHandle), true);
+
   // ---- older pages ----
   /** Load the page before the oldest one; resolves once it is drawn (or at once when there is nothing to load). */
   function loadOlder() {
     // The snapshot's cursor is not usable until the live backlog replaces it.
     if (!backlogLoaded || loadingOlder || !history.hasMore || history.startLine === null) return Promise.resolve();
     loadingOlder = true;
-    return hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) })
+    olderLoad = hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) }, { signal: paneAbort.signal })
       .then((frame) => {
         const read = readFrame(frame);
         if (read) { history.receive(read); render(); }
       })
       .catch(() => {})
-      .finally(() => { loadingOlder = false; });
+      .finally(() => { loadingOlder = false; olderLoad = null; });
+    return olderLoad;
   }
   timeline.onScrollTop?.(() => { loadOlder(); });
 
@@ -899,7 +1020,10 @@ export function openChat(el, computerName, child, opts = {}) {
     focus() { composer.focus(); },
     close() {
       closed = true;
+      paneAbort.abort();
       find.destroy();
+      closeMenu();
+      clearExportPane(exportHandle);
       setChatOpen(computerName, child, false);
       stopWatchingShown();
       dictation?.stop(); talk?.stop();
