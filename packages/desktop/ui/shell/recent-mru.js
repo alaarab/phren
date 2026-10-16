@@ -35,3 +35,31 @@ export function moveSelection(index, count, delta) {
   if (count < 1) return -1;
   return (((index + delta) % count) + count) % count;
 }
+
+/** Terminals, editors and iframes keep Ctrl+Tab (the same exemption as ⌘1–9 in app.js). */
+export function ownsCtrlTab(target) {
+  return !!target?.closest?.(".monaco-editor, .xterm, iframe");
+}
+
+/**
+ * A key or pointer event with Ctrl up while the switcher is open means the
+ * Ctrl keyup was missed (focus moved into an iframe or terminal, a dialog, an
+ * IME). Commit when the overlay is showing, so what the user selected opens;
+ * cancel when it never showed, so a stray tap does nothing.
+ */
+export function lostCtrl(state, ev) {
+  if (!state || ev.ctrlKey) return null;
+  return state.shown ? "commit" : "cancel";
+}
+
+/** Held Tab repeats are ignored until the overlay shows, then at most one move per `gap` ms. */
+export function acceptTab({ repeat, shown, now, last }, gap = 150) {
+  if (!repeat) return true;
+  return shown && now - last >= gap;
+}
+
+/** Ids restored from sessionStorage: "computer/id" strings only, capped. */
+export function validKeys(value, limit = RECENT_LIMIT) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((k) => typeof k === "string" && k.length <= 300 && /^[^/]+\/.+$/.test(k)).slice(0, limit);
+}

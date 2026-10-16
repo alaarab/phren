@@ -153,3 +153,42 @@ test("the Settings toggle turns Ctrl+Tab switching off", async ({ page }) => {
   await expect(page.locator(".mru-backdrop")).toHaveCount(0);
   await expect(active(page)).toHaveText("Charlie chat");
 });
+
+test("a terminal or editor keeps Ctrl+Tab", async ({ page }) => {
+  await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.className = "xterm";
+    const input = document.createElement("textarea");
+    host.append(input);
+    document.body.append(host);
+    input.focus();
+  });
+  await page.keyboard.down("Control");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(300);
+  await expect(page.locator(".mru-backdrop")).toHaveCount(0);
+  await page.keyboard.up("Control");
+  await expect(active(page)).toHaveText("Charlie chat");
+});
+
+test("a missed Ctrl release opens the selection on the next event with Ctrl up", async ({ page }) => {
+  await page.keyboard.down("Control");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".mru-backdrop")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", ctrlKey: false })));
+  await expect(page.locator(".mru-backdrop")).toHaveCount(0);
+  await expect(active(page)).toHaveText("Alpha chat");
+  await page.keyboard.up("Control");
+});
+
+test("the overlay is modal and announces the selected chat", async ({ page }) => {
+  await page.keyboard.down("Control");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("dialog", { name: "Recent chats" })).toHaveAttribute("aria-modal", "true");
+  await expect(page.locator(".mru-live")).toHaveText("Alpha chat, phren on This computer, working");
+  await page.keyboard.press("Escape");
+  await page.keyboard.up("Control");
+});

@@ -50,3 +50,4 @@
   .mru-card { grid-template-columns: 10px minmax(0, 1fr); }
   .mru-meta { grid-column: 2; }
 }
+.mru-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
