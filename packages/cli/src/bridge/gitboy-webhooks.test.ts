@@ -53,6 +53,7 @@ it("opens nothing without private config and refuses unsafe config without leaki
   expect(receiver.status).toEqual({ configured: false, listening: false });
   await expect(send(push())).rejects.toMatchObject({ code: "ECONNREFUSED" });
   await writeFile(path.join(root, "gitboy-webhooks.json"), JSON.stringify({ listenPort: port, stores }), { mode: 0o600 });
+  if (process.platform === "win32") return; // No POSIX permission bits to refuse on Windows.
   await chmod(path.join(root, "gitboy-webhooks.json"), 0o644);
   await receiver.start();
   expect(receiver.status).toMatchObject({ configured: true, listening: false, problem: expect.any(String) });

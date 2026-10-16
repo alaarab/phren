@@ -154,6 +154,8 @@ describe("built-in registration declarations", () => {
     const currentPosts = new Set([...postBlock.matchAll(/url.pathname === "(\/v1\/[^\"]+)"/g)].map(match => match[1]));
     for (const operation of ["create", "focus", "rename", "close"]) currentPosts.add(`/v1/workspaces/${operation}`);
     for (const route of storeRoutes("POST")) currentPosts.add(route);
+    // Routed before the per-method blocks, beside the other /v1/store/ prefix routes.
+    currentPosts.add("/v1/store/pull-now");
     expect(declared.filter(route => route.method === "POST").map(route => route.path).sort()).toEqual([...currentPosts].sort());
     expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live"]);
   });
