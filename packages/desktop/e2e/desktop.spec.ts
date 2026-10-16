@@ -8,7 +8,7 @@ import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
 import { hookRequest, hookWebSocket } from "../src/hook-client.js";
 import { createOverviewHub } from "../src/overview.js";
 import { startServer } from "../src/server.js";
-import { SAMPLE_FINDING, startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
+import { SAMPLE_FINDING, SAMPLE_STALE_FINDINGS, startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
 
 const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
 const TOKEN = "desktop-smoke-token";
@@ -1282,4 +1282,57 @@ test("Memory and chat recall show citation freshness with a tooltip at narrow wi
   await expect(recallWarning).toHaveText("May be out of date");
   await expect(recallWarning).toHaveAttribute("title", tooltip);
   expect(await recallWarning.evaluate(el => el.getBoundingClientRect().right)).toBeLessThanOrEqual(420);
+});
+
+test("Memory can filter to findings that may be out of date and combine it with search", async ({ page }) => {
+  await page.route("**/api/memory/*/projects", route => route.fulfill({ json: { projects: [{ name: "phren", findings: 5 }] } }));
+  await page.route("**/api/memory/*/findings?*", route => route.fulfill({ json: { items: [SAMPLE_FINDING, ...SAMPLE_STALE_FINDINGS] } }));
+  await page.goto(`${url}#/memory`, { waitUntil: "domcontentloaded" });
+  const rows = page.locator(".mem-row");
+  await expect(rows).toHaveCount(5);
+  const toggle = page.locator('.mem-chip[data-filter="stale"]');
+  await expect(toggle).toHaveText("May be out of date (3)");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+  const focusedFilter = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.filter);
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(await focusedFilter()).toBe("stale");
+  await expect(page.locator('.mem-chip[data-filter="all"]')).not.toHaveClass(/\bon\b/);
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator(".mem-row .mem-tag.warn")).toHaveCount(3);
+  await expect(toggle).toHaveText("May be out of date (3)");
+
+  await page.locator(".mem-search").fill("queue");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("Drain the queue");
+  await page.locator(".mem-search").fill("handlers");
+  await expect(page.locator(".mem-empty")).toHaveText("No matches.");
+
+  await page.locator(".mem-search").fill("");
+  await page.locator('.mem-chip[data-filter="stale"]').focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(await focusedFilter()).toBe("stale");
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(await focusedFilter()).toBe("stale");
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+  // The count follows the chosen type: only the decision is stale among decisions.
+  await page.locator('.mem-chip[data-filter="tag:decision"]').click();
+  await expect(toggle).toHaveText("May be out of date (1)");
+  expect(await focusedFilter()).toBe("tag:decision");
+  await page.locator('.mem-chip[data-filter="tag:decision"]').click();
+  await expect(rows).toHaveCount(5);
+});
+
+test("Memory hides the out-of-date filter when no finding has freshness data", async ({ page }) => {
+  await page.route("**/api/memory/*/projects", route => route.fulfill({ json: { projects: [{ name: "phren", findings: 1 }] } }));
+  await page.route("**/api/memory/*/findings?*", route => route.fulfill({ json: { items: [SAMPLE_STALE_FINDINGS[3]] } }));
+  await page.goto(`${url}#/memory`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".mem-row")).toHaveCount(1);
+  await expect(page.locator('.mem-chip[data-filter="stale"]')).toHaveCount(0);
 });

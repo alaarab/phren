@@ -33,3 +33,9 @@ export function freshnessChip(item, className) {
   chip.title = note.detail;
   return chip;
 }
+
+/** True when the Hook reported the finding's cited file changed since it was written. */
+export const isStale = (item) => freshnessNote(item) !== null;
+
+/** How many of `items` may be out of date; 0 means the filter has nothing to show. */
+export const staleCount = (items) => (items ?? []).filter(isStale).length;

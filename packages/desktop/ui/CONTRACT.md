@@ -679,7 +679,10 @@ chat recall. Its title is `<file> changed in <sha7> “<summary>” (<date>)`, w
 the file from `citationData` or the raw `phren:cite` comment and a short UTC date
 such as `Oct 14`. Without `lastCommit`, it reads `<file> changed since this was
 written`. Current, unknown and missing fields are silent. Chip rows wrap on
-narrow windows. Covered by `src/ui-citation-freshness.test.ts` and the desktop
+narrow windows. `isStale(item)` and `staleCount(items)` back the Memory
+Findings chip “May be out of date (N)” (`aria-pressed`, shown only when N > 0,
+combined with the type chips and search, cleared on project change); it uses the
+loaded findings and makes no request. Covered by `src/ui-citation-freshness.test.ts` and the desktop
 Memory browser smoke test.
 
 Home’s Computers block reads `computer.resources.heavy` from the shared overview

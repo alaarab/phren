@@ -83,11 +83,12 @@
 .mem-chip {
   height: 24px; padding: 0 12px; border: 1px solid var(--border-strong);
   border-radius: 999px; background: var(--raised); color: var(--muted);
-  font: 500 11.5px system-ui; text-transform: lowercase; cursor: pointer;
+  font: 500 11.5px system-ui; text-transform: lowercase; cursor: pointer; white-space: nowrap;
   transition: color .18s ease, background .18s ease, border-color .18s ease;
 }
 .mem-chip:hover { color: var(--text-2); }
 .mem-chip.on { background: var(--card); border-color: var(--accent); color: var(--accent); }
+.mem-chip.stale.on { border-color: var(--waiting); color: var(--waiting); }
 .mem-chip.tag-pitfall.on { border-color: var(--waiting); color: var(--waiting); }
 .mem-chip.tag-decision.on { border-color: var(--accent); color: var(--accent); }
 .mem-chip.tag-pattern.on { border-color: var(--done); color: var(--done); }
@@ -225,3 +226,13 @@
 /* Delete… shows on the row you're on, not on every note at once. */
 .mem-row .mem-row-actions { opacity: 0; transition: opacity .18s ease; }
 .mem-row:hover .mem-row-actions, .mem-row:focus-within .mem-row-actions { opacity: 1; }
+
+/* Narrow windows: the rail stacks above the main pane instead of squeezing it. */
+@media (max-width: 720px) {
+  .mem { flex-direction: column; }
+  .mem-rail { width: auto; max-height: 34%; border-right: 0; border-bottom: 1px solid var(--border); }
+  .mem-head { padding: 12px 14px 10px; }
+  .mem-head .segments { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .mem-head .segment { flex: none; }
+  .mem-pane { padding: 14px; }
+}
