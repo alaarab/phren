@@ -39,7 +39,8 @@ it("a new message or a changed state resurfaces the row at once", () => {
   state.snooze(waiting("a"), now() + 3_600_000);
   expect(state.visible([waiting("a")])).toHaveLength(0);
   expect(state.visible([waiting("a", { lastReply: "Also, tests failed" })])).toHaveLength(1);
-  expect(state.visible([waiting("a", { lastChangedAt: "2026-10-10T12:05:00Z" })])).toHaveLength(1);
+  // Tab activity bumps lastChangedAt without anything new being asked: still snoozed.
+  expect(state.visible([waiting("a", { lastChangedAt: "2026-10-10T12:05:00Z", title: "Renamed" })])).toHaveLength(0);
   // Reconciling drops the stale entry, so the old version does not hide it again later.
   state.reconcile([waiting("a", { lastReply: "Also, tests failed" })]);
   expect(state.size).toBe(0);
@@ -92,12 +93,59 @@ it("keeps entries across a reload and prunes the expired ones", () => {
   expect(setup(JSON.stringify([{ key: 1 }, null, { key: "x", version: "v", until: "soon" }])).state.size).toBe(0);
 });
 
-it("caps the entries, keeping the ones that wake latest", () => {
-  const { state, now } = setup();
-  for (let i = 0; i < 60; i++) state.snooze(waiting(`s${i}`), now() + 60_000 + i * 1000);
+it("caps the entries: expired go first, then the oldest created, never the one just added", () => {
+  const { state, now, advance } = setup();
+  for (let i = 0; i < 60; i++) { state.snooze(waiting(`s${i}`), now() + 3_600_000 - i * 1000); advance(1); }
   expect(state.size).toBe(50);
-  expect(state.isSnoozed(waiting("s0"))).toBe(false);
+  expect(state.isSnoozed(waiting("s0"))).toBe(false); // oldest created, though it wakes last
   expect(state.isSnoozed(waiting("s59"))).toBe(true);
+  // A new snooze that wakes sooner than all the rest still stays.
+  state.snooze(waiting("fresh"), now() + 60_000);
+  expect(state.size).toBe(50);
+  expect(state.isSnoozed(waiting("fresh"))).toBe(true);
+});
+
+it("keeps a snooze when its row misses a frame, and drops it once it has been gone over a minute", () => {
+  const { state, now, advance } = setup();
+  const row = waiting("a");
+  state.snooze(row, now() + 3_600_000);
+  state.reconcile([]); // Herdr dropped the tab for one frame
+  expect(state.size).toBe(1);
+  advance(30_000);
+  state.reconcile([row]); // and it is back
+  advance(50_000);
+  state.reconcile([]);
+  expect(state.size).toBe(1);
+  advance(61_000);
+  state.reconcile([]);
+  expect(state.size).toBe(0);
+});
+
+it("tells wake listeners only about snoozes that ended by their time", () => {
+  const { state, now, advance } = setup();
+  const woken: string[][] = [];
+  state.onWake((keys: string[], why: string) => { if (why === "time") woken.push(keys); });
+  state.snooze(waiting("a"), now() + 60_000);
+  state.snooze(waiting("b"), now() + 60_000);
+  state.snooze(waiting("c"), now() + 60_000);
+  expect(woken).toEqual([]); // snoozing announces nothing
+  state.wake("Desk/b");
+  state.reconcile([waiting("c", { lastReply: "new" })]);
+  expect(woken).toEqual([]); // nor does Wake now or a changed row
+  advance(61_000);
+  state.sweep();
+  state.sweep();
+  expect(woken).toEqual([["Desk/a"]]);
+});
+
+it("reads the saved snoozes again when another window changes them", () => {
+  const { state, data, now } = setup();
+  let emitted = 0;
+  state.subscribe(() => { emitted++; });
+  data.set("phren.desktop.snoozed", JSON.stringify([{ key: "Desk/z", version: snoozeVersion(waiting("z").child), until: now() + 60_000, created: now() }]));
+  state.reload();
+  expect(emitted).toBe(1);
+  expect(state.isSnoozed(waiting("z"))).toBe(true);
 });
 
 it("arms one timer for the next wake, re-armed after every change, and wakes on sweep", () => {
@@ -124,18 +172,23 @@ it("arms one timer for the next wake, re-armed after every change, and wakes on 
   expect(state.size).toBe(0);
 });
 
-it("offers 15 minutes, 1 hour and tomorrow 9:00 local", () => {
+it("offers 15 minutes, 1 hour and the next 9:00 local: today's before 9, else tomorrow's", () => {
   const now = new Date(2026, 9, 16, 14, 30).getTime();
   const [a, b, c] = snoozeChoices(now);
   expect([a.label, b.label, c.label]).toEqual(["15 minutes", "1 hour", "Until tomorrow 9:00"]);
   expect(a.until - now).toBe(900_000);
   expect(b.until - now).toBe(3_600_000);
   expect(new Date(c.until)).toEqual(new Date(2026, 9, 17, 9, 0));
-  // Past midnight it is still the next calendar day.
-  expect(new Date(snoozeChoices(new Date(2026, 9, 17, 0, 30).getTime())[2].until)).toEqual(new Date(2026, 9, 18, 9, 0));
+  // At 01:00 the next 9:00 is this morning's.
+  const early = snoozeChoices(new Date(2026, 9, 17, 1, 0).getTime())[2];
+  expect(early.label).toBe("Until 9:00");
+  expect(new Date(early.until)).toEqual(new Date(2026, 9, 17, 9, 0));
+  // Exactly 9:00 or later rolls to tomorrow.
+  expect(new Date(snoozeChoices(new Date(2026, 9, 17, 9, 0).getTime())[2].until)).toEqual(new Date(2026, 9, 18, 9, 0));
 });
 
-it("versions a row by status, last change and last reply", () => {
+it("versions a row by status, approval and last reply, not by last change", () => {
+  expect(snoozeVersion(waiting("a").child)).toBe(snoozeVersion(waiting("a", { lastChangedAt: "later" }).child));
   expect(snoozeVersion(waiting("a").child)).not.toBe(snoozeVersion(waiting("a", { lastReply: "x" }).child));
   expect(snoozeVersion(waiting("a").child)).toBe(snoozeVersion(waiting("a").child));
 });

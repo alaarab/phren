@@ -708,6 +708,7 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 }
 @keyframes sb-spin { to { transform: rotate(360deg); } }
 
+.sb-snoozed { flex: none; margin-left: 6px; color: var(--muted); font-size: 12px; line-height: 1; }
 .sb-unread { flex: none; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--accent); }
 
 /* Compact project-group header. */

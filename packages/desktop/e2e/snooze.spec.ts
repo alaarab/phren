@@ -103,7 +103,7 @@ test("snoozing a waiting chat hides its row and lowers every needs-you count; Wa
 
   const row = needs(page).locator(".home-reply-row", { hasText: "Fix login" });
   await row.getByRole("button", { name: "Snooze Fix login" }).click();
-  await expect(row.getByRole("menuitem")).toHaveText(["15 minutes", "1 hour", "Until tomorrow 9:00"]);
+  await expect(row.getByRole("menuitem")).toHaveText(["15 minutes", "1 hour", /^Until (tomorrow )?9:00$/]);
   await page.screenshot({ path: test.info().outputPath("snooze-menu.png") });
   await row.locator('[data-snooze="1h"]').click();
 
@@ -111,6 +111,10 @@ test("snoozing a waiting chat hides its row and lowers every needs-you count; Wa
   await expect(page.locator("#needs-pill")).toHaveText("3 need you");
   await expect(needs(page).locator(".count")).toHaveText("3");
   await expect(page).toHaveTitle("(3) Phren");
+  // The sidebar still lists the chat under Needs you, marked as snoozed.
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(page.locator(".sb-row", { hasText: "Fix login" }).locator(".sb-snoozed")).toHaveAttribute("title", /^Snoozed until /);
+  await page.locator(".section-pill", { hasText: "Home" }).click();
 
   const footer = needs(page).locator(".home-snoozed");
   await expect(footer.locator(".home-snoozed-label")).toHaveText("Snoozed (1)");
@@ -181,7 +185,7 @@ test("the Snooze menu fits a narrow window", async ({ page }) => {
   const row = needs(page).locator(".home-reply-row", { hasText: "Fix login" });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Snooze Fix login" }).click();
-  await expect(row.locator('[data-snooze="tomorrow"]')).toBeInViewport();
+  await expect(row.locator('[data-snooze="morning"]')).toBeInViewport();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBe(0);
 });

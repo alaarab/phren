@@ -71,12 +71,12 @@ export function createNeeds({ root, state, open, block, sessionRow, fill, isVisi
     }
     trigger.addEventListener("click", () => (menu.hidden ? openMenu() : close()));
     wrap.addEventListener("keydown", (event) => {
-      // Keys here belong to the menu, not to Home's row shortcuts.
-      event.stopPropagation();
       if (menu.hidden) {
-        if (event.target === trigger && event.key === "ArrowDown") { openMenu(); event.preventDefault(); }
+        if (event.target === trigger && event.key === "ArrowDown") { openMenu(); event.stopPropagation(); event.preventDefault(); }
         return;
       }
+      // While the menu is open its keys belong to it, not to Home's row shortcuts.
+      event.stopPropagation();
       const at = items.indexOf(document.activeElement);
       if (event.key === "ArrowDown") items[(at + 1) % items.length].focus();
       else if (event.key === "ArrowUp") items[(at - 1 + items.length) % items.length].focus();
