@@ -60,6 +60,8 @@ const moveRecordSchema = z.object({
   createdAt: timestamp, updatedAt: timestamp,
   from: z.object({ target: targetSchema, account: z.string().max(64).optional(), label: z.string().max(200).optional() }).strict(),
   to: moveToSchema,
+  computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  accountChoice: z.string().max(400).optional(),
   mode: z.enum(["replace", "new-chat"]).optional(),
   modeForced: z.literal("conductor").optional(),
   handedOffTo: z.object({ computer: z.string().optional(), target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
@@ -82,7 +84,7 @@ export type MoveRecord = z.infer<typeof moveRecordSchema>;
 
 /** What a dispatching Hook records on its receipt when its worker moved. */
 export interface MovedWorker {
-  id: string; at: string; handoff?: string;
+  id: string; at: string; handoff?: string; computerFingerprint?: string;
   from: { harness: Provider; account?: string };
   to: MoveTo;
   target: Target | StartingTarget;
@@ -163,6 +165,7 @@ export function moveSessionFields(records: readonly MoveRecord[], target: Target
 export function movedWorker(record: MoveRecord): MovedWorker | undefined {
   if (record.state !== "moved" || !record.target) return undefined;
   return { id: record.id, at: record.movedAt ?? record.updatedAt, ...(record.handoff ? { handoff: record.handoff.path } : {}),
+    ...(record.computerFingerprint ? { computerFingerprint: record.computerFingerprint } : {}),
     from: { harness: record.from.target.source, ...(record.from.account ? { account: record.from.account } : {}) }, to: record.to, target: record.target };
 }
 
@@ -315,7 +318,7 @@ export async function processesBelow(pids: readonly number[]): Promise<string[]>
 }
 
 /** What Phren itself saw at the move, appended to every hand-off. */
-export function observedState(git: GitState | undefined, processes: readonly string[]): string {
+export function observedState(git: GitState | undefined, processes: readonly string[], processCommands = true): string {
   const lines = ["## Checked by Phren at the move", ""];
   if (!git) lines.push("- Not a git checkout, or git could not be read.");
   else {
@@ -325,7 +328,8 @@ export function observedState(git: GitState | undefined, processes: readonly str
     else lines.push(`- Uncommitted changes (${git.changes.length}). The move committed, stashed and reset nothing: they are the previous agent's work in progress, so keep them.`, "", "```", ...git.changes, "```");
   }
   lines.push("");
-  if (processes.length) lines.push(`- Processes the previous agent had running (${processes.length}):`, "", "```", ...processes, "```");
+  if (!processCommands) lines.push(`- The previous agent had ${processes.length} child processes running; process command lines are withheld on cross-computer moves.`);
+  else if (processes.length) lines.push(`- Processes the previous agent had running (${processes.length}):`, "", "```", ...processes, "```");
   else lines.push("- The previous agent had no child processes running.");
   return lines.join("\n");
 }
@@ -477,6 +481,7 @@ export class SessionMover {
     const cwd = String(pane.foreground_cwd || pane.cwd || "");
     if (!path.isAbsolute(cwd)) throw new BridgeError(409, "The pane's folder is unknown, so the new agent could not start there.");
     let project: string | undefined;
+    let accountChoice: string | undefined;
     if (peer) {
       const { getProjectDirs } = await import("../phren-paths.js");
       const { phrenStoreRoot } = await import("./transcripts.js");
@@ -491,13 +496,14 @@ export class SessionMover {
       }
       if (!project) throw new BridgeError(409, "The source folder is not a registered project checkout.");
       projectName.parse(project);
-      await checkMovePeer(peer, project, to);
+      const selected = await checkMovePeer(peer, project, to);
+      if (selected.account) { to.account = selected.account; accountChoice = selected.accountChoice; }
     }
     const dispatch = await this.deps.paneDispatch?.(target.server, pane).catch(() => undefined);
     const label = [pane.label, pane.title, pane.terminal_title_stripped, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
     const at = new Date(this.now).toISOString();
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: "handing-off", createdAt: at, updatedAt: at,
-      mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd,
+      mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}) };
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
@@ -528,7 +534,7 @@ export class SessionMover {
       const body = "text" in written ? written.text : record.mode === "new-chat"
         ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
         : fallback!;
-      const document = handoffDocument(record, body, observedState(git, processes), new Date(this.now).toISOString(), !!conductor);
+      const document = handoffDocument(record, body, observedState(git, processes, !peer), new Date(this.now).toISOString(), !!conductor);
       const file = handoffPath(record.id);
       const prompt = briefText(continuePrompt(document, file));
       // The folder is the new agent's brief folder; the hand-off is written into it, whole.
@@ -548,12 +554,12 @@ export class SessionMover {
         // Preserve commit ids and the complete hand-off, refusing credentials
         // rather than applying the lossy approval/log summarizer to it.
         const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
-        if (scanForSecrets(safeDocument)) throw new BridgeError(409, "The hand-off contains credential-bearing text; nothing was sent to the peer.");
         const remotePrompt = briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`);
+        if (scanForSecrets(remotePrompt)) throw new BridgeError(409, "The hand-off contains a credential; nothing was sent to the peer.");
         if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
         await (await import("./move-computers.js")).checkMovePeer(peer, project!, record.to);
         await this.checkPromotion(record);
-        const target = await new DispatchService().continueChat(peer, project!, record.to, { id: record.id, text: remotePrompt }, redactSecretsForLog(redactApproval(record.from.label ?? "Continued chat")));
+        const target = await new DispatchService().continueChat(peer, project!, record.to, { id: record.id, text: remotePrompt }, redactSecretsForLog(redactApproval(briefText(record.from.label ?? "Continued chat"))));
         launched = { target, to: record.to, placement: "peer" };
       } else launched = await this.relaunch(record, prompt);
       await this.checkPromotion(record);

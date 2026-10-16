@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { hookRequest } from "./client.js";
 import { localNames } from "./computer-names.js";
 import { peerRequest, type HookPeer } from "./peers.js";
@@ -13,6 +14,7 @@ export interface DispatchHost {
   name: string;
   server: string;
   local: boolean;
+  fingerprint?: string;
   /** Every name this computer answers to (local hosts only). */
   names?: readonly string[];
   request(route: string, data?: Json, timeout?: number): Promise<Json>;
@@ -31,8 +33,13 @@ export function isLocalComputer(name: string, names: readonly string[] = localNa
   });
 }
 
+/** Public pinned host-key identity; aliases and trailing key comments are local. */
+export function peerFingerprint(peer: Pick<HookPeer, "hostKey">): string {
+  return createHash("sha256").update(peer.hostKey.trim().split(/\s+/).slice(0, 2).join(" ")).digest("hex");
+}
+
 export function peerHost(peer: HookPeer, request: typeof peerRequest = peerRequest): DispatchHost {
-  return { name: peer.name, server: peer.server, local: false, request: (route, data, timeout) => request(peer, route, data, timeout) };
+  return { name: peer.name, server: peer.server, local: false, fingerprint: peerFingerprint(peer), request: (route, data, timeout) => request(peer, route, data, timeout) };
 }
 
 /** This computer. `server` is the Herdr server its Hook reports first. */

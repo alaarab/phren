@@ -27,6 +27,7 @@ import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
 /** The harnesses a dispatch, a code note's hand-off or a schedule can start. */
+export const PEER_COPILOT_REASON = "Copilot cannot continue on another computer: its harness does not confirm launch-brief arrival. Continue locally or choose another harness.";
 export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
 export const dispatchSchema = z.object({
   computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, or anywhere for the least busy connected computer."),
@@ -78,6 +79,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     .describe("The worker hit its Claude usage limit: the dispatch that continues it on another account, or why none could."),
   continues: z.string().uuid().optional().describe("The dispatch this one continues after its worker hit its usage limit."),
   moves: z.array(z.object({ id: z.string().uuid(), at: timestamp, handoff: z.string().max(4096).optional(),
+    computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     from: z.object({ harness: provider, account: z.string().max(64).optional() }).strict(), to: moveToSchema }).strict()).max(16).optional()
     .describe("Each move of this worker to another agent (session-move.ts): from, to, when, and the hand-off file on the worker's computer. `target`, `harness`, `account`, `model` and `effort` are the current agent's."),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
@@ -698,6 +700,7 @@ export class DispatchService {
   /** Owner continuation: use the same pinned transport and launch/arrival
    * protocol as dispatch, without turning the new chat into a worker. */
   async continueChat(peer: DispatchHost, project: string, to: z.infer<typeof moveToSchema>, brief: { id: string; text: string }, label: string): Promise<Target> {
+    if (to.harness === "copilot") throw new BridgeError(409, PEER_COPILOT_REASON);
     const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
       { project, kind: to.harness, ...(to.account ? { account: to.account } : {}),
         ...(to.model ? { model: to.model } : {}), ...(to.effort ? { effort: to.effort } : {}), label, brief }, 65_000);

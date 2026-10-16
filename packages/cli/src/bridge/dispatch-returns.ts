@@ -14,7 +14,7 @@ import { findGrant } from "./grants.js";
 import { findPane, paneIdentity, sharedSnapshot, snapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { isLocalComputer } from "./dispatch-hosts.js";
+import { isLocalComputer, peerFingerprint } from "./dispatch-hosts.js";
 import { BridgeError, objects, startingTargetSchema, targetSchema, type ApprovalDecision, type Json, type Provider, type Target } from "./protocol.js";
 import { isClaudeUsageLimit, ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 import { liveWork, runningTasks } from "./session-activity.js";
@@ -358,16 +358,31 @@ const observationSchema = z.object({
 const movedSchema = z.object({
   id: z.string().uuid(), at: z.string().datetime(), handoff: z.string().max(4096).optional(),
   from: z.object({ harness: z.enum(["codex", "claude", "copilot", "phren", "opencode"]), account: z.string().max(64).optional() }).strict(),
+  computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   to: moveToSchema, target: z.union([targetSchema, startingTargetSchema]),
 }).strict();
 
 /** The worker moved to another agent: the receipt now follows that agent, and keeps the move. */
-function observeMove(receipt: Receipt, value: unknown): boolean {
+function observeMove(receipt: Receipt, value: unknown, peers: readonly HookPeer[]): boolean {
   const parsed = movedSchema.safeParse(value);
   if (!parsed.success || receipt.moves?.some(move => move.id === parsed.data.id)) return false;
   const { target, ...move } = parsed.data;
+  if (move.to.computer) {
+    // The worker Hook's alias has no authority in this Hook's directory.
+    // Missing/ambiguous identities leave the receipt at its old location.
+    const matches = move.computerFingerprint ? peers.filter(peer => peerFingerprint(peer) === move.computerFingerprint && peer.server === target.server) : [];
+    if (matches.length !== 1) {
+      const error = "The moved worker's destination identity is missing or not uniquely verified in this Hook's peer directory; receipt routing was retained.";
+      if (receipt.error === error) return false;
+      receipt.error = error;
+      return true;
+    }
+    if (receipt.error?.startsWith("The moved worker's destination identity")) delete receipt.error;
+    receipt.computer = matches[0].name;
+    move.to.computer = matches[0].name;
+    delete receipt.computerId;
+  }
   receipt.target = target;
-  if (move.to.computer) { receipt.computer = move.to.computer; delete receipt.computerId; }
   receipt.harness = move.to.harness;
   if (move.to.account) receipt.account = move.to.account; else delete receipt.account;
   if (move.to.model) receipt.model = move.to.model; else delete receipt.model;
@@ -400,10 +415,10 @@ function turnKey(value: string | undefined): string | undefined {
 }
 
 /** Apply one observation to a receipt. Returns true when the receipt changed. */
-export function observe(receipt: Receipt, value: unknown, now: number): boolean {
+export function observe(receipt: Receipt, value: unknown, now: number, peers: readonly HookPeer[] = []): boolean {
   const parsed = observationSchema.safeParse(value);
   if (receipt.closedAt) return false;
-  const moved = parsed.success && parsed.data.moved !== undefined && observeMove(receipt, parsed.data.moved);
+  const moved = parsed.success && parsed.data.moved !== undefined && observeMove(receipt, parsed.data.moved, peers);
   if (!parsed.success || parsed.data.state === "unavailable" || parsed.data.state === "unknown") return moved;
   if (parsed.data.state === "closed") { receipt.closedAt = new Date(now).toISOString(); return true; }
   if (parsed.data.state === "gone" && receipt.brief === "launch" && !receipt.worker?.sawWorking && !receipt.returned
@@ -725,7 +740,7 @@ export class DispatchReturns {
           const seen = await this.grantAnswered(receipt, workers[index]);
           let fresh: NonNullable<Receipt["approval"]> | undefined;
           const current = await updateReceipt(receipt.id, value => {
-            const before = value.approval?.actionId, changed = observe(value, seen, this.now());
+            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), peers);
             if (value.approval && value.approval.actionId !== before) fresh = value.approval;
             return changed;
           }).catch(() => undefined);

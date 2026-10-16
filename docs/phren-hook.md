@@ -1288,6 +1288,25 @@ is a local-only facts probe for the owner and verified peers; it never fans out
 or launches a chat. A dispatched worker moved by its owner re-points its receipt
 to the destination computer so future returns and approvals follow it.
 
+Peer hand-offs omit process command lines (only a child-process count is
+included). Control characters are normalized before the exact outgoing prompt
+is scanned; detected credentials fail the move with “The hand-off contains a
+credential” before any peer launch. Copilot is unavailable for cross-computer
+moves because it has no launch-brief arrival signal: its peer listing has
+`usable: false` and a `reason`; local Copilot moves still work.
+
+An omitted Claude account selects any usable login with room, preferring the
+most five-hour headroom and then weekly room, as the launcher does. The Hook
+pins that choice in `to.account`, records `accountChoice`, and advertises the
+listing's `selectedAccount`, so the receiving launcher uses the reported login.
+
+Moved-worker observations carry `computerFingerprint`, derived from the
+verified SSH host key. The dispatching Hook resolves it against its own pinned
+peer directory and records its own destination name. It never treats another
+Hook's alias as a local address. An absent or ambiguous identity retains the
+previous receipt routing and reports an error; it cannot send returns or
+approvals to a different computer that happens to share the alias.
+
 **Conductor decision:** cross-computer conductor moves return a clear 409
 before any hand-off or launch. `conductor-role.json`, its serialized CAS, receipt
 origins and approval routing belong to one Hook. There is no distributed commit
