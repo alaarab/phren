@@ -1,61 +1,33 @@
-import { existsSync, symlinkSync, unlinkSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
-import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
-import { hookRequest, hookWebSocket } from "../src/hook-client.js";
-import { createOverviewHub } from "../src/overview.js";
-import { startServer } from "../src/server.js";
-import { startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
+import { linkUi, startHarness, type Harness } from "./helpers.js";
 
-const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
-const SPEC_DIR = path.dirname(fileURLToPath(import.meta.url));
-const UI_SOURCE = path.resolve(SPEC_DIR, "../ui");
-const UI_LINK = path.resolve(SPEC_DIR, "../../../packages/ui");
-// The live backlog arrives this late, so a chat that shows its transcript sooner was prefetched.
-const STREAM_DELAY_MS = 1500;
-let linkedUi = false;
-let dir: string;
-let hook: FakeHook;
-let hub: OverviewHub;
-let closeServer: (() => Promise<void>) | undefined;
-let url: string;
+// The live backlog arrives this late, so a chat that shows its transcript sooner was prefetched. Generous, so a
+// loaded runner's slow click-to-text still lands well inside it.
+const STREAM_DELAY_MS = 4000;
+let h: Harness;
+let unlinkUi: () => void;
 
 const fixture = (name: string): Promise<unknown> => readFile(new URL(`./fixtures/${name}`, import.meta.url), "utf8").then(JSON.parse);
-const historyCalls = () => hook.calls.filter((call) => call.path.startsWith("/v1/transcripts/history")).length;
-const streamCalls = () => hook.calls.filter((call) => call.path.startsWith("/v1/transcripts?")).length;
+const historyCalls = () => h.hook.calls.filter((call) => call.path.startsWith("/v1/transcripts/history")).length;
+const streamCalls = () => h.hook.calls.filter((call) => call.path.startsWith("/v1/transcripts?")).length;
 
 test.beforeAll(async () => {
-  if (!existsSync(UI_LINK)) { symlinkSync(UI_SOURCE, UI_LINK, "dir"); linkedUi = true; }
-  dir = await mkdtemp(path.join(tmpdir(), "desktop-prefetch-"));
-  process.env.PHREN_BRIDGE_HOME = dir;
+  unlinkUi = linkUi();
   const [overview, transcript] = await Promise.all([fixture("overview.json"), fixture("transcript.json")]);
-  hook = await startFakeHook({ dir, overviewFrames: [overview], transcriptFrames: transcript as unknown[], transcriptDelayMs: STREAM_DELAY_MS });
-  hub = createOverviewHub([LOCAL], hookWebSocket);
-  const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
-  hub.start();
-  await ready;
-  const server = await startServer({
-    port: 0, token: "desktop-prefetch-token", computers: [LOCAL], hub, hookRequest, hookWebSocket,
-    attachTerminal: () => ({ write() {}, resize() {}, onData() {}, onExit() {}, kill() {} }),
-  });
-  url = server.url;
-  closeServer = server.close;
+  h = await startHarness("prefetch", { overviewFrames: [overview], transcriptFrames: transcript as unknown[], transcriptDelayMs: STREAM_DELAY_MS });
 });
 
 test.afterAll(async () => {
-  hub?.stop();
-  await closeServer?.();
-  await hook?.close();
-  await rm(dir, { recursive: true, force: true });
-  if (linkedUi) { try { unlinkSync(UI_LINK); } catch { /* already gone */ } }
-  delete process.env.PHREN_BRIDGE_HOME;
+  await h?.close();
+  unlinkUi();
 });
 
+// The counts below are per test: the Hook is shared, its call log is not.
+test.beforeEach(() => { h.hook.calls.length = 0; });
+
 async function openSidebar(page: Page) {
-  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.goto(h.url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click();
   const row = page.locator(".sb-row", { hasText: "Fix login" }).first();
   await expect(row).toBeVisible();
@@ -78,6 +50,7 @@ test("a fly-by hover reads nothing and a resting hover reads the transcript once
   await row.hover();
   await expect.poll(historyCalls).toBe(1);
   await page.waitForTimeout(300); // and it stays one
+  expect(historyCalls()).toBe(1);
   expect(streamCalls()).toBe(0); // the snapshot only: no live socket for a prefetch
 });
 
@@ -85,22 +58,25 @@ test("a chat opened after resting on its row shows the transcript before the str
   const row = await openSidebar(page);
   await row.hover();
   await expect.poll(() => snapshotLanded(page)).toBe(1);
+  const sentBefore = h.hook.backlogsSent();
   await row.click();
-  // The fake Hook holds the live backlog for 1.5 s: seeing the text sooner is the snapshot.
-  await expect(page.locator(".ct-column")).toContainText("Fix the login flow", { timeout: 500 });
+  // The fake Hook holds the live backlog for STREAM_DELAY_MS: seeing the text well before then is the snapshot.
+  await expect(page.locator(".ct-column")).toContainText("Fix the login flow", { timeout: STREAM_DELAY_MS * 0.75 });
+  expect(h.hook.backlogsSent()).toBe(sentBefore); // and the stream had not answered yet
   const prefetched = await clickToTranscript(page);
   expect(prefetched).not.toBeNull();
-  expect(prefetched!).toBeLessThan(STREAM_DELAY_MS / 2);
+  expect(prefetched!).toBeLessThan(STREAM_DELAY_MS * 0.75);
   test.info().annotations.push({ type: "click-to-transcript prefetched (ms)", description: String(Math.round(prefetched!)) });
   // The stream still attaches and reconciles: the transcript stays and shows once.
-  await page.waitForTimeout(STREAM_DELAY_MS + 300);
+  await expect.poll(() => h.hook.backlogsSent(), { timeout: STREAM_DELAY_MS + 5000 }).toBe(sentBefore + 1);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.locator(".ct-user-bubble", { hasText: "Fix the login flow" })).toHaveCount(1);
 });
 
 test("without a hover the chat waits for the stream", async ({ page }) => {
   const row = await openSidebar(page);
   await row.click();
-  await expect(page.locator(".ct-column")).toContainText("Fix the login flow", { timeout: STREAM_DELAY_MS + 2000 });
+  await expect(page.locator(".ct-column")).toContainText("Fix the login flow", { timeout: STREAM_DELAY_MS + 5000 });
   const fresh = await clickToTranscript(page);
   expect(fresh!).toBeGreaterThanOrEqual(STREAM_DELAY_MS * 0.8);
   test.info().annotations.push({ type: "click-to-transcript fresh (ms)", description: String(Math.round(fresh!)) });

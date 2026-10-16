@@ -401,7 +401,7 @@ test("projects section renders", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.locator(".section-pill", { hasText: "Projects" }).click();
-  await page.waitForTimeout(1200);
+  await expect(page.locator(".pj-card", { hasText: "phren" }).first()).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("projects.png") });
   // A project's Code block: host, branch with its own request's checks, open requests.
   await page.locator(".pj-card", { hasText: "phren" }).first().click();

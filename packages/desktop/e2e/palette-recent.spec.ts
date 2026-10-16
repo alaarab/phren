@@ -1,58 +1,22 @@
-import { existsSync, symlinkSync, unlinkSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
-import { hookRequest, hookWebSocket } from "../src/hook-client.js";
-import { createOverviewHub } from "../src/overview.js";
-import { startServer } from "../src/server.js";
-import { startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
+import { chatRow, linkUi, overviewFrame, startHarness, type Harness } from "./helpers.js";
 
-const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
-const SPEC_DIR = path.dirname(fileURLToPath(import.meta.url));
-const UI_LINK = path.resolve(SPEC_DIR, "../../../packages/ui");
-const originalBridgeHome = process.env.PHREN_BRIDGE_HOME;
-const originalConfigHome = process.env.XDG_CONFIG_HOME;
-let linkedUi = false;
-let dir: string;
-let hook: FakeHook;
-let hub: OverviewHub;
-let closeServer: (() => Promise<void>) | undefined;
+let h: Harness | undefined;
+let unlinkUi: () => void;
 let url: string;
 
-const chat = (id: string, title: string, agentStatus: string, lastReply: string) => ({
-  id, title, label: "phren", agent: "claude", agentStatus, lastReply, cwd: "/Users/you/phren",
-  target: { server: "default", workspace: "1", tab: id, pane: id, source: "claude", session: id },
-});
-const children = [
-  chat("a", "Alpha chat", "working", "Running the migration now"),
-  chat("b", "Bravo chat", "blocked", "Should I delete the old table?"),
-  chat("c", "Charlie chat", "idle", "All done, tests pass."),
-];
-const overview = {
-  type: "overview", kind: "overview", groups: [{ id: "1", label: "phren", children }],
-  phren: { computer: { id: "test-computer", name: LOCAL.name }, version: "0.3.49",
-    capabilities: { transcript: true, prompt: true, overviewStream: true } },
-};
+const overview = overviewFrame([
+  chatRow("a", "Alpha chat", "working", { lastReply: "Running the migration now" }),
+  chatRow("b", "Bravo chat", "blocked", { lastReply: "Should I delete the old table?" }),
+  chatRow("c", "Charlie chat", "idle", { lastReply: "All done, tests pass." }),
+]);
+
+test.beforeAll(() => { unlinkUi = linkUi(); });
+test.afterAll(() => { unlinkUi(); });
 
 test.beforeEach(async ({ page }) => {
-  if (!existsSync(UI_LINK)) { symlinkSync(path.resolve(SPEC_DIR, "../ui"), UI_LINK, "dir"); linkedUi = true; }
-  await mkdir(path.resolve(".scratch"), { recursive: true });
-  dir = await mkdtemp(path.resolve(".scratch/desktop-palette-recent-"));
-  process.env.PHREN_BRIDGE_HOME = dir;
-  process.env.XDG_CONFIG_HOME = dir;
-  hook = await startFakeHook({ dir, overviewFrames: [overview] });
-  hub = createOverviewHub([LOCAL], hookWebSocket);
-  const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
-  hub.start();
-  await ready;
-  const server = await startServer({
-    port: 0, token: "desktop-palette-recent-token", computers: [LOCAL], hub, hookRequest, hookWebSocket,
-    attachTerminal: () => ({ write() {}, resize() {}, onData() {}, onExit() {}, kill() {} }),
-  });
-  url = server.url;
-  closeServer = server.close;
+  h = await startHarness("palette-recent", { overviewFrames: [overview] });
+  url = h.url;
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => localStorage.clear());
   await page.locator('.section-pill[data-section="agents"]').click();
@@ -61,18 +25,8 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ page }) => {
   await page.close();
-  hub?.stop();
-  await closeServer?.();
-  await hook?.close();
-  await rm(dir, { recursive: true, force: true });
-  if (originalBridgeHome === undefined) delete process.env.PHREN_BRIDGE_HOME;
-  else process.env.PHREN_BRIDGE_HOME = originalBridgeHome;
-  if (originalConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalConfigHome;
-});
-
-test.afterAll(() => {
-  if (linkedUi) { try { unlinkSync(UI_LINK); } catch { /* already gone */ } }
+  await h?.close();
+  h = undefined;
 });
 
 const input = (page: Page) => page.locator(".palette-input");
