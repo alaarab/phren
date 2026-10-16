@@ -68,6 +68,7 @@ function defaultSession() {
     title: "Fix login",
     agent: "claude",
     agentStatus: "working",
+    currentStep: "Checking the login guard",
     cwd: "/Users/you/phren",
     branch: "main",
     lastChangedAt: new Date().toISOString(),
@@ -321,10 +322,23 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     : [[APP_PATH, { content: "export const app = \"new\";\nexport const ready = true;\n", version: "v1" }]]);
 
   const defaults: Record<string, FakeHookHandler> = {
+    "GET /v1/tasks/stores": () => ({ json: { stores: [{ id: "personal", name: "Personal", primary: true, role: "owner", metadataWritable: true, projects: ["phren", "website"] }] } }),
+    "GET /v1/tasks": (_req, _body, url) => {
+      const project = url.searchParams.get("project") ?? "phren";
+      const titles = project === "phren"
+        ? ["Polish the Home dashboard", "Review the launch flow", "Document the desktop shortcuts", "Check the release notes"]
+        : ["Refresh the landing page", "Improve mobile navigation", "Review accessibility", "Publish the getting started guide"];
+      return { json: { project, revision: "sample-1", metadataWritable: true, items: {
+        Active: titles.map((line, i) => ({ id: `A${i + 1}`, stableId: `${project}-${i}`, line, checked: false,
+          createdAt: new Date(Date.UTC(2026, 9, 15, 12 - i, project === "phren" ? 30 : 0)).toISOString(), responsibility: "agent", readiness: "ready" })),
+        Queue: [], Done: [],
+      } } };
+    },
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
+    "POST /v1/keys": () => ({ json: { ok: true } }),
     "POST /v1/schedules": () => ({ status: 200, json: defaultSchedules() }),
 
     "GET /v1/files/range": (_req, _body, url) => {

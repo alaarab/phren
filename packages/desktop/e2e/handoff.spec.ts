@@ -126,7 +126,7 @@ test("Enter on the sidebar row itself opens the old chat", async ({ page }) => {
 
 test("Home Working hand-off rows fill the list with tags on their metadata line", async ({ page }) => {
   const list = page.locator('[data-block="working"] .home-list');
-  const rows = list.locator(".home-row");
+  const rows = list.locator(".home-working");
   const oldRow = rows.filter({ has: page.getByText(oldChat.title, { exact: true }) });
   const newRow = rows.filter({ has: page.getByText(newChat.title, { exact: true }) });
   await expect(oldRow.locator(".home-row-meta").getByRole("button", { name: "→ Codex", exact: true })).toBeVisible();

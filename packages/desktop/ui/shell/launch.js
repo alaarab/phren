@@ -16,6 +16,7 @@ const CSS_ID = "launch-styles";
 
 // ---------------------------------------------------------------- constants
 const HARNESS_ORDER = ["codex", "claude", "opencode", "copilot", "phren"];
+const TASK_HARNESSES = ["codex", "claude", "opencode"];
 const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"]];
 const PERMISSIONS = [
   ["supervised", "Supervised"], ["auto-edits", "Auto edits"], ["auto", "Auto"], ["full-access", "Full access"],
@@ -69,7 +70,8 @@ function loadParts(resources) {
 /** Open the launch sheet. `project` and `computer` prefill the choices, `role`
  * starts it as a worker ("agent") or a conductor. `prompt` adds an editable
  * first prompt, sent as the launch's brief; `title` and `label` name the sheet
- * and the session. */
+ * and the session. `storeId` plus `task` (stableId, expectedRevision) uses the
+ * task launch route, bound to `computer`, with the Hook owning the brief. */
 export function openLaunchSheet(options = {}) {
   installStyles();
   return open(options);
@@ -118,9 +120,10 @@ function option(value, label) {
 /** `chat: true` is a quick chat: phren's own agent with `mode: "chat"` (no
  * tools; it answers from the project's memory), so the harness is fixed and
  * the role, permission and worktree fields are hidden. */
-async function open({ project = "", computer = "", role = "agent", prompt = "", title: heading = "", label = "", chat = false } = {}) {
+async function open({ project = "", computer = "", storeId = "", task = null, role = "agent", prompt = "", title: heading = "", label = "", chat = false } = {}) {
   const state = {
     project: (project ?? "").trim(),
+    storeId, task, taskComputer: task ? computer : "",
     computer: computer ?? "",
     // A quick chat's harness is fixed, so the recommendation looks for computers that run it.
     harness: chat ? "phren" : "",
@@ -130,7 +133,7 @@ async function open({ project = "", computer = "", role = "agent", prompt = "", 
     worktree: false,
     branch: "",
     account: "",
-    role: role === "conductor" ? "conductor" : "agent",
+    role: !task && role === "conductor" ? "conductor" : "agent",
     launching: false,
     profiles: new Map(),
     located: new Map(),
@@ -164,6 +167,7 @@ async function open({ project = "", computer = "", role = "agent", prompt = "", 
   projectInput.className = "launch-input mono";
   projectInput.placeholder = "project name";
   projectInput.value = state.project;
+  projectInput.readOnly = !!task;
   projectInput.setAttribute("list", "launch-projects");
   projectInput.setAttribute("autocomplete", "off");
   projectInput.setAttribute("aria-label", "Project");
@@ -212,6 +216,7 @@ async function open({ project = "", computer = "", role = "agent", prompt = "", 
   promptInput.className = "launch-input launch-prompt";
   promptInput.rows = 7;
   promptInput.value = state.prompt;
+  promptInput.readOnly = !!task;
   promptInput.setAttribute("aria-label", "First prompt");
   promptInput.addEventListener("input", () => { state.prompt = promptInput.value; refreshLaunch(ui); });
   const promptField = field("First prompt", promptInput);
@@ -332,6 +337,7 @@ function renderComputers(ui) {
     const profile = state.profiles.get(c.computer);
     const row = el("button", "launch-computer");
     row.type = "button";
+    row.disabled = !!state.task && c.computer !== state.taskComputer;
     if (c.computer === state.computer) row.classList.add("selected");
     const dot = el("span", `launch-dot ${c.state === "online" ? "online" : "dim"}`);
     const main = el("div", "launch-computer-main");
@@ -386,7 +392,7 @@ function rolePresentation(ui, value) {
   ui.state.role = value;
   const conductor = value === "conductor";
   ui.title.textContent = conductor ? "Start the conductor" : ui.state.heading;
-  ui.roleField.hidden = ui.state.chat;
+  ui.roleField.hidden = ui.state.chat || !!ui.state.task;
   ui.noteEl.textContent = conductor
     ? "Starts the store\u2019s conductor on the computer you choose; it sends work into any project from there."
     : ui.state.chat
@@ -395,7 +401,7 @@ function rolePresentation(ui, value) {
 }
 
 function renderWorktree(ui) {
-  ui.worktreeField.hidden = ui.state.role === "conductor" || ui.state.chat;
+  ui.worktreeField.hidden = ui.state.role === "conductor" || ui.state.chat || !!ui.state.task;
   ui.promptField.hidden = !ui.state.withPrompt || ui.state.role === "conductor";
 }
 
@@ -410,7 +416,7 @@ function renderHarness(ui) {
   }
   // A quick chat runs only on phren's own agent.
   if (state.chat) state.harness = "phren";
-  const kinds = state.chat ? ["phren"] : HARNESS_ORDER.filter((kind) => (kind === "phren" ? harnessEntry(harnesses, kind) : true));
+  const kinds = state.task ? TASK_HARNESSES : state.chat ? ["phren"] : HARNESS_ORDER.filter((kind) => (kind === "phren" ? harnessEntry(harnesses, kind) : true));
   let usable = 0;
   for (const kind of kinds) {
     const entry = harnessEntry(harnesses, kind);
@@ -541,6 +547,9 @@ function refreshLaunch(ui) {
 function launchReady(ui) {
   const state = ui.state;
   if (state.launching) return false;
+  if (state.task && (!state.storeId || !state.task.stableId || !state.task.expectedRevision
+    || state.computer !== state.taskComputer || !TASK_HARNESSES.includes(state.harness)
+    || !onlineComputers(store.merged).some((c) => c.computer === state.taskComputer))) return false;
   if (!state.computer) return false;
   const profile = state.profiles.get(state.computer);
   if (!profile || profile.loading || !harnessUsable(profile.harnesses, state.harness)) return false;
@@ -567,7 +576,7 @@ function firstUsable(ui, computer) {
   if (ui.state.chat) return "phren";
   const profile = ui.state.profiles.get(computer);
   const harnesses = profile?.harnesses;
-  const kinds = ui.state.role === "conductor" ? HARNESS_ORDER.filter((kind) => kind !== "phren") : HARNESS_ORDER;
+  const kinds = ui.state.task ? TASK_HARNESSES : ui.state.role === "conductor" ? HARNESS_ORDER.filter((kind) => kind !== "phren") : HARNESS_ORDER;
   // Prefer a harness whose account still has quota on that computer.
   const out = new Set((profile?.capacity?.usage ?? []).filter(exhausted).map((row) => String(row.source)));
   if (harnesses) {
@@ -622,6 +631,7 @@ function pickInitial(ui) {
   const state = ui.state;
   const online = onlineComputers(store.merged);
   if (!online.length) return;
+  if (state.task && !online.some((c) => c.computer === state.taskComputer)) return;
   if (state.computer && !online.some((c) => c.computer === state.computer)) { state.computer = ""; state.harness = ""; }
   if (!state.computer) {
     const rec = recommend(ui);
@@ -686,7 +696,7 @@ async function loadLocated(ui) {
   const state = ui.state;
   const project = state.project;
   state.located = new Map();
-  if (project) {
+  if (project && !state.task) {
     await Promise.all(onlineComputers(store.merged).map(async (c) => {
       try {
         const found = await hookGet(c.computer, "/v1/projects/locate", { project });
@@ -727,7 +737,15 @@ async function doLaunch(ui) {
   // A new agent in a folder that already has one must not match that one.
   const before = new Set(allSessions(store.merged).filter((row) => row.computer === state.computer).map((row) => row.child.id));
   try {
-    const result = await hookPost(state.computer, "/v1/workspaces/launch", body);
+    const taskBody = state.task ? {
+      storeId: state.storeId, project: state.project, stableId: state.task.stableId,
+      expectedRevision: state.task.expectedRevision, kind,
+      ...(state.model && supportsModel(kind) ? { model: state.model } : {}),
+      ...(supportsEffort(kind) ? { effort: state.effort } : {}),
+      ...(PERMISSION_HARNESSES.has(kind) && state.permission ? { permissionMode: state.permission } : {}),
+      ...(kind === "claude" && state.account ? { account: state.account } : {}),
+    } : null;
+    const result = await hookPost(state.computer, state.task ? "/v1/tasks/launch" : "/v1/workspaces/launch", taskBody ?? body);
     state.status = result.reused ? "Joining the launch already in flight\u2026" : "Waiting for the session to appear\u2026";
     refreshLaunch(ui);
     const match = await waitForSession(state.computer, result, before, 20_000);
