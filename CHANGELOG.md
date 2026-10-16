@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Session moves wait for the marked hand-off reply when prompt delivery is uncertain. Codex launches disable startup updates and retry once if Codex exits during startup, reporting the last screen line if it exits again.
+
 ## [0.3.52] - 2026-10-16
 
 ### Added

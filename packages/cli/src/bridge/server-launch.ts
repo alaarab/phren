@@ -26,6 +26,7 @@ import { optionalHookPeers } from "./peers.js";
 import { AppServerRpcError, AppServerUnsupportedError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
+import { stripTerminal } from "../terminal-text.js";
 import { JobRegistry } from "./job-registry.js";
 import { atomic, BridgeError, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
 import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./settings-switch.js";
@@ -217,6 +218,39 @@ async function startWhenShellReady(server: string, pane: string, agent: AgentSta
       const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_pane_busy";
       if (!starting || Date.now() >= deadline) throw error;
       await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+}
+
+/** A startup can return to its shell even when the terminal reports an
+ * unknown agent. Keep the existing pane and app-server thread for one retry. */
+async function startCodex(server: string, pane: string, agent: AgentStart): Promise<void> {
+  const terminal = terminalProvider();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const startedAt = Date.now();
+    const deadline = startedAt + agent.timeoutMs;
+    let result: { error?: unknown } | undefined;
+    const starting = startWhenShellReady(server, pane, agent).then(
+      () => { result = {}; }, error => { result = { error }; });
+    for (;;) {
+      // A provider may wait for readiness while the process has already exited.
+      await Promise.race([starting, new Promise(resolve => setTimeout(resolve, 250))]);
+      const processes = await terminal.processes?.(server, pane).catch(() => undefined);
+      const shell = processes?.shellPid;
+      const exited = processes !== undefined && shell !== undefined && processes.foregroundPids.every(pid => pid === shell);
+      if (exited && (result || Date.now() - startedAt >= 1_000)) {
+        if (attempt === 0) break;
+        const screen = await terminal.readScreen(server, pane, { scope: "pane", source: "recent", lines: 20 }).catch(() => "");
+        const last = stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1);
+        throw new BridgeError(409, `Codex exited at start: ${last || "process returned to its shell"}`);
+      }
+      if (result?.error) throw result.error;
+      if (result) {
+        const state = await terminal.snapshot(server);
+        const status = objects(state.panes).find(row => row.pane_id === pane)?.agent_status;
+        if (!processes || ["idle", "working", "blocked", "waiting"].includes(String(status)) || Date.now() >= deadline) return;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      } else if (Date.now() >= deadline) { await starting; }
     }
   }
 }
@@ -459,11 +493,13 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
       await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
     } catch (error) { briefTurn = error instanceof AppServerRpcError ? undefined : "uncertain"; }
   }
-  const agentArgs = structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])];
+  const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
+    ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
   try {
-    await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
+    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
+    if (error instanceof BridgeError && error.message.startsWith("Codex exited at start:")) throw error;
     // A first-run screen (Claude's folder trust, a login notice) holds the
     // agent at startup. It did start: hand the pane back so the owner answers
     // that screen from the chat instead of stranding the workspace.

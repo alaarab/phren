@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HarnessInventory } from "./harnesses.js";
-import type { Json } from "./protocol.js";
+import { BridgeError, type Json } from "./protocol.js";
 import { launchSession, setLaunchInventory } from "./server-launch.js";
 import { type AgentStart, type PanePlacement, setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({ structured: false,
   launch: vi.fn(), prompt: vi.fn(), holdSettings: vi.fn(), stop: vi.fn(), awaitThread: vi.fn() }));
 vi.mock("./codex-servers.js", async importOriginal => ({ ...await importOriginal<typeof import("./codex-servers.js")>(),
   codexAppServerEnabled: () => mocks.structured,
-  codexServers: { launch: mocks.launch, prompt: mocks.prompt, holdSettings: mocks.holdSettings, stop: mocks.stop, awaitThread: mocks.awaitThread } }));
+  codexServers: { forPane: () => undefined, launch: mocks.launch, prompt: mocks.prompt, holdSettings: mocks.holdSettings, stop: mocks.stop, awaitThread: mocks.awaitThread } }));
 
 const inventory = (): HarnessInventory => ({ harnesses: ["claude", "codex", "opencode", "copilot"].map(source =>
   ({ source, installed: true, usable: true, accounts: [{ id: "default", label: source, key: source, signedIn: true, usable: true }] })) }) as unknown as HarnessInventory;
@@ -60,8 +60,57 @@ describe("launching in a permission mode", () => {
     for (const [mode, flags] of Object.entries(wanted)) {
       const launched = await launchSession("default", { cwd, label: `Codex ${mode}`, kind: "codex", permissionMode: mode });
       expect(launched).toMatchObject({ ok: true, permissionMode: mode });
-      expect(starts.at(-1)!.args).toEqual(flags);
+      expect(starts.at(-1)!.args).toEqual([...flags, "-c", "check_for_update_on_startup=false"]);
     }
+  });
+
+  it.each([[true, false], [false, false], [true, true], [false, true]])("retries Codex once after a startup exit (retry starts %s, readiness rejected %s)", async (recovers, rejected) => {
+    // The first process exits before readiness even though Herdr still names it Codex.
+    let attempts = 0;
+    const base = { snapshot: async () => structuredClone(state),
+      create: async (_server: string, placement: PanePlacement) => {
+        state.workspaces.push({ workspace_id: "w1", label: placement.label });
+        state.tabs.push({ tab_id: "w1:t1", workspace_id: "w1", label: placement.label });
+        state.panes.push({ pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1" });
+      },
+      startAgent: async (_server: string, _pane: string, agent: AgentStart) => {
+        starts.push(agent); attempts++;
+        state.panes[0].agent = "codex";
+        state.panes[0].agent_status = recovers && attempts === 2 ? "idle" : "unknown";
+        state.panes[0].agent_session = { kind: "id", agent: "codex", value: "00000004-2222-4222-8222-222222222222" };
+        if (rejected && !(recovers && attempts === 2)) throw new BridgeError(409, "not an active named agent", { herdrCode: "agent_not_ready" });
+      },
+      processes: async () => ({ shellPid: 10, foregroundPids: recovers && attempts === 2 ? [11] : [10] }),
+      readScreen: async () => "npm install -g @openai/codex\nPlease restart Codex\n\n",
+    };
+    const undo = setTerminalProvider({ kind: "fake", ...base } as unknown as TerminalProvider);
+    try {
+      const launch = launchSession("default", { cwd, label: "Restarted", kind: "codex" });
+      if (recovers) await expect(launch).resolves.toMatchObject({ ok: true });
+      else await expect(launch).rejects.toMatchObject({ message: "Codex exited at start: Please restart Codex" });
+      expect(attempts).toBe(2);
+      expect(state.panes).toHaveLength(1);
+      expect(starts[1].args).toEqual(starts[0].args);
+    } finally { undo(); }
+  });
+
+  it("detects a startup exit while the terminal is still waiting for readiness", async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    const undo = setTerminalProvider({
+      kind: "fake", snapshot: async () => structuredClone(state),
+      startAgent: async () => { attempts++; return new Promise<void>(() => {}); },
+      processes: async () => ({ shellPid: 10, foregroundPids: [10] }),
+      readScreen: async () => "Please restart Codex",
+    } as unknown as TerminalProvider);
+    try {
+      const launch = launchSession("default", { cwd, label: "Waiting", kind: "codex" },
+        { into: { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" } });
+      const failed = expect(launch).rejects.toMatchObject({ message: "Codex exited at start: Please restart Codex" });
+      await vi.advanceTimersByTimeAsync(2_500);
+      await failed;
+      expect(attempts).toBe(2);
+    } finally { undo(); vi.useRealTimers(); }
   });
 
   it("starts Copilot with its model, reasoning effort and the tool approvals of the mode", async () => {
@@ -96,8 +145,8 @@ describe("launching in a permission mode", () => {
     expect(launched).toMatchObject({ ok: true, permissionMode: "auto", briefLaunched: true });
     expect(order).toEqual(["hold", "prompt"]);
     expect(mocks.holdSettings).toHaveBeenCalledWith(entry, { approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite" } });
-    // The pane joins a thread that already exists, so it has no flags of its own.
-    expect(starts[0].args).toEqual(["resume", "thread-1", "--remote", "unix:///tmp/s.sock"]);
+    // The resumed TUI must also skip its startup update screen.
+    expect(starts[0].args).toEqual(["resume", "thread-1", "--remote", "unix:///tmp/s.sock", "-c", "check_for_update_on_startup=false"]);
   });
 
   it("gives a TUI-started app-server thread the mode as remote flags when there is no brief", async () => {
