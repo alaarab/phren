@@ -1,0 +1,90 @@
+name: gitboy RC
+
+# Advisory: starts the same release candidate on a gitboy instance at the RC's
+# exact commit (.gitboy.yml, docs/gitboy-ci.md), which reports back as the
+# `gitboy/rc` commit status. It lives outside ci.yml so it never holds the RC
+# run open; release.yml reads only that run. It starts when the owner
+# dispatches CI with release_candidate=true on the default branch (the
+# workflow_run `requested` event, so both run side by side), or by hand.
+# Without the GITBOY_URL and GITBOY_TRIGGER_TOKEN secrets it does nothing.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [requested]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to run (defaults to the dispatched ref's head)
+        type: string
+        required: false
+
+permissions: {}
+
+jobs:
+  trigger:
+    # Owner-only: these secrets start code on the owner's own runners.
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.event == 'workflow_dispatch'
+        && github.event.workflow_run.display_title == 'RC validation'
+        && github.event.workflow_run.actor.login == github.repository_owner
+        && github.event.workflow_run.triggering_actor.login == github.repository_owner
+        && github.event.workflow_run.head_branch == github.event.repository.default_branch)
+      || (github.event_name == 'workflow_dispatch'
+        && github.actor == github.repository_owner
+        && github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    continue-on-error: true
+    env:
+      GITBOY_URL: ${{ secrets.GITBOY_URL }}
+      GITBOY_TRIGGER_TOKEN: ${{ secrets.GITBOY_TRIGGER_TOKEN }}
+      GITBOY_REPO: ${{ vars.GITBOY_REPO || github.repository }}
+      RC_SHA: ${{ github.event.workflow_run.head_sha || inputs.sha || github.sha }}
+      RC_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
+    steps:
+      - name: Start the gitboy release candidate
+        run: |
+          if [ -z "$GITBOY_URL" ] || [ -z "$GITBOY_TRIGGER_TOKEN" ]; then
+            echo "gitboy RC not configured"
+            exit 0
+          fi
+          if ! printf '%s' "$RC_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::warning::gitboy RC not started: not a full commit SHA"
+            exit 0
+          fi
+          # curl runs with -s and no -S, and nothing it returns is echoed: an
+          # error message could name the private host behind GITBOY_URL.
+          api="${GITBOY_URL%/}/api/v1/repos/$GITBOY_REPO"
+          auth="Authorization: Bearer $GITBOY_TRIGGER_TOKEN"
+          # Ask the pull mirror to fetch this commit now. Best effort: it needs
+          # an account admin token, and instant sync usually got there first.
+          printf '%s\n' "$auth" | curl -s -o /dev/null -m 15 -X POST -H @- "$api/mirror/sync" >/dev/null 2>&1 || true
+          body="$(jq -nc --arg sha "$RC_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RC_RUN_ID" \
+            '{ref: $sha, variables: {PHREN_RC: "true", PHREN_RC_SHA: $sha, GITHUB_REPOSITORY: $repo, GITHUB_RUN_URL: $run}}')"
+          # Until the mirror has the commit gitboy answers 400 "Ref does not
+          # resolve to a commit"; keep asking for about four minutes.
+          for attempt in $(seq 1 16); do
+            code="$(printf '%s\n' "$auth" | curl -s -o response.json -w '%{http_code}' -m 20 \
+              -X POST -H @- -H 'Content-Type: application/json' --data "$body" "$api/pipelines" 2>/dev/null || true)"
+            code="${code:-000}"
+            if [ "$code" = 201 ]; then
+              iid="$(jq -r '.iid // empty | tostring | select(test("^[0-9]+$"))' response.json 2>/dev/null || true)"
+              echo "Started gitboy pipeline #${iid:-?} at $RC_SHA."
+              echo "Started gitboy release candidate pipeline #${iid:-?} at \`$RC_SHA\`; it reports as the \`gitboy/rc\` commit status." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$code" = 400 ] && jq -e '(.error // "") | test("does not resolve")' response.json >/dev/null 2>&1; then
+              echo "gitboy does not have $RC_SHA yet (attempt $attempt); waiting for the mirror."
+              sleep 15
+              continue
+            fi
+            case "$code" in
+              000) echo "::warning::gitboy RC not started: gitboy could not be reached" ;;
+              *) echo "::warning::gitboy RC not started: HTTP $code" ;;
+            esac
+            exit 0
+          done
+          echo "::warning::gitboy RC not started: the mirror never received $RC_SHA"

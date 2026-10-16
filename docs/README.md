@@ -36,5 +36,6 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/phren-hook.md`: Install and maintain the independent computer helper for the iPhone app.
 - `docs/desktop/DESIGN.md` and `docs/desktop/RESEARCH.md`: Phren desktop design proposal (a desktop and web client of every computer's Hook) and the research behind it. Proposal only; nothing built.
 - Screenshots used by the site and README: `shell-*.png` (terminal), `webui-graph.png` (the memory viewer, shared by the web UI and VS Code), `splash.gif`.
+- `docs/gitboy-ci.md`: The advisory parallel release candidate on a self-hosted gitboy instance (Linux Docker and macOS runners), its `gitboy/rc` commit status and setup.
 - `docs/feature-flags.md`: Feature flag reference (`PHREN_FEATURE_*` env vars).
 - `docs/faq.md`: Common setup and workflow questions.
