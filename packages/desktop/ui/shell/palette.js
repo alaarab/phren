@@ -141,7 +141,7 @@ registerCommand({
   id: "palette.clear-recent",
   title: "Clear recent",
   meta: "Forget what the palette remembers you using",
-  when: () => readRecent().length > 0,
+  when: () => (opened ? picksNow() : readRecent()).length > 0,
   run: () => clearRecent(),
 });
 
@@ -358,6 +358,9 @@ let keyedRows = new Map();
 let selected = 0;
 let lastQuery = "";
 let filePool = [];
+let opened = false;
+let picksCache = null; // readRecent() once per open
+function picksNow() { return (picksCache ??= readRecent(Date.now())); }
 
 export function isPaletteOpen() { return !!overlayEl; }
 
@@ -365,6 +368,8 @@ export function isPaletteOpen() { return !!overlayEl; }
  * Each item is { id, title, meta?, icon?, kind?, shortcut?, run() }. */
 export function openPalette({ sources = [] } = {}) {
   closePalette();
+  opened = true;
+  picksCache = null;
   returnFocus = document.activeElement;
   filePool = [];
   const session = activeSession();
@@ -422,6 +427,7 @@ export function closePalette() {
   overlayEl?.remove();
   if (returnFocus?.isConnected) returnFocus.focus();
   returnFocus = null;
+  opened = false; picksCache = null;
   overlayEl = null; inputEl = null; listEl = null;
   items = []; rowEls = []; keyedRows.clear(); selected = 0; lastQuery = ""; filePool = [];
   cancelMemory();
@@ -459,7 +465,7 @@ function render(sources) {
   if (memory.key) cancelMemory();
   const scored = [];
   const now = Date.now();
-  const picks = readRecent(now);
+  const picks = picksNow();
   const heat = weights(picks, now);
   const pool = collect(sources, query, commandsOnly);
   for (const item of pool) {
@@ -474,9 +480,13 @@ function render(sources) {
   items = scored.slice(0, MAX_ROWS).map((s) => s.item);
   if (!query && !commandsOnly) {
     // Recent: copies under their own row ids; picking one still counts for the original.
-    const byId = new Map(pool.map((it) => [it.id, it]));
+    // Rows that already lead (needs you, failing PRs: boost > 0) stay first and out of Recent;
+    // an item shown in Recent is not listed again below.
+    const byId = new Map(pool.filter((it) => !(it.boost > 0)).map((it) => [it.id, it]));
     const recent = recentRows(picks, byId, now).map((it) => ({ ...it, id: `recent:${it.id}`, pickId: it.id, group: "Recent" }));
-    items = [...recent, ...items];
+    const shown = new Set(recent.map((it) => it.pickId));
+    const leading = items.filter((it) => it.boost > 0);
+    items = [...leading, ...recent, ...items.filter((it) => !(it.boost > 0) && !shown.has(it.id))];
   }
   if (selected >= items.length) selected = Math.max(0, items.length - 1);
   paint();

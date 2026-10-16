@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fuzzyScore } from "../ui/shell/palette.js";
 import {
   HALF_LIFE_MS, MAX_BOOST, MAX_ENTRIES, STORE_KEY, blend, boostFactor, bump, clearRecent, decayed, prune,
   readRecent, recentRows, recordPick, weights,
@@ -33,6 +34,19 @@ describe("frecency score", () => {
     expect(blend(-1, "a", heat)).toBe(-1);
   });
 
+  it("cannot flip a clearly better real fuzzyScore match, even at the cap", () => {
+    // fuzzyScore never returns below 1 for a match, so the x1.5 cap bounds the unfair lift.
+    const best = fuzzyScore("alp", "Alpha chat"); // exact prefix
+    const scattered = fuzzyScore("alp", "Zoom the whole application layout panel"); // a..l..p spread across words
+    expect(scattered).toBeGreaterThanOrEqual(1);
+    expect(best).toBeGreaterThan(scattered * (1 + MAX_BOOST));
+    const heat = weights([{ id: "weak", n: 1e6, t: NOW }], NOW);
+    expect(blend(scattered, "weak", heat)).toBeLessThan(blend(best, "strong", heat));
+    // A near-equal match (ratio under 1.5) does flip once it is used.
+    const close = fuzzyScore("alp", "Malpha chat");
+    expect(blend(close, "weak", heat)).toBeGreaterThan(blend(best, "strong", heat) );
+  });
+
   it("orders ties by recency, then id, in the Recent group", () => {
     const entries = [{ id: "z", n: 1, t: NOW - 10 }, { id: "a", n: 1, t: NOW - 10 }, { id: "m", n: 1, t: NOW }];
     const available = new Map(entries.map((e) => [e.id, { id: e.id }]));
@@ -57,6 +71,7 @@ describe("recent storage", () => {
       { id: "session:old", n: 1, t: NOW - 30 * DAY },
       { id: "session:ok", n: 9, t: NOW },
       { id: "memory:x", n: 5, t: NOW },
+      { id: "file:src/secret/path.ts", n: 5, t: NOW },
       { id: "command:palette.clear-recent", n: 5, t: NOW },
       { id: 7, n: 1, t: NOW },
       { id: "session:nan", n: "x", t: NOW },
@@ -65,12 +80,18 @@ describe("recent storage", () => {
     expect(readRecent(NOW, memoryStorage(raw).store).map((e: { id: string }) => e.id)).toEqual(["session:ok"]);
   });
 
+  it("clamps a future-dated pick to now", () => {
+    const [entry] = prune([{ id: "session:x", n: 1, t: NOW + 400 * DAY }], NOW);
+    expect(entry.t).toBe(NOW);
+    expect(recordPick("session:y", NOW + 10 * DAY, memoryStorage().store)[0].t).toBe(NOW + 10 * DAY);
+  });
+
   it("caps at 200 entries, keeping the strongest", () => {
-    const many = Array.from({ length: 260 }, (_, i) => ({ id: `file:${i}`, n: 1 + i / 100, t: NOW }));
+    const many = Array.from({ length: 260 }, (_, i) => ({ id: `session:${i}`, n: 1 + i / 100, t: NOW }));
     const kept = prune(many, NOW);
     expect(kept).toHaveLength(MAX_ENTRIES);
-    expect(kept[0].id).toBe("file:259");
-    expect(kept.some((e: { id: string }) => e.id === "file:0")).toBe(false);
+    expect(kept[0].id).toBe("session:259");
+    expect(kept.some((e: { id: string }) => e.id === "session:0")).toBe(false);
   });
 
   it("survives corrupt JSON and a storage that throws", () => {

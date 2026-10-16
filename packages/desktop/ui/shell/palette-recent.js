@@ -24,9 +24,9 @@ export function boostFactor(decayedCount) {
   return 1 + Math.min(MAX_BOOST, BOOST_PER_LOG2 * Math.log2(1 + decayedCount));
 }
 
-/** Ids the palette never learns: memory hits and the "ask" row are one-off, and clearing is not a habit. */
+/** Ids the palette never learns: memory hits and the "ask" row are one-off, file paths are never stored, and clearing is not a habit. */
 export function isRememberable(id) {
-  return typeof id === "string" && id !== "" && id !== "ask-quick-chat" && !id.startsWith("memory:") && id !== "command:palette.clear-recent";
+  return typeof id === "string" && id !== "" && id !== "ask-quick-chat" && !id.startsWith("file:") && !id.startsWith("memory:") && id !== "command:palette.clear-recent";
 }
 
 /** Drop malformed and faded entries, then keep the MAX_ENTRIES strongest. */
@@ -35,10 +35,10 @@ export function prune(entries, now) {
   const seen = new Set();
   for (const e of Array.isArray(entries) ? entries : []) {
     if (!e || typeof e.id !== "string" || seen.has(e.id) || !isRememberable(e.id)) continue;
-    if (!Number.isFinite(e.n) || !Number.isFinite(e.t) || e.n <= 0 || e.t > now + HALF_LIFE_MS) continue;
-    if (decayed(e.n, e.t, now) < FORGET_BELOW) continue;
+    if (!Number.isFinite(e.n) || !Number.isFinite(e.t) || e.n <= 0) continue;
+    if (decayed(e.n, Math.min(e.t, now), now) < FORGET_BELOW) continue;
     seen.add(e.id);
-    clean.push({ id: e.id, n: e.n, t: e.t });
+    clean.push({ id: e.id, n: e.n, t: Math.min(e.t, now) });
   }
   clean.sort((a, b) => decayed(b.n, b.t, now) - decayed(a.n, a.t, now) || b.t - a.t || a.id.localeCompare(b.id));
   return clean.slice(0, MAX_ENTRIES);

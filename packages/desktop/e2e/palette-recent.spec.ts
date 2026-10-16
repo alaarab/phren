@@ -99,19 +99,24 @@ test("an empty palette shows what you picked first, in frecency order", async ({
 
   await pick(page, "Toggle Sidebar", "Toggle Sidebar");
   await pick(page, "Toggle Sidebar", "Toggle Sidebar");
-  await pick(page, "Alpha chat", "Alpha chat");
+  await pick(page, "Charlie chat", "Charlie chat");
 
   await openPalette(page);
-  await expect(page.locator(".palette-group").first()).toHaveText(/recent/i);
-  // Picked twice beats picked once, even though the chat was picked last.
-  await expect(titles(page).nth(0)).toHaveText("Toggle Sidebar");
+  // Bravo chat needs you (and Alpha chat is working), so they keep the top; Recent follows.
+  await expect(titles(page).nth(0)).toHaveText("Bravo chat");
   await expect(titles(page).nth(1)).toHaveText("Alpha chat");
-  await expect(page.locator(".palette-group").nth(1)).toHaveText(/sessions/i);
+  await expect(page.locator(".palette-group").nth(1)).toHaveText(/recent/i);
+  // Picked twice beats picked once, even though the chat was picked last.
+  await expect(titles(page).nth(2)).toHaveText("Toggle Sidebar");
+  await expect(titles(page).nth(3)).toHaveText("Charlie chat");
+  // An item shown in Recent is not listed again below.
+  await expect(page.locator(".palette-row .palette-title", { hasText: "Charlie chat" })).toHaveCount(1);
+  await expect(page.locator(".palette-row .palette-title", { hasText: "Toggle Sidebar" })).toHaveCount(1);
 
   // Only ids are stored: no query text.
   const stored = await page.evaluate(() => localStorage.getItem("phren.palette.recent"));
-  expect(stored).not.toMatch(/Toggle Sidebar|Alpha chat/);
-  expect(JSON.parse(stored as string).map((e: { id: string }) => e.id).sort()).toEqual(["command:keys.toggle_sidebar", "session:This computer/a"].sort());
+  expect(stored).not.toMatch(/Toggle Sidebar|Charlie chat/);
+  expect(JSON.parse(stored as string).map((e: { id: string }) => e.id).sort()).toEqual(["command:keys.toggle_sidebar", "session:This computer/c"].sort());
 });
 
 test("frecency lifts a used item but never above a clearly better text match", async ({ page }) => {
@@ -139,15 +144,15 @@ test("frecency lifts a used item but never above a clearly better text match", a
 });
 
 test("Clear recent empties the Recent group, and a vanished item is skipped", async ({ page }) => {
-  await pick(page, "Alpha chat", "Alpha chat");
+  await pick(page, "Charlie chat", "Charlie chat");
   await page.evaluate(() => {
     const entries = JSON.parse(localStorage.getItem("phren.palette.recent") as string);
     entries.push({ id: "session:This computer/gone", n: 5, t: Date.now() });
     localStorage.setItem("phren.palette.recent", JSON.stringify(entries));
   });
   await openPalette(page);
-  await expect(page.locator(".palette-group").first()).toHaveText(/recent/i);
-  await expect(page.locator(".palette-row")).toContainText(["Alpha chat"]);
+  await expect(page.locator(".palette-group", { hasText: /recent/i })).toHaveCount(1);
+  await expect(page.locator(".palette-row")).toContainText(["Charlie chat"]);
   await expect(page.locator(".palette-row .palette-title", { hasText: "gone" })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
