@@ -533,6 +533,30 @@ describe("moving a session to another agent", () => {
     expect(moveSessionFields([record], from)).toEqual({});
   });
 
+  it.each([true, false])("waits for the hand-off window after uncertain delivery (reply %s)", async replies => {
+    const { deps, launches } = world();
+    const deliver = deps.deliver;
+    let request = "", polls = 0;
+    deps.deliver = async (...args) => {
+      request = args[1];
+      await deliver(...args);
+      return { ok: false, delivered: false, state: "uncertain" };
+    };
+    const transcript = deps.transcript;
+    deps.transcript = async (...args) => {
+      const lines = await transcript(...args);
+      // The reply lands after the delivery call, during normal polling.
+      if (++polls === 2 && replies) lines.push(agent(writes(request)!));
+      return lines;
+    };
+    const record = await move(deps, { harness: "codex" }, { handoffTimeoutMs: 10_000 });
+    expect(record).toMatchObject({ state: "moved", handoff: { source: replies ? "agent" : "fallback" } });
+    expect(polls).toBeGreaterThanOrEqual(2);
+    const brief = String(object(launches[0].data.brief).text);
+    expect(brief).toContain(replies ? "## Goal\nFix the parser." : "Original brief: fix the parser");
+    if (!replies) expect(record.handoff?.reason).toContain("within 10 seconds");
+  });
+
   it("builds the hand-off from the transcript, git state and original brief when the agent writes none in time", async () => {
     const { deps } = world();
     const record = await move(deps, { harness: "codex" }, { handoffTimeoutMs: 5_000 });

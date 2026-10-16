@@ -26,6 +26,7 @@ import { optionalHookPeers } from "./peers.js";
 import { AppServerRpcError, AppServerUnsupportedError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
+import { stripTerminal } from "../terminal-text.js";
 import { JobRegistry } from "./job-registry.js";
 import { atomic, BridgeError, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
 import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./settings-switch.js";
@@ -217,6 +218,53 @@ async function startWhenShellReady(server: string, pane: string, agent: AgentSta
       const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_pane_busy";
       if (!starting || Date.now() >= deadline) throw error;
       await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+}
+
+/** Retry only a demonstrated exit, and serialize starters: neither terminal
+ * provider supports cancelling a start already submitted to its server. */
+async function startCodex(server: string, pane: string, agent: AgentStart): Promise<void> {
+  const terminal = terminalProvider();
+  const screenText = async () => stripTerminal(await terminal.readScreen?.(server, pane,
+    { scope: "pane", source: "recent", lines: 20 }).catch(() => "") ?? "").trim();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = await screenText();
+    const deadline = Date.now() + agent.timeoutMs;
+    let ran = false;
+    let result: { error?: unknown } | undefined;
+    const starting = startWhenShellReady(server, pane, agent).then(
+      () => { result = {}; ran = true; }, error => { result = { error }; });
+    try {
+      for (;;) {
+        await Promise.race([starting, new Promise(resolve => setTimeout(resolve, 250))]);
+        const processes = await terminal.processes?.(server, pane).catch(() => undefined);
+        const state = await terminal.snapshot(server);
+        const current = objects(state.panes).find(row => row.pane_id === pane);
+        const shell = processes?.shellPid;
+        const atShell = processes !== undefined && shell !== undefined && processes.foregroundPids.every(pid => pid === shell);
+        if (processes && !atShell && current?.agent === "codex") ran = true;
+        if (atShell) {
+          const screen = await screenText();
+          const exitMessage = screen !== before && /please restart codex|codex exited(?: at start)?/i.test(screen);
+          if (ran || exitMessage) {
+            // A screen or process observation cannot cancel a pending start.
+            // Wait for it, then observe again: it might still launch Codex.
+            if (!result) { await starting; continue; }
+            if (attempt === 0) break;
+            const last = screen.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1);
+            throw new BridgeError(409, `Codex exited at start: ${last || "process returned to its shell"}`);
+          }
+        }
+        if (result && "error" in result) throw result.error;
+        if (result) {
+          if (!processes || ["idle", "working", "blocked", "waiting"].includes(String(current?.agent_status)) || Date.now() >= deadline) return;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        } else if (Date.now() >= deadline) { await starting; }
+      }
+    } finally {
+      // Even a failed process/snapshot read must not leave a starter behind.
+      await starting;
     }
   }
 }
@@ -459,11 +507,13 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
       await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
     } catch (error) { briefTurn = error instanceof AppServerRpcError ? undefined : "uncertain"; }
   }
-  const agentArgs = structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])];
+  const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
+    ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
   try {
-    await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
+    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
+    if (error instanceof BridgeError && error.message.startsWith("Codex exited at start:")) throw error;
     // A first-run screen (Claude's folder trust, a login notice) holds the
     // agent at startup. It did start: hand the pane back so the owner answers
     // that screen from the chat instead of stranding the workspace.
