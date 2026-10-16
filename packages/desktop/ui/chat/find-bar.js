@@ -7,7 +7,11 @@
 import { el } from "../dom.js";
 import { createFinder } from "./find.js";
 
-const RESEARCH_MS = 200;
+const THROTTLE_MS = 300; // re-search while messages stream in: at most this often
+const TYPE_MS = 80;      // pause after typing before searching
+const MIN_QUERY = 2;     // shorter queries show nothing
+
+const inComposition = (ev) => !!ev.isComposing || ev.keyCode === 229;
 
 // The chat pane the owner last used: the palette's "Find in chat" opens this one.
 let activePane = null;
@@ -51,6 +55,8 @@ export function createFindBar({ pane, root, before, focusComposer, partial = () 
   let bar = null;
   let input; let counter; let hint; let prev; let next;
   let timer = null;
+  let lastRun = 0;
+  let composing = false;
   let observer = null;
 
   const usable = () => pane.isConnected && pane.getClientRects().length > 0;
@@ -67,14 +73,18 @@ export function createFindBar({ pane, root, before, focusComposer, partial = () 
     counter.classList.toggle("none", !!finder.query && !finder.count);
     const empty = !finder.count;
     prev.disabled = empty; next.disabled = empty;
-    hint.hidden = !partial();
+    const lines = [];
+    if (partial()) lines.push("Searching loaded messages.");
+    if (finder.query && !finder.count) lines.push("A phrase split by formatting (code, bold, links) isn't matched.");
+    hint.textContent = lines.join(" ");
+    hint.hidden = !lines.length;
   }
 
   /** Search the loaded messages again; `keep` stays on the current hit and does not scroll. */
   function run({ keep }) {
     if (!bar) return;
     unobserve();
-    const result = finder.search(input.value, { keep });
+    const result = finder.search(input.value.length >= MIN_QUERY ? input.value : "", { keep });
     if (result.mark) {
       if (!keep) finder.current();
       if (!keep) scrollTo(result.mark);
@@ -85,9 +95,18 @@ export function createFindBar({ pane, root, before, focusComposer, partial = () 
 
   function scrollTo(mark) { if (mark.scrollIntoView) mark.scrollIntoView({ block: "center", inline: "nearest" }); }
 
+  // Streaming changes arrive continuously: search at once when idle, then at most once per THROTTLE_MS,
+  // with a trailing run so the last change is always searched.
   function schedule() {
+    const wait = lastRun + THROTTLE_MS - Date.now();
+    if (wait <= 0) { clearTimeout(timer); timer = null; lastRun = Date.now(); run({ keep: true }); return; }
+    if (timer) return;
+    timer = setTimeout(() => { timer = null; lastRun = Date.now(); run({ keep: true }); }, wait);
+  }
+
+  function typed() {
     clearTimeout(timer);
-    timer = setTimeout(() => run({ keep: true }), RESEARCH_MS);
+    timer = setTimeout(() => { timer = null; lastRun = Date.now(); run({ keep: false }); }, TYPE_MS);
   }
 
   function step(direction) {
@@ -128,10 +147,13 @@ export function createFindBar({ pane, root, before, focusComposer, partial = () 
     prev.addEventListener("click", () => step(-1));
     next.addEventListener("click", () => step(1));
     close.addEventListener("click", hide);
-    input.addEventListener("input", () => { clearTimeout(timer); run({ keep: false }); });
+    // Typing re-searches after a short pause, and never mid-composition (an IME's candidate text is not the query yet).
+    input.addEventListener("compositionstart", () => { composing = true; });
+    input.addEventListener("compositionend", () => { composing = false; typed(); });
+    input.addEventListener("input", () => { if (!composing) typed(); });
     bar.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); hide(); }
-      else if (ev.key === "Enter" && ev.target === input) { ev.preventDefault(); step(ev.shiftKey ? -1 : 1); }
+      if (inComposition(ev)) return; // Enter / Esc here confirm or cancel the IME, not find
+      if (ev.key === "Enter" && ev.target === input) { ev.preventDefault(); step(ev.shiftKey ? -1 : 1); }
     });
     pane.insertBefore(bar, before);
     paint();
@@ -155,6 +177,7 @@ export function createFindBar({ pane, root, before, focusComposer, partial = () 
     finder.clear();
     bar?.remove();
     bar = null;
+    document.removeEventListener("keydown", onEsc);
     if (activePane === handle) activePane = null;
   }
 
@@ -162,10 +185,17 @@ export function createFindBar({ pane, root, before, focusComposer, partial = () 
   pane.addEventListener("focusin", () => { activePane = handle; });
   pane.addEventListener("pointerdown", () => { activePane = handle; }, true);
   pane.addEventListener("keydown", (ev) => {
-    if (!isFindKey(ev)) return;
-    ev.preventDefault();
-    show();
+    if (isFindKey(ev)) { ev.preventDefault(); show(); }
   });
+  // Esc closes from anywhere in the pane (the composer, the bar) or from the timeline, where a click leaves focus
+  // on the body, unless something inside already used the key. Listening only while the bar is open.
+  function onEsc(ev) {
+    if (!bar || ev.key !== "Escape" || ev.defaultPrevented || inComposition(ev)) return;
+    if (ev.target !== document.body && !pane.contains(ev.target)) return;
+    ev.preventDefault();
+    hide();
+  }
+  document.addEventListener("keydown", onEsc);
 
   return handle;
 }

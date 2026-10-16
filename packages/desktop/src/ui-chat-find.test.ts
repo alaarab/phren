@@ -191,6 +191,23 @@ describe("createFinder", () => {
     expect(finder.search("guard", { keep: true }).index).toBe(0);
   });
 
+  it("keeps the hit by row id and occurrence when its row is re-rendered into a new element", () => {
+    const { doc, root } = conversation();
+    const row = (words: string) => { const r = build(doc, ["DIV", "ct-md", words]) as FakeElement; r.attrs["data-row-id"] = "row:a"; return r; };
+    const old = row("token and token");
+    root.appendChild(old);
+    const finder = createFinder(root);
+    finder.search("token");
+    finder.step(-1); // last hit: second "token" of row:a
+    expect(finder.marks[finder.index].parentNode).toBe(old);
+    // The timeline rebuilds the row (new element, one more word) and the search runs again.
+    root.removeChild(old);
+    root.appendChild(row("token and token plus more"));
+    const again = finder.search("token", { keep: true });
+    expect(again.index).toBe(again.count - 1);
+    expect(finder.marks[again.index].parentNode).not.toBe(old);
+  });
+
   it("survives its rows being re-rendered away", () => {
     const { root } = conversation();
     const finder = createFinder(root);

@@ -116,11 +116,20 @@ export function createFinder(root, { reveal } = {}) {
     });
   }
 
+  // A hit's row: the timeline row's id (it survives the row being re-rendered), else its parent block.
+  function rowKey(m) {
+    for (let node = m.parentNode; node; node = node.parentNode) {
+      const id = node.getAttribute && node.getAttribute("data-row-id");
+      if (id) return id;
+    }
+    return m.parentNode;
+  }
+
   function currentAnchor() {
     const m = marks[index];
-    if (!m || !m.parentNode) return null;
-    const siblings = marks.filter((other) => other.parentNode === m.parentNode);
-    return { parent: m.parentNode, ordinal: siblings.indexOf(m), fallback: index };
+    if (!m) return null;
+    const key = rowKey(m);
+    return { key, ordinal: marks.filter((other) => rowKey(other) === key).indexOf(m), fallback: index };
   }
 
   function select(next) {
@@ -143,7 +152,7 @@ export function createFinder(root, { reveal } = {}) {
       if (!marks.length) { index = -1; return { count: 0, index: -1, mark: null }; }
       let next = 0;
       if (anchor) {
-        const same = marks.filter((m) => m.parentNode === anchor.parent)[anchor.ordinal];
+        const same = marks.filter((m) => rowKey(m) === anchor.key)[anchor.ordinal];
         next = same ? marks.indexOf(same) : Math.min(anchor.fallback, marks.length - 1);
       }
       const current = select(next);
