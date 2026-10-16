@@ -88,6 +88,7 @@
 }
 .mem-chip:hover { color: var(--text-2); }
 .mem-chip.on { background: var(--card); border-color: var(--accent); color: var(--accent); }
+.mem-chip.stale.on { border-color: var(--waiting); color: var(--waiting); }
 .mem-chip.tag-pitfall.on { border-color: var(--waiting); color: var(--waiting); }
 .mem-chip.tag-decision.on { border-color: var(--accent); color: var(--accent); }
 .mem-chip.tag-pattern.on { border-color: var(--done); color: var(--done); }

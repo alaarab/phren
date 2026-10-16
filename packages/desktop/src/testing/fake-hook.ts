@@ -59,6 +59,20 @@ export const SAMPLE_FINDING = {
   },
 };
 
+/** More sample findings for the Memory filter: two may be out of date, one is current, one has no freshness data. */
+export const SAMPLE_STALE_FINDINGS = [
+  { id: "fid:cache-stale", text: "[decision] Cache the host lookup for one minute.", date: "2026-10-12",
+    citationData: { file: "src/cache.ts", line: 40, commit: "b2c3d4e" },
+    citationFreshness: { state: "changed", checkedAt: "2026-10-15T12:00:00Z", lastCommit: null } },
+  { id: "fid:queue-stale", text: "[pitfall] Drain the queue before closing the socket.", date: "2026-10-10",
+    citationData: { file: "src/queue.ts", line: 8, commit: "c3d4e5f" },
+    citationFreshness: { state: "changed", checkedAt: "2026-10-15T12:00:00Z", lastCommit: null } },
+  { id: "fid:config-current", text: "[pattern] Read the config once at startup.", date: "2026-10-09",
+    citationData: { file: "src/config.ts", line: 3, commit: "d4e5f6a" },
+    citationFreshness: { state: "current", checkedAt: "2026-10-15T12:00:00Z", lastCommit: null } },
+  { id: "fid:plain", text: "[pattern] Keep handlers small.", date: "2026-10-08" },
+];
+
 /** The local calendar day as the Hook writes a finding's date. */
 function localToday() {
   const d = new Date();
@@ -365,6 +379,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [
       { id: "fid:phren-today", text: "Sample finding saved today: the Hook caps findings at 500 per project.", type: "pitfall", status: "active", created: localToday(), citation: null },
       SAMPLE_FINDING,
+      ...SAMPLE_STALE_FINDINGS,
     ], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),

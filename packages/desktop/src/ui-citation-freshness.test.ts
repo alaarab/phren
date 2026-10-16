@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { freshnessChip, freshnessNote } from "../ui/citation-freshness.js";
+import { freshnessChip, freshnessNote, isStale, staleCount } from "../ui/citation-freshness.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -75,5 +75,20 @@ describe("citation freshness", () => {
     expect(created).toHaveLength(1);
     expect(freshnessChip({ citationFreshness: { state: "current" } }, "mem-tag warn")).toBeNull();
     expect(created).toHaveLength(1);
+  });
+});
+
+describe("Memory stale filter", () => {
+  const changed = { citationFreshness: { state: "changed" } };
+  const items = [changed, { citationFreshness: { state: "current" } }, { citationFreshness: { state: "unknown" } }, {}, changed];
+
+  it("matches only findings the Hook reports as changed", () => {
+    expect(items.map(isStale)).toEqual([true, false, false, false, true]);
+  });
+
+  it("counts them, and is zero without freshness data", () => {
+    expect(staleCount(items)).toBe(2);
+    expect(staleCount([{}, { citationFreshness: { state: "current" } }])).toBe(0);
+    expect(staleCount(undefined)).toBe(0);
   });
 });

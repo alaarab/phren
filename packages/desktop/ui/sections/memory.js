@@ -1,5 +1,5 @@
 import { el } from "../dom.js";
-import { citationData, freshnessChip } from "../citation-freshness.js";
+import { citationData, freshnessChip, isStale, staleCount } from "../citation-freshness.js";
 // Memory: the phone's Memory screen at desktop scale. A rail of online
 // computers and their projects (review counts in amber) beside one segment
 // control over Findings, Review, Notes, Truths, Topics and the 3D graph.
@@ -176,6 +176,7 @@ export function mountMemory(root) {
     review: [],
     search: "",
     type: null,
+    stale: false,
     reviewIndex: 0,
     editingLine: null,
     generation: 0,
@@ -268,6 +269,7 @@ export function mountMemory(root) {
         state.project = project.name;
         state.search = "";
         state.type = null;
+        state.stale = false;
         state.reviewIndex = 0;
         state.findings = [];
         state.review = [];
@@ -298,6 +300,7 @@ export function mountMemory(root) {
     state.segment = id;
     state.search = "";
     state.type = null;
+    state.stale = false;
     state.reviewIndex = 0;
     state.editingLine = null;
     renderSegments();
@@ -391,7 +394,9 @@ export function mountMemory(root) {
     search.value = state.search;
     toolbar.append(search);
     const tags = [...new Set(state.findings.map(findingTag).filter(Boolean))].sort();
-    if (tags.length) {
+    const stale = staleCount(state.findings);
+    if (!stale) state.stale = false;
+    if (tags.length || stale) {
       const chips = el("div", "mem-chips");
       const all = el("button", `mem-chip${state.type === null ? " on" : ""}`, "all");
       all.type = "button";
@@ -401,6 +406,14 @@ export function mountMemory(root) {
         const chip = el("button", `mem-chip tag-${tag}${state.type === tag ? " on" : ""}`, tag);
         chip.type = "button";
         chip.addEventListener("click", () => { state.type = state.type === tag ? null : tag; renderFindings(); });
+        chips.append(chip);
+      }
+      if (stale) {
+        const chip = el("button", `mem-chip stale${state.stale ? " on" : ""}`, `May be out of date (${stale})`);
+        chip.type = "button";
+        chip.dataset.filter = "stale";
+        chip.setAttribute("aria-pressed", String(state.stale));
+        chip.addEventListener("click", () => { state.stale = !state.stale; renderFindings(); });
         chips.append(chip);
       }
       toolbar.append(chips);
@@ -417,6 +430,7 @@ export function mountMemory(root) {
     const query = state.search.trim().toLowerCase();
     let items = state.findings.slice().sort(byDateDesc);
     if (state.type) items = items.filter((item) => findingTag(item) === state.type);
+    if (state.stale) items = items.filter(isStale);
     if (query) items = items.filter((item) => `${findingBody(item)} ${item.citation ?? ""}`.toLowerCase().includes(query));
     if (!items.length) {
       listEl.append(el("div", "mem-empty", state.findings.length ? "No matches." : "No findings in this project yet."));
@@ -852,7 +866,7 @@ export function mountMemory(root) {
       if (state.segment === "graph") destroyGraph();
       const switching = computer && computer !== state.computer && state.computers.includes(computer);
       if (switching) { state.computer = computer; state.projects = []; }
-      Object.assign(state, { project, segment, search, type: null, reviewIndex: 0, editingLine: null, findings: [], review: [] });
+      Object.assign(state, { project, segment, search, type: null, stale: false, reviewIndex: 0, editingLine: null, findings: [], review: [] });
       renderSegments();
       if (switching || !state.projects.some((p) => p.name === project)) void loadProjects();
       else { renderRail(); void loadSegment(); }
