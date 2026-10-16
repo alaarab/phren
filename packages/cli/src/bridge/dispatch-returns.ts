@@ -359,11 +359,12 @@ const movedSchema = z.object({
   id: z.string().uuid(), at: z.string().datetime(), handoff: z.string().max(4096).optional(),
   from: z.object({ harness: z.enum(["codex", "claude", "copilot", "phren", "opencode"]), account: z.string().max(64).optional() }).strict(),
   computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  computerId: z.string().uuid().optional(),
   to: moveToSchema, target: z.union([targetSchema, startingTargetSchema]),
 }).strict();
 
 /** The worker moved to another agent: the receipt now follows that agent, and keeps the move. */
-function observeMove(receipt: Receipt, value: unknown, peers: readonly HookPeer[]): boolean {
+function observeMove(receipt: Receipt, value: unknown, peers: readonly HookPeer[], self?: { id: string; name: string }): boolean {
   const parsed = movedSchema.safeParse(value);
   if (!parsed.success || receipt.moves?.some(move => move.id === parsed.data.id)) return false;
   const { target, ...move } = parsed.data;
@@ -371,16 +372,17 @@ function observeMove(receipt: Receipt, value: unknown, peers: readonly HookPeer[
     // The worker Hook's alias has no authority in this Hook's directory.
     // Missing/ambiguous identities leave the receipt at its old location.
     const matches = move.computerFingerprint ? peers.filter(peer => peerFingerprint(peer) === move.computerFingerprint && peer.server === target.server) : [];
-    if (matches.length !== 1) {
+    const home = self && move.computerId === self.id ? self : undefined;
+    if (!home && matches.length !== 1) {
       const error = "The moved worker's destination identity is missing or not uniquely verified in this Hook's peer directory; receipt routing was retained.";
       if (receipt.error === error) return false;
       receipt.error = error;
       return true;
     }
     if (receipt.error?.startsWith("The moved worker's destination identity")) delete receipt.error;
-    receipt.computer = matches[0].name;
-    move.to.computer = matches[0].name;
-    delete receipt.computerId;
+    receipt.computer = home?.name ?? matches[0].name;
+    move.to.computer = receipt.computer;
+    if (home) receipt.computerId = home.id; else delete receipt.computerId;
   }
   receipt.target = target;
   receipt.harness = move.to.harness;
@@ -415,10 +417,10 @@ function turnKey(value: string | undefined): string | undefined {
 }
 
 /** Apply one observation to a receipt. Returns true when the receipt changed. */
-export function observe(receipt: Receipt, value: unknown, now: number, peers: readonly HookPeer[] = []): boolean {
+export function observe(receipt: Receipt, value: unknown, now: number, peers: readonly HookPeer[] = [], self?: { id: string; name: string }): boolean {
   const parsed = observationSchema.safeParse(value);
   if (receipt.closedAt) return false;
-  const moved = parsed.success && parsed.data.moved !== undefined && observeMove(receipt, parsed.data.moved, peers);
+  const moved = parsed.success && parsed.data.moved !== undefined && observeMove(receipt, parsed.data.moved, peers, self);
   if (!parsed.success || parsed.data.state === "unavailable" || parsed.data.state === "unknown") return moved;
   if (parsed.data.state === "closed") { receipt.closedAt = new Date(now).toISOString(); return true; }
   if (parsed.data.state === "gone" && receipt.brief === "launch" && !receipt.worker?.sawWorking && !receipt.returned
@@ -567,6 +569,8 @@ export function returnRow(receipt: Receipt): Json {
 }
 
 export interface DispatchReturnsOptions {
+  /** This Hook's stable identity, for a worker moving back home. */
+  localComputer?: { id: string; name: string };
   peers?: () => Promise<HookPeer[]>;
   request?: typeof peerRequest;
   /** Worker states on this computer, for dispatches placed here without SSH. */
@@ -602,6 +606,7 @@ export function noticeDeliveryId(receipts: readonly Receipt[]): string {
 
 /** Dispatching side: follows open dispatches and delivers their returns. */
 export class DispatchReturns {
+  private readonly localComputer?: DispatchReturnsOptions["localComputer"];
   private readonly peers: () => Promise<HookPeer[]>;
   private readonly request: typeof peerRequest;
   private readonly localWorkers: (input: Json) => Promise<{ workers: unknown[] }>;
@@ -624,6 +629,7 @@ export class DispatchReturns {
   private running?: Promise<void>;
 
   constructor(options: DispatchReturnsOptions = {}) {
+    this.localComputer = options.localComputer;
     this.close = options.close;
     this.failover = options.failover;
     this.peers = options.peers ?? hookPeers;
@@ -640,13 +646,15 @@ export class DispatchReturns {
     this.onApproval = options.onApproval;
   }
 
+  private isSelf(receipt: Receipt): boolean { return !!this.localComputer && receipt.computerId === this.localComputer.id; }
+
   /** Send a decision for a worker's request to the Hook that runs it. */
   private async sendAnswer(receipt: Receipt, actionId: string, decision: ApprovalDecision): Promise<void> {
     const target = receipt.target;
     if (!target || !("session" in target)) throw new BridgeError(409, "This worker is not waiting on an approval.");
-    const peer = (await this.peers().catch(() => [] as HookPeer[])).find(candidate => candidate.name === receipt.computer);
+    const peer = this.isSelf(receipt) ? undefined : (await this.peers().catch(() => [] as HookPeer[])).find(candidate => candidate.name === receipt.computer);
     if (peer) { await this.request(peer, "/v1/approvals/answer", { target, actionId, decision }); return; }
-    if (!this.localAnswer || !this.isLocal(receipt.computer)) throw new BridgeError(503, `${receipt.computer} is not reachable from here.`);
+    if (!this.localAnswer || !(this.isSelf(receipt) || this.isLocal(receipt.computer))) throw new BridgeError(503, `${receipt.computer} is not reachable from here.`);
     await this.localAnswer(target, actionId, decision);
   }
 
@@ -661,7 +669,7 @@ export class DispatchReturns {
     if (caller) {
       const same = (pane?: { server: string; pane: string }) => !!pane && pane.server === caller.server && pane.pane === caller.pane;
       // A worker dispatched from the phone or CLI records no dispatching pane, so no agent may answer for it; the owner answers without a pane.
-      if (!receipt.origin || !same(receipt.origin) || (this.isLocal(receipt.computer) && same(receipt.target))) throw new BridgeError(403, "Only the agent that dispatched this worker can answer its approvals.");
+      if (!receipt.origin || !same(receipt.origin) || ((this.isSelf(receipt) || this.isLocal(receipt.computer)) && same(receipt.target))) throw new BridgeError(403, "Only the agent that dispatched this worker can answer its approvals.");
     }
     const clear = () => updateReceipt(id, current => {
       if (current.approval?.actionId !== approval.actionId) return false;
@@ -700,8 +708,8 @@ export class DispatchReturns {
     const unconfirmed = (await dispatchStatus()).filter(receipt => receipt.state === "uncertain" && receipt.brief === "launch"
       && now - Date.parse(receipt.createdAt) < WATCH_MS).slice(0, 64);
     for (const receipt of unconfirmed) {
-      const peer = peers.find(candidate => candidate.name === receipt.computer);
-      if (!peer && !this.isLocal(receipt.computer)) continue;
+      const peer = this.isSelf(receipt) ? undefined : peers.find(candidate => candidate.name === receipt.computer);
+      if (!peer && !this.isSelf(receipt) && !this.isLocal(receipt.computer)) continue;
       const arrival = await (peer ? arrivalOf({ request: route => this.request(peer, route) }, receipt.id) : this.localArrival(receipt.id)).catch(() => undefined);
       if (!arrival?.accepted) continue;
       const named = arrival.accepted.target;
@@ -723,11 +731,15 @@ export class DispatchReturns {
     if (!open.length) return;
     const peers = await this.peers().catch(() => [] as HookPeer[]);
     const byComputer = new Map<string, Receipt[]>();
-    for (const receipt of open) byComputer.set(receipt.computer, [...byComputer.get(receipt.computer) ?? [], receipt]);
+    for (const receipt of open) {
+      const key = this.isSelf(receipt) ? "\0self" : receipt.computer;
+      byComputer.set(key, [...byComputer.get(key) ?? [], receipt]);
+    }
     await Promise.all([...byComputer].map(async ([computer, receipts]) => {
       // A dispatch placed on this computer is read here, without SSH.
-      const peer = peers.find(candidate => candidate.name === computer);
-      const local = !peer && this.isLocal(computer);
+      const home = receipts.every(receipt => this.isSelf(receipt));
+      const peer = home ? undefined : peers.find(candidate => candidate.name === computer);
+      const local = home || (!peer && this.isLocal(computer));
       if (!peer && !local) return;
       for (let start = 0; start < receipts.length; start += 64) {
         const batch = receipts.slice(start, start + 64);
@@ -740,7 +752,7 @@ export class DispatchReturns {
           const seen = await this.grantAnswered(receipt, workers[index]);
           let fresh: NonNullable<Receipt["approval"]> | undefined;
           const current = await updateReceipt(receipt.id, value => {
-            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), peers);
+            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), peers, this.localComputer);
             if (value.approval && value.approval.actionId !== before) fresh = value.approval;
             return changed;
           }).catch(() => undefined);

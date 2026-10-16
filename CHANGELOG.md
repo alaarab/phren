@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Redact structural credentials across entire peer hand-offs, including fallback conversation text, before the final credential scan. Workers moved back to their dispatching Hook now route returns and approvals locally using its stable computer identity.
+
 - Harden cross-computer chat continuation: omit process command lines, scan the normalized outbound hand-off, disable unsupported peer Copilot moves with a reason, select and report an available Claude login, and resolve worker destinations by pinned host-key identity in the dispatching Hook’s own peer directory.
 
 ### Added

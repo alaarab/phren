@@ -96,12 +96,13 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const agentHooks = new AgentHooks(undefined, modules, path.join(bridgeRoot(), "deliveries.json"));
   // Follows what dispatched workers do and tells the dispatching agent.
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
+    localComputer: { id: computerID, name: hostname() },
     // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
     failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
     close: async receipt => {
-      const data = { target: receipt.target, dispatch: receipt.id, turn: receipt.closePending!.turn };
-      if (isLocalComputer(receipt.computer)) return closeFinishedWorker(data, handOffs);
+      const data = { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn };
+      if (receipt.computerId === computerID || isLocalComputer(receipt.computer)) return closeFinishedWorker(data, handOffs);
       const peer = (await hookPeers()).find(peer => peer.name === receipt.computer);
       if (!peer) throw new BridgeError(503, "The worker's computer is offline.");
       return peerRequest(peer, "/v1/dispatch/close", data);

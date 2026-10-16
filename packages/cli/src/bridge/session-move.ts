@@ -1,3 +1,4 @@
+import { redactPeerHandoff } from "./peer-handoff.js";
 // Moving a live session to another agent: the agent in the pane writes a
 // hand-off, exits the way it normally does, and the target harness starts in
 // the same pane by default, or a new chat that keeps the old agent running.
@@ -61,6 +62,7 @@ const moveRecordSchema = z.object({
   from: z.object({ target: targetSchema, account: z.string().max(64).optional(), label: z.string().max(200).optional() }).strict(),
   to: moveToSchema,
   computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  computerId: z.string().uuid().optional(),
   accountChoice: z.string().max(400).optional(),
   mode: z.enum(["replace", "new-chat"]).optional(),
   modeForced: z.literal("conductor").optional(),
@@ -84,7 +86,7 @@ export type MoveRecord = z.infer<typeof moveRecordSchema>;
 
 /** What a dispatching Hook records on its receipt when its worker moved. */
 export interface MovedWorker {
-  id: string; at: string; handoff?: string; computerFingerprint?: string;
+  id: string; at: string; handoff?: string; computerFingerprint?: string; computerId?: string;
   from: { harness: Provider; account?: string };
   to: MoveTo;
   target: Target | StartingTarget;
@@ -166,6 +168,7 @@ export function movedWorker(record: MoveRecord): MovedWorker | undefined {
   if (record.state !== "moved" || !record.target) return undefined;
   return { id: record.id, at: record.movedAt ?? record.updatedAt, ...(record.handoff ? { handoff: record.handoff.path } : {}),
     ...(record.computerFingerprint ? { computerFingerprint: record.computerFingerprint } : {}),
+    ...(record.computerId ? { computerId: record.computerId } : {}),
     from: { harness: record.from.target.source, ...(record.from.account ? { account: record.from.account } : {}) }, to: record.to, target: record.target };
 }
 
@@ -482,6 +485,7 @@ export class SessionMover {
     if (!path.isAbsolute(cwd)) throw new BridgeError(409, "The pane's folder is unknown, so the new agent could not start there.");
     let project: string | undefined;
     let accountChoice: string | undefined;
+    let computerId: string | undefined;
     if (peer) {
       const { getProjectDirs } = await import("../phren-paths.js");
       const { phrenStoreRoot } = await import("./transcripts.js");
@@ -497,13 +501,14 @@ export class SessionMover {
       if (!project) throw new BridgeError(409, "The source folder is not a registered project checkout.");
       projectName.parse(project);
       const selected = await checkMovePeer(peer, project, to);
+      computerId = selected.computerId;
       if (selected.account) { to.account = selected.account; accountChoice = selected.accountChoice; }
     }
     const dispatch = await this.deps.paneDispatch?.(target.server, pane).catch(() => undefined);
     const label = [pane.label, pane.title, pane.terminal_title_stripped, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
     const at = new Date(this.now).toISOString();
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: "handing-off", createdAt: at, updatedAt: at,
-      mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
+      mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}) };
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
@@ -554,12 +559,13 @@ export class SessionMover {
         // Preserve commit ids and the complete hand-off, refusing credentials
         // rather than applying the lossy approval/log summarizer to it.
         const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
-        const remotePrompt = briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`);
+        const remotePrompt = redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
         if (scanForSecrets(remotePrompt)) throw new BridgeError(409, "The hand-off contains a credential; nothing was sent to the peer.");
         if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
-        await (await import("./move-computers.js")).checkMovePeer(peer, project!, record.to);
+        const checked = await (await import("./move-computers.js")).checkMovePeer(peer, project!, record.to);
+        if (record.computerId && checked.computerId !== record.computerId) throw new BridgeError(409, "The destination Hook identity changed during the move; nothing was launched.");
         await this.checkPromotion(record);
-        const target = await new DispatchService().continueChat(peer, project!, record.to, { id: record.id, text: remotePrompt }, redactSecretsForLog(redactApproval(briefText(record.from.label ?? "Continued chat"))));
+        const target = await new DispatchService().continueChat(peer, project!, record.to, { id: record.id, text: remotePrompt }, redactSecretsForLog(redactPeerHandoff(redactApproval(briefText(record.from.label ?? "Continued chat")))));
         launched = { target, to: record.to, placement: "peer" };
       } else launched = await this.relaunch(record, prompt);
       await this.checkPromotion(record);

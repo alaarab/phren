@@ -10,7 +10,7 @@ import { BridgeError, type Json } from "./protocol.js";
 
 const account = z.object({ id: z.string().max(64), label: z.string().max(200), usable: z.boolean(), signedIn: z.boolean(),
   fiveHourLeft: z.number().min(0).max(100).optional(), weekLeft: z.number().min(0).max(100).optional(), resetsAt: z.string().optional() });
-const availability = z.object({ hasCheckout: z.boolean(), harnesses: z.array(z.object({
+const availability = z.object({ computerId: z.string().uuid().optional(), hasCheckout: z.boolean(), harnesses: z.array(z.object({
   source: z.enum(["claude", "codex", "opencode", "copilot"]), usable: z.boolean(), reason: z.string().optional(), accounts: z.array(account).optional(),
 })) });
 export type MoveAvailability = z.infer<typeof availability>;
@@ -57,7 +57,7 @@ function chosenLogin(accounts: z.infer<typeof account>[]) {
   }))).choice;
 }
 
-export async function checkMovePeer(peer: DispatchHost, project: string, to: MoveTo): Promise<{ account?: string; accountChoice?: string }> {
+export async function checkMovePeer(peer: DispatchHost, project: string, to: MoveTo): Promise<{ account?: string; accountChoice?: string; computerId?: string }> {
   if (to.harness === "copilot") throw new BridgeError(409, PEER_COPILOT_REASON);
   const facts = await peerMoveAvailability(peer, project);
   if (!facts.hasCheckout) throw new BridgeError(409, `Computer ${peer.name} has no checkout of ${project}.`);
@@ -67,7 +67,7 @@ export async function checkMovePeer(peer: DispatchHost, project: string, to: Mov
   if (!harness?.usable || (harness.accounts && !login?.usable) || login?.fiveHourLeft === 0 || login?.weekLeft === 0) {
     throw new BridgeError(409, `The harness or account is not usable on ${peer.name}.`);
   }
-  return choice ? { account: choice.account, accountChoice: choice.reason } : {};
+  return { ...(facts.computerId ? { computerId: facts.computerId } : {}), ...(choice ? { account: choice.account, accountChoice: choice.reason } : {}) };
 }
 
 export async function moveComputers(project: unknown, self: string, local: () => Promise<MoveAvailability>): Promise<Json> {

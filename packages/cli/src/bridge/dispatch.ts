@@ -79,7 +79,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     .describe("The worker hit its Claude usage limit: the dispatch that continues it on another account, or why none could."),
   continues: z.string().uuid().optional().describe("The dispatch this one continues after its worker hit its usage limit."),
   moves: z.array(z.object({ id: z.string().uuid(), at: timestamp, handoff: z.string().max(4096).optional(),
-    computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(), computerId: z.string().uuid().optional(),
     from: z.object({ harness: provider, account: z.string().max(64).optional() }).strict(), to: moveToSchema }).strict()).max(16).optional()
     .describe("Each move of this worker to another agent (session-move.ts): from, to, when, and the hand-off file on the worker's computer. `target`, `harness`, `account`, `model` and `effort` are the current agent's."),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),

@@ -15,12 +15,14 @@ import { admitScopedRequest } from "./scoped-gateway.js";
 import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { peerFingerprint } from "./dispatch-hosts.js";
-import type { Json, Target } from "./protocol.js";
+import { objects, type Json, type Target } from "./protocol.js";
 
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWhFCx/BoeHGP4KuXTnSU1szj0tNbYHo3BHMBe4YQ+h";
 const from: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude", session: "00000003-1111-4111-8111-111111111111" };
 const target: Target = { ...from, pane: "w2:p1", workspace: "w2", tab: "w2:t1", session: "00000004-2222-4222-8222-222222222222" };
-const facts = () => ({ hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [
+const A_ID = "70000000-0000-4000-8000-000000000001";
+const B_ID = "70000000-0000-4000-8000-000000000002";
+const facts = () => ({ computerId: B_ID, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [
   { id: "default", label: "Personal", usable: true, signedIn: true, fiveHourLeft: 62, weekLeft: 41 },
   { id: "work", label: "Work", usable: true, signedIn: true, fiveHourLeft: 88 },
 ] }] });
@@ -38,21 +40,23 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); resetRoleState(); await rm(root, { recursive: true, force: true }); });
 
-function fixture(options: { availability?: Json; offline?: boolean; confirmed?: boolean; text?: string; processes?: string[] } = {}) {
+function fixture(options: { availability?: Json; offline?: boolean; confirmed?: boolean; text?: string; processes?: string[]; reply?: boolean; launchedTarget?: Target } = {}) {
   const sent: Array<{ route: string; data?: Json; timeout?: number }> = [];
   let brief: Json | undefined;
+  const launchedTarget = options.launchedTarget ?? target;
   const transport = vi.spyOn(peers, "peerRequest").mockImplementation(async (_peer, route, data, timeout) => {
     sent.push({ route, data, timeout });
     if (options.offline) throw new Error("offline");
     if (route.includes("/availability?")) return options.availability ?? facts();
-    if (route.startsWith("/v1/workspaces/launch")) { brief = data?.brief as Json; return { target, briefLaunched: true }; }
-    if (route.startsWith("/v1/dispatch/arrival")) return { arrival: { accepted: { at: new Date().toISOString(), target } } };
-    if (route.startsWith("/v1/workspaces/panes")) return { panes: [{ id: target.pane, agentStatus: options.confirmed === false ? "blocked" : "working" }] };
+    if (route.startsWith("/v1/workspaces/launch")) { brief = data?.brief as Json; return { target: launchedTarget, briefLaunched: true }; }
+    if (route.startsWith("/v1/dispatch/arrival")) return { arrival: { accepted: { at: new Date().toISOString(), target: launchedTarget } } };
+    if (route.startsWith("/v1/workspaces/panes")) return { panes: [{ id: launchedTarget.pane, agentStatus: options.confirmed === false ? "blocked" : "working" }] };
     throw new Error(`Unexpected route ${route}`);
   });
   const pane: Json = { pane_id: from.pane, tab_id: from.tab, workspace_id: from.workspace, terminal_id: "term-1", agent: "claude", agent_status: "idle", cwd: path.join(root, "checkout") };
-  const lines: string[] = [];
+  const lines: string[] = [JSON.stringify({ type: "user", message: { role: "user", content: `Finish the parser. ${options.text ?? ""}` } })];
   const deliver = vi.fn(async (_target: Target, text: string) => {
+    if (options.reply === false) { lines.push(JSON.stringify({ type: "user", message: { role: "user", content: text } })); return { ok: true, delivered: true }; }
     const marker = /=== PHREN HANDOFF (\w+) BEGIN ===/.exec(text)?.[1];
     lines.push(JSON.stringify({ type: "user", message: { role: "user", content: text } }),
       JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: `=== PHREN HANDOFF ${marker} BEGIN ===\n## Goal\n${options.text ?? "Finish the parser."}\n=== PHREN HANDOFF ${marker} END ===` }] } }));
@@ -68,7 +72,7 @@ function fixture(options: { availability?: Json; offline?: boolean; confirmed?: 
 async function request(mover: SessionMover, method: string, route: string, data: Json = {}, headers = {}) {
   const modules = { has: () => true, modules: BUILTIN_MODULES };
   const capabilities = capabilitiesForModules(modules as never);
-  const handler = createRouteHandler({ mover, modules, info: { computer: { name: "self" }, capabilities }, streams: {} } as unknown as RouteContext);
+  const handler = createRouteHandler({ mover, modules, info: { computer: { id: A_ID, name: "self" }, capabilities }, accountUsage: { read: async () => ({ accounts: [] }) }, streams: {} } as unknown as RouteContext);
   const req = Readable.from(method === "POST" ? [Buffer.from(JSON.stringify(data))] : []) as IncomingMessage;
   req.method = method; req.url = route; req.headers = headers;
   let payload = "";
@@ -141,14 +145,14 @@ describe("continue on another computer", () => {
     expect((await readMove(move.id))?.handedOffTo).toBeUndefined(); expect(f.pane.agent).toBe("claude"); expect(f.terminal.closePane).not.toHaveBeenCalled();
   });
 
-  it("withholds credentials in hand-offs before any peer launch", async () => {
+  it("redacts credentials with a recognizable Authorization header before peer launch", async () => {
     const secret = "ghp_" + "a".repeat(36);
     const f = fixture({ text: `Finish parser. Authorization: Bearer ${secret}` });
     const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
     await f.mover.settled(from.server, from.pane);
     expect(JSON.stringify(f.sent)).not.toContain(secret);
-    expect(await readMove(move.id)).toMatchObject({ state: "failed", error: expect.stringContaining("The hand-off contains a credential") });
-    expect(f.sent.some(call => call.route.includes("/launch"))).toBe(false);
+    expect(await readMove(move.id)).toMatchObject({ state: "moved" });
+    expect(f.brief()?.text).toContain("Authorization: [redacted]");
   });
 });
 
@@ -262,5 +266,98 @@ describe("review regressions", () => {
       await returns.answerApproval(id, { kind: "allow" } as never, "ask-new");
     }
     expect(request.mock.calls.some(([peer]) => peer.name === wrong.name)).toBe(false);
+  });
+});
+
+const credentialNames = ["password", "passwd", "pwd", "token", "secret", "api-key", "api_key", "auth", "bearer"];
+const credentialForms = [
+  { name: "flag equals", render: (name: string, value: string) => `--${name}=${value}` },
+  { name: "flag space", render: (name: string, value: string) => `--${name} ${value}` },
+  { name: "mapping key", render: (name: string, value: string) => `${name}: ${value}` },
+  { name: "environment assignment", render: (name: string, value: string) => `${name.toUpperCase()}=${value}` },
+  { name: "quoted JSON key and value", render: (name: string, value: string) => `"${name}": "${value} with spaces"` },
+  { name: "quoted shell value", render: (name: string, value: string) => `--${name} '${value} with spaces'` },
+  { name: "headers", render: (_name: string, value: string) => `Authorization: Bearer ${value}\nAuthorization: Basic ${value}\nBearer ${value}` },
+  { name: "Bearer values after auth keys", render: (_name: string, value: string) => `--auth Bearer ${value}\nauth: Bearer ${value}\nAUTH=Bearer ${value}` },
+  { name: "URL userinfo", render: (_name: string, value: string) => `https://owner:${value}@example.test/path\npostgres://owner:${value}@db.test/app\nhttps://${value}@example.test/` },
+  { name: "prefixed environment key", render: (_name: string, value: string) => `SERVICE_TOKEN=${value}\nAPI_KEY=${value}` },
+];
+
+describe("whole outbound hand-off redaction", () => {
+  for (const reply of [true, false]) {
+    it.each(credentialForms)(`redacts $name in the ${reply ? "agent" : "fallback"} hand-off`, async form => {
+      const secrets = credentialNames.map((_name, index) => `z9-v${index},tail${index}`);
+      const text = credentialNames.map((name, index) => form.render(name, secrets[index])).join("\n");
+      const f = fixture({ text: `Finish the parser.\n${text}`, reply });
+      if (!reply) {
+        let clock = Date.now();
+        f.deps.now = () => clock += 1000;
+        f.deps.sleep = async () => {};
+      }
+      const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" }, handoffTimeoutMs: 5000 }, { owner: true });
+      await f.mover.settled(from.server, from.pane);
+      expect(await readMove(move.id)).toMatchObject({ state: "moved", handoff: { source: reply ? "agent" : "fallback" } });
+      expect(f.brief()?.text).toContain("[redacted]");
+      for (const secret of secrets) for (const part of secret.split(",")) expect(JSON.stringify(f.sent)).not.toContain(part);
+      expect(f.brief()?.text).toContain("Finish the parser");
+    });
+  }
+});
+
+describe("worker returns home", () => {
+  it("routes A→B→A worker returns and approvals locally without a self peer entry", async () => {
+    const self = { id: A_ID, name: "dispatcher-a" };
+    const onB = fixture();
+    vi.spyOn(harnesses, "harnessInventoryWithin").mockResolvedValue({ harnesses: [] });
+    expect((await request(onB.mover, "GET", "/v1/sessions/move/availability?project=repo")).body.computerId).toBe(A_ID);
+    const outward = await onB.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+    await onB.mover.settled(from.server, from.pane);
+    const away = (await readMove(outward.id))!;
+    const homeTarget = { ...from, pane: "w1:p9", session: "80000000-0000-4000-8000-000000000008" };
+    await peers.addHookPeer({ name: "back-home", address: "home.test", username: "owner", hostKey: KEY.slice(0, -1) + "i" });
+    const back = fixture({ availability: { ...facts(), computerId: A_ID }, launchedTarget: homeTarget });
+    back.deps.snapshot = async () => ({ panes: [{ pane_id: target.pane, tab_id: target.tab, workspace_id: target.workspace,
+      terminal_id: "term-b", agent: "claude", agent_status: "idle", cwd: path.join(root, "checkout") }] });
+    back.deps.identity = async () => target.session;
+    const inward = await back.mover.start({ target, to: { harness: "claude", computer: "back-home" } }, { owner: true });
+    await back.mover.settled(target.server, target.pane);
+    const home = (await readMove(inward.id))!;
+    expect(home).toMatchObject({ state: "moved", computerId: A_ID });
+    const outwardObservation = (await workerStates({ targets: [from] }, { moves: async () => [away] } as never)).workers[0];
+    const inwardObservation = (await workerStates({ targets: [target] }, { moves: async () => [home] } as never)).workers[0];
+    const peerB = (await peers.hookPeers())[0];
+    const id = "90000000-0000-4000-8000-000000000009";
+    const now = new Date().toISOString();
+    await mkdir(path.join(root, "bridge", "dispatches"), { recursive: true });
+    await writeFile(path.join(root, "bridge", "dispatches", `${id}.json`), JSON.stringify({
+      id, computer: self.name, computerId: self.id, harness: "claude", project: "repo", label: "round trip", state: "accepted", target: from, createdAt: now, updatedAt: now,
+    }));
+    let answered = false;
+    const localAnswer = vi.fn(async () => { answered = true; });
+    const localWorkers = vi.fn(async (input: Json) => {
+      if (objects(input.targets)[0].session === from.session) return { workers: [outwardObservation] };
+      expect(input).toMatchObject({ targets: [{ ...homeTarget, dispatch: inward.id }] });
+      return { workers: [answered ? { state: "done", completed: true, session: homeTarget.session, hook: true, endedAt: now, reply: "Finished on A." }
+        : { state: "blocked", session: homeTarget.session, approval: { actionId: "home-ask", tool: "Bash", at: now } }] };
+    });
+    const remoteWorkers = vi.fn(async (peer: peers.HookPeer, route: string, input?: Json) => {
+      expect(peer.name).toBe(peerB.name);
+      expect(route).toBe("/v1/dispatch/workers");
+      expect(input).toMatchObject({ targets: [{ ...target, dispatch: outward.id }] });
+      return { workers: [inwardObservation] };
+    });
+    const returns = new DispatchReturns({ localComputer: self, peers: async () => [peerB], request: remoteWorkers,
+      isLocal: computer => computer === self.name, localWorkers, localAnswer });
+    await returns.poll();
+    expect((await dispatchStatus())[0]).toMatchObject({ computer: peerB.name, target });
+    await returns.poll();
+    expect((await dispatchStatus())[0]).toMatchObject({ computer: self.name, computerId: A_ID, target: homeTarget });
+    await returns.poll();
+    expect((await dispatchStatus())[0].approval?.actionId).toBe("home-ask");
+    await returns.answerApproval(id, { kind: "allow" } as never, "home-ask");
+    expect(localAnswer).toHaveBeenCalledWith(homeTarget, "home-ask", { kind: "allow" });
+    await returns.poll();
+    expect((await dispatchStatus())[0].returned).toMatchObject({ state: "done", reply: "Finished on A." });
+    expect(remoteWorkers).toHaveBeenCalledTimes(1);
   });
 });

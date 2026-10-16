@@ -1289,9 +1289,12 @@ or launches a chat. A dispatched worker moved by its owner re-points its receipt
 to the destination computer so future returns and approvals follow it.
 
 Peer hand-offs omit process command lines (only a child-process count is
-included). Control characters are normalized before the exact outgoing prompt
-is scanned; detected credentials fail the move with “The hand-off contains a
-credential” before any peer launch. Copilot is unavailable for cross-computer
+included). Control characters are normalized, then the whole outbound prompt
+(including fallback conversation text) is structurally redacted: password,
+passwd, pwd, token, secret, api-key/api_key, auth and bearer values in flags,
+assignments and mappings, Authorization/Bearer headers, and URL userinfo become
+`[redacted]`. The exact resulting prompt is then scanned; remaining credentials
+fail the move with “The hand-off contains a credential” before any peer launch. Copilot is unavailable for cross-computer
 moves because it has no launch-brief arrival signal: its peer listing has
 `usable: false` and a `reason`; local Copilot moves still work.
 
@@ -1301,7 +1304,10 @@ pins that choice in `to.account`, records `accountChoice`, and advertises the
 listing's `selectedAccount`, so the receiving launcher uses the reported login.
 
 Moved-worker observations carry `computerFingerprint`, derived from the
-verified SSH host key. The dispatching Hook resolves it against its own pinned
+verified SSH host key, and `computerId`, advertised by the destination Hook's
+local availability endpoint. A destination matching the dispatching Hook's own
+stable ID is routed locally, so A→B→A moves preserve returns and approvals
+without listing self as a peer. The dispatching Hook resolves it against its own pinned
 peer directory and records its own destination name. It never treats another
 Hook's alias as a local address. An absent or ambiguous identity retains the
 previous receipt routing and reports an error; it cannot send returns or

@@ -430,7 +430,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Local facts only: peers may probe these without starting a move or fanning out.
           case "/v1/sessions/move/availability": {
             if (!ownerRequest(request, {}) && request.headers["x-phren-origin"] !== "peer") throw new BridgeError(403, "Only the owner or a verified peer can read continuation availability.");
-            result = await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true));
+            result = { ...await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true)), computerId: info.computer.id };
             break;
           }
           case "/v1/sessions/move": {
