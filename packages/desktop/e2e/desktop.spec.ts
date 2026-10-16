@@ -1337,7 +1337,6 @@ test("Memory hides the out-of-date filter when no finding has freshness data", a
   await expect(page.locator('.mem-chip[data-filter="stale"]')).toHaveCount(0);
 });
 
-<<<<<<< HEAD
 test("a project page opens with Today: its chats, pull request and memory from today", async ({ page }) => {
   await page.routeWebSocket(/\/api\/overview$/, (ws) => {
     const server = ws.connectToServer();
@@ -1383,7 +1382,8 @@ test("a project page opens with Today: its chats, pull request and memory from t
   expect(memoryReads).toHaveLength(1);
   await today.locator('[data-group="chats"] .pj-row').click();
   await expect(page).toHaveURL(/#\/agents$/);
-=======
+});
+
 for (const width of [320, 360, 390, 420]) {
   test(`a chat fits a ${width} px window: title, send, pane actions and an on-demand Changes panel`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
@@ -1550,5 +1550,4 @@ test("a narrow pane in a wide window gets the compact chat header and composer",
   const pane = (await page.locator(".session-doc").first().boundingBox())!;
   const send = (await page.locator(".pc-primary").first().boundingBox())!;
   expect(send.x + send.width).toBeLessThanOrEqual(pane.x + pane.width);
->>>>>>> origin/main
 });
