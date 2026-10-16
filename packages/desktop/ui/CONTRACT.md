@@ -700,3 +700,14 @@ wraps on narrow screens. Covered by `src/ui-home-jobs.test.ts`.
 `sections/home/active-tasks.js` renders after Up next and hides when empty. It shows unchecked Active tasks across every available store and project on online computers, newest `createdAt` first (undated tasks last), capped at six. Keyed rows retain Launch controls and focus across polls. Each row truncates its text, project and computer; Launch opens `shell/launch.js`'s `openLaunchSheet` with the task line as the brief preview and its project, computer, store ID, stable task ID and document revision. Task sheets keep the project and computer fixed, show only task-supported harnesses, and submit to `/v1/tasks/launch`, which resolves the selected store’s checkout and generates the task brief; generic sheets retain their editable brief and project launch flow. `+N more` opens Tasks and calls its `filterSection("Active")` handle; Show all tasks clears that filter.
 
 `shell/task-cache.js` shares store discovery and per-computer/store/project task reads between Home and Tasks, including in-flight requests, for 60 seconds from request start (in-flight requests are still shared). Home reads on show and every 60 seconds while visible, dropping offline rows immediately; hide/destroy stops its timer and ignores late answers. Tasks writes update the shared document cache; conflict/deletion reloads force a fresh read. Tasks retains its existing per-store/project navigation under the Active filter.
+
+### Home Working stop
+
+`sections/home/working.js` owns keyed online working rows with separate chat and
+Stop buttons. Stop is a square icon at the end, titled and named `Stop <session
+title>`, and calls `shell/pause-all.js`'s `liveStop` (Escape to that row's target).
+Clicks stop propagation. The control stays focusable while busy, ignores repeat
+activation until an overview leaves working or five seconds pass, and reports
+failures inline for four seconds. Polls retain Stop and
+restore chat focus when metadata or row order changes. Idle and offline sessions
+have no Stop control. Home's existing approval keyboard shortcuts are unchanged.
