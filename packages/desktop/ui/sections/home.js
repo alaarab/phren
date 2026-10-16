@@ -6,7 +6,7 @@ import { loadQuotaState } from "../shell/quota-warn-prefs.js";
 import { homeRows } from "./home/rows.js";
 import { createNeeds } from "./home/needs-you.js";
 import { createRunningLow } from "./home/running-low.js";
-import { renderWorking } from "./home/working.js";
+import { createWorking } from "./home/working.js";
 import { createFinished } from "./home/finished.js";
 import { createChecks } from "./home/checks.js";
 import { createUpNext } from "./home/up-next.js";
@@ -74,6 +74,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const runs = new Map();
   const scheduleLists = new Map();
   const shared = { root, state, open, block, ...homeRows({ state, open, block }) };
+  const working = createWorking(shared);
   const needs = createNeeds({ ...shared, isVisible: () => visible });
   const low = createRunningLow(shared);
   const finished = createFinished({ ...shared, openPrs, receipts, runs });
@@ -143,7 +144,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     needs.render();
     finished.renderAway();
     low.render();
-    renderWorking(shared);
+    working.render();
     checks.render();
     finished.renderReturns();
     renderUpNext();
@@ -184,6 +185,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       checks.unfollow();
       stopUsage?.();
       stopUsage = null;
+      working.destroy();
       unsubscribe();
       unsubscribeAway();
       unsubscribeApprovals();
