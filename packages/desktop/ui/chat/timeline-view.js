@@ -371,6 +371,7 @@ export function createTimelineView(container, ctx = {}) {
         rows.set(id, row);
       }
       if (row.live) live.push(row.live);
+      row.el.setAttribute("data-row-id", id); // find in chat keeps its place across a re-rendered row
       ordered.push(row.el);
     });
     for (const [id, row] of [...rows]) if (!seen.has(id)) { row.cleanup?.(); row.el.remove(); rows.delete(id); }
@@ -1203,6 +1204,8 @@ export function createTimelineView(container, ctx = {}) {
     render,
     scrollToBottom,
     isAtBottom,
+    /** Earlier turns are behind the fold (find searches only what is drawn). */
+    isFolded: () => foldHidden,
     onScrollTop(fn) { onTop.push(fn); },
     destroy() {
       clearInterval(tick);
