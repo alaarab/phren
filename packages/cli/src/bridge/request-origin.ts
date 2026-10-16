@@ -28,14 +28,14 @@ export async function ownerToken(root = bridgeRoot()): Promise<string> {
 }
 export async function strongOwnerRequest(request: Pick<IncomingMessage, "headers">, data: Json = {}): Promise<boolean> {
   if (!ownerRequest(request, data)) return false;
-  const supplied = request.headers["x-phren-owner-token"];
+  const supplied = request.headers?.["x-phren-owner-token"];
   if (typeof supplied !== "string" || !/^[a-f0-9]{64}$/.test(supplied)) return false;
   return timingSafeEqual(Buffer.from(supplied), Buffer.from(await ownerToken()));
 }
 export interface PeerIdentity { name?: string; id?: string; fingerprint: string }
 export function requestPeer(request: Pick<IncomingMessage, "headers">): PeerIdentity | undefined {
-  if (request.headers["x-phren-origin"] !== "peer") return undefined;
-  const encoded = request.headers["x-phren-peer"];
+  if (request.headers?.["x-phren-origin"] !== "peer") return undefined;
+  const encoded = request.headers?.["x-phren-peer"];
   if (typeof encoded !== "string") return undefined;
   try {
     const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));

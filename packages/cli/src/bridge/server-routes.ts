@@ -495,7 +495,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }
           // Local facts only: peers may probe these without starting a move or fanning out.
           case "/v1/sessions/move/availability": {
-            if (!ownerRequest(request, {}) && request.headers["x-phren-origin"] !== "peer") throw new BridgeError(403, "Only the owner or a verified peer can read continuation availability.");
+            if (!ownerRequest(request, {}) && request.headers?.["x-phren-origin"] !== "peer") throw new BridgeError(403, "Only the owner or a verified peer can read continuation availability.");
             const availability = await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true), url.searchParams.get("conductor") === "1");
             if (!await strongOwnerRequest(request)) for (const harness of availability.harnesses) for (const account of harness.accounts ?? []) { delete account.email; delete account.plan; }
             result = { ...availability, computerId: info.computer.id };
@@ -754,7 +754,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           return { grant: await removeGrant(payload) };
         };
         const conductorCall = (action: Parameters<ConductorExecutor>[0], payload: Json, origin: unknown, run: () => Promise<Json>) => {
-          if (request.headers["x-phren-origin"] === "peer") {
+          if (request.headers?.["x-phren-origin"] === "peer") {
             if (action === "hand_off") return run();
             throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
           }
@@ -776,7 +776,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
           result = await ctx.succession.notice(data);
         } else if (url.pathname === "/v1/conductor/call") {
-          if (request.headers["x-phren-origin"] === "peer") throw new BridgeError(403, "Only local agents use the conductor call route.");
+          if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Only local agents use the conductor call route.");
           const parsed = z.object({ action: z.enum(["dispatch", "hand_off", "returns", "approve", "grants-list", "grants-add", "grants-remove"]), data: z.record(z.string(), z.unknown()), origin: targetSchema.omit({ source: true, session: true }) }).strict().parse(data);
           result = await conductorCall(parsed.action, parsed.data, parsed.origin, () => executeConductor(parsed.action, parsed.data, parsed.origin));
         } else if (url.pathname === "/v1/tasks/launch") {
@@ -871,7 +871,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/dispatch/close-self") {
           result = await closeOwnPane(data);
         } else if (url.pathname === "/v1/hand-off") {
-          const forwarded = request.headers["x-phren-origin"] === "peer" && typeof data.deliveryId === "string" && /^handoff-notice-[a-f0-9]{40}$/.test(data.deliveryId)
+          const forwarded = request.headers?.["x-phren-origin"] === "peer" && typeof data.deliveryId === "string" && /^handoff-notice-[a-f0-9]{40}$/.test(data.deliveryId)
             ? await ctx.succession?.forward(data.target, z.string().max(32768).parse(data.text), data.deliveryId) : undefined;
           result = forwarded ? { ok: forwarded.delivered, delivered: forwarded.delivered, deliveryId: data.deliveryId } : await conductorCall("hand_off", data, data.origin, () => ctx.handOffs!.enqueue(data));
         } else if (url.pathname === "/v1/hand-off/status") {
@@ -977,7 +977,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "DELETE") {
         if (url.pathname !== "/v1/conductor/grants" && url.pathname !== "/v1/authority" && url.pathname !== "/v1/approval-rules") throw new BridgeError(404, "Unknown Phren Hook route.");
         const data = await body(request);
-        if (url.pathname === "/v1/conductor/grants" && request.headers["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
+        if (url.pathname === "/v1/conductor/grants" && request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
         if (url.pathname === "/v1/approval-rules") {
           result = await changeApprovalRule(data, "DELETE");
         } else if (url.pathname === "/v1/authority") {
@@ -985,7 +985,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = { ok: true, authority: await clearProjectAuthority(data, "phone") };
         } else result = { ok: true, grant: await removeGrant(data) };
       } else throw new BridgeError(405, "Unsupported request method.");
-      const payload = JSON.stringify(request.headers["x-phren-origin"] === "peer" ? redactPeerPayload(result, true) : result);
+      const payload = JSON.stringify(request.headers?.["x-phren-origin"] === "peer" ? redactPeerPayload(result, true) : result);
       if (Buffer.byteLength(payload) > MAX_FRAME) throw new BridgeError(413, "The response is too large.");
       response.setHeader("Content-Type", "application/json"); response.end(payload);
     } catch (error) {
@@ -993,7 +993,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       response.setHeader("Content-Type", "application/json");
       const failure = { error: error instanceof BridgeError ? error.message : "Phren Hook could not complete this request. Run phren bridge doctor on the computer.",
         ...(error instanceof BridgeError ? error.details : {}) };
-      response.end(JSON.stringify(request.headers["x-phren-origin"] === "peer" ? redactPeerPayload(failure, true) : failure));
+      response.end(JSON.stringify(request.headers?.["x-phren-origin"] === "peer" ? redactPeerPayload(failure, true) : failure));
     }
   };
 }
