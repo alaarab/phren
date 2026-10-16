@@ -44,7 +44,8 @@ export class SocketBudget<S> {
     while (this.entries.size > this.limits.total) {
       const counts = new Map<string, number>();
       for (const e of this.entries) counts.set(e.identity, (counts.get(e.identity) ?? 0) + 1);
-      const [heaviest] = [...counts].sort((a, b) => b[1] - a[1])[0];
+      // Ties go against a peer identity, so forged peer budgets never push out the owner's own devices first.
+      const [heaviest] = [...counts].sort((a, b) => b[1] - a[1] || Number(a[0] === "owner") - Number(b[0] === "owner"))[0];
       drop(e => e.identity === heaviest);
     }
     return evicted;

@@ -60,4 +60,10 @@ describe("socket budget", () => {
     budget.remove("p3");
     expect(budget.count()).toBe(39);
   });
+  it("evicts a peer identity before the owner when they tie at the global cap", () => {
+    const budget = new SocketBudget<string>({ kind: 16, identity: 32, total: 31 });
+    fill(budget, "owner", "default", 15);
+    fill(budget, "p1", "default", 16);
+    expect(budget.add("owner-new", "owner", "desktop")).toEqual(["p1default0"]);
+  });
 });
