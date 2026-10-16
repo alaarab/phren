@@ -5,6 +5,7 @@
 import { isShown, watchShown } from "./shown.js";
 import { hookGet, hookPost, readRepoFile } from "./api.js";
 import { projectOf } from "./shell/store.js";
+import { noteOwnAction } from "./shell/ci-watch.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 import { hostTokenError, tokenDestinationText } from "./project-host-token.js";
 import { branchProblem, capitalize, checksSummary, checksWord, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, syncAction, tokenPage, trackingText } from "./git-review.js";
@@ -1317,7 +1318,7 @@ export function openChanges(el, ctx) {
     const m = state.merge;
     try {
       const res = await hookPost(computer, "/v1/git/pr/merge", scopeBody({ number: p.number, method: m.method, ...(p.headSha ? { expectedHeadSha: p.headSha } : {}), expectedRepository: repo() }));
-      if (res && res.ok) { state.merge = null; toast(`Merged ${terms().ref}${p.number}`); state.landed = `merged-${p.number}`; }
+      if (res && res.ok) { state.merge = null; noteOwnAction({ number: p.number, url: p.url, project: projectOf(ctx.child) }); toast(`Merged ${terms().ref}${p.number}`); state.landed = `merged-${p.number}`; }
       else state.notice = { title: res && res.reason === "blocked" ? `${terms().ref}${p.number} can't be merged yet` : "The merge was refused", message: (res && res.message) || "The host refused the merge." };
       m.confirm = false;
       state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody());

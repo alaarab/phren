@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startCiWatch } from "../ui/shell/ci-watch.js";
+import { pullsKey, startCiWatch } from "../ui/shell/ci-watch.js";
 import { inQuietHours } from "../ui/shell/quiet.js";
 
 // The watcher end to end: one session, a scripted /v1/git/pulls, fake timers.
@@ -38,9 +38,9 @@ describe("startCiWatch review notifications", () => {
     await tick({ reviewDecision: "APPROVED", mergeState: "DIRTY" });
     stop();
     expect(notes).toEqual([
-      ["Changes requested on #42 Keep the session", "phren · mini", { key: "pulls:mini\u0000phren" }],
-      ["Approved: #42 Keep the session", "phren · mini", { key: "pulls:mini\u0000phren" }],
-      ["#42 Keep the session now has conflicts", "phren · mini", { key: "pulls:mini\u0000phren" }],
+      ["Changes requested on #42 Keep the session", "phren · mini", { key: pullsKey({ computer: "mini", project: "phren", key: "mini\u0000phren" }) }],
+      ["Approved: #42 Keep the session", "phren · mini", { key: pullsKey({ computer: "mini", project: "phren", key: "mini\u0000phren" }) }],
+      ["#42 Keep the session now has conflicts", "phren · mini", { key: pullsKey({ computer: "mini", project: "phren", key: "mini\u0000phren" }) }],
     ]);
   });
 

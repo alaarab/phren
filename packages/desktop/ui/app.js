@@ -113,6 +113,12 @@ startNeedsNotify(shell, {
   stallsEnabled: () => notifyEnabled() && stallNotifyEnabled() && !quietNow(),
   openSession,
   openPulls: (computer, child) => { showSection("agents"); agents().openPulls(computer, child); },
+  openProject: (computer, name) => {
+    showSection("projects");
+    const projects = sectionHandle("projects");
+    if (name && projects?.open) projects.open({ computer, name });
+    else showSection("home");
+  },
 });
 startApprovals();
 startTray(shell);

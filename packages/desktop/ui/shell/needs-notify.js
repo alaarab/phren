@@ -7,6 +7,7 @@ import { hookPost } from "../api.js";
 import { projectOf, sessions, store } from "./store.js";
 import { newlyStalled, stalledMinutes } from "./stalls.js";
 import { snoozes } from "./snooze.js";
+import { parsePullsKey } from "./ci-watch.js";
 
 /** What the shell shows for a needs-you row. Only a plain wait takes a reply:
  * an approval or a blocked agent needs its own card, not more text. */
@@ -47,7 +48,7 @@ function sameBinding(a, b) {
   return sameTarget && a.id === b.id && a.sessionId === b.sessionId && a.conversationId === b.conversationId;
 }
 
-export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, openSession, openPulls = openSession }) {
+export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, openSession, openPulls = openSession, openProject = () => {} }) {
   if (!shell) return;
   let notified = null; // keys already announced; null until the first frame
   let stalled = null; // keys already reported stalled; null until the first frame
@@ -118,11 +119,19 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
   });
   approvals.subscribe(updateNeeds);
   shell.onOpenSession?.((key) => {
-    // `pulls:<session key>` is a pull request notification: open Changes > PRs.
-    const pulls = key.startsWith("pulls:");
-    const wanted = pulls ? key.slice(6) : key;
-    const row = store.sessions({ includeOffline: true }).find((s) => s.key === wanted);
-    if (row) (pulls ? openPulls : openSession)(row.computer, row.child);
+    const pulls = parsePullsKey(key);
+    const sessions = store.sessions({ includeOffline: true });
+    if (!pulls) {
+      const row = sessions.find((s) => s.key === key);
+      if (row) openSession(row.computer, row.child);
+      return;
+    }
+    // A pull request notification: Changes > PRs of its session, else of another
+    // session on that project, else the project's page, else Home.
+    const row = sessions.find((s) => s.key === pulls.session)
+      ?? sessions.find((s) => s.computer === pulls.computer && projectOf(s.child) === pulls.project);
+    if (row) openPulls(row.computer, row.child);
+    else openProject(pulls.computer, pulls.project);
   });
   shell.onReply?.(async ({ key, text, binding }) => {
     const error = binding ? await sendReply(key, text, { expected: binding }) : "That session is gone.";

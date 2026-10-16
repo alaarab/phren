@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checksStrip, ciTransitions, reviewNotice, reviewTransitions, watchedSessions } from "../ui/shell/ci-watch.js";
+import { checksStrip, ciTransitions, noteOwnAction, parsePullsKey, prKey, pullsKey, reviewLook, reviewNotice, reviewStep, watchedSessions } from "../ui/shell/ci-watch.js";
 
 const pull = (checks: string | null) => ({ project: "phren", computer: "This computer", number: 42, title: "Keep the session", checks });
 
@@ -41,43 +41,43 @@ describe("checksStrip", () => {
   });
 });
 
-describe("reviewTransitions", () => {
-  type Look = Parameters<typeof reviewTransitions>[1] extends Map<string, infer V> ? V : never;
-  const look = (decision: string | null, conflicts = false, key = "a"): [string, Look] =>
-    [key, { key, project: "phren", computer: "mini", number: 42, title: "Keep the session", ref: "#", decision, conflicts, checks: null } as Look];
-  const run = (looks: Array<Array<[string, Look]>>) => {
-    const announced = new Set<string>();
-    let previous = new Map<string, Look>();
-    return looks.map((entries) => {
-      const current = new Map(entries);
-      const out = reviewTransitions(previous, current, announced).map((t: { state: string }) => t.state);
-      previous = current;
-      return out;
-    });
+describe("reviewStep", () => {
+  type Seen = { decision?: string | null; mergeState?: string; conflicts?: boolean };
+  /** Feed looks in order; the states that began at each. */
+  const run = (looks: Seen[]) => {
+    let known: ReturnType<typeof reviewStep>["next"] | undefined;
+    return looks.map((look) => { const { next, began } = reviewStep(known, look); known = next; return began; });
   };
 
   it("announces each transition once and nothing on first sight", () => {
     expect(run([
-      [look("CHANGES_REQUESTED", true)], // first sight: baseline only
-      [look("CHANGES_REQUESTED", true)],
-      [look(null)], // both cleared
-      [look("CHANGES_REQUESTED")],
-      [look("CHANGES_REQUESTED")],
+      { decision: "CHANGES_REQUESTED", mergeState: "DIRTY" }, // first sight: baseline only
+      { decision: "CHANGES_REQUESTED", mergeState: "DIRTY" },
+      { decision: "REVIEW_REQUIRED", mergeState: "CLEAN" },
+      { decision: "CHANGES_REQUESTED", mergeState: "CLEAN" },
+      { decision: "CHANGES_REQUESTED", mergeState: "CLEAN" },
     ])).toEqual([[], [], [], ["changes"], []]);
   });
 
   it("announces approval only when it was not approved before; approved to approved is silent", () => {
-    expect(run([[look("REVIEW_REQUIRED")], [look("APPROVED")], [look("APPROVED")], [look("REVIEW_REQUIRED")], [look("APPROVED")]]))
+    expect(run([{ decision: "REVIEW_REQUIRED" }, { decision: "APPROVED" }, { decision: "APPROVED" }, { decision: "REVIEW_REQUIRED" }, { decision: "APPROVED" }]))
       .toEqual([[], ["approved"], [], [], ["approved"]]);
   });
 
   it("announces conflicts again after they were cleared and came back", () => {
-    expect(run([[look(null)], [look(null, true)], [look(null, true)], [look(null, false)], [look(null, true)]]))
+    expect(run([{ mergeState: "CLEAN" }, { mergeState: "DIRTY" }, { mergeState: "DIRTY" }, { mergeState: "BEHIND" }, { conflicts: true }]))
       .toEqual([[], ["conflicts"], [], [], ["conflicts"]]);
   });
 
-  it("forgets a request that leaves the watch set, so it is a first sight again", () => {
-    expect(run([[look(null)], [], [look("APPROVED")], [look("CHANGES_REQUESTED")]])).toEqual([[], [], [], ["changes"]]);
+  it("treats UNKNOWN and a missing decision as no information", () => {
+    expect(run([{ mergeState: "DIRTY" }, { mergeState: "UNKNOWN" }, { mergeState: "DIRTY" }, {}, { mergeState: "DIRTY" }])).toEqual([[], [], [], [], []]);
+    expect(run([{ decision: "APPROVED" }, { decision: null }, { decision: "APPROVED" }, {}, { decision: "APPROVED" }])).toEqual([[], [], [], [], []]);
+    expect(run([{ decision: "CHANGES_REQUESTED" }, { decision: undefined }, { decision: "CHANGES_REQUESTED" }])).toEqual([[], [], []]);
+  });
+
+  it("clears a state only on a positive opposite value", () => {
+    expect(run([{ decision: "APPROVED" }, { decision: "CHANGES_REQUESTED" }, { decision: "APPROVED" }])).toEqual([[], ["changes"], ["approved"]]);
+    expect(run([{ mergeState: "DIRTY" }, { mergeState: "BLOCKED" }, { mergeState: "DIRTY" }])).toEqual([[], [], ["conflicts"]]);
   });
 
   it("titles each notice", () => {
@@ -88,3 +88,54 @@ describe("reviewTransitions", () => {
   });
 });
 
+describe("prKey and pullsKey", () => {
+  it("keys one request by host and repository across sessions, else by project", () => {
+    expect(prKey({ number: 42, url: "https://github.com/Sam/phren/pull/42" }, "a")).toBe(prKey({ number: 42, url: "https://github.com/sam/phren/pull/42" }, "b"));
+    expect(prKey({ number: 12, url: "https://gitlab.example.com/team/phren/-/merge_requests/12" }, "a")).toBe("https://gitlab.example.com/team/phren#12");
+    expect(prKey({ number: 42 }, "phren")).toBe("phren#42");
+  });
+
+  it("round-trips a notification key with awkward characters", () => {
+    const pull = { computer: "Mac mini|2", project: "my|proj", key: "Mac mini|2\u0000my|proj" };
+    expect(parsePullsKey(pullsKey(pull))).toEqual({ computer: "Mac mini|2", project: "my|proj", session: pull.key });
+    expect(parsePullsKey("some-session")).toBeNull();
+  });
+});
+
+describe("reviewLook", () => {
+  const w = (key: string, at: string) => ({ key, project: "phren", computer: key, child: { lastChangedAt: at } });
+  const seen = (key: string, at: string, pull: object) => ({ w: w(key, at), ref: "#", pull: { number: 42, title: "T", url: "https://github.com/sam/phren/pull/42", ...pull } });
+  const H = 3_600_000;
+
+  it("announces one request once, carried by the most recently active session", () => {
+    const reviews = new Map();
+    reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", {}), seen("laptop", "2026-10-16T11:00:00Z", {})], 0);
+    const out = reviewLook(reviews, [
+      seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "CHANGES_REQUESTED" }),
+      seen("laptop", "2026-10-16T11:00:00Z", { reviewDecision: "CHANGES_REQUESTED" }),
+    ], 1);
+    expect(out.map((c) => [c.state, c.pull.key])).toEqual([["changes", "laptop"]]);
+  });
+
+  it("keeps a baseline through a gap shorter than the grace period, and drops it after", () => {
+    const reviews = new Map();
+    reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "REVIEW_REQUIRED" })], 0);
+    expect(reviewLook(reviews, [], 5 * H)).toEqual([]);
+    expect(reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "APPROVED" })], 5.5 * H).map((c) => c.state)).toEqual(["approved"]);
+    reviewLook(reviews, [], 5.5 * H + 7 * H);
+    expect(reviews.size).toBe(0);
+    expect(reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "CHANGES_REQUESTED" })], 13 * H)).toEqual([]);
+  });
+
+  it("is silent for a change right after the owner's own action", () => {
+    const reviews = new Map();
+    const pull = { number: 42, url: "https://github.com/sam/phren/pull/42", project: "phren" };
+    reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "REVIEW_REQUIRED" })], 1000);
+    noteOwnAction(pull, 1000);
+    expect(reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "APPROVED" })], 60_000)).toEqual([]);
+    expect(reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "CHANGES_REQUESTED" })], 61_000)).toEqual([]);
+    noteOwnAction(pull, 1000);
+    reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "REVIEW_REQUIRED" })], 2000);
+    expect(reviewLook(reviews, [seen("mini", "2026-10-16T10:00:00Z", { reviewDecision: "APPROVED" })], 200_000).map((c) => c.state)).toEqual(["approved"]);
+  });
+});

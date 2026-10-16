@@ -679,7 +679,7 @@ test("CI watch notifies once when the pull request gets changes requested, never
   await page.clock.install();
   await page.addInitScript(() => {
     const notes: unknown[][] = [];
-    Object.assign(window, { __notes: notes, phrenDesktop: { notify: (...args: unknown[]) => notes.push(args), setBadge() {} } });
+    Object.assign(window, { __notes: notes, phrenDesktop: { notify: (...args: unknown[]) => notes.push(args), setBadge() {}, onOpenSession: (fn: (key: string) => void) => { Object.assign(window, { __openSession: fn }); } } });
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => { localStorage.removeItem("phren.desktop.notify-pr"); localStorage.removeItem("phren.desktop.quiet"); });
@@ -701,6 +701,13 @@ test("CI watch notifies once when the pull request gets changes requested, never
     await expect.poll(notes).toEqual([["Changes requested on #42 Keep the session through the guard", "phren · This computer", { key: expect.stringMatching(/^pulls:/) }]]);
     await tick();
     expect(await notes()).toHaveLength(1);
+    // The click opens the session on Changes > PRs; for a project with no live session it opens the project page.
+    const key = ((await notes())[0][2] as { key: string }).key;
+    const open = (k: string) => page.evaluate((x) => (window as unknown as { __openSession: (k: string) => void }).__openSession(x), k);
+    await open(key);
+    await expect(page.locator(".section-pill.selected")).toHaveText("Agents");
+    await open(["pulls:" + key.split("|")[0].slice(6), "ghost", "gone"].join("|"));
+    await expect(page.locator(".section-pill.selected")).toHaveText("Projects");
   } finally {
     ciReview = null;
   }
