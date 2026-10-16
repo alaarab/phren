@@ -68,6 +68,7 @@ import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.js";
 import { localNames } from "./computer-names.js";
 import { startStoreSyncLoop } from "../sync/store-sync.js";
+import { SocketBudget, socketIdentity, socketKind } from "./socket-budget.js";
 
 export { capabilities, capabilitiesForModules, requireRoute } from "./server-routes.js";
 export { streamCloseReason } from "./server-stream.js";
@@ -251,7 +252,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     fanoutMessages, canary, streams, returns, handOffs, inbox, mover, succession, storePulls, gitboyWebhooks }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
-  const socketPools = new Map<string, Set<WebSocket>>();
+  const socketPools = new SocketBudget<WebSocket>();
   http.on("upgrade", (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
@@ -259,19 +260,14 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       requireRoute(modules, "WS", url.pathname);
       // Parsed before the upgrade: an invalid server name is refused as the other routes refuse it.
       const overviewServer = url.pathname === "/v1/overview" ? selectedServer(url) : undefined;
-      // Each client kind has its own pool of 16, so a desktop that holds many
-      // sockets never evicts the phone's (and the reverse). The header is a
-      // fairness hint between already-authorized clients, not an identity.
-      const pool = request.headers["x-phren-client"] === "desktop" ? "desktop" : "default";
+      // Sockets are budgeted per authenticated identity (socket-budget.ts); the
+      // x-phren-client header only picks a sub-pool inside that budget.
+      const identity = socketIdentity(request), kind = socketKind(request);
       ws.handleUpgrade(request, socket, head, client => {
-        const members = socketPools.get(pool) ?? new Set<WebSocket>();
-        socketPools.set(pool, members);
-        members.add(client);
-        client.once("close", () => members.delete(client));
-        while (members.size > 16) {
-          const oldest = members.values().next().value!;
+        client.once("close", () => socketPools.remove(client));
+        for (const oldest of socketPools.add(client, identity, kind)) {
           oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
-          members.delete(oldest); ws.clients.delete(oldest);
+          ws.clients.delete(oldest);
         }
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1"); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => failRelay(client)); return; }
