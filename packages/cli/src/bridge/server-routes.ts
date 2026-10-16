@@ -1,5 +1,6 @@
 import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
+import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { ownerRequest } from "./request-origin.js";
 import { listMoves, moveSessionFields, readMove, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
@@ -156,7 +157,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -420,6 +421,18 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // A session move (session-move.ts) by its id, or this computer's recent moves.
+          case "/v1/sessions/move/computers": {
+            if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner can list continuation computers.");
+            result = await moveComputers(url.searchParams.get("project"), info.computer.name,
+              () => localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true)));
+            break;
+          }
+          // Local facts only: peers may probe these without starting a move or fanning out.
+          case "/v1/sessions/move/availability": {
+            if (!ownerRequest(request, {}) && request.headers["x-phren-origin"] !== "peer") throw new BridgeError(403, "Only the owner or a verified peer can read continuation availability.");
+            result = await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true));
+            break;
+          }
           case "/v1/sessions/move": {
             const move = await readMove(z.string().uuid().parse(url.searchParams.get("id")));
             if (!move) throw new BridgeError(404, "No move with that id on this computer.");

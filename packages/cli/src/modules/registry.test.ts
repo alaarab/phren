@@ -141,6 +141,9 @@ describe("built-in registration declarations", () => {
     const declared = BUILTIN_MODULES.flatMap(module => module.hookRoutes);
     const identities = declared.map(route => `${route.method} ${route.path}`);
     expect(new Set(identities).size).toBe(identities.length);
+    for (const path of ["/v1/sessions/move/computers", "/v1/sessions/move/availability"]) {
+      expect(declared.find(route => route.method === "GET" && route.path === path)).toBeDefined();
+    }
     const server = source("bridge/server-routes.ts");
     const getBlock = server.slice(server.indexOf('if (request.method === "GET")'), server.indexOf('} else if (request.method === "POST")'));
     // The phone's memory routes live in memory-store.ts behind one /v1/store/ prefix check.

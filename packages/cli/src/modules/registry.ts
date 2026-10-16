@@ -87,7 +87,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/workspaces/layout", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
-        "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages", "/v1/sessions/move", "/v1/sessions/moves",
+        "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages", "/v1/sessions/move", "/v1/sessions/moves", "/v1/sessions/move/computers", "/v1/sessions/move/availability",
       ]),
       ...routes("POST", [
         "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
@@ -101,7 +101,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "paneLayout", "deskPresence", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor",
+      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
     localFiles: ["<bridge>/gitboy-webhooks.json", "<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json"],

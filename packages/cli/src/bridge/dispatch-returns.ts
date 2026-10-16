@@ -329,6 +329,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     if (move && move.state !== "moved" && move.state !== "failed") return { state: "working", moving: move.id };
     const moved = move ? movedWorker(move) : undefined;
     if (!moved) return observeOne(target);
+    if (moved.to.computer) return { state: "unknown", moved };
     effective[index] = { ...moved.target, ...(target.dispatch ? { dispatch: target.dispatch } : {}) };
     return { ...await observeOne(effective[index]), moved };
   }));
@@ -366,6 +367,7 @@ function observeMove(receipt: Receipt, value: unknown): boolean {
   if (!parsed.success || receipt.moves?.some(move => move.id === parsed.data.id)) return false;
   const { target, ...move } = parsed.data;
   receipt.target = target;
+  if (move.to.computer) { receipt.computer = move.to.computer; delete receipt.computerId; }
   receipt.harness = move.to.harness;
   if (move.to.account) receipt.account = move.to.account; else delete receipt.account;
   if (move.to.model) receipt.model = move.to.model; else delete receipt.model;
@@ -714,7 +716,7 @@ export class DispatchReturns {
       if (!peer && !local) return;
       for (let start = 0; start < receipts.length; start += 64) {
         const batch = receipts.slice(start, start + 64);
-        const input = { targets: batch.map(receipt => ({ ...receipt.target!, dispatch: receipt.id })) };
+        const input = { targets: batch.map(receipt => ({ ...receipt.target!, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id })) };
         // An unreachable peer records nothing: silence is not a transition.
         const answer: Json | undefined = await (peer ? this.request(peer, "/v1/dispatch/workers", input) : this.localWorkers(input) as Promise<Json>).catch(() => undefined);
         const workers = objects(answer?.workers);
@@ -837,7 +839,7 @@ export class DispatchReturns {
   private async closeRemote(receipt: Receipt): Promise<Json> {
     const peer = (await this.peers()).find(peer => peer.name === receipt.computer);
     if (!peer) return { closed: false };
-    return this.request(peer, "/v1/dispatch/close", { target: receipt.target, dispatch: receipt.id, turn: receipt.closePending!.turn });
+    return this.request(peer, "/v1/dispatch/close", { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn });
   }
 
   /** Every unread return, oldest first, marked read as it is handed over. */

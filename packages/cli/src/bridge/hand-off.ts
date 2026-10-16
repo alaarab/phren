@@ -212,6 +212,16 @@ export function claudeAccountRooms(answer: Json, computer: string, now = Date.no
   });
 }
 
+/** Login labels and remaining allowance for the continuation picker. No
+ * emails, identity hashes, config paths or provider credentials cross it. */
+export function claudeMoveAccounts(answer: Json): Array<{ id: string; fiveHourLeft?: number; weekLeft?: number; resetsAt?: string }> {
+  return claudeAccountRooms(answer, "local").map(room => ({ id: room.account,
+    ...(room.fiveHour?.leftPercent !== undefined ? { fiveHourLeft: room.fiveHour.leftPercent } : {}),
+    ...(room.week?.leftPercent !== undefined ? { weekLeft: room.week.leftPercent } : {}),
+    ...(room.fiveHour?.resetsAt ?? room.week?.resetsAt ? { resetsAt: room.fiveHour?.resetsAt ?? room.week?.resetsAt } : {}),
+  }));
+}
+
 function sessionsFrom(overview: Json, computer: string, local: boolean, now = Date.now()): LiveSession[] {
   const sessions: LiveSession[] = [];
   for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {

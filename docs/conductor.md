@@ -640,6 +640,46 @@ A request that ends in the worker's terminal (answered there, or its hold ran
 out) clears `approval`; answering one that is gone returns 409.
 
 
+With `capabilities.moveToComputer: true`, the owner can continue an ordinary
+chat on another verified computer. `GET /v1/sessions/move/computers?project=<name>`
+returns `{computers, localClaudeLogins}`. Each computer has `name`, `self`,
+`online`, `hasCheckout`, and `harnesses` (`source`, `usable`, optional `accounts`
+with `id`, `label`, `fiveHourLeft`, `weekLeft`, `resetsAt`). Percentages are
+remaining usage from the hand-off overview's Claude usage. Offline peers stay
+in the list, disabled; a missing checkout also disables a destination.
+
+`POST /v1/sessions/move` accepts `to.computer`, an exact verified hooks.yaml
+peer name. Omitted or self uses the local move. A peer forces `mode: "new-chat"`:
+the source writes its hand-off and the peer starts in its own registered
+checkout of the project, over the existing pinned SSH launch path. The full
+hand-off is sent inline, with credential-bearing text withheld or refused;
+login credentials, environment and checkout files are never copied. The new
+conversation must confirm its first brief and be running before `state: "moved"`.
+The old chat stays open, including on failure. The record has `to.computer`,
+`placement: "peer"` and `handedOffTo: {computer,target}`. Unknown peers return
+404; offline peers, missing checkouts and unusable harnesses/accounts return
+409 before the hand-off request. Peer calls have bounded timeouts.
+
+Listing destinations and starting a cross-computer move require the owner.
+Scoped gitboy keys, MCP agents (including dispatched workers), and peer-originated
+requests cannot start one. `GET /v1/sessions/move/availability?project=<name>`
+is a local-only facts probe for the owner and verified peers; it never fans out
+or launches a chat. A dispatched worker moved by its owner re-points its receipt
+to the destination computer so future returns and approvals follow it.
+
+**Conductor decision:** cross-computer conductor moves return a clear 409
+before any hand-off or launch. `conductor-role.json`, its serialized CAS, receipt
+origins and approval routing belong to one Hook. There is no distributed commit
+or forwarding protocol that could transfer these safely between two Hooks.
+The current conductor keeps its role and workers; local conductor moves retain
+the existing CAS and receipt re-pointing behavior.
+
+Clients hide self in “On another computer”, show offline/no-checkout reasons,
+and show remaining usage per harness/account. When `localClaudeLogins <= 1`,
+show: “Only one Claude login on <computer>. Add another with
+`phren bridge accounts add <name>`, or continue on another computer.”
+Without `moveToComputer`, existing clients and local moves are unchanged.
+
 ## Move a session to another agent
 
 `move_session` (or `phren move <session-or-pane> --to <harness>`, for example

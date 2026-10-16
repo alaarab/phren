@@ -1,0 +1,182 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as peers from "./peers.js";
+import * as harnesses from "./harnesses.js";
+import { localMoveAvailability, moveComputers } from "./move-computers.js";
+import { recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
+import { SessionMover, readMove, type MoverDeps } from "./session-move.js";
+import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
+import { BUILTIN_MODULES } from "../modules/registry.js";
+import { admitScopedRequest } from "./scoped-gateway.js";
+import { observe, workerStates } from "./dispatch-returns.js";
+import type { Receipt } from "./dispatch.js";
+import type { Json, Target } from "./protocol.js";
+
+const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWhFCx/BoeHGP4KuXTnSU1szj0tNbYHo3BHMBe4YQ+h";
+const from: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude", session: "00000003-1111-4111-8111-111111111111" };
+const target: Target = { ...from, pane: "w2:p1", workspace: "w2", tab: "w2:t1", session: "00000004-2222-4222-8222-222222222222" };
+const facts = () => ({ hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [
+  { id: "default", label: "Personal", usable: true, signedIn: true, fiveHourLeft: 62, weekLeft: 41 },
+  { id: "work", label: "Work", usable: true, signedIn: true, fiveHourLeft: 88 },
+] }] });
+let root: string;
+beforeEach(async () => {
+  root = await mkdtemp(path.join(tmpdir(), "phren-move-computer-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+  vi.stubEnv("PHREN_PATH", path.join(root, "store"));
+  await mkdir(path.join(root, "bridge"));
+  await mkdir(path.join(root, "checkout"));
+  await mkdir(path.join(root, "store", "repo"), { recursive: true });
+  await writeFile(path.join(root, "store", "repo", "summary.md"), "# repo\n");
+  await writeFile(path.join(root, "store", "repo", "phren.project.yaml"), `sourcePath: ${path.join(root, "checkout")}\n`);
+  await peers.addHookPeer({ name: "remote", address: "remote.test", username: "owner", hostKey: KEY });
+});
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); resetRoleState(); await rm(root, { recursive: true, force: true }); });
+
+function fixture(options: { availability?: Json; offline?: boolean; confirmed?: boolean; text?: string } = {}) {
+  const sent: Array<{ route: string; data?: Json; timeout?: number }> = [];
+  let brief: Json | undefined;
+  const transport = vi.spyOn(peers, "peerRequest").mockImplementation(async (_peer, route, data, timeout) => {
+    sent.push({ route, data, timeout });
+    if (options.offline) throw new Error("offline");
+    if (route.includes("/availability?")) return options.availability ?? facts();
+    if (route.startsWith("/v1/workspaces/launch")) { brief = data?.brief as Json; return { target, briefLaunched: true }; }
+    if (route.startsWith("/v1/dispatch/arrival")) return { arrival: { accepted: { at: new Date().toISOString(), target } } };
+    if (route.startsWith("/v1/workspaces/panes")) return { panes: [{ id: target.pane, agentStatus: options.confirmed === false ? "blocked" : "working" }] };
+    throw new Error(`Unexpected route ${route}`);
+  });
+  const pane: Json = { pane_id: from.pane, tab_id: from.tab, workspace_id: from.workspace, terminal_id: "term-1", agent: "claude", agent_status: "idle", cwd: path.join(root, "checkout") };
+  const lines: string[] = [];
+  const deliver = vi.fn(async (_target: Target, text: string) => {
+    const marker = /=== PHREN HANDOFF (\w+) BEGIN ===/.exec(text)?.[1];
+    lines.push(JSON.stringify({ type: "user", message: { role: "user", content: text } }),
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: `=== PHREN HANDOFF ${marker} BEGIN ===\n## Goal\n${options.text ?? "Finish the parser."}\n=== PHREN HANDOFF ${marker} END ===` }] } }));
+    return { ok: true, delivered: true };
+  });
+  const terminal = { prompt: vi.fn(), sendKeys: vi.fn(), processes: vi.fn(async () => ({ shellPid: 1, foregroundPids: [] })), closePane: vi.fn() };
+  const deps: MoverDeps = { snapshot: async () => ({ panes: [pane] }), identity: async () => from.session, terminal, deliver,
+    launch: vi.fn(), inventory: vi.fn(async () => undefined), transcript: async () => lines, git: async () => undefined, processesBelow: async () => [],
+    isConductor: async () => (await recordedConductor())?.pane === from.pane, pollMs: 1 };
+  return { mover: new SessionMover(deps), deps, pane, terminal, deliver, transport, sent, brief: () => brief };
+}
+
+async function request(mover: SessionMover, method: string, route: string, data: Json = {}, headers = {}) {
+  const modules = { has: () => true, modules: BUILTIN_MODULES };
+  const capabilities = capabilitiesForModules(modules as never);
+  const handler = createRouteHandler({ mover, modules, info: { computer: { name: "self" }, capabilities }, streams: {} } as unknown as RouteContext);
+  const req = Readable.from(method === "POST" ? [Buffer.from(JSON.stringify(data))] : []) as IncomingMessage;
+  req.method = method; req.url = route; req.headers = headers;
+  let payload = "";
+  const res = { statusCode: 200, setHeader() {}, end(value: string) { payload = value; } };
+  await handler(req, res as unknown as ServerResponse);
+  return { status: res.statusCode, body: JSON.parse(payload) };
+}
+
+describe("continue on another computer", () => {
+  it("advertises the capability and confirms a peer chat with the full hand-off, preserving the source", async () => {
+    const f = fixture();
+    expect((await request(f.mover, "GET", "/v1/health")).body.capabilities.moveToComputer).toBe(true);
+    const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote", account: "work" } });
+    expect(answer.status).toBe(200);
+    await f.mover.settled(from.server, from.pane);
+    const moved = await readMove(answer.body.move.id);
+    expect(moved, JSON.stringify(moved)).toMatchObject({ state: "moved", mode: "new-chat", placement: "peer", to: { computer: "remote", account: "work" }, handedOffTo: { computer: "remote", target } });
+    expect(f.brief()?.text).toContain("Finish the parser.");
+    expect(f.brief()?.text).toContain("different checkout");
+    expect(f.sent.find(call => call.route.startsWith("/v1/workspaces/launch"))?.data).toMatchObject({ project: "repo", kind: "claude", account: "work" });
+    expect(f.terminal.prompt).not.toHaveBeenCalled(); expect(f.terminal.sendKeys).not.toHaveBeenCalled(); expect(f.terminal.closePane).not.toHaveBeenCalled();
+    expect(f.deps.launch).not.toHaveBeenCalled(); expect(f.pane.agent).toBe("claude");
+    // The receiving Hook reports the relocation without looking for the peer pane locally.
+    const state = await workerStates({ targets: [from] }, { snapshot: async () => ({ panes: [f.pane] }), moves: async () => [moved!] } as never);
+    expect(state.workers[0]).toMatchObject({ state: "unknown", moved: { to: { computer: "remote" } } });
+    const receipt = { id: "old", computer: "local", harness: "claude", target: from } as Receipt;
+    observe(receipt, state.workers[0], Date.now());
+    expect(receipt).toMatchObject({ computer: "remote", target });
+  });
+
+  it.each([
+    ["offline", undefined, true, "offline"],
+    ["no checkout", { ...facts(), hasCheckout: false }, false, "no checkout"],
+    ["harness unavailable", { hasCheckout: true, harnesses: [] }, false, "not usable"],
+    ["account unavailable", facts(), false, "not usable"],
+  ] as const)("refuses %s before asking the source", async (name, availability, offline, error) => {
+    const f = fixture({ availability, offline });
+    await expect(f.mover.start({ target: from, to: { harness: "claude", computer: "remote", ...(name === "account unavailable" ? { account: "missing" } : {}) } }, { owner: true })).rejects.toThrow(error);
+    expect(f.deliver).not.toHaveBeenCalled(); expect(f.sent.some(row => row.route.includes("/launch"))).toBe(false);
+  });
+
+  it.each([[{}, { origin: "agent" }], [{ "x-phren-origin": "peer" }, {}]] as const)("refuses agent and peer initiated cross-computer moves", async (headers, origin) => {
+    const f = fixture();
+    expect((await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" }, ...origin }, headers)).status).toBe(403);
+    expect(f.transport).not.toHaveBeenCalled(); expect(f.deliver).not.toHaveBeenCalled();
+    expect((await request(f.mover, "GET", "/v1/sessions/move/computers?project=repo", {}, { "x-phren-origin": "peer" })).status).toBe(403);
+  });
+
+  it.each(["gitboy-read", "gitboy-write"] as const)("scoped %s keys cannot list or move chats", scope => {
+    for (const line of ["GET /v1/sessions/move/computers?project=repo", "GET /v1/sessions/move/availability?project=repo", "POST /v1/sessions/move"]) {
+      expect(admitScopedRequest(scope, `${line} HTTP/1.1\r\nHost: phren.local\r\nContent-Length: 0\r\n\r\n`)).toMatchObject({ ok: false, status: 403 });
+    }
+  });
+
+  it("refuses unknown peers with 404 and cross-computer conductors with 409 before launch", async () => {
+    const f = fixture();
+    expect((await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "codex", computer: "unknown" } })).status).toBe(404);
+    await recordConductor(from.server, f.pane, "owner", from.session);
+    const old = await recordedConductor();
+    const result = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" } });
+    expect(result.status).toBe(409); expect(result.body.error).toContain("local to each Hook");
+    expect(await recordedConductor()).toEqual(old); expect(f.deliver).not.toHaveBeenCalled(); expect(f.transport).not.toHaveBeenCalled();
+  });
+
+  it("keeps the source open and unannotated when the peer is blocked after launch", async () => {
+    const f = fixture({ confirmed: false });
+    const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+    await f.mover.settled(from.server, from.pane);
+    expect(await readMove(move.id)).toMatchObject({ state: "failed" });
+    expect((await readMove(move.id))?.handedOffTo).toBeUndefined(); expect(f.pane.agent).toBe("claude"); expect(f.terminal.closePane).not.toHaveBeenCalled();
+  });
+
+  it("withholds credentials in hand-offs before any peer launch", async () => {
+    const secret = "ghp_" + "a".repeat(36);
+    const f = fixture({ text: `Finish parser. Authorization: Bearer ${secret}` });
+    const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+    await f.mover.settled(from.server, from.pane);
+    expect(JSON.stringify(f.sent)).not.toContain(secret);
+    expect(await readMove(move.id)).toMatchObject({ state: "failed", error: expect.stringContaining("credential-bearing") });
+    expect(f.sent.some(call => call.route.includes("/launch"))).toBe(false);
+  });
+});
+
+describe("continuation computers", () => {
+  it("lists self, verified peers, offline peers, missing checkouts and safe account room", async () => {
+    const f = fixture();
+    await peers.addHookPeer({ name: "offline", address: "offline.test", username: "owner", hostKey: KEY });
+    await peers.addHookPeer({ name: "empty", address: "empty.test", username: "owner", hostKey: KEY });
+    f.transport.mockImplementation(async (peer, _route, _data, timeout) => {
+      expect(timeout).toBe(10_000);
+      if (peer.name === "offline") throw new Error("offline");
+      return { ...facts(), hasCheckout: peer.name !== "empty", token: "must-not-leak" };
+    });
+    const answer = await moveComputers("repo", "self", async () => facts() as never);
+    expect(answer).toMatchObject({ localClaudeLogins: 2, computers: [
+      { name: "self", self: true, online: true, hasCheckout: true },
+      { name: "remote", self: false, online: true, hasCheckout: true, harnesses: [{ accounts: [{ id: "default", fiveHourLeft: 62, weekLeft: 41 }, { id: "work", fiveHourLeft: 88 }] }] },
+      { name: "offline", online: false, hasCheckout: false, harnesses: [] }, { name: "empty", online: true, hasCheckout: false },
+    ] });
+    expect(JSON.stringify(answer)).not.toMatch(/must-not-leak|signedIn|usable.*signedIn/);
+  });
+
+  it("gets hasCheckout and Claude room from the receiving Hook's own checkout and usage", async () => {
+    vi.spyOn(harnesses, "harnessInventoryWithin").mockResolvedValue({ harnesses: [{ source: "claude", installed: true, usable: true, accounts: [{ id: "work", label: "Work", key: "private-identity", usable: true, signedIn: true }] }] });
+    const answer = await localMoveAvailability("repo", async () => ({ accounts: [{ source: "claude", account: { id: "work", label: "Work", key: "private-identity" }, windows: [
+      { id: "five_hour", usedPercent: 38 }, { id: "seven_day", usedPercent: 59 },
+    ] }] }));
+    expect(answer).toMatchObject({ hasCheckout: true, harnesses: [{ source: "claude", accounts: [{ id: "work", fiveHourLeft: 62, weekLeft: 41 }] }] });
+    expect(JSON.stringify(answer)).not.toContain("private-identity");
+    expect((await localMoveAvailability("absent", async () => ({}))).hasCheckout).toBe(false);
+  });
+});

@@ -49,6 +49,7 @@ export const dispatchSchema = z.object({
 export type DispatchInput = z.infer<typeof dispatchSchema>;
 /** Where a session moves to (session-move.ts): a harness with its account, model and effort, as a dispatch names them. */
 export const moveToSchema = z.object({
+  computer: computerName.optional().describe("Verified destination computer; omitted means this computer."),
   harness: z.enum(DISPATCH_HARNESSES).describe("Harness to continue in: claude, codex, opencode or copilot."),
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
     .describe("Claude account id (default, or a slug from `phren bridge accounts`); only for claude."),
@@ -692,6 +693,32 @@ export class DispatchService {
       release();
       if (placed) { const left = this.inFlight(placed) - 1; if (left > 0) this.placing.set(placed, left); else this.placing.delete(placed); }
     }
+  }
+
+  /** Owner continuation: use the same pinned transport and launch/arrival
+   * protocol as dispatch, without turning the new chat into a worker. */
+  async continueChat(peer: DispatchHost, project: string, to: z.infer<typeof moveToSchema>, brief: { id: string; text: string }, label: string): Promise<Target> {
+    const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
+      { project, kind: to.harness, ...(to.account ? { account: to.account } : {}),
+        ...(to.model ? { model: to.model } : {}), ...(to.effort ? { effort: to.effort } : {}), label, brief }, 65_000);
+    const settled = launched.target ? { target: launched.target } : await settledTarget(peer, launched, to.harness, this.settleIntervalMs);
+    const target = remoteTarget.parse(settled.target);
+    if (target.server !== peer.server || target.source !== to.harness) throw new BridgeError(502, "The peer returned a different launch target.");
+    if (launched.briefLaunched !== true) {
+      if (!("session" in target)) throw new BridgeError(409, "The peer chat is not ready to receive its hand-off; the old chat remains open.");
+      const sent = await sendBrief(peer, target, brief.text, `move-${brief.id}-brief`);
+      if (sent.ok !== true || sent.deliveryUncertain === true || sent.unsubmitted === true || (sent.delivered !== true && sent.queued !== true)) {
+        throw new BridgeError(409, "The peer did not confirm the hand-off; both chats remain open.");
+      }
+    }
+    const arrival = await awaitArrival(peer, brief.id, this.settleIntervalMs);
+    const confirmed = targetSchema.parse(arrival.accepted?.target);
+    if (confirmed.server !== peer.server || confirmed.source !== to.harness || confirmed.pane !== target.pane
+      || confirmed.workspace !== target.workspace || confirmed.tab !== target.tab
+      || ("session" in target && confirmed.session !== target.session)) throw new BridgeError(409, "The peer did not confirm the launched conversation.");
+    const listed = await listedPane(peer, confirmed);
+    if (!listed || !["idle", "working"].includes(String(listed.agentStatus))) throw new BridgeError(409, "The peer chat is not confirmed running; the old chat remains open.");
+    return confirmed;
   }
 
   /** Launches placed on `computer` whose brief is still being confirmed. */

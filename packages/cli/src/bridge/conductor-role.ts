@@ -154,6 +154,8 @@ export function recordConductor(server: string, pane: Json, by: ConductorRecord[
 /** Move only the captured role. The optional hand-over holds the receipt
  * writer's queue while preparing routing and committing this role; it must
  * roll routing back if commit fails. No role writer can interleave here. */
+// This CAS covers one Hook only. Cross-computer moves must refuse until a
+// distributed ownership and worker-routing protocol exists.
 export function transferConductor(expected: ConductorRecord, server: string, pane: Json, session?: string,
   handOver: (commit: () => Promise<void>) => Promise<void> = commit => commit()): Promise<ConductorRecord> {
   return serialized(async () => {

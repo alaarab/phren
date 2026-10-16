@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Continue a chat on another verified computer from the owner’s Continue in… picker (`moveToComputer`): checkout and account availability with remaining usage, a full hand-off over pinned SSH, confirmed new-chat launch and a link from the still-open source chat. Cross-computer conductor moves return 409 until ownership and worker routing can transfer safely between Hooks.
+
 ## [0.3.52] - 2026-10-16
 
 ### Added

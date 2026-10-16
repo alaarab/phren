@@ -15,9 +15,13 @@
 // `<bridge>/moves/<id>.json`; a dispatching Hook asking about the old pane
 // (dispatch-returns.ts `workerStates`) follows the record to the new agent,
 // so the dispatch and its receipt carry on as one worker.
+import { redactSecretsForLog, scanForSecrets } from "../content/secrets.js";
+import { redactApproval } from "./approval-summary.js";
+import { stableComputerName } from "./computer-names.js";
+import type { DispatchHost } from "./dispatch-hosts.js";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -25,7 +29,7 @@ import { logger } from "../logger.js";
 import { quoted, withOriginalBrief } from "./account-failover.js";
 import { recordedConductor, runsAgent, transferConductor, type ConductorRecord } from "./conductor-role.js";
 import { DEFAULT_ACCOUNT } from "./claude-accounts.js";
-import { DISPATCH_HARNESSES, moveToSchema, repointDispatchOrigins } from "./dispatch.js";
+import { DISPATCH_HARNESSES, DispatchService, dispatchProjectDirectory, projectName, moveToSchema, repointDispatchOrigins } from "./dispatch.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { findPane } from "./herdr.js";
 import { briefArrival, briefId, briefRoot, writeLaunchBrief } from "./launch-brief.js";
@@ -58,7 +62,7 @@ const moveRecordSchema = z.object({
   to: moveToSchema,
   mode: z.enum(["replace", "new-chat"]).optional(),
   modeForced: z.literal("conductor").optional(),
-  handedOffTo: z.object({ target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
+  handedOffTo: z.object({ computer: z.string().optional(), target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
   handedOffFrom: z.object({ target: targetSchema, title: z.string().max(200) }).strict().optional(),
   cwd: z.string().max(4096),
   /** The dispatch the moved worker was launched for, as its turn record names it. */
@@ -66,7 +70,7 @@ const moveRecordSchema = z.object({
   handoff: z.object({ path: z.string().max(4096), source: z.enum(["agent", "fallback"]), reason: z.string().max(300).optional(), chars: z.number().int().nonnegative() }).strict().optional(),
   /** How the old agent ended: its own exit command, an interrupt, or a kill after it hung. */
   exit: z.enum(["clean", "interrupted", "killed"]).optional(),
-  placement: z.enum(["same-pane", "adjacent-pane"]).optional(),
+  placement: z.enum(["same-pane", "adjacent-pane", "peer"]).optional(),
   target: z.union([targetSchema, startingTargetSchema]).optional(),
   paneTarget: targetSchema.omit({ session: true }).optional(),
   linkPending: z.boolean().optional(),
@@ -148,7 +152,7 @@ export function moveSessionFields(records: readonly MoveRecord[], target: Target
     && other.tab === target.tab && other.pane === target.pane && other.source === target.source
     && "session" in other && other.session === target.session;
   const outgoing = records.find(record => record.state === "moved" && record.mode === "new-chat" && matches(record.from.target));
-  const incoming = records.find(record => record.state === "moved" && record.mode === "new-chat" && record.target && matches(record.target));
+  const incoming = records.find(record => record.state === "moved" && record.mode === "new-chat" && !record.to.computer && record.target && matches(record.target));
   const suffix = outgoing ? ` (handed off to ${outgoing.to.harness})` : "";
   return { ...(outgoing?.handedOffTo ? { handedOffTo: outgoing.handedOffTo,
     title: `${(title ?? outgoing.from.label ?? outgoing.from.target.source).replace(/ \(handed off to [^)]+\)$/, "")}${suffix}` } : {}),
@@ -426,16 +430,20 @@ export class SessionMover {
   /** Checks the move can happen, records it and starts it. Refuses before anything is typed. */
   async start(input: unknown, caller: { owner?: boolean } = {}): Promise<MoveRecord> {
     const data = moveRequestSchema.parse(input);
+    if (data.to.computer && !caller.owner) throw new BridgeError(403, "Only the owner can continue a chat on another computer.");
     if (data.id) {
       const earlier = await readMove(data.id);
       if (earlier) {
-        if (earlier.modeForced === "conductor" && !caller.owner) throw new BridgeError(403, "Only the owner can move the conductor.");
+        if ((earlier.modeForced === "conductor" || earlier.to.computer) && !caller.owner) throw new BridgeError(403, "Only the owner can move the conductor.");
         const from = earlier.from.target;
         if (from.server !== data.target.server || from.pane !== data.target.pane || from.session !== data.target.session) throw new BridgeError(409, "This move id was already used for another session.");
         return earlier;
       }
     }
-    const { target, to } = data;
+    const { target } = data;
+    const peer = data.to.computer ? await (await import("./move-computers.js")).movePeer(data.to.computer, stableComputerName()) : undefined;
+    const to = { ...data.to };
+    if (!peer) delete to.computer;
     const active = (await listMoves(this.now)).find(record => record.from.target.server === target.server && record.from.target.pane === target.pane
       && record.state !== "moved" && record.state !== "failed");
     if (active || [...this.running.keys()].some(key => key === `${target.server}\0${target.pane}`)) throw new BridgeError(409, "This session is already being moved.", { code: "move_in_progress" });
@@ -451,12 +459,13 @@ export class SessionMover {
     if (holdsRole && (!conductor || conductor.server !== target.server || conductor.pane !== target.pane)) {
       throw new BridgeError(409, "The conductor changed during the move; nothing was transferred.");
     }
+    if (conductor && peer) throw new BridgeError(409, "Cross-computer conductor moves are unavailable: conductor ownership, worker returns and approvals are local to each Hook. The old conductor keeps its role.");
     if (conductor && to.harness === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
     const account = target.source === "claude" ? this.deps.paneAccount?.(target.server, pane) ?? DEFAULT_ACCOUNT : undefined;
     const sameHarness = to.harness === target.source && (to.harness !== "claude" || (to.account ?? account) === account);
-    if (sameHarness && !to.model && !to.effort) throw new BridgeError(400, "The session already runs there. Choose another harness, account, model or effort.");
+    if (!peer && sameHarness && !to.model && !to.effort) throw new BridgeError(400, "The session already runs there. Choose another harness, account, model or effort.");
     // Only harnesses signed in and usable here; an inventory that cannot be read lets the move go on, as a launch does.
-    const inventory = await this.deps.inventory().catch(() => undefined);
+    const inventory = peer ? undefined : await this.deps.inventory().catch(() => undefined);
     if (inventory) {
       const availability = hasUsable(inventory, to.harness, to.harness === "claude" ? to.account : undefined);
       if (!availability.ok) {
@@ -467,15 +476,32 @@ export class SessionMover {
     }
     const cwd = String(pane.foreground_cwd || pane.cwd || "");
     if (!path.isAbsolute(cwd)) throw new BridgeError(409, "The pane's folder is unknown, so the new agent could not start there.");
+    let project: string | undefined;
+    if (peer) {
+      const { getProjectDirs } = await import("../phren-paths.js");
+      const { phrenStoreRoot } = await import("./transcripts.js");
+      const { checkMovePeer } = await import("./move-computers.js");
+      // Match the registered checkout, including sessions in its subfolders.
+      const sourceDirectory = await realpath(cwd).catch(() => cwd);
+      let longest = 0;
+      for (const directoryName of getProjectDirs(phrenStoreRoot())) {
+        const name = path.basename(directoryName);
+        const directory = await dispatchProjectDirectory(name).catch(() => undefined);
+        if (directory && directory.length > longest && (sourceDirectory === directory || sourceDirectory.startsWith(directory + path.sep))) { project = name; longest = directory.length; }
+      }
+      if (!project) throw new BridgeError(409, "The source folder is not a registered project checkout.");
+      projectName.parse(project);
+      await checkMovePeer(peer, project, to);
+    }
     const dispatch = await this.deps.paneDispatch?.(target.server, pane).catch(() => undefined);
     const label = [pane.label, pane.title, pane.terminal_title_stripped, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
     const at = new Date(this.now).toISOString();
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: "handing-off", createdAt: at, updatedAt: at,
-      mode: conductor ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd,
+      mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd,
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}) };
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
-    const work = this.run(record, data.handoffTimeoutMs ?? DEFAULT_HANDOFF_MS, conductor).finally(() => this.running.delete(key));
+    const work = this.run(record, data.handoffTimeoutMs ?? DEFAULT_HANDOFF_MS, conductor, peer, project).finally(() => this.running.delete(key));
     this.running.set(key, work);
     return record;
   }
@@ -488,7 +514,7 @@ export class SessionMover {
     await saveMove(record);
   }
 
-  private async run(record: MoveRecord, handoffMs: number, conductor: ConductorRecord | undefined): Promise<void> {
+  private async run(record: MoveRecord, handoffMs: number, conductor: ConductorRecord | undefined, peer?: DispatchHost, project?: string): Promise<void> {
     const from = record.from.target;
     let roleTransferred = false;
     try {
@@ -516,7 +542,20 @@ export class SessionMover {
         await this.update(record, { state: "launching", exit });
         await this.deps.afterExit?.(from.server, from.pane).catch(() => undefined);
       }
-      const launched = await this.relaunch(record, prompt);
+      let launched: Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">;
+      if (peer) {
+        // Full inline text only: the peer cannot read this Hook's brief path.
+        // Preserve commit ids and the complete hand-off, refusing credentials
+        // rather than applying the lossy approval/log summarizer to it.
+        const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
+        if (scanForSecrets(safeDocument)) throw new BridgeError(409, "The hand-off contains credential-bearing text; nothing was sent to the peer.");
+        const remotePrompt = briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`);
+        if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
+        await (await import("./move-computers.js")).checkMovePeer(peer, project!, record.to);
+        await this.checkPromotion(record);
+        const target = await new DispatchService().continueChat(peer, project!, record.to, { id: record.id, text: remotePrompt }, redactSecretsForLog(redactApproval(record.from.label ?? "Continued chat")));
+        launched = { target, to: record.to, placement: "peer" };
+      } else launched = await this.relaunch(record, prompt);
       await this.checkPromotion(record);
       if (conductor) {
         try {
@@ -548,7 +587,7 @@ export class SessionMover {
       }
       await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), ...launched,
         ...(record.mode === "new-chat" ? {
-          ...(launched.target ? { handedOffTo: { target: launched.target } } : {}),
+          ...(launched.target ? { handedOffTo: { ...(peer ? { computer: peer.name } : {}), target: launched.target } } : {}),
           handedOffFrom: { target: from, title: record.from.label ?? from.source },
         } : {}) });
       logger.info("move", `Moved ${from.source} in pane ${from.pane} to ${harnessName(record.to)} (${launched.placement}); hand-off ${record.handoff?.source}.`);
