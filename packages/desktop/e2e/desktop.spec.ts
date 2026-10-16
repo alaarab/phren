@@ -32,6 +32,7 @@ let closeServer: (() => Promise<void>) | undefined;
 let url: string;
 // What the fake Hook says about the working session's pull request checks.
 let ciChecks = "pending";
+let ciReview: string | null = null;
 const completed: string[] = [];
 
 test.beforeAll(async () => {
@@ -59,7 +60,7 @@ test.beforeAll(async () => {
       "POST /v1/diff": () => ({ status: 200, json: diff }),
       "GET /v1/transcripts/blob": () => ({ status: 200, body: TINY_PNG, contentType: "application/octet-stream" }),
       "POST /v1/git/pulls": () => ({ status: 200, json: { available: true, branch: "feat/login", pulls: [], host: { kind: "github", name: "GitHub", terms: { ref: "#" } },
-        current: { number: 42, title: "Keep the session through the guard", state: "OPEN", checks: ciChecks } } }),
+        current: { number: 42, title: "Keep the session through the guard", state: "OPEN", checks: ciChecks, reviewDecision: ciReview, mergeState: "CLEAN" } } }),
       "GET /v1/projects/repos": () => ({ status: 200, json: { repos: [{ name: "phren", directory: "/Users/you/phren", source: "activity", registered: true }] } }),
       "GET /v1/projects/phren/git": () => ({ status: 200, json: FORGE }),
       "GET /v1/projects/phren/tasks": (_req: unknown, _body: unknown, url: URL) => ({ status: 200, json: { project: "phren", branch: url.searchParams.get("branch"), truncated: false, tasks: [
@@ -670,6 +671,46 @@ test("CI watch notifies once when the working session's pull request checks fail
   await expect.poll(pullCalls).toBeGreaterThan(before);
   await page.waitForTimeout(300);
   expect(await notes()).toHaveLength(1);
+});
+
+test("CI watch notifies once when the pull request gets changes requested, never on first sight", async ({ page }) => {
+  ciChecks = "pending";
+  ciReview = null;
+  await page.clock.install();
+  await page.addInitScript(() => {
+    const notes: unknown[][] = [];
+    Object.assign(window, { __notes: notes, phrenDesktop: { notify: (...args: unknown[]) => notes.push(args), setBadge() {}, onOpenSession: (fn: (key: string) => void) => { Object.assign(window, { __openSession: fn }); } } });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => { localStorage.removeItem("phren.desktop.notify-pr"); localStorage.removeItem("phren.desktop.quiet"); });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(page.locator(".sb-row", { hasText: "Fix login" })).toBeVisible();
+  const pullCalls = () => hook.calls.filter((c) => c.path === "/v1/git/pulls").length;
+  const notes = () => page.evaluate(() => (window as unknown as { __notes: unknown[][] }).__notes);
+  const tick = async () => {
+    const before = pullCalls();
+    await page.clock.fastForward(121_000);
+    await expect.poll(pullCalls).toBeGreaterThan(before);
+    await page.waitForTimeout(300);
+  };
+  await tick(); // baseline: no review yet
+  expect(await notes()).toEqual([]);
+  try {
+    ciReview = "CHANGES_REQUESTED";
+    await tick();
+    await expect.poll(notes).toEqual([["Changes requested on #42 Keep the session through the guard", "phren · This computer", { key: expect.stringMatching(/^pulls:/) }]]);
+    await tick();
+    expect(await notes()).toHaveLength(1);
+    // The click opens the session on Changes > PRs; for a project with no live session it opens the project page.
+    const key = ((await notes())[0][2] as { key: string }).key;
+    const open = (k: string) => page.evaluate((x) => (window as unknown as { __openSession: (k: string) => void }).__openSession(x), k);
+    await open(key);
+    await expect(page.locator(".section-pill.selected")).toHaveText("Agents");
+    await open(["pulls:" + key.split("|")[0].slice(6), "ghost", "gone"].join("|"));
+    await expect(page.locator(".section-pill.selected")).toHaveText("Projects");
+  } finally {
+    ciReview = null;
+  }
 });
 
 test("the summon hotkey is set in Settings › Keys and opens ⌘K when it fires", async ({ page }) => {
