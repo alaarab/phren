@@ -17,6 +17,14 @@ const inComposition = (ev) => !!ev.isComposing || ev.keyCode === 229;
 let activePane = null;
 export function activeFindPane() { return activePane && activePane.isUsable() ? activePane : null; }
 
+/** True when every mutation happened inside the prompt outline's rail (its ticks and tooltip are not conversation). */
+export function onlyRail(records) {
+  return records.length > 0 && records.every((r) => {
+    const node = r.target && r.target.nodeType === 1 ? r.target : r.target && r.target.parentElement;
+    return !!(node && node.closest && node.closest(".ct-outline"));
+  });
+}
+
 /** Is this the key press that opens find (⌘F, or Ctrl+F off the Mac), and not ⇧⌘F / ⌥⌘F? */
 export function isFindKey(ev) {
   return !!(ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && String(ev.key).toLowerCase() === "f";
@@ -63,7 +71,7 @@ export function createFindBar({ pane, root, before, focusComposer, partial = () 
   const handle = { isUsable: usable, open: show, close: hide, get isOpen() { return !!bar; }, destroy };
 
   function observe() {
-    if (!observer) observer = new MutationObserver(schedule);
+    if (!observer) observer = new MutationObserver((records) => { if (!onlyRail(records)) schedule(); });
     observer.observe(root, { childList: true, subtree: true, characterData: true });
   }
   function unobserve() { if (observer) { observer.disconnect(); observer.takeRecords(); } }

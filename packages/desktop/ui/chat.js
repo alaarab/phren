@@ -788,11 +788,12 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   // ---- older pages ----
+  /** Load the page before the oldest one; resolves once it is drawn (or at once when there is nothing to load). */
   function loadOlder() {
     // The snapshot's cursor is not usable until the live backlog replaces it.
-    if (!backlogLoaded || loadingOlder || !history.hasMore || history.startLine === null) return;
+    if (!backlogLoaded || loadingOlder || !history.hasMore || history.startLine === null) return Promise.resolve();
     loadingOlder = true;
-    hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) })
+    return hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) })
       .then((frame) => {
         const read = readFrame(frame);
         if (read) { history.receive(read); render(); }
@@ -800,7 +801,7 @@ export function openChat(el, computerName, child, opts = {}) {
       .catch(() => {})
       .finally(() => { loadingOlder = false; });
   }
-  timeline.onScrollTop?.(loadOlder);
+  timeline.onScrollTop?.(() => { loadOlder(); });
 
   // ---- rename ----
   function startRename() {

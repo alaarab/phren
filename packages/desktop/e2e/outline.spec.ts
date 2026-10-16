@@ -31,13 +31,13 @@ const overview = {
     capabilities: { transcript: true, prompt: true, overviewStream: true } },
 };
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
   if (!existsSync(UI_LINK)) { symlinkSync(path.resolve(SPEC_DIR, "../ui"), UI_LINK, "dir"); linkedUi = true; }
   await mkdir(path.resolve(".scratch"), { recursive: true });
   dir = await mkdtemp(path.resolve(".scratch/desktop-outline-"));
   process.env.PHREN_BRIDGE_HOME = dir;
   process.env.XDG_CONFIG_HOME = dir;
-  hook = await startFakeHook({ dir, overviewFrames: [overview], transcriptFrames: longTranscript(6) });
+  hook = await startFakeHook({ dir, overviewFrames: [overview], transcriptFrames: testInfo.title.includes("80 prompts") ? longTranscript(80, 2) : longTranscript(6) });
   hub = createOverviewHub([LOCAL], hookWebSocket);
   const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
   hub.start();
@@ -66,12 +66,12 @@ test.afterAll(() => {
   if (linkedUi) { try { unlinkSync(UI_LINK); } catch { /* already gone */ } }
 });
 
-async function openLongChat(page: Page, width: number, height: number) {
+async function openLongChat(page: Page, width: number, height: number, last = "Step 9 of answer 6") {
   await page.setViewportSize({ width, height });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click();
   await page.locator(".sb-row", { hasText: "Long chat" }).first().click();
-  await expect(page.locator(".ct-column")).toContainText("Step 9 of answer 6");
+  await expect(page.locator(".ct-column")).toContainText(last);
 }
 
 /** The prompt row (1-based) whose top edge is closest to the transcript's top, as its text. */
@@ -85,25 +85,29 @@ const topPrompt = (page: Page) => page.locator(".ct-scroll").evaluate((scroll) =
 test("a long chat shows the prompt rail; clicking a tick scrolls that prompt in and highlights it; Alt+Up/Down step", async ({ page }) => {
   await openLongChat(page, 1280, 800);
   const rail = page.locator(".ct-outline");
-  // Only the last two turns are drawn; the fold's prompts count, and "↑ earlier" opens them.
+  // Folded by default: 2 turns drawn, yet every loaded prompt has a tick (4 hollow ones in the top segment).
   await expect(rail).toBeVisible();
   await expect(rail).toHaveAttribute("aria-label", "Prompts");
-  await expect(rail.locator(".ct-outline-earlier")).toBeVisible();
-  await rail.locator(".ct-outline-earlier").click();
+  await expect(page.locator(".ct-fold")).toBeVisible();
   const ticks = rail.locator(".ct-outline-tick");
   await expect(ticks).toHaveCount(6);
+  await expect(rail.locator(".ct-outline-tick.folded")).toHaveCount(4);
   await expect(ticks.nth(0)).toHaveAttribute("aria-label", "Prompt 1: Fix the login flow");
   await expect(ticks.nth(2)).toHaveAttribute("aria-label", "Prompt 3: Cover the guard with tests");
 
-  // Ticks sit in the order of their prompts, top to bottom.
+  // Ticks sit in the order of their prompts, top to bottom; the folded ones stay in the top quarter of the rail.
   const tops = await ticks.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
   expect([...tops].sort((a, b) => a - b)).toEqual(tops);
+  const railBox = (await page.locator(".ct-outline-track").boundingBox())!;
+  expect(tops[3]).toBeLessThan(railBox.y + railBox.height * 0.3);
 
   // Hovering shows the first line only.
   await ticks.nth(2).hover();
   await expect(page.locator(".ct-outline-tip")).toHaveText("Cover the guard with tests");
 
+  // A folded tick opens the fold and scrolls its prompt in.
   await ticks.nth(2).click();
+  await expect(page.locator(".ct-fold")).toContainText("Hide earlier");
   const row3 = page.locator('.ct-user-row', { hasText: "Prompt 3" });
   await expect(row3).toBeInViewport();
   await expect(page.locator(".ct-outline-flash .ct-user-bubble")).toContainText("Cover the guard with tests");
@@ -118,6 +122,32 @@ test("a long chat shows the prompt rail; clicking a tick scrolls that prompt in 
   await expect(ticks.nth(1)).toHaveAttribute("aria-current", "true");
   await page.keyboard.press("Alt+ArrowDown");
   await expect.poll(() => topPrompt(page)).toContain("Cover the guard with tests");
+
+  // With no prompt that way the key is left alone (not prevented).
+  await ticks.nth(0).click();
+  await expect.poll(() => topPrompt(page)).toContain("Fix the login flow");
+  const prevented = await page.locator(".ct-scroll").evaluate((s) => {
+    const ev = new KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, bubbles: true, cancelable: true });
+    s.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  expect(prevented).toBe(false);
+});
+
+test("with 80 prompts the rail merges crowded ticks into ranges that jump to the first", async ({ page }) => {
+  await openLongChat(page, 1280, 800, "Step 2 of answer 80");
+  const ticks = page.locator(".ct-outline-tick");
+  await expect.poll(() => ticks.count()).toBeGreaterThan(5);
+  expect(await ticks.count()).toBeLessThan(40);
+  const gaps = await ticks.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top).map((t, i, all) => (i ? t - all[i - 1] : 99)));
+  expect(Math.min(...gaps)).toBeGreaterThanOrEqual(9);
+  const first = ticks.first();
+  await expect(first).toHaveAttribute("aria-label", /^Prompts 1–\d+: Fix the login flow/);
+  await first.hover();
+  await expect(page.locator(".ct-outline-tip")).toHaveText(/^Prompts 1–\d+$/);
+  await first.click();
+  await expect(page.locator(".ct-fold")).toContainText("Hide earlier");
+  await expect.poll(() => topPrompt(page)).toContain("Fix the login flow");
 });
 
 test("the rail stays clear of the scrollbar and the Jump to latest button", async ({ page }) => {
@@ -147,7 +177,8 @@ test("the rail is hidden in a narrow pane and in Console mode, and Alt+Arrow doe
 
 test("works with Find in chat: the rail's text is not searched and a jump keeps the matches", async ({ page }) => {
   await openLongChat(page, 1280, 800);
-  await page.locator(".ct-outline-earlier").click();
+  await page.locator(".ct-outline-tick").first().click(); // opens the fold: all six prompts are drawn
+  await expect(page.locator(".ct-fold")).toContainText("Hide earlier");
   await page.locator(".chat-pane .chat-composer textarea, .chat-pane .chat-composer [contenteditable]").first().focus();
   await page.keyboard.press("Control+f");
   await page.keyboard.type("tooltip leaves out");

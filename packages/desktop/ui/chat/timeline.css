@@ -276,7 +276,7 @@
    latest" (centred); narrow panes (the chat container, #587) do without it. */
 .ct-scroll:focus { outline: none; }
 .ct-outline {
-  position: absolute; top: 14px; bottom: 56px; right: calc(var(--ct-sb, 0px) + 4px); width: 16px;
+  position: absolute; top: 14px; bottom: 56px; inset-inline-end: calc(var(--ct-sb, 0px) + 4px); width: 16px;
   display: flex; flex-direction: column; align-items: stretch; z-index: 2;
 }
 .ct-outline[hidden] { display: none; }
@@ -289,23 +289,28 @@
 .ct-outline-earlier:hover { color: var(--accent); background: var(--raised); }
 .ct-outline-track { position: relative; flex: 1; min-height: 0; }
 .ct-outline-tick {
-  position: absolute; right: 0; width: 16px; height: 10px; margin-top: -5px; padding: 0; border: none;
+  position: absolute; inset-inline-end: 0; width: 16px; height: 10px; margin-top: -5px; padding: 0; border: none;
   background: transparent; cursor: pointer;
 }
 .ct-outline-tick::after {
-  content: ""; position: absolute; right: 2px; top: 4px; width: 9px; height: 2px; border-radius: 1px;
+  content: ""; position: absolute; inset-inline-end: 2px; top: 4px; width: 9px; height: 2px; border-radius: 1px;
   background: var(--muted); opacity: .6; transition: width .15s ease, opacity .15s ease, background-color .15s ease;
 }
 .ct-outline-tick:hover::after, .ct-outline-tick:focus-visible::after { width: 14px; opacity: 1; background: var(--text-2); }
 .ct-outline-tick.current::after { width: 14px; height: 3px; top: 3.5px; opacity: 1; background: var(--accent); }
 .ct-outline-tick:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: 3px; }
 .ct-outline-tip {
-  position: absolute; right: calc(100% + 6px); transform: translateY(-50%); max-width: 280px;
+  position: absolute; inset-inline-end: calc(100% + 6px); transform: translateY(-50%); max-width: 280px;
   padding: 5px 9px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--raised);
   color: var(--text); font: 500 12px var(--prose); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   box-shadow: 0 4px 14px rgba(0, 0, 0, .4); pointer-events: none;
 }
 .ct-outline-tip[hidden] { display: none; }
+/* Prompts behind the fold: hollow ticks in a compressed segment above a hairline. */
+.ct-outline-tick.folded::after { height: 4px; top: 3px; width: 7px; background: transparent; border: 1px solid var(--muted); opacity: .7; box-sizing: border-box; }
+.ct-outline-tick.folded:hover::after, .ct-outline-tick.folded:focus-visible::after { opacity: 1; border-color: var(--text-2); }
+.ct-outline-divider { position: absolute; inset-inline-end: 2px; width: 14px; height: 0; border-top: 1px dashed var(--border-strong); pointer-events: none; }
+.ct-outline-divider[hidden] { display: none; }
 
 /* The prompt a jump landed on. */
 .ct-outline-flash .ct-user-bubble { animation: ct-outline-flash 1.4s ease-out; }

@@ -189,8 +189,9 @@ export function createTimelineView(container, ctx = {}) {
   let foldHidden = false;     // this render hid turns behind the fold
   let lastPreparation = null; // re-render arguments for the fold's click
   let lastPreview = null;
-  let promptRows = [];        // the user prompts drawn now: { id, el, text }
-  let promptTotal = 0;        // every loaded prompt, folded ones included
+  let holdUntil = 0;          // a prompt jump is under way: do not pull the view back to the bottom
+  const holding = () => performance.now() < holdUntil;
+  let promptRows = [];        // every loaded user prompt: { id, el, text }; el is null behind the fold
 
   const distanceFromBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
   const isAtBottom = () => distanceFromBottom() < 40;
@@ -217,7 +218,7 @@ export function createTimelineView(container, ctx = {}) {
   // pane shown again keeps a reader who was at the bottom there, instead of
   // leaving them a "Jump to latest" they never scrolled away from.
   const follow = new ResizeObserver(() => {
-    if (!atBottom) return;
+    if (!atBottom || holding()) return;
     scrollToBottom();
     jump.hidden = true;
   });
@@ -228,12 +229,8 @@ export function createTimelineView(container, ctx = {}) {
   const outline = createOutline({
     root: container, scroll,
     prompts: () => promptRows,
-    total: () => promptTotal,
-    earlier: () => {
-      if (foldHidden) return () => { expandedAll = true; render(lastPreparation, lastPreview); };
-      if (ctx.hasOlder?.()) return () => ctx.loadOlder?.();
-      return null;
-    },
+    reveal: (id) => revealPrompt(id),
+    earlier: () => (ctx.hasOlder?.() ? () => ctx.loadOlder?.() : null),
   });
   const outlineObserver = new ResizeObserver(() => outline.schedule());
   outlineObserver.observe(column);
@@ -355,7 +352,7 @@ export function createTimelineView(container, ctx = {}) {
     const entries = (preparation && preparation.entries) || [];
     const jobs = (preparation && preparation.jobs) || [];
     // Where the reader last was, not where growth since then left the view.
-    const stick = atBottom || isAtBottom();
+    const stick = (atBottom || isAtBottom()) && !holding();
     const beforeHeight = scroll.scrollHeight;
     const beforeTop = scroll.scrollTop;
 
@@ -380,11 +377,13 @@ export function createTimelineView(container, ctx = {}) {
     const live = [];
     const seen = new Set();
     promptRows = [];
-    promptTotal = entries.filter(isPrompt).length;
     entries.forEach((entry, index) => {
       const id = ids[index];
       seen.add(id); // hidden rows keep their cache so expanding is instant
-      if (hidden.has(entry)) return;
+      if (hidden.has(entry)) {
+        if (isPrompt(entry)) promptRows.push({ id, el: null, text: kit.VoiceMarker.hidden(entry.messages[0].text) });
+        return;
+      }
       const key = entryKey(entry);
       let row = rows.get(id);
       if (!row || row.key !== key) {
@@ -418,6 +417,16 @@ export function createTimelineView(container, ctx = {}) {
     }
     updateJump();
     outline.schedule();
+  }
+
+  /** Open the fold if the prompt is behind it (the reader's place stays), then scroll to it and flash it. */
+  function revealPrompt(id) {
+    // The reader is leaving the bottom: neither this render nor the follow observer may pull the view back down.
+    holdUntil = performance.now() + 1200;
+    if (foldHidden) { expandedAll = true; render(lastPreparation, lastPreview); }
+    atBottom = false;
+    updateJump();
+    outline.jumpToId(id);
   }
 
   /** The fold row at the top of the column: N previous messages, or hide earlier. */
