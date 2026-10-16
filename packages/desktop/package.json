@@ -1,6 +1,6 @@
 {
   "name": "@phren/desktop",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "description": "Phren desktop: a client of every computer's Phren Hook",
   "type": "module",
