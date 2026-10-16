@@ -3046,7 +3046,7 @@ schedules:
       expect(sent.data).toMatchObject({ ok: true, id, computer: "Devbox", state: "accepted", brief: "launch", target: worker });
       // The remote Hook resolves the checkout through realpath; on macOS /tmp is a symlink.
       expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ cwd: await realpathAsync(path.join(root, "checkout")), env: { PHREN_DISPATCH_ID: id } });
-      expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model", `Read and follow the brief in ${file}`]);
+      expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model", `Read and follow the brief in ${file}`, "-c", "check_for_update_on_startup=false"]);
       expect(commands.filter(c => c.method === "agent.prompt")).toEqual([]);
       expect((await api("/v1/dispatch")).data.dispatches[0]).toMatchObject({ id: sent.data.id, state: "accepted" });
       const connections = (await readFile(path.join(root, "ssh-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
