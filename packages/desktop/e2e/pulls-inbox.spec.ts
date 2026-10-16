@@ -73,7 +73,8 @@ test("clicking a request opens its project's session on Changes, PRs; a project 
   await expect(page.locator(".pj-forge")).toContainText("!3");
 });
 
-test("no requests while Home is hidden, none sooner than two minutes apart while it is shown", async ({ page }) => {
+test("no requests while Home is hidden, none sooner than five minutes apart while it is shown and focused", async ({ page }) => {
+  await page.addInitScript(() => { document.hasFocus = () => true; });
   await page.clock.install();
   h = await twoComputers("pulls-budget");
   await page.goto(h.url, { waitUntil: "domcontentloaded" });
@@ -81,8 +82,8 @@ test("no requests while Home is hidden, none sooner than two minutes apart while
   const reads = () => projectReads(h!.hook).length + projectReads(h!.peerHook!).length;
   const lists = () => listReads(h!.hook).length + listReads(h!.peerHook!).length;
   expect(reads()).toBe(4);
-  // A minute later nothing new; past two minutes, one read of each project.
-  await page.clock.fastForward(60_000);
+  // Four minutes later nothing new; past five, one read of each project.
+  await page.clock.fastForward(240_000);
   await page.waitForTimeout(300);
   expect(reads()).toBe(4);
   await page.clock.fastForward(65_000);
@@ -117,4 +118,27 @@ test("an error line shows when every read failed", async ({ page }) => {
   } });
   await page.goto(h.url, { waitUntil: "domcontentloaded" });
   await expect(page.locator('[data-block="pulls"] .home-empty')).toContainText("Could not read pull requests");
+});
+
+test("Refresh forces a round; a project that fails keeps its rows, marked stale, with a note under them", async ({ page }) => {
+  const routes = localRoutes();
+  const good = routes["GET /v1/projects/phren/git"];
+  let down = false;
+  routes["GET /v1/projects/phren/git"] = (req, body, url) => down
+    ? { status: 200, json: { project: "phren", available: false, reason: "failed", message: "gh timed out", host: { kind: "github", name: "GitHub" }, pulls: [] } }
+    : good(req, body, url);
+  h = await startHarness("pulls-stale", { overviewFrames: [overview()], routes, peer: { name: PEER, options: { overviewFrames: [overviewFrame([])], routes: peerRoutes() } } });
+  await page.goto(h.url, { waitUntil: "domcontentloaded" });
+  const card = page.locator('[data-block="pulls"]');
+  await expect(card.locator(".home-pull", { hasText: "Split the router" })).toBeVisible();
+  await expect(card.locator(".home-pulls-note")).toHaveText("");
+  const before = projectReads(h.hook).length;
+  down = true;
+  await card.locator(".home-pulls-refresh").click();
+  await expect(card.locator(".home-pulls-note")).toHaveText("Couldn’t read 1 project");
+  expect(projectReads(h.hook).length).toBe(before + 2);
+  const stale = card.locator(".home-pull.stale", { hasText: "Split the router" });
+  await expect(stale).toBeVisible();
+  // A stale read is never listed above a current one.
+  await expect(card.locator(".home-pull .home-row-title").first()).toHaveText("#7 Optimise the hero image");
 });

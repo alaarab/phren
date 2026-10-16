@@ -234,3 +234,10 @@ button.home-job:focus-visible { outline: 2px solid var(--accent); outline-offset
   .home-pull .home-row-title { white-space: normal; overflow-wrap: anywhere; }
   .home-pull-meta { justify-content: flex-start; }
 }
+.home-pull.stale { opacity: .6; }
+.home-pull-author.mine { color: var(--accent); }
+.home-pulls-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; }
+.home-pulls-note { color: var(--waiting); font-size: 12px; }
+.home-pulls-refresh { margin-left: auto; padding: 4px 2px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; }
+.home-pulls-refresh:hover { color: var(--accent-hover); }
+.home-pulls-refresh:disabled { cursor: default; opacity: .6; }

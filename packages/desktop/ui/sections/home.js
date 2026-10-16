@@ -12,6 +12,7 @@ import { createWorking } from "./home/working.js";
 import { createFinished } from "./home/finished.js";
 import { createChecks } from "./home/checks.js";
 import { createPulls } from "./home/pulls.js";
+import { computerReady } from "../shell/transcript-prefetch.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { sessionsForProject } from "../shell/project-today.js";
 import { createUpNext } from "./home/up-next.js";
@@ -101,7 +102,13 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const finished = createFinished({ ...shared, openPrs, receipts, runs });
   const checks = createChecks({ block, openPrs });
   const onlineNames = () => (state.merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer);
-  const pulls = createPulls({ block, computers: onlineNames, isVisible: () => visible, openProject: openPullProject });
+  const WEEK_MS = 7 * 86_400_000;
+  const pulls = createPulls({
+    block, computers: onlineNames, isVisible: () => visible, openProject: openPullProject,
+    // A session there moved in the last week; and not a computer that is stressed or low on battery.
+    active: (computer, project) => sessions(state.merged).some((row) => row.computer === computer && projectOf(row.child) === project && Date.now() - (Date.parse(row.child.lastChangedAt ?? "") || 0) < WEEK_MS),
+    ready: (computer) => computerReady(computer, state.merged),
+  });
   const renderUpNext = createUpNext({ block, scheduleLists, state });
   const activeTasks = createActiveTasks({ block, state });
   const savedToday = createSavedToday({ block, state });

@@ -13,7 +13,7 @@ const host = (kind: "github" | "gitlab", repo: string) => kind === "github"
   ? { kind, name: "GitHub", domain: "github.com", webUrl: `https://github.com/you/${repo}`, remote: "origin", source: "url", terms: GITHUB_TERMS, supported: true }
   : { kind, name: "GitLab", domain: "gitlab.com", webUrl: `https://gitlab.com/you/${repo}`, remote: "origin", source: "url", terms: GITLAB_TERMS, supported: true };
 
-const answer = (kind: "github" | "gitlab", repo: string, pulls: object[]) => ({ project: repo, directory: `/Users/you/${repo}`, branch: "main", available: true, host: host(kind, repo), current: null, pulls });
+const answer = (kind: "github" | "gitlab", repo: string, pulls: object[]) => ({ project: repo, directory: `/Users/you/${repo}`, branch: "main", available: true, host: host(kind, repo), current: null, account: { user: "you", source: "cli" }, pulls });
 const reply = (json: object): FakeHookHandler => () => ({ status: 200, json });
 
 export const PHREN_PULLS = [
