@@ -201,7 +201,9 @@ export function renderSidebar(el, merged, handlers)
 //   merged: MergedOverview (src/contract.ts). Re-render fully on every call.
 //   handlers.onOpenChat(computerName, child)     // child: OverviewChild with a target
 //   handlers.onOpenTerminal(computerName, server) // server: child.target.server or mux.session
-//   handlers.onDropFiles(computerName, child, files) // Files dropped on a row: open it, then attach(files)
+//   handlers.onDropFiles(computerName, child, files) // Files dropped on a row: open it, then attach(files).
+//     Only chat rows are targets (shell/row-drop.js): a row dragged over with Files gets `.sb-drop` and
+//     `data-drop-hint="Attach to <title>"`; Escape, dragend, drop or leaving the row clears it.
 
 // chat.js
 export function openChat(el, computerName, child) // returns { close(), focus(), insert(text), attach(files) }
