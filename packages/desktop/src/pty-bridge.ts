@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
-import { channelPool, type AcquiredChannel } from "./channel-pool.js";
+import { sideChannelPool, type AcquiredChannel } from "./channel-pool.js";
 import { masterKey, sshArgs } from "./hosts.js";
 import type { AttachTerminal, Computer, TerminalSession } from "./contract.js";
 
@@ -13,6 +13,10 @@ import type { AttachTerminal, Computer, TerminalSession } from "./contract.js";
 const SERVER_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const require = createRequire(import.meta.url);
 let helperChecked = false;
+/** Queued this long for an SSH channel, a terminal says so. */
+const WAIT_NOTICE_MS = 2_000;
+/** Input held for a terminal that has not started yet. */
+const MAX_PENDING_BYTES = 1024 * 1024;
 
 /** node-pty 1.1.0 prebuilds ship spawn-helper without +x under pnpm; fix once. */
 function ensureSpawnHelper(): void {
@@ -107,29 +111,49 @@ function pooledSession(c: Computer, command: string, cols: number, rows: number)
     release();
     for (const listener of exitListeners) listener(code);
   };
-  const run = (action: (p: pty.IPty) => void): void => {
-    if (p) action(p);
-    else if (!ended) pending.push(action);
-  };
-  channelPool.acquire(masterKey(c), { signal: controller.signal }).then((acquired) => {
+  const say = (text: string): void => { for (const listener of dataListeners) listener(`\r\n${text}\r\n`); };
+  let pendingBytes = 0;
+  let dropped = false;
+  let size = { cols, rows };
+  // Tell the user while queued: a terminal that shows nothing looks hung.
+  const waitingNotice = setTimeout(() => say(`Waiting for a free SSH channel to ${c.name}…`), WAIT_NOTICE_MS);
+  sideChannelPool.acquire(masterKey(c), { signal: controller.signal }).then((acquired) => {
+    clearTimeout(waitingNotice);
     channel = acquired;
     if (ended) { release(); return; }
     try {
-      p = spawnPty("ssh", sshArgs(c, command, { tty: true, slot: acquired.slot }), cols, rows, false);
+      p = spawnPty("ssh", sshArgs(c, command, { tty: true, slot: acquired.slot }), size.cols, size.rows, false);
     } catch {
       end(1);
       return;
     }
     p.onData((data) => { for (const listener of dataListeners) listener(data); });
     p.onExit(({ exitCode }) => end(exitCode));
+    if (dropped) say("Input typed while waiting for an SSH channel was too large and was dropped.");
     for (const action of pending.splice(0)) action(p);
-  }, () => end(1));
+  }, () => {
+    clearTimeout(waitingNotice);
+    if (!ended) say(`No free SSH channel to ${c.name}; close a terminal or preview.`);
+    end(1);
+  });
   return {
-    write: (data) => run((live) => live.write(data)),
-    resize: (w, h) => run((live) => live.resize(clamp(w, 2, 500), clamp(h, 2, 200))),
+    write: (data) => {
+      if (p) { p.write(data); return; }
+      if (ended) return;
+      // Bound what is held before the pty starts.
+      if (pendingBytes + data.length > MAX_PENDING_BYTES) { dropped = true; return; }
+      pendingBytes += data.length;
+      pending.push((live) => live.write(data));
+    },
+    resize: (w, h) => {
+      const next = { cols: clamp(w, 2, 500), rows: clamp(h, 2, 200) };
+      if (p) p.resize(next.cols, next.rows);
+      else size = next;
+    },
     onData: (listener) => { dataListeners.push(listener); },
     onExit: (listener) => { exitListeners.push(listener); },
     kill: () => {
+      clearTimeout(waitingNotice);
       controller.abort();
       try {
         p?.kill();

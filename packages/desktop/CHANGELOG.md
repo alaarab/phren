@@ -8,7 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### Fixed
 
-- Web previews and terminals share each computer's SSH connection limit with chats instead of overrunning it.
+- Web previews and terminals share each computer's SSH connection limit with chats instead of overrunning it. Terminals and previews hold at most half of a computer's channels, so chats always have room; a waiting terminal says so, a preview with no channel answers 503, and idle preview connections close after a minute.
 
 ## [0.1.11] - 2026-10-16
 

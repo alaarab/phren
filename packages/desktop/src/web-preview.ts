@@ -7,12 +7,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { Duplex } from "node:stream";
-import { channelPool, type AcquiredChannel } from "./channel-pool.js";
+import { sideChannelPool, type AcquiredChannel } from "./channel-pool.js";
 import type { Computer } from "./contract.js";
 import { masterKey, sshArgs } from "./hosts.js";
 
 const IDLE_MS = 30 * 60_000;
 const MAX_HEAD = 16 * 1024;
+/** Idle time after which a remote preview connection (and its SSH channel) is closed. */
+const IDLE_CONNECTION_MS = 60_000;
 
 /** Whether a request head names exactly `127.0.0.1:<port>` as its Host. Exported for tests. */
 export function hostMatches(head: string, port: number): boolean {
@@ -106,6 +108,11 @@ class Relay {
       release();
       remote.destroy();
     });
+    // A remote connection holds a pooled channel: drop idle keep-alive
+    // connections quickly; the browser reconnects on demand.
+    if (!this.computer.local) {
+      socket.setTimeout(IDLE_CONNECTION_MS, () => socket.destroy());
+    }
     remote.write(head);
     socket.pipe(remote).pipe(socket);
     socket.resume();
@@ -127,7 +134,7 @@ class Relay {
       released = true;
       channel?.release();
     };
-    const started = channelPool.acquire(masterKey(computer), { signal: controller.signal }).then((acquired) => {
+    const started = sideChannelPool.acquire(masterKey(computer), { signal: controller.signal }).then((acquired) => {
       channel = acquired;
       if (destroyed) { release(); throw new Error("Preview connection closed."); }
       let spawned: ChildProcess;
@@ -149,7 +156,14 @@ class Relay {
       spawned.on("exit", () => release());
       return spawned;
     });
-    started.catch((error) => pipe.destroy(error instanceof Error ? error : new Error(String(error))));
+    started.catch((error) => {
+      if (destroyed) return;
+      // Answer the browser instead of dropping the connection silently.
+      const body = `No free SSH channel to ${computer.name}; close a terminal or preview.`;
+      pipe.push(Buffer.from(`HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`));
+      pipe.push(null);
+      void error;
+    });
     const pipe: Duplex = new Duplex({
       read() { child?.stdout?.resume(); },
       write(chunk, encoding, callback) {

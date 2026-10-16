@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { connect, type Socket } from "node:net";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { channelPool, type AcquiredChannel } from "./channel-pool.js";
+import { MAX_CHANNELS, MAX_SLOTS, SIDE_CHANNEL_BUDGET, channelPool, sideChannelPool, type AcquiredChannel } from "./channel-pool.js";
 import type { Computer } from "./contract.js";
 import { closeAllPreviews, openPreview } from "./web-preview.js";
 
@@ -16,15 +16,19 @@ const held: AcquiredChannel[] = [];
 const sockets: Socket[] = [];
 let children: EventEmitter[] = [];
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 const inUse = () => channelPool.stats(key).slots.reduce((a, b) => a + b, 0);
 
-function client(localPort: number): Socket {
+function client(localPort: number): { socket: Socket; received: () => string; closed: () => boolean } {
   const socket = connect({ host: "127.0.0.1", port: localPort });
+  let received = "";
+  let closed = false;
+  socket.setEncoding("utf8");
   socket.on("error", () => undefined);
+  socket.on("data", (chunk: string) => { received += chunk; });
+  socket.on("close", () => { closed = true; });
   sockets.push(socket);
   socket.on("connect", () => socket.write(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${localPort}\r\n\r\n`));
-  return socket;
+  return { socket, received: () => received, closed: () => closed };
 }
 
 beforeEach(() => {
@@ -39,6 +43,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   closeAllPreviews();
   for (const socket of sockets.splice(0)) socket.destroy();
   for (const channel of held.splice(0)) channel.release();
@@ -47,26 +52,25 @@ afterEach(() => {
 describe("remote web preview channel pool", () => {
   it("passes the pooled slot to ssh and releases once when ssh exits", async () => {
     // Fill slot 0 so the next channel is granted slot 1.
-    for (let i = 0; i < 8; i++) held.push(await channelPool.acquire(key));
+    for (let i = 0; i < MAX_CHANNELS; i++) held.push(await channelPool.acquire(key));
     const preview = await openPreview(REMOTE, 8080);
     client(preview.localPort);
-    await settle();
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
     expect(mocks.sshArgs).toHaveBeenCalledWith(REMOTE, "phren-hook v1 web 127.0.0.1 8080", { slot: 1 });
-    expect(channelPool.stats(key).slots).toEqual([8, 1, 0, 0]);
+    expect(channelPool.stats(key).slots).toEqual([MAX_CHANNELS, 1, 0, 0]);
     children[0].emit("exit", 0);
     children[0].emit("exit", 0);
-    expect(channelPool.stats(key).slots).toEqual([8, 0, 0, 0]);
+    expect(channelPool.stats(key).slots).toEqual([MAX_CHANNELS, 0, 0, 0]);
   });
 
   it("releases when the browser connection is destroyed, killing ssh", async () => {
     const preview = await openPreview(REMOTE, 8080);
-    const socket = client(preview.localPort);
-    await settle();
-    expect(inUse()).toBe(1);
+    const { socket } = client(preview.localPort);
+    await vi.waitFor(() => expect(inUse()).toBe(1));
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
     socket.destroy();
-    await settle();
+    await vi.waitFor(() => expect(inUse()).toBe(0));
     expect(mocks.kill).toHaveBeenCalled();
-    expect(inUse()).toBe(0);
     children[0].emit("exit", null);
     expect(inUse()).toBe(0);
   });
@@ -75,22 +79,47 @@ describe("remote web preview channel pool", () => {
     mocks.spawn.mockImplementation(() => { throw new Error("spawn failed"); });
     const preview = await openPreview(REMOTE, 8080);
     client(preview.localPort);
-    await settle();
-    expect(inUse()).toBe(0);
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalled());
+    await vi.waitFor(() => expect(inUse()).toBe(0));
   });
 
   it("takes no slot when the connection closes while waiting for a channel", async () => {
-    for (let i = 0; i < 32; i++) held.push(await channelPool.acquire(key));
+    for (let i = 0; i < MAX_SLOTS * MAX_CHANNELS; i++) held.push(await channelPool.acquire(key));
     const preview = await openPreview(REMOTE, 8080);
-    const socket = client(preview.localPort);
-    await settle();
-    expect(channelPool.stats(key).waiting).toBe(1);
+    const { socket } = client(preview.localPort);
+    await vi.waitFor(() => expect(channelPool.stats(key).waiting).toBe(1));
     socket.destroy();
-    await settle();
-    expect(channelPool.stats(key).waiting).toBe(0);
+    await vi.waitFor(() => expect(channelPool.stats(key).waiting).toBe(0));
     held.pop()!.release();
-    await settle();
     expect(mocks.spawn).not.toHaveBeenCalled();
-    expect(inUse()).toBe(31);
+    expect(inUse()).toBe(MAX_SLOTS * MAX_CHANNELS - 1);
+  });
+
+  it("leaves chats headroom while previews sit at their budget", async () => {
+    const preview = await openPreview(REMOTE, 8080);
+    for (let i = 0; i < SIDE_CHANNEL_BUDGET; i++) client(preview.localPort);
+    await vi.waitFor(() => expect(sideChannelPool.held(key)).toBe(SIDE_CHANNEL_BUDGET));
+    const extra = client(preview.localPort);
+    await vi.waitFor(() => expect(extra.socket.connecting).toBe(false));
+    // The extra connection queues in the budget, so the shared pool keeps room.
+    expect(channelPool.stats(key).waiting).toBe(0);
+    for (let i = 0; i < MAX_SLOTS * MAX_CHANNELS - SIDE_CHANNEL_BUDGET; i++) held.push(await channelPool.acquire(key, { timeoutMs: 1 }));
+    expect(inUse()).toBe(MAX_SLOTS * MAX_CHANNELS);
+  });
+
+  it("answers 503 when no channel comes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    for (let i = 0; i < SIDE_CHANNEL_BUDGET; i++) held.push(await sideChannelPool.acquire(key));
+    const preview = await openPreview(REMOTE, 8080);
+    const browser = client(preview.localPort);
+    // Let the connection and its Host check reach the relay (real I/O, not timers).
+    await vi.waitFor(() => expect(browser.socket.connecting).toBe(false), { interval: 1 });
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(60_000);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(browser.received()).toContain("503 Service Unavailable"));
+    expect(browser.received()).toContain("No free SSH channel to Pool preview; close a terminal or preview.");
+    await vi.waitFor(() => expect(browser.closed()).toBe(true));
+    expect(mocks.spawn).not.toHaveBeenCalled();
   });
 });
