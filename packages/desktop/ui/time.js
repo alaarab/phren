@@ -25,7 +25,10 @@ export function age(value, suffix = " ago", now = Date.now()) {
   if (seconds < 60) return Math.floor(seconds) + "s" + suffix;
   if (seconds < 3600) return Math.floor(seconds / 60) + "m" + suffix;
   if (seconds < 86400) return Math.floor(seconds / 3600) + "h" + suffix;
-  return Math.floor(seconds / 86400) + "d" + suffix;
+  const days = Math.floor(seconds / 86400);
+  if (days < 30) return days + "d" + suffix;
+  if (days < 365) return Math.floor(days / 30) + "mo" + suffix;
+  return Math.floor(days / 365) + "y" + suffix;
 }
 
 /** `age`, or "today" when a finding only has a date (`at` null). */

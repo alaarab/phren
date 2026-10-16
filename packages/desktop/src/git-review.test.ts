@@ -178,6 +178,9 @@ describe("pull and merge request presentation", () => {
     const now = Date.parse("2026-10-10T12:00:00Z");
     expect([age("2026-10-10T11:59:30Z", " ago", now), age("2026-10-10T11:55:00Z", " ago", now), age("2026-10-08T12:00:00Z", " ago", now), age("", " ago", now)])
       .toEqual(["30s ago", "5m ago", "2d ago", ""]);
+    const day = 86_400_000;
+    expect([29, 30, 364, 365, 800].map((d) => age(now - d * day, " ago", now))).toEqual(["29d ago", "1mo ago", "12mo ago", "1y ago", "2y ago"]);
+    expect([age(now - 65 * day, "", now), age(now - 400 * day, "", now)]).toEqual(["2mo", "1y"]);
   });
 });
 
