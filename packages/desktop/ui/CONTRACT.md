@@ -731,30 +731,52 @@ are reported without dropping successful results. Scoped `?` retains its quick
 chat action. Palette input retains focus while asynchronous results arrive.
 Coverage: `src/ui-palette-memory.test.ts`.
 
-### Continue on another computer
+### Continue by account across computers
 
 The shared `shell/move.js` sheet (also opened by quota Switch through
 `quota-warn-sheet.js`) reads the session computer's health capabilities via
-`store.capabilities(computer)`. With `moveToComputer: true` it requests
-`GET /v1/sessions/move/computers?project=<projectOf(child)>` on that Hook.
+`store.capabilities(computer)`. With `moveToComputer`, it requests
+`GET /v1/sessions/move/computers?project=<registered project>` from that Hook.
+It prefers the session's reported `child.project`; otherwise it reads
+`/v1/projects/repos` and chooses the longest registered `directory` ancestor
+of `child.cwd`, matching complete path segments. A session in `project/src`
+uses the registered project's name, never `src`. An unresolved project shows
+an error and preserves local moves; it never guesses from the basename.
+
 The answer is `{ computers: [{ name, self, online, hasCheckout, harnesses:
-[{ source, usable, accounts?: [{ id, label, fiveHourLeft?, weekLeft?, resetsAt? }] }]
-}], localClaudeLogins }`. “On another computer” shows one row per non-self
-computer, its online state, and a harness/account selector with remaining usage
-(e.g. “Claude · Work · 62% left”; each option's tooltip gives both windows and
-reset time). Offline computers, missing checkouts and unusable harnesses are
-disabled with reasons. Arrow keys and Tab reach rows inside the existing focus
-trap; native selects keep their arrow behavior.
+[{ source, usable, accounts?: [{ id, label, email?, plan?, fiveHourLeft?,
+weekLeft?, fiveHourResetsAt?, weekResetsAt?, usable, current }] }] }],
+localClaudeLogins }`. “Claude accounts” comes first, with one button per login
+including self: email (or label), plan, computer, `5h N% · week N%` and each
+known reset. Unknown usage reads “unknown”. The current login is marked
+“Current account” and disabled. Offline computers, absent checkouts and
+unusable logins remain visible with disabled reasons. “Other harnesses” follows
+with local and peer destinations. This sheet has no model or effort pickers.
+Account rows retain their nodes through selection and busy/error updates.
+Arrow keys and Tab reach enabled rows within the focus trap; Escape closes and
+returns focus to the invoker. Continue waits for account discovery to finish.
+Older Hooks retain their existing local harness/account choices.
 
-When `localClaudeLogins <= 1`, the sheet shows “Only one Claude login on
-<computer>. Add another with `phren bridge accounts add <name>`, or continue on
-another computer.” The command is a copy button. Without `moveToComputer`,
-there is no new request, section or hint. Inventory errors stay in the section.
+Choosing a self account posts a local move with `to: { harness: "claude",
+account }`; peer accounts also include `to.computer` and `mode: "new-chat"`.
+Conductor peer rows require the session Hook's `moveConductorToComputer`,
+otherwise show “Update <computer>'s Hook to move the conductor”. Submission
+rechecks the source capabilities. The Hook owns the hand-off and role transfer.
+Status polls the source Hook; `handedOffTo: { computer, target }` opens the
+peer chat once present in the overview (falling back to the selected computer
+and `move.target`). Peer 404/409 errors remain visible and permit retry.
 
-Remote Continue posts `{ target, to: { harness, account?, computer }, id,
-mode: "new-chat" }` to the source Hook's existing move route. The source stays
-open; the Hook owns hand-off creation and conductor role transfer. Status still
-polls the source Hook. A moved record's `handedOffTo: { computer, target }`
-opens that peer's chat once present in the shared overview (falling back to the
-selected computer and `move.target`). Peer 404/409 errors remain visible and
-allow retry or another choice. Coverage: `src/ui-move.test.ts`.
+The exact single-login hint remains when `localClaudeLogins <= 1`, with its
+copyable `phren bridge accounts add <name>` command. It additionally offers
+“Add a Claude account on <computer>…” when that computer's own health declares
+`claudeAccountAdd`. The local action is available independently of
+`moveToComputer`; online peers get their own health-gated actions. The action
+opens an inline slug form within the same focus trap. Slugs are 1–32 lowercase
+letters or digits with internal hyphens; `default` is reserved. Cancel restores
+the action's focus; launch errors stay editable. Submit rechecks that Hook's
+capability, posts `/v1/accounts/claude/add { slug }`, closes the sheet on success,
+and opens the returned live pane immediately through Agents' `openPane(computer,
+target)`. Herdr opens the exact console tile; tmux opens that server's terminal,
+which supports interactive login without waiting for a transcript or overview
+session. The Hook runs the login command; the client never builds shell commands.
+Coverage: `src/ui-move.test.ts`.

@@ -198,3 +198,7 @@
 .move-computer:has(button:disabled) { opacity: .55; }
 .move-copy-command { font: inherit; font-family: var(--mono); color: inherit; background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; user-select: text; overflow-wrap: anywhere; }
 .move-login-hint { overflow-wrap: anywhere; }
+
+.move-destination { display: block; width: 100%; white-space: normal; overflow-wrap: anywhere; font: inherit; }
+.move-destination:disabled { opacity: .55; cursor: default; }
+.move-sheet [hidden] { display: none !important; }

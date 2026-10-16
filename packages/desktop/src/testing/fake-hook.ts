@@ -111,7 +111,7 @@ function defaultHealth() {
     computer: { id: "test-computer", name: "This computer" },
     capabilities: {
       fileWrite: true, fileSearch: true, gitReview: true, files: true, fileResolution: true, repositoryFiles: true,
-      moveToComputer: true, moveNewChat: true, moveConductor: true, schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
+      moveToComputer: true, moveConductorToComputer: true, claudeAccountAdd: true, moveNewChat: true, moveConductor: true, schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
     },
   };
 }
@@ -349,15 +349,20 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
       { source: "codex", installed: true, usable: true },
     ] } }),
     "GET /v1/sessions/move/computers": () => ({ json: { localClaudeLogins: 1, computers: [
-      { name: "This computer", self: true, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true }] },
+      { name: "This computer", self: true, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [{ id: "default", label: "Personal", email: "personal@example.com", plan: "Pro", usable: true, current: true, fiveHourLeft: 4, weekLeft: 12 }] }, { source: "codex", usable: true }] },
       { name: "Studio", self: false, online: true, hasCheckout: true, harnesses: [
         { source: "claude", usable: true, accounts: [
-          { id: "work", label: "Work", fiveHourLeft: 62, weekLeft: 48, resetsAt: "2026-10-16T18:00:00Z" },
-          { id: "personal", label: "Personal", fiveHourLeft: 84, weekLeft: 71, resetsAt: "2026-10-16T19:00:00Z" },
+          { id: "work", label: "Work", email: "work@example.com", plan: "Max", usable: true, current: false, fiveHourLeft: 62, weekLeft: 48, fiveHourResetsAt: "2026-10-16T18:00:00Z" },
+          { id: "personal", label: "Personal", email: "personal@example.com", plan: "Pro", usable: true, current: false, fiveHourLeft: 84, weekLeft: 71, weekResetsAt: "2026-10-16T19:00:00Z" },
         ] }, { source: "codex", usable: true },
       ] },
       { name: "Laptop", self: false, online: false, hasCheckout: false, harnesses: [] },
     ] } }),
+    "POST /v1/accounts/claude/add": (_req, body) => {
+      const slug = (body as { slug?: string })?.slug ?? "";
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(slug) || slug === "default") return { status: 400, json: { error: "Invalid account short name" } };
+      return { json: { target: { server: "default", workspace: "1", tab: "login", pane: `login-${slug}` } } };
+    },
     "POST /v1/sessions/move": (_req, body) => {
       const data = body as { id: string; target: object; to: { computer?: string; harness: string; account?: string } };
       if (data.to.computer && data.to.computer !== "Studio") return { status: data.to.computer === "Laptop" ? 409 : 404, json: { error: "Computer unavailable" } };

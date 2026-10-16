@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.11] - unreleased
 
+- Continue in lists Claude accounts across computers first, with email, plan and usage; add an account through an interactive login pane, gate conductor transfers on Hook support, and resolve nested session folders to their registered project.
+
 - Continue a chat on another computer with harness/account usage, unavailable-computer reasons and a copyable single-Claude-login hint (Hook `moveToComputer`).
 
 - Search memory across projects on online computers from the command palette with `??`, or `?` without a project scope, with ranked, labelled results and cancellable searches.
