@@ -32,6 +32,8 @@ export interface FakeHookOptions {
   overviewFrames?: unknown[];
   /** Backlog entries sent on every transcript connection. */
   transcriptFrames?: unknown[];
+  /** Milliseconds the transcript socket waits before sending its backlog (default 0), to tell a prefetched chat from a fresh load. */
+  transcriptDelayMs?: number;
   /** Text files `/v1/files/range` serves, by repository path (default: src/app.ts). */
   files?: Record<string, string>;
 }
@@ -329,7 +331,13 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     ? Object.entries(options.files).map(([path, content]) => [path, { content, version: "v1" }])
     : [[APP_PATH, { content: "export const app = \"new\";\nexport const ready = true;\n", version: "v1" }]]);
 
+  const numberedTranscript = () => (transcriptFrames as Array<{ line?: number; raw: unknown }>).map((entry, index) => ({ line: entry.line ?? index + 1, raw: entry.raw }));
   const defaults: Record<string, FakeHookHandler> = {
+    // The newest page over HTTP: the snapshot the desktop reads ahead of opening a chat.
+    "GET /v1/transcripts/history": (_req, _body, url) => {
+      const entries = numberedTranscript();
+      return { json: { type: "older", source: url.searchParams.get("source") ?? "claude", session: url.searchParams.get("session") ?? "", entries, totalLines: entries.length, startLine: 1, hasMore: false } };
+    },
     "GET /v1/tasks/stores": () => ({ json: { stores: [{ id: "personal", name: "Personal", primary: true, role: "owner", metadataWritable: true, projects: ["phren", "website"] }] } }),
     "GET /v1/tasks": (_req, _body, url) => {
       const project = url.searchParams.get("project") ?? "phren";
@@ -532,8 +540,11 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
         // The real Hook's backlog shape (packages/cli/src/bridge/transcripts.ts): numbered
         // entries, the harness source and the session, so clients parse it as they do live.
         const source = url.searchParams.get("source") ?? "claude";
-        const entries = (transcriptFrames as Array<{ line?: number; raw: unknown }>).map((entry, index) => ({ line: entry.line ?? index + 1, raw: entry.raw }));
-        send(ws, { type: "backlog", source, session: url.searchParams.get("session") ?? "", entries, totalLines: entries.length, startLine: 1, hasMore: false, reset: true });
+        const entries = numberedTranscript();
+        const backlog = { type: "backlog", source, session: url.searchParams.get("session") ?? "", entries, totalLines: entries.length, startLine: 1, hasMore: false, reset: true };
+        const delay = options.transcriptDelayMs ?? 0;
+        if (delay > 0) { const timer = setTimeout(() => send(ws, backlog), delay); ws.once("close", () => clearTimeout(timer)); }
+        else send(ws, backlog);
       } else if (url.pathname === "/v1/status") {
         statusSockets.add(ws);
         ws.on("close", () => statusSockets.delete(ws));
