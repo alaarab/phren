@@ -1219,6 +1219,49 @@ test("a file dropped on a session row opens it and waits in its composer", async
   await expect(page.getByText("Only images can be attached.")).toBeVisible();
 });
 
+test("dragging files over a chat row shows its hint, Escape clears it, and the chat opens with the files unsent", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  const row = page.locator(".sb-row", { hasText: "Fix login" });
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  const files = await page.evaluateHandle((png) => {
+    const d = new DataTransfer();
+    for (const name of ["first.png", "second.png"]) d.items.add(new File([Uint8Array.from(atob(png), (c) => c.charCodeAt(0))], name, { type: "image/png" }));
+    return d;
+  }, PNG);
+  const tab = await page.evaluateHandle(() => { const d = new DataTransfer(); d.setData("text/phren-tab", "x"); return d; });
+  const before = hook.calls.filter((c) => c.path === "/v1/prompt").length;
+
+  // Only files make a target; a dragged tab does not.
+  await row.dispatchEvent("dragover", { dataTransfer: tab });
+  await expect(row).not.toHaveClass(/sb-drop/);
+  // Non-chat rows show nothing.
+  const computerRow = page.locator(".sb-computer-row").first();
+  await computerRow.dispatchEvent("dragover", { dataTransfer: files });
+  await expect(computerRow).not.toHaveClass(/sb-drop/);
+
+  await row.dispatchEvent("dragover", { dataTransfer: files });
+  await expect(row).toHaveClass(/sb-drop/);
+  await expect(page.locator(".sb-drop-hint.show")).toHaveText("Attach to Fix login");
+  const tip = await page.locator(".sb-drop-hint").boundingBox();
+  expect(tip!.x).toBeGreaterThanOrEqual(0);
+  expect(tip!.x + tip!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  await page.keyboard.press("Escape");
+  await expect(row).not.toHaveClass(/sb-drop/);
+  await expect(page.locator(".sb-drop-hint.show")).toHaveCount(0);
+  await row.dispatchEvent("dragover", { dataTransfer: files });
+  await expect(row).toHaveClass(/sb-drop/);
+  await row.dispatchEvent("dragleave");
+  await expect(row).not.toHaveClass(/sb-drop/);
+
+  await row.dispatchEvent("drop", { dataTransfer: files });
+  await expect(page.locator(".pc-attach img")).toHaveCount(2);
+  await expect(page.locator(".pc-attach img").nth(0)).toHaveAttribute("alt", "first.png");
+  await expect(page.locator(".pc-attach img").nth(1)).toHaveAttribute("alt", "second.png");
+  await expect(page.locator(".pc-input")).toBeFocused();
+  expect(hook.calls.filter((c) => c.path === "/v1/prompt")).toHaveLength(before);
+});
+
 test("Memory and chat recall show citation freshness with a tooltip at narrow widths", async ({ page }) => {
   // Memory is read by the daemon's store mirror; recall comes from the Hook.
   await page.route("**/api/memory/*/projects", route => route.fulfill({ json: { projects: [{ name: "phren", findings: 1 }] } }));
