@@ -167,3 +167,22 @@
 .pc-where-computer, .pc-where-branch { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
 .pc-where-icon { color: var(--muted); }
 .pc-where-branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Narrow windows: the footer row tightens so the talk and send buttons stay in view. */
+@media (max-width: 760px) {
+  .pc-card { padding: 8px 8px 6px; }
+  .pc-footer { gap: 2px; }
+  .pc-footer > * { flex-shrink: 0; }
+  .pc-footer > .pc-spacer { flex-shrink: 1; min-width: 0; }
+  .pc-icon { width: 26px; height: 26px; }
+  .pc-icon svg { width: 18px; height: 18px; }
+  .pc-select { padding: 4px 4px; }
+  .pc-talk, .pc-primary { width: 38px; height: 38px; flex: none; }
+  .pc-where { padding: 6px 4px 0; gap: 8px; }
+}
+@media (max-width: 400px) {
+  .pc-card { padding: 8px 6px 6px; }
+  .pc-icon { width: 24px; height: 24px; }
+  .pc-icon svg { width: 17px; height: 17px; }
+  .pc-talk, .pc-primary { width: 34px; height: 34px; }
+}

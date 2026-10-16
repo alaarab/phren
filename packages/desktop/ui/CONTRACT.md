@@ -31,6 +31,16 @@ fraction has screen-reader text “computers online” at every width, rendered 
 `shell/titlebar.js` without relying on an accessible name on a generic span.
 At 1280 px the labels and spacing are unchanged.
 
+Agents at 760 px and below (`NARROW_QUERY` in `sections/agents.js`, the media
+queries in `theme.css`, `chat/chat.css` and `chat/composer.css`): the layout bar
+folds Mirror tab / Shell / Split / Zoom into a `.layout-more` ("⋯") menu (Escape
+or an outside press closes it), a `.layout-panel` button (`aria-expanded`) opens
+and closes the right panel, which starts closed and overlays the centre at
+`100vw - 48px`, the chat header gives the title the first line, and the composer
+footer tightens so the talk and send buttons stay on screen. Wider windows are
+unchanged: `.layout-more` and `.layout-panel` are hidden and `.layout-actions` is
+`display: contents`.
+
 ## Daemon connections
 
 The overview uses each computer's configured `server` and reconnects when its

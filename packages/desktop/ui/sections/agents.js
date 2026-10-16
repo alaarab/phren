@@ -29,6 +29,11 @@ const TERM_MIN = 120;
 // right panel over the centre (see the media query in theme.css).
 const SIDEBAR_COLLAPSE = 1440;
 
+// Below this width (the titlebar's own breakpoint) pane actions collapse into a
+// menu and the right panel starts closed; keep in step with theme.css.
+const NARROW_QUERY = "(max-width: 760px)";
+const narrowWindow = () => window.matchMedia(NARROW_QUERY).matches;
+
 function readSize(key, fallback) {
   try {
     const value = Number(localStorage.getItem(key));
@@ -49,11 +54,15 @@ export function mountAgents(root) {
           <button class="doc-sidebar-toggle" type="button" aria-label="Collapse sidebar">\u25e7</button>
           <button class="layout-btn layout-new" data-act="launch" type="button" title="Start an agent on any computer">+ New agent</button>
           <span class="spacer"></span>
-          <button class="layout-btn" data-act="mirror" type="button" title="Arrange tiles like this session's Herdr tab">Mirror tab</button>
-          <button class="layout-btn" data-act="terminal" type="button" title="A shell in this project, in a new tile">Shell</button>
-          <button class="layout-btn" data-act="split-right" type="button" title="Split side by side (\u2318\\)">Split \u2192</button>
-          <button class="layout-btn" data-act="split-down" type="button" title="Split top and bottom (\u2318\u21e7\\)">Split \u2193</button>
-          <button class="layout-btn" data-act="zoom" type="button" title="Zoom the focused tile">Zoom</button>
+          <button class="layout-btn layout-panel" data-act="panel" type="button" title="Show or hide the Changes panel" aria-label="Show or hide the Changes panel" aria-expanded="false">Changes</button>
+          <button class="layout-btn layout-more" data-act="more" type="button" title="More pane actions" aria-label="More pane actions" aria-haspopup="menu" aria-expanded="false">\u22ef</button>
+          <div class="layout-actions" role="group" aria-label="Pane actions">
+            <button class="layout-btn" data-act="mirror" type="button" title="Arrange tiles like this session's Herdr tab">Mirror tab</button>
+            <button class="layout-btn" data-act="terminal" type="button" title="A shell in this project, in a new tile">Shell</button>
+            <button class="layout-btn" data-act="split-right" type="button" title="Split side by side (\u2318\\)">Split \u2192</button>
+            <button class="layout-btn" data-act="split-down" type="button" title="Split top and bottom (\u2318\u21e7\\)">Split \u2193</button>
+            <button class="layout-btn" data-act="zoom" type="button" title="Zoom the focused tile">Zoom</button>
+          </div>
         </div>
         <div class="tiles-root"></div>
         <section id="terminal-panel" class="terminal-panel" hidden>
@@ -77,6 +86,9 @@ export function mountAgents(root) {
   const termTitle = root.querySelector(".terminal-title");
   const termBody = root.querySelector(".terminal-body");
   const sidebarToggle = root.querySelector(".doc-sidebar-toggle");
+  const layoutBar = root.querySelector(".layout-bar");
+  const moreBtn = layoutBar.querySelector(".layout-more");
+  const panelBtn = layoutBar.querySelector(".layout-panel");
 
   let session = null; // { computer, child } of the active tab
 
@@ -230,6 +242,7 @@ export function mountAgents(root) {
     // terminal is no longer a right-panel segment: it toggles the bottom panel.
     if (key === "terminal") return toggleTerminal(terminalTarget);
     sideEl.hidden = false;
+    syncPanelBtn();
     bench.pane = key;
     for (const [k] of PANES) segmentButtons[k].classList.toggle("selected", k === key);
     for (const [k, div] of Object.entries(bench.bodies)) div.hidden = k !== key;
@@ -245,6 +258,7 @@ export function mountAgents(root) {
   function closePanel() {
     sideEl.hidden = true;
     document.body.classList.remove("bench-max");
+    syncPanelBtn();
   }
 
   // ------------------------------------------------------------ bottom terminal
@@ -333,7 +347,8 @@ export function mountAgents(root) {
       if (bench.sessionKey !== key) {
         bench.sessionKey = key;
         resetBench();
-        showPane(bench.pane ?? "changes");
+        // Narrow windows start with the panel closed; it opens from the Changes button.
+        if (!narrowWindow() || !sideEl.hidden) showPane(bench.pane ?? "changes");
       }
       syncTerminal();
       void quotaWarning.check();
@@ -348,8 +363,21 @@ export function mountAgents(root) {
     },
   });
 
-  root.querySelector(".layout-bar").addEventListener("click", (ev) => {
+  /** Narrow windows: the pane actions live in the "\u22ef" menu and the panel opens on demand. */
+  function setMoreOpen(open) {
+    layoutBar.classList.toggle("more-open", open);
+    moreBtn.setAttribute("aria-expanded", String(open));
+  }
+  function syncPanelBtn() { panelBtn.setAttribute("aria-expanded", String(!sideEl.hidden)); }
+  document.addEventListener("pointerdown", (ev) => {
+    if (layoutBar.classList.contains("more-open") && !(ev.target instanceof Element && ev.target.closest(".layout-more, .layout-actions"))) setMoreOpen(false);
+  });
+  layoutBar.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && layoutBar.classList.contains("more-open")) { setMoreOpen(false); moreBtn.focus(); } });
+  layoutBar.addEventListener("click", (ev) => {
     const act = ev.target instanceof Element ? ev.target.closest(".layout-btn")?.dataset.act : null;
+    if (act === "more") { setMoreOpen(!layoutBar.classList.contains("more-open")); return; }
+    if (act === "panel") { if (sideEl.hidden) showPane(bench.pane ?? "changes"); else closePanel(); return; }
+    if (act && act !== "launch") setMoreOpen(false);
     if (act === "split-right") tabs.split("right");
     else if (act === "split-down") tabs.split("down");
     else if (act === "zoom") tabs.zoom();

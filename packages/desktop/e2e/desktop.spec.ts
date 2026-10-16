@@ -1336,3 +1336,68 @@ test("Memory hides the out-of-date filter when no finding has freshness data", a
   await expect(page.locator(".mem-row")).toHaveCount(1);
   await expect(page.locator('.mem-chip[data-filter="stale"]')).toHaveCount(0);
 });
+
+for (const width of [360, 390, 420]) {
+  test(`a chat fits a ${width} px window: title, send, pane actions and an on-demand Changes panel`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.locator('.section-pill[data-section="agents"]').click();
+    await page.locator(".sb-row", { hasText: "Fix login" }).click();
+    const title = page.locator(".chat-title");
+    await expect(title).toHaveText("Fix login");
+    await expect(page.locator(".ct-column")).toContainText("Fix the login flow");
+
+    const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
+    const inside = (b: { x: number; width: number }) => b.x >= 0 && b.x + b.width <= width;
+    expect((await box(".chat-title")).width).toBeGreaterThan(80);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // The titlebar's right end (computers count, Settings) stays on screen.
+    expect(inside(await box(".titlebar .section-icons"))).toBe(true);
+
+    // The composer's send and talk buttons are on screen and clickable.
+    for (const selector of [".pc-primary", ".pc-talk"]) {
+      expect(inside(await box(selector))).toBe(true);
+      await page.locator(selector).first().click({ trial: true });
+    }
+
+    // Pane actions sit behind one "⋯" trigger that is on screen.
+    const more = page.locator(".layout-more");
+    expect(inside(await box(".layout-more"))).toBe(true);
+    await expect(page.locator('.layout-actions [data-act="zoom"]')).toBeHidden();
+    await more.click();
+    for (const act of ["mirror", "terminal", "split-right", "split-down", "zoom"]) {
+      const button = page.locator(`.layout-actions [data-act="${act}"]`);
+      await expect(button).toBeVisible();
+      expect(inside((await button.boundingBox())!)).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(page.locator('.layout-actions [data-act="zoom"]')).toBeHidden();
+
+    // The Changes panel starts closed, so it leaves the transcript uncovered, and opens on demand.
+    await expect(page.locator("#side")).toBeHidden();
+    const transcript = await box(".ct-column");
+    expect(transcript.x + transcript.width).toBeLessThanOrEqual(width);
+    const toggle = page.locator(".layout-panel");
+    expect(inside(await box(".layout-panel"))).toBe(true);
+    await toggle.click();
+    await expect(page.locator("#side")).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".chg-name", { hasText: "app.ts" })).toBeVisible();
+    expect(inside(await box("#side"))).toBe(true);
+    await page.getByRole("button", { name: "Close the panel" }).click();
+    await expect(page.locator("#side")).toBeHidden();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+}
+
+test("a wide window keeps the pane actions in the bar and the Changes panel open", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await expect(page.locator(".chat-title")).toHaveText("Fix login");
+  await expect(page.locator("#side")).toBeVisible();
+  await expect(page.locator(".layout-more")).toBeHidden();
+  await expect(page.locator(".layout-panel")).toBeHidden();
+  for (const act of ["mirror", "terminal", "split-right", "split-down", "zoom"]) await expect(page.locator(`.layout-actions [data-act="${act}"]`)).toBeVisible();
+});
