@@ -61,28 +61,30 @@ async function openSidebar(page: Page) {
   await expect(row).toBeVisible();
   return row;
 }
+// The snapshot has been delivered to the page once its fetch shows as a finished resource.
+const snapshotLanded = (page: Page) =>
+  page.evaluate(() => performance.getEntriesByType("resource").filter((e) => e.name.includes("/v1/transcripts/history")).length);
 const clickToTranscript = (page: Page) =>
   page.evaluate(() => performance.getEntriesByName("phren:click-to-transcript").pop()?.duration ?? null);
 
 test("a fly-by hover reads nothing and a resting hover reads the transcript once", async ({ page }) => {
   const row = await openSidebar(page);
   await row.hover();
-  await page.waitForTimeout(60);
-  await page.mouse.move(0, 0);
-  await page.waitForTimeout(400);
+  await page.mouse.move(0, 0); // gone well inside the 150 ms dwell
+  await page.waitForTimeout(400); // longer than dwell + request: a stray read would have landed
   expect(historyCalls()).toBe(0);
   expect(streamCalls()).toBe(0);
 
   await row.hover();
-  await page.waitForTimeout(300);
-  expect(historyCalls()).toBe(1);
+  await expect.poll(historyCalls).toBe(1);
+  await page.waitForTimeout(300); // and it stays one
   expect(streamCalls()).toBe(0); // the snapshot only: no live socket for a prefetch
 });
 
 test("a chat opened after resting on its row shows the transcript before the stream arrives", async ({ page }) => {
   const row = await openSidebar(page);
   await row.hover();
-  await page.waitForTimeout(400);
+  await expect.poll(() => snapshotLanded(page)).toBe(1);
   await row.click();
   // The fake Hook holds the live backlog for 1.5 s: seeing the text sooner is the snapshot.
   await expect(page.locator(".ct-column")).toContainText("Fix the login flow", { timeout: 500 });

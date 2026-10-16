@@ -433,7 +433,7 @@ function makeRow(sb, desc) {
   const leave = () => { const row = node.__row; if (row) cancelPrefetch(row.computer, row.child); };
   node.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") rest(); });
   node.addEventListener("pointerleave", leave);
-  node.addEventListener("focus", rest);
+  node.addEventListener("focus", () => { if (!matchMedia("(pointer: coarse)").matches) rest(); });
   node.addEventListener("blur", leave);
   node.addEventListener("keydown", (event) => {
     if (event.target !== node) return;
