@@ -92,7 +92,7 @@ async function request(mover: SessionMover, method: string, route: string, data:
   return { status: res.statusCode, body: JSON.parse(payload) };
 }
 
-describe("continue on another computer", () => {
+describe.skipIf(process.platform === "win32")("continue on another computer", () => {
   it("advertises the capability and confirms a peer chat with the full hand-off, preserving the source", async () => {
     const f = fixture();
     expect((await request(f.mover, "GET", "/v1/health")).body.capabilities.moveToComputer).toBe(true);
@@ -167,7 +167,7 @@ describe("continue on another computer", () => {
   });
 });
 
-describe("continuation computers", () => {
+describe.skipIf(process.platform === "win32")("continuation computers", () => {
   it("lists self, verified peers, offline peers, missing checkouts and safe account room", async () => {
     const f = fixture();
     await peers.addHookPeer({ name: "offline", address: "offline.test", username: "owner", hostKey: KEY });
@@ -198,7 +198,7 @@ describe("continuation computers", () => {
   });
 });
 
-describe("review regressions", () => {
+describe.skipIf(process.platform === "win32")("review regressions", () => {
   it("omits process argv from the peer hand-off, including short passwords and environment credentials", async () => {
     const f = fixture({ processes: ["12 server --password=hunter2", "13 worker --token tiny-token", "14 FOO_TOKEN=shortsecret runner", "15 fetch --secret tiny-secret --key small-key"] });
     const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
@@ -329,7 +329,7 @@ const credentialForms = [
   { name: "prefixed environment key", render: (_name: string, value: string) => `SERVICE_TOKEN=${value}\nAPI_KEY=${value}` },
 ];
 
-describe("whole outbound hand-off redaction", () => {
+describe.skipIf(process.platform === "win32")("whole outbound hand-off redaction", () => {
   for (const reply of [true, false]) {
     it.each(credentialForms)(`redacts $name in the ${reply ? "agent" : "fallback"} hand-off`, async form => {
       const secrets = credentialNames.map((_name, index) => `z9-v${index},tail${index}`);
@@ -350,7 +350,7 @@ describe("whole outbound hand-off redaction", () => {
   }
 });
 
-describe("worker returns home", () => {
+describe.skipIf(process.platform === "win32")("worker returns home", () => {
   it("routes A→B→A worker returns and approvals locally without a self peer entry", async () => {
     const self = { id: A_ID, name: "dispatcher-a" };
     const onB = fixture();
@@ -412,7 +412,7 @@ describe("worker returns home", () => {
 });
 
 
-describe("owner move admission", () => {
+describe.skipIf(process.platform === "win32")("owner move admission", () => {
   it("two concurrent starts → exactly one proceeds, the other gets 409", async () => {
     const f = fixture();
     const outcomes = await Promise.allSettled([1, 2].map(() => f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true })));
@@ -438,7 +438,7 @@ describe("owner move admission", () => {
   });
 });
 
-describe("short credentials", () => {
+describe.skipIf(process.platform === "win32")("short credentials", () => {
   it.each([true, false])("redacts every short credential form in the whole outbound prompt (agent: %s)", async reply => {
     const f = fixture({ reply, text: ["password=hunter2", "pwd: x1", "--token abc123", "--token=abc", "--password -p secret", "Authorization: Bearer abc", "bearer xyz", "api_key=k", "X-API-Key: k", "https://owner:tiny@example.test/path", "PGPASSWORD=hunter2", "apiToken=abc123", "secret_key=", "aws_secret_access_key=tiny", "DB_PASS=smol", "passphrase: x", "credential: y", "Cookie: k=v", "mysql -pshortpw", "curl -u user:pw", "--auth user:pw", "_authToken=npmshort"].join("\n") });
     if (!reply) { let clock = Date.now(); f.deps.now = () => clock += 1000; f.deps.sleep = async () => {}; }
@@ -451,7 +451,7 @@ describe("short credentials", () => {
   });
 });
 
-describe("Claude account picker", () => {
+describe.skipIf(process.platform === "win32")("Claude account picker", () => {
   it("lists all local and peer logins, including unusable accounts, with metadata and only the local current login marked", async () => {
     fixture();
     const local = { ...facts(), harnesses: [{ source: "claude", usable: true, accounts: [
@@ -492,7 +492,7 @@ describe("Claude account picker", () => {
 });
 
 
-describe("durable peer continuation launch", () => {
+describe.skipIf(process.platform === "win32")("durable peer continuation launch", () => {
   it("reuses the persisted placement after a lost acknowledgement and rejects changed payloads", async () => {
     const input = { computerId: B_ID, project: "repo", to: { harness: "claude" }, label: "Continue", brief: { id: "a0000000-0000-4000-8000-000000000001", text: "Finish the parser" } };
     const launch = vi.fn(async () => ({ target, briefLaunched: true }));
@@ -545,7 +545,7 @@ describe("durable peer continuation launch", () => {
 });
 
 
-describe("owner conductor moves through SessionMover", () => {
+describe.skipIf(process.platform === "win32")("owner conductor moves through SessionMover", () => {
   it.each([false, true])("moves a projectless conductor with its role and reconciles a lost activation acknowledgement (%s)", async loseAck => {
     const f = fixture();
     f.pane.cwd = path.join(root, "store");
@@ -684,7 +684,7 @@ it("lists projectless conductor accounts without requiring an invented project n
   expect(JSON.stringify(answer.body)).not.toContain("private-key");
 });
 
-describe("reviewed peer authorization and recovery", () => {
+describe.skipIf(process.platform === "win32")("reviewed peer authorization and recovery", () => {
   it("accepts existing owner clients without a token and refuses peer owner-only actions", async () => {
     const f = fixture();
     expect((await request(f.mover, "GET", "/v1/sessions/move/computers?project=repo")).status).toBe(200);

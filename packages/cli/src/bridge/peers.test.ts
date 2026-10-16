@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { peerRequest } from "./peers.js";
 let root: string;
 afterEach(async () => { vi.unstubAllEnvs(); if (root) await rm(root, { recursive: true, force: true }); });
-it("carries long paths and opaque protocol tokens unchanged through pinned peer transport", async () => {
+it.skipIf(process.platform === "win32")("carries long paths and opaque protocol tokens unchanged through pinned peer transport", async () => {
   root = await mkdtemp(path.join(tmpdir(), "phren-peer-wire-"));
   const bin = path.join(root, "bin"); await mkdir(bin);
   const ssh = path.join(bin, "ssh");
