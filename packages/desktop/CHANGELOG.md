@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- **Today on each project page**: the project's chats, pull requests and memory from today in one place.
 - Memory can show only findings that may be out of date, so you can review what changed under them.
 - Dragging files over a chat in the sidebar now says which chat they'll attach to, and tab drags no longer look like file drops.
 - **Saved today on Home**: what you and your agents saved to memory or tasks today, across projects and computers.

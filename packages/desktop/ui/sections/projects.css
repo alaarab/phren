@@ -304,3 +304,10 @@ button.pj-row:hover { background: var(--card); }
 .pj-checks.failing { background: rgba(239,152,152,.16); color: var(--danger); }
 .pj-checks.pending { background: rgba(224,188,127,.16); color: var(--waiting); }
 .pj-empty.danger { color: var(--danger); }
+
+/* Today: up to three compact groups, in the card style of the other project blocks. */
+.pj-today { gap: 10px; }
+.pj-today-group { display: grid; gap: 4px; }
+.pj-today-group .pj-subhead { display: flex; align-items: center; gap: 8px; margin: 0; }
+.pj-today-more { justify-self: start; padding: 4px 2px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; }
+.pj-today-more:hover { color: var(--accent-hover); }
