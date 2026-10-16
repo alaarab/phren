@@ -542,7 +542,7 @@ test("Home's Saved today card lists today's findings and tasks and each row open
   // Tasks carry a time and lead, newest first; findings (date only) follow.
   const rows = card.locator(".home-saved-row");
   await expect(rows.nth(0)).toContainText("tidy the release checklist");
-  await expect(rows.nth(0)).toContainText(/task.*phren.*12 min ago/);
+  await expect(rows.nth(0)).toContainText(/task.*phren.*12m ago/);
   await expect(rows.nth(1)).toContainText("compress the hero image");
   await expect(rows.nth(2)).toContainText(/finding.*today/);
   await expect(card.locator(".home-more")).toBeHidden();

@@ -251,17 +251,6 @@ export function durationText(seconds) {
   return `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60) ? ` ${Math.floor((s % 3600) / 60)}m` : ""}`;
 }
 
-/** "just now", "5m ago", "3h ago", "2d ago" from an ISO time; "" without one. */
-export function relativeTime(iso, now = Date.now()) {
-  const at = Date.parse(iso || "");
-  if (!Number.isFinite(at)) return "";
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 45) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
-
 /** One wording for a request's checks everywhere (Home, ⌘K, project page,
  * Changes): "Checks failing", "Checks running", "Checks passing"; `what` is the
  * host's word ("Pipeline" on GitLab and gitboy). "" when there are no checks. */

@@ -20,6 +20,10 @@ GitHub release notes, and the app shows them when that version is available.
 - Chats open instantly when you rest the pointer on them in the sidebar first: Phren loads the conversation ahead of the click.
 - The command palette remembers what you use: recent picks show first, and frequent ones rank higher.
 
+### Changed
+
+- Times like "5m ago" read the same everywhere in the app.
+
 ### Fixed
 
 - Chats fit narrow windows: the title, send button and pane actions stay visible, and the Changes panel opens on demand.

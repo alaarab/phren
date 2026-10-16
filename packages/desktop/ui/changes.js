@@ -7,14 +7,15 @@ import { hookGet, hookPost, readRepoFile } from "./api.js";
 import { projectOf } from "./shell/store.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 import { hostTokenError, tokenDestinationText } from "./project-host-token.js";
-import { branchProblem, capitalize, checksSummary, checksWord, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
+import { branchProblem, capitalize, checksSummary, checksWord, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
 import { openLaunchSheet } from "./shell/launch.js";
 import { armMerge, disarmMerge, isArmed, onArmedChange } from "./shell/merge-when-green.js";
 import { createStaging } from "./changes/stage.js";
+import { age } from "./time.js";
 import { CHANGES_CSS } from "./changes/styles.js";
-import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, relTime, span, tileClass } from "./changes/util.js";
+import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, span, tileClass } from "./changes/util.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
 // "Session" is what this agent changed, from the Hook's per-call capture.
@@ -484,7 +485,7 @@ export function openChanges(el, ctx) {
       cite.title = file ? `Open ${file}` : where;
       meta.appendChild(cite);
     }
-    const when = relativeTime(item.created);
+    const when = age(item.created);
     if (when) meta.appendChild(span("chg-pr-num", when));
     row.appendChild(meta);
     return row;
@@ -780,7 +781,7 @@ export function openChanges(el, ctx) {
     row.appendChild(span("chg-sha", c.short || (c.sha || "").slice(0, 7)));
     const mid = div("chg-log-mid");
     mid.appendChild(div("chg-log-subject", c.subject || ""));
-    mid.appendChild(div("chg-log-meta", `${c.author || ""} · ${relTime(c.date)}`));
+    mid.appendChild(div("chg-log-meta", `${c.author || ""} · ${age(c.date)}`));
     const refs = (c.refs || []).filter((r) => r && r.name);
     if (refs.length) {
       const wrap = div("chg-refs");
@@ -806,7 +807,7 @@ export function openChanges(el, ctx) {
     if (d.body) head.appendChild(div("chg-commit-body", d.body));
     const meta = div("chg-commit-meta");
     meta.appendChild(button(d.short || d.sha.slice(0, 7), "chg-copy", () => copy(d.sha, d.short)));
-    meta.appendChild(span("", `${d.author || ""} · ${relTime(d.date)}`));
+    meta.appendChild(span("", `${d.author || ""} · ${age(d.date)}`));
     if (d.committer && d.committer !== d.author) meta.appendChild(span("", `committed by ${d.committer}`));
     if ((d.parents || []).length > 1) meta.appendChild(span("chg-chip", `merge of ${d.parents.length}`));
     const stat = div("chg-stat");
@@ -1097,7 +1098,7 @@ export function openChanges(el, ctx) {
     const top = div("chg-req-top");
     top.appendChild(span("chg-req-state " + reqState(p), reqStateLabel(p)));
     top.appendChild(span("chg-req-num", `${t.ref}${p.number}`));
-    if (p.updated) top.appendChild(span("chg-req-age", relativeTime(p.updated)));
+    if (p.updated) top.appendChild(span("chg-req-age", age(p.updated)));
     card.appendChild(top);
     const title = div("chg-req-title", p.title || "");
     title.title = p.url || "";
@@ -1338,7 +1339,7 @@ export function openChanges(el, ctx) {
     if (p.draft) meta.appendChild(span("chg-req-state draft", "Draft"));
     if (p.head) meta.appendChild(span("chg-chip", p.head));
     if (p.author) meta.appendChild(span("chg-req-by", `@${p.author}`));
-    if (p.updated) meta.appendChild(span("chg-req-by", relativeTime(p.updated)));
+    if (p.updated) meta.appendChild(span("chg-req-by", age(p.updated)));
     mid.appendChild(meta);
     row.appendChild(mid);
     row.title = p.url || "";

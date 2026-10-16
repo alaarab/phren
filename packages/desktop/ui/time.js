@@ -15,15 +15,20 @@ export function dayUTC(iso) {
   return Number.isFinite(d.getTime()) ? `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` : "";
 }
 
-/** "now", "5m ago", "3h ago", "2d ago" from an ISO time; `suffix` "" gives the compact "3h". */
-export function age(iso, suffix = " ago") {
-  if (!iso) return "";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "";
-  const seconds = Math.max(0, (Date.now() - t) / 1000);
-  if (!Number.isFinite(seconds) || seconds < 10) return "now";
+/** "now", "5m ago", "3h ago", "2d ago" from an ISO time or epoch ms; `suffix` "" gives the compact "3h". */
+export function age(value, suffix = " ago", now = Date.now()) {
+  if (value === null || value === undefined || value === "") return "";
+  const t = typeof value === "number" ? value : Date.parse(value);
+  if (!Number.isFinite(t)) return "";
+  const seconds = Math.max(0, (now - t) / 1000);
+  if (seconds < 10) return "now";
   if (seconds < 60) return Math.floor(seconds) + "s" + suffix;
   if (seconds < 3600) return Math.floor(seconds / 60) + "m" + suffix;
   if (seconds < 86400) return Math.floor(seconds / 3600) + "h" + suffix;
   return Math.floor(seconds / 86400) + "d" + suffix;
+}
+
+/** `age`, or "today" when a finding only has a date (`at` null). */
+export function savedAgo(at, now = Date.now()) {
+  return at === null || at === undefined ? "today" : age(at, " ago", now);
 }

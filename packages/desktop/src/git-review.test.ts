@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   branchProblem, checksSummary, checksWord, diffModes, diffSides, hunkAt, hunkPatch, lineChangeTotals, localForRemote,
-  capitalize, durationText, fixItPrompt, groupRuns, hostTerms, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, splitHunks, stepChange,
+  capitalize, durationText, fixItPrompt, groupRuns, hostTerms, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, splitHunks, stepChange,
   syncAction, tokenPage, trackingText,
 // @ts-expect-error git-review.js is plain JavaScript without type declarations
 } from "../ui/git-review.js";
+// @ts-expect-error time.js is plain JavaScript without type declarations
+import { age } from "../ui/time.js";
 
 const HEADER = "diff --git a/a.ts b/a.ts\nindex 1..2 100644\n--- a/a.ts\n+++ b/a.ts";
 const PATCH = `${HEADER}\n@@ -1,2 +1,3 @@\n-old\n+new\n+more\n keep\n@@ -10 +11,2 @@ function f() {\n-x\n+y\n+z\n`;
@@ -174,8 +176,8 @@ describe("pull and merge request presentation", () => {
     expect(tokenPage({ kind: "github", domain: "github.com" })).toBeNull();
     expect([durationText(45), durationText(90), durationText(3600), durationText(7500), durationText(undefined)]).toEqual(["45s", "1m 30s", "1h", "2h 5m", ""]);
     const now = Date.parse("2026-10-10T12:00:00Z");
-    expect([relativeTime("2026-10-10T11:59:30Z", now), relativeTime("2026-10-10T11:55:00Z", now), relativeTime("2026-10-08T12:00:00Z", now), relativeTime("", now)])
-      .toEqual(["just now", "5m ago", "2d ago", ""]);
+    expect([age("2026-10-10T11:59:30Z", " ago", now), age("2026-10-10T11:55:00Z", " ago", now), age("2026-10-08T12:00:00Z", " ago", now), age("", " ago", now)])
+      .toEqual(["30s ago", "5m ago", "2d ago", ""]);
   });
 });
 

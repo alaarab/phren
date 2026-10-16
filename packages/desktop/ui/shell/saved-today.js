@@ -49,12 +49,3 @@ export function savedToday(entries, now = Date.now()) {
   timed.sort((a, b) => b.at - a.at || a.index - b.index);
   return [...timed, ...dated];
 }
-
-/** "just now", "12 min ago", "3 h ago"; "today" when only the date is known. */
-export function savedAgo(at, now = Date.now()) {
-  if (at === null || at === undefined) return "today";
-  const minutes = Math.max(0, Math.round((now - at) / 60_000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  return `${Math.floor(minutes / 60)} h ago`;
-}

@@ -2,7 +2,8 @@ import { el } from "../../dom.js";
 import { hookGet } from "../../api.js";
 import { loadTaskSources, loadTaskDoc, TASK_FRESH_MS } from "../../shell/task-cache.js";
 import { showSection } from "../../shell/sections.js";
-import { savedToday, savedAgo, dayBounds, SAVED_TODAY_ROWS } from "../../shell/saved-today.js";
+import { savedToday, dayBounds, SAVED_TODAY_ROWS } from "../../shell/saved-today.js";
+import { savedAgo } from "../../time.js";
 
 // Findings are read once per computer and project and kept five minutes. Each read parses FINDINGS.md and
 // checks citation freshness on the Hook, so they are fetched only when Home is shown (or a computer first
