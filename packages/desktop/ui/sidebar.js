@@ -8,6 +8,7 @@ import { backgroundLabel, stallLabel, stalledMinutes } from "./shell/stalls.js";
 import { openMoveSheet } from "./shell/move.js";
 import { showSection } from "./shell/sections.js";
 import { prefetchTranscript, cancelPrefetch } from "./shell/transcript-prefetch.js";
+import { carriesFiles, createRowDrop, leftRow } from "./shell/row-drop.js";
 import { hookPost, targetQuery } from "./api.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 
@@ -176,7 +177,7 @@ function stateOf(el) {
   if (!el.__sb) {
     el.__sb = {
       el, mode: readMode(), rows: readRows(), pinned: [], seen: {},
-      merged: null, handlers: {}, rowsListener: null,
+      merged: null, handlers: {}, rowsListener: null, rowDrop: createRowDrop(),
       nodes: new Map(), prCache: new Map(), prInflight: new Set(),
       approvals: new Map(), approvalSockets: new Map(),
     };
@@ -320,6 +321,7 @@ function reconcile(sb, container, desired) {
     node.remove();
     sb.nodes.delete(id);
   }
+  sb.rowDrop.sweep();
 }
 
 function makeNode(sb, desc) {
@@ -441,15 +443,18 @@ function makeRow(sb, desc) {
   });
   node.addEventListener("contextmenu", (event) => { event.preventDefault(); showMenu(node); });
   // Files dropped on a row open that session and land in its composer.
-  const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes("Files");
   node.addEventListener("dragover", (event) => {
-    if (!hasFiles(event)) return;
+    const row = node.__row;
+    if (!row || !carriesFiles(event.dataTransfer)) return;
+    // An offline computer can't take a chat's files, same as a non-chat row.
+    const co = (sb.merged?.computers || []).find((c) => c.computer === row.computer);
+    if (co && co.state !== "online") return;
     event.preventDefault();
-    node.classList.add("sb-drop");
+    sb.rowDrop.over(node, row.child?.title);
   });
-  node.addEventListener("dragleave", (event) => { if (!node.contains(event.relatedTarget)) node.classList.remove("sb-drop"); });
+  node.addEventListener("dragleave", (event) => { if (leftRow(node, event.relatedTarget)) sb.rowDrop.clear(); });
   node.addEventListener("drop", (event) => {
-    node.classList.remove("sb-drop");
+    sb.rowDrop.clear();
     const row = node.__row;
     const files = Array.from(event.dataTransfer?.files || []);
     if (!row || !files.length) return;
