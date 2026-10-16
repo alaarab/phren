@@ -17,7 +17,7 @@ import { storeBlobText, storeTree } from "../store-cache.js";
 import { skeleton } from "../shell/skeleton.js";
 import { todayGroups, sessionsForProject, TODAY_ROWS } from "../shell/project-today.js";
 import { loadFindings, openSaved } from "./home/saved-today.js";
-import { savedAgo } from "../shell/saved-today.js";
+import { savedAgo } from "../time.js";
 
 // The five per-project knobs the CLI reads from <project>/phren.project.yaml,
 // under the file's top-level `config:` mapping (packages/cli/src/project-config.ts).

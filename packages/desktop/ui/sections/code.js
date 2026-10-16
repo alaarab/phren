@@ -14,6 +14,7 @@ import { store, projectOf } from "../shell/store.js";
 import { showSection, sectionHandle } from "../shell/sections.js";
 import { hookGet, hookPost } from "../api.js";
 import { openEditorDoc } from "../editor.js";
+import { age } from "../time.js";
 
 const CSS_ID = "code-css";
 const SEGMENTS = [
@@ -354,21 +355,12 @@ export function mountCode(root) {
     const tys = (state.status.kinds ?? []).filter((k) => ["class", "struct", "enum", "interface", "type"].includes(k.kind)).reduce((n, k) => n + k.symbols, 0);
     if (fns?.symbols) parts.push(`${fns.symbols.toLocaleString()} functions`);
     if (tys) parts.push(`${tys.toLocaleString()} types`);
-    if (state.status.lastIndexedAt) parts.push(`updated ${relativeTime(state.status.lastIndexedAt)}`);
+    if (state.status.lastIndexedAt) parts.push(`updated ${age(state.status.lastIndexedAt)}`);
     if (state.reindexing) parts.push("rebuilding…");
     statusEl.textContent = parts.join(" · ");
   }
 
   function hasIndex() { return Boolean(state.status?.available) && !state.indexOff; }
-
-  function relativeTime(ms) {
-    const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.round(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.round(hours / 24)}d ago`;
-  }
 
   reindexBtn.addEventListener("click", () => void reindex());
 

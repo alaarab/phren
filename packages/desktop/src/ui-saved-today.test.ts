@@ -1,6 +1,8 @@
 import { afterEach, expect, it } from "vitest";
 // @ts-expect-error plain ESM
-import { savedToday, savedAgo, dayBounds, utcDatesOfDay } from "../ui/shell/saved-today.js";
+import { savedToday, dayBounds, utcDatesOfDay } from "../ui/shell/saved-today.js";
+// @ts-expect-error plain ESM
+import { savedAgo } from "../ui/time.js";
 
 const ORIGINAL_TZ = process.env.TZ;
 afterEach(() => { if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ; });
@@ -75,9 +77,9 @@ it("collapses the same item seen from several computers to the preferred one", (
 
 it("labels the age", () => {
   const now = Date.parse("2026-10-16T12:00:00Z");
-  expect(savedAgo(now - 20_000, now)).toBe("just now");
-  expect(savedAgo(now - 12 * 60_000, now)).toBe("12 min ago");
-  expect(savedAgo(now - 3 * 3_600_000 - 5 * 60_000, now)).toBe("3 h ago");
+  expect(savedAgo(now - 20_000, now)).toBe("20s ago");
+  expect(savedAgo(now - 12 * 60_000, now)).toBe("12m ago");
+  expect(savedAgo(now - 3 * 3_600_000 - 5 * 60_000, now)).toBe("3h ago");
   expect(savedAgo(null, now)).toBe("today");
-  expect(savedAgo(now + 60_000, now)).toBe("just now");
+  expect(savedAgo(now + 60_000, now)).toBe("now");
 });
