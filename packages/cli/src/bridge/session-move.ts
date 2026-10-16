@@ -18,7 +18,7 @@ import { redactPeerHandoff } from "./peer-handoff.js";
 // `<bridge>/moves/<id>.json`; a dispatching Hook asking about the old pane
 // (dispatch-returns.ts `workerStates`) follows the record to the new agent,
 // so the dispatch and its receipt carry on as one worker.
-import { redactSecretsForLog, scanForSecrets } from "../content/secrets.js";
+import { redactSecretsForLog } from "../content/secrets.js";
 import { redactApproval } from "./approval-summary.js";
 import { stableComputerName } from "./computer-names.js";
 import type { DispatchHost } from "./dispatch-hosts.js";
@@ -85,6 +85,7 @@ const moveRecordSchema = z.object({
   notice: z.string().max(500).optional(),
   movedAt: timestamp.optional(),
   error: z.string().max(500).optional(),
+  recovery: z.object({ attempts: z.number().int().positive(), nextAt: timestamp }).strict().optional(),
 }).strict();
 export type MoveRecord = z.infer<typeof moveRecordSchema>;
 
@@ -679,11 +680,10 @@ export class SessionMover {
   }
   private async continueOnPeer(record: MoveRecord, peer: DispatchHost, project: string, document: string): Promise<Target> {
     // Full inline text only: the peer cannot read this Hook's brief path.
-    // Preserve commit ids and the complete hand-off, refusing credentials
-    // rather than applying the lossy approval/log summarizer to it.
+    // Preserve commit ids and the complete hand-off, redacting credentials
+    // in place instead of applying the lossy approval/log summarizer to it.
     const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
     const remotePrompt = redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
-    if (scanForSecrets(remotePrompt)) throw new BridgeError(409, "The hand-off contains a credential; nothing was sent to the peer.");
     if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
     const checked = await (await import("./move-computers.js")).checkMovePeer(peer, project, record.to, record.modeForced === "conductor");
     if (record.computerId && checked.computerId !== record.computerId) throw new BridgeError(409, "The destination Hook identity changed during the move; nothing was launched.");
@@ -716,6 +716,7 @@ export class SessionMover {
     if (transaction?.side === "origin" && ["preparing", "prepared"].includes(transaction.phase) && transaction.resume && !await readMove(transaction.id)) await saveMove(moveRecordSchema.parse(transaction.resume));
     for (const record of await listMoves(this.now)) {
       if (["moved", "failed"].includes(record.state) || !record.to.computer || !record.project) continue;
+      if (record.recovery && Date.parse(record.recovery.nextAt) > this.now) continue;
       const key = `${record.from.target.server}\0${record.from.target.pane}`;
       if (this.running.has(key) || this.admissions.has(key)) continue;
       const work = (async () => {
@@ -740,7 +741,9 @@ export class SessionMover {
           if (record.modeForced === "conductor") await this.deps.succession!.ensurePrepared(record.id);
           const document = await readFile(handoffPath(record.id), "utf8").catch(() => undefined);
           if (!document) {
-            await this.run(record, DEFAULT_HANDOFF_MS, record.modeForced === "conductor" ? transaction?.previous : undefined, peer, record.project); return;
+            await this.run(record, DEFAULT_HANDOFF_MS, record.modeForced === "conductor" ? transaction?.previous : undefined, peer, record.project);
+            if (record.state === "uncertain") throw new BridgeError(503, record.error ?? "The launch is still uncertain.");
+            return;
           }
           const target = await this.continueOnPeer(record, peer, record.project!, document);
           if (record.modeForced === "conductor") {
@@ -754,7 +757,23 @@ export class SessionMover {
           await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), target, placement: "peer", error: undefined,
             handedOffTo: { computer: peer.name, target }, handedOffFrom: { target: record.from.target, title: record.from.label ?? record.from.target.source } });
         } catch (error) {
-          await this.update(record, { state: "uncertain", error: String(error instanceof Error ? error.message : error).slice(0, 500) }).catch(() => undefined);
+          const attempts = (record.recovery?.attempts ?? 0) + 1;
+          const deadline = Date.parse(record.createdAt) + 10 * 60_000;
+          const refused = error instanceof BridgeError && error.status >= 400 && error.status < 500;
+          let message = String(error instanceof Error ? error.message : error);
+          if (refused || this.now >= deadline) {
+            if (record.modeForced === "conductor") {
+              // abort() reads the durable commit point and cannot roll back a
+              // committed generation, including a lost commit acknowledgement.
+              await this.deps.succession!.abort(record.id).catch(() => undefined);
+              const state = await this.deps.succession!.status(record.id).catch(() => undefined);
+              message += state?.phase === "committed" ? " Ownership is committed; the old chat remains fenced. Reconcile conductor status on the original Hook." : state?.phase === "aborted" ? " The uncommitted move was aborted; the original conductor keeps the role." : " Ownership is uncertain; verify the original Hook's generation before changing roles.";
+            }
+            await this.update(record, { state: "failed", error: message.slice(0, 500) }).catch(() => undefined);
+          } else {
+            const delay = Math.min(600_000, 5_000 * 2 ** Math.min(attempts - 1, 20));
+            await this.update(record, { state: "uncertain", error: message.slice(0, 500), recovery: { attempts, nextAt: new Date(Math.min(this.now + delay, deadline)).toISOString() } }).catch(() => undefined);
+          }
         }
       })().finally(() => this.running.delete(key));
       this.running.set(key, work);

@@ -1,5 +1,6 @@
+import * as hookClient from "./client.js";
+import * as terminals from "./terminal.js";
 import { relocationSupport } from "./worker-relocation.js";
-import { ownerToken } from "./request-origin.js";
 import { writeLaunchBrief, recordBriefArrival } from "./launch-brief.js";
 import * as herdr from "./herdr.js";
 import { herdrTerminal } from "./terminal-herdr.js";
@@ -84,7 +85,7 @@ async function request(mover: SessionMover, method: string, route: string, data:
   const capabilities = capabilitiesForModules(modules as never);
   const handler = createRouteHandler({ mover, modules, info: { computer: { id: A_ID, name: "self" }, capabilities }, accountUsage: { read: async () => ({ accounts: [] }) }, launches: new LaunchLimiter(), streams: {}, ...overrides } as unknown as RouteContext);
   const req = Readable.from(method === "POST" ? [Buffer.from(JSON.stringify(data))] : []) as IncomingMessage;
-  req.method = method; req.url = route; req.headers = { "x-phren-owner-token": await ownerToken(), ...headers };
+  req.method = method; req.url = route; req.headers = headers;
   let payload = "";
   const res = { statusCode: 200, setHeader() {}, end(value: string) { payload = value; } };
   await handler(req, res as unknown as ServerResponse);
@@ -207,12 +208,13 @@ describe("review regressions", () => {
     expect(f.brief()?.text).toContain("4 child processes running");
   });
 
-  it("refuses a credential reconstructed by control-character normalization before sending any peer brief", async () => {
+  it("redacts a credential reconstructed by normalization while continuing the move", async () => {
     const f = fixture({ text: "ghp_" + "a".repeat(18) + "\x01" + "a".repeat(18) });
     const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
     await f.mover.settled(from.server, from.pane);
-    expect(await readMove(move.id)).toMatchObject({ state: "failed", error: expect.stringContaining("The hand-off contains a credential") });
-    expect(f.sent.some(call => call.route.includes("/launch"))).toBe(false);
+    expect(await readMove(move.id)).toMatchObject({ state: "moved" });
+    expect(String(f.brief()?.text)).not.toContain("ghp_");
+    expect(String(f.brief()?.text)).toContain("[redacted]");
   });
 
   it("reports and explicitly launches a non-default Claude login when no account is requested", async () => {
@@ -683,17 +685,18 @@ it("lists projectless conductor accounts without requiring an invented project n
 });
 
 describe("reviewed peer authorization and recovery", () => {
-  it("requires owner proof on new owner-only paths even on the plain local socket", async () => {
+  it("accepts existing owner clients without a token and refuses peer owner-only actions", async () => {
     const f = fixture();
-    const noProof = { "x-phren-owner-token": undefined };
+    expect((await request(f.mover, "GET", "/v1/sessions/move/computers?project=repo")).status).toBe(200);
+    expect((await request(f.mover, "GET", "/v1/sessions/moves")).status).toBe(200);
+    const peer = { "x-phren-origin": "peer" };
     for (const [method, route, data] of [
       ["GET", "/v1/sessions/move/computers?project=repo", {}],
-      ["GET", "/v1/sessions/moves", {}],
       ["POST", "/v1/accounts/claude/add", { slug: "work" }],
       ["POST", "/v1/sessions/move", { target: from, to: { computer: "remote", harness: "claude" } }],
       ["POST", "/v1/sessions/move/launch", { computerId: A_ID }],
       ["POST", "/v1/sessions/move/abort", { id: A_ID }],
-    ] as const) expect((await request(f.mover, method, route, data, noProof)).status, route).toBe(403);
+    ] as const) expect((await request(f.mover, method, route, data, peer)).status, route).toBe(403);
     expect(f.deliver).not.toHaveBeenCalled();
   });
 
@@ -794,7 +797,7 @@ describe("reviewed peer authorization and recovery", () => {
     expect(f.sent.some(call => call.route.includes("/launch"))).toBe(false);
   });
 
-  it("rejects third peer C on every conductor move route and peer listing even when C knows B's move id", async () => {
+  it("rejects third peer C on every conductor move route even when C knows B's move id", async () => {
     const f = fixture(); const old = await recordConductor(from.server, f.pane, "owner", from.session);
     const original = f.transport.getMockImplementation()!;
     f.transport.mockImplementation(async (peer, route, data, timeout) => {
@@ -810,7 +813,7 @@ describe("reviewed peer authorization and recovery", () => {
     const overrides = { succession: service };
     for (const path of ["status", "launch", "operation", "notification"]) expect((await request(f.mover, "GET", `/v1/conductor/move/${path}?id=${A_ID}&operationId=${B_ID}&deliveryId=notice-1234567890`, {}, headers, overrides)).status, path).toBe(403);
     for (const path of ["prepare", "commit", "operate", "notice", "ack"]) expect((await request(f.mover, "POST", `/v1/conductor/move/${path}`, { id: A_ID, originId: A_ID }, headers, overrides)).status, path).toBe(403);
-    expect((await request(f.mover, "GET", "/v1/sessions/moves", {}, headers, overrides)).status).toBe(403);
+    expect((await request(f.mover, "GET", "/v1/sessions/moves", {}, headers, overrides)).status).toBe(200);
     const counterpart = { ...headers, "x-phren-peer": Buffer.from(JSON.stringify({ id: B_ID, fingerprint: peerFingerprint(peer) })).toString("base64url") };
     expect((await request(f.mover, "GET", `/v1/conductor/move/status?id=${A_ID}`, {}, counterpart, overrides)).status).toBe(200);
   });
@@ -883,9 +886,74 @@ it("does not accept unrelated new Hooks as proof that a legacy dispatcher's work
 
 it("redacts credential values from peer error responses as well as successful payloads", async () => {
   const f = fixture();
-  const authorize = async () => { throw new BridgeError(409, "PGPASSWORD=hunter2\nCookie: k=v\ncurl -u user:pw", { credential: "short-value" }); };
+  const authorize = async () => { throw new BridgeError(409, "PGPASSWORD=hunter2\nCookie: k=v\ncurl -u user:pw", { authority: "owner" }); };
   const response = await request(f.mover, "GET", `/v1/conductor/move/status?id=${A_ID}`, {}, { "x-phren-origin": "peer" }, { succession: { authorize } } as never);
   expect(response.status).toBe(409);
-  expect(JSON.stringify(response.body)).not.toMatch(/hunter2|k=v|user:pw|short-value/);
-  expect(response.body.credential).toBe("[redacted]");
+  expect(JSON.stringify(response.body)).not.toMatch(/hunter2|k=v|user:pw/);
+  expect(response.body.authority).toBe("owner");
+});
+
+it("preserves startingToken in peer pane replies and capabilities in peer health replies", async () => {
+  const f = fixture(), startingToken = "ab".repeat(32);
+  vi.spyOn(herdr, "panes").mockResolvedValue({ panes: [{ id: "w1:p2", startingToken, agent: "claude" }] });
+  const headers = { "x-phren-origin": "peer" };
+  const reply = await request(f.mover, "GET", "/v1/workspaces/panes?server=default&groupId=w1&childId=w1:t1", {}, headers);
+  expect(reply).toMatchObject({ status: 200, body: { panes: [{ startingToken }] } });
+  const health = await request(f.mover, "GET", "/v1/health", {}, headers, { info: { computer: { id: A_ID }, capabilities: { projectHostToken: true, authority: true }, author: "Al", authority: "owner" } } as never);
+  expect(health).toMatchObject({ status: 200, body: { capabilities: { projectHostToken: true, authority: true }, author: "Al", authority: "owner" } });
+});
+
+it("limits peer move status reads to the move's verified destination", async () => {
+  const f = fixture(), original = f.transport.getMockImplementation()!;
+  f.transport.mockImplementation(async (peer, route, data, timeout) => route === "/v1/health" ? { computer: { id: B_ID } } : original(peer, route, data, timeout));
+  const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+  await f.mover.settled(from.server, from.pane);
+  const peer = (await peers.hookPeers())[0];
+  const headers = (name: string, fingerprint: string) => ({ "x-phren-origin": "peer", "x-phren-peer": Buffer.from(JSON.stringify({ name, fingerprint })).toString("base64url") });
+  expect((await request(f.mover, "GET", `/v1/sessions/move?id=${move.id}`, {}, headers(peer.name, peerFingerprint(peer)))).status).toBe(200);
+  expect((await request(f.mover, "GET", `/v1/sessions/move?id=${move.id}`, {}, headers("third-peer", peerFingerprint({ ...peer, username: "carol" })))).status).toBe(403);
+  expect((await request(f.mover, "GET", `/v1/sessions/move?id=${move.id}`, {}, { "x-phren-origin": "peer" })).status).toBe(403);
+  expect((await request(f.mover, "GET", `/v1/sessions/move?id=${move.id}`)).status).toBe(200);
+});
+
+it.each([403, 503])("terminates refusals and backs off transient move recovery (%s)", async status => {
+  const f = fixture(), original = f.transport.getMockImplementation()!;
+  let clock = Date.now(); const created = clock;
+  f.deps.now = () => clock;
+  f.transport.mockImplementation(async (peer, route, data, timeout) => {
+    if (route.startsWith("/v1/sessions/move/launch?server=")) throw new BridgeError(status, "Destination unavailable");
+    if (route.startsWith("/v1/sessions/move/launch?id=")) return { state: "uncertain" };
+    return original(peer, route, data, timeout);
+  });
+  const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+  await f.mover.settled(from.server, from.pane);
+  const attempts = () => f.transport.mock.calls.filter(([, route]) => route.startsWith("/v1/sessions/move/launch?server=")).length;
+  const recover = async (mover: SessionMover) => { await mover.reconcile(); await mover.settled(from.server, from.pane); };
+  await recover(f.mover);
+  if (status === 403) {
+    expect(await readMove(move.id)).toMatchObject({ state: "failed", error: "Destination unavailable" });
+    const count = attempts(); await recover(new SessionMover(f.deps)); expect(attempts()).toBe(count);
+  } else {
+    expect(await readMove(move.id)).toMatchObject({ state: "uncertain", recovery: { attempts: 1, nextAt: new Date(clock + 5000).toISOString() } });
+    const restarted = new SessionMover(f.deps), count = attempts();
+    await recover(restarted); expect(attempts()).toBe(count);
+    clock += 5000; await recover(restarted);
+    expect(await readMove(move.id)).toMatchObject({ recovery: { attempts: 2, nextAt: new Date(clock + 10000).toISOString() } });
+    clock = created + 600_001; await recover(restarted);
+    expect(await readMove(move.id)).toMatchObject({ state: "failed", error: "Destination unavailable" });
+    const ended = attempts(); await recover(restarted); expect(attempts()).toBe(ended);
+  }
+});
+
+it("delivers Hook return notices directly even when its inherited environment identifies an agent pane", async () => {
+  const f = fixture(), at = new Date().toISOString();
+  await mkdir(path.join(root, "bridge", "dispatches"));
+  await writeFile(path.join(root, "bridge", "dispatches", `${A_ID}.json`), JSON.stringify({ id: A_ID, computer: "self", harness: "claude", project: "repo", label: "Finished", state: "accepted", target, origin: { server: from.server, workspace: from.workspace, tab: from.tab, pane: from.pane, agent: "claude", terminal: "term-1" }, createdAt: at, updatedAt: at, returned: { state: "done", at, reply: "Done", read: false } }));
+  vi.spyOn(terminals, "terminalPaneFromEnv").mockResolvedValue({ server: from.server, workspace: from.workspace, tab: from.tab, pane: from.pane });
+  const calls = vi.spyOn(hookClient, "hookRequest").mockImplementation(async route => route === "/v1/hand-off" ? { ok: true, delivered: true } : { groups: [] });
+  const returns = new DispatchReturns({ snapshot: f.deps.snapshot, identity: f.deps.identity });
+  await returns.notify();
+  expect((await dispatchStatus())[0].returned?.notifiedAt).toBeDefined();
+  expect(calls.mock.calls.some(([route]) => route === "/v1/hand-off")).toBe(true);
+  expect(calls.mock.calls.some(([route]) => route === "/v1/conductor/call")).toBe(false);
 });

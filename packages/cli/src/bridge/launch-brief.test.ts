@@ -41,7 +41,7 @@ describe("a dispatch label kept with its brief", () => {
     const file = await writeLaunchBrief({ id, text: "first" }, Date.now(), "first label");
     expect(await writeLaunchBrief({ id, text: "first" }, Date.now(), "first label")).toBe(file);
     await expect(writeLaunchBrief({ id, text: "second" }, Date.now(), "second label")).rejects.toMatchObject({ status: 409 });
-    await expect(writeLaunchBrief({ id, text: "first" }, Date.now(), "changed label")).rejects.toMatchObject({ status: 409 });
+    expect(await writeLaunchBrief({ id, text: "first" }, Date.now(), "changed label")).toBe(file);
     expect(await readLaunchBrief(id)).toBe("first\n");
     expect(await briefLabel(id)).toBe("first label");
   });

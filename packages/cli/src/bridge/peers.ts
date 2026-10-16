@@ -1,4 +1,3 @@
-import { redactPeerPayload } from "./peer-handoff.js";
 import { spawn } from "node:child_process";
 import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -126,7 +125,6 @@ export function peerOfflineMessage(diagnostic: string, exitCode: number | null |
 
 /** A pin is supplied out of band; dispatch never learns or replaces host keys. */
 export async function peerRequest(peer: HookPeer, route: string, data?: Json, timeout?: number): Promise<Json> {
-  if (data !== undefined) data = redactPeerPayload(data);
   const root = bridgeRoot(), key = dispatchKeyPath(root);
   const info = await lstat(key).catch(() => undefined);
   if (!info?.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw new BridgeError(409, "Run phren bridge enroll-computer on this computer first (private key mode 0600).", { code: "dispatch-key-missing" });

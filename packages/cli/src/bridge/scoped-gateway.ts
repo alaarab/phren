@@ -224,13 +224,13 @@ export interface ScopedIO { input: Readable; output: Writable; socket: string; a
 export async function scopedDispatch(scope: string, command: string, io: ScopedIO): Promise<void> {
   let identity: PeerIdentity | undefined;
   if (scope.startsWith("peer:")) {
-    const peer = (await hookPeers()).find(peer => peer.name === scope.slice(5));
-    if (!peer) throw new BridgeError(403, "This computer key has no current verified reverse enrollment.");
+    const peer = (await hookPeers().catch(() => [])).find(peer => peer.name === scope.slice(5));
     // The forced-command enrollment binds this client key to the reverse
     // host-key + OS account pin. The Hook verifies its stable computer ID
     // over that pin when authorizing a move. Do not probe here: two gateways
     // probing one another's /health would recursively open SSH sessions.
-    identity = { name: peer.name, fingerprint: peerFingerprint(peer) }; scope = "peer";
+    if (peer) identity = { name: peer.name, fingerprint: peerFingerprint(peer) };
+    scope = "peer";
   }
   if (scope !== "peer" && !isGatewayScope(scope)) throw new BridgeError(403, "Unknown key scope.");
   if (command !== SCOPED_COMMAND) throw new BridgeError(403, `This SSH key only permits \`${SCOPED_COMMAND}\` with ${scope === "peer" ? "Hook API requests" : DESCRIBE[scope]}.`);

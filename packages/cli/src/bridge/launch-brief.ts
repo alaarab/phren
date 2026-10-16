@@ -120,7 +120,7 @@ export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), lab
   };
   // A retry may reuse identical bytes; it must never replace another launch.
   const existing = async () => {
-    if (await readFile(file, "utf8").catch(() => undefined) !== text || (await briefLabel(brief.id) ?? "") !== named) throw new BridgeError(409, "This brief id already belongs to another launch.");
+    if (await readFile(file, "utf8").catch(() => undefined) !== text) throw new BridgeError(409, "This brief id already belongs to another launch.");
     return file;
   };
   if (await stat(directory).catch(() => undefined)) return existing();

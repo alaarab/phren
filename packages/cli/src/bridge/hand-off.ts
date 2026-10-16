@@ -1,3 +1,4 @@
+import { redactPeerHandoff } from "./peer-handoff.js";
 import { randomUUID } from "node:crypto";
 import { deliveryIdSchema } from "./prompt-once.js";
 import { terminalPaneFromEnv } from "./terminal.js";
@@ -103,7 +104,7 @@ export async function handOff(input: unknown, options: { deliveryId?: string; no
   const originComputer = peer && origin ? await hookRequest("/v1/health").then(health => object(health.computer).name, () => undefined) : undefined;
   const deliveryId = data.deliveryId ?? options.deliveryId ?? randomUUID().replaceAll("-", "");
   const result = await request(data.status ? "/v1/hand-off/status" : "/v1/hand-off", { target, deliveryId,
-    ...(!data.status ? { text: data.text, ...(origin ? { origin, ...(typeof originComputer === "string" ? { originComputer } : {}) } : {}) } : {}) });
+    ...(!data.status ? { text: peer ? redactPeerHandoff(data.text!) : data.text, ...(origin ? { origin, ...(typeof originComputer === "string" ? { originComputer } : {}) } : {}) } : {}) });
   // A bare ok only acknowledges typing. Even an unchanged, busy Codex pane
   // may have kept the text in its composer instead of submitting a turn.
   const delivered = result.ok === true && result.delivered === true && result.deliveryUncertain !== true && result.unsubmitted !== true;

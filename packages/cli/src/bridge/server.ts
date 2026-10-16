@@ -1,4 +1,3 @@
-import { ownerToken } from "./request-origin.js";
 import { continuationPlacement } from "./continuation-launch.js";
 import { ConductorSuccessionService, preflightConductorWorkers } from "./conductor-succession.js";
 import { StorePulls } from "./store-pull.js";
@@ -85,7 +84,6 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const identityFile = path.join(root, "computer-id");
   try { computerID = (await readFile(identityFile, "utf8")).trim(); }
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
-  await ownerToken(root);
   const launches = new LaunchLimiter();
   const dispatches = modules.has("conductor")
     ? new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true),
@@ -146,7 +144,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       const session = pane ? await paneIdentity(target.server, pane, true) : undefined;
       return pane && session ? { session, terminal: pane.terminal_id } : undefined;
     },
-    notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false }),
+    notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false, bypassConductor: true }),
     send: sendPrompt,
   }) : undefined;
   // Moving a session to another agent (session-move.ts): its hand-off request

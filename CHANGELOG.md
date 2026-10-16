@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Narrow peer redaction to free text, preserve protocol tokens and capabilities, remove the unused owner token, keep existing peer keys compatible, make identical brief retries idempotent, and bound failed move recovery with backoff. Hook hand-offs bypass agent forwarding; peer move-status reads require the recorded destination.
+
 - Make remote conductor reads retryable without losing returns; resolve forwarded destinations by verified identity, forward hand-off notices, fence automatic failover, bound absent-launch recovery and add owner aborts. Bind peer routes to their recorded counterpart, require owner proof on new owner paths, protect account metadata and existing briefs, validate returning workers locally, and redact short embedded credential forms in every peer payload.
 
 - Reserve chat moves before asynchronous admission, re-check peer enrollment before sending hand-offs, redact short credential values, verify moved-worker Hook identities, require dispatcher relocation support, and reconcile uncertain peer launches by durable move ID.

@@ -656,7 +656,7 @@ in the list, disabled; a missing checkout also disables a destination.
 peer name. Omitted or self uses the local move. A peer forces `mode: "new-chat"`:
 the source writes its hand-off and the peer starts in its own registered
 checkout of the project, over the existing pinned SSH launch path. The full
-hand-off is sent inline, with credential-bearing text withheld or refused;
+hand-off is sent inline, with credential values redacted;
 login credentials, environment and checkout files are never copied. The new
 conversation must confirm its first brief and be running before `state: "moved"`.
 The old chat stays open, including on failure. The record has `to.computer`,
@@ -676,8 +676,9 @@ included). Control characters are normalized, then the whole outbound prompt
 (including fallback conversation text) is structurally redacted: password,
 passwd, pwd, token, secret, api-key/api_key, auth and bearer values in flags,
 assignments and mappings, Authorization/Bearer headers, and URL userinfo become
-`[redacted]`. The exact resulting prompt is then scanned; remaining credentials
-fail the move with “The hand-off contains a credential” before any peer launch. Copilot is unavailable for cross-computer
+`[redacted]`. Recognizable credential values are redacted in place; a long path or other
+base64-looking text does not refuse the move. Redaction applies to prose fields,
+never opaque protocol tokens, capabilities or other structural metadata. Copilot is unavailable for cross-computer
 moves because it has no launch-brief arrival signal: its peer listing has
 `usable: false` and a `reason`; local Copilot moves still work.
 
@@ -739,20 +740,20 @@ uncertain mutations fail closed.
 Credential-bearing text is withheld from peer operation replies. The owner can end delegation with conductor stop on A; B
 reconciles that revocation and neither previous chat regains the role.
 
-New owner-only paths require `X-Phren-Owner-Token`, containing the local
-`<bridge>/owner-token` (private mode 0600). This includes destination discovery,
-move listing, cross-computer moves, account-add, owner launch and abort. The
-legacy owner SSH byte pipe and a plain local socket do not distinguish their
-callers; no origin header is insufficient proof on these paths. Existing routes
-retain their authorization behavior. Clients must obtain this local proof over
-the owner's authenticated connection; it is never sent to another Hook. Peer
-gateways discard client-supplied owner and identity headers. Computer keys are
-bound by their forced command to a verified reverse enrollment; reinstall the
-Hook to upgrade legacy peer keys. Conductor prepare/commit/status/launch,
-operations, acknowledgements and notices check that authenticated host-key/SSH
-account identity against the recorded counterpart and verify its Hook ID over
-the pinned channel. Other enrolled peers cannot use a known move UUID. Peer
-availability excludes account emails and plans; owner discovery includes them.
+Owner-only actions use the existing owner request envelope: owner phone,
+desktop and CLI calls carry no agent or peer origin. Scoped gateways rebuild
+the envelope and stamp peer requests, so peers cannot impersonate that owner
+path. Existing session move listings keep their normal behavior. Peer move-status
+reads require the recorded source/destination identity. Peer availability omits
+account emails and plans; owner discovery includes them.
+
+Newly enrolled computer keys use `dispatch-scoped peer:<name>` instead of
+`dispatch-scoped peer`; the restrictions, public key and comment are unchanged.
+Install never rewrites existing computer keys. An unknown named enrollment
+retains legacy peer behavior on existing routes. The new continuation launch
+and conductor succession routes require a known verified reverse enrollment;
+explicitly re-enroll a legacy key to use them. Conductor operations and status
+check the recorded counterpart's host-key/SSH-account identity and pinned Hook ID.
 
 A forwarded dispatch or hand-off without `computer` means the successor's
 computer B. Named destinations are translated to pinned identities and resolved
@@ -794,7 +795,10 @@ An interrupted creation is reconciled through that brief's
 arrival, never by creating a second pane. After ten minutes, a successful terminal
 inspection that confirms the unique creation label and recorded pane are both
 absent reports `not-placed`; A then fails the uncommitted move and releases the
-original conductor. An unreachable destination stays uncertain. Legacy intents
+original conductor. Transient recovery errors use persisted exponential backoff, starting at five
+seconds and capped at ten minutes. Refusals (4xx) fail with their reason; recovery
+gives up after the ten-minute absence window. A committed conductor generation
+is never rolled back, even when the move record fails. Legacy intents
 without enough placement metadata require the owner to abort before commit. The owner may
 `POST /v1/sessions/move/abort` with `{id}` before commit. A committed or uncertain
 ownership switch is reconciled instead of rolled back. Continuations also record whether

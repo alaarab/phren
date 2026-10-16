@@ -1,7 +1,3 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { bridgeRoot } from "./protocol.js";
 import type { IncomingMessage } from "node:http";
 import type { Json } from "./protocol.js";
 
@@ -12,26 +8,6 @@ export function ownerRequest(request: Pick<IncomingMessage, "headers">, data: Js
   return request.headers?.["x-phren-origin"] === undefined && data.origin === undefined;
 }
 
-/** The legacy raw socket/owner byte pipe does not carry an authenticated
- * principal. New owner-only operations require this private local proof.
- * Scoped gateways discard this header, so a peer cannot replay owner proof. */
-export async function ownerToken(root = bridgeRoot()): Promise<string> {
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  const file = path.join(root, "owner-token");
-  try { await writeFile(file, randomBytes(32).toString("hex"), { flag: "wx", mode: 0o600 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  const info = await lstat(file);
-  if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw new Error("The owner token must be a private regular file.");
-  const token = (await readFile(file, "utf8")).trim();
-  if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("Invalid owner token file.");
-  return token;
-}
-export async function strongOwnerRequest(request: Pick<IncomingMessage, "headers">, data: Json = {}): Promise<boolean> {
-  if (!ownerRequest(request, data)) return false;
-  const supplied = request.headers?.["x-phren-owner-token"];
-  if (typeof supplied !== "string" || !/^[a-f0-9]{64}$/.test(supplied)) return false;
-  return timingSafeEqual(Buffer.from(supplied), Buffer.from(await ownerToken()));
-}
 export interface PeerIdentity { name?: string; id?: string; fingerprint: string }
 export function requestPeer(request: Pick<IncomingMessage, "headers">): PeerIdentity | undefined {
   if (request.headers?.["x-phren-origin"] !== "peer") return undefined;

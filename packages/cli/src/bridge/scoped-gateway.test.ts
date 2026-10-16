@@ -212,6 +212,13 @@ describe.skipIf(process.platform === "win32")("scoped SSH session", () => {
     return text;
   }
 
+  it("keeps unknown named peer keys compatible with pre-existing routes", async () => {
+    const reply = await session("phren-hook v1 pipe", [head("GET /v1/health HTTP/1.1")], socket, "peer:unlisted");
+    expect(reply).toMatch(/^HTTP\/1\.1 200 OK/);
+    expect(received[0]).toContain("X-Phren-Origin: peer\r\n");
+    expect(received[0]).not.toContain("X-Phren-Peer:");
+  });
+
   it("forwards an admitted request as a request it builds itself", async () => {
     const reply = await session("phren-hook v1 pipe", [head("GET /v1/projects/app/memory HTTP/1.1", ["Host: evil", "Cookie: x", "X-Phren-Origin: phone"])]);
     expect(reply).toMatch(/^HTTP\/1\.1 200 OK/);

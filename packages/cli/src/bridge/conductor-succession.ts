@@ -418,7 +418,7 @@ export class ConductorSuccessionService {
     const work = (async () => {
       let saved: Json | undefined;
       try { saved = JSON.parse(await readFile(key, "utf8")); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      if (saved?.result) return peerData(object(saved.result), true);
+      if (saved?.result) return peerData(object(saved.result));
       if (saved?.state === "failed") throw new BridgeError(Number(saved.status), String(saved.error));
       if (saved && !readOperation(operation.action, operation.data)) throw new BridgeError(503, "This conductor operation has an uncertain outcome. Inspect its existing receipt; it will not be repeated.");
       await updateConductorAuthority(this.options.root, async role => {
@@ -430,7 +430,7 @@ export class ConductorSuccessionService {
         const { server, workspace, tab, pane } = state.from;
         const payload = { ...operation.data };
         if (operation.computerIdentity) payload.computer = await this.resolveComputer(operation.computerIdentity);
-        const result = peerData(await execute(operation.action, payload, { server, workspace, tab, pane }, true), true);
+        const result = peerData(await execute(operation.action, payload, { server, workspace, tab, pane }, true));
         await atomicInPrivateDir(key, JSON.stringify({ state: "done", result, operation }));
         return result;
       } catch (error) {

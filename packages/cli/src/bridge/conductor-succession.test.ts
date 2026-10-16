@@ -368,8 +368,9 @@ describe("reviewed conductor recovery and identity contracts", () => {
 it("redacts embedded short credentials in forwarded operations, notices and responses", async () => {
   const f = await fixture(); await f.begin(); await f.commit();
   const text = ["PGPASSWORD=hunter2", "apiToken=abc123", "secret_key=", "aws_secret_access_key=awsvalue", "DB_PASS=dbvalue", "passphrase: phrasevalue", "credential: credentialvalue", "Cookie: k=v", "mysql -pmysqlvalue", "curl -u user:pw", "--auth user:pw", "_authToken=npmvalue"].join("\n");
-  f.execute.mockResolvedValue({ reply: text, apiToken: "objectvalue" });
+  f.execute.mockResolvedValue({ reply: text, startingToken: "ab".repeat(32), authority: "owner", author: "Al" });
   const response = await f.b.call("hand_off", { target, text }, target, async () => ({}));
+  expect(response).toMatchObject({ startingToken: "ab".repeat(32), authority: "owner", author: "Al" });
   await f.a.forward(from, text, "notice-12345678901234567890123456789012");
   for (const outbound of [JSON.stringify(f.execute.mock.calls[0][1]), JSON.stringify(response), f.typed.at(-1)!.text]) {
     expect(outbound).not.toMatch(/hunter2|abc123|awsvalue|dbvalue|phrasevalue|credentialvalue|k=v|mysqlvalue|user:pw|npmvalue|objectvalue/);

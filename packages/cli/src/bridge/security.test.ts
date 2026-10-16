@@ -21,12 +21,12 @@ describe("Phren device key restrictions", () => {
     }
   });
 
-  it("moves existing computer keys onto the peer scope without changing owner device keys", () => {
-    const computer = `restrict,pty,${forcedCommand} ssh-ed25519 AAAA phren-computer:Desk\n`;
+  it("preserves existing computer key scopes on install", () => {
     const owner = `restrict,pty,${forcedCommand} ssh-ed25519 BBBB phren-iphone\n`;
-    const upgraded = `restrict,${peerForcedCommand.replace(" peer\"", " peer:Desk\"")} ssh-ed25519 AAAA phren-computer:Desk\n`;
-    expect(upgradeKeys(computer + owner)).toEqual({ text: upgraded + owner, changed: 1 });
-    expect(upgradeKeys(upgraded + owner)).toEqual({ text: upgraded + owner, changed: 0 });
+    for (const command of [forcedCommand, peerForcedCommand, peerForcedCommand.replace(" peer\"", " peer:Desk\"")]) {
+      const computer = `restrict,${command} ssh-ed25519 AAAA phren-computer:Desk\n`;
+      expect(upgradeKeys(computer + owner)).toEqual({ text: computer + owner, changed: 0 });
+    }
   });
 
   it("migrates an Android device key the same way", () => {
