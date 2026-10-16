@@ -16,6 +16,7 @@ import { sectionHandle, showSection } from "../shell/sections.js";
 import { storeBlobText, storeTree } from "../store-cache.js";
 import { skeleton } from "../shell/skeleton.js";
 import { todayGroups, sessionsForProject, TODAY_ROWS } from "../shell/project-today.js";
+import { freshProjectGit, rememberProjectGit } from "../shell/project-pulls.js";
 import { loadFindings, openSaved } from "./home/saved-today.js";
 import { savedAgo } from "../time.js";
 
@@ -524,17 +525,20 @@ export function mountProjects(root) {
 
   /** The project's host, branch and open pull requests with checks, from its
    *  checkout on that computer. A Hook without the route hides the block. */
-  async function loadForge() {
+  async function loadForge({ force = false } = {}) {
     const detail = state.detail;
     const project = detail && state.data.get(detail.computer)?.projects.get(detail.name);
     if (!project || project.forge?.loading) return;
     project.forge = { loading: true };
     renderDetail();
     try {
+      // Home's Pull requests card reads the same route: an answer under two minutes old is shared, Refresh asks again.
+      const shared = force ? null : freshProjectGit(detail.computer, project.name);
       const [data, capabilities] = await Promise.all([
-        hookGet(detail.computer, `/v1/projects/${encodeURIComponent(project.name)}/git`),
+        shared ?? hookGet(detail.computer, `/v1/projects/${encodeURIComponent(project.name)}/git`),
         store.capabilities(detail.computer),
       ]);
+      if (!shared) rememberProjectGit(detail.computer, project.name, data);
       project.forge = { data, projectHostToken: capabilities.projectHostToken === true };
       void loadForgeTasks(detail, project, project.forge);
     } catch (err) {
@@ -761,7 +765,7 @@ export function mountProjects(root) {
     }
     const refresh = el("button", "pj-btn", "Refresh");
     refresh.disabled = !!forge.loading;
-    refresh.addEventListener("click", () => loadForge());
+    refresh.addEventListener("click", () => loadForge({ force: true }));
     head.append(refresh);
     block.append(head);
     const list = el("div", "pj-list");
@@ -993,11 +997,11 @@ export function mountProjects(root) {
       try {
         await connectProjectHost(detail.computer, detail.name, host, input.value);
         if (openSheetEl === sheet) closeSheet();
-        if (state.detail === detail) await loadForge();
+        if (state.detail === detail) await loadForge({ force: true });
       } catch (error) {
         changed = error?.code === "host-changed";
         setNotice(notice, hostTokenError(error), true);
-        if (changed && state.detail === detail) await loadForge();
+        if (changed && state.detail === detail) await loadForge({ force: true });
       } finally {
         input.value = ""; busy = false;
         connect.textContent = "Connect"; connect.disabled = true;

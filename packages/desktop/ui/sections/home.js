@@ -1,7 +1,7 @@
 import { createActiveTasks } from "./home/active-tasks.js";
 import { createSavedToday } from "./home/saved-today.js";
 import { hookGet, hookPost } from "../api.js";
-import { store } from "../shell/store.js";
+import { projectOf, sessions, store } from "../shell/store.js";
 import { approvals } from "../shell/approvals.js";
 import { followUsage } from "../shell/usage-rings.js";
 import { loadQuotaState } from "../shell/quota-warn-prefs.js";
@@ -11,6 +11,9 @@ import { createRunningLow } from "./home/running-low.js";
 import { createWorking } from "./home/working.js";
 import { createFinished } from "./home/finished.js";
 import { createChecks } from "./home/checks.js";
+import { createPulls } from "./home/pulls.js";
+import { sectionHandle, showSection } from "../shell/sections.js";
+import { sessionsForProject } from "../shell/project-today.js";
 import { createUpNext } from "./home/up-next.js";
 import { createComputers } from "./home/computers.js";
 import { createConductor } from "./home/conductor.js";
@@ -61,6 +64,10 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         <h2 class="section-label">Checks <span class="count"></span></h2>
         <div class="home-checks"></div>
       </section>
+      <section class="home-block" data-block="pulls" hidden>
+        <h2 class="section-label"><span class="pulls-title">Pull requests</span> <span class="count"></span></h2>
+        <div class="home-list"></div>
+      </section>
       <section class="home-block" data-block="upnext" hidden>
         <h2 class="section-label">Up next <span class="count"></span></h2>
         <div class="home-list"></div>
@@ -93,6 +100,8 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const low = createRunningLow(shared);
   const finished = createFinished({ ...shared, openPrs, receipts, runs });
   const checks = createChecks({ block, openPrs });
+  const onlineNames = () => (state.merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer);
+  const pulls = createPulls({ block, computers: onlineNames, isVisible: () => visible, openProject: openPullProject });
   const renderUpNext = createUpNext({ block, scheduleLists, state });
   const activeTasks = createActiveTasks({ block, state });
   const savedToday = createSavedToday({ block, state });
@@ -100,6 +109,18 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const renderConductor = createConductor({ root, state, receipts, open });
   const unsubscribeAway = finished.subscribe();
   const { onKeydown } = needs;
+
+  // The project's session on that computer with Changes on its requests, else the project's page.
+  function openPullProject(pull) {
+    const rows = sessions(state.merged).filter((row) => row.computer === pull.computer && projectOf(row.child) === pull.project);
+    const inside = sessionsForProject(sessions(state.merged), { name: pull.project, checkouts: new Map([[pull.computer, pull.directory ? [pull.directory] : []]]) });
+    const row = rows[0] ?? inside[0];
+    if (row) { openPrs(pull.computer, row.child); return; }
+    showSection("projects");
+    const projects = sectionHandle("projects");
+    // The page can only open a project whose computer it has read.
+    void Promise.resolve(projects?.load?.()).catch(() => {}).then(() => projects?.open?.({ computer: pull.computer, name: pull.project }));
+  }
 
   async function pollReceipts() {
     const online = (state.merged?.computers ?? []).filter((c) => c.state === "online");
@@ -162,6 +183,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     low.render();
     working.render();
     checks.render();
+    pulls.render();
     finished.renderReturns();
     renderUpNext();
     activeTasks.render();
@@ -175,7 +197,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     state.merged = value;
     render();
     const online = (value?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
-    if (visible && online && online !== polledFor) { polledFor = online; void pollReceipts(); }
+    if (visible && online && online !== polledFor) { polledFor = online; void pollReceipts(); pulls.update(); }
   });
   const unsubscribeApprovals = approvals.subscribe(needs.render);
 
@@ -187,6 +209,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       activeTasks.show();
       savedToday.show();
       checks.follow();
+      pulls.show();
       stopUsage = followUsage(low.update);
       void loadQuotaState().then(() => { low.ready(); if (visible) low.render(); }).catch((error) => console.warn("Home usage preferences:", error));
       document.addEventListener("keydown", onKeydown);
@@ -197,6 +220,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       activeTasks.hide();
       savedToday.hide();
       checks.unfollow();
+      pulls.hide();
       stopUsage?.();
       stopUsage = null;
       document.removeEventListener("keydown", onKeydown);
@@ -207,6 +231,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       activeTasks.hide();
       savedToday.hide();
       checks.unfollow();
+      pulls.hide();
       stopUsage?.();
       stopUsage = null;
       working.destroy();

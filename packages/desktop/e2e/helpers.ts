@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page } from "@playwright/test";
-import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
-import { hookRequest, hookWebSocket } from "../src/hook-client.js";
+import { request as httpRequest } from "node:http";
+import { WebSocket } from "ws";
+import type { Computer, HookRequest, HookWebSocket, MergedOverview, OverviewHub } from "../src/contract.js";
+import { hookRequest as localHookRequest, hookWebSocket as localHookWebSocket } from "../src/hook-client.js";
 import { createOverviewHub } from "../src/overview.js";
 import { startServer } from "../src/server.js";
 import { startFakeHook, type FakeHook, type FakeHookOptions } from "../src/testing/fake-hook.js";
@@ -24,15 +26,21 @@ export function linkUi(): () => void {
   return () => { try { unlinkSync(UI_LINK); } catch { /* already gone */ } };
 }
 
+/** A second computer: its own fake Hook, reached over its socket instead of the shared bridge directory. */
+export interface Peer { name: string; options?: Omit<FakeHookOptions, "dir"> }
+
 export interface Harness {
   url: string;
   hook: FakeHook;
+  /** The peer computer's fake Hook, when `startHarness` was given a `peer`. */
+  peerHook?: FakeHook;
   /** Stops the daemon and the fake Hook, removes the bridge directory and restores the environment. */
   close(): Promise<void>;
 }
 
 /** A fake Hook plus the real daemon over it, in a short temp directory (a Unix socket path must stay under ~100 bytes). */
-export async function startHarness(name: string, options: Omit<FakeHookOptions, "dir"> = {}): Promise<Harness> {
+export async function startHarness(name: string, options: Omit<FakeHookOptions, "dir"> & { peer?: Peer } = {}): Promise<Harness> {
+  const { peer, ...hookOptions } = options;
   const saved = { bridge: process.env.PHREN_BRIDGE_HOME, config: process.env.XDG_CONFIG_HOME };
   const undo: Array<() => unknown> = [];
   // Closes whatever has started, newest first, then restores the environment; one failing step does not skip the rest.
@@ -47,23 +55,59 @@ export async function startHarness(name: string, options: Omit<FakeHookOptions, 
     undo.push(() => rm(dir, { recursive: true, force: true }));
     process.env.PHREN_BRIDGE_HOME = dir;
     process.env.XDG_CONFIG_HOME = dir;
-    const hook = await startFakeHook({ dir, ...options });
+    const hook = await startFakeHook({ dir, ...hookOptions });
     undo.push(() => hook.close());
-    const hub: OverviewHub = createOverviewHub([LOCAL], hookWebSocket);
+    const peerHook = peer ? await startFakeHook({ dir: path.join(dir, "peer"), ...peer.options }) : undefined;
+    if (peerHook) undo.push(() => peerHook.close());
+    const computers: Computer[] = peer ? [LOCAL, { name: peer.name, local: true, server: "default" }] : [LOCAL];
+    // The peer is also "local" to the daemon's eyes; its calls go to its own socket.
+    const toPeer = (c: Computer) => peerHook !== undefined && c.name === peer?.name;
+    const hookRequest: HookRequest = (c, method, requestPath, body, signal) => toPeer(c)
+      ? socketRequest(peerHook!.socketPath, method, requestPath, body, signal) : localHookRequest(c, method, requestPath, body, signal);
+    const hookWebSocket: HookWebSocket = async (c, requestPath) => toPeer(c)
+      ? new Promise((resolve, reject) => {
+        const socket = new WebSocket(`ws+unix://${peerHook!.socketPath}:${requestPath}`, { perMessageDeflate: false, headers: { "X-Phren-Client": "desktop" } });
+        socket.once("open", () => { socket.pause(); resolve(socket); setImmediate(() => socket.resume()); });
+        socket.once("error", reject);
+      })
+      : localHookWebSocket(c, requestPath);
+    const hub: OverviewHub = createOverviewHub(computers, hookWebSocket);
     undo.push(() => hub.stop());
-    const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
+    const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers.length === computers.length && merged.computers.every((c) => c.overview)) resolve(); }); });
     hub.start();
     await ready;
     const server = await startServer({
-      port: 0, token: `desktop-${name}-token`, computers: [LOCAL], hub, hookRequest, hookWebSocket,
+      port: 0, token: `desktop-${name}-token`, computers, hub, hookRequest, hookWebSocket,
       attachTerminal: () => ({ write() {}, resize() {}, onData() {}, onExit() {}, kill() {} }),
     });
     undo.push(() => server.close());
-    return { url: server.url, hook, close };
+    return { url: server.url, hook, peerHook, close };
   } catch (error) {
     await close();
     throw error;
   }
+}
+
+/** One HTTP request straight to a fake Hook's socket. */
+function socketRequest(socketPath: string, method: string, requestPath: string, body?: unknown, signal?: AbortSignal): ReturnType<HookRequest> {
+  return new Promise((resolve, reject) => {
+    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+    const req = httpRequest({ socketPath, method, path: requestPath, signal, headers: {
+      Host: "phren.local", Connection: "close", "X-Phren-Client": "desktop",
+      ...(payload === undefined ? {} : { "Content-Type": "application/json", "Content-Length": payload.byteLength }),
+    } }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("error", reject);
+      response.on("end", () => {
+        const headers: Record<string, string> = {};
+        for (const [k, v] of Object.entries(response.headers)) if (v !== undefined) headers[k.toLowerCase()] = Array.isArray(v) ? v.join(", ") : v;
+        resolve({ status: response.statusCode ?? 0, headers, body: Buffer.concat(chunks) });
+      });
+    });
+    req.on("error", reject);
+    req.end(payload);
+  });
 }
 
 /** One session row of an overview frame; `fields` override any of it. */
