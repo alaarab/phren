@@ -35,7 +35,10 @@ export function mountSettings(root) {
   const nav = el("nav", "settings-nav");
   nav.setAttribute("aria-label", "Settings");
   const body = el("div", "settings-body");
-  wrap.append(nav, body);
+  // `.settings` is the size container; the shell inside it is what the narrow-width rules reflow.
+  const shell = el("div", "settings-shell");
+  shell.append(nav, body);
+  wrap.append(shell);
   root.replaceChildren(wrap);
 
   const panes = new Map();
@@ -63,6 +66,8 @@ export function mountSettings(root) {
       p.tab.setAttribute("aria-selected", String(on));
       p.page.hidden = !on;
     }
+    // In the narrow tab row, keep the chosen tab in view.
+    pane.tab.scrollIntoView?.({ inline: "nearest", block: "nearest" });
     if (!pane.built) {
       pane.built = true;
       pane.refresh = BUILDERS[id]?.(pane.page) ?? null;
