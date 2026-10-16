@@ -1,80 +1,34 @@
-import { existsSync, symlinkSync, unlinkSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
-import { hookRequest, hookWebSocket } from "../src/hook-client.js";
-import { createOverviewHub } from "../src/overview.js";
-import { startServer } from "../src/server.js";
-import { startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
+import { chatRow, linkUi, overviewFrame, startHarness, type Harness } from "./helpers.js";
 
-const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
-const SPEC_DIR = path.dirname(fileURLToPath(import.meta.url));
-const UI_LINK = path.resolve(SPEC_DIR, "../../../packages/ui");
-const originalBridgeHome = process.env.PHREN_BRIDGE_HOME;
-const originalConfigHome = process.env.XDG_CONFIG_HOME;
-let linkedUi = false;
-let dir: string;
-let hook: FakeHook;
-let hub: OverviewHub;
-let closeServer: (() => Promise<void>) | undefined;
+let h: Harness;
+let unlinkUi: () => void;
 let url: string;
 
-function child(id: string, title: string, fields: object) {
-  return {
-    id, title, label: "phren", agent: "claude", cwd: "/Users/you/phren", lastChangedAt: "2026-10-16T09:00:00.000Z",
-    target: { server: "default", workspace: "1", tab: id, pane: id, source: "claude", session: id }, ...fields,
-  };
-}
+const child = (id: string, title: string, fields: object) =>
+  chatRow(id, title, "idle", { lastChangedAt: "2026-10-16T09:00:00.000Z", ...fields });
 
 /** Two chats waiting for a reply, one asking for approval, one blocked. */
-function frame(fixLogin: object = {}) {
-  return {
-    type: "overview", kind: "overview",
-    groups: [{ id: "1", label: "phren", children: [
-      child("fix", "Fix login", { agentStatus: "waiting", lastReply: "Tests pass. Want me to open a PR?", ...fixLogin }),
-      child("docs", "Review the docs", { agentStatus: "waiting", lastReply: "Which section first?" }),
-      child("sudo", "Ship release 0.3.34", { agentStatus: "blocked", approvalPending: true }),
-      child("stuck", "Migrate the index", { agentStatus: "blocked" }),
-    ] }],
-    phren: { computer: { id: "test-computer", name: LOCAL.name }, version: "0.3.49", capabilities: { transcript: true, prompt: true, overviewStream: true } },
-  };
+function frame(fixLogin: object = {}, docs: object = {}) {
+  return overviewFrame([
+    child("fix", "Fix login", { agentStatus: "waiting", lastReply: "Tests pass. Want me to open a PR?", ...fixLogin }),
+    child("docs", "Review the docs", { agentStatus: "waiting", lastReply: "Which section first?", ...docs }),
+    child("sudo", "Ship release 0.3.34", { agentStatus: "blocked", approvalPending: true }),
+    child("stuck", "Migrate the index", { agentStatus: "blocked" }),
+  ]);
 }
 
+test.beforeAll(() => { unlinkUi = linkUi(); });
+test.afterAll(() => { unlinkUi(); });
+
 test.beforeEach(async () => {
-  if (!existsSync(UI_LINK)) { symlinkSync(path.resolve(SPEC_DIR, "../ui"), UI_LINK, "dir"); linkedUi = true; }
-  await mkdir(path.resolve(".scratch"), { recursive: true });
-  dir = await mkdtemp(path.resolve(".scratch/desktop-snooze-"));
-  process.env.PHREN_BRIDGE_HOME = dir;
-  process.env.XDG_CONFIG_HOME = dir;
-  hook = await startFakeHook({ dir, overviewFrames: [frame()] });
-  hub = createOverviewHub([LOCAL], hookWebSocket);
-  const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
-  hub.start();
-  await ready;
-  const server = await startServer({
-    port: 0, token: "desktop-snooze-token", computers: [LOCAL], hub, hookRequest, hookWebSocket,
-    attachTerminal: () => ({ write() {}, resize() {}, onData() {}, onExit() {}, kill() {} }),
-  });
-  url = server.url;
-  closeServer = server.close;
+  h = await startHarness("snooze", { overviewFrames: [frame()] });
+  url = h.url;
 });
 
 test.afterEach(async ({ page }) => {
   await page.close();
-  hub?.stop();
-  await closeServer?.();
-  await hook?.close();
-  await rm(dir, { recursive: true, force: true });
-  if (originalBridgeHome === undefined) delete process.env.PHREN_BRIDGE_HOME;
-  else process.env.PHREN_BRIDGE_HOME = originalBridgeHome;
-  if (originalConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalConfigHome;
-});
-
-test.afterAll(() => {
-  if (linkedUi) { try { unlinkSync(UI_LINK); } catch { /* already gone */ } }
+  await h.close();
 });
 
 async function openHome(page: Page) {
@@ -98,7 +52,6 @@ test("snoozing a waiting chat hides its row and lowers every needs-you count; Wa
   await expect(page.locator("#needs-pill")).toHaveText("4 need you");
   await expect(needs(page).locator(".count")).toHaveText("4");
   await expect(needs(page).locator(".home-snoozed")).toBeHidden();
-  await page.waitForTimeout(300);
   await page.screenshot({ path: test.info().outputPath("snooze-before.png") });
 
   const row = needs(page).locator(".home-reply-row", { hasText: "Fix login" });
@@ -122,7 +75,6 @@ test("snoozing a waiting chat hides its row and lowers every needs-you count; Wa
   await footer.locator("summary").click();
   await expect(footer.locator(".home-snoozed-row")).toContainText("Fix login");
   await expect(footer.locator(".home-snoozed-row")).toContainText("until");
-  await page.waitForTimeout(300);
   await page.screenshot({ path: test.info().outputPath("snooze-after.png") });
 
   // It survives a reload (per-viewer storage) and the sidebar's own needs-you group is untouched.
@@ -142,12 +94,14 @@ test("a new message on a snoozed chat brings it back at once", async ({ page }) 
   await openHome(page);
   await snoozeFix(page);
   await expect(page.locator("#needs-pill")).toHaveText("3 need you");
-  // The same frame again changes nothing.
-  hook.pushOverview(frame());
-  await page.waitForTimeout(300);
+  // The same frame again changes nothing. Frames arrive in order, so once an unrelated change in the
+  // next one has drawn, the identical frame before it has been handled too.
+  h.hook.pushOverview(frame());
+  h.hook.pushOverview(frame({}, { lastReply: "Which section first? (edited)" }));
+  await expect(rowOf(page, "Review the docs")).toContainText("(edited)");
   await expect(page.locator("#needs-pill")).toHaveText("3 need you");
   // A new reply from the agent is a new need.
-  hook.pushOverview(frame({ lastReply: "Actually, CI failed. Should I fix it?", lastChangedAt: "2026-10-16T09:30:00.000Z" }));
+  h.hook.pushOverview(frame({ lastReply: "Actually, CI failed. Should I fix it?", lastChangedAt: "2026-10-16T09:30:00.000Z" }));
   await expect(page.locator("#needs-pill")).toHaveText("4 need you");
   await expect(needs(page).locator(".home-reply-row", { hasText: "Fix login" })).toContainText("CI failed");
   await expect(needs(page).locator(".home-snoozed")).toBeHidden();

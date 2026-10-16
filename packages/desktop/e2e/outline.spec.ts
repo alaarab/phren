@@ -1,77 +1,33 @@
-import { existsSync, symlinkSync, unlinkSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
-import { hookRequest, hookWebSocket } from "../src/hook-client.js";
-import { createOverviewHub } from "../src/overview.js";
-import { startServer } from "../src/server.js";
-import { longTranscript, startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
+import { longTranscript } from "../src/testing/fake-hook.js";
+import { chatRow, linkUi, openChat, overviewFrame, startHarness, type Harness } from "./helpers.js";
 
-const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
-const SPEC_DIR = path.dirname(fileURLToPath(import.meta.url));
-const UI_LINK = path.resolve(SPEC_DIR, "../../../packages/ui");
-const originalBridgeHome = process.env.PHREN_BRIDGE_HOME;
-const originalConfigHome = process.env.XDG_CONFIG_HOME;
-let linkedUi = false;
-let dir: string;
-let hook: FakeHook;
-let hub: OverviewHub;
-let closeServer: (() => Promise<void>) | undefined;
+let h: Harness;
+let unlinkUi: () => void;
 let url: string;
 
-const overview = {
-  type: "overview", kind: "overview",
-  groups: [{ id: "1", label: "phren", children: [{
-    id: "long", title: "Long chat", label: "phren", agent: "claude", agentStatus: "idle", lastReply: "Done.", cwd: "/Users/you/phren",
-    target: { server: "default", workspace: "1", tab: "long", pane: "long", source: "claude", session: "long" },
-  }] }],
-  phren: { computer: { id: "test-computer", name: LOCAL.name }, version: "0.3.49",
-    capabilities: { transcript: true, prompt: true, overviewStream: true } },
-};
+const overview = overviewFrame([chatRow("long", "Long chat", "idle", { lastReply: "Done." })]);
 
-test.beforeEach(async ({ page }, testInfo) => {
-  if (!existsSync(UI_LINK)) { symlinkSync(path.resolve(SPEC_DIR, "../ui"), UI_LINK, "dir"); linkedUi = true; }
-  await mkdir(path.resolve(".scratch"), { recursive: true });
-  dir = await mkdtemp(path.resolve(".scratch/desktop-outline-"));
-  process.env.PHREN_BRIDGE_HOME = dir;
-  process.env.XDG_CONFIG_HOME = dir;
-  hook = await startFakeHook({ dir, overviewFrames: [overview], transcriptFrames: testInfo.title.includes("80 prompts") ? longTranscript(80, 2) : longTranscript(6) });
-  hub = createOverviewHub([LOCAL], hookWebSocket);
-  const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
-  hub.start();
-  await ready;
-  const server = await startServer({
-    port: 0, token: "desktop-outline-token", computers: [LOCAL], hub, hookRequest, hookWebSocket,
-    attachTerminal: () => ({ write() {}, resize() {}, onData() {}, onExit() {}, kill() {} }),
+test.beforeAll(() => { unlinkUi = linkUi(); });
+test.afterAll(() => { unlinkUi(); });
+
+test.beforeEach(async ({}, testInfo) => {
+  h = await startHarness("outline", {
+    overviewFrames: [overview],
+    transcriptFrames: testInfo.title.includes("80 prompts") ? longTranscript(80, 2) : longTranscript(6),
+    transcriptPageSize: testInfo.title.includes("earlier prompts") ? 6 : undefined,
   });
-  url = server.url;
-  closeServer = server.close;
+  url = h.url;
 });
 
 test.afterEach(async ({ page }) => {
   await page.close();
-  hub?.stop();
-  await closeServer?.();
-  await hook?.close();
-  await rm(dir, { recursive: true, force: true });
-  if (originalBridgeHome === undefined) delete process.env.PHREN_BRIDGE_HOME;
-  else process.env.PHREN_BRIDGE_HOME = originalBridgeHome;
-  if (originalConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalConfigHome;
-});
-
-test.afterAll(() => {
-  if (linkedUi) { try { unlinkSync(UI_LINK); } catch { /* already gone */ } }
+  await h.close();
 });
 
 async function openLongChat(page: Page, width: number, height: number, last = "Step 9 of answer 6") {
   await page.setViewportSize({ width, height });
-  await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.locator('.section-pill[data-section="agents"]').click();
-  await page.locator(".sb-row", { hasText: "Long chat" }).first().click();
-  await expect(page.locator(".ct-column")).toContainText(last);
+  await openChat(page, url, "Long chat", last);
 }
 
 /** The prompt row (1-based) whose top edge is closest to the transcript's top, as its text. */
@@ -139,7 +95,7 @@ test("a jump lands while the reply streams, and following the bottom resumes onc
   let line = 12;
   const stream = (text: string) => {
     line += 1;
-    hook.pushTranscript(undefined, { type: "append", totalLines: line, entries: [{ line, raw: { type: "assistant", uuid: `s${line}`, message: { role: "assistant", content: [{ type: "text", text }] } } }] });
+    h.hook.pushTranscript(undefined, { type: "append", totalLines: line, entries: [{ line, raw: { type: "assistant", uuid: `s${line}`, message: { role: "assistant", content: [{ type: "text", text }] } } }] });
   };
   // Entries keep arriving while the reader jumps to a folded prompt.
   let n = 0;
@@ -147,7 +103,8 @@ test("a jump lands while the reply streams, and following the bottom resumes onc
   try {
     await page.locator(".ct-outline-tick").first().click();
     await expect.poll(() => topPrompt(page), { timeout: 10_000 }).toContain("Fix the login flow");
-    await page.waitForTimeout(600); // more chunks land after the jump settled; the view stays on the prompt
+    // More chunks land after the jump settled; the view stays on the prompt.
+    await expect(page.locator(".ct-column")).toContainText(`Streaming chunk ${n + 5}:`);
     expect(await topPrompt(page)).toContain("Fix the login flow");
   } finally {
     clearInterval(timer);
@@ -224,4 +181,27 @@ test("works with Find in chat: the rail's text is not searched and a jump keeps 
   await page.locator(".ct-outline-tick").nth(1).click();
   await expect(page.locator(".ct-column mark.ct-find-hit")).toHaveCount(6);
   await expect(count).toHaveText(/\/6$/);
+});
+
+test("with earlier prompts on the Hook the rail offers ↑ earlier, which loads them and lands on the first loaded prompt", async ({ page }) => {
+  await openLongChat(page, 1280, 800);
+  const ticks = page.locator(".ct-outline-tick");
+  const earlier = page.locator(".ct-outline-earlier");
+  // The Hook holds only the newest page (3 of the 6 prompts): the rail says there is more.
+  await expect(ticks).toHaveCount(3);
+  await expect(earlier).toBeVisible();
+  await expect(earlier).toHaveAttribute("aria-label", "Load earlier prompts");
+  const olderCalls = () => h.hook.calls.filter((call) => call.path.startsWith("/v1/transcripts/history") && call.path.includes("beforeLine")).length;
+  expect(olderCalls()).toBe(0);
+
+  await earlier.click();
+  // Every prompt now has a tick, numbered from the first, and there is nothing older to offer.
+  await expect(ticks).toHaveCount(6);
+  await expect(ticks.first()).toHaveAttribute("aria-label", "Prompt 1: Fix the login flow");
+  await expect(earlier).toBeHidden();
+  expect(olderCalls()).toBe(1);
+  // The view lands on the first loaded prompt (the oldest, which the page before it brought in).
+  await expect.poll(() => topPrompt(page)).toContain("Fix the login flow");
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(olderCalls()).toBe(1);
 });

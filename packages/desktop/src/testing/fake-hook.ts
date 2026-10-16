@@ -32,6 +32,11 @@ export interface FakeHookOptions {
   overviewFrames?: unknown[];
   /** Backlog entries sent on every transcript connection. */
   transcriptFrames?: unknown[];
+  /** Entries per transcript page. With it, the snapshot and the live backlog hold only the newest page (`hasMore: true`) and
+   * `GET /v1/transcripts/history?beforeLine=N` returns the page before line N, so "load earlier" paths can be driven. */
+  transcriptPageSize?: number;
+  /** Awaited before each older page (a request with `beforeLine`) is answered, to hold a load open mid-flight. */
+  holdOlderPages?: () => Promise<void>;
   /** Milliseconds the transcript socket waits before sending its backlog (default 0), to tell a prefetched chat from a fresh load. */
   transcriptDelayMs?: number;
   /** Text files `/v1/files/range` serves, by repository path (default: src/app.ts). */
@@ -43,6 +48,8 @@ export interface FakeHook {
   socketPath: string;
   /** Every HTTP request and WebSocket upgrade, in arrival order. */
   calls: FakeHookCall[];
+  /** How many transcript backlogs have been sent (after `transcriptDelayMs`), to wait on a delayed stream. */
+  backlogsSent(): number;
   /** Push an overview frame to every open overview socket. */
   pushOverview(frame: unknown): void;
   /** Push a transcript frame; `target` a session id (or `{session}`), else all. */
@@ -353,6 +360,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   const statusSockets = new Set<WebSocket>();
   const overviewFrames = options.overviewFrames ?? [defaultOverview(), { type: "resources", resources: defaultResources() }];
   const transcriptFrames = options.transcriptFrames ?? defaultTranscript();
+  let backlogs = 0;
 
   // One text file the editor can read and save; version bumps on every write.
   const files = new Map<string, { content: string; version: string }>(options.files
@@ -360,11 +368,21 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     : [[APP_PATH, { content: "export const app = \"new\";\nexport const ready = true;\n", version: "v1" }]]);
 
   const numberedTranscript = () => (transcriptFrames as Array<{ line?: number; raw: unknown }>).map((entry, index) => ({ line: entry.line ?? index + 1, raw: entry.raw }));
+  // One page of the transcript ending before `beforeLine` (the newest page when omitted).
+  const transcriptPage = (beforeLine?: number) => {
+    const all = numberedTranscript();
+    const size = options.transcriptPageSize;
+    if (!size) return { entries: all, totalLines: all.length, startLine: 1, hasMore: false };
+    const end = beforeLine === undefined ? all.length : Math.min(all.length, beforeLine - 1);
+    const start = Math.max(1, end - size + 1);
+    return { entries: all.filter((entry) => entry.line >= start && entry.line <= end), totalLines: all.length, startLine: start, hasMore: start > 1 };
+  };
   const defaults: Record<string, FakeHookHandler> = {
     // The newest page over HTTP: the snapshot the desktop reads ahead of opening a chat.
-    "GET /v1/transcripts/history": (_req, _body, url) => {
-      const entries = numberedTranscript();
-      return { json: { type: "older", source: url.searchParams.get("source") ?? "claude", session: url.searchParams.get("session") ?? "", entries, totalLines: entries.length, startLine: 1, hasMore: false } };
+    "GET /v1/transcripts/history": async (_req, _body, url) => {
+      const before = url.searchParams.get("beforeLine");
+      if (before !== null) await options.holdOlderPages?.();
+      return { json: { type: "older", source: url.searchParams.get("source") ?? "claude", session: url.searchParams.get("session") ?? "", ...transcriptPage(before === null ? undefined : Number(before)) } };
     },
     "GET /v1/tasks/stores": () => ({ json: { stores: [{ id: "personal", name: "Personal", primary: true, role: "owner", metadataWritable: true, projects: ["phren", "website"] }] } }),
     "GET /v1/tasks": (_req, _body, url) => {
@@ -569,11 +587,11 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
         // The real Hook's backlog shape (packages/cli/src/bridge/transcripts.ts): numbered
         // entries, the harness source and the session, so clients parse it as they do live.
         const source = url.searchParams.get("source") ?? "claude";
-        const entries = numberedTranscript();
-        const backlog = { type: "backlog", source, session: url.searchParams.get("session") ?? "", entries, totalLines: entries.length, startLine: 1, hasMore: false, reset: true };
+        const backlog = { type: "backlog", source, session: url.searchParams.get("session") ?? "", ...transcriptPage(), reset: true };
         const delay = options.transcriptDelayMs ?? 0;
-        if (delay > 0) { const timer = setTimeout(() => send(ws, backlog), delay); ws.once("close", () => clearTimeout(timer)); }
-        else send(ws, backlog);
+        const sendBacklog = () => { send(ws, backlog); backlogs += 1; };
+        if (delay > 0) { const timer = setTimeout(sendBacklog, delay); ws.once("close", () => clearTimeout(timer)); }
+        else sendBacklog();
       } else if (url.pathname === "/v1/status") {
         statusSockets.add(ws);
         ws.on("close", () => statusSockets.delete(ws));
@@ -593,6 +611,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     dir,
     socketPath,
     calls,
+    backlogsSent: () => backlogs,
     pushOverview(frame: unknown): void {
       for (const ws of overviewSockets) send(ws, frame);
     },
