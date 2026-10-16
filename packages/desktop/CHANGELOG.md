@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- **Pull requests on Home**: every open pull or merge request across your projects, the ones that need you first.
 - Notifications when a pull request you're working on gets changes requested, is approved, or hits conflicts.
 - **Snooze** a chat that's waiting on you from Home; it comes back when the time's up or something new happens.
 - **Switch between recent chats with Ctrl+Tab**: hold Ctrl to see your last eight chats and their status.
