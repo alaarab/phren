@@ -16,6 +16,11 @@ const MAX_HEAD = 16 * 1024;
 /** Idle time after which a remote preview connection (and its SSH channel) is closed. */
 const IDLE_CONNECTION_MS = 60_000;
 
+/** Whether a request head asks to switch protocols (a WebSocket). Exported for tests. */
+export function isUpgrade(head: string): boolean {
+  return head.split("\r\n").slice(1).some((line) => /^upgrade:\s*\S/i.test(line));
+}
+
 /** Whether a request head names exactly `127.0.0.1:<port>` as its Host. Exported for tests. */
 export function hostMatches(head: string, port: number): boolean {
   const hosts = head.split("\r\n").slice(1).filter((line) => /^host:/i.test(line));
@@ -109,8 +114,10 @@ class Relay {
       remote.destroy();
     });
     // A remote connection holds a pooled channel: drop idle keep-alive
-    // connections quickly; the browser reconnects on demand.
-    if (!this.computer.local) {
+    // connections quickly; the browser reconnects on demand. Upgraded
+    // connections (a dev server's HMR socket) idle legitimately, and closing
+    // one makes the page reload, so they keep their channel.
+    if (!this.computer.local && !isUpgrade(head.subarray(0, head.indexOf("\r\n\r\n")).toString("latin1"))) {
       socket.setTimeout(IDLE_CONNECTION_MS, () => socket.destroy());
     }
     remote.write(head);
