@@ -23,13 +23,15 @@ The gitboy jobs run the same commands as the GitHub jobs. Differences: the macOS
 
 ## How a run starts
 
-1. You dispatch CI on GitHub with `release_candidate=true`, as for any RC.
-2. The `gitboy-rc` job in `ci.yml` asks the gitboy pull mirror to sync (best effort), then calls `POST /api/v1/repos/:owner/:repo/pipelines` with `ref` set to the commit's SHA and the variables `PHREN_RC=true`, `PHREN_RC_SHA`, `GITHUB_REPOSITORY` and `GITHUB_RUN_URL`. While the mirror doesn't have the commit yet, gitboy answers `400 Ref does not resolve to a commit` and the job retries for about four minutes.
+1. You dispatch CI on GitHub with `release_candidate=true` on the default branch, as for any RC.
+2. That starts `.github/workflows/gitboy-rc.yml` through `workflow_run` on CI's `requested` event, so both RCs run side by side and CI never waits for it. It runs only when the CI run is an `RC validation` dispatch started by the repository owner on the default branch, and uses that run's `head_sha`. Its `trigger` job asks the gitboy pull mirror to sync (best effort), then calls `POST /api/v1/repos/:owner/:repo/pipelines` with `ref` set to the commit's SHA and the variables `PHREN_RC=true`, `PHREN_RC_SHA`, `GITHUB_REPOSITORY` and `GITHUB_RUN_URL`. While the mirror doesn't have the commit yet, gitboy answers `400 Ref does not resolve to a commit` and the job retries for about four minutes.
 3. `.gitboy.yml`'s `workflow.rules` admits only manual (API or Console) pipelines with `PHREN_RC=true`, so mirror syncs and pushes never start it.
 4. `github-status-pending` posts `pending` for `gitboy/rc` on the commit and checks that gitboy resolved the SHA it was asked for. The test jobs run in parallel.
 5. When they finish, `github-status-success` or `github-status-failure` posts the result. The status links to the gitboy pipeline page.
 
-The `gitboy-rc` job has `continue-on-error`, a six-minute timeout and no token permissions. Without the two secrets it logs `gitboy RC not configured` and succeeds. It never prints the gitboy URL (GitHub masks secrets in the public log) and writes only the pipeline number to the run summary.
+The gitboy RC workflow is separate from `ci.yml`, so it never holds the RC run open, and `release.yml` (which reads only the CI run) cannot see it. Its job has `continue-on-error`, a six-minute timeout and no token permissions. Without the two secrets it logs `gitboy RC not configured` and succeeds. Only the repository owner can start it: a collaborator with write access dispatching CI or this workflow gets a skipped job, because the secrets start code on the owner's runners. It never prints the gitboy URL, curl's error text or gitboy's response body; failures are reported as `gitboy could not be reached` or the HTTP status. The run summary names only the pipeline number.
+
+GitHub only fires `workflow_run` for a workflow file on the default branch, so nothing happens until this file is merged. To start it by hand (for example after adding the secrets), run the **gitboy RC** workflow from the Actions tab on the default branch, optionally with a full commit `sha`.
 
 ## Setup
 
@@ -57,7 +59,7 @@ If the gitboy repository's path differs from `alaarab/phren`, also add the Actio
 ## Reading results
 
 - On GitHub, the commit (and any pull request at that head) shows `gitboy/rc` next to the Actions checks. Its link opens the gitboy pipeline.
-- The GitHub RC run's `gitboy-rc` job summary names the gitboy pipeline number; its log says why nothing started (not configured, HTTP status, mirror never received the commit).
+- The **gitboy RC** workflow run's summary names the gitboy pipeline number; its log says why nothing started (not configured, HTTP status, mirror never received the commit).
 - On gitboy, the pipeline page shows each job's log. A failed `browser-test` keeps `coverage/desktop-playwright/` as an artifact for three days.
 
 A pipeline whose jobs wait for a runner that is offline (the Mac asleep, for instance) stays `pending` on GitHub until the runner returns or you cancel the pipeline on gitboy. That never blocks a release: `release.yml` doesn't read commit statuses.

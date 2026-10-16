@@ -7,7 +7,7 @@
 # on GitHub.
 #
 # It is started only through the API (or the Console's Run pipeline), never by
-# a push: the RC job in .github/workflows/ci.yml posts
+# a push: .github/workflows/gitboy-rc.yml, started alongside GitHub's RC, posts
 #   POST /api/v1/repos/:owner/:repo/pipelines
 #   {"ref": "<sha>", "variables": {"PHREN_RC": "true", "PHREN_RC_SHA": "<sha>", ...}}
 # so the pipeline runs at exactly the commit GitHub's RC runs.
