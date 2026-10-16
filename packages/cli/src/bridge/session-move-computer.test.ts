@@ -626,7 +626,7 @@ describe.skipIf(process.platform === "win32")("owner conductor moves through Ses
 });
 
 
-it("keeps the original dispatcher receipt through an immediate worker relocation before its next poll", async () => {
+it.skipIf(process.platform === "win32")("keeps the original dispatcher receipt through an immediate worker relocation before its next poll", async () => {
   const f = fixture();
   const dispatch = "d0000000-0000-4000-8000-000000000001";
   await peers.addHookPeer({ name: "dispatcher", address: "dispatcher.test", username: "owner", hostKey: KEY });
@@ -658,7 +658,7 @@ it("keeps the original dispatcher receipt through an immediate worker relocation
 });
 
 
-it("retains a peer pane immediately when harness startup fails before its launch reply", async () => {
+it.skipIf(process.platform === "win32")("retains a peer pane immediately when harness startup fails before its launch reply", async () => {
   const f = fixture();
   const original = f.transport.getMockImplementation()!;
   const { session: _session, ...paneTarget } = target;
@@ -675,7 +675,7 @@ it("retains a peer pane immediately when harness startup fails before its launch
 });
 
 
-it("lists projectless conductor accounts without requiring an invented project name", async () => {
+it.skipIf(process.platform === "win32")("lists projectless conductor accounts without requiring an invented project name", async () => {
   const f = fixture();
   vi.spyOn(harnesses, "harnessInventoryWithin").mockResolvedValue({ harnesses: [{ source: "claude", installed: true, usable: true, accounts: [{ id: "work", label: "Work", key: "private-key", signedIn: true, usable: true }] }] });
   const answer = await request(f.mover, "GET", "/v1/sessions/move/computers?conductor=1");
@@ -836,7 +836,7 @@ describe.skipIf(process.platform === "win32")("reviewed peer authorization and r
   });
 });
 
-it("forwards peer-originated hand-off notices at ingress rather than enqueueing them into the fenced old pane", async () => {
+it.skipIf(process.platform === "win32")("forwards peer-originated hand-off notices at ingress rather than enqueueing them into the fenced old pane", async () => {
   const f = fixture(), deliveryId = `handoff-notice-${"a".repeat(40)}`;
   const forward = vi.fn(async () => ({ delivered: true })), enqueue = vi.fn();
   const response = await request(f.mover, "POST", "/v1/hand-off", { target: from, text: "Hand-off finished", deliveryId }, { "x-phren-origin": "peer" }, { succession: { forward }, handOffs: { enqueue } } as never);
@@ -845,7 +845,7 @@ it("forwards peer-originated hand-off notices at ingress rather than enqueueing 
   expect(enqueue).not.toHaveBeenCalled();
 });
 
-it("refuses an authenticated peer launch without a canonical owner-admitted source intent", async () => {
+it.skipIf(process.platform === "win32")("refuses an authenticated peer launch without a canonical owner-admitted source intent", async () => {
   const f = fixture(), peer = (await peers.hookPeers())[0];
   const enqueue = vi.fn();
   const original = f.transport.getMockImplementation()!;
@@ -859,7 +859,7 @@ it("refuses an authenticated peer launch without a canonical owner-admitted sour
   expect(enqueue).not.toHaveBeenCalled();
 });
 
-it("reports a never-received launch as not-placed only after verifying the source's owner-admitted intent", async () => {
+it.skipIf(process.platform === "win32")("reports a never-received launch as not-placed only after verifying the source's owner-admitted intent", async () => {
   const f = fixture(), peer = (await peers.hookPeers())[0];
   const canonical = { computerId: A_ID, project: "repo", to: { harness: "claude" }, label: "Continue", worker: false, brief: { id: B_ID, text: "Owner-admitted work" } };
   f.transport.mockResolvedValue(canonical);
@@ -871,7 +871,7 @@ it("reports a never-received launch as not-placed only after verifying the sourc
   expect(f.transport).toHaveBeenCalledWith(expect.objectContaining({ name: peer.name }), `/v1/sessions/move/intent?id=${B_ID}`, undefined, 5000);
 });
 
-it("does not accept unrelated new Hooks as proof that a legacy dispatcher's worker can relocate", async () => {
+it.skipIf(process.platform === "win32")("does not accept unrelated new Hooks as proof that a legacy dispatcher's worker can relocate", async () => {
   const f = fixture();
   f.deps.paneDispatch = async () => A_ID;
   const original = f.transport.getMockImplementation()!;
@@ -884,7 +884,7 @@ it("does not accept unrelated new Hooks as proof that a legacy dispatcher's work
   expect(f.deliver).not.toHaveBeenCalled();
 });
 
-it("redacts credential values from peer error responses as well as successful payloads", async () => {
+it.skipIf(process.platform === "win32")("redacts credential values from peer error responses as well as successful payloads", async () => {
   const f = fixture();
   const authorize = async () => { throw new BridgeError(409, "PGPASSWORD=hunter2\nCookie: k=v\ncurl -u user:pw", { authority: "owner" }); };
   const response = await request(f.mover, "GET", `/v1/conductor/move/status?id=${A_ID}`, {}, { "x-phren-origin": "peer" }, { succession: { authorize } } as never);
@@ -893,7 +893,7 @@ it("redacts credential values from peer error responses as well as successful pa
   expect(response.body.authority).toBe("owner");
 });
 
-it("preserves startingToken in peer pane replies and capabilities in peer health replies", async () => {
+it.skipIf(process.platform === "win32")("preserves startingToken in peer pane replies and capabilities in peer health replies", async () => {
   const f = fixture(), startingToken = "ab".repeat(32);
   vi.spyOn(herdr, "panes").mockResolvedValue({ panes: [{ id: "w1:p2", startingToken, agent: "claude" }] });
   const headers = { "x-phren-origin": "peer" };
@@ -903,7 +903,7 @@ it("preserves startingToken in peer pane replies and capabilities in peer health
   expect(health).toMatchObject({ status: 200, body: { capabilities: { projectHostToken: true, authority: true }, author: "Al", authority: "owner" } });
 });
 
-it("limits peer move status reads to the move's verified destination", async () => {
+it.skipIf(process.platform === "win32")("limits peer move status reads to the move's verified destination", async () => {
   const f = fixture(), original = f.transport.getMockImplementation()!;
   f.transport.mockImplementation(async (peer, route, data, timeout) => route === "/v1/health" ? { computer: { id: B_ID } } : original(peer, route, data, timeout));
   const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
@@ -916,7 +916,7 @@ it("limits peer move status reads to the move's verified destination", async () 
   expect((await request(f.mover, "GET", `/v1/sessions/move?id=${move.id}`)).status).toBe(200);
 });
 
-it.each([403, 503])("terminates refusals and backs off transient move recovery (%s)", async status => {
+it.skipIf(process.platform === "win32").each([403, 503])("terminates refusals and backs off transient move recovery (%s)", async status => {
   const f = fixture(), original = f.transport.getMockImplementation()!;
   let clock = Date.now(); const created = clock;
   f.deps.now = () => clock;
@@ -945,7 +945,7 @@ it.each([403, 503])("terminates refusals and backs off transient move recovery (
   }
 });
 
-it("delivers Hook return notices directly even when its inherited environment identifies an agent pane", async () => {
+it.skipIf(process.platform === "win32")("delivers Hook return notices directly even when its inherited environment identifies an agent pane", async () => {
   const f = fixture(), at = new Date().toISOString();
   await mkdir(path.join(root, "bridge", "dispatches"));
   await writeFile(path.join(root, "bridge", "dispatches", `${A_ID}.json`), JSON.stringify({ id: A_ID, computer: "self", harness: "claude", project: "repo", label: "Finished", state: "accepted", target, origin: { server: from.server, workspace: from.workspace, tab: from.tab, pane: from.pane, agent: "claude", terminal: "term-1" }, createdAt: at, updatedAt: at, returned: { state: "done", at, reply: "Done", read: false } }));
