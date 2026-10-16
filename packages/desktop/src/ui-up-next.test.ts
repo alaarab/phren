@@ -78,7 +78,12 @@ class FakeNode {
   disabled = false;
   className = "";
   textContent = "";
-  hidden = false;
+  private isHidden = false;
+  get hidden() { return this.isHidden; }
+  set hidden(value: boolean) {
+    if (value && this.contains(doc.activeElement)) doc.activeElement = null;
+    this.isHidden = value;
+  }
   title = "";
   style: Record<string, string> = {};
   dataset: Record<string, string> = {};
@@ -218,20 +223,61 @@ it.each([409, 404])("shows Hook %s errors inline and disables missing routes", a
     expect(list.children[0].children[2].hidden).toBe(false);
   } finally { home.destroy(); }
 });
-it("gates unsupported owners and keeps confirmation focus through changed and reordered polls", async () => {
+it("gates unsupported owners and keeps confirmation focus through unchanged and reordered polls", async () => {
   const { home, list, run, source } = await runSetup();
   try {
     hooks.can.mockReturnValue(false); hooks.publish!(hooks.merged);
     expect(run.disabled).toBe(true); await click(run); expect(run.textContent).toBe("Run now");
     hooks.can.mockReturnValue(true); hooks.publish!(hooks.merged);
     await click(run); run.focus();
-    hooks.schedules.set("Desk", { schedules: [{ ...source, id: "earlier", nextRun: new Date(Date.now() + 60_000).toISOString() }, { ...source, name: "Renamed", updatedAt: "revision-2" }] });
+    hooks.schedules.set("Desk", { schedules: [{ ...source, id: "earlier", nextRun: new Date(Date.now() + 60_000).toISOString() }, { ...source, name: "Renamed" }] });
     home.hide(); home.show();
     await vi.waitFor(() => expect(list.children).toHaveLength(2));
     expect(list.children[1].children[1].children[0]).toBe(run);
     expect(doc.activeElement).toBe(run); expect(run.textContent).toBe("Run? Yes");
     hooks.schedules.set("Desk", { schedules: [{ ...source, running: true }] });
     home.hide(); home.show(); await vi.waitFor(() => expect(list.children).toHaveLength(0));
+    expect(hooks.run).not.toHaveBeenCalled();
+  } finally { home.destroy(); }
+});
+
+it.each(["updatedAt", "revision", "prompt"])("disarms confirmation when a poll changes %s, including focused Cancel during reorder", async (field) => {
+  const { home, list, run, source } = await runSetup();
+  try {
+    await click(run);
+    const cancel = list.children[0].children[1].children[1];
+    cancel.focus();
+    const changed = { ...source, [field]: "changed" };
+    hooks.schedules.set("Desk", { schedules: [
+      { ...source, id: "earlier", nextRun: new Date(Date.now() + 60_000).toISOString() }, changed,
+    ] });
+    home.hide(); home.show();
+    await vi.waitFor(() => expect(list.children).toHaveLength(2));
+    expect(list.children[1].children[1].children[0]).toBe(run);
+    expect(run.textContent).toBe("Run now");
+    expect(cancel.hidden).toBe(true);
+    expect(doc.activeElement).toBe(run);
+    await click(run);
+    expect(hooks.run).not.toHaveBeenCalled();
+    expect(run.textContent).toBe("Run? Yes");
+    await click(run);
+    expect(hooks.run).toHaveBeenCalledExactlyOnceWith("Desk", "/v1/schedules/run", {
+      project: "phren", id: "triage", expectedUpdatedAt: changed.updatedAt,
+    });
+  } finally { home.destroy(); }
+});
+it.each(["Yes", "Cancel", "elsewhere"])("keeps focus on a safe control when confirmation expires with focus on %s", async (focused) => {
+  const { home, list, run } = await runSetup();
+  try {
+    vi.useFakeTimers();
+    await click(run);
+    const cancel = list.children[0].children[1].children[1];
+    const other = new FakeNode();
+    (focused === "Yes" ? run : focused === "Cancel" ? cancel : other).focus();
+    vi.advanceTimersByTime(5000);
+    expect(cancel.hidden).toBe(true);
+    expect(run.textContent).toBe("Run now");
+    expect(doc.activeElement).toBe(focused === "elsewhere" ? other : run);
     expect(hooks.run).not.toHaveBeenCalled();
   } finally { home.destroy(); }
 });

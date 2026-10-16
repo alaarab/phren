@@ -6,6 +6,9 @@ import { runSchedule } from "../../shell/schedule-run.js";
 import { store } from "../../shell/store.js";
 import { harnessLabel } from "../../harness.js";
 
+// A confirmation authorizes the prompt and revision the user actually saw.
+const confirmationVersion = (schedule) => JSON.stringify([schedule.updatedAt, schedule.revision, schedule.prompt]);
+
 export function createUpNext({ block, scheduleLists, state }) {
   // Rows are keyed by schedule: an unchanged poll or overview update keeps the
   // same buttons (and keyboard focus) and only refreshes their wait labels.
@@ -56,7 +59,13 @@ export function createUpNext({ block, scheduleLists, state }) {
       cancel.hidden = !row.confirming;
       run.title = row.entry.schedule.running ? "Already running" : !row.allowed() ? "Run now unavailable on this computer" : "Run this schedule now";
     };
-    row.reset = () => { row.confirming = false; row.update(); };
+    row.reset = () => {
+      clearTimeout(row.timer);
+      // Keep keyboard input on this action before hiding the focused Cancel.
+      if (document.activeElement === cancel) run.focus();
+      row.confirming = false;
+      row.update();
+    };
     cancel.addEventListener("click", (event) => {
       event.stopPropagation(); clearTimeout(row.timer); row.reset(); run.focus();
     });
@@ -65,7 +74,7 @@ export function createUpNext({ block, scheduleLists, state }) {
       if (row.disposed || row.busy || !row.allowed()) return;
       clearTimeout(row.timer);
       if (!row.confirming) {
-        row.confirming = true; row.update();
+        row.confirming = true; row.confirmedVersion = confirmationVersion(row.entry.schedule); row.update();
         row.timer = setTimeout(row.reset, 5000);
         return;
       }
@@ -102,6 +111,7 @@ export function createUpNext({ block, scheduleLists, state }) {
       let row = upNextRows.get(entry.key);
       if (!row) row = upNextRow(entry);
       row.entry = entry;
+      if (row.confirming && row.confirmedVersion !== confirmationVersion(schedule)) row.reset();
       row.title.textContent = schedule.name || "Scheduled prompt";
       const line = promptLine(schedule);
       const main = row.button.children[0];
@@ -135,8 +145,10 @@ export function createUpNext({ block, scheduleLists, state }) {
     upNextRows = next;
     const current = [...list.children];
     if (buttons.length === current.length && buttons.every((button, i) => button === current[i])) return;
+    // A reset above may have moved focus from Cancel back to Run now.
+    const focused = document.activeElement;
     list.replaceChildren(...buttons);
-    if (keepFocus && buttons.some((button) => button.contains(active))) active.focus();
+    if (keepFocus && buttons.some((button) => button.contains(focused))) focused.focus();
   }
   renderUpNext.destroy = () => { for (const row of upNextRows.values()) { row.disposed = true; clearTimeout(row.timer); } upNextRows.clear(); };
   return renderUpNext;
