@@ -47,7 +47,7 @@ function sameBinding(a, b) {
   return sameTarget && a.id === b.id && a.sessionId === b.sessionId && a.conversationId === b.conversationId;
 }
 
-export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, openSession }) {
+export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, openSession, openPulls = openSession }) {
   if (!shell) return;
   let notified = null; // keys already announced; null until the first frame
   let stalled = null; // keys already reported stalled; null until the first frame
@@ -118,8 +118,11 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
   });
   approvals.subscribe(updateNeeds);
   shell.onOpenSession?.((key) => {
-    const row = store.sessions({ includeOffline: true }).find((s) => s.key === key);
-    if (row) openSession(row.computer, row.child);
+    // `pulls:<session key>` is a pull request notification: open Changes > PRs.
+    const pulls = key.startsWith("pulls:");
+    const wanted = pulls ? key.slice(6) : key;
+    const row = store.sessions({ includeOffline: true }).find((s) => s.key === wanted);
+    if (row) (pulls ? openPulls : openSession)(row.computer, row.child);
   });
   shell.onReply?.(async ({ key, text, binding }) => {
     const error = binding ? await sendReply(key, text, { expected: binding }) : "That session is gone.";

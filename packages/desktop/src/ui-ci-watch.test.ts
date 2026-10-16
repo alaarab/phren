@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checksStrip, ciTransitions, watchedSessions } from "../ui/shell/ci-watch.js";
+import { checksStrip, ciTransitions, reviewNotice, reviewTransitions, watchedSessions } from "../ui/shell/ci-watch.js";
 
 const pull = (checks: string | null) => ({ project: "phren", computer: "This computer", number: 42, title: "Keep the session", checks });
 
@@ -40,3 +40,51 @@ describe("checksStrip", () => {
     expect(checksStrip(pulls).map((p) => `${p.checks}#${p.number}`)).toEqual(["failing#8", "failing#3", "pending#5", "passing#7", "null#9"]);
   });
 });
+
+describe("reviewTransitions", () => {
+  type Look = Parameters<typeof reviewTransitions>[1] extends Map<string, infer V> ? V : never;
+  const look = (decision: string | null, conflicts = false, key = "a"): [string, Look] =>
+    [key, { key, project: "phren", computer: "mini", number: 42, title: "Keep the session", ref: "#", decision, conflicts, checks: null } as Look];
+  const run = (looks: Array<Array<[string, Look]>>) => {
+    const announced = new Set<string>();
+    let previous = new Map<string, Look>();
+    return looks.map((entries) => {
+      const current = new Map(entries);
+      const out = reviewTransitions(previous, current, announced).map((t: { state: string }) => t.state);
+      previous = current;
+      return out;
+    });
+  };
+
+  it("announces each transition once and nothing on first sight", () => {
+    expect(run([
+      [look("CHANGES_REQUESTED", true)], // first sight: baseline only
+      [look("CHANGES_REQUESTED", true)],
+      [look(null)], // both cleared
+      [look("CHANGES_REQUESTED")],
+      [look("CHANGES_REQUESTED")],
+    ])).toEqual([[], [], [], ["changes"], []]);
+  });
+
+  it("announces approval only when it was not approved before; approved to approved is silent", () => {
+    expect(run([[look("REVIEW_REQUIRED")], [look("APPROVED")], [look("APPROVED")], [look("REVIEW_REQUIRED")], [look("APPROVED")]]))
+      .toEqual([[], ["approved"], [], [], ["approved"]]);
+  });
+
+  it("announces conflicts again after they were cleared and came back", () => {
+    expect(run([[look(null)], [look(null, true)], [look(null, true)], [look(null, false)], [look(null, true)]]))
+      .toEqual([[], ["conflicts"], [], [], ["conflicts"]]);
+  });
+
+  it("forgets a request that leaves the watch set, so it is a first sight again", () => {
+    expect(run([[look(null)], [], [look("APPROVED")], [look("CHANGES_REQUESTED")]])).toEqual([[], [], [], ["changes"]]);
+  });
+
+  it("titles each notice", () => {
+    const pull = { project: "phren", computer: "mini", number: 42, title: "Keep the session", ref: "#" };
+    expect((["changes", "approved", "conflicts"] as const).map((state) => reviewNotice({ pull, state }).title)).toEqual([
+      "Changes requested on #42 Keep the session", "Approved: #42 Keep the session", "#42 Keep the session now has conflicts",
+    ]);
+  });
+});
+

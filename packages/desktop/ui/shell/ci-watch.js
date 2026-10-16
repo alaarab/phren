@@ -41,6 +41,48 @@ export function ciTransitions(previous, current) {
   return settled;
 }
 
+/** The review and merge states a request is in now: what notifications are about. */
+export function reviewStates(pull) {
+  const states = [];
+  if (pull.decision === "CHANGES_REQUESTED") states.push("changes");
+  if (pull.decision === "APPROVED") states.push("approved");
+  if (pull.conflicts) states.push("conflicts");
+  return states;
+}
+
+/** The review or merge transitions since the last look, as `{ pull, state }`
+ *  with state `changes`, `approved` or `conflicts`. A request seen for the
+ *  first time only sets the baseline. `announced` is the watcher's memory of
+ *  `<session>\0<number>:<state>` keys already reported: one report per
+ *  transition, forgotten when the state ends or the request leaves the watch
+ *  set (so approved again later is news again). Mutated. */
+export function reviewTransitions(previous, current, announced) {
+  const out = [];
+  for (const [key, now] of current) {
+    const active = reviewStates(now);
+    const before = previous.get(key);
+    const was = before ? reviewStates(before) : null;
+    for (const state of ["changes", "approved", "conflicts"]) {
+      const id = `${key}:${state}`;
+      if (!active.includes(state)) { announced.delete(id); continue; }
+      if (announced.has(id)) continue;
+      announced.add(id);
+      if (was && !was.includes(state)) out.push({ pull: now, state });
+    }
+  }
+  for (const id of [...announced]) if (!current.has(id.slice(0, id.lastIndexOf(":")))) announced.delete(id);
+  return out;
+}
+
+/** The notification for one review transition: title and body. */
+export function reviewNotice({ pull, state }) {
+  const ref = `${pull.ref || "#"}${pull.number}`;
+  const title = state === "changes" ? `Changes requested on ${ref} ${pull.title}`
+    : state === "approved" ? `Approved: ${ref} ${pull.title}`
+    : `${ref} ${pull.title} now has conflicts`;
+  return { title: title.trim(), body: `${pull.project} · ${pull.computer}` };
+}
+
 // Which sessions are watched, regardless of their recency order.
 const keysOf = (watched) => watched.map((w) => w.key).sort().join("\n");
 
@@ -80,13 +122,15 @@ export function followChecks(fn) {
   return () => { if (listeners.delete(fn)) interest -= 1; };
 }
 
-/** Start watching; `notify(title, body)` is the shell's (absent in a browser),
- *  `enabled()` the notification setting. */
-export function startCiWatch({ notify, enabled }) {
+/** Start watching; `notify(title, body, { key })` is the shell's (absent in a
+ *  browser), `enabled()` the checks notification setting, `reviewEnabled()` the
+ *  review and conflicts one. A notification's key is `pulls:<session key>`. */
+export function startCiWatch({ notify, enabled, reviewEnabled = () => false }) {
   let previous = new Map();
+  const announced = new Set();
   let running = false;
   let watchedKeys = "";
-  const notifying = () => !!notify && enabled();
+  const notifying = () => !!notify && (enabled() || reviewEnabled());
   async function tick() {
     if (running || !(notifying() || interest > 0)) return;
     running = true;
@@ -101,12 +145,18 @@ export function startCiWatch({ notify, enabled }) {
         const pull = body.current;
         if (!pull || !pull.number || (pull.state && pull.state !== "OPEN")) return;
         current.set(`${w.key}\u0000${pull.number}`, { ...w, number: pull.number, title: pull.title || "", checks: pull.checks ?? null,
+          decision: pull.reviewDecision ?? null, conflicts: pull.mergeState === "DIRTY" || pull.conflicts === true,
           ref: body.host?.terms?.ref || "#" });
       }));
       const settled = ciTransitions(previous, current);
       for (const fn of settledListeners) for (const pull of settled) fn(pull);
-      if (notifying()) for (const pull of settled) {
+      if (notify && enabled()) for (const pull of settled) {
         notify(`${pull.project}: checks ${pull.checks === "failing" ? "failed" : "passed"}`, `${pull.ref}${pull.number} ${pull.title} · ${pull.computer}`);
+      }
+      const reviews = reviewTransitions(previous, current, announced);
+      if (notify && reviewEnabled()) for (const change of reviews) {
+        const { title, body } = reviewNotice(change);
+        notify(title, body, { key: `pulls:${change.pull.key}` });
       }
       previous = current;
       lastLook = [...current.values()];
