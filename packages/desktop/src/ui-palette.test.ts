@@ -16,8 +16,8 @@ describe("memoryItems", () => {
       { kind: "truth", score: 0.4, matched: 2, text: "Never push to main.", finding: null },
     ], { computer: "This computer", project: "phren" });
     expect(rows.map((r) => [r.title, r.meta, r.icon])).toEqual([
-      ["Set TZ=UTC in the date tests.", "pitfall · 82%", "◆"],
-      ["Never push to main.", "truth · 40%", "★"],
+      ["Set TZ=UTC in the date tests.", "phren · This computer · pitfall · 82%", "◆"],
+      ["Never push to main.", "phren · This computer · truth · 40%", "★"],
     ]);
     expect(new Set(rows.map((r) => r.id)).size).toBe(2);
   });
