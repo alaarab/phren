@@ -231,6 +231,42 @@ describe("webServers", () => {
     }
   });
 
+  it("shares one socket-table read between concurrent ownership checks", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` }, lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
+    expect(await webServers()).toMatchObject([{ port, pid: 42 }]);
+    execFileMock.mockClear();
+    now += 2_000;
+    const results = await Promise.all([webServers(), webServers(), webServers()]);
+    expect(results.every(list => list.length === 1 && list[0].pid === 42)).toBe(true);
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    // A settled read is never reused.
+    await webServers();
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("probes every listener at once: unresponsive ones cost one timeout, not one per group of eight", async () => {
+    const { createServer: listen } = await import("node:net");
+    const open = new Set<import("node:net").Socket>();
+    const silent = await Promise.all(Array.from({ length: 24 }, () => new Promise<ReturnType<typeof listen>>(resolve => {
+      const hung = listen(socket => { socket.on("error", () => {}); open.add(socket); });
+      hung.listen(0, "127.0.0.1", () => resolve(hung));
+    })));
+    try {
+      const lines = silent.map((hung, i) => ssLine((hung.address() as AddressInfo).port, "hung", 100 + i));
+      answer({ ss: { stdout: [...lines, ssLine(port, "bun", 42)].join("\n") } });
+      const started = Date.now();
+      const found = await webServers();
+      expect(found.map(entry => entry.port)).toEqual([port]);
+      // Three groups of eight would take 3.6 s.
+      expect(Date.now() - started).toBeLessThan(2_400);
+    } finally {
+      for (const socket of open) socket.destroy();
+      await Promise.all(silent.map(hung => new Promise<void>(resolve => { hung.close(() => resolve()); })));
+    }
+  }, 10_000);
+
   it("retries a failed scan without caching its error", async () => {
     answer({});
     await expect(webServers()).rejects.toThrow(/install lsof/);

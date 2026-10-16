@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
@@ -298,6 +299,67 @@ export function invalidatePullsForDomain(domain: string): void {
   const normalized = domain.trim().toLowerCase().replace(/\.$/, "");
   for (const key of credentialReads.keys()) if (JSON.parse(key)[1] === normalized) credentialReads.delete(key);
   pullsCache.invalidate(key => key.split("\0")[1] === normalized);
+  pullsTargets.clear();
+}
+
+// Finding a checkout's root, branch and host costs about eight git subprocesses. The answer
+// only changes when HEAD or a git config file does, so it is reused per cwd while those are
+// unchanged, for at most PULLS_TARGET_TTL_MS (which also bounds what a config `include` or a
+// nested repository could hide). Concurrent polls share one lookup.
+const PULLS_TARGET_TTL_MS = 10_000;
+interface PullsTarget { root: string; branch: string; host: Awaited<ReturnType<typeof detectHost>> & { apiHost: string | null } }
+interface PullsTargetEntry { at: number; value: Promise<{ target: PullsTarget; signature: string }> }
+const pullsTargets = new Map<string, PullsTargetEntry>();
+
+function fileStamp(file: string): string {
+  try { const info = statSync(file); return `${info.mtimeMs}:${info.size}:${info.ino}`; } catch { return "-"; }
+}
+
+/** A cheap freshness signal: HEAD's text and the stamps of the repository's and the user's git config files. */
+function pullsSignature(root: string): string {
+  const parts: string[] = [];
+  const dotGit = path.join(root, ".git");
+  let gitDir = dotGit;
+  try {
+    const link = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, "utf8"));
+    if (link) gitDir = path.resolve(root, link[1].trim());
+  } catch { /* a directory: the main checkout */ }
+  let common = gitDir;
+  try { common = path.resolve(gitDir, readFileSync(path.join(gitDir, "commondir"), "utf8").trim()); } catch { /* gitDir is the common one */ }
+  let head: string;
+  try { head = readFileSync(path.join(gitDir, "HEAD"), "utf8"); } catch { head = "?"; }
+  const home = homedir();
+  parts.push(head, fileStamp(path.join(common, "config")), fileStamp(path.join(gitDir, "config.worktree")),
+    fileStamp(process.env.GIT_CONFIG_GLOBAL || path.join(home, ".gitconfig")),
+    fileStamp(path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "git", "config")));
+  return parts.join("\0");
+}
+
+async function pullsTarget(cwd: string): Promise<PullsTarget> {
+  const hit = pullsTargets.get(cwd);
+  if (hit && Date.now() - hit.at < PULLS_TARGET_TTL_MS) {
+    try {
+      const { target, signature } = await hit.value;
+      if (pullsSignature(target.root) === signature) return target;
+    } catch (error) {
+      // A shared lookup that failed fails its own callers; the next call looks again.
+      if (pullsTargets.get(cwd) === hit) pullsTargets.delete(cwd);
+      throw error;
+    }
+  }
+  const entry: PullsTargetEntry = { at: Date.now(), value: withIndependentGitReadDeadline(async () => {
+    const root = await repository(cwd);
+    // Signed before the reads below, so a change made while they run is seen by the next call.
+    const signature = pullsSignature(root);
+    const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
+    const host = await detectHost(root, branch);
+    const { apiHost } = await tokenDestination(root, host);
+    return { target: { root, branch, host: { ...host, apiHost } }, signature };
+  }) };
+  pullsTargets.set(cwd, entry);
+  if (pullsTargets.size > 64) pullsTargets.delete(pullsTargets.keys().next().value!);
+  try { return (await entry.value).target; }
+  catch (error) { if (pullsTargets.get(cwd) === entry) pullsTargets.delete(cwd); throw error; }
 }
 
 /** Open pull or merge requests and the checked-out branch's own (any state)
@@ -305,13 +367,7 @@ export function invalidatePullsForDomain(domain: string): void {
  * host that cannot answer (a missing CLI, a stubbed provider, an unknown
  * domain) is `{ available: false, reason, message }`, never an error. */
 export async function gitPulls(cwd: string, retried = false): Promise<Json> {
-  const { root, branch, host } = await withIndependentGitReadDeadline(async () => {
-    const root = await repository(cwd);
-    const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
-    const host = await detectHost(root, branch);
-    const { apiHost } = await tokenDestination(root, host);
-    return { root, branch, host: { ...host, apiHost } };
-  });
+  const { root, branch, host } = await pullsTarget(cwd);
   const provider = providerFor(host);
   const credential = await credentialIdentity(host);
   const key = repositoryId(root) + "\0" + (host.domain ?? "").toLowerCase().replace(/\.$/, "") + "\0" + JSON.stringify([branch, host, credential]);

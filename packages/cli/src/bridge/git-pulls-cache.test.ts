@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as gitHosts from "./git-hosts.js";
 import { PROVIDERS, type RequestList } from "./git-hosts.js";
 import { gitPulls } from "./git.js";
 import { gitHostToken, gitMergeRequest, gitPullRequest } from "./git-publish.js";
@@ -236,6 +238,44 @@ describe("Hook pull lookup cache", () => {
     await writeFile(file, "github.com:\n  user: sam\nghe.example.com:\n  user: work\n");
     await gitPulls(root);
     expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  describe("per-checkout target memo", () => {
+    it("looks up root, branch and host once while HEAD and config are unchanged, and shares concurrent lookups", async () => {
+      vi.spyOn(PROVIDERS.github, "list").mockResolvedValue(result(1));
+      const detect = vi.spyOn(gitHosts, "detectHost");
+      await Promise.all([gitPulls(root), gitPulls(root), gitPulls(root)]);
+      expect(detect).toHaveBeenCalledTimes(1);
+      await gitPulls(root);
+      await gitPulls(root);
+      expect(detect).toHaveBeenCalledTimes(1);
+    });
+
+    it("looks again after HEAD or the repository config changes, and after the memo expires", async () => {
+      vi.spyOn(PROVIDERS.github, "list").mockResolvedValue(result(1));
+      const detect = vi.spyOn(gitHosts, "detectHost");
+      await gitPulls(root);
+      await writeFile(path.join(root, ".git", "HEAD"), "ref: refs/heads/topic\n");
+      expect((await gitPulls(root)).branch).toBe("topic");
+      expect(detect).toHaveBeenCalledTimes(2);
+      await exec("git", ["-C", root, "remote", "set-url", "origin", "git@github.com:sam/moved.git"]);
+      expect(((await gitPulls(root)).host as { webUrl: string }).webUrl).toContain("sam/moved");
+      expect(detect).toHaveBeenCalledTimes(3);
+      now += 10_001;
+      await gitPulls(root);
+      expect(detect).toHaveBeenCalledTimes(4);
+    });
+
+    it("does not memoize a failed lookup", async () => {
+      // Outside this checkout, so no enclosing repository answers.
+      const outside = await realpath(await mkdtemp(path.join(tmpdir(), "not-a-repo-")));
+      try {
+        await expect(gitPulls(outside)).rejects.toThrow();
+        await exec("git", ["init", "-q", "-b", "feature", outside]);
+        vi.spyOn(PROVIDERS.github, "list").mockResolvedValue(result(1));
+        expect(await gitPulls(outside)).toMatchObject({ branch: "feature" });
+      } finally { await rm(outside, { recursive: true, force: true }); }
+    });
   });
 
   it("ghHostBlock returns only that host's lines", () => {
