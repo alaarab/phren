@@ -157,7 +157,7 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   });
   const loginHint = el("div", "launch-note move-login-hint");
   loginHint.hidden = true;
-  body.append(remoteField, harnessField, accountField, otherField, addActions, loginHint, addForm, status);
+  body.append(remoteField, harnessField, accountField, otherField, loginHint, addActions, addForm, status);
   const foot = el("div", "launch-foot");
   foot.append(go);
   sheet.append(head, body, foot);
