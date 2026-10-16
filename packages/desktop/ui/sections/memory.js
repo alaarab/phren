@@ -186,7 +186,6 @@ export function mountMemory(root) {
     onSynced: (computer) => { if (computer === state.computer) return loadProjects(); },
   });
   syncHost.append(sync.el);
-  let syncFor = null;
 
   // ── Rail ───────────────────────────────────────────────────────────────
   let lastComputerSig = null;
@@ -207,7 +206,7 @@ export function mountMemory(root) {
 
   function renderComputer() {
     computerEl.replaceChildren();
-    if (syncFor !== state.computer) { syncFor = state.computer; sync.reset(state.computer); }
+    sync.reset(state.computer);
     if (!state.computers.length) {
       computerEl.append(el("div", "mem-rail-note", "No computer is online."));
       return;

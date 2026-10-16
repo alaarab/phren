@@ -1,15 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { countChanges, pullIdentity, syncResultMessage, throttleLeft } from "../ui/store-sync.js";
+import { pullIdentity, syncLabel, syncResultMessage, throttleLeft, watchHead, WATCH_DELAYS } from "../ui/store-sync.js";
 
 describe("syncResultMessage", () => {
-  it("says up to date when nothing moved", () => {
-    expect(syncResultMessage({ changed: false })).toBe("Up to date");
-    expect(syncResultMessage({ changed: true, changes: 0 })).toBe("Up to date");
-  });
-  it("counts the pulled changes", () => {
-    expect(syncResultMessage({ changed: true, changes: 1 })).toBe("Pulled 1 change");
-    expect(syncResultMessage({ changed: true, changes: 3 })).toBe("Pulled 3 changes");
-    expect(syncResultMessage({ changed: true, changes: null })).toBe("Pulled changes");
+  it("never claims a result the Hook did not report", () => {
+    expect(syncResultMessage({ state: "requested" })).toBe("Sync requested");
+    expect(syncResultMessage({ state: "updated" })).toBe("Memory updated");
+    expect(syncResultMessage({ state: "quiet" })).toBe("Sync requested — no new changes so far");
   });
   it("shows the Hook's message, and explains its bare 404", () => {
     expect(syncResultMessage({ error: Object.assign(new Error("Only the owner or a peer Hook can request a pull."), { status: 403 }) }))
@@ -18,12 +14,32 @@ describe("syncResultMessage", () => {
   });
 });
 
-describe("countChanges", () => {
-  it("counts added, removed and changed files", () => {
-    const blob = (path: string, sha: string) => ({ path, sha, type: "blob" });
-    const before = [blob("a/FINDINGS.md", "1"), blob("a/tasks.md", "2"), blob("b/summary.md", "3"), { path: "a", sha: "x", type: "tree" }];
-    const after = [blob("a/FINDINGS.md", "9"), blob("a/tasks.md", "2"), blob("c/new.md", "4")];
-    expect(countChanges(before, after)).toBe(3);
+describe("watchHead", () => {
+  const run = (heads: Array<string | Error>, before: string | undefined = "a") => {
+    const waits: number[] = [];
+    let i = 0;
+    const readHead = async () => { const next = heads[Math.min(i++, heads.length - 1)]; if (next instanceof Error) throw next; return next; };
+    return watchHead({ readHead, before, wait: async (ms) => { waits.push(ms); } }).then((updated) => ({ updated, waits, reads: i }));
+  };
+  it("waits 2, 4, 8, 16 then 15 seconds and reports no change", async () => {
+    const r = await run(["a"]);
+    expect(r).toEqual({ updated: false, waits: [2000, 4000, 8000, 16_000, 15_000], reads: 5 });
+    expect(WATCH_DELAYS.reduce((a, b) => a + b, 0)).toBe(45_000);
+  });
+  it("stops at the first changed head", async () => {
+    expect(await run(["a", "b", "c"])).toMatchObject({ updated: true, waits: [2000, 4000], reads: 2 });
+  });
+  it("ignores a failed read and tries again at the next interval", async () => {
+    expect(await run([new Error("offline"), "b"])).toMatchObject({ updated: true, waits: [2000, 4000], reads: 2 });
+  });
+  it("takes the first good read as the baseline when the first head could not be read", async () => {
+    expect(await run(["a", "a", "b"], undefined)).toMatchObject({ updated: true, reads: 3 });
+  });
+  it("stops when cancelled", async () => {
+    let n = 0;
+    const updated = await watchHead({ readHead: async () => "b", before: "a", wait: async () => {}, cancelled: () => n++ > 0 });
+    expect(updated).toBe(true);
+    expect(await watchHead({ readHead: async () => "b", before: "a", wait: async () => {}, cancelled: () => true })).toBe(false);
   });
 });
 
@@ -35,10 +51,16 @@ describe("throttleLeft", () => {
   });
 });
 
-describe("pullIdentity", () => {
+describe("pullIdentity and syncLabel", () => {
   it("names the primary store by id, repository and branch", () => {
     expect(pullIdentity({ stores: [{ id: "x1", primary: false }, { id: "ab12cd34", primary: true, repositoryIdentity: { repository: "me/memory", branch: "main" } }] }))
       .toEqual({ storeId: "ab12cd34", repository: "me/memory", branch: "main" });
     expect(pullIdentity({ stores: [{ id: "ab12cd34", primary: true }] })).toBeNull();
+  });
+  it("says primary store only when the computer has several", () => {
+    expect(syncLabel({ stores: [{ id: "a" }] }).text).toBe("Sync now");
+    const many = syncLabel({ stores: [{ id: "a", primary: true }, { id: "b" }] });
+    expect(many.text).toBe("Sync primary store");
+    expect(many.title).toMatch(/team stores are not included/);
   });
 });
