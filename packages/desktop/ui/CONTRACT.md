@@ -812,3 +812,17 @@ harness inventory, retaining local Claude accounts and other harnesses. When
 tmux login attachment uses `attach-session -t <session>` followed by explicit
 `select-window` and `select-pane` commands in the same tmux queue. Regression
 coverage lives in `src/ui-move.test.ts` and `src/pty-bridge.test.ts`.
+
+Continue account rows put identity above a single compact usage line, such as
+`5h 62% · week 80% · resets 6 PM`. The reset is the tightest remaining window
+with a known future reset. `usage-windows.js`'s `resetLabel` accepts an optional
+third argument `{ clock: true }`: local clock time today, weekday and clock on
+later days, omitting zero minutes. Existing warning callers keep their relative
+reset wording. Raw timestamps are never rendered in the sheet.
+
+The move body uses normal block flow within a shrinking scrollport, with margins
+between fields instead of compressible grid tracks. The header and footer remain
+outside that scrollport; the sheet is bounded by the dynamic viewport minus its
+backdrop padding. At scroll end the complete single-login hint and its unique,
+full-width add action stay above the footer. The account usage line never wraps;
+long identity text can wrap independently.

@@ -1,5 +1,6 @@
 import { el } from "../dom.js";
 import { harnessLabel } from "../harness.js";
+import { resetLabel } from "./usage-windows.js";
 import { movePlan } from "./handoff.js";
 import { openHandoffChat } from "./handoff-view.js";
 import { store } from "./store.js";
@@ -379,9 +380,14 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
     remoteRows.replaceChildren();
     harnessField.hidden = accountField.hidden = true;
     otherField.hidden = false;
-    const rowFor = (parent, label, destination) => {
+    const rowFor = (parent, label, destination, detail) => {
       state.destinations.push(destination);
-      const button = el("button", "launch-computer move-destination", label);
+      const button = el("button", "launch-computer move-destination", detail ? null : label);
+      if (detail) {
+        button.append(el("span", "move-account-title", label), el("span", "move-account-usage", detail));
+        button.setAttribute("aria-label", `${label} · ${detail}`);
+        button.title = `${label} · ${detail}`;
+      }
       button.type = "button";
       button.disabled = !!destination.reason;
       button.setAttribute("aria-pressed", "false");
@@ -405,10 +411,16 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
             const isCurrent = peer.self && (account.current || account.current === undefined && current === "claude" && account.id === (child.account?.id ?? "default"));
             const unavailable = isCurrent ? "Current account" : reason || (!harness.usable || !account.usable ? "Account unavailable" : "");
             const percent = (value) => Number.isFinite(value) ? `${value}%` : "unknown";
-            const resets = [account.fiveHourResetsAt ? `5h resets ${account.fiveHourResetsAt}` : "", account.weekResetsAt ? `week resets ${account.weekResetsAt}` : ""].filter(Boolean);
-            const label = [account.email || account.label || account.id, account.plan, peer.self ? computer : peer.name,
-              `5h ${percent(account.fiveHourLeft)} · week ${percent(account.weekLeft)}`, ...resets, unavailable].filter(Boolean).join(" · ");
-            rowFor(remoteRows, label, { computer: destinationComputer, harness: "claude", account: account.id, reason: unavailable });
+            const now = Date.now();
+            const windows = [
+              { left: account.fiveHourLeft, resetsAt: account.fiveHourResetsAt },
+              { left: account.weekLeft, resetsAt: account.weekResetsAt },
+            ].filter((window) => Date.parse(window.resetsAt) > now)
+              .sort((a, b) => (a.left ?? Infinity) - (b.left ?? Infinity));
+            const reset = windows.length ? resetLabel(windows[0], now, { clock: true }) : "";
+            const label = [account.email || account.label || account.id, account.plan, peer.self ? computer : peer.name].filter(Boolean).join(" · ");
+            const detail = [`5h ${percent(account.fiveHourLeft)}`, `week ${percent(account.weekLeft)}`, reset, unavailable].filter(Boolean).join(" · ");
+            rowFor(remoteRows, label, { computer: destinationComputer, harness: "claude", account: account.id, reason: unavailable }, detail);
           }
         } else if (remote || harness.source !== current) {
           rowFor(otherRows, [harnessLabel(harness.source), peer.self ? computer : peer.name, reason || (!harness.usable ? "Not available" : "")].filter(Boolean).join(" · "),

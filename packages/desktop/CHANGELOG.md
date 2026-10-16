@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.11] - unreleased
 
+- Continue in shows compact local reset times and scrolls all rows and the complete login hint above its pinned footer, including on narrow windows.
+
 - Continue in maps peer identities to desktop connections, recovers local choices from incomplete inventories, releases controls after a moved chat cannot be opened, and keeps account-login actions focused, unique and usable on narrow windows.
 
 - Continue in lists Claude accounts across computers first, with email, plan and usage; add an account through an interactive login pane, gate conductor transfers on Hook support, and resolve nested session folders to their registered project.

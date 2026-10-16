@@ -34,3 +34,13 @@ it("rounds partial minutes up and handles elapsed and reported reset times", () 
   expect(resetLabel({ resetsAt: later(0) }, now)).toBe("reset time unknown");
   expect(resetLabel({ resetsIn: "2h" }, now)).toBe("resets in 2h");
 });
+
+
+it("can use compact local clock labels without changing relative warning labels", () => {
+  const now = new Date(2026, 9, 16, 12).getTime();
+  const today = { resetsAt: new Date(2026, 9, 16, 18).toISOString() };
+  expect(resetLabel(today, now, { clock: true })).toBe("resets 6 PM");
+  expect(resetLabel(today, now)).toBe("resets in 6h");
+  expect(resetLabel({ resetsAt: new Date(2026, 9, 23, 9).toISOString() }, now, { clock: true })).toBe("resets Fri 9 AM");
+  expect(resetLabel({ resetsAt: new Date(2026, 9, 16, 18, 5).toISOString() }, now, { clock: true })).toBe("resets 6:05 PM");
+});

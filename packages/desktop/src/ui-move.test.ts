@@ -49,7 +49,9 @@ class Node {
   value = "";
   classList = { toggle: (name: string, on: boolean) => { this.className = this.className.split(" ").filter((c) => c !== name).concat(on ? [name] : []).join(" "); }, add: (name: string) => { this.className += ` ${name}`; } };
   parent: Node | null = null;
-  textContent = "";
+  private text = "";
+  get textContent(): string { return this.text + this.children.map((child) => child.textContent).join(""); }
+  set textContent(value: string) { this.text = value; this.children = []; }
   className = "";
   disabled = false;
   hidden = false;
@@ -61,8 +63,9 @@ class Node {
     if (child.parent) child.parent.children = child.parent.children.filter((node) => node !== child);
     child.parent = this; this.children.push(child);
   } }
-  replaceChildren(...children: Node[]) { for (const child of this.children) child.parent = null; this.children = []; this.append(...children); }
-  setAttribute() {}
+  replaceChildren(...children: Node[]) { this.text = ""; for (const child of this.children) child.parent = null; this.children = []; this.append(...children); }
+  attributes = new Map<string, string>();
+  setAttribute(name: string, value: string) { this.attributes.set(name, value); }
   addEventListener(event: string, fn: (event?: KeyEvent) => void) { this.listeners.set(event, fn); }
   focus() { if (!this.disabled) { dom.activeElement = this; dom.listeners.get("focusin")?.(); } }
   remove() { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); this.parent = null; }
@@ -75,7 +78,7 @@ class Node {
       ...child.querySelectorAll(selector),
     ]);
   }
-  find(text: string): Node | undefined { return this.textContent === text ? this : this.children.map((n) => n.find(text)).find(Boolean); }
+  find(text: string): Node | undefined { return this.children.map((n) => n.find(text)).find(Boolean) ?? (this.textContent === text || this.attributes.get("aria-label") === text ? this : undefined); }
 }
 let dom: ReturnType<typeof setupDom>;
 function setupDom() {
@@ -192,14 +195,14 @@ const peers = { localClaudeLogins: 1, computers: [
     { id: "work", email: "local@example.com", label: "Work", plan: "Max", usable: true, current: false },
   ] }, { source: "codex", usable: true }] },
   { name: "Studio", self: false, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [
-    { id: "work", label: "Work", email: "work@example.com", plan: "Max", usable: true, current: false, fiveHourLeft: 62, weekLeft: 35, fiveHourResetsAt: "2026-10-17T01:00:00Z" },
+    { id: "work", label: "Work", email: "work@example.com", plan: "Max", usable: true, current: false, fiveHourLeft: 62, weekLeft: 35, fiveHourResetsAt: "2020-10-17T01:00:00Z" },
     { id: "personal", label: "Personal", plan: "Pro", usable: false, current: false, fiveHourLeft: 80 },
   ] }] },
   { name: "Laptop", self: false, online: false, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [{ id: "laptop", label: "Laptop account", usable: true }] }] },
   { name: "No checkout", self: false, online: true, hasCheckout: false, harnesses: [{ source: "codex", usable: true }] },
 ] };
 const localLabel = "local@example.com · Max · Desk · 5h unknown · week unknown";
-const remoteLabel = "work@example.com · Max · Studio · 5h 62% · week 35% · 5h resets 2026-10-17T01:00:00Z";
+const remoteLabel = "work@example.com · Max · Studio · 5h 62% · week 35%";
 function remoteInventory(result = peers) {
   vi.mocked(hookGet).mockImplementation(async (_computer, route) => {
     if (route === "/v1/harnesses") return { harnesses: inventory };
@@ -471,7 +474,7 @@ it.each(["missing", "empty", "unusable", "no-codex"])("keeps local accounts and 
   else for (const harness of result.computers[0].harnesses) { harness.usable = false; for (const account of harness.accounts ?? []) account.usable = false; }
   remoteInventory(result);
   await openMoveSheet({ computer: "Desk", child: { ...session, account: { id: "default" } } });
-  const local = body.find("Claude accounts")!.parent!.querySelectorAll("button").find((node) => node.textContent.includes(" · Desk · ") && !node.disabled)!;
+  const local = body.find("Claude accounts")!.parent!.querySelectorAll("button").find((node) => node.textContent.includes(" · Desk") && !node.disabled)!;
   expect(local).toBeDefined(); local.listeners.get("click")!();
   vi.mocked(hookPost).mockResolvedValue({ move: { id: "local" } });
   vi.mocked(hookGet).mockResolvedValue({ move: { state: "moved" } });
@@ -490,4 +493,23 @@ it("marks the session's account current when the Hook omits current", async () =
   remoteInventory(result);
   await openMoveSheet({ computer: "Desk", child: { ...session, account: { id: "work" } } });
   expect(body.find(localLabel + " · Current account")!.disabled).toBe(true);
+});
+
+
+it.each(["five-hour", "weekly"])("shows one compact clock reset for the %s constraint", async (constraint) => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 9, 16, 12));
+  hooks.caps = { moveToComputer: true }; const { body } = setupDom();
+  const result = structuredClone(peers);
+  Object.assign(result.computers[1].harnesses[0].accounts![0], {
+    fiveHourLeft: 62, weekLeft: constraint === "five-hour" ? 80 : 20,
+    fiveHourResetsAt: new Date(2026, 9, 16, 18).toISOString(),
+    weekResetsAt: new Date(2026, 9, 23, 9).toISOString(),
+  });
+  remoteInventory(result);
+  await openMoveSheet({ computer: "Desk", child: session });
+  const detail = constraint === "five-hour" ? "5h 62% · week 80% · resets 6 PM" : "5h 62% · week 20% · resets Fri 9 AM";
+  const row = body.find(`work@example.com · Max · Studio · ${detail}`)!;
+  expect(row).toBeDefined();
+  expect(row.children.find((node) => node.className === "move-account-usage")!.textContent).toBe(detail);
+  expect(row.textContent).not.toMatch(/2026-|T\d\d:|Z$/);
 });

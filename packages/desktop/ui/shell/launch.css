@@ -201,3 +201,13 @@
 .move-sheet [hidden] { display: none !important; }
 
 .move-add-account { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; height: auto; min-height: 34px; padding-block: 6px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+
+/* Keep every row in normal flow inside the scrollport; grid auto tracks can
+   compress below wrapped hints while the footer remains visible. */
+.move-sheet { max-height: min(88dvh, calc(100dvh - 48px)); min-height: 0; }
+.move-sheet .launch-body { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.move-sheet .launch-body > * { margin: 0 0 14px; }
+.move-sheet .launch-body > :last-child { margin-bottom: 0; }
+.move-sheet .launch-foot { position: static; flex: 0 0 auto; }
+.move-account-title { display: block; }
+.move-account-usage { display: block; white-space: nowrap; font-size: 11.5px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; }
