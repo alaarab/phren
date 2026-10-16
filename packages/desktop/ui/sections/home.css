@@ -165,6 +165,9 @@ button.home-job:focus-visible { outline: 2px solid var(--accent); outline-offset
 
 .home-active-task { align-items: center; }
 .home-active-task .home-row-meta { min-width: 0; max-width: 100%; }
+.home-saved-row { align-items: center; width: 100%; box-sizing: border-box; }
+.home-saved-row .home-row-meta { min-width: 0; max-width: 100%; }
+.home-saved-kind { flex: none; color: var(--text-2); }
 .home-task-launch { flex: none; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--accent); padding: 6px 10px; font: inherit; cursor: pointer; }
 .home-task-launch:hover { background: var(--card); }
 

@@ -701,6 +701,10 @@ wraps on narrow screens. Covered by `src/ui-home-jobs.test.ts`.
 
 `shell/task-cache.js` shares store discovery and per-computer/store/project task reads between Home and Tasks, including in-flight requests, for 60 seconds from request start (in-flight requests are still shared). Home reads on show and every 60 seconds while visible, dropping offline rows immediately; hide/destroy stops its timer and ignores late answers. Tasks writes update the shared document cache; conflict/deletion reloads force a fresh read. Tasks retains its existing per-store/project navigation under the Active filter.
 
+
+### Home Saved today
+
+`sections/home/saved-today.js` renders after Active tasks and hides when nothing was saved today. Rows are the Active and Queue tasks whose `createdAt` falls after local midnight (from the shared task cache Active tasks already fills) and the findings whose `created` date is today's local date (one cached `GET /v1/projects/:project/memory` per computer and project, kept 60 s, four at a time, refreshed on the task cadence). `shell/saved-today.js` holds the pure filter/sort: timed rows newest first, then date-only findings (the route exposes a finding's day, not its time, so they read "today"). Eight rows show; `Show all N` expands. A finding opens Memory through `open({ computer, project, segment: "findings", search })`; a task opens Tasks through `openTask({ computer, storeId, project, id })`, which selects the store, project and row. Exported for `src/ui-saved-today.test.ts`.
 ### Home Working stop
 
 `sections/home/working.js` owns keyed online working rows with separate chat and
