@@ -28,6 +28,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### Fixed
 
+- Settings fits narrow windows.
 - Chats fit narrow windows: the title, send button and pane actions stay visible, and the Changes panel opens on demand.
 - Web previews and terminals share each computer's SSH connection limit with chats instead of overrunning it. Terminals and previews hold at most half of a computer's channels, so chats always have room; a waiting terminal says so, a preview with no channel answers 503, and idle preview connections close after a minute.
 
