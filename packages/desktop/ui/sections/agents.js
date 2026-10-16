@@ -628,6 +628,9 @@ export function mountAgents(root) {
   });
 
   return {
+    openPane(computer, target) {
+      return tabs.open(consoleDoc(computer, target.server, target.pane));
+    },
     openSession,
     /** Open a session with its Changes pane on pull requests and checks. */
     openPulls(computer, child) {

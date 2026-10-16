@@ -1,3 +1,4 @@
+import { redactPeerHandoff } from "./peer-handoff.js";
 import { integratorSchema, prsSchema } from "./return-contract.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
@@ -14,10 +15,10 @@ import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, r
 import { hookPeers } from "./peers.js";
 import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
 import { prepareDispatchOriginHandover, trackDispatchOrigin, type DispatchOriginWindow } from "./dispatch-origins.js";
-import { recordedConductor, type ConductorRecord } from "./conductor-role.js";
+import { readRoleState, recordedConductor, type ConductorRecord } from "./conductor-role.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
-import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
+import { object, atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
@@ -27,6 +28,7 @@ import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
 /** The harnesses a dispatch, a code note's hand-off or a schedule can start. */
+export const PEER_COPILOT_REASON = "Copilot cannot continue on another computer: its harness does not confirm launch-brief arrival. Continue locally or choose another harness.";
 export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
 export const dispatchSchema = z.object({
   computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, or anywhere for the least busy connected computer."),
@@ -49,6 +51,7 @@ export const dispatchSchema = z.object({
 export type DispatchInput = z.infer<typeof dispatchSchema>;
 /** Where a session moves to (session-move.ts): a harness with its account, model and effort, as a dispatch names them. */
 export const moveToSchema = z.object({
+  computer: computerName.optional().describe("Verified destination computer; omitted means this computer."),
   harness: z.enum(DISPATCH_HARNESSES).describe("Harness to continue in: claude, codex, opencode or copilot."),
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
     .describe("Claude account id (default, or a slug from `phren bridge accounts`); only for claude."),
@@ -77,6 +80,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     .describe("The worker hit its Claude usage limit: the dispatch that continues it on another account, or why none could."),
   continues: z.string().uuid().optional().describe("The dispatch this one continues after its worker hit its usage limit."),
   moves: z.array(z.object({ id: z.string().uuid(), at: timestamp, handoff: z.string().max(4096).optional(),
+    computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(), computerId: z.string().uuid().optional(),
     from: z.object({ harness: provider, account: z.string().max(64).optional() }).strict(), to: moveToSchema }).strict()).max(16).optional()
     .describe("Each move of this worker to another agent (session-move.ts): from, to, when, and the hand-off file on the worker's computer. `target`, `harness`, `account`, `model` and `effort` are the current agent's."),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
@@ -627,7 +631,8 @@ export class DispatchService {
       const authority = checked?.authority ?? await readAuthority().then(policy => projectAuthority(policy, data.project)).catch(() => undefined);
       const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
-      const { prompt, ...metadata } = data;
+      const { prompt: originalPrompt, ...metadata } = data;
+      const prompt = peer.local ? originalPrompt : redactPeerHandoff(originalPrompt);
       const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
@@ -638,7 +643,7 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt } });
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
         // The receiving Hook chose the Claude account (the one with the most room) when none was named.
@@ -692,6 +697,53 @@ export class DispatchService {
       release();
       if (placed) { const left = this.inFlight(placed) - 1; if (left > 0) this.placing.set(placed, left); else this.placing.delete(placed); }
     }
+  }
+
+  /** Owner continuation: use the same pinned transport and launch/arrival
+   * protocol as dispatch, without turning the new chat into a worker. */
+  async continueChat(peer: DispatchHost, project: string, to: z.infer<typeof moveToSchema>, brief: { id: string; text: string }, label: string, placed?: (target: unknown) => Promise<void>, computerId?: string, worker = false, workerDispatch?: string): Promise<Target> {
+    if (to.harness === "copilot") throw new BridgeError(409, PEER_COPILOT_REASON);
+    const { computer: _computer, ...destination } = to;
+    const readPlacement = async () => {
+      const saved = await peer.request(`/v1/sessions/move/launch?id=${encodeURIComponent(brief.id)}`, undefined, 5_000).catch(() => undefined);
+      if (saved?.paneTarget) await placed?.({ paneTarget: saved.paneTarget });
+      if (object(saved?.result).target) await placed?.(object(saved?.result).target);
+    };
+    let complete = false;
+    const pendingLaunch = peer.request(`/v1/sessions/move/launch?server=${encodeURIComponent(peer.server)}`,
+      { computerId, project, to: destination, label, brief, worker, ...(workerDispatch ? { workerDispatch } : {}) }, 65_000).then(result => { complete = true; return { result }; }, error => { complete = true; return { error }; });
+    // Track a created pane while its harness is still starting. Every probe
+    // is bounded, and completion stops the monitor before any later move.
+    const monitor = (async () => {
+      while (!complete) {
+        await new Promise(resolve => setTimeout(resolve, this.settleIntervalMs));
+        if (!complete) await readPlacement();
+      }
+    })().catch(() => undefined);
+    const outcome = await pendingLaunch;
+    await monitor;
+    if ("error" in outcome) { await readPlacement(); throw outcome.error; }
+    const launched = outcome.result;
+    if (launched.target) await placed?.(launched.target);
+    const settled = launched.target ? { target: launched.target } : await settledTarget(peer, launched, to.harness, this.settleIntervalMs);
+    const target = remoteTarget.parse(settled.target);
+    await placed?.(target);
+    if (target.server !== peer.server || target.source !== to.harness) throw new BridgeError(502, "The peer returned a different launch target.");
+    if (launched.briefLaunched !== true) {
+      if (!("session" in target)) throw new BridgeError(409, "The peer chat is not ready to receive its hand-off; the old chat remains open.");
+      const sent = await sendBrief(peer, target, brief.text, `move-${brief.id}-brief`);
+      if (sent.ok !== true || sent.deliveryUncertain === true || sent.unsubmitted === true || (sent.delivered !== true && sent.queued !== true)) {
+        throw new BridgeError(409, "The peer did not confirm the hand-off; both chats remain open.");
+      }
+    }
+    const arrival = await awaitArrival(peer, brief.id, this.settleIntervalMs);
+    const confirmed = targetSchema.parse(arrival.accepted?.target);
+    if (confirmed.server !== peer.server || confirmed.source !== to.harness || confirmed.pane !== target.pane
+      || confirmed.workspace !== target.workspace || confirmed.tab !== target.tab
+      || ("session" in target && confirmed.session !== target.session)) throw new BridgeError(409, "The peer did not confirm the launched conversation.");
+    const listed = await listedPane(peer, confirmed);
+    if (!listed || !["idle", "working"].includes(String(listed.agentStatus))) throw new BridgeError(409, "The peer chat is not confirmed running; the old chat remains open.");
+    return confirmed;
   }
 
   /** Launches placed on `computer` whose brief is still being confirmed. */
@@ -785,7 +837,9 @@ export class DispatchService {
   private async conductorCaller(value: unknown): Promise<string | undefined> {
     const pane = originPaneSchema.safeParse(value);
     if (!pane.success) return undefined;
-    const conductor = await recordedConductor().catch(() => undefined);
+    let conductor = await recordedConductor().catch(() => undefined);
+    const delegated = (await readRoleState())?.succession;
+    if (!conductor && delegated?.side === "origin" && delegated.phase === "committed") conductor = delegated.previous;
     if (!conductor || conductor.server !== pane.data.server || conductor.pane !== pane.data.pane) return undefined;
     return callerQuery(await localCaller());
   }

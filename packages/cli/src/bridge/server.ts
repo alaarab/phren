@@ -1,3 +1,5 @@
+import { continuationPlacement } from "./continuation-launch.js";
+import { ConductorSuccessionService, preflightConductorWorkers } from "./conductor-succession.js";
 import { StorePulls } from "./store-pull.js";
 import { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { setChoiceReaders } from "./account-choice.js";
@@ -59,7 +61,7 @@ import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import { paneAccount, paneAccountKey } from "./pane-accounts.js";
 import { readTurn } from "./turn-records.js";
 import { readLaunchBrief } from "./launch-brief.js";
-import { conductorPane } from "./conductor-role.js";
+import { conductorPane, readRoleState } from "./conductor-role.js";
 import { terminalKind, terminalProvider } from "./terminal.js";
 import { targetTranscriptPath } from "./transcripts.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
@@ -86,6 +88,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const dispatches = modules.has("conductor")
     ? new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true),
       originAgent: async origin => {
+        const state = (await readRoleState())?.succession;
+        if (state?.side === "origin" && state.phase === "committed" && state.from.server === origin.server && state.from.pane === origin.pane && state.previous.terminal && state.previous.source) return { agent: state.previous.source, terminal: state.previous.terminal };
         const pane = findPane(await snapshot(origin.server), origin);
         const agent = provider.safeParse(pane?.agent);
         return agent.success && typeof pane?.terminal_id === "string" ? { agent: agent.data, terminal: pane.terminal_id } : undefined;
@@ -95,16 +99,20 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks(undefined, modules, path.join(bridgeRoot(), "deliveries.json"));
   // Follows what dispatched workers do and tells the dispatching agent.
+  let succession: ConductorSuccessionService | undefined;
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
+    localComputer: { id: computerID, name: hostname() },
+    forward: (origin, text, deliveryId) => succession?.forward(origin, text, deliveryId) ?? Promise.resolve(undefined),
     // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
-    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => dispatches.dispatch(input, origin, continues) }),
+    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => succession ? succession.automatic("dispatch", { ...input, continues }, origin, () => dispatches.dispatch(input, origin, continues)) : dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
-    close: async receipt => {
-      const data = { target: receipt.target, dispatch: receipt.id, turn: receipt.closePending!.turn };
-      if (isLocalComputer(receipt.computer)) return closeFinishedWorker(data, handOffs);
-      const peer = (await hookPeers()).find(peer => peer.name === receipt.computer);
-      if (!peer) throw new BridgeError(503, "The worker's computer is offline.");
-      return peerRequest(peer, "/v1/dispatch/close", data);
+    close: async (receipt, verifiedPeer) => {
+      const data = { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn };
+      if (receipt.computerId === computerID) return closeFinishedWorker(data, handOffs);
+      const peer = verifiedPeer ?? (await hookPeers().catch(() => [])).find(peer => peer.name === receipt.computer);
+      if (peer) return peerRequest(peer, "/v1/dispatch/close", data);
+      if (!receipt.moves?.some(move => move.to.computer) && isLocalComputer(receipt.computer)) return closeFinishedWorker(data, handOffs);
+      throw new BridgeError(503, "The worker's verified computer is offline.");
     },
     localAnswer: (target, actionId, decision) => agentHooks.answer(target, actionId, decision),
     // A worker's request the worker's own Hook did not push reaches this Hook's phone.
@@ -129,18 +137,25 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const sendPrompt = async (target: Target, text: string, deliveryId: string, typing: () => Promise<void>) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions },
     new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>;
   const handOffs = dispatches ? new HandOffQueue({
+    forward: (target, text, deliveryId) => succession?.forward(target, text, deliveryId) ?? Promise.resolve(undefined),
     validate: target => validateTarget(target, false, true),
     current: async target => {
       const pane = findPane(await snapshot(target.server), target);
       const session = pane ? await paneIdentity(target.server, pane, true) : undefined;
       return pane && session ? { session, terminal: pane.terminal_id } : undefined;
     },
-    notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false }),
+    notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false, bypassConductor: true }),
     send: sendPrompt,
   }) : undefined;
   // Moving a session to another agent (session-move.ts): its hand-off request
   // takes the hand_off path, and the new agent starts through the launch path.
+  succession = dispatches ? new ConductorSuccessionService({ root, computer: { id: computerID, name: hostname() }, snapshot, validate: target => validateTarget(target, false, true),
+    isSuccessor: async (origin, id) => (await readTurn(origin.server, origin.pane))?.dispatch === id,
+    deliver: (target, text, deliveryId) => handOffs!.enqueue({ target, text, deliveryId }),
+    checkWorkers: from => preflightConductorWorkers(from, computerID),
+  }) : undefined;
   const mover = new SessionMover({
+    succession,
     snapshot: server => snapshot(server),
     identity: (server, pane) => paneIdentity(server, pane, true),
     terminal: terminalProvider(),
@@ -150,7 +165,14 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     inventory: () => launchCheckOff() ? Promise.resolve(undefined) : harnessInventoryWithin(2_500),
     transcript: async target => transcriptTail(await targetTranscriptPath(target)),
     paneAccount: (server, pane) => paneAccount(paneAccountKey(server, pane.pane_id), typeof pane.terminal_id === "string" ? pane.terminal_id : undefined)?.id,
-    paneDispatch: async (server, pane) => (await readTurn(server, String(pane.pane_id)))?.dispatch,
+    paneDispatch: async (server, pane) => {
+      const dispatch = (await readTurn(server, String(pane.pane_id)))?.dispatch;
+      if (!dispatch) return undefined;
+      const continuation = await continuationPlacement(dispatch);
+      if (continuation) return continuation.worker ? dispatch : undefined;
+      const localMove = await (await import("./session-move.js")).readMove(dispatch);
+      return localMove && !localMove.dispatch ? undefined : dispatch;
+    },
     brief: readLaunchBrief,
     isConductor: async (server, pane) => (await conductorPane(server, await snapshot(server)))?.pane_id === pane.pane_id,
     envAtStart: server => terminalKind(server) === "tmux",
@@ -226,7 +248,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
   const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams, returns, handOffs, inbox, mover, storePulls, gitboyWebhooks }));
+    fanoutMessages, canary, streams, returns, handOffs, inbox, mover, succession, storePulls, gitboyWebhooks }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   const socketPools = new Map<string, Set<WebSocket>>();
@@ -317,6 +339,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       // Dispatch returns ride this tick and its shared snapshots. The returns
       // loop throttles its own peer polls and never holds up activity.
       void handOffs?.tick().catch(() => {});
+      void mover.reconcile().catch(() => {});
+      void succession?.reconcile().catch(() => {});
       void returns?.tick();
       void inbox?.tick().catch(() => {});
     })().finally(() => { recording = false; }).catch(() => {});

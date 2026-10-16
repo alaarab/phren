@@ -26,7 +26,8 @@ export async function runDispatch(args: string[]): Promise<number> {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch"), null, 2)); return 0;
   }
   if (args.length === 1 && args[0] === "returns") {
-    console.log(JSON.stringify(await hookRequest("/v1/dispatch/returns", {}), null, 2)); return 0;
+    const origin = await terminalPaneFromEnv();
+    console.log(JSON.stringify(await hookRequest("/v1/dispatch/returns", { ...(origin ? { origin } : {}) }), null, 2)); return 0;
   }
   if (args[0] === "usage" && args.slice(1).every(arg => arg === "--json")) {
     const { readAccountUsage, formatAccountUsage } = await import("./account-usage.js");
@@ -174,8 +175,11 @@ export async function runConductor(args: string[]): Promise<number> {
     return 0;
   }
   if (namespace !== "grants") throw new Error(CONDUCTOR_USAGE);
+  const grantOrigin = await terminalPaneFromEnv();
+  const grantCall = async (action: string, data: Json) => grantOrigin ? hookRequest("/v1/conductor/call", { action, data, origin: grantOrigin }) : undefined;
   if (action === "list") {
-    console.log(JSON.stringify(await listNamedGrants(), null, 2));
+    const forwarded = await grantCall("grants-list", {});
+    console.log(JSON.stringify(forwarded?.grants ?? await listNamedGrants(), null, 2));
     return 0;
   }
   if (action === "add") {
@@ -191,7 +195,8 @@ export async function runConductor(args: string[]): Promise<number> {
       ...(values.until ? { until: values.until } : {}),
       ...(values["max-permission-mode"] ? { maxPermissionMode: values["max-permission-mode"] } : {}),
     });
-    console.log(JSON.stringify(await addGrant(grant), null, 2));
+    const forwarded = await grantCall("grants-add", grant);
+    console.log(JSON.stringify(forwarded?.grant ?? await addGrant(grant), null, 2));
     return 0;
   }
   if (action === "remove") {
@@ -201,7 +206,9 @@ export async function runConductor(args: string[]): Promise<number> {
     const index = values.index !== undefined ? Number(values.index) : positionals[0] !== undefined ? Number(positionals[0]) : undefined;
     if (index === undefined && !values.scope) throw new Error("Usage: phren conductor grants remove <index>|--scope <scope>");
     if (index !== undefined && !Number.isInteger(index)) throw new Error("Grant index must be an integer.");
-    console.log(JSON.stringify(await removeGrant(index !== undefined ? { index } : { scope: values.scope }), null, 2));
+    const input = index !== undefined ? { index } : { scope: values.scope };
+    const forwarded = await grantCall("grants-remove", input);
+    console.log(JSON.stringify(forwarded?.grant ?? await removeGrant(input), null, 2));
     return 0;
   }
   throw new Error(CONDUCTOR_USAGE);

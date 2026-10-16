@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.54] - 2026-10-16
+
+### Added
+
+- Continue a chat on another computer. The Hook lists every Claude login on this and linked computers, with email and plan for the owner, 5-hour and weekly remaining, and the current login (`moveToComputer`). It then launches the new chat in that computer's checkout with a full hand-off over pinned SSH, and links it from the source chat. Peers are verified by host key and SSH username.
+- `phren bridge accounts add <name>` opens a sign-in pane for another Claude login on this computer (`claudeAccountAdd`); the phone and desktop offer it from the Continue in… sheet.
+- Conductor chats move to another computer with their role (`moveConductorToComputer`) instead of refusing. Receipts, approvals and grants stay on the original Hook, which forwards to a fenced successor. Returns and approvals are kept, and the move fails closed if the original is unreachable.
+
+### Changed
+
+- Computer enrollment lines name the peer (`dispatch-scoped peer:<name>`), so moves can verify who is calling. Existing keys keep working unchanged.
+
+### Fixed
+
+- Credentials in hand-off text sent to another computer are redacted, without touching protocol fields.
+
 ## [0.3.53] - 2026-10-16
 
 ### Fixed

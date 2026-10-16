@@ -36,6 +36,7 @@ export async function runBridge(args: string[], version: string): Promise<number
       break;
     }
     case "accounts": {
+      if (args[1] === "add" && args[2] === "--") args.splice(2, 1);
       if (args.length === 1) {
         for (const harness of (await harnessInventory()).harnesses) {
           console.log(`${harness.source}: ${harness.installed ? `installed ${harness.version ?? ""}`.trim() : "not installed"}, ${harness.usable ? "usable" : `not usable (${harness.reason ?? "unknown"})`}`);

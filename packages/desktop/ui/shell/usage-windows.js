@@ -23,10 +23,16 @@ export function compareUsage(a, b) {
   return y[0] - x[0] || y[1] - x[1];
 }
 /** Warning wording: ceil minutes below 24 hours, then local weekday and time. */
-export function resetLabel(w, now = Date.now()) {
+export function resetLabel(w, now = Date.now(), { clock = false } = {}) {
   if (w?.reset) return "";
   const reset = Date.parse(w?.resetsAt);
   if (Number.isFinite(reset) && reset > now) {
+    if (clock) {
+      const date = new Date(reset);
+      const time = date.toLocaleTimeString("en-US", { hour: "numeric", ...(date.getMinutes() ? { minute: "2-digit" } : {}), hour12: true });
+      const day = date.toDateString() === new Date(now).toDateString() ? "" : date.toLocaleDateString("en-US", { weekday: "short" }) + " ";
+      return `resets ${day}${time}`;
+    }
     const minutes = Math.ceil((reset - now) / 60_000);
     if (minutes < 1440) {
       const hours = Math.floor(minutes / 60), rest = minutes % 60;

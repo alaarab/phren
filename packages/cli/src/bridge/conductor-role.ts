@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { conductorOriginChanged } from "./dispatch-origins.js";
 import { isConductorName, paneAgentName } from "./herdr.js";
-import { atomicInPrivateDir, BridgeError, bridgeRoot, id, type Json, objects, provider, serverName } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, id, type Json, objects, provider, serverName, targetSchema } from "./protocol.js";
 
 /**
  * Which pane is this computer's conductor, as the Hook keeps it
@@ -25,17 +25,26 @@ const setNameSchema = z.object({ name: z.string().min(1).max(60).nullable(), nam
 export type SetName = z.infer<typeof setNameSchema>;
 /** `conductor` absent is legacy mode: nothing has decided the role yet, so a
  * conductor is still recognized by its mux name. `null` is no conductor. */
-const stateSchema = z.object({ version: z.literal(1), conductor: recordSchema.nullable().optional(), set: setNameSchema.optional() });
+export const successionSchema = z.object({
+  id: z.string().uuid(), generation: z.string().uuid(), side: z.enum(["origin", "successor"]),
+  phase: z.enum(["preparing", "prepared", "committed", "aborted"]),
+  originId: z.string().uuid(), destinationId: z.string().uuid(), previous: recordSchema, from: targetSchema,
+  connection: z.object({ name: serverName, server: serverName, fingerprint: z.string().regex(/^[a-f0-9]{64}$/), id: z.string().uuid() }).strict(),
+  workers: z.array(z.object({ id: z.string().uuid(), fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict()).optional(),
+  revoked: z.boolean().optional(), activated: z.boolean().optional(), target: targetSchema.optional(), resume: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+export type ConductorSuccession = z.infer<typeof successionSchema>;
+const stateSchema = z.object({ version: z.literal(1), conductor: recordSchema.nullable().optional(), set: setNameSchema.optional(), succession: successionSchema.optional() });
 export type RoleState = z.infer<typeof stateSchema>;
 
-const roleFile = () => path.join(bridgeRoot(), "conductor-role.json");
+const roleFile = (root = bridgeRoot()) => path.join(root, "conductor-role.json");
 /** The Hook is the only writer, so the last state it read or wrote stands in for the file. */
-let cached: { file: string; state: RoleState | undefined } | undefined;
+const cached = new Map<string, RoleState | undefined>();
 
 /** The saved state; undefined before the file exists. */
-export async function readRoleState(): Promise<RoleState | undefined> {
-  const file = roleFile();
-  if (cached?.file === file) return cached.state;
+export async function readRoleState(root = bridgeRoot()): Promise<RoleState | undefined> {
+  const file = roleFile(root);
+  if (cached.has(file)) return cached.get(file);
   // Read once per process and synchronously: the overview's time budget
   // should not wait on disk for a file of a few hundred bytes.
   let text: string | undefined;
@@ -49,29 +58,42 @@ export async function readRoleState(): Promise<RoleState | undefined> {
     // A damaged file is a state with no conductor, never a return to names.
     try { state = stateSchema.parse(JSON.parse(text)); } catch { state = { version: 1, conductor: null }; }
   }
-  cached = { file, state };
+  cached.set(file, state);
   return state;
 }
 
-async function writeRoleState(state: RoleState): Promise<void> {
-  const file = roleFile();
+async function writeRoleState(state: RoleState, root = bridgeRoot()): Promise<void> {
+  const file = roleFile(root);
   await atomicInPrivateDir(file, JSON.stringify(state, null, 2) + "\n");
-  cached = { file, state };
+  cached.set(file, state);
   conductorOriginChanged(state.conductor);
 }
 
 /** Every read-modify-write of the state runs one at a time: an overview poll
  * noting a moved pane must not interleave with a make or stop and bring back
  * the record it replaced. */
-let queue: Promise<unknown> = Promise.resolve();
-function serialized<T>(run: () => Promise<T>): Promise<T> {
+const queues = new Map<string, Promise<unknown>>();
+function serialized<T>(run: () => Promise<T>, root = bridgeRoot()): Promise<T> {
+  const queue = queues.get(root) ?? Promise.resolve();
   const next = queue.then(run, run);
-  queue = next.catch(() => undefined);
+  queues.set(root, next.catch(() => undefined));
   return next;
 }
 
+/** Uses the same serialization as every local role writer. */
+export function updateConductorAuthority(root: string, change: (state: RoleState) => Promise<RoleState>): Promise<RoleState> {
+  return serialized(async () => {
+    const state = await change(await readRoleState(root) ?? { version: 1 });
+    await writeRoleState(state, root);
+    return state;
+  }, root);
+}
+export function assertRoleMutable(state: RoleState | undefined): void {
+  if (state?.succession && state.succession.phase !== "aborted") throw new BridgeError(409, "The conductor is moving or delegated to another computer; reconcile its ownership before changing the role.");
+}
+
 /** For tests: forget the cached state. */
-export function resetRoleState(): void { cached = undefined; }
+export function resetRoleState(): void { cached.clear(); }
 
 const liveStatus = (pane: Json) => !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status));
 /** A pane running an agent the Hook can talk to. */
@@ -107,13 +129,16 @@ function recordedPane(record: ConductorRecord, s: Json): Json | undefined {
  * agent runs there right now. A recorded pane gone from the snapshot ends the
  * role. In legacy mode a live pane with a conductor name is adopted and saved.
  */
-export function conductorPane(server: string, s: Json): Promise<Json | undefined> {
+export function conductorPane(server: string, s: Json, root = bridgeRoot()): Promise<Json | undefined> {
+  const write = (state: RoleState) => writeRoleState(state, root);
   return serialized(async () => {
-    const state = await readRoleState();
+    const state = await readRoleState(root);
+    if (state?.succession?.side === "origin" && state.succession.phase === "committed") return undefined;
+    if (state?.succession?.side === "successor" && ["preparing", "prepared"].includes(state.succession.phase)) return undefined;
     if (state?.conductor === undefined) {
       const named = objects(s.panes).find(pane => isConductorName(paneAgentName(s, pane)) && runsAgent(pane));
       if (!named) return undefined;
-      await writeRoleState({ ...state, version: 1, conductor: recordFor(server, named, "migrated") });
+      await write({ ...state, version: 1, conductor: recordFor(server, named, "migrated") });
       return named;
     }
     const record = state.conductor;
@@ -123,17 +148,18 @@ export function conductorPane(server: string, s: Json): Promise<Json | undefined
       // The pane went away or was recreated (a moved tab, a Herdr restart): the
       // role follows the session, so a pane running it takes the role over.
       const adopted = record.session ? sessionPane(record.session, s) : undefined;
-      if (!adopted) { await writeRoleState({ ...state, conductor: null }); return undefined; }
-      await writeRoleState({ ...state, conductor: { ...recordFor(server, adopted, record.by, record.session), since: record.since } });
+      if (!adopted && state.succession && state.succession.phase !== "aborted") return undefined;
+      if (!adopted) { await write({ ...state, conductor: null }); return undefined; }
+      await write({ ...state, conductor: { ...recordFor(server, adopted, record.by, record.session), since: record.since } });
       return adopted;
     }
     // Keep the place current: a pane moved to another tab or workspace is the same pane.
     const moved = (id.safeParse(pane.workspace_id).success && pane.workspace_id !== record.workspace) || (id.safeParse(pane.tab_id).success && pane.tab_id !== record.tab)
       || (provider.safeParse(pane.agent).success && pane.agent !== record.source);
-    if (moved) await writeRoleState({ ...state, conductor: { ...record, workspace: String(pane.workspace_id), tab: String(pane.tab_id),
+    if (moved) await write({ ...state, conductor: { ...record, workspace: String(pane.workspace_id), tab: String(pane.tab_id),
       ...(provider.safeParse(pane.agent).success ? { source: pane.agent as ConductorRecord["source"] } : {}) } });
     return pane;
-  });
+  }, root);
 }
 
 /** The recorded conductor, whatever its server; undefined in legacy mode or with none. */
@@ -145,6 +171,7 @@ export async function recordedConductor(): Promise<ConductorRecord | undefined> 
 export function recordConductor(server: string, pane: Json, by: ConductorRecord["by"], session?: string): Promise<ConductorRecord> {
   return serialized(async () => {
     const state = await readRoleState() ?? { version: 1 as const };
+    assertRoleMutable(state);
     const record = recordFor(server, pane, by, session);
     await writeRoleState({ ...state, conductor: record });
     return record;
@@ -154,11 +181,14 @@ export function recordConductor(server: string, pane: Json, by: ConductorRecord[
 /** Move only the captured role. The optional hand-over holds the receipt
  * writer's queue while preparing routing and committing this role; it must
  * roll routing back if commit fails. No role writer can interleave here. */
+// This CAS covers local targets. ConductorSuccessionService owns remote
+// generations while keeping the receipts and grants on their original Hook.
 export function transferConductor(expected: ConductorRecord, server: string, pane: Json, session?: string,
   handOver: (commit: () => Promise<void>) => Promise<void> = commit => commit()): Promise<ConductorRecord> {
   return serialized(async () => {
     const state = await readRoleState();
     const current = state?.conductor;
+    assertRoleMutable(state);
     // Include the generation (since), terminal and session, so a stop/make
     // or another move cannot be overwritten even if it used the same pane.
     if (!current || !recordSchema.keyof().options.every(field => current[field] === expected[field])) {
@@ -185,6 +215,7 @@ export function clearConductor(pane?: string): Promise<ConductorRecord | undefin
   return serialized(async () => {
     const state = await readRoleState();
     const record = state?.conductor ?? undefined;
+    assertRoleMutable(state);
     if (record && pane !== undefined && record.pane !== pane) return undefined;
     // Written even with nothing to clear: a stop also ends legacy mode, so a
     // leftover conductor name is not adopted again.

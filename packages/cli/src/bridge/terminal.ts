@@ -104,6 +104,8 @@ export interface TerminalProvider {
   /** Types `text` and sends the submit key. Success acknowledges transport,
    * not a submitted turn; the harness must confirm that separately. */
   prompt(server: string, pane: string, text: string, signal?: AbortSignal): Promise<void>;
+  /** Run an owner-selected command at an empty pane's shell prompt. */
+  shellCommand?(server: string, pane: string, command: string): Promise<void>;
   /** Opens a pane; the caller finds it in the next `listPanes`. */
   create(server: string, placement: PanePlacement): Promise<void>;
   startAgent(server: string, pane: string, agent: AgentStart): Promise<void>;
@@ -148,6 +150,11 @@ export const routedTerminal: TerminalProvider = {
   readScreen: (server, pane, read) => route(server).readScreen(server, pane, read),
   sendKeys: (server, pane, keys) => route(server).sendKeys(server, pane, keys),
   prompt: (server, pane, text, signal) => route(server).prompt(server, pane, text, signal),
+  shellCommand: async (server, pane, command) => {
+    const provider = route(server);
+    if (!provider.shellCommand) throw new BridgeError(503, "This terminal cannot open an interactive account login.");
+    await provider.shellCommand(server, pane, command);
+  },
   create: (server, placement) => route(server).create(server, placement),
   startAgent: (server, pane, agent) => route(server).startAgent(server, pane, agent),
   paneEnv: (server, place) => route(server).paneEnv?.(server, place),

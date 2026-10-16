@@ -730,3 +730,99 @@ A capped search shows “Searched N of M projects” (N successful reads); failu
 are reported without dropping successful results. Scoped `?` retains its quick
 chat action. Palette input retains focus while asynchronous results arrive.
 Coverage: `src/ui-palette-memory.test.ts`.
+
+### Continue by account across computers
+
+The shared `shell/move.js` sheet (also opened by quota Switch through
+`quota-warn-sheet.js`) reads the session computer's health capabilities via
+`store.capabilities(computer)`. With `moveToComputer`, it requests
+`GET /v1/sessions/move/computers?project=<registered project>` from that Hook.
+It prefers the session's reported `child.project`; otherwise it reads
+`/v1/projects/repos` and chooses the longest registered `directory` ancestor
+of `child.cwd`, matching complete path segments. Its optional `project` field
+is the registered name; `name` is only the checkout basename. If `project` is
+absent, canonical names from `/v1/tasks/stores` are matched to that checkout
+through `/v1/projects/locate` (four reads at a time). A session in `project/src`
+uses the registered project's name, never `src`. An unresolved project shows
+an error and preserves local moves; it never guesses from the basename.
+
+The answer is `{ computers: [{ name, self, online, hasCheckout, harnesses:
+[{ source, usable, accounts?: [{ id, label, email?, plan?, fiveHourLeft?,
+weekLeft?, fiveHourResetsAt?, weekResetsAt?, usable, current }] }] }],
+localClaudeLogins }`. “Claude accounts” comes first, with one button per login
+including self: email (or label), plan, computer, `5h N% · week N%` and each
+known reset. Unknown usage reads “unknown”. The current login is marked
+“Current account” and disabled. Offline computers, absent checkouts and
+unusable logins remain visible with disabled reasons. “Other harnesses” follows
+with local and peer destinations. This sheet has no model or effort pickers.
+Account rows retain their nodes through selection and busy/error updates.
+Arrow keys and Tab reach enabled rows within the focus trap; Escape closes and
+returns focus to the invoker. Continue waits for account discovery to finish.
+Older Hooks retain their existing local harness/account choices.
+
+Choosing a self account posts a local move with `to: { harness: "claude",
+account }`; peer accounts also include `to.computer` and `mode: "new-chat"`.
+Conductor peer rows require the session Hook's `moveConductorToComputer`,
+otherwise show “Update <computer>'s Hook to move the conductor”. Submission
+rechecks the source capabilities. The Hook owns the hand-off and role transfer.
+Status polls the source Hook; `handedOffTo: { computer, target }` opens the
+peer chat once present in the overview (falling back to the selected computer
+and `move.target`). Peer 404/409 errors remain visible and permit retry.
+
+The exact single-login hint remains when `localClaudeLogins <= 1`, with its
+copyable `phren bridge accounts add <name>` command. It additionally offers
+“Add a Claude account on <computer>…” when that computer's own health declares
+`claudeAccountAdd`. The local action is available independently of
+`moveToComputer`; online peers get their own health-gated actions. The action
+opens an inline slug form within the same focus trap. Slugs are 1–32 lowercase
+letters or digits with internal hyphens; `default` is reserved. Cancel restores
+the action's focus; launch errors stay editable. Submit rechecks that Hook's
+capability, posts `/v1/accounts/claude/add { slug }`, closes the sheet on success,
+and opens the returned live pane immediately through Agents' `openPane(computer,
+target)`. Both muxes use the known-pane console tile and carry the returned
+server and pane through `/pty`. For local tmux, the bridge resolves that pane's
+actual session/window/pane IDs, attaches that session and selects its window
+and pane on the returned server's socket, never using an untargeted attach. Remote
+panes use the Hook's existing SSH pane attachment path. Interactive login opens
+without waiting for a transcript or overview session. The Hook runs the login command; the client never builds shell commands.
+Coverage: `src/ui-move.test.ts`.
+
+The move inventory's `computerId` is the stable Hook identity, not its verified
+peer name. The sheet resolves it to a configured desktop computer from that
+computer's overview identity or `/v1/health computer.id`; it falls back to a
+matching name only when an ID is absent. Conflicting or unlinked identities
+never receive desktop reads or login requests. Their add/open actions are
+disabled with a link-in-desktop reason; the source Hook can still move there.
+Move requests keep the Hook peer name in `to.computer`; account addition,
+capabilities and opening the returned pane or landed chat use the mapped
+desktop alias, including `handedOffTo.computer` resolution.
+
+After a confirmed move, the sheet checks the shared overview for up to 30
+seconds without further move-status reads. If the chat never appears, it shows
+“Moved to <computer> — open it from there” and releases its controls. An
+in-flight account-add blocks Escape, Close and replacement sheets until its
+pane opens or its error returns; failed adds refocus the editable slug field.
+The single local add action moves into the single-login hint instead of being
+duplicated. Its `.move-add-account` class wraps long names within narrow sheets
+with automatic height and a 34 px minimum.
+
+A missing, unusable or partial `self` inventory is supplemented with the local
+harness inventory, retaining local Claude accounts and other harnesses. When
+`current` is absent, the session's Claude account ID is also excluded. Local
+tmux login attachment uses `attach-session -t <session>` followed by explicit
+`select-window` and `select-pane` commands in the same tmux queue. Regression
+coverage lives in `src/ui-move.test.ts` and `src/pty-bridge.test.ts`.
+
+Continue account rows put identity above a single compact usage line, such as
+`5h 62% · week 80% · resets 6 PM`. The reset is the tightest remaining window
+with a known future reset. `usage-windows.js`'s `resetLabel` accepts an optional
+third argument `{ clock: true }`: local clock time today, weekday and clock on
+later days, omitting zero minutes. Existing warning callers keep their relative
+reset wording. Raw timestamps are never rendered in the sheet.
+
+The move body uses normal block flow within a shrinking scrollport, with margins
+between fields instead of compressible grid tracks. The header and footer remain
+outside that scrollport; the sheet is bounded by the dynamic viewport minus its
+backdrop padding. At scroll end the complete single-login hint and its unique,
+full-width add action stay above the footer. The account usage line never wraps;
+long identity text can wrap independently.
