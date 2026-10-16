@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { shortDate } from "../time.js";
 import { citationData, freshnessChip, isStale, staleCount } from "../citation-freshness.js";
 // Memory: the phone's Memory screen at desktop scale. A rail of online
 // computers and their projects (review counts in amber) beside one segment
@@ -26,7 +27,6 @@ const LIFECYCLE_CHIP = {
   invalid_citation: { label: "Invalid citation", cls: "danger" },
 };
 const DIM_STATES = new Set(["superseded", "retracted", "stale"]);
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const GRAPH_MISSING = "The graph needs a newer desktop build";
 
 function ensureCss() {
@@ -96,13 +96,6 @@ function citeInfo(item) {
   const base = file.split("/").filter(Boolean).pop() || file;
   const full = line != null ? `${file}:${line}` : file;
   return { label: line != null ? `${base}:${line}` : base, title: full, copy: full, commit };
-}
-
-/** "Oct 7" from an ISO date or a YYYY-MM-DD heading date. */
-function shortDate(value) {
-  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return "";
-  return `${MONTHS[Number(match[2]) - 1] ?? "?"} ${Number(match[3])}`;
 }
 
 function itemText(item) {

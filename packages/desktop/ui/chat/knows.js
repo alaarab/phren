@@ -1,4 +1,5 @@
 import { el } from "../dom.js";
+import { shortDate } from "../time.js";
 // The "Phren knows" drawer for a session's project and "Remember this" for a
 // selected line of text. Plain browser ES module. Reads the project's summary,
 // findings, tasks and topics; saves a finding with or without a code location.
@@ -16,7 +17,6 @@ function ensureStyle() {
   styleLinked = true;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function memoryGet(computer, route, query) {
   const qs = new URLSearchParams(query).toString();
@@ -52,11 +52,6 @@ function findingBody(item) {
     .replace(/^\[[A-Za-z][A-Za-z0-9_-]*\]\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-function shortDate(value) {
-  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return "";
-  return `${MONTHS[Number(match[2]) - 1] ?? "?"} ${Number(match[3])}`;
 }
 function topicLabel(item) {
   const label = String(item?.label ?? item?.title ?? "").trim();

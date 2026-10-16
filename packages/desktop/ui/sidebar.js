@@ -10,6 +10,7 @@ import { showSection } from "./shell/sections.js";
 import { prefetchTranscript, cancelPrefetch } from "./shell/transcript-prefetch.js";
 import { carriesFiles, createRowDrop, leftRow } from "./shell/row-drop.js";
 import { hookPost, targetQuery } from "./api.js";
+import { age } from "./time.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 
 // answerApproval is written in a parallel change under ui/chat/. Import it
@@ -71,18 +72,6 @@ function hostColor(name) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   return HOST_HUES[hash % HOST_HUES.length];
-}
-
-function relativeAge(iso) {
-  if (!iso) return "";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "";
-  const seconds = Math.max(0, (Date.now() - t) / 1000);
-  if (!Number.isFinite(seconds) || seconds < 10) return "now";
-  if (seconds < 60) return Math.floor(seconds) + "s ago";
-  if (seconds < 3600) return Math.floor(seconds / 60) + "m ago";
-  if (seconds < 86400) return Math.floor(seconds / 3600) + "h ago";
-  return Math.floor(seconds / 86400) + "d ago";
 }
 
 function offlineReason(co) {
@@ -152,19 +141,6 @@ function togglePin(sb, desc) {
   const at = sb.pinned.indexOf(key);
   if (at >= 0) sb.pinned.splice(at, 1); else sb.pinned.push(key);
   writeJSON(PINNED_KEY, sb.pinned);
-}
-
-// Compact-row age: "3h", not the detailed "3h ago".
-function shortAge(iso) {
-  if (!iso) return "";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "";
-  const seconds = Math.max(0, (Date.now() - t) / 1000);
-  if (!Number.isFinite(seconds) || seconds < 10) return "now";
-  if (seconds < 60) return Math.floor(seconds) + "s";
-  if (seconds < 3600) return Math.floor(seconds / 60) + "m";
-  if (seconds < 86400) return Math.floor(seconds / 3600) + "h";
-  return Math.floor(seconds / 86400) + "d";
 }
 
 function folderGlyph() {
@@ -395,7 +371,7 @@ function updateComputer(node, desc) {
   let state = count ? `${count} session${count === 1 ? "" : "s"}` : "No sessions";
   if (co.state === "connecting") state = "Connecting\u2026";
   else if (co.state === "offline" || co.state === "verify") {
-    const seen = relativeAge(co.updatedAt);
+    const seen = age(co.updatedAt);
     state = offlineReason(co) + (seen ? ` \u00B7 ${seen}` : "");
   }
   // A diverged or long-unsynced store on that computer (the Hook's storeWarnings).
@@ -508,7 +484,7 @@ function rowContent(sb, node, desc) {
   const chip = el("span", "sb-computer", computer);
   chip.style.setProperty("--host-color", hostColor(computer));
   const stalled = stalledMinutes(child);
-  top.append(chip, stalled !== null ? el("span", "sb-stalled", stallLabel(stalled)) : el("span", "sb-age", relativeAge(child.lastChangedAt)));
+  top.append(chip, stalled !== null ? el("span", "sb-stalled", stallLabel(stalled)) : el("span", "sb-age", age(child.lastChangedAt)));
   if (unread) top.append(el("span", "sb-unread"));
   main.append(top);
 
@@ -572,7 +548,7 @@ function compactRowContent(sb, node, desc) {
   }
   if (kind === "working") out.push(el("span", "sb-cspin"));
   else if (["needs", "error", "unknown"].includes(kind)) out.push(el("span", "sb-cmark " + kind, BADGE[kind]));
-  else out.push(el("span", "sb-cage", shortAge(child.lastChangedAt)));
+  else out.push(el("span", "sb-cage", age(child.lastChangedAt, "")));
   if (unread) out.push(el("span", "sb-unread"));
 
   // Hidden terminal trigger: keys.js's 't' clicks `.sb-term`.

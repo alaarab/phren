@@ -1,6 +1,5 @@
 import { el } from "./dom.js";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+import { shortDate } from "./time.js";
 
 /** The parsed citation meta, from citationData or the whole raw comment payload. */
 export function citationData(item) {
@@ -16,8 +15,7 @@ export function freshnessNote(item) {
   const citation = citationData(item);
   const file = typeof citation?.file === "string" && citation.file.trim() ? citation.file : "Cited file";
   const commit = item.citationFreshness.lastCommit;
-  const date = typeof commit?.authoredAt === "string" ? commit.authoredAt.match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
-  const when = date ? `${MONTHS[Number(date[2]) - 1]} ${Number(date[3])}` : "";
+  const when = typeof commit?.authoredAt === "string" ? shortDate(commit.authoredAt) : "";
   const detail = typeof commit?.sha === "string" && /^[0-9a-f]{7,64}$/i.test(commit.sha)
     && typeof commit.summary === "string" && commit.summary && when
     ? `${file} changed in ${commit.sha.slice(0, 7)} “${commit.summary}” (${when})`
