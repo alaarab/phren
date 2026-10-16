@@ -53,10 +53,9 @@ function looksSecret(run) {
   return run.length >= 40 && /[a-z]/.test(run) && /[A-Z]/.test(run) && /[0-9]/.test(run);
 }
 
-/** Redact the whole notification text, cut to what a notification shows. */
-export function redactNotice(value) {
-  const text = value.length > SCAN_MAX ? value.slice(0, SCAN_MAX) : value;
-  const redacted = redactString(text)
+/** Redact a whole text with every pattern, without shortening it (an exported chat). */
+export function redactAll(value) {
+  return redactString(String(value))
     .replace(MORE_TOKENS, "[redacted]")
     .replace(AUTHORIZATION, "$1[redacted]")
     .replace(SIGNED_PARAMS, "$1[redacted]")
@@ -64,6 +63,12 @@ export function redactNotice(value) {
     .replace(ASSIGNMENT, "$1[redacted]")
     .replace(ENV_ASSIGNMENT, "$1[redacted]")
     .replace(LONG_RUN, (run) => (looksSecret(run) ? "[redacted]" : run));
+}
+
+/** Redact the whole notification text, cut to what a notification shows. */
+export function redactNotice(value) {
+  const text = value.length > SCAN_MAX ? value.slice(0, SCAN_MAX) : value;
+  const redacted = redactAll(text);
   if (redacted.length <= NOTICE_MAX && value.length <= SCAN_MAX) return redacted;
   // Shorten after redacting, and never end inside a word that could be the start of a secret.
   return `${redacted.slice(0, NOTICE_MAX).replace(/\S*$/, "")}…`;

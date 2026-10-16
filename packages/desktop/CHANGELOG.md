@@ -9,6 +9,7 @@ GitHub release notes, and the app shows them when that version is available.
 ### New
 
 - **Switch between recent chats with Ctrl+Tab**: hold Ctrl to see your last eight chats and their status.
+- **Copy or save a chat as Markdown** from its menu, with credentials removed.
 - **Find in chat**: Cmd/Ctrl+F searches the open conversation and steps through matches.
 - **Today on each project page**: the project's chats, pull requests and memory from today in one place.
 - Memory can show only findings that may be out of date, so you can review what changed under them.
