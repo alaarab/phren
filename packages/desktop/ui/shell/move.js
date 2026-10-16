@@ -290,10 +290,26 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
     if (!project) {
       const { repos = [] } = await hookGet(computer, "/v1/projects/repos");
       const cwd = (child.cwd ?? "").replace(/\/+$/, "");
-      project = repos.filter((repo) => {
+      const checkout = repos.filter((repo) => {
         const root = repo.directory?.replace(/\/+$/, "");
         return repo.registered && root && (cwd === root || cwd.startsWith(root + "/"));
-      }).sort((a, b) => b.directory.length - a.directory.length)[0]?.name;
+      }).sort((a, b) => b.directory.length - a.directory.length)[0];
+      // `name` is the checkout basename, not the registered store project.
+      project = checkout?.project;
+      if (checkout && !project) {
+        const { stores = [] } = await hookGet(computer, "/v1/tasks/stores");
+        const names = [...new Set(stores.flatMap((store) => store.projects ?? []))];
+        for (let offset = 0; offset < names.length && !project; offset += 4) {
+          const located = await Promise.all(names.slice(offset, offset + 4).map(async (name) => {
+            try {
+              const { candidates = [] } = await hookGet(computer, "/v1/projects/locate", { project: name });
+              return candidates.some((candidate) => candidate.directory?.replace(/\/+$/, "") === checkout.directory.replace(/\/+$/, "")) ? name : null;
+            } catch { return null; }
+          }));
+          project = located.find(Boolean);
+          if (openSheet?.backdrop !== backdrop) return;
+        }
+      }
     }
     if (openSheet?.backdrop !== backdrop) return;
     if (!project) throw new Error("This session has no registered project. Open a chat in a registered checkout to continue on another computer.");

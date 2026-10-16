@@ -629,10 +629,7 @@ export function mountAgents(root) {
 
   return {
     openPane(computer, target) {
-      const doc = target.server === "tmux" || target.server.startsWith("tmux-")
-        ? terminalDoc(computer, { server: target.server })
-        : consoleDoc(computer, target.server, target.pane);
-      return tabs.open(doc);
+      return tabs.open(consoleDoc(computer, target.server, target.pane));
     },
     openSession,
     /** Open a session with its Changes pane on pull requests and checks. */

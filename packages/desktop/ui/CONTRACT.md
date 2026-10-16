@@ -739,7 +739,10 @@ The shared `shell/move.js` sheet (also opened by quota Switch through
 `GET /v1/sessions/move/computers?project=<registered project>` from that Hook.
 It prefers the session's reported `child.project`; otherwise it reads
 `/v1/projects/repos` and chooses the longest registered `directory` ancestor
-of `child.cwd`, matching complete path segments. A session in `project/src`
+of `child.cwd`, matching complete path segments. Its optional `project` field
+is the registered name; `name` is only the checkout basename. If `project` is
+absent, canonical names from `/v1/tasks/stores` are matched to that checkout
+through `/v1/projects/locate` (four reads at a time). A session in `project/src`
 uses the registered project's name, never `src`. An unresolved project shows
 an error and preserves local moves; it never guesses from the basename.
 
@@ -776,7 +779,10 @@ letters or digits with internal hyphens; `default` is reserved. Cancel restores
 the action's focus; launch errors stay editable. Submit rechecks that Hook's
 capability, posts `/v1/accounts/claude/add { slug }`, closes the sheet on success,
 and opens the returned live pane immediately through Agents' `openPane(computer,
-target)`. Herdr opens the exact console tile; tmux opens that server's terminal,
-which supports interactive login without waiting for a transcript or overview
-session. The Hook runs the login command; the client never builds shell commands.
+target)`. Both muxes use the known-pane console tile and carry the returned
+server and pane through `/pty`. For local tmux, the bridge resolves that pane's
+actual session/window/pane IDs and uses a fully qualified `attach-session -t`
+target on the returned server's socket, never an untargeted attach. Remote
+panes use the Hook's existing SSH pane attachment path. Interactive login opens
+without waiting for a transcript or overview session. The Hook runs the login command; the client never builds shell commands.
 Coverage: `src/ui-move.test.ts`.

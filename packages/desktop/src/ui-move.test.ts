@@ -202,8 +202,10 @@ function remoteInventory(result = peers) {
     if (route === "/v1/projects/repos") return { repos: [
       { name: "wrong", directory: "/repo/project-extra", registered: true },
       { name: "unregistered", directory: "/repo/project/src", registered: false },
-      { name: "registered-name", directory: "/repo/project", registered: true },
+      { name: "project", directory: "/repo/project", registered: true },
     ] };
+    if (route === "/v1/tasks/stores") return { stores: [{ projects: ["registered-name"] }] };
+    if (route === "/v1/projects/locate") return { candidates: [{ directory: "/repo/project" }] };
     return result;
   });
 }
@@ -271,6 +273,7 @@ it.each([true, false])("resolves project/src via reported project when present=%
   await openMoveSheet({ computer: "Desk", child: { ...session, project: reported ? "reported-project" : undefined, cwd: "/repo/project/src" } });
   expect(hookGet).toHaveBeenCalledWith("Desk", "/v1/sessions/move/computers", { project: reported ? "reported-project" : "registered-name" });
   expect(vi.mocked(hookGet).mock.calls.some((call) => call[1] === "/v1/projects/repos")).toBe(!reported);
+  if (!reported) expect(hookGet).toHaveBeenCalledWith("Desk", "/v1/projects/locate", { project: "registered-name" });
 });
 
 it("refuses to guess a project from an unmatched cwd basename", async () => {

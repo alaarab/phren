@@ -69,7 +69,8 @@ function defaultSession() {
     agent: "claude",
     agentStatus: "working",
     currentStep: "Checking the login guard",
-    cwd: "/Users/you/phren",
+    cwd: "/Users/you/phren-checkout/src",
+    project: "phren",
     branch: "main",
     lastChangedAt: new Date().toISOString(),
     target: { server: "default", workspace: "1", tab: "1", pane: "1", source: "claude", session: "sess-fix-login" },
@@ -336,8 +337,8 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
       } } };
     },
     "GET /v1/projects/repos": () => ({ json: { repos: [
-      { name: "phren", directory: "/Users/you/phren", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
-      { name: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
+      { name: "phren-checkout", project: "phren", directory: "/Users/you/phren-checkout", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
+      { name: "website", project: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
     ] } }),
     "GET /v1/projects/website/memory": () => ({ json: { project: "website", findings: [{ id: "fid:website", text: "Route website requests through the preview host." }], truths: [], tasks: [] } }),
     "GET /v1/projects/website/memory/search": () => ({ json: { results: [{ kind: "finding", text: "Route website requests through the preview host.", score: 0.95, finding: { id: "fid:website", type: "pattern" } }] } }),

@@ -104,7 +104,7 @@ export function attachShell(c: Computer, folder: string, cols: number, rows: num
   return wrap(pty.spawn(shell, ["-l"], { name: "xterm-256color", cols: clamp(cols, 2, 500), rows: clamp(rows, 2, 200), cwd: folder, env: childEnv(true) }));
 }
 
-/** A whole Herdr or tmux server, or with `pane`, one Herdr pane's own terminal (the console view). */
+/** A whole Herdr or tmux server, or with `pane`, that pane's terminal (the console view). */
 export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols: number, rows: number, pane?: string): TerminalSession => {
   if (!SERVER_RE.test(server)) throw new Error(`invalid server name: ${server}`);
   if (pane !== undefined && !PANE_RE.test(pane)) throw new Error(`invalid pane: ${pane}`);
@@ -113,7 +113,15 @@ export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols
     return wrap(spawnPty("ssh", sshArgs(c, command, { tty: true }), cols, rows, false));
   }
   if (pane !== undefined) {
-    if (server === "tmux" || server.startsWith("tmux-")) throw new Error("A single pane's console needs Herdr.");
+    if (server === "tmux" || server.startsWith("tmux-")) {
+      if (!/^p\d{1,9}$/.test(pane)) throw new Error("Invalid tmux pane.");
+      const socket = server === "tmux" ? [] : ["-L", server.slice("tmux-".length)];
+      // Resolve the pane's session and window too, so attach never chooses the
+      // default session or a similarly named target. Hook ids p42 mean %42.
+      const target = execFileSync("tmux", [...socket, "display-message", "-p", "-t", `%${pane.slice(1)}`, "#{session_id}:#{window_id}.#{pane_id}"], { encoding: "utf8", timeout: 5_000, env: childEnv(true) }).trim();
+      if (!/^\$\d+:@\d+\.%\d+$/.test(target) || !target.endsWith(`.%${pane.slice(1)}`)) throw new Error("That pane is not open anymore.");
+      return wrap(spawnPty("tmux", [...socket, "attach-session", "-t", target], cols, rows, true));
+    }
     return wrap(spawnPty("herdr", ["--session", server, "terminal", "attach", localPaneTerminal(server, pane)], cols, rows, true));
   }
   const { file, args } = localCommand(server);
