@@ -3,19 +3,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const hooks = vi.hoisted(() => ({
   schedules: new Map<string, unknown>(),
   showSection: vi.fn(),
+  run: vi.fn(), can: vi.fn(() => true),
   merged: { computers: [{ computer: "Desk", state: "online" }, { computer: "Laptop", state: "online" }] },
   publish: null as null | ((value: unknown) => void),
 }));
 vi.mock("../ui/api.js", () => ({
   hookGet: vi.fn(async () => ({ dispatches: [] })),
-  hookPost: vi.fn(async (computer: string) => {
+  hookPost: vi.fn(async (computer: string, route: string, body: unknown) => {
+    if (route === "/v1/schedules/run") return hooks.run(computer, route, body);
     const answer = hooks.schedules.get(computer);
     if (answer instanceof Error) throw answer;
     return answer ?? { schedules: [] };
   }),
 }));
 vi.mock("../ui/shell/store.js", () => ({
-  store: { subscribe: (fn: (value: unknown) => void) => { hooks.publish = fn; fn(hooks.merged); return () => {}; }, find: () => null },
+  store: { can: hooks.can, subscribe: (fn: (value: unknown) => void) => { hooks.publish = fn; fn(hooks.merged); return () => {}; }, find: () => null },
   sessions: () => [], needsYou: () => [], projectOf: () => "project",
 }));
 vi.mock("../ui/shell/sections.js", () => ({ showSection: hooks.showSection }));
@@ -73,6 +75,7 @@ describe("upNext", () => {
 // replacing a list's children blurs a focused child, even one put back.
 const doc = { activeElement: null as unknown };
 class FakeNode {
+  disabled = false;
   className = "";
   textContent = "";
   hidden = false;
@@ -103,7 +106,7 @@ class FakeNode {
   querySelectorAll() { return []; }
 }
 
-afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); hooks.schedules.clear(); doc.activeElement = null; });
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); hooks.schedules.clear(); hooks.can.mockReturnValue(true); vi.useRealTimers(); doc.activeElement = null; });
 
 function stubDocument() {
   vi.stubGlobal("HTMLElement", FakeNode);
@@ -130,12 +133,12 @@ it("keeps a focused Up next row, and its focus, across re-renders and polls", as
     expect(list.children[1] === second, "same row element").toBe(true);
     expect(doc.activeElement === second, "focus kept").toBe(true);
 
-    // A changed schedule rebuilds only its own row, and focus returns to the same schedule.
+    // Changed content keeps action controls mounted.
     hooks.schedules.set("Desk", { schedules: [schedule("triage", null, { nextRun: at(42), name: "Renamed" }), schedule("deps", null, { nextRun: at(185) })] });
     home.hide();
     home.show(); // show() reads the schedules again
-    await vi.waitFor(() => expect(list.children[0] === first, "changed row rebuilt").toBe(false));
-    expect(list.children[0].children[0].children[0].textContent).toBe("Renamed");
+    await vi.waitFor(() => expect(list.children[0].children[0].children[0].children[0].textContent).toBe("Renamed"));
+    expect(list.children[0]).toBe(first);
     expect(list.children[1] === second, "same row element").toBe(true);
     expect(doc.activeElement === second, "focus kept").toBe(true);
   } finally { home.destroy(); }
@@ -158,7 +161,7 @@ it("Home lists the schedules due next from the schedules it already reads, and o
     await vi.waitFor(() => expect(scope.hidden).toBe(false));
     const list = scope.querySelector(".home-list");
     expect(list.children).toHaveLength(1);
-    const row = list.children[0];
+    const row = list.children[0].children[0];
     expect(row.children[0].children[0].textContent).toBe("Nightly triage");
     expect(row.children[0].children[1].textContent).toBe("Triage today's issues.");
     const meta = row.children[1].children.map((child) => child.textContent);
@@ -166,5 +169,69 @@ it("Home lists the schedules due next from the schedules it already reads, and o
     expect(scope.querySelector(".count").textContent).toBe("1");
     row.listeners.get("click")!({});
     expect(hooks.showSection).toHaveBeenCalledWith("schedules");
+  } finally { home.destroy(); }
+});
+
+const click = (node: FakeNode) => node.listeners.get("click")!({ stopPropagation: vi.fn() });
+async function runSetup() {
+  stubDocument();
+  const root = new FakeNode();
+  const list = root.querySelector('[data-block="upnext"]').querySelector(".home-list");
+  const source = { ...schedule("triage", null), computer: "hook-name", updatedAt: "revision-1", nextRun: new Date(Date.now() + 600_000).toISOString() };
+  hooks.schedules.set("Desk", { schedules: [source] });
+  const home = mountHome(root); home.show();
+  await vi.waitFor(() => expect(list.children).toHaveLength(1));
+  return { home, list, source, run: list.children[0].children[1].children[0] };
+}
+it("confirms for five seconds, cancels, sends the Schedules payload once and shows busy then Started", async () => {
+  const { home, list, run, source } = await runSetup();
+  try {
+    vi.useFakeTimers();
+    const cancel = list.children[0].children[1].children[1];
+    await click(run);
+    expect(run.textContent).toBe("Run? Yes"); expect(cancel.hidden).toBe(false);
+    expect(hooks.run).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(5000); expect(run.textContent).toBe("Run now");
+    await click(run); await click(cancel);
+    expect(run.textContent).toBe("Run now"); expect(doc.activeElement).toBe(run);
+    let finish!: () => void;
+    hooks.run.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    await click(run); const pending = click(run);
+    expect(run.textContent).toBe("Starting…"); expect(run.disabled).toBe(true);
+    await click(run);
+    expect(hooks.run).toHaveBeenCalledExactlyOnceWith("Desk", "/v1/schedules/run", { project: "phren", id: "triage", expectedUpdatedAt: source.updatedAt });
+    finish(); await pending;
+    const note = list.children[0].children[2];
+    expect(note.textContent).toBe("Started"); expect(note.hidden).toBe(false);
+    vi.advanceTimersByTime(4000); expect(note.hidden).toBe(true);
+    expect(hooks.showSection).not.toHaveBeenCalled();
+  } finally { home.destroy(); }
+});
+it.each([409, 404])("shows Hook %s errors inline and disables missing routes", async (status) => {
+  const { home, list, run } = await runSetup();
+  try {
+    hooks.run.mockRejectedValueOnce(Object.assign(new Error("Hook refused this run"), { status }));
+    await click(run); await click(run);
+    expect(list.children[0].children[2].textContent).toBe("Hook refused this run");
+    expect(run.disabled).toBe(status === 404);
+    hooks.publish!(hooks.merged);
+    expect(list.children[0].children[2].hidden).toBe(false);
+  } finally { home.destroy(); }
+});
+it("gates unsupported owners and keeps confirmation focus through changed and reordered polls", async () => {
+  const { home, list, run, source } = await runSetup();
+  try {
+    hooks.can.mockReturnValue(false); hooks.publish!(hooks.merged);
+    expect(run.disabled).toBe(true); await click(run); expect(run.textContent).toBe("Run now");
+    hooks.can.mockReturnValue(true); hooks.publish!(hooks.merged);
+    await click(run); run.focus();
+    hooks.schedules.set("Desk", { schedules: [{ ...source, id: "earlier", nextRun: new Date(Date.now() + 60_000).toISOString() }, { ...source, name: "Renamed", updatedAt: "revision-2" }] });
+    home.hide(); home.show();
+    await vi.waitFor(() => expect(list.children).toHaveLength(2));
+    expect(list.children[1].children[1].children[0]).toBe(run);
+    expect(doc.activeElement).toBe(run); expect(run.textContent).toBe("Run? Yes");
+    hooks.schedules.set("Desk", { schedules: [{ ...source, running: true }] });
+    home.hide(); home.show(); await vi.waitFor(() => expect(list.children).toHaveLength(0));
+    expect(hooks.run).not.toHaveBeenCalled();
   } finally { home.destroy(); }
 });

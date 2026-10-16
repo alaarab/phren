@@ -84,7 +84,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const low = createRunningLow(shared);
   const finished = createFinished({ ...shared, openPrs, receipts, runs });
   const checks = createChecks({ block, openPrs });
-  const renderUpNext = createUpNext({ block, scheduleLists });
+  const renderUpNext = createUpNext({ block, scheduleLists, state });
   const activeTasks = createActiveTasks({ block, state });
   const renderComputers = createComputers(shared);
   const renderConductor = createConductor({ root, state, receipts, open });
@@ -196,6 +196,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       stopUsage?.();
       stopUsage = null;
       working.destroy();
+      renderUpNext.destroy();
       unsubscribe();
       unsubscribeAway();
       unsubscribeApprovals();

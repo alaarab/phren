@@ -68,7 +68,7 @@ export function createWorking({ state, block, sessionRow }) {
         const controls = [...entry.content.querySelectorAll("button")];
         const focusIndex = controls.indexOf(active);
         const activity = row.child.currentStep || row.child.activity || row.child.activityVerb || backgroundLabel(row.child);
-        const sub = activity ? el("span", "home-row-sub activity", String(activity)) : undefined;
+        const sub = String(activity || "").trim() ? el("span", "home-row-sub activity", String(activity)) : undefined;
         entry.content.replaceChildren(sessionRow(row, { tone: stalledMinutes(row.child) !== null ? "stalled" : "working", sub }));
         if (focusIndex >= 0) entry.content.querySelectorAll("button")[focusIndex]?.focus();
         entry.sig = sig;

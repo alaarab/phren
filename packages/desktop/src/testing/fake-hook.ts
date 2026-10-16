@@ -111,7 +111,7 @@ function defaultHealth() {
     computer: { id: "test-computer", name: "This computer" },
     capabilities: {
       fileWrite: true, fileSearch: true, gitReview: true, files: true, fileResolution: true, repositoryFiles: true,
-      transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
+      schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
     },
   };
 }
@@ -340,6 +340,12 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
     "POST /v1/keys": () => ({ json: { ok: true } }),
     "POST /v1/schedules": () => ({ status: 200, json: defaultSchedules() }),
+    "POST /v1/schedules/run": (_req, body) => {
+      const data = body as { id?: string };
+      return data?.id === "deps-check"
+        ? { status: 409, json: { error: "Dependency check is already running." } }
+        : { json: { ok: true } };
+    },
 
     "GET /v1/files/range": (_req, _body, url) => {
       const requested = url.searchParams.get("path") ?? "";

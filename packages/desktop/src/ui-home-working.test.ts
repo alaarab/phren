@@ -168,3 +168,14 @@ it.each(["overview", "timeout"])("blocks a second Escape after a fast response u
     expect(hooks.post).toHaveBeenCalledTimes(2);
   } finally { working.destroy(); vi.useRealTimers(); }
 });
+
+it("omits the second line for missing and whitespace-only steps", () => {
+  const { list, publish, working } = setup();
+  try {
+    for (const currentStep of [undefined, "   "]) {
+      publish([{ ...child("one"), currentStep } as ReturnType<typeof child>]);
+      const main = list.children[0].children[0].children[0].children[0];
+      expect(main.children.map((node) => node.className)).toEqual(["home-row-title"]);
+    }
+  } finally { working.destroy(); }
+});
