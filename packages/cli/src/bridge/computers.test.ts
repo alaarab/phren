@@ -14,7 +14,7 @@ describe("computer enrollment", () => {
   // The Hook that reads these files supports macOS and Linux only.
   it.skipIf(process.platform === "win32")("creates one private identity and prints the phone's restricted forced command", async () => {
     const line = await enrollComputer("Desk", root);
-    expect(line).toMatch(/^restrict,command="sh ~\/\.local\/share\/phren\/bridge\/dispatch-scoped peer" ssh-ed25519 \S+ phren-computer:Desk$/);
+    expect(line).toMatch(/^restrict,command="sh ~\/\.local\/share\/phren\/bridge\/dispatch-scoped peer:Desk" ssh-ed25519 \S+ phren-computer:Desk$/);
     expect(line).not.toContain("port-forwarding");
     expect(await enrollComputer("Desk", root)).toBe(line);
     expect((await stat(dispatchKeyPath(root))).mode & 0o777).toBe(0o600);

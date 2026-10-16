@@ -6,7 +6,7 @@ export async function hookRequest(route: string, data?: Json, options: RequestOp
     const payload = data === undefined ? undefined : JSON.stringify(data);
     const method = options.method ?? (payload === undefined ? "GET" : "POST");
     const req = request({ ...options, path: route, method,
-      headers: { Host: "phren.local", Connection: "close", ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}) } }, response => {
+      headers: { Host: "phren.local", Connection: "close", ...options.headers, ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}) } }, response => {
       const chunks: Buffer[] = []; let size = 0;
       response.on("data", chunk => {
         size += chunk.length;

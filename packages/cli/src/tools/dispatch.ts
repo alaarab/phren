@@ -59,7 +59,8 @@ export function register(server: McpServer): void {
     inputSchema: {},
   }, async () => {
     try {
-      const result = await hookRequest("/v1/dispatch/returns", {});
+      const origin = await terminalPaneFromEnv();
+      const result = await hookRequest("/v1/dispatch/returns", { ...(origin ? { origin } : {}) });
       const returns = Array.isArray(result.returns) ? result.returns : [];
       return mcpResponse({ ok: true, data: result, message: returns.length ? `${returns.length} unread returns.` : "No unread returns." });
     } catch (error) {

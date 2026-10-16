@@ -22,7 +22,7 @@ export function publicComputerKey(value: string): string {
 }
 
 export function computerKeyLine(name: string, publicKey: string): string {
-  return `restrict,${peerForcedCommand} ${publicComputerKey(publicKey)} phren-computer:${computerName.parse(name)}`;
+  return `restrict,${peerForcedCommand.replace(" peer\"", ` peer:${computerName.parse(name)}\"`)} ${publicComputerKey(publicKey)} phren-computer:${name}`;
 }
 
 async function regularFile(file: string): Promise<boolean> {
@@ -63,7 +63,8 @@ export async function acceptComputer(name: string, input: string, sshDirectory =
   computerName.parse(name);
   const prefixes = [`restrict,${peerForcedCommand} `, `restrict,pty,${forcedCommand} `];
   const raw = input.trim();
-  const prefix = prefixes.find(value => raw.startsWith(value));
+  const namedPeer = /^restrict,command="sh ~\/\.local\/share\/phren\/bridge\/dispatch-scoped peer:[A-Za-z0-9_.-]+" /.exec(raw)?.[0];
+  const prefix = namedPeer ?? prefixes.find(value => raw.startsWith(value));
   const publicKey = publicComputerKey(prefix ? raw.slice(prefix.length) : raw);
   const line = computerKeyLine(name, publicKey);
   const encoded = publicKey.split(" ")[1];

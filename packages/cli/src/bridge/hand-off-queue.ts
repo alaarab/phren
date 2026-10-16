@@ -20,6 +20,7 @@ type Row = z.infer<typeof rowSchema>;
 export interface QueueOptions {
   validate: (target: Target) => Promise<Json>;
   send: (target: Target, text: string, deliveryId: string, typing: () => Promise<void>) => Promise<Json>;
+  forward?: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean } | undefined>;
   notify?: (target: Target, text: string, deliveryId: string, computer: string) => Promise<Json>;
   /** The conversation the target's pane shows now, and its terminal. */
   current?: (target: Target) => Promise<{ session: string; terminal: unknown } | undefined>;
@@ -180,6 +181,11 @@ export class HandOffQueue {
       }
       for (const row of rows) if (row.origin && !row.notified && ["delivered", "failed", "uncertain"].includes(row.state)) {
         if (row.originComputer) { remote.push(row); continue; }
+        const forwarded = await this.options.forward?.(row.origin, `Hand-off ${row.deliveryId}: ${row.state}.`, this.noticeId(row)).catch(() => ({ delivered: false }));
+        if (forwarded) {
+          if (forwarded.delivered) { row.notified = true; await this.save(row); }
+          continue;
+        }
         // A notice is itself an idempotent queued hand-off, without an origin.
         const id = this.noticeId(row);
         if (!await this.read(id)) {

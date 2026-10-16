@@ -1261,6 +1261,187 @@ The overview and `/v1/dispatch/workers` observations carry `stalled:true`,
 `stalledSince` (ISO time) and `stallFor` (seconds) when both the screen and
 transcript are unchanged while working for `PHREN_STALL_MS`.
 
+With `capabilities.moveToComputer: true`, the owner can continue an ordinary
+chat on another verified computer. `GET /v1/sessions/move/computers?project=<name>`
+returns `{computers, localClaudeLogins}`. Each computer has `name`, `self`,
+`online`, `hasCheckout`, and `harnesses` (`source`, `usable`, optional `accounts`
+with `id`, `label`, `email?`, `plan?`, `fiveHourLeft?`, `weekLeft?`,
+`fiveHourResetsAt?`, `weekResetsAt?`, `usable`, and `current`). Every Claude
+login is included, including unusable logins and logins on this computer.
+Pass `session=<current-session-id>` (and `server` when needed) to mark its
+account `current: true`; other accounts have `current: false`. Percentages are
+remaining usage from the hand-off overview's Claude usage. Offline peers stay
+in the list, disabled; a missing checkout also disables a destination.
+
+`POST /v1/sessions/move` accepts `to.computer`, an exact verified hooks.yaml
+peer name. Omitted or self uses the local move. A peer forces `mode: "new-chat"`:
+the source writes its hand-off and the peer starts in its own registered
+checkout of the project, over the existing pinned SSH launch path. The full
+hand-off is sent inline, with credential values redacted;
+login credentials, environment and checkout files are never copied. The new
+conversation must confirm its first brief and be running before `state: "moved"`.
+The old chat stays open, including on failure. The record has `to.computer`,
+`placement: "peer"` and `handedOffTo: {computer,target}`. Unknown peers return
+404; offline peers, missing checkouts and unusable harnesses/accounts return
+409 before the hand-off request. Peer calls have bounded timeouts.
+
+Listing destinations and starting a cross-computer move require the owner.
+Scoped gitboy keys, MCP agents (including dispatched workers), and peer-originated
+requests cannot start one. `GET /v1/sessions/move/availability?project=<name>`
+is a local-only facts probe for the owner and verified peers; it never fans out
+or launches a chat. A dispatched worker moved by its owner re-points its receipt
+to the destination computer so future returns and approvals follow it.
+
+Peer hand-offs omit process command lines (only a child-process count is
+included). Control characters are normalized, then the whole outbound prompt
+(including fallback conversation text) is structurally redacted: password,
+passwd, pwd, token, secret, api-key/api_key, auth and bearer values in flags,
+assignments and mappings, Authorization/Bearer headers, and URL userinfo become
+`[redacted]`. Recognizable credential values are redacted in place; a long path or other
+base64-looking text does not refuse the move. Redaction applies to prose fields,
+never opaque protocol tokens, capabilities or other structural metadata. Copilot is unavailable for cross-computer
+moves because it has no launch-brief arrival signal: its peer listing has
+`usable: false` and a `reason`; local Copilot moves still work.
+
+An omitted Claude account selects any usable login with room, preferring the
+most five-hour headroom and then weekly room, as the launcher does. The Hook
+pins that choice in `to.account`, records `accountChoice`, and advertises the
+listing's `selectedAccount`, so the receiving launcher uses the reported login.
+
+Moved-worker observations carry `computerFingerprint`, derived from the
+verified SSH host key and enrolled SSH username, and `computerId`, advertised by
+the destination Hook's local availability endpoint. A destination matching the
+dispatching Hook's own stable ID is routed locally, so A→B→A moves preserve
+returns and approvals without listing self as a peer. The dispatching Hook
+resolves it against its own pinned peer directory and records its own destination name. It never treats another
+Hook's alias as a local address. An absent or ambiguous identity retains the
+previous receipt routing and reports an error; it cannot send returns or
+approvals to a different computer that happens to share the alias.
+
+With `moveConductorToComputer: true`, a conductor can move with its role.
+The original Hook A keeps its receipts, pending approvals, standing grants and
+serialization. B prepares an inactive successor; only after its exact conversation
+is confirmed running does A compare the captured role generation and atomically
+commit ownership to B's pinned SSH account, Hook ID and target. A fences the old
+chat, forwards late returns and proxies the successor's dispatch, hand-off,
+approval and grant operations. Approval action IDs are preserved, and return
+notices use the durable hand-off queue's stable delivery IDs. During preparation,
+returns remain pending on A instead of being acknowledged to the old chat after
+its hand-off was written. B fails closed
+with a clear error while A is unreachable. A stays required for coordination.
+
+Prepare, commit and status are persisted by move ID on both Hooks under
+`conductor-role.json` and `conductor-moves/`. A pending move blocks new conductor
+dispatches/hand-offs and role make/start/stop; it also refuses to begin while an
+existing conductor operation is in flight or a worker computer is unreachable.
+Before commit the original chat keeps authority. Failures before commit abort
+preparation and tell the successor it is not the conductor. An uncertain commit
+is reconciled from A's durable generation, never rolled back. Restarts reuse the
+same move and launch IDs. Private source recovery data is withheld from peer
+status replies. Local conductor moves retain their existing CAS and
+receipt re-pointing behavior.
+
+For a projectless conductor, pass `conductor=1` to destination discovery
+(`project` may be omitted); its
+successor starts in B's own Phren store. No checkout or credentials are copied.
+The peer protocol uses `POST /v1/conductor/move/prepare`, `/commit`, `/operate`,
+`/ack` (return acknowledgement), and `/notice`, with `GET /v1/conductor/move/status`, `/launch`, `/operation`,
+and `/notification`. Local agents use `POST /v1/conductor/call`; peer-originated
+calls to that local route are refused. A peer's claimed alias and generation
+are insufficient authorization: each write fetches the canonical prepared
+intent back over the receiver's own pinned SSH account and verifies the Hook ID.
+Generic peer dispatch, approval, return-read and grant-write requests are
+refused; only the authenticated conductor routes accept those operations. Unacknowledged operations
+keep their persisted operation ID across restarts for mutations; a lost peer reply
+cannot dispatch a second worker. Read operations (returns, grants-list and hand-off
+status) use fresh operation IDs after an uncertain attempt. Returns stay unread
+on A until B durably receives the result and acknowledges its exact version; a
+failed read never consumes them. Confirmed refusals allow a new intent, while
+uncertain mutations fail closed.
+Credential-bearing text is withheld from peer operation replies. The owner can end delegation with conductor stop on A; B
+reconciles that revocation and neither previous chat regains the role.
+
+Owner-only actions use the existing owner request envelope: owner phone,
+desktop and CLI calls carry no agent or peer origin. Scoped gateways rebuild
+the envelope and stamp peer requests, so peers cannot impersonate that owner
+path. Existing session move listings keep their normal behavior. Peer move-status
+reads require the recorded source/destination identity. Peer availability omits
+account emails and plans; owner discovery includes them.
+
+Newly enrolled computer keys use `dispatch-scoped peer:<name>` instead of
+`dispatch-scoped peer`; the restrictions, public key and comment are unchanged.
+Install never rewrites existing computer keys. An unknown named enrollment
+retains legacy peer behavior on existing routes. The new continuation launch
+and conductor succession routes require a known verified reverse enrollment;
+explicitly re-enroll a legacy key to use them. Conductor operations and status
+check the recorded counterpart's host-key/SSH-account identity and pinned Hook ID.
+
+A forwarded dispatch or hand-off without `computer` means the successor's
+computer B. Named destinations are translated to pinned identities and resolved
+through A's verified directory, so local aliases need not match. Unknown
+identities are refused. `anywhere` explicitly uses the original Hook A's
+directory and placement policy. All receipt workers, including legacy receipts,
+must resolve to the same host-key/SSH-account and Hook identity in B's directory.
+Automatic account failover obeys the move fence and, after commit, verifies the
+successor generation before dispatch. Hand-off completion notices follow the
+successor with stable delivery IDs. Returning a worker home requires its exact
+move's local arrival and a matching live pane; a peer's claimed home ID alone
+cannot change routing. Existing brief IDs cannot be overwritten.
+
+Clients list Claude accounts first across self and linked computers, with email
+(or label), plan, computer, both usage windows and reset times. The current login
+is marked and disabled; same-computer choices use `to.account`, peer choices use
+`to.computer` plus `to.account`. Other harnesses follow in a secondary section;
+model and effort controls are secondary. Offline computers and missing checkouts
+stay visible with their reason. Without the conductor capability, peer conductor
+rows say “Update <computer>'s Hook to move the conductor”.
+
+`claudeAccountAdd: true` enables owner-only `POST /v1/accounts/claude/add`
+with `{slug}` (`^[a-z0-9][a-z0-9-]{0,31}$`, lowercase, not existing). It opens a new pane
+running `phren bridge accounts add -- <slug>` and returns `{target, terminalOnly:true}`.
+The target has server/workspace/tab/pane/source, with no invented conversation ID.
+Open that pane's terminal view so the owner can complete the interactive Claude
+login. Phren never types or forwards credentials. The single-login hint can also
+offer this action.
+
+Peer launches use `POST /v1/sessions/move/launch` with a stable brief/move ID and
+the expected destination `computerId`; `GET` on the same route reads its placement.
+The receiver persists an uncertain intent before creation and replays the saved
+target on retry. A peer launch first pulls the canonical, owner-admitted source
+intent from `GET /v1/sessions/move/intent?id=<move-id>` over the receiver's own
+verified reverse enrollment; knowing an id cannot authorize an arbitrary launch.
+That intent route admits only the move's recorded destination. A never-received
+launch reports `not-placed` only after that same source-intent verification.
+An interrupted creation is reconciled through that brief's
+arrival, never by creating a second pane. After ten minutes, a successful terminal
+inspection that confirms the unique creation label and recorded pane are both
+absent reports `not-placed`; A then fails the uncommitted move and releases the
+original conductor. Transient recovery errors use persisted exponential backoff, starting at five
+seconds and capped at ten minutes. Refusals (4xx) fail with their reason; recovery
+gives up after the ten-minute absence window. A committed conductor generation
+is never rolled back, even when the move record fails. Legacy intents
+without enough placement metadata require the owner to abort before commit. The owner may
+`POST /v1/sessions/move/abort` with `{id}` before commit. A committed or uncertain
+ownership switch is reconciled instead of rolled back. Continuations also record whether
+the chat is a dispatched worker, so an ordinary continued chat remains movable
+without requiring a dispatcher. The source persists an `uncertain`
+placement immediately and reconciles it across Hook restarts using the same ID.
+
+A dispatched worker's cross-computer move first requires its original dispatcher's
+`workerRelocation: 1` capability from its original dispatcher, checked with
+`GET /v1/dispatch/relocation?id=<dispatch-or-move-id>&session=<session>`.
+A compatible dispatcher may not yet have observed the preceding relocation.
+The receiving launch preserves the original receipt ID as `workerDispatch`, so
+`knownDispatch: true` proves the dispatcher recognizes that receipt even while
+the new session is still unknown. An unrelated Hook advertising the capability
+cannot authorize relocation. This allows an immediate move home before the
+next poll. Without compatibility, the move refuses with “Update the dispatching computer's Phren Hook
+first”. Destination routing verifies host key, SSH username and the destination
+Hook's ID over the dispatcher's own pinned connection. Polls, approvals and
+cleanup re-verify that tuple after relocation; changing an enrollment retains
+the old receipt and pending approval instead of sending it to a replacement Hook.
+Without `moveToComputer`, existing clients and local moves are unchanged.
+
 ### Session moves
 
 With capability `sessionMove`, `POST /v1/sessions/move` takes

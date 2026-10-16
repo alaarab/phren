@@ -159,6 +159,7 @@ export async function localConductor(known?: { server: string; snapshot: Json })
 /** Refuses a second conductor in this computer's set: a live one here on
  * another pane, or on any member. Members that could not say come back as `unchecked`. */
 async function requireNoConductor(server: string, before: Json, except?: string): Promise<GroupConductor["unchecked"]> {
+  (await import("./conductor-role.js")).assertRoleMutable(await readRoleState());
   const existing = await localConductor({ server, snapshot: before });
   if (existing && !(except && existing.server === server && existing.target?.pane === except)) {
     throw new BridgeError(409, "A conductor is already running on this computer. Stop it first.", { target: existing.target });
@@ -293,6 +294,8 @@ async function requireAvailable(kind: string, account: string | undefined): Prom
 }
 
 export interface LaunchOptions {
+  /** Persist a newly created pane before starting or prompting its harness. */
+  onPlaced?: (paneTarget: Json) => Promise<void>;
   canary?: boolean;
   /** `data.cwd` is a folder the Hook resolved itself (a dispatched or
    * scheduled project's source folder), so it may be marked trusted for the
@@ -484,6 +487,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   }
   if (!created) throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
   const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
+  await options.onPlaced?.({ server, ...place, source: kind });
   const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
     ...(data.effort === undefined ? {} : { effort }), env: { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) },
     ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief, ...(permissionMode ? { remoteArgs: codexModeFlags(permissionMode) } : {}) }).catch(error => {

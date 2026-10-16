@@ -1,3 +1,4 @@
+import { redactPeerHandoff } from "./peer-handoff.js";
 import { randomUUID } from "node:crypto";
 import { deliveryIdSchema } from "./prompt-once.js";
 import { terminalPaneFromEnv } from "./terminal.js";
@@ -84,8 +85,12 @@ async function hookFor(computer: string | undefined): Promise<{ request: Request
   return { peer: found, request: (route, body) => peerRequest(found, route, body) };
 }
 
-export async function handOff(input: unknown, options: { deliveryId?: string; notifySender?: boolean } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; queued?: boolean; deliveryId?: string; state?: string; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
+export async function handOff(input: unknown, options: { deliveryId?: string; notifySender?: boolean; bypassConductor?: boolean } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; queued?: boolean; deliveryId?: string; state?: string; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
   const data = handOffSchema.parse(input);
+  if (!options.bypassConductor) {
+    const here = await terminalPaneFromEnv();
+    if (here) return await hookRequest("/v1/conductor/call", { action: "hand_off", data, origin: here }) as unknown as Awaited<ReturnType<typeof handOff>>;
+  }
   const { request, peer } = await hookFor(data.computer);
   const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server, data.account);
   const target = data.target ?? resolved!.target;
@@ -99,7 +104,7 @@ export async function handOff(input: unknown, options: { deliveryId?: string; no
   const originComputer = peer && origin ? await hookRequest("/v1/health").then(health => object(health.computer).name, () => undefined) : undefined;
   const deliveryId = data.deliveryId ?? options.deliveryId ?? randomUUID().replaceAll("-", "");
   const result = await request(data.status ? "/v1/hand-off/status" : "/v1/hand-off", { target, deliveryId,
-    ...(!data.status ? { text: data.text, ...(origin ? { origin, ...(typeof originComputer === "string" ? { originComputer } : {}) } : {}) } : {}) });
+    ...(!data.status ? { text: peer ? redactPeerHandoff(data.text!) : data.text, ...(origin ? { origin, ...(typeof originComputer === "string" ? { originComputer } : {}) } : {}) } : {}) });
   // A bare ok only acknowledges typing. Even an unchanged, busy Codex pane
   // may have kept the text in its composer instead of submitting a turn.
   const delivered = result.ok === true && result.delivered === true && result.deliveryUncertain !== true && result.unsubmitted !== true;
@@ -210,6 +215,20 @@ export function claudeAccountRooms(answer: Json, computer: string, now = Date.no
     return { computer, account: usage.account?.id ?? "default", ...(usage.account?.label ? { label: usage.account.label } : {}),
       ...(usage.account?.email ? { email: usage.account.email } : {}), ...(five ? { fiveHour: five } : {}), ...(seven ? { week: seven } : {}) };
   });
+}
+
+/** Owner-visible login metadata and remaining allowance for continuation.
+ * Config paths, identity hashes and provider credentials stay on the Hook. */
+export function claudeMoveAccounts(answer: Json): Array<{ id: string; email?: string; plan?: string; fiveHourLeft?: number; weekLeft?: number; resetsAt?: string; fiveHourResetsAt?: string; weekResetsAt?: string }> {
+  return claudeAccountRooms(answer, "local").map(room => ({ id: room.account,
+    ...(room.email ? { email: room.email } : {}),
+    ...(typeof object(objects(answer.accounts).find(row => row.source === "claude" && object(row.account).id === room.account)?.subscription).plan === "string" ? { plan: String(object(objects(answer.accounts).find(row => row.source === "claude" && object(row.account).id === room.account)?.subscription).plan) } : {}),
+    ...(room.fiveHour?.resetsAt ? { fiveHourResetsAt: room.fiveHour.resetsAt } : {}),
+    ...(room.week?.resetsAt ? { weekResetsAt: room.week.resetsAt } : {}),
+    ...(room.fiveHour?.leftPercent !== undefined ? { fiveHourLeft: room.fiveHour.leftPercent } : {}),
+    ...(room.week?.leftPercent !== undefined ? { weekLeft: room.week.leftPercent } : {}),
+    ...(room.fiveHour?.resetsAt ?? room.week?.resetsAt ? { resetsAt: room.fiveHour?.resetsAt ?? room.week?.resetsAt } : {}),
+  }));
 }
 
 function sessionsFrom(overview: Json, computer: string, local: boolean, now = Date.now()): LiveSession[] {

@@ -2,7 +2,7 @@ import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { briefArgs, briefArrival, briefLabel, briefIdInPrompt, briefRoot, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
+import { readLaunchBrief, briefArgs, briefArrival, briefLabel, briefIdInPrompt, briefRoot, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { launchSession } from "./server-launch.js";
 import { type AgentStart, type PanePlacement, setTerminalProvider, type TerminalProvider } from "./terminal.js";
 import type { Json, Target } from "./protocol.js";
@@ -37,13 +37,13 @@ describe("a dispatch label kept with its brief", () => {
     expect(await briefLabel(id)).toBeUndefined();
   });
 
-  it("follows a retried launch of the same id", async () => {
-    await writeLaunchBrief({ id, text: "first" }, Date.now(), "first label");
-    await writeLaunchBrief({ id, text: "second" }, Date.now(), "second label");
-    expect(await briefLabel(id)).toBe("second label");
-    // A retry that names no label leaves the earlier one.
-    await writeLaunchBrief({ id, text: "third" });
-    expect(await briefLabel(id)).toBe("second label");
+  it("replays identical brief bytes and refuses to overwrite an existing id", async () => {
+    const file = await writeLaunchBrief({ id, text: "first" }, Date.now(), "first label");
+    expect(await writeLaunchBrief({ id, text: "first" }, Date.now(), "first label")).toBe(file);
+    await expect(writeLaunchBrief({ id, text: "second" }, Date.now(), "second label")).rejects.toMatchObject({ status: 409 });
+    expect(await writeLaunchBrief({ id, text: "first" }, Date.now(), "changed label")).toBe(file);
+    expect(await readLaunchBrief(id)).toBe("first\n");
+    expect(await briefLabel(id)).toBe("first label");
   });
 });
 
@@ -67,7 +67,7 @@ describe("a brief that goes with the launch", () => {
     expect(briefIdInPrompt("Read and follow the brief in /tmp/briefs/x/brief.md")).toBeUndefined();
   });
 
-  it("never shows a brief folder without its brief, and rewrites the same id in place", async () => {
+  it("never shows a brief folder without its brief", async () => {
     let seen = 0, torn = 0, done = false;
     const watch = (async () => {
       while (!done) {
@@ -83,9 +83,7 @@ describe("a brief that goes with the launch", () => {
     expect(seen).toBeGreaterThan(0);
     expect(torn).toBe(0);
     expect(await readdir(path.join(root, "briefs-staging"))).toEqual([]);
-    await writeLaunchBrief({ id, text: "first" });
-    await writeLaunchBrief({ id, text: "second" });
-    expect(await readFile(path.join(briefRoot(), id, "brief.md"), "utf8")).toBe("second\n");
+
   });
 
   it("keeps a week of briefs", async () => {
