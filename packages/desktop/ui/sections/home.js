@@ -39,6 +39,10 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         <h2 class="section-label">Needs you <span class="count"></span></h2>
         <p class="home-keys">Up/Down select &middot; <kbd>Enter</kbd> approve &middot; <kbd>P</kbd> allow for this project &middot; <kbd>D</kbd> deny &middot; <kbd>O</kbd> open</p>
         <div class="home-list"></div>
+        <details class="home-snoozed" hidden>
+          <summary class="home-snoozed-label">Snoozed (0)</summary>
+          <div class="home-snoozed-list"></div>
+        </details>
       </section>
       <section class="home-block" data-block="finished">
         <h2 class="section-label">Finished <span class="count"></span><span class="home-away-for"></span></h2>

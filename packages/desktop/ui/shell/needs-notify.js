@@ -6,12 +6,13 @@ import { approvals } from "./approvals.js";
 import { hookPost } from "../api.js";
 import { projectOf, sessions, store } from "./store.js";
 import { newlyStalled, stalledMinutes } from "./stalls.js";
+import { snoozes } from "./snooze.js";
 
 /** What the shell shows for a needs-you row. Only a plain wait takes a reply:
  * an approval or a blocked agent needs its own card, not more text. */
-export function needsNotice({ key, computer, child }) {
+export function needsNotice({ key, computer, child }, { stillWaiting = false } = {}) {
   return {
-    title: redactNotice(`${projectOf(child)} needs you`),
+    title: redactNotice(stillWaiting ? `Still waiting: ${child.title ?? child.label ?? projectOf(child)}` : `${projectOf(child)} needs you`),
     body: redactNotice(`${child.title ?? child.label} · ${computer}${child.lastReply ? `\n${child.lastReply}` : ""}`),
     key,
     reply: child.agentStatus === "waiting" && !child.approvalPending && !!child.target,
@@ -51,6 +52,12 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
   let notified = null; // keys already announced; null until the first frame
   let stalled = null; // keys already reported stalled; null until the first frame
   const baselineApprovals = new Set();
+  // A snoozed chat whose time ran out gets one deliberate "Still waiting" reminder
+  // when it returns. Snoozing, Wake now (the owner is looking) and a row that
+  // changed meanwhile (an ordinary new notice) do not.
+  const woken = new Set();
+  const hushed = new Set();
+  snoozes.onWake((keys, why) => { for (const key of keys) (why === "time" ? woken : hushed).add(key); });
   const announcedApprovals = new Map(); // session key -> action IDs, retained through temporary gaps
   function noticeKey(row) {
     if (!row.child.approvalPending) return row.key;
@@ -88,12 +95,14 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
         const id = noticeKey(row);
         if (!id || remember(row) || notified.has(id)) continue;
         if (baselineApprovals.delete(row.key)) continue;
+        if (hushed.delete(row.key)) continue;
         if (enabled()) {
-          const { title, body, key, reply } = needsNotice(row);
+          const { title, body, key, reply } = needsNotice(row, { stillWaiting: woken.has(row.key) });
           shell.notify(title, body, { key, reply, ...(reply ? { binding: replyBinding(row.child) } : {}) });
         }
       }
     }
+    for (const row of rows) woken.delete(row.key);
     notified = new Set(rows.map(noticeKey).filter(Boolean));
   }
   store.subscribe((merged) => {

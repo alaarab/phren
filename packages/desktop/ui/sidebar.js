@@ -11,6 +11,7 @@ import { prefetchTranscript, cancelPrefetch } from "./shell/transcript-prefetch.
 import { carriesFiles, createRowDrop, leftRow } from "./shell/row-drop.js";
 import { hookPost, targetQuery } from "./api.js";
 import { age } from "./time.js";
+import { snoozes } from "./shell/snooze.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 
 // answerApproval is written in a parallel change under ui/chat/. Import it
@@ -452,7 +453,21 @@ function rowSig(sb, desc) {
   return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "", c.stalled ? c.stalledSince : "", c.backgroundTasks ?? "",
     JSON.stringify(rowHandoff(sb, desc)), c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
-    isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : ""].join("|");
+    isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : "",
+    snoozes.until({ key: keyOf(desc.computer, c), child: c }) ?? ""].join("|");
+}
+
+/** A moon on a chat snoozed from Home, so the sidebar's needs-you group and Home's count do not seem to disagree. */
+function snoozeMark(desc) {
+  const until = snoozes.until({ key: keyOf(desc.computer, desc.child), child: desc.child });
+  if (until === null) return null;
+  const mark = el("span", "sb-snoozed", "\u263E");
+  const at = new Date(until);
+  const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  mark.title = `Snoozed until ${at.toDateString() === new Date().toDateString() ? time : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`}`;
+  mark.setAttribute("role", "img");
+  mark.setAttribute("aria-label", mark.title);
+  return mark;
 }
 
 function updateRow(sb, node, desc) {
@@ -486,6 +501,8 @@ function rowContent(sb, node, desc) {
   const stalled = stalledMinutes(child);
   top.append(chip, stalled !== null ? el("span", "sb-stalled", stallLabel(stalled)) : el("span", "sb-age", age(child.lastChangedAt)));
   if (unread) top.append(el("span", "sb-unread"));
+  const snooze = snoozeMark(desc);
+  if (snooze) top.append(snooze);
   main.append(top);
 
   const bottom = el("span", "sb-line");
@@ -550,6 +567,8 @@ function compactRowContent(sb, node, desc) {
   else if (["needs", "error", "unknown"].includes(kind)) out.push(el("span", "sb-cmark " + kind, BADGE[kind]));
   else out.push(el("span", "sb-cage", age(child.lastChangedAt, "")));
   if (unread) out.push(el("span", "sb-unread"));
+  const snooze = snoozeMark(desc);
+  if (snooze) out.push(snooze);
 
   // Hidden terminal trigger: keys.js's 't' clicks `.sb-term`.
   const term = el("span", "sb-term");

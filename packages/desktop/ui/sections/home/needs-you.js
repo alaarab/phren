@@ -1,8 +1,16 @@
 import { el } from "../../dom.js";
-import { needsYou } from "../../shell/store.js";
+import { needsYou, sessions, projectOf } from "../../shell/store.js";
+import { snoozes, snoozable, snoozeChoices } from "../../shell/snooze.js";
 import { approvals } from "../../shell/approvals.js";
 import { sendReply } from "../../shell/needs-notify.js";
 import { replySub } from "./rows.js";
+
+/** "3:15 PM" today, "Fri 9:00 AM" later. */
+export function wakeLabel(until, now = Date.now()) {
+  const at = new Date(until);
+  const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return at.toDateString() === new Date(now).toDateString() ? time : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
 
 export function createNeeds({ root, state, open, block, sessionRow, fill, isVisible }) {
   let selected = 0;
@@ -21,6 +29,68 @@ export function createNeeds({ root, state, open, block, sessionRow, fill, isVisi
     return document.activeElement instanceof HTMLElement && !!document.activeElement.closest('[data-block="needs"] .home-reply');
   }
 
+  /** A small menu on a waiting row: 15 minutes, 1 hour, until tomorrow 9:00. */
+  function snoozeMenu(row) {
+    const wrap = el("span", "home-snooze");
+    const trigger = el("button", "home-snooze-btn", "Snooze");
+    trigger.type = "button";
+    trigger.setAttribute("aria-haspopup", "menu");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-label", `Snooze ${row.child.title || row.child.label || "this chat"}`);
+    const menu = el("div", "home-snooze-menu");
+    menu.setAttribute("role", "menu");
+    menu.hidden = true;
+    const items = [];
+    for (const choice of snoozeChoices()) {
+      const item = el("button", "home-snooze-item", choice.label);
+      item.type = "button";
+      item.setAttribute("role", "menuitem");
+      item.dataset.snooze = choice.id;
+      // The wake time is taken when chosen, not when the row was drawn.
+      item.addEventListener("click", () => {
+        const picked = snoozeChoices().find((c) => c.id === choice.id);
+        close(false);
+        item.blur(); // a focused control inside the row would hold back the redraw
+        snoozes.snooze(row, picked.until);
+      });
+      items.push(item);
+    }
+    menu.append(...items);
+    function close(refocus = true) {
+      menu.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+      document.removeEventListener("pointerdown", outside, true);
+      if (refocus) trigger.focus();
+    }
+    function outside(event) { if (!wrap.contains(event.target)) close(false); }
+    function openMenu() {
+      menu.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+      document.addEventListener("pointerdown", outside, true);
+      items[0].focus();
+    }
+    trigger.addEventListener("click", () => (menu.hidden ? openMenu() : close()));
+    wrap.addEventListener("keydown", (event) => {
+      if (menu.hidden) {
+        if (event.target === trigger && event.key === "ArrowDown") { openMenu(); event.stopPropagation(); event.preventDefault(); }
+        return;
+      }
+      // While the menu is open its keys belong to it, not to Home's row shortcuts.
+      event.stopPropagation();
+      const at = items.indexOf(document.activeElement);
+      if (event.key === "ArrowDown") items[(at + 1) % items.length].focus();
+      else if (event.key === "ArrowUp") items[(at - 1 + items.length) % items.length].focus();
+      else if (event.key === "Home") items[0].focus();
+      else if (event.key === "End") items[items.length - 1].focus();
+      else if (event.key === "Escape") close();
+      else if (event.key === "Tab") { close(false); return; }
+      else return;
+      event.preventDefault();
+    });
+    wrap.append(trigger, menu);
+    return wrap;
+  }
+
   function replyBox(row) {
     const form = el("form", "home-reply");
     const input = el("input", "home-reply-input");
@@ -33,6 +103,7 @@ export function createNeeds({ root, state, open, block, sessionRow, fill, isVisi
     const shown = replyNotes.get(row.key);
     const note = el("span", `home-reply-note${shown?.error ? " error" : ""}`, shown?.text ?? "");
     form.append(input, note);
+    if (snoozable(row.child)) form.append(snoozeMenu(row));
     const say = (text, error = false) => {
       replyNotes.set(row.key, { text, error });
       note.textContent = text;
@@ -63,12 +134,34 @@ export function createNeeds({ root, state, open, block, sessionRow, fill, isVisi
     return wrap;
   }
 
+  /** "Snoozed (N)": collapsed under the list, each with when it wakes and Wake now. */
+  function renderSnoozed() {
+    const footer = block("needs").querySelector(".home-snoozed");
+    if (!footer) return;
+    const rows = snoozes.snoozed(sessions(state.merged).filter(({ child }) => snoozable(child)));
+    footer.hidden = !rows.length;
+    footer.querySelector(".home-snoozed-label").textContent = `Snoozed (${rows.length})`;
+    footer.querySelector(".home-snoozed-list").replaceChildren(...rows.map((row) => {
+      const line = el("div", "home-snoozed-row");
+      const name = row.child.title || row.child.label || projectOf(row.child);
+      const text = el("span", "home-snoozed-text");
+      text.append(el("span", "home-snoozed-title", name), el("span", "home-snoozed-until", `${projectOf(row.child)} · until ${wakeLabel(row.until)}`));
+      const wake = el("button", "home-snoozed-wake", "Wake now");
+      wake.type = "button";
+      wake.setAttribute("aria-label", `Wake ${name} now`);
+      wake.addEventListener("click", () => snoozes.wake(row.key));
+      line.append(text, wake);
+      return line;
+    }));
+  }
+
   function renderNeeds() {
     const rows = needsYou(state.merged);
     if (typingReply()) { needsDirty = true; return; }
     needsDirty = false;
     if (selected >= rows.length) selected = Math.max(0, rows.length - 1);
     fill("needs", rows.map(needsRow), "Nothing needs you.");
+    renderSnoozed();
     block("needs").querySelector(".home-keys").hidden = !rows.length;
   }
 
