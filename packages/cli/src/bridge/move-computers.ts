@@ -85,7 +85,7 @@ export async function moveComputers(project: unknown, self: string, local: () =>
   const name = project === null || project === undefined || project === "" ? "" : projectName.parse(project);
   const { peers } = await optionalHookPeers();
   const here = await local();
-  const publicFacts = (facts: MoveAvailability, remote = false) => ({ hasCheckout: facts.hasCheckout, harnesses: facts.harnesses.map(row => ({
+  const publicFacts = (facts: MoveAvailability, remote = false) => ({ ...(facts.computerId ? { computerId: facts.computerId } : {}), hasCheckout: facts.hasCheckout, harnesses: facts.harnesses.map(row => ({
     source: row.source, usable: remote && row.source === "copilot" ? false : row.usable,
     ...(remote && row.source === "copilot" ? { reason: PEER_COPILOT_REASON } : {}),
     ...(row.source === "claude" && row.accounts ? { selectedAccount: chosenLogin(row.accounts)?.account } : {}), ...(row.accounts ? { accounts: row.accounts.map(({ signedIn: _signedIn, ...login }) => ({ ...login, current: !remote && row.source === "claude" && login.id === currentAccount })) } : {}),

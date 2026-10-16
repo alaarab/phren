@@ -459,7 +459,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               if (current) currentAccount = String(object(current.account).id ?? "default");
             }
             result = await moveComputers(url.searchParams.get("project"), info.computer.name,
-              () => localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true), url.searchParams.get("conductor") === "1"), currentAccount, url.searchParams.get("conductor") === "1");
+              async () => ({ ...await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true), url.searchParams.get("conductor") === "1"), computerId: info.computer.id }), currentAccount, url.searchParams.get("conductor") === "1");
             break;
           }
           // Local facts only: peers may probe these without starting a move or fanning out.
