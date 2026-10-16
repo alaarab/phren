@@ -26,10 +26,12 @@ async function fixture() {
   const peerB: HookPeer = { name: "destination-local-alias", address: "b.test", username: "bob", port: 22, hostKey: "ssh-ed25519 key-b", server: "default" };
   const workerPeer: HookPeer = { ...peerB, name: "worker-local-alias", address: "worker.test" };
   const typed: Array<{ target: Target; text: string; id: string }> = [];
+  let handOffFailure = false;
+  let workerUsername = workerPeer.username;
   let unreachable = "", lostCommitAck = false, lostOperationAck = false, workerOffline = false, replaced = false, legacy = false;
   let a: ConductorSuccessionService, b: ConductorSuccessionService;
   const execute = vi.fn<ConductorExecutor>(async () => ({ ok: true }));
-  const queue = (name: string) => new HandOffQueue({ root: path.join(root, name, "hand-offs"), validate: async target => pane(target), send: async (target, text, id, typing) => { await typing(); typed.push({ target, text, id }); return { ok: true, delivered: true }; } });
+  const queue = (name: string) => new HandOffQueue({ forward: name === "a" ? (origin, text, id) => a.forward(origin, text, id) : undefined, root: path.join(root, name, "hand-offs"), validate: async target => pane(target), send: async (target, text, id, typing) => { if (handOffFailure && target.pane === "w3:p1") throw new BridgeError(404, "Worker pane disappeared"); await typing(); typed.push({ target, text, id }); return { ok: true, delivered: true }; } });
   let qa = queue("a"), qb = queue("b");
   const request = vi.fn(async (peer: HookPeer, route: string, data?: Json) => {
     if (peer.address === "worker.test") {
@@ -51,9 +53,10 @@ async function fixture() {
     }
     if (url.pathname === "/v1/conductor/move/operate") {
       const result = await service.operate(data, execute);
-      if (lostOperationAck) { lostOperationAck = false; throw new Error("lost operation acknowledgement"); }
+      if (lostOperationAck) { lostOperationAck = false; throw new BridgeError(503, "lost operation acknowledgement"); }
       return result;
     }
+    if (url.pathname === "/v1/conductor/move/ack") return service.acknowledge(data, rows => new DispatchReturns().acknowledge(rows));
     if (url.pathname === "/v1/conductor/move/operation") return service.outgoing(url.searchParams.get("id")!, url.searchParams.get("operationId")!);
     if (url.pathname === "/v1/conductor/move/notice") return service.notice(data);
     if (url.pathname === "/v1/conductor/move/notification") return service.notification(url.searchParams.get("id")!, url.searchParams.get("deliveryId")!);
@@ -64,7 +67,7 @@ async function fixture() {
     a = new ConductorSuccessionService({ root: path.join(root, "a"), computer: { id: A, name: "a" }, peers: async () => [peerB, workerPeer], request,
       snapshot: async () => ({ panes: [pane(from)] }), validate: async target => pane(target), deliver: (target, text, deliveryId) => qa.enqueue({ target, text, deliveryId }),
       checkWorkers: from => preflightConductorWorkers(from, A, async () => [peerB, workerPeer], request) });
-    b = new ConductorSuccessionService({ root: path.join(root, "b"), computer: { id: B, name: "b" }, peers: async () => [peerA], request,
+    b = new ConductorSuccessionService({ root: path.join(root, "b"), computer: { id: B, name: "b" }, peers: async () => [peerA, { ...workerPeer, username: workerUsername, name: "workers-other-alias" }], request,
       snapshot: async () => ({ panes: [{ ...pane(target), ...(legacy ? { agent_name: "conductor-work" } : {}) }] }), isSuccessor: async origin => origin.pane === target.pane,
       validate: async requested => { if (replaced && requested.pane === target.pane) throw new Error("conversation changed"); return pane(requested); },
       deliver: (target, text, deliveryId) => qb.enqueue({ target, text, deliveryId }), checkWorkers: async () => {} });
@@ -73,7 +76,7 @@ async function fixture() {
   const id = randomUUID();
   const begin = () => a.begin(id, old, from, peerHost(peerB, request), B);
   const commit = async () => { await a.prepared(id, target); await a.commit(id); await a.finish(id); };
-  return { id, old, begin, commit, boot, get a() { return a; }, get b() { return b; }, typed, request, execute,
+  return { id, old, begin, commit, boot, get a() { return a; }, get b() { return b; }, typed, request, execute, queue: () => qa, failHandOff: () => { handOffFailure = true; }, wrongWorkerAccount: () => { workerUsername = "other-user"; }, peerA, peerB,
     offline: (name: string) => { unreachable = name; }, loseAck: () => { lostCommitAck = true; }, loseOperationAck: () => { lostOperationAck = true; }, workerOffline: async () => {
       workerOffline = true;
       const id = randomUUID(), at = new Date().toISOString();
@@ -256,7 +259,7 @@ describe("origin-owned remote conductor succession", () => {
       ...(id === firstId ? { returned: { state: "done", at, reply: "First result", read: false } } : {}) }));
     await f.begin(); await f.commit();
     const returns = new DispatchReturns({ localComputer: { id: A, name: "a" } });
-    f.execute.mockImplementation(async action => { expect(action).toBe("returns"); return { returns: await returns.take() }; });
+    f.execute.mockImplementation(async action => { expect(action).toBe("returns"); return { returns: await returns.take(false) }; });
     const first = await f.b.call("returns", {}, target, async () => ({}));
     expect(objects(first.returns).map(row => row.id)).toEqual([firstId]);
     const pat = "ghp_" + "a".repeat(36);
@@ -276,4 +279,101 @@ describe("origin-owned remote conductor succession", () => {
     expect(f.execute).toHaveBeenCalledTimes(2);
   });
 
+});
+
+describe("reviewed conductor recovery and identity contracts", () => {
+  it.each(["mid-read", "lost-ack"])("retries returns after a 503 %s without consuming them before successor acknowledgement", async failure => {
+    const f = await fixture(); await f.begin(); await f.commit();
+    const id = randomUUID(), at = new Date().toISOString();
+    await mkdir(path.join(root, "a", "dispatches"));
+    await writeFile(path.join(root, "a", "dispatches", `${id}.json`), JSON.stringify({ id, computer: "a", computerId: A, harness: "claude", project: "repo", label: "result", state: "accepted", target, createdAt: at, updatedAt: at, returned: { state: "done", at, reply: "Keep this result", read: false } }));
+    const returns = new DispatchReturns();
+    f.execute.mockImplementation(async () => ({ returns: await returns.take(false) }));
+    if (failure === "mid-read") f.execute.mockImplementationOnce(async () => { await returns.take(false); throw new BridgeError(503, "interrupted read"); });
+    else f.loseOperationAck();
+    await expect(f.b.call("returns", {}, target, async () => ({}))).rejects.toMatchObject({ status: 503 });
+    expect((await dispatchStatus())[0].returned?.read).toBe(false);
+    f.boot();
+    expect(objects((await f.b.call("returns", {}, target, async () => ({}))).returns)).toMatchObject([{ id, reply: "Keep this result" }]);
+    expect((await dispatchStatus())[0].returned?.read).toBe(true);
+    expect((await f.b.call("returns", {}, target, async () => ({}))).returns).toEqual([]);
+  });
+
+  it("starts a fresh grants-list read after an execution crash and restart", async () => {
+    const f = await fixture(); await f.begin(); await f.commit();
+    f.execute.mockRejectedValueOnce(new Error("crash during grants-list")).mockResolvedValue({ grants: [{ id: "standing" }] });
+    await expect(f.b.call("grants-list", {}, target, async () => ({}))).rejects.toThrow("crash");
+    f.boot();
+    expect(await f.b.call("grants-list", {}, target, async () => ({}))).toEqual({ grants: [{ id: "standing" }] });
+    const ids = f.request.mock.calls.filter(([, route]) => route === "/v1/conductor/move/operate").map(([, , data]) => data?.operationId);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("resolves the successor's omitted computer and differing peer alias in A's own directory", async () => {
+    const f = await fixture(); await f.begin(); await f.commit();
+    await f.b.call("hand_off", { target, text: "Continue here" }, target, async () => { throw new Error("local bypass"); });
+    expect(f.execute.mock.calls[0][1]).toMatchObject({ computer: "destination-local-alias", target });
+    await f.b.call("dispatch", { computer: "workers-other-alias", project: "repo", harness: "claude", prompt: "Finish", label: "worker" }, target, async () => ({}));
+    expect(f.execute.mock.calls[1][1].computer).toBe("worker-local-alias");
+    await expect(f.b.call("dispatch", { computer: "unknown-alias" }, target, async () => ({}))).rejects.toMatchObject({ status: 409 });
+  });
+
+  it.each(["delivered", "failed"])("forwards %s hand-off notices to the successor and deduplicates them across restart", async outcome => {
+    const f = await fixture(); await f.begin(); await f.commit();
+    if (outcome === "failed") f.failHandOff();
+    await f.queue().enqueue({ target: { ...from, pane: "w3:p1" }, origin: from, text: "Do the work", deliveryId: "work-message-12345" });
+    await f.queue().tick();
+    f.boot(); await f.queue().tick();
+    const notices = f.typed.filter(row => row.id.startsWith("handoff-notice-"));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ target, text: `Hand-off work-message-12345: ${outcome}.` });
+  });
+
+  it("fences automatic account-failover dispatch during preparation and validates the delegated generation after commit", async () => {
+    const f = await fixture(); await f.begin();
+    const dispatch = vi.fn(async () => ({ ok: true }));
+    await expect(f.a.automatic("dispatch", {}, from, dispatch)).rejects.toMatchObject({ status: 409 });
+    expect(dispatch).not.toHaveBeenCalled();
+    await f.commit();
+    expect(await f.a.automatic("dispatch", {}, from, dispatch)).toEqual({ ok: true });
+    f.offline("b");
+    await expect(f.a.automatic("dispatch", {}, from, dispatch)).rejects.toMatchObject({ status: 409 });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])("pins legacy receipt workers across aliases (SSH account changed: %s)", async changed => {
+    const f = await fixture();
+    const id = randomUUID(), at = new Date().toISOString();
+    await mkdir(path.join(root, "a", "dispatches"));
+    await writeFile(path.join(root, "a", "dispatches", `${id}.json`), JSON.stringify({ id, computer: "worker-local-alias", harness: "claude", project: "repo", label: "legacy worker", state: "accepted", target, origin: { server: from.server, workspace: from.workspace, tab: from.tab, pane: from.pane, agent: "claude", terminal: "old" }, createdAt: at, updatedAt: at }));
+    if (changed) {
+      f.wrongWorkerAccount();
+      await expect(f.begin()).rejects.toMatchObject({ status: 409 });
+      expect(await recordedConductor()).toEqual(f.old);
+      expect((await f.a.status(f.id)).phase).toBe("aborted");
+    } else {
+      await f.begin(); await f.commit();
+      expect((await f.b.status(f.id)).target).toEqual(target);
+    }
+  });
+
+  it("serializes concurrent finish and activation calls for the same move", async () => {
+    const f = await fixture(); await f.begin(); await f.a.prepared(f.id, target); const state = await f.a.commit(f.id);
+    await Promise.all([f.a.finish(f.id), f.a.finish(f.id), f.b.activate({ id: f.id, generation: state.generation }), f.b.activate({ id: f.id, generation: state.generation })]);
+    expect(f.request.mock.calls.filter(([, route]) => route === "/v1/conductor/move/commit")).toHaveLength(1);
+    expect(f.typed.filter(row => row.id === `move-${f.id}-conductor-confirmed`)).toHaveLength(1);
+  });
+});
+
+it("redacts embedded short credentials in forwarded operations, notices and responses", async () => {
+  const f = await fixture(); await f.begin(); await f.commit();
+  const text = ["PGPASSWORD=hunter2", "apiToken=abc123", "secret_key=", "aws_secret_access_key=awsvalue", "DB_PASS=dbvalue", "passphrase: phrasevalue", "credential: credentialvalue", "Cookie: k=v", "mysql -pmysqlvalue", "curl -u user:pw", "--auth user:pw", "_authToken=npmvalue"].join("\n");
+  f.execute.mockResolvedValue({ reply: text, apiToken: "objectvalue" });
+  const response = await f.b.call("hand_off", { target, text }, target, async () => ({}));
+  await f.a.forward(from, text, "notice-12345678901234567890123456789012");
+  for (const outbound of [JSON.stringify(f.execute.mock.calls[0][1]), JSON.stringify(response), f.typed.at(-1)!.text]) {
+    expect(outbound).not.toMatch(/hunter2|abc123|awsvalue|dbvalue|phrasevalue|credentialvalue|k=v|mysqlvalue|user:pw|npmvalue|objectvalue/);
+    expect(outbound).toContain("[redacted]");
+    expect(outbound).toContain("secret_key=[redacted]");
+  }
 });

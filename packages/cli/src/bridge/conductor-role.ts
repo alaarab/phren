@@ -30,6 +30,7 @@ export const successionSchema = z.object({
   phase: z.enum(["preparing", "prepared", "committed", "aborted"]),
   originId: z.string().uuid(), destinationId: z.string().uuid(), previous: recordSchema, from: targetSchema,
   connection: z.object({ name: serverName, server: serverName, fingerprint: z.string().regex(/^[a-f0-9]{64}$/), id: z.string().uuid() }).strict(),
+  workers: z.array(z.object({ id: z.string().uuid(), fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict()).optional(),
   revoked: z.boolean().optional(), activated: z.boolean().optional(), target: targetSchema.optional(), resume: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 export type ConductorSuccession = z.infer<typeof successionSchema>;

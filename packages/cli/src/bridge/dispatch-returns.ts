@@ -364,7 +364,7 @@ const movedSchema = z.object({
 }).strict();
 
 /** The worker moved to another agent: the receipt now follows that agent, and keeps the move. */
-function observeMove(receipt: Receipt, value: unknown, peers: readonly HookPeer[], self?: { id: string; name: string }): boolean {
+function observeMove(receipt: Receipt, value: unknown, peers: readonly HookPeer[], self?: { id: string; name: string; verifiedHomeMove?: string }): boolean {
   const parsed = movedSchema.safeParse(value);
   if (!parsed.success || receipt.moves?.some(move => move.id === parsed.data.id)) return false;
   const { target, ...move } = parsed.data;
@@ -372,7 +372,7 @@ function observeMove(receipt: Receipt, value: unknown, peers: readonly HookPeer[
     // The worker Hook's alias has no authority in this Hook's directory.
     // Missing/ambiguous identities leave the receipt at its old location.
     const matches = move.computerFingerprint ? peers.filter(peer => peerFingerprint(peer) === move.computerFingerprint && peer.server === target.server) : [];
-    const home = self && move.computerId === self.id ? self : undefined;
+    const home = self && move.computerId === self.id && self.verifiedHomeMove === move.id ? self : undefined;
     if (!home && matches.length !== 1) {
       const error = "The moved worker's destination identity is missing or not uniquely verified in this Hook's peer directory; receipt routing was retained.";
       if (receipt.error === error) return false;
@@ -417,7 +417,7 @@ function turnKey(value: string | undefined): string | undefined {
 }
 
 /** Apply one observation to a receipt. Returns true when the receipt changed. */
-export function observe(receipt: Receipt, value: unknown, now: number, peers: readonly HookPeer[] = [], self?: { id: string; name: string }): boolean {
+export function observe(receipt: Receipt, value: unknown, now: number, peers: readonly HookPeer[] = [], self?: { id: string; name: string; verifiedHomeMove?: string }): boolean {
   const parsed = observationSchema.safeParse(value);
   if (receipt.closedAt) return false;
   const moved = parsed.success && parsed.data.moved !== undefined && observeMove(receipt, parsed.data.moved, peers, self);
@@ -783,6 +783,7 @@ export class DispatchReturns {
         for (const [index, receipt] of batch.entries()) {
           const observation = workers[index];
           let routingPeers = peers;
+          let verifiedHomeMove: string | undefined;
           const relocation = movedSchema.safeParse(observation.moved);
           if (relocation.success && relocation.data.to.computer && relocation.data.computerId !== this.localComputer?.id) {
             const move = relocation.data;
@@ -798,10 +799,18 @@ export class DispatchReturns {
             }
             routingPeers = peers.filter(peer => !candidates.includes(peer) || peer === verified[0]);
           }
+          if (relocation.success && relocation.data.to.computer && relocation.data.computerId === this.localComputer?.id) {
+            const move = relocation.data;
+            const arrival = await this.localArrival(move.id).catch(() => undefined);
+            const pane = findPane(await this.snapshot(move.target.server), move.target);
+            const arrived = arrival?.accepted?.target;
+            if (!pane || pane.agent !== move.target.source || !arrived || !Object.keys(move.target).every(key => object(arrived)[key] === object(move.target)[key]) || "session" in move.target && await this.identity(move.target.server, pane) !== move.target.session) continue;
+            verifiedHomeMove = move.id;
+          }
           const seen = await this.grantAnswered(receipt, observation);
           let fresh: NonNullable<Receipt["approval"]> | undefined;
           const current = await updateReceipt(receipt.id, value => {
-            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), routingPeers, this.localComputer);
+            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), routingPeers, this.localComputer ? { ...this.localComputer, verifiedHomeMove } : undefined);
             if (value.approval && value.approval.actionId !== before) fresh = value.approval;
             return changed;
           }).catch(() => undefined);
@@ -927,10 +936,22 @@ export class DispatchReturns {
     return this.request(peer, "/v1/dispatch/close", { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn });
   }
 
+  /** A remote successor acknowledges only the exact return version it received. */
+  async acknowledge(rows: Json[]): Promise<void> {
+    for (const row of rows) await updateReceipt(String(row.id), value => {
+      if (!value.returned || value.returned.at !== row.at || value.returned.read) return false;
+      value.returned.read = true;
+      if (value.returned.state === "done" && value.closeOnFinish !== false && !value.returned.background && value.returned.turn && !value.closedAt) value.closePending = { at: value.returned.at, turn: value.returned.turn };
+      return true;
+    });
+    await this.forwardPrs(); await this.cleanup();
+  }
+
   /** Every unread return, oldest first, marked read as it is handed over. */
-  async take(): Promise<Json[]> {
+  async take(consume = true): Promise<Json[]> {
     const unread = (await dispatchStatus()).filter(receipt => receipt.returned && !receipt.returned.read)
       .sort((a, b) => a.returned!.at.localeCompare(b.returned!.at));
+    if (!consume) return unread.map(returnRow);
     const rows: Json[] = [];
     for (const receipt of unread) {
       let marked = false;

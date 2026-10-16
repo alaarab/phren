@@ -1,3 +1,6 @@
+import { hookPeers } from "./peers.js";
+import { peerFingerprint } from "./dispatch-hosts.js";
+import { type PeerIdentity } from "./request-origin.js";
 import { connect } from "node:net";
 import type { Readable, Writable } from "node:stream";
 import type { ZodType } from "zod";
@@ -159,7 +162,7 @@ export function admitScopedRequest(scope: GatewayScope, rawHead: string, rest: B
 
 /** A computer key's forced scope rebuilds the HTTP envelope. Client headers
  * cannot impersonate the owner gateway, and peer keys cannot open terminals. */
-export function admitPeerRequest(rawHead: string, rest: Buffer = Buffer.alloc(0)): Admission {
+export function admitPeerRequest(rawHead: string, rest: Buffer = Buffer.alloc(0), identity?: PeerIdentity): Admission {
   const head = parseHead(rawHead);
   if ("ok" in head) return head;
   if (!["GET", "POST", "DELETE"].includes(head.method) || !head.path.startsWith("/v1/")) return refuse(403, "This key only permits Hook API requests.");
@@ -167,7 +170,7 @@ export function admitPeerRequest(rawHead: string, rest: Buffer = Buffer.alloc(0)
   if (rest.length && !head.json) return refuse(415, "Send Content-Type: application/json.");
   const body = rest.toString("utf8");
   const target = head.path + (head.query === null ? "" : `?${head.query}`);
-  return { ok: true, request: `${head.method} ${target} HTTP/1.1\r\nHost: phren.local\r\nX-Phren-Origin: peer\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}` };
+  return { ok: true, request: `${head.method} ${target} HTTP/1.1\r\nHost: phren.local\r\nX-Phren-Origin: peer\r\n${identity ? `X-Phren-Peer: ${Buffer.from(JSON.stringify(identity)).toString("base64url")}\r\n` : ""}Connection: close\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}` };
 }
 
 const REASONS: Record<number, string> = { 400: "Bad Request", 403: "Forbidden", 408: "Request Timeout", 413: "Content Too Large", 415: "Unsupported Media Type", 503: "Service Unavailable" };
@@ -219,10 +222,20 @@ export interface ScopedIO { input: Readable; output: Writable; socket: string; a
  * reads a normal response.
  */
 export async function scopedDispatch(scope: string, command: string, io: ScopedIO): Promise<void> {
+  let identity: PeerIdentity | undefined;
+  if (scope.startsWith("peer:")) {
+    const peer = (await hookPeers()).find(peer => peer.name === scope.slice(5));
+    if (!peer) throw new BridgeError(403, "This computer key has no current verified reverse enrollment.");
+    // The forced-command enrollment binds this client key to the reverse
+    // host-key + OS account pin. The Hook verifies its stable computer ID
+    // over that pin when authorizing a move. Do not probe here: two gateways
+    // probing one another's /health would recursively open SSH sessions.
+    identity = { name: peer.name, fingerprint: peerFingerprint(peer) }; scope = "peer";
+  }
   if (scope !== "peer" && !isGatewayScope(scope)) throw new BridgeError(403, "Unknown key scope.");
   if (command !== SCOPED_COMMAND) throw new BridgeError(403, `This SSH key only permits \`${SCOPED_COMMAND}\` with ${scope === "peer" ? "Hook API requests" : DESCRIBE[scope]}.`);
   const read = await readRequest(scope, io.input);
-  const admission = "head" in read ? (scope === "peer" ? admitPeerRequest(read.head, read.rest) : admitScopedRequest(scope, read.head, read.rest)) : refuse(read.status, read.error);
+  const admission = "head" in read ? (scope === "peer" ? admitPeerRequest(read.head, read.rest, identity) : admitScopedRequest(scope, read.head, read.rest)) : refuse(read.status, read.error);
   if (!admission.ok) {
     await new Promise<void>(done => io.output.write(httpResponse(admission.status, admission.error), () => done()));
     return;

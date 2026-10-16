@@ -6,7 +6,7 @@ import { claudeHomes } from "./claude-accounts.js";
 import { BridgeError, bridgeRoot, type Json } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
 
-export const accountAddSchema = z.object({ slug: z.string().regex(/^[a-z0-9-]{1,32}$/) }).strict();
+export const accountAddSchema = z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/) }).strict();
 const adding = new Set<string>();
 const pendingPanes = new Map<string, { server: string; pane: string }>();
 /** Open a shell for the owner to complete the existing interactive flow. */
@@ -27,7 +27,7 @@ export async function addClaudeAccount(input: unknown, server: string): Promise<
     if (created.length !== 1) throw new BridgeError(409, "The new account pane could not be identified safely.");
     const pane = created[0];
     pendingPanes.set(key, { server, pane: pane.pane });
-    await terminal.shellCommand(server, pane.pane, `phren bridge accounts add '${slug}'`);
+    await terminal.shellCommand(server, pane.pane, `phren bridge accounts add -- '${slug}'`);
     return { target: { server, workspace: pane.workspace, tab: pane.tab, pane: pane.pane, source: "claude" }, terminalOnly: true };
   } finally { adding.delete(key); }
 }

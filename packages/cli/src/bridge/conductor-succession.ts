@@ -1,5 +1,6 @@
-import { redactSecretsForLog, scanForSecrets } from "../content/secrets.js";
-import { redactPeerHandoff } from "./peer-handoff.js";
+import type { PeerIdentity } from "./request-origin.js";
+import { redactPeerPayload } from "./peer-handoff.js";
+import { deliveryIdSchema } from "./prompt-once.js";
 import type { OriginPane } from "./dispatch.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -13,25 +14,16 @@ import { atomicInPrivateDir, BridgeError, object, type Json, type Target } from 
 const actions = z.enum(["dispatch", "hand_off", "returns", "approve", "grants-list", "grants-add", "grants-remove"]);
 type Action = z.infer<typeof actions>;
 const callSchema = z.object({ id: z.string().uuid(), generation: z.string().uuid(), operationId: z.string().uuid() }).strict();
-const operationSchema = z.object({ action: actions, data: z.record(z.string(), z.unknown()) }).strict();
-export type ConductorExecutor = (action: Action, data: Json, origin: OriginPane) => Promise<Json>;
+const computerIdentitySchema = z.object({ id: z.string().uuid(), fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict();
+const operationSchema = z.object({ action: actions, data: z.record(z.string(), z.unknown()), computerIdentity: computerIdentitySchema.optional() }).strict();
+export type ConductorExecutor = (action: Action, data: Json, origin: OriginPane, remote?: boolean) => Promise<Json>;
 const samePane = (left: unknown, right: { server: string; pane: string }) => object(left).server === right.server && object(left).pane === right.pane;
 const sameTarget = (left: Target | undefined, right: Target | undefined) => !!left && !!right && Object.keys(left).every(key => left[key as keyof Target] === right[key as keyof Target]);
 const busy = new Map<string, number>();
+const transitions = new Map<string, Promise<unknown>>();
+const readOperation = (action: Action, data: Json) => action === "returns" || action === "grants-list" || action === "hand_off" && data.status === true;
 
-function peerData(data: Json, response = false): Json {
-  return JSON.parse(JSON.stringify(data, (key, value) => {
-    if (/(?:^|[_-])(?:password|passwd|pwd|token|secret|api[-_]?key|auth|bearer|authorization)$/i.test(key)) return "[redacted]";
-    if (typeof value !== "string") return value;
-    let normalized = redactPeerHandoff(value.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ""));
-    if (response) normalized = redactSecretsForLog(normalized);
-    if (scanForSecrets(normalized)) {
-      if (response) return "[redacted]";
-      throw new BridgeError(409, "The hand-off contains a credential");
-    }
-    return normalized;
-  }));
-}
+const peerData = redactPeerPayload;
 
 interface Options {
   root: string;
@@ -110,6 +102,37 @@ export class ConductorSuccessionService {
     const { resume: _resume, ...publicState } = state;
     return publicState;
   }
+  /** Identity is supplied only by the scoped SSH gateway, never the body. */
+  async authorize(id: string, caller: PeerIdentity | undefined, preparingOrigin?: string): Promise<void> {
+    if (!caller) throw new BridgeError(403, "This route requires an authenticated enrolled computer key. Re-enroll legacy peer keys.");
+    let state: ConductorSuccession | undefined;
+    try { state = await this.status(id); } catch (error) { if (!(error instanceof BridgeError && error.status === 404 && preparingOrigin)) throw error; }
+    if (state) {
+      if (caller.name !== undefined && caller.name !== state.connection.name || caller.id !== undefined && caller.id !== state.connection.id || caller.fingerprint !== state.connection.fingerprint) throw new BridgeError(403, "This peer is not the move's recorded counterpart.");
+      await this.connection(state);
+    } else {
+      if (caller.id !== undefined && caller.id !== preparingOrigin) throw new BridgeError(403, "This peer is not the preparing origin.");
+      const peers = (await this.peers()).filter(peer => peerFingerprint(peer) === caller.fingerprint && (!caller.name || peer.name === caller.name));
+      if (peers.length !== 1 || object((await this.request(peers[0], "/v1/health", undefined, 5_000)).computer).id !== preparingOrigin) throw new BridgeError(403, "The preparing peer is not currently verified.");
+    }
+  }
+  private async workerIdentities(from: Target): Promise<Array<z.infer<typeof computerIdentitySchema>>> {
+    const { dispatchStatus } = await import("./dispatch.js");
+    const directory = await this.peers();
+    const receipts = (await dispatchStatus()).filter(receipt => samePane(receipt.origin, from) && !receipt.closedAt);
+    const identities = new Map<string, z.infer<typeof computerIdentitySchema>>();
+    for (const receipt of receipts) {
+      const peer = directory.find(peer => peer.name === receipt.computer);
+      const moved = receipt.moves?.slice().reverse().find(move => move.to.computer);
+      if (receipt.computerId === this.options.computer.id || !peer && !moved && isLocalComputer(receipt.computer, [this.options.computer.name])) { identities.set(this.options.computer.id, { id: this.options.computer.id }); continue; }
+      if (!peer) throw new BridgeError(409, "A worker computer is not enrolled in the original Hook's directory.");
+      const health = await this.request(peer, "/v1/health", undefined, 5_000);
+      const id = z.string().uuid().parse(object(health.computer).id), fingerprint = peerFingerprint(peer);
+      if ((moved?.computerId ?? receipt.computerId) && (moved?.computerId ?? receipt.computerId) !== id || moved?.computerFingerprint && moved.computerFingerprint !== fingerprint) throw new BridgeError(409, "A worker computer's identity changed.");
+      identities.set(`${id}:${fingerprint}`, { id, fingerprint });
+    }
+    return [...identities.values()];
+  }
   private async connection(state: ConductorSuccession): Promise<HookPeer> {
     const peer = (await this.peers()).find(candidate => candidate.name === state.connection.name && candidate.server === state.connection.server && peerFingerprint(candidate) === state.connection.fingerprint);
     if (!peer) throw new BridgeError(409, "The conductor's enrolled connection was removed or changed.");
@@ -126,6 +149,7 @@ export class ConductorSuccessionService {
     return saved.succession!;
   }
   async begin(id: string, expected: ConductorRecord, from: Target, destination: DispatchHost, computerId: string, resume?: Json): Promise<ConductorSuccession> {
+    if (busy.get(this.options.root)) throw new BridgeError(409, "The conductor has an operation in flight; try the move again after it completes.");
     await this.options.checkWorkers(from);
     if (!destination.fingerprint) throw new BridgeError(409, "The destination has no pinned identity.");
     const health = await destination.request("/v1/health", undefined, 5_000);
@@ -135,7 +159,8 @@ export class ConductorSuccessionService {
       if (current.phase === "aborted") throw new BridgeError(409, "This conductor move was aborted; use a new move id.");
       await this.ensurePrepared(id); return current;
     }
-    const transaction: ConductorSuccession = { id, generation: randomUUID(), side: "origin", phase: "preparing", originId: this.options.computer.id, destinationId: computerId,
+    const workers = await this.workerIdentities(from);
+    const transaction: ConductorSuccession = { workers, id, generation: randomUUID(), side: "origin", phase: "preparing", originId: this.options.computer.id, destinationId: computerId,
       previous: expected, from, ...(resume ? { resume } : {}), connection: { name: destination.name, server: destination.server, fingerprint: destination.fingerprint, id: computerId } };
     await updateConductorAuthority(this.options.root, async role => {
       if (busy.get(this.options.root)) throw new BridgeError(409, "The conductor has an operation in flight; try the move again after it completes.");
@@ -146,7 +171,7 @@ export class ConductorSuccessionService {
     await this.save(transaction);
     try {
       const peer = await this.connection(transaction);
-      await this.request(peer, "/v1/conductor/move/prepare", { id, originId: transaction.originId, generation: transaction.generation }, 10_000);
+      await this.request(peer, "/v1/conductor/move/prepare", { id, originId: transaction.originId, generation: transaction.generation, workers: transaction.workers ?? [] }, 10_000);
       return transaction;
     } catch (error) { await this.abort(id); throw error; }
   }
@@ -154,10 +179,10 @@ export class ConductorSuccessionService {
     const state = await this.status(id);
     if (state.side !== "origin" || state.phase === "aborted") throw new BridgeError(409, "The conductor move is no longer preparing.");
     const peer = await this.connection(state);
-    await this.request(peer, "/v1/conductor/move/prepare", { id, originId: state.originId, generation: state.generation }, 10_000);
+    await this.request(peer, "/v1/conductor/move/prepare", { id, originId: state.originId, generation: state.generation, workers: state.workers ?? [] }, 10_000);
   }
   async prepare(input: unknown): Promise<Json> {
-    const data = z.object({ id: z.string().uuid(), originId: z.string().uuid(), generation: z.string().uuid() }).strict().parse(input);
+    const data = z.object({ id: z.string().uuid(), originId: z.string().uuid(), generation: z.string().uuid(), workers: z.array(computerIdentitySchema).default([]) }).strict().parse(input);
     const existing = (await readRoleState(this.options.root))?.succession;
     if (existing?.id === data.id && existing.generation === data.generation) return { ok: true, phase: existing.phase };
     const candidates = await Promise.all((await this.peers()).map(async peer => {
@@ -172,6 +197,8 @@ export class ConductorSuccessionService {
     const verified = candidates.filter(value => value !== undefined);
     if (verified.length !== 1) throw new BridgeError(403, "No unique pinned origin Hook authorized this conductor prepare.");
     const { peer, state } = verified[0];
+    if (JSON.stringify(data.workers) !== JSON.stringify(state.workers ?? [])) throw new BridgeError(403, "The worker preflight does not match the original Hook intent.");
+    for (const worker of data.workers) await this.resolveComputer(worker);
     const successor: ConductorSuccession = { ...state, side: "successor", phase: "prepared", connection: { name: peer.name, server: peer.server, fingerprint: peerFingerprint(peer), id: data.originId } };
     // Adopt a legacy named role through the same resolver as the overview,
     // including prefixed names and mux agent-name mappings.
@@ -228,7 +255,17 @@ export class ConductorSuccessionService {
     await this.save(state);
     return state;
   }
+  private async transition<T>(id: string, run: () => Promise<T>): Promise<T> {
+    const key = this.file(id, "transition");
+    const work = (transitions.get(key) ?? Promise.resolve()).catch(() => {}).then(run);
+    transitions.set(key, work);
+    try { return await work; } finally { if (transitions.get(key) === work) transitions.delete(key); }
+  }
   async activate(input: unknown): Promise<Json> {
+    const id = z.object({ id: z.string().uuid() }).parse(input).id;
+    return this.transition(id, () => this.activateOnce(input));
+  }
+  private async activateOnce(input: unknown): Promise<Json> {
     const data = z.object({ id: z.string().uuid(), generation: z.string().uuid() }).strict().parse(input);
     const successor = await this.status(data.id);
     if (successor.side !== "successor" || successor.generation !== data.generation) throw new BridgeError(403, "This is not the prepared successor generation.");
@@ -246,7 +283,8 @@ export class ConductorSuccessionService {
     await this.options.deliver(target, "The original Hook committed the hand-over. You are now the conductor. Its receipts, approvals and grants stay there; your conductor operations are forwarded there and fail closed if it is unreachable.", `move-${data.id}-conductor-confirmed`);
     return { ok: true, phase: "committed", target };
   }
-  async finish(id: string): Promise<void> {
+  async finish(id: string): Promise<void> { return this.transition(id, () => this.finishOnce(id)); }
+  private async finishOnce(id: string): Promise<void> {
     const state = await this.status(id);
     if (state.side !== "origin" || state.phase !== "committed") throw new BridgeError(409, "The origin has not committed this hand-over.");
     if (state.activated) return;
@@ -307,7 +345,7 @@ export class ConductorSuccessionService {
     const peer = await this.connection(state);
     const authority = successionSchema.parse(await this.request(peer, `/v1/conductor/move/status?id=${state.id}`, undefined, 5_000));
     if (authority.phase !== "committed" || authority.generation !== state.generation || !sameTarget(authority.target, state.target)) throw new BridgeError(409, "The original Hook no longer authorizes this conductor generation.");
-    const operation = { action, data: peerData(data) };
+    const operation = { action, data: peerData(data), ...(["dispatch", "hand_off"].includes(action) && data.computer !== "anywhere" ? { computerIdentity: await this.identifyComputer(data.computer) } : {}) };
     const hash = createHash("sha256").update(JSON.stringify(operation)).digest("hex");
     const key = this.file(state.id, `call-${hash}`);
     const pending = this.operations.get(key);
@@ -317,12 +355,13 @@ export class ConductorSuccessionService {
       try { saved = JSON.parse(await readFile(key, "utf8")); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       // Only an unacknowledged intent is replayed. A successful call starts
       // a fresh intent next time, especially for draining newly arrived returns.
-      const operationId = saved && !saved.result && !saved.failed ? saved.operationId : randomUUID();
+      const operationId = !readOperation(action, data) && saved && !saved.result && !saved.failed ? saved.operationId : randomUUID();
       await atomicInPrivateDir(this.file(state.id, `out-${operationId}`), JSON.stringify(operation));
       await atomicInPrivateDir(key, JSON.stringify({ operationId, at: Date.now() }));
       try {
         const result = await this.request(peer, "/v1/conductor/move/operate", { id: state.id, generation: state.generation, operationId }, 65_000);
         await atomicInPrivateDir(key, JSON.stringify({ operationId, at: Date.now(), result }));
+        if (action === "returns") await this.request(peer, "/v1/conductor/move/ack", { id: state.id, generation: state.generation, operationId }, 10_000).catch(() => undefined);
         return result;
       } catch (error) {
         if (error instanceof BridgeError && error.status >= 400 && error.status < 500) await atomicInPrivateDir(key, JSON.stringify({ operationId, at: Date.now(), failed: true }));
@@ -331,6 +370,37 @@ export class ConductorSuccessionService {
     })();
     this.operations.set(key, work);
     try { return await work; } finally { this.operations.delete(key); }
+  }
+  private async identifyComputer(name: unknown): Promise<z.infer<typeof computerIdentitySchema>> {
+    if (name === undefined || typeof name === "string" && isLocalComputer(name, [this.options.computer.name])) return { id: this.options.computer.id };
+    const peer = (await this.peers()).find(peer => peer.name === name);
+    if (!peer) throw new BridgeError(409, "The selected computer is not in the successor Hook's verified directory.");
+    const health = await this.request(peer, "/v1/health", undefined, 5_000);
+    return { id: z.string().uuid().parse(object(health.computer).id), fingerprint: peerFingerprint(peer) };
+  }
+  private async resolveComputer(identity: z.infer<typeof computerIdentitySchema>): Promise<string> {
+    if (identity.id === this.options.computer.id) return this.options.computer.name;
+    const matches = (await Promise.all((await this.peers()).filter(peer => !identity.fingerprint || peerFingerprint(peer) === identity.fingerprint).map(async peer => {
+      const health = await this.request(peer, "/v1/health", undefined, 5_000).catch(() => undefined);
+      return object(health?.computer).id === identity.id ? peer.name : undefined;
+    }))).filter((name): name is string => !!name);
+    if (matches.length !== 1) throw new BridgeError(409, "The selected computer identity is not uniquely enrolled on the original conductor Hook.");
+    return matches[0];
+  }
+  /** Automatic failover has no authority from the fenced old pane. Its
+   * generation is checked against the live successor before executing at A. */
+  async automatic(action: Action, data: Json, origin: unknown, execute: () => Promise<Json>): Promise<Json> {
+    this.assertCallerAvailable(origin);
+    const state = (await readRoleState(this.options.root))?.succession;
+    if (state?.side !== "origin" || state.phase !== "committed" || !samePane(origin, state.from)) return this.call(action, data, origin, execute);
+    const peer = await this.connection(state);
+    const successor = await this.request(peer, `/v1/conductor/move/status?id=${state.id}`, undefined, 5_000);
+    if (successor.phase !== "committed" || successor.generation !== state.generation || !sameTarget(object(successor.target) as Target, state.target)) throw new BridgeError(409, "The delegated conductor is unavailable; automatic dispatch is paused.");
+    await updateConductorAuthority(this.options.root, async role => {
+      if (role.succession?.generation !== state.generation || role.succession.phase !== "committed") throw new BridgeError(409, "The conductor generation changed.");
+      busy.set(this.options.root, (busy.get(this.options.root) ?? 0) + 1); return role;
+    });
+    try { return await execute(); } finally { busy.set(this.options.root, (busy.get(this.options.root) ?? 1) - 1); }
   }
   async outgoing(id: string, operationId: string): Promise<Json> {
     const state = await this.status(id);
@@ -348,9 +418,9 @@ export class ConductorSuccessionService {
     const work = (async () => {
       let saved: Json | undefined;
       try { saved = JSON.parse(await readFile(key, "utf8")); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      if (saved?.result) return object(saved.result);
+      if (saved?.result) return peerData(object(saved.result), true);
       if (saved?.state === "failed") throw new BridgeError(Number(saved.status), String(saved.error));
-      if (saved) throw new BridgeError(503, "This conductor operation has an uncertain outcome. Inspect its existing receipt; it will not be repeated.");
+      if (saved && !readOperation(operation.action, operation.data)) throw new BridgeError(503, "This conductor operation has an uncertain outcome. Inspect its existing receipt; it will not be repeated.");
       await updateConductorAuthority(this.options.root, async role => {
         if (role.succession?.id !== data.id || role.succession.phase !== "committed" || role.succession.generation !== data.generation) throw new BridgeError(403, "The conductor generation was fenced.");
         busy.set(this.options.root, (busy.get(this.options.root) ?? 0) + 1); return role;
@@ -358,8 +428,10 @@ export class ConductorSuccessionService {
       try {
         await atomicInPrivateDir(key, JSON.stringify({ state: "uncertain", operation }));
         const { server, workspace, tab, pane } = state.from;
-        const result = peerData(await execute(operation.action, operation.data, { server, workspace, tab, pane }), true);
-        await atomicInPrivateDir(key, JSON.stringify({ state: "done", result }));
+        const payload = { ...operation.data };
+        if (operation.computerIdentity) payload.computer = await this.resolveComputer(operation.computerIdentity);
+        const result = peerData(await execute(operation.action, payload, { server, workspace, tab, pane }, true), true);
+        await atomicInPrivateDir(key, JSON.stringify({ state: "done", result, operation }));
         return result;
       } catch (error) {
         if (error instanceof BridgeError && error.status >= 400 && error.status < 500) await atomicInPrivateDir(key, JSON.stringify({ state: "failed", status: error.status, error: error.message }));
@@ -368,6 +440,13 @@ export class ConductorSuccessionService {
     })();
     this.operations.set(key, work);
     try { return await work; } finally { this.operations.delete(key); }
+  }
+  async acknowledge(input: unknown, acknowledge: (rows: Json[]) => Promise<void>): Promise<Json> {
+    const data = callSchema.parse(input), state = await this.status(data.id);
+    if (state.side !== "origin" || state.phase !== "committed" || state.generation !== data.generation) throw new BridgeError(403, "The conductor generation is not authorized.");
+    const saved = object(JSON.parse(await readFile(this.file(data.id, `result-${data.operationId}`), "utf8")));
+    if (object(saved.operation).action === "returns" && saved.state === "done") await acknowledge((object(saved.result).returns ?? []) as Json[]);
+    return { ok: true };
   }
   async forward(origin: unknown, text: string, deliveryId: string): Promise<{ delivered: boolean } | undefined> {
     const state = (await readRoleState(this.options.root))?.succession;
@@ -382,7 +461,7 @@ export class ConductorSuccessionService {
     return { delivered: sent.delivered === true || sent.queued === true };
   }
   async notice(input: unknown): Promise<Json> {
-    const data = z.object({ id: z.string().uuid(), generation: z.string().uuid(), deliveryId: z.string().regex(/^notice-[a-f0-9]{32}$/) }).strict().parse(input);
+    const data = z.object({ id: z.string().uuid(), generation: z.string().uuid(), deliveryId: deliveryIdSchema.unwrap() }).strict().parse(input);
     const state = await this.status(data.id);
     if (state.side !== "successor" || state.phase !== "committed" || state.generation !== data.generation || !state.target) throw new BridgeError(403, "This conductor generation is not active.");
     const peer = await this.connection(state);
@@ -393,7 +472,7 @@ export class ConductorSuccessionService {
     return this.options.deliver(state.target, z.string().max(32768).parse(notice.text), data.deliveryId);
   }
   async notification(id: string, deliveryId: string): Promise<Json> {
-    z.string().regex(/^notice-[a-f0-9]{32}$/).parse(deliveryId);
+    deliveryIdSchema.unwrap().parse(deliveryId);
     await this.status(id);
     return JSON.parse(await readFile(this.file(id, `notice-${deliveryId}`), "utf8"));
   }

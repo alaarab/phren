@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Make remote conductor reads retryable without losing returns; resolve forwarded destinations by verified identity, forward hand-off notices, fence automatic failover, bound absent-launch recovery and add owner aborts. Bind peer routes to their recorded counterpart, require owner proof on new owner paths, protect account metadata and existing briefs, validate returning workers locally, and redact short embedded credential forms in every peer payload.
+
 - Reserve chat moves before asynchronous admission, re-check peer enrollment before sending hand-offs, redact short credential values, verify moved-worker Hook identities, require dispatcher relocation support, and reconcile uncertain peer launches by durable move ID.
 
 - Redact structural credentials across entire peer hand-offs, including fallback conversation text, before the final credential scan. Workers moved back to their dispatching Hook now route returns and approvals locally using its stable computer identity.

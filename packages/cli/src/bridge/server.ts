@@ -1,3 +1,4 @@
+import { ownerToken } from "./request-origin.js";
 import { continuationPlacement } from "./continuation-launch.js";
 import { ConductorSuccessionService, preflightConductorWorkers } from "./conductor-succession.js";
 import { StorePulls } from "./store-pull.js";
@@ -84,6 +85,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const identityFile = path.join(root, "computer-id");
   try { computerID = (await readFile(identityFile, "utf8")).trim(); }
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
+  await ownerToken(root);
   const launches = new LaunchLimiter();
   const dispatches = modules.has("conductor")
     ? new DispatchService({ computerID, validateParentTarget: target => validateTarget(target, false, true),
@@ -104,7 +106,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     localComputer: { id: computerID, name: hostname() },
     forward: (origin, text, deliveryId) => succession?.forward(origin, text, deliveryId) ?? Promise.resolve(undefined),
     // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
-    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => dispatches.dispatch(input, origin, continues) }),
+    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => succession ? succession.automatic("dispatch", { ...input, continues }, origin, () => dispatches.dispatch(input, origin, continues)) : dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
     close: async (receipt, verifiedPeer) => {
       const data = { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn };
@@ -137,6 +139,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const sendPrompt = async (target: Target, text: string, deliveryId: string, typing: () => Promise<void>) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions },
     new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>;
   const handOffs = dispatches ? new HandOffQueue({
+    forward: (target, text, deliveryId) => succession?.forward(target, text, deliveryId) ?? Promise.resolve(undefined),
     validate: target => validateTarget(target, false, true),
     current: async target => {
       const pane = findPane(await snapshot(target.server), target);

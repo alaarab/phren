@@ -24,7 +24,7 @@ describe("Phren device key restrictions", () => {
   it("moves existing computer keys onto the peer scope without changing owner device keys", () => {
     const computer = `restrict,pty,${forcedCommand} ssh-ed25519 AAAA phren-computer:Desk\n`;
     const owner = `restrict,pty,${forcedCommand} ssh-ed25519 BBBB phren-iphone\n`;
-    const upgraded = `restrict,${peerForcedCommand} ssh-ed25519 AAAA phren-computer:Desk\n`;
+    const upgraded = `restrict,${peerForcedCommand.replace(" peer\"", " peer:Desk\"")} ssh-ed25519 AAAA phren-computer:Desk\n`;
     expect(upgradeKeys(computer + owner)).toEqual({ text: upgraded + owner, changed: 1 });
     expect(upgradeKeys(upgraded + owner)).toEqual({ text: upgraded + owner, changed: 0 });
   });

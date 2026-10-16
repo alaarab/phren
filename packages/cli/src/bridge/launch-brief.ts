@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { atomic, bridgeRoot, targetSchema, type Target } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, targetSchema, type Target } from "./protocol.js";
 
 /**
  * A worker's first prompt carried by its launch instead of typed into a
@@ -92,6 +92,13 @@ export async function briefLabel(id: string): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
+/** Moves occupy the launch namespace as well as their own move ledger. */
+export async function assertUnusedLaunchId(id: string): Promise<void> {
+  briefId.parse(id);
+  const entries = await Promise.all([briefDirectory(id), path.join(bridgeRoot(), "dispatches", `${id}.json`)].map(file => lstat(file).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; })));
+  if (entries.some(Boolean)) throw new BridgeError(409, "This move id already belongs to an existing dispatch or brief.");
+}
+
 /**
  * Writes the brief (0600, in a 0700 folder of its own) and returns its path.
  * A `label` is written beside it, inside the same folder, so it is published
@@ -103,7 +110,6 @@ export async function briefLabel(id: string): Promise<string | undefined> {
  */
 export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), label?: string): Promise<string> {
   await mkdir(briefRoot(), { recursive: true, mode: 0o700 });
-  await prune(now);
   const directory = briefDirectory(brief.id);
   const file = path.join(directory, "brief.md");
   const text = brief.text.endsWith("\n") ? brief.text : `${brief.text}\n`;
@@ -112,8 +118,13 @@ export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), lab
     await atomic(path.join(folder, "brief.md"), text);
     if (named) await atomic(path.join(folder, LABEL_FILE), named);
   };
-  // The same id again (a retried launch) replaces the text and label in the existing folder.
-  if (await stat(directory).catch(() => undefined)) { await fill(directory); return file; }
+  // A retry may reuse identical bytes; it must never replace another launch.
+  const existing = async () => {
+    if (await readFile(file, "utf8").catch(() => undefined) !== text || (await briefLabel(brief.id) ?? "") !== named) throw new BridgeError(409, "This brief id already belongs to another launch.");
+    return file;
+  };
+  if (await stat(directory).catch(() => undefined)) return existing();
+  await prune(now);
   const staging = path.join(bridgeRoot(), "briefs-staging");
   await mkdir(staging, { recursive: true, mode: 0o700 });
   const draft = path.join(staging, `${brief.id}.${randomUUID()}`);
@@ -123,9 +134,9 @@ export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), lab
     await rename(draft, directory);
   } catch (error) {
     await rm(draft, { recursive: true, force: true }).catch(() => undefined);
-    // Another writer published the same id first: write into its folder.
+    // Another writer published the same id first: only identical retries are safe.
     if (!(await stat(path.join(directory, "brief.md")).catch(() => undefined))) throw error;
-    await fill(directory);
+    return existing();
   }
   return file;
 }

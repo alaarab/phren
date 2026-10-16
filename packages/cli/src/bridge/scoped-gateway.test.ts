@@ -37,12 +37,14 @@ describe("conductor move gateway admission", () => {
   it("stamps computer-key requests as peers regardless of supplied owner headers", () => {
     const body = JSON.stringify({ target: { pane: "lead" }, to: { harness: "codex" } });
     const admitted = admitPeerRequest(head("POST /v1/sessions/move HTTP/1.1", [
-      "Host: phren.local", "X-Phren-Origin: owner", "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(body)}`,
-    ]), Buffer.from(body));
+      "Host: phren.local", "X-Phren-Origin: owner", "X-Phren-Owner-Token: fake-owner", "X-Phren-Peer: forged-counterpart", "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(body)}`,
+    ]), Buffer.from(body), { fingerprint: "a".repeat(64), id: "70000000-0000-4000-8000-000000000002" });
     expect(admitted).toMatchObject({ ok: true });
     if (!admitted.ok) throw new Error("Peer API should reach the Hook with its origin class.");
     expect(admitted.request).toContain("X-Phren-Origin: peer\r\n");
     expect(admitted.request).not.toContain("X-Phren-Origin: owner");
+    expect(admitted.request).not.toMatch(/fake-owner|forged-counterpart/);
+    expect(admitted.request).toContain(`X-Phren-Peer: ${Buffer.from(JSON.stringify({ fingerprint: "a".repeat(64), id: "70000000-0000-4000-8000-000000000002" })).toString("base64url")}\r\n`);
     expect(admitted.request).toContain(body);
     expect(admitPeerRequest(head("POST /v1/sessions/move HTTP/1.1", ["Content-Length: 0"]), Buffer.from("GET /v1/health HTTP/1.1\r\n\r\n")))
       .toMatchObject({ ok: false });

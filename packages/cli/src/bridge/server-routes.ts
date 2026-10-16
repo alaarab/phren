@@ -1,11 +1,14 @@
+import { terminalProvider } from "./terminal.js";
+import { peerFingerprint } from "./dispatch-hosts.js";
+import { redactPeerPayload } from "./peer-handoff.js";
 import type { ConductorSuccessionService, ConductorExecutor } from "./conductor-succession.js";
 import { relocationSupport } from "./worker-relocation.js";
-import { continuationPlacement, launchContinuation } from "./continuation-launch.js";
+import { continuationIntent, continuationLaunchSchema, continuationPlacement, launchContinuation } from "./continuation-launch.js";
 import { addClaudeAccount } from "./account-add.js";
 import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
-import { ownerRequest } from "./request-origin.js";
+import { ownerRequest, strongOwnerRequest, requestPeer, type PeerIdentity } from "./request-origin.js";
 import { listMoves, moveSessionFields, readMove, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
@@ -37,7 +40,7 @@ import { listApprovalRules, changeApprovalRule } from "./approval-rules.js";
 import { addGrant, listGrants, listNamedGrants, removeGrant } from "./grants.js";
 import { clearProjectAuthority, confirmAuthority, listConfirmations, projectAuthority, readAuthority, setProjectAuthority } from "./authority.js";
 import { readComputers } from "./computer-identity.js";
-import { optionalHookPeers, peerRequest } from "./peers.js";
+import { hookPeers, optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
@@ -367,6 +370,12 @@ async function fromPeers(route: string): Promise<{ peers: Json[]; peerError?: st
   return { peers: answers, ...(peerError ? { peerError } : {}) };
 }
 
+async function peerContinuationIntent(caller: PeerIdentity, id: string): Promise<Json> {
+  const candidates = (await hookPeers()).filter(peer => peerFingerprint(peer) === caller.fingerprint && (!caller.name || caller.name === peer.name));
+  if (candidates.length !== 1) throw new BridgeError(403, "The launch origin is not uniquely verified.");
+  return peerRequest(candidates[0], `/v1/sessions/move/intent?id=${z.string().uuid().parse(id)}`, undefined, 5_000);
+}
+
 export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const { version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks, journal,
     modelCatalog, accountUsage, resources, launches, locatedDirectories, fanoutMessages, canary } = ctx;
@@ -382,6 +391,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       if (url.origin !== "http://phren.local") throw new BridgeError(400, "Invalid request origin.");
       requireRoute(modules, request.method ?? "", url.pathname);
       let result: unknown;
+      if (url.pathname.startsWith("/v1/conductor/move/")) {
+        if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+        if (request.method === "GET") await ctx.succession.authorize(z.string().uuid().parse(url.searchParams.get("id")), requestPeer(request));
+      }
       const memoryRoute = PROJECT_MEMORY_ROUTE.exec(url.pathname);
       if (memoryRoute) {
         const [, project, route] = memoryRoute;
@@ -445,11 +458,29 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/dispatch/relocation": {
             result = await relocationSupport(z.string().parse(url.searchParams.get("id")), z.string().parse(url.searchParams.get("session"))); break;
           }
+          case "/v1/sessions/move/intent": {
+            const id = z.string().uuid().parse(url.searchParams.get("id"));
+            const caller = requestPeer(request), move = await readMove(id);
+            if (!caller || !move || move.state === "failed" || !move.computerFingerprint || caller.fingerprint !== move.computerFingerprint || caller.id !== undefined && caller.id !== move.computerId) throw new BridgeError(403, "This peer is not the move's recorded destination.");
+            const peer = (await hookPeers()).find(peer => peerFingerprint(peer) === move.computerFingerprint && (!caller.name || caller.name === peer.name));
+            if (caller.name && caller.name !== move.to.computer) throw new BridgeError(403, "This computer key is not the recorded destination enrollment.");
+            if (!peer || object((await peerRequest(peer, "/v1/health", undefined, 5_000)).computer).id !== move.computerId) throw new BridgeError(403, "The move destination's enrollment changed.");
+            result = await continuationIntent(id); break;
+          }
           case "/v1/sessions/move/launch": {
-            result = await continuationPlacement(z.string().uuid().parse(url.searchParams.get("id"))) ?? { state: "missing" }; break;
+            const placement = await continuationPlacement(z.string().uuid().parse(url.searchParams.get("id")));
+            const caller = requestPeer(request);
+            if (!placement && caller) {
+              const id = z.string().uuid().parse(url.searchParams.get("id"));
+              const intent = continuationLaunchSchema.parse(await peerContinuationIntent(caller, id));
+              if (intent.computerId !== info.computer.id || intent.brief.id !== id) throw new BridgeError(403, "This continuation is not intended for this Hook.");
+              result = { state: "not-placed" }; break;
+            }
+            if (!await strongOwnerRequest(request) && (!caller || !placement?.caller || caller.name !== placement.caller.name || caller.id !== placement.caller.id || caller.fingerprint !== placement.caller.fingerprint)) throw new BridgeError(403, "This peer is not the launch's recorded counterpart.");
+            result = placement ?? { state: "missing" }; break;
           }
           case "/v1/sessions/move/computers": {
-            if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner can list continuation computers.");
+            if (!await strongOwnerRequest(request)) throw new BridgeError(403, "Only the owner can list continuation computers; present the owner token.");
             const session = url.searchParams.get("session");
             let currentAccount: string | undefined;
             if (session) {
@@ -465,7 +496,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Local facts only: peers may probe these without starting a move or fanning out.
           case "/v1/sessions/move/availability": {
             if (!ownerRequest(request, {}) && request.headers["x-phren-origin"] !== "peer") throw new BridgeError(403, "Only the owner or a verified peer can read continuation availability.");
-            result = { ...await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true), url.searchParams.get("conductor") === "1"), computerId: info.computer.id };
+            const availability = await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true), url.searchParams.get("conductor") === "1");
+            if (!await strongOwnerRequest(request)) for (const harness of availability.harnesses) for (const account of harness.accounts ?? []) { delete account.email; delete account.plan; }
+            result = { ...availability, computerId: info.computer.id };
             break;
           }
           case "/v1/sessions/move": {
@@ -473,7 +506,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             if (!move) throw new BridgeError(404, "No move with that id on this computer.");
             result = { move }; break;
           }
-          case "/v1/sessions/moves": result = { moves: (await listMoves()).slice(0, 50) }; break;
+          case "/v1/sessions/moves": if (!await strongOwnerRequest(request)) throw new BridgeError(403, "Only the owner can list session moves."); result = { moves: (await listMoves()).slice(0, 50) }; break;
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
           // Asked by the dispatching Hook when this computer's worker hit its usage limit and continues on another account.
@@ -707,10 +740,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        const executeConductor: ConductorExecutor = async (action, payload, origin) => {
+        if (url.pathname.startsWith("/v1/conductor/move/")) await ctx.succession!.authorize(z.string().uuid().parse(data.id), requestPeer(request), url.pathname.endsWith("/prepare") ? z.string().uuid().parse(data.originId) : undefined);
+        const executeConductor: ConductorExecutor = async (action, payload, origin, remote = false) => {
           if (action === "dispatch") return dispatches!.dispatch(payload, { server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane });
           if (action === "hand_off") return handOff(payload, { bypassConductor: true });
-          if (action === "returns") return { returns: await ctx.returns!.take() };
+          if (action === "returns") return { returns: await ctx.returns!.take(!remote) };
           if (action === "approve") {
             const parsed = z.object({ id: z.string().uuid(), decision: z.enum(approvalDecisions), actionId: z.string().min(1).max(200) }).strict().parse(payload);
             await ctx.returns!.answerApproval(parsed.id, parsed.decision, parsed.actionId, origin); return { ok: true };
@@ -735,6 +769,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/conductor/move/operate") {
           if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
           result = await ctx.succession.operate(data, executeConductor);
+        } else if (url.pathname === "/v1/conductor/move/ack") {
+          if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+          result = await ctx.succession.acknowledge(data, rows => ctx.returns!.acknowledge(rows));
         } else if (url.pathname === "/v1/conductor/move/notice") {
           if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
           result = await ctx.succession.notice(data);
@@ -770,18 +807,34 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Answers once the move is checked and recorded; the hand-off and relaunch run on, and GET says where it is.
           if (!ctx.mover) throw new BridgeError(503, "This Hook cannot move sessions.");
           const { origin: _origin, ...input } = data;
-          result = { ok: true, move: await ctx.mover.start(input, { owner: ownerRequest(request, data) }) };
+          result = { ok: true, move: await ctx.mover.start(input, { owner: object(data.to).computer !== undefined ? await strongOwnerRequest(request, data) : ownerRequest(request, data) }) };
+        } else if (url.pathname === "/v1/sessions/move/abort") {
+          if (!await strongOwnerRequest(request, data)) throw new BridgeError(403, "Only the owner can abort a move; present the owner token.");
+          if (!ctx.mover) throw new BridgeError(503, "Session moves are unavailable.");
+          result = { ok: true, move: await ctx.mover.abort(z.object({ id: z.string().uuid() }).strict().parse(data).id) };
         } else if (url.pathname === "/v1/sessions/move/launch") {
+          const caller = requestPeer(request);
+          if (!caller && !await strongOwnerRequest(request, data)) throw new BridgeError(403, "Only an authenticated owner or enrolled peer can launch a continuation.");
+          if (caller) {
+            const launch = continuationLaunchSchema.parse(data);
+            const canonical = await peerContinuationIntent(caller, launch.brief.id);
+            if (JSON.stringify(canonical) !== JSON.stringify(data)) throw new BridgeError(403, "This is not the origin Hook's owner-admitted continuation launch.");
+          }
+          const preparedRole = (await (await import("./conductor-role.js")).readRoleState())?.succession;
+          if (preparedRole && preparedRole.id === object(data.brief).id) await ctx.succession!.authorize(preparedRole.id, caller);
           if (data.computerId !== info.computer.id) throw new BridgeError(409, "The destination Hook identity changed; no chat was launched.");
           const verified = ctx.succession ? await ctx.succession.verifiedLaunch(data) : data;
           result = await launchContinuation(verified, (input, onPlaced) => launches.run(async () => {
             const role = await (await import("./conductor-role.js")).readRoleState();
             const prepared = role?.succession?.side === "successor" && role.succession.id === input.brief.id && role.succession.phase !== "aborted";
             const cwd = prepared ? defaultPhrenPath() : await dispatchProjectDirectory(input.project);
-            return launchSession(selectedServer(url), { cwd, kind: input.to.harness, account: input.to.account, model: input.to.model, effort: input.to.effort, label: input.label, brief: input.brief }, { trustFolder: true, onPlaced });
-          }));
+            return launchSession(selectedServer(url), { cwd, kind: input.to.harness, account: input.to.account, model: input.to.model, effort: input.to.effort, label: `move-${input.brief.id}`, brief: input.brief }, { trustFolder: true, onPlaced: async target => {
+              await onPlaced(target);
+              await terminalProvider().renamePane(selectedServer(url), z.string().parse(target.pane), input.label).catch(() => undefined);
+            } });
+          }), { caller, server: selectedServer(url) });
         } else if (url.pathname === "/v1/accounts/claude/add") {
-          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can add a Claude account.");
+          if (!await strongOwnerRequest(request, data)) throw new BridgeError(403, "Only the owner can add a Claude account; present the owner token.");
           result = await launches.run(() => addClaudeAccount(data, selectedServer(url)));
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
@@ -818,7 +871,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/dispatch/close-self") {
           result = await closeOwnPane(data);
         } else if (url.pathname === "/v1/hand-off") {
-          result = await conductorCall("hand_off", data, data.origin, () => ctx.handOffs!.enqueue(data));
+          const forwarded = request.headers["x-phren-origin"] === "peer" && typeof data.deliveryId === "string" && /^handoff-notice-[a-f0-9]{40}$/.test(data.deliveryId)
+            ? await ctx.succession?.forward(data.target, z.string().max(32768).parse(data.text), data.deliveryId) : undefined;
+          result = forwarded ? { ok: forwarded.delivered, delivered: forwarded.delivered, deliveryId: data.deliveryId } : await conductorCall("hand_off", data, data.origin, () => ctx.handOffs!.enqueue(data));
         } else if (url.pathname === "/v1/hand-off/status") {
           const body = z.object({ deliveryId: z.string().min(8).max(64), target: targetSchema }).strict().parse(data);
           result = await ctx.handOffs!.status(body.deliveryId, body.target);
@@ -930,14 +985,15 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = { ok: true, authority: await clearProjectAuthority(data, "phone") };
         } else result = { ok: true, grant: await removeGrant(data) };
       } else throw new BridgeError(405, "Unsupported request method.");
-      const payload = JSON.stringify(result);
+      const payload = JSON.stringify(request.headers["x-phren-origin"] === "peer" ? redactPeerPayload(result, true) : result);
       if (Buffer.byteLength(payload) > MAX_FRAME) throw new BridgeError(413, "The response is too large.");
       response.setHeader("Content-Type", "application/json"); response.end(payload);
     } catch (error) {
       response.statusCode = error instanceof BridgeError ? error.status : error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503;
       response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify({ error: error instanceof BridgeError ? error.message : "Phren Hook could not complete this request. Run phren bridge doctor on the computer.",
-        ...(error instanceof BridgeError ? error.details : {}) }));
+      const failure = { error: error instanceof BridgeError ? error.message : "Phren Hook could not complete this request. Run phren bridge doctor on the computer.",
+        ...(error instanceof BridgeError ? error.details : {}) };
+      response.end(JSON.stringify(request.headers["x-phren-origin"] === "peer" ? redactPeerPayload(failure, true) : failure));
     }
   };
 }

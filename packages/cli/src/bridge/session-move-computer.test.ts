@@ -1,3 +1,6 @@
+import { relocationSupport } from "./worker-relocation.js";
+import { ownerToken } from "./request-origin.js";
+import { writeLaunchBrief, recordBriefArrival } from "./launch-brief.js";
 import * as herdr from "./herdr.js";
 import { herdrTerminal } from "./terminal-herdr.js";
 import { ConductorSuccessionService } from "./conductor-succession.js";
@@ -21,7 +24,7 @@ import { peerFingerprint } from "./dispatch-hosts.js";
 import { setTerminalProvider } from "./terminal.js";
 import { continuationPlacement, launchContinuation } from "./continuation-launch.js";
 import { LaunchLimiter } from "./limits.js";
-import { objects, type Json, type Target } from "./protocol.js";
+import { BridgeError, objects, type Json, type Target } from "./protocol.js";
 
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWhFCx/BoeHGP4KuXTnSU1szj0tNbYHo3BHMBe4YQ+h";
 const from: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude", session: "00000003-1111-4111-8111-111111111111" };
@@ -81,7 +84,7 @@ async function request(mover: SessionMover, method: string, route: string, data:
   const capabilities = capabilitiesForModules(modules as never);
   const handler = createRouteHandler({ mover, modules, info: { computer: { id: A_ID, name: "self" }, capabilities }, accountUsage: { read: async () => ({ accounts: [] }) }, launches: new LaunchLimiter(), streams: {}, ...overrides } as unknown as RouteContext);
   const req = Readable.from(method === "POST" ? [Buffer.from(JSON.stringify(data))] : []) as IncomingMessage;
-  req.method = method; req.url = route; req.headers = headers;
+  req.method = method; req.url = route; req.headers = { "x-phren-owner-token": await ownerToken(), ...headers };
   let payload = "";
   const res = { statusCode: 200, setHeader() {}, end(value: string) { payload = value; } };
   await handler(req, res as unknown as ServerResponse);
@@ -310,7 +313,7 @@ describe("review regressions", () => {
   });
 });
 
-const credentialNames = ["password", "passwd", "pwd", "token", "secret", "api-key", "api_key", "auth", "bearer"];
+const credentialNames = ["PGPASSWORD", "apiToken", "secret_key", "aws_secret_access_key", "DB_PASS", "passphrase", "credential", "_authToken", "password", "passwd", "pwd", "token", "secret", "api-key", "api_key", "auth", "bearer"];
 const credentialForms = [
   { name: "flag equals", render: (name: string, value: string) => `--${name}=${value}` },
   { name: "flag space", render: (name: string, value: string) => `--${name} ${value}` },
@@ -389,7 +392,9 @@ describe("worker returns home", () => {
       return { workers: [inwardObservation] };
     });
     const returns = new DispatchReturns({ localComputer: self, peers: async () => [peerB], request: remoteWorkers,
-      isLocal: computer => computer === self.name, localWorkers, localAnswer });
+      isLocal: computer => computer === self.name, localWorkers, localAnswer,
+      snapshot: async () => ({ panes: [{ pane_id: homeTarget.pane, workspace_id: homeTarget.workspace, tab_id: homeTarget.tab, agent: "claude", terminal_id: "home-terminal" }] }), identity: async () => homeTarget.session,
+      localArrival: async id => id === inward.id ? { id, accepted: { target: homeTarget } } as never : undefined });
     await returns.poll();
     expect((await dispatchStatus())[0]).toMatchObject({ computer: peerB.name, target });
     await returns.poll();
@@ -433,7 +438,7 @@ describe("owner move admission", () => {
 
 describe("short credentials", () => {
   it.each([true, false])("redacts every short credential form in the whole outbound prompt (agent: %s)", async reply => {
-    const f = fixture({ reply, text: ["password=hunter2", "pwd: x1", "--token abc123", "--token=abc", "--password -p secret", "Authorization: Bearer abc", "bearer xyz", "api_key=k", "X-API-Key: k", "https://owner:tiny@example.test/path"].join("\n") });
+    const f = fixture({ reply, text: ["password=hunter2", "pwd: x1", "--token abc123", "--token=abc", "--password -p secret", "Authorization: Bearer abc", "bearer xyz", "api_key=k", "X-API-Key: k", "https://owner:tiny@example.test/path", "PGPASSWORD=hunter2", "apiToken=abc123", "secret_key=", "aws_secret_access_key=tiny", "DB_PASS=smol", "passphrase: x", "credential: y", "Cookie: k=v", "mysql -pshortpw", "curl -u user:pw", "--auth user:pw", "_authToken=npmshort"].join("\n") });
     if (!reply) { let clock = Date.now(); f.deps.now = () => clock += 1000; f.deps.sleep = async () => {}; }
     const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" }, handoffTimeoutMs: 5000 }, { owner: true });
     await f.mover.settled(from.server, from.pane);
@@ -473,10 +478,10 @@ describe("Claude account picker", () => {
     const restore = setTerminalProvider({ shellCommand: herdrTerminal.shellCommand, listPanes: async () => panes, create: async () => { panes.push({ server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1" }); }, prompt } as never);
     try {
       expect((await request(f.mover, "POST", "/v1/accounts/claude/add", { slug: "work" }, { "x-phren-origin": "peer" })).status).toBe(403);
-      expect((await request(f.mover, "POST", "/v1/accounts/claude/add", { slug: "../../bad" })).status).toBe(400);
+      for (const slug of ["../../bad", "-work", "--", ""]) expect((await request(f.mover, "POST", "/v1/accounts/claude/add", { slug })).status).toBe(400);
       const answer = await request(f.mover, "POST", "/v1/accounts/claude/add", { slug: "work" });
       expect(answer).toMatchObject({ status: 200, body: { target: { server: "default", pane: "w9:p1" }, terminalOnly: true } });
-      expect(commands).toEqual(["phren bridge accounts add 'work'"]);
+      expect(commands).toEqual(["phren bridge accounts add -- 'work'"]);
       expect(prompt).not.toHaveBeenCalled();
       expect((await request(f.mover, "POST", "/v1/accounts/claude/add", { slug: "work" })).status).toBe(409);
       expect(commands).toHaveLength(1);
@@ -619,25 +624,35 @@ describe("owner conductor moves through SessionMover", () => {
 });
 
 
-it("preflights a compatible dispatcher before relocating its worker and marks the receiving launch as a worker", async () => {
+it("keeps the original dispatcher receipt through an immediate worker relocation before its next poll", async () => {
   const f = fixture();
   const dispatch = "d0000000-0000-4000-8000-000000000001";
   await peers.addHookPeer({ name: "dispatcher", address: "dispatcher.test", username: "owner", hostKey: KEY });
+  const dispatcherRoot = path.join(root, "dispatcher"), at = new Date().toISOString();
+  await mkdir(path.join(dispatcherRoot, "dispatches"), { recursive: true });
+  await writeFile(path.join(dispatcherRoot, "dispatches", `${dispatch}.json`), JSON.stringify({ id: dispatch, computer: "worker", harness: "claude", project: "repo", label: "Original worker", state: "accepted", target, createdAt: at, updatedAt: at }));
   const original = f.transport.getMockImplementation()!;
   f.transport.mockImplementation(async (peer, route, data, timeout) => {
     if (peer.name === "dispatcher") {
       expect(timeout).toBe(5000);
       if (route === "/v1/health") return { computer: { id: A_ID }, capabilities: { workerRelocation: 1 } };
       expect(route).toContain(`/v1/dispatch/relocation?id=${dispatch}&session=${from.session}`);
-      return { known: true, workerRelocation: 1 };
+      const savedBridgeHome = process.env.PHREN_BRIDGE_HOME!;
+      try {
+        vi.stubEnv("PHREN_BRIDGE_HOME", dispatcherRoot);
+        const support = await relocationSupport(dispatch, from.session);
+        expect(support).toMatchObject({ known: false, knownDispatch: true, workerRelocation: 1 });
+        return support;
+      } finally { vi.stubEnv("PHREN_BRIDGE_HOME", savedBridgeHome); }
     }
     return original(peer, route, data, timeout);
   });
-  f.deps.paneDispatch = async () => dispatch;
+  await launchContinuation({ computerId: A_ID, project: "repo", to: { harness: "claude" }, label: "Received worker", worker: true, workerDispatch: dispatch, brief: { id: B_ID, text: "Original worker" } }, async () => ({ target: from, briefLaunched: true }));
+  f.deps.paneDispatch = async () => B_ID;
   const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
   await f.mover.settled(from.server, from.pane);
-  expect(await readMove(move.id)).toMatchObject({ state: "moved", dispatch });
-  expect(f.sent.find(call => call.route.includes("/launch"))?.data).toMatchObject({ worker: true });
+  expect(await readMove(move.id)).toMatchObject({ state: "moved", dispatch: B_ID, workerDispatch: dispatch });
+  expect(f.sent.find(call => call.route.includes("/launch"))?.data).toMatchObject({ worker: true, workerDispatch: dispatch });
 });
 
 
@@ -665,4 +680,212 @@ it("lists projectless conductor accounts without requiring an invented project n
   expect(answer.status).toBe(200);
   expect(answer.body).toMatchObject({ localClaudeLogins: 1, computers: [{ self: true, hasCheckout: true }, { self: false, online: true }] });
   expect(JSON.stringify(answer.body)).not.toContain("private-key");
+});
+
+describe("reviewed peer authorization and recovery", () => {
+  it("requires owner proof on new owner-only paths even on the plain local socket", async () => {
+    const f = fixture();
+    const noProof = { "x-phren-owner-token": undefined };
+    for (const [method, route, data] of [
+      ["GET", "/v1/sessions/move/computers?project=repo", {}],
+      ["GET", "/v1/sessions/moves", {}],
+      ["POST", "/v1/accounts/claude/add", { slug: "work" }],
+      ["POST", "/v1/sessions/move", { target: from, to: { computer: "remote", harness: "claude" } }],
+      ["POST", "/v1/sessions/move/launch", { computerId: A_ID }],
+      ["POST", "/v1/sessions/move/abort", { id: A_ID }],
+    ] as const) expect((await request(f.mover, method, route, data, noProof)).status, route).toBe(403);
+    expect(f.deliver).not.toHaveBeenCalled();
+  });
+
+  it("withholds account email and plan from peers while retaining owner account discovery", async () => {
+    const f = fixture();
+    vi.spyOn(harnesses, "harnessInventoryWithin").mockResolvedValue({ harnesses: [{ source: "claude", usable: true, installed: true, accounts: [{ id: "work", label: "Work", key: "private", email: "owner@example.test", plan: "Max", usable: true, signedIn: true }] }] });
+    const owner = await request(f.mover, "GET", "/v1/sessions/move/availability?project=repo");
+    expect(JSON.stringify(owner.body)).toContain("owner@example.test");
+    const peer = await request(f.mover, "GET", "/v1/sessions/move/availability?project=repo", {}, { "x-phren-origin": "peer" });
+    expect(peer.status).toBe(200);
+    expect(peer.body.harnesses[0].accounts[0]).toMatchObject({ id: "work", label: "Work", usable: true });
+    expect(JSON.stringify(peer.body)).not.toMatch(/owner@example|"plan"|private/);
+  });
+
+  it("does not reserve or fence the conductor for an unauthorized request", async () => {
+    const f = fixture();
+    await recordConductor(from.server, f.pane, "owner", from.session);
+    const reserveCaller = vi.fn(() => () => {});
+    f.deps.succession = { reserveCaller } as never;
+    await expect(f.mover.start({ target: from, to: { harness: "codex" } })).rejects.toMatchObject({ status: 403 });
+    await expect(f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } })).rejects.toMatchObject({ status: 403 });
+    expect(reserveCaller).not.toHaveBeenCalled();
+  });
+
+  it.each(["brief", "oversized brief", "dispatch"])("refuses a move id colliding with an existing %s before asking the chat", async kind => {
+    const f = fixture();
+    if (kind !== "dispatch") await writeLaunchBrief({ id: A_ID, text: kind === "oversized brief" ? "x".repeat(70_000) : "Existing work" });
+    else {
+      await mkdir(path.join(root, "bridge", "dispatches"));
+      const at = new Date().toISOString();
+      await writeFile(path.join(root, "bridge", "dispatches", `${A_ID}.json`), JSON.stringify({ id: A_ID, computer: "self", harness: "claude", project: "repo", label: "Existing", state: "accepted", createdAt: at, updatedAt: at }));
+    }
+    await expect(f.mover.start({ id: A_ID, target: from, to: { harness: "claude", computer: "remote" } }, { owner: true })).rejects.toMatchObject({ status: 409 });
+    expect(f.deliver).not.toHaveBeenCalled();
+    expect(f.sent.some(call => call.route.includes("/launch"))).toBe(false);
+  });
+
+  it("reconciles an abandoned receiving intent as not-placed only after a bounded, successful pane inspection", async () => {
+    const input = { computerId: B_ID, project: "repo", to: { harness: "claude" }, label: "Continue", brief: { id: A_ID, text: "Finish the parser" } };
+    let clock = Date.now(); vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const panes = [{ server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p9", label: `move-${A_ID}` }];
+    const restore = setTerminalProvider({ listPanes: async () => panes } as never);
+    const launch = vi.fn(async () => { throw new Error("crash before placement persisted"); });
+    try {
+      await expect(launchContinuation(input, launch, { server: "default" })).rejects.toThrow("crash");
+      expect((await continuationPlacement(A_ID))?.state).toBe("uncertain");
+      clock += 600_001;
+      expect((await continuationPlacement(A_ID))?.state).toBe("uncertain");
+      panes.length = 0;
+      expect((await continuationPlacement(A_ID))?.state).toBe("not-placed");
+      await expect(launchContinuation(input, launch, { server: "default" })).rejects.toMatchObject({ status: 409 });
+      expect(launch).toHaveBeenCalledTimes(1);
+    } finally { restore(); }
+  });
+
+  it("ends source recovery when the destination confirms no pane exists after ten minutes", async () => {
+    const f = fixture();
+    let clock = Date.now(), absent = false;
+    f.deps.now = () => clock;
+    const original = f.transport.getMockImplementation()!;
+    f.transport.mockImplementation(async (peer, route, data, timeout) => {
+      if (route.startsWith("/v1/sessions/move/launch?server=")) throw new Error("lost launch");
+      if (route.startsWith("/v1/sessions/move/launch?id=")) return { state: absent ? "not-placed" : "uncertain" };
+      return original(peer, route, data, timeout);
+    });
+    const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+    await f.mover.settled(from.server, from.pane);
+    clock += 600_001; absent = true;
+    const restarted = new SessionMover(f.deps);
+    await restarted.reconcile(); await restarted.settled(from.server, from.pane);
+    expect(await readMove(move.id)).toMatchObject({ state: "failed", error: expect.stringContaining("no pane exists") });
+    expect(f.terminal.closePane).not.toHaveBeenCalled();
+  });
+
+  it("accepts an owner abort before commit, un-fences the old conductor and prevents the pending hand-off launching a successor", async () => {
+    const f = fixture(); await recordConductor(from.server, f.pane, "owner", from.session);
+    const original = f.transport.getMockImplementation()!;
+    f.transport.mockImplementation(async (peer, route, data, timeout) => {
+      if (route === "/v1/health") return { computer: { id: B_ID }, capabilities: { moveConductorToComputer: true } };
+      if (route === "/v1/conductor/move/prepare") return { ok: true };
+      return original(peer, route, data, timeout);
+    });
+    const service = new ConductorSuccessionService({ root: path.join(root, "bridge"), computer: { id: A_ID, name: "self" }, snapshot: f.deps.snapshot, validate: async () => f.pane, deliver: f.deliver, checkWorkers: async () => {} });
+    f.deps.succession = service;
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const deliver = f.deliver.getMockImplementation()!;
+    f.deliver.mockImplementation(async (...args) => { entered(); await held; return deliver(...args); });
+    const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+    await ready;
+    expect((await request(f.mover, "POST", "/v1/sessions/move/abort", { id: move.id })).status).toBe(200);
+    expect((await service.status(move.id)).phase).toBe("aborted");
+    expect(await service.call("grants-list", {}, from, async () => ({ grants: [] }))).toEqual({ grants: [] });
+    release(); await f.mover.settled(from.server, from.pane);
+    expect(await readMove(move.id)).toMatchObject({ state: "failed" });
+    expect((await recordedConductor())?.pane).toBe(from.pane);
+    expect(f.sent.some(call => call.route.includes("/launch"))).toBe(false);
+  });
+
+  it("rejects third peer C on every conductor move route and peer listing even when C knows B's move id", async () => {
+    const f = fixture(); const old = await recordConductor(from.server, f.pane, "owner", from.session);
+    const original = f.transport.getMockImplementation()!;
+    f.transport.mockImplementation(async (peer, route, data, timeout) => {
+      if (route === "/v1/health") return { computer: { id: B_ID }, capabilities: { moveConductorToComputer: true } };
+      if (route === "/v1/conductor/move/prepare") return { ok: true };
+      return original(peer, route, data, timeout);
+    });
+    const service = new ConductorSuccessionService({ root: path.join(root, "bridge"), computer: { id: A_ID, name: "self" }, snapshot: f.deps.snapshot, validate: async () => f.pane, deliver: f.deliver, checkWorkers: async () => {} });
+    const peer = (await peers.hookPeers())[0];
+    const { peerHost } = await import("./dispatch-hosts.js");
+    await service.begin(A_ID, old, from, peerHost(peer, f.transport), B_ID);
+    const headers = { "x-phren-origin": "peer", "x-phren-peer": Buffer.from(JSON.stringify({ id: "70000000-0000-4000-8000-000000000003", fingerprint: peerFingerprint({ ...peer, username: "carol" }) })).toString("base64url") };
+    const overrides = { succession: service };
+    for (const path of ["status", "launch", "operation", "notification"]) expect((await request(f.mover, "GET", `/v1/conductor/move/${path}?id=${A_ID}&operationId=${B_ID}&deliveryId=notice-1234567890`, {}, headers, overrides)).status, path).toBe(403);
+    for (const path of ["prepare", "commit", "operate", "notice", "ack"]) expect((await request(f.mover, "POST", `/v1/conductor/move/${path}`, { id: A_ID, originId: A_ID }, headers, overrides)).status, path).toBe(403);
+    expect((await request(f.mover, "GET", "/v1/sessions/moves", {}, headers, overrides)).status).toBe(403);
+    const counterpart = { ...headers, "x-phren-peer": Buffer.from(JSON.stringify({ id: B_ID, fingerprint: peerFingerprint(peer) })).toString("base64url") };
+    expect((await request(f.mover, "GET", `/v1/conductor/move/status?id=${A_ID}`, {}, counterpart, overrides)).status).toBe(200);
+  });
+
+  it("ignores a peer's claimed home relocation until the pane and that move's local arrival are both verified", async () => {
+    const f = fixture(); const peer = (await peers.hookPeers())[0];
+    const at = new Date().toISOString(), id = A_ID;
+    await mkdir(path.join(root, "bridge", "dispatches"));
+    await writeFile(path.join(root, "bridge", "dispatches", `${id}.json`), JSON.stringify({ id, computer: peer.name, harness: "claude", project: "repo", label: "worker", state: "accepted", target, createdAt: at, updatedAt: at }));
+    const moved = { id: B_ID, at, from: { harness: "claude" }, to: { harness: "claude", computer: "home" }, target: from, computerId: A_ID, computerFingerprint: peerFingerprint(peer) };
+    const local = vi.fn(async () => ({ workers: [] }));
+    const returns = new DispatchReturns({ localComputer: { id: A_ID, name: "self" }, peers: async () => [peer], request: async () => ({ workers: [{ state: "unknown", moved }] }), localWorkers: local, snapshot: async () => ({ panes: [f.pane] }), identity: async () => from.session });
+    await returns.poll();
+    expect((await dispatchStatus())[0]).toMatchObject({ computer: peer.name, target });
+    await writeLaunchBrief({ id: B_ID, text: "Return home" });
+    await recordBriefArrival(B_ID, "UserPromptSubmit", from);
+    await returns.poll();
+    expect((await dispatchStatus())[0]).toMatchObject({ computer: "self", computerId: A_ID, target: from });
+    expect(local).not.toHaveBeenCalled();
+  });
+});
+
+it("forwards peer-originated hand-off notices at ingress rather than enqueueing them into the fenced old pane", async () => {
+  const f = fixture(), deliveryId = `handoff-notice-${"a".repeat(40)}`;
+  const forward = vi.fn(async () => ({ delivered: true })), enqueue = vi.fn();
+  const response = await request(f.mover, "POST", "/v1/hand-off", { target: from, text: "Hand-off finished", deliveryId }, { "x-phren-origin": "peer" }, { succession: { forward }, handOffs: { enqueue } } as never);
+  expect(response).toMatchObject({ status: 200, body: { delivered: true } });
+  expect(forward).toHaveBeenCalledWith(from, "Hand-off finished", deliveryId);
+  expect(enqueue).not.toHaveBeenCalled();
+});
+
+it("refuses an authenticated peer launch without a canonical owner-admitted source intent", async () => {
+  const f = fixture(), peer = (await peers.hookPeers())[0];
+  const enqueue = vi.fn();
+  const original = f.transport.getMockImplementation()!;
+  f.transport.mockImplementation(async (peer, route, data, timeout) => route.startsWith("/v1/sessions/move/intent?") ? {} : original(peer, route, data, timeout));
+  const response = await request(f.mover, "POST", "/v1/sessions/move/launch", { computerId: A_ID, project: "repo", to: { harness: "claude" }, label: "Unadmitted", worker: false, brief: { id: A_ID, text: "Pretend this was admitted" } }, {
+    "x-phren-origin": "peer", "x-phren-peer": Buffer.from(JSON.stringify({ name: peer.name, fingerprint: peerFingerprint(peer) })).toString("base64url"),
+  }, { handOffs: { enqueue } } as never);
+  expect(response.status).toBe(403);
+  expect(f.transport.mock.calls.some(([, route]) => route === `/v1/sessions/move/intent?id=${A_ID}`)).toBe(true);
+  expect(await continuationPlacement(A_ID)).toBeUndefined();
+  expect(enqueue).not.toHaveBeenCalled();
+});
+
+it("reports a never-received launch as not-placed only after verifying the source's owner-admitted intent", async () => {
+  const f = fixture(), peer = (await peers.hookPeers())[0];
+  const canonical = { computerId: A_ID, project: "repo", to: { harness: "claude" }, label: "Continue", worker: false, brief: { id: B_ID, text: "Owner-admitted work" } };
+  f.transport.mockResolvedValue(canonical);
+  const response = await request(f.mover, "GET", `/v1/sessions/move/launch?id=${B_ID}`, {}, {
+    "x-phren-origin": "peer", "x-phren-peer": Buffer.from(JSON.stringify({ name: peer.name, fingerprint: peerFingerprint(peer) })).toString("base64url"),
+  });
+  expect(response).toMatchObject({ status: 200, body: { state: "not-placed" } });
+  expect(await continuationPlacement(B_ID)).toBeUndefined();
+  expect(f.transport).toHaveBeenCalledWith(expect.objectContaining({ name: peer.name }), `/v1/sessions/move/intent?id=${B_ID}`, undefined, 5000);
+});
+
+it("does not accept unrelated new Hooks as proof that a legacy dispatcher's worker can relocate", async () => {
+  const f = fixture();
+  f.deps.paneDispatch = async () => A_ID;
+  const original = f.transport.getMockImplementation()!;
+  f.transport.mockImplementation(async (peer, route, data, timeout) => {
+    if (route === "/v1/health") return { capabilities: { workerRelocation: 1 } };
+    if (route.startsWith("/v1/dispatch/relocation")) return { known: false, knownDispatch: false, workerRelocation: 1 };
+    return original(peer, route, data, timeout);
+  });
+  await expect(f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true })).rejects.toMatchObject({ status: 409, message: "Update the dispatching computer's Phren Hook first" });
+  expect(f.deliver).not.toHaveBeenCalled();
+});
+
+it("redacts credential values from peer error responses as well as successful payloads", async () => {
+  const f = fixture();
+  const authorize = async () => { throw new BridgeError(409, "PGPASSWORD=hunter2\nCookie: k=v\ncurl -u user:pw", { credential: "short-value" }); };
+  const response = await request(f.mover, "GET", `/v1/conductor/move/status?id=${A_ID}`, {}, { "x-phren-origin": "peer" }, { succession: { authorize } } as never);
+  expect(response.status).toBe(409);
+  expect(JSON.stringify(response.body)).not.toMatch(/hunter2|k=v|user:pw|short-value/);
+  expect(response.body.credential).toBe("[redacted]");
 });
