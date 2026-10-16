@@ -3,6 +3,8 @@
 // /api/overview WebSocket; every section subscribes here instead of opening
 // its own.
 
+import { snoozes } from "./snooze.js";
+
 const listeners = new Set();
 let merged = null;
 const capabilities = new Map(); // computer -> { at, caps } | { at, error }
@@ -20,7 +22,7 @@ export const store = {
     return () => listeners.delete(fn);
   },
 
-  /** Rows that need the owner: blocked or waiting agents and pending approvals. */
+  /** Rows that need the owner: blocked or waiting agents and pending approvals, minus waiting chats the owner snoozed. */
   needsYou() { return needsYou(merged); },
 
   /** Live agent rows, or last-seen rows too with includeOffline. */
@@ -67,7 +69,7 @@ export const store = {
 };
 
 export function needsYou(m = merged) {
-  return sessions(m).filter(({ child }) => sessionKind(child) === "needs");
+  return snoozes.visible(sessions(m).filter(({ child }) => sessionKind(child) === "needs"));
 }
 
 export function sessions(m = merged, { includeOffline = false } = {}) {
@@ -83,6 +85,14 @@ export function sessions(m = merged, { includeOffline = false } = {}) {
   return rows;
 }
 
+// Snoozing, waking and expiry change what needs you without a new frame.
+snoozes.subscribe(() => {
+  if (!merged) return;
+  for (const fn of listeners) {
+    try { fn(merged); } catch (err) { console.error(err); }
+  }
+});
+
 let retry = 1000;
 const states = new Map(); // computer -> state, to refresh capabilities on reconnect
 
@@ -95,6 +105,7 @@ export function connectStore() {
     const msg = JSON.parse(ev.data);
     if (msg.type !== "overview") return;
     merged = msg.merged;
+    snoozes.reconcile(sessions(merged, { includeOffline: true }));
     for (const c of merged?.computers ?? []) {
       if (c.state === "online" && states.get(c.computer) !== "online") capabilities.delete(c.computer);
       states.set(c.computer, c.state);

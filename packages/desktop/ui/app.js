@@ -34,6 +34,7 @@ import { startRecentSwitcher } from "./shell/recent.js";
 import { startApprovals } from "./shell/approvals.js";
 import { startTray } from "./shell/tray.js";
 import { startNeedsNotify } from "./shell/needs-notify.js";
+import { snoozes } from "./shell/snooze.js";
 import { startAway } from "./shell/away.js";
 import { startUpdateChip } from "./shell/update-chip.js";
 import { startWarm } from "./shell/warm.js";
@@ -110,6 +111,7 @@ startNeedsNotify(shell, {
 });
 startApprovals();
 startTray(shell);
+snoozes.start(); // wakes snoozed Home rows on time, also after sleep
 
 startAway();
 startUpdateChip(shell, document.getElementById("usage-rings"));
