@@ -163,6 +163,11 @@ button.home-job:focus-visible { outline: 2px solid var(--accent); outline-offset
   .home-job { gap: 6px; }
 }
 
+.home-active-task { align-items: center; }
+.home-active-task .home-row-meta { min-width: 0; max-width: 100%; }
+.home-task-launch { flex: none; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--accent); padding: 6px 10px; font: inherit; cursor: pointer; }
+.home-task-launch:hover { background: var(--card); }
+
 /* Separate chat and Stop buttons keep both controls reachable without nesting. */
 .home-working { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; min-width: 0; }
 .home-working-content { min-width: 0; }

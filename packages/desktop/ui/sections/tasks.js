@@ -1,3 +1,4 @@
+import { loadTaskSources, loadTaskDoc, cacheTaskDoc, TASK_FRESH_MS } from "../shell/task-cache.js";
 import { el } from "../dom.js";
 import { harnessLabel } from "../harness.js";
 // Tasks: every online computer's Phren stores, their projects, and each
@@ -5,7 +6,7 @@ import { harnessLabel } from "../harness.js";
 // inline edit, complete, move, pin and "Launch as agent" are written through
 // the Hook's task routes. This is the phone's Tasks screen, drawn with the
 // desktop shell's CSS.
-import { hookGet, hookPost } from "../api.js";
+import { hookPost } from "../api.js";
 import { projectOf, sessions, store } from "../shell/store.js";
 import { skeleton } from "../shell/skeleton.js";
 import { sectionHandle } from "../shell/sections.js";
@@ -64,7 +65,7 @@ function projectCounts(doc) {
 }
 
 // A read this recent is shown as is when the section is opened again.
-const FRESH_MS = 30_000;
+const FRESH_MS = TASK_FRESH_MS;
 
 let toastHost = null;
 function toast(text, kind = "") {
@@ -109,6 +110,7 @@ export function mountTasks(root) {
     doneOpen: false,
     loading: false,
     createDraft: "",
+    sectionFilter: null,
     loadedAt: 0,              // when the active store's tasks were last read in full
   };
 
@@ -117,34 +119,7 @@ export function mountTasks(root) {
 
   // ---------------------------------------------------------------- stores
   async function loadStores() {
-    const computers = (store.merged?.computers ?? []).filter((c) => c.state === "online");
-    const found = [];
-    await Promise.all(computers.map(async (c) => {
-      try {
-        // A Hook that serves the tasks module advertises taskDependencies; an
-        // older one answers nothing and contributes no store at all.
-        const caps = await store.capabilities(c.computer);
-        const contract = caps.taskDependencies === true;
-        const body = await hookGet(c.computer, "/v1/tasks/stores");
-        for (const s of body.stores ?? []) {
-          if (!s.id || s.available === false || s.identityReady === false || s.ambiguous) continue;
-          found.push({
-            computer: c.computer,
-            id: s.id,
-            name: s.name || s.id,
-            role: s.role,
-            primary: !!s.primary,
-            readonly: s.role === "readonly",
-            metadataWritable: !!s.metadataWritable,
-            contract,
-            projects: Array.isArray(s.projects) ? s.projects : [],
-          });
-        }
-      } catch {
-        // An older Hook without the tasks module: it just contributes nothing.
-      }
-    }));
-    found.sort((a, b) => (b.primary - a.primary) || a.computer.localeCompare(b.computer) || a.name.localeCompare(b.name));
+    const found = await loadTaskSources(store.merged?.computers ?? []);
     state.sources = found;
     if (!found.some((s) => sourceKey(s) === state.activeKey)) {
       state.activeKey = found.length ? sourceKey(found[0]) : null;
@@ -175,7 +150,7 @@ export function mountTasks(root) {
     const current = () => mine === generation && state.activeKey === key;
     const entries = await Promise.all(source.projects.map(async (project) => {
       let doc = null;
-      try { doc = await hookGet(source.computer, "/v1/tasks", { storeId: source.id, project }); } catch { /* left out below */ }
+      try { doc = await loadTaskDoc(source, project); } catch { /* left out below */ }
       if (doc && current()) {
         state.docs.set(project, doc);
         // Unless the owner picked another project meanwhile.
@@ -211,7 +186,7 @@ export function mountTasks(root) {
     if (!source || !project) return;
     const key = state.activeKey;
     try {
-      const doc = await hookGet(source.computer, "/v1/tasks", { storeId: source.id, project });
+      const doc = await loadTaskDoc(source, project, true);
       if (state.activeKey !== key) return; // the owner switched stores meanwhile
       state.docs.set(project, doc);
     } catch { /* keep the last good copy */ }
@@ -323,12 +298,17 @@ export function mountTasks(root) {
     const head = el("div", "tasks-main-head");
     head.append(el("h2", "tasks-main-title", project));
     head.append(el("div", "tasks-main-sub", `${counts.active} active · ${counts.queue} queue · ${counts.done} done`));
+    if (state.sectionFilter) {
+      const clear = el("button", "tasks-menu-item", "Show all tasks");
+      clear.addEventListener("click", () => { state.sectionFilter = null; renderMain(); });
+      head.append(clear);
+    }
     mainEl.append(head);
 
     mainEl.append(createRow(source, project, canMeta));
 
     const body = el("div", "tasks-body");
-    for (const section of ["Active", "Queue", "Done"]) {
+    for (const section of state.sectionFilter ? [state.sectionFilter] : ["Active", "Queue", "Done"]) {
       body.append(sectionBlock(section, doc, source, { canMeta, write }));
     }
     mainEl.append(body);
@@ -455,6 +435,7 @@ export function mountTasks(root) {
         storeId: source.id, project, stableId, responsibility: "agent", text,
       });
       state.docs.set(project, doc);
+      cacheTaskDoc(source, project, doc);
       state.createDraft = "";
       toast("Added to Queue");
       renderProjects();
@@ -499,7 +480,7 @@ export function mountTasks(root) {
   async function write(route, source, body) {
     try {
       const doc = await hookPost(source.computer, `/v1/tasks/${route}`, body);
-      if (body.project) state.docs.set(body.project, doc);
+      if (body.project) { state.docs.set(body.project, doc); cacheTaskDoc(source, body.project, doc); }
       renderProjects();
       renderMain();
       return true;
@@ -850,5 +831,6 @@ export function mountTasks(root) {
     hide() { closeMenu(); },
     focus() { /* the create field owns first focus */ },
     reload() { void loadStores(); },
+    filterSection(section) { state.sectionFilter = section; renderMain(); },
   };
 }
