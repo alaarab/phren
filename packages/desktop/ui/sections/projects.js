@@ -1065,7 +1065,7 @@ export function mountProjects(root) {
     hide() {},
     /** Every project loaded so far, across computers (⌘K lists them). */
     projects() {
-      return [...state.data.values()].flatMap((entry) => [...entry.projects.values()].map((p) => ({ computer: p.computer, name: p.name })));
+      return [...state.data.values()].flatMap((entry) => [...entry.projects.values()].map((p) => ({ computer: p.computer, name: p.name, lastSeen: p.lastSeen })));
     },
     /** Load the online computers not loaded yet; resolves once those reads finish. */
     load() {

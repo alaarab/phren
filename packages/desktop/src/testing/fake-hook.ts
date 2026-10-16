@@ -334,6 +334,12 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
         Queue: [], Done: [],
       } } };
     },
+    "GET /v1/projects/repos": () => ({ json: { repos: [
+      { name: "phren", directory: "/Users/you/phren", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
+      { name: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
+    ] } }),
+    "GET /v1/projects/website/memory": () => ({ json: { project: "website", findings: [{ id: "fid:website", text: "Route website requests through the preview host." }], truths: [], tasks: [] } }),
+    "GET /v1/projects/website/memory/search": () => ({ json: { results: [{ kind: "finding", text: "Route website requests through the preview host.", score: 0.95, finding: { id: "fid:website", type: "pattern" } }] } }),
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),

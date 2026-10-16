@@ -2,8 +2,9 @@ import { el } from "../dom.js";
 // ⌘K command palette: one ranked list across sessions (every computer), the
 // open pull requests the CI watch last saw, the projects on every computer, the
 // active session's repository files, registered commands and top-level
-// sections, operated entirely by keyboard; `?` asks the active session's
-// project memory instead. Opened by the `palette` action in keys.js. Plain DOM
+// sections, operated entirely by keyboard; `?` searches the opened project's
+// memory, or every project without a scope; `??` always searches everywhere.
+// Opened by the `palette` action in keys.js. Plain DOM
 // only, never innerHTML with data.
 
 import { hookGet, hookPost, targetQuery } from "../api.js";
@@ -28,12 +29,13 @@ const GROUP_ORDER = { Sessions: 0, "Pull requests": 1, Projects: 2, "Go to": 3, 
 const CHECK_ICON = { failing: "✕", pending: "●", passing: "✓" };
 const MAX_ROWS = 200;
 const MEMORY_LIMIT = 20;
-const MEMORY_DEBOUNCE_MS = 180;
+const MEMORY_DEBOUNCE_MS = 250;
 
 /** What the typed text asks for: `>` commands only, `?` the project's memory. */
 export function paletteMode(raw) {
   const text = raw ?? "";
   if (text.startsWith(">")) return { mode: "commands", query: text.slice(1).trim() };
+  if (text.startsWith("??")) return { mode: "memory", query: text.slice(2).trim(), everywhere: true };
   if (text.startsWith("?")) return { mode: "memory", query: text.slice(1).trim() };
   return { mode: "all", query: text.trim() };
 }
@@ -182,13 +184,13 @@ export function memoryItems(results, { computer, project }) {
     const truth = hit.kind === "truth";
     const type = hit.finding?.type;
     return {
-      id: `memory:${hit.finding?.id ?? `${hit.kind}:${i}`}`,
+      id: `memory:${computer}:${project}:${hit.finding?.id ?? `${hit.kind}:${i}`}`,
       group: "Memory",
       kind: "idle",
       wrap: true,
       icon: truth ? "★" : "◆",
       title: hit.text,
-      meta: [truth ? "truth" : type || "finding", `${Math.round((hit.score ?? 0) * 100)}%`].join(" · "),
+      meta: [project, computer, truth ? "truth" : type || "finding", `${Math.round((hit.score ?? 0) * 100)}%`].join(" · "),
       run() {
         showSection("memory");
         sectionHandle("memory")?.open?.({ computer, project, segment: truth ? "truths" : "findings", search: truth ? "" : hit.text.slice(0, 80) });
@@ -215,45 +217,77 @@ export function askItem(query, scope, openChat) {
 // launch.js registers its commands here at load, so it is imported only when used.
 const openQuickChat = (options) => { void import("./launch.js").then((m) => m.openLaunchSheet(options)); };
 
-// The last memory answer: `key` is computer, project and query.
-let memory = { key: "", state: "idle", items: [], timer: null };
+// Each query owns its timer, controller and answer; late answers cannot repaint.
+let memory = { key: "", state: "idle", items: [], timer: null, controller: null };
+let openedScope = null;
+// Shared across superseded queries; the daemon also holds four SSH slots until
+// hookRequest confirms completion/abort, since fetch can reject sooner.
+const memoryReads = new Set();
 
-/** Where `?` searches: the active session's project on its computer. */
-function memoryScope() {
-  const session = activeSession();
-  const project = session?.child ? projectOf(session.child) : "";
-  return project ? { computer: session.computer, project } : null;
+function memoryScope() { return openedScope; }
+
+function cancelMemory() {
+  clearTimeout(memory.timer);
+  memory.controller?.abort();
+  memory = { key: "", state: "idle", items: [], timer: null, controller: null };
 }
 
-function askMemory(sources, query) {
+function memoryProjects(everywhere) {
   const scope = memoryScope();
-  const key = scope && query ? `${scope.computer}\u0000${scope.project}\u0000${query}` : "";
+  if (scope && !everywhere) return [{ ...scope, name: scope.project }];
+  const online = new Set((store.merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer));
+  const projects = sectionHandle("projects")?.projects?.() ?? [];
+  return projects.filter((p) => online.has(p.computer))
+    .sort((a, b) => (Date.parse(b.lastSeen) || 0) - (Date.parse(a.lastSeen) || 0));
+}
+
+function askMemory(sources, query, everywhere) {
+  const projects = memoryProjects(everywhere);
+  const targets = projects.slice(0, 12);
+  const key = query ? JSON.stringify([query, everywhere, targets.map((p) => [p.computer, p.name]), projects.length]) : "";
   if (key === memory.key) return;
-  clearTimeout(memory.timer);
-  memory = { key, state: key ? "loading" : "idle", items: [], timer: null };
+  cancelMemory();
   if (!key) return;
-  memory.timer = setTimeout(async () => {
-    let next;
-    try {
-      const body = await hookGet(scope.computer, `/v1/projects/${encodeURIComponent(scope.project)}/memory/search`, { q: query, limit: String(MEMORY_LIMIT) });
-      next = { state: "done", items: memoryItems(body.results, scope) };
-    } catch (err) {
-      next = { state: "error", items: [], error: err?.message || "Memory search failed." };
+  const request = memory = { key, state: "loading", items: [], timer: null, controller: new AbortController(), total: projects.length, searched: 0 };
+  request.timer = setTimeout(async () => {
+    const hits = [];
+    let cursor = 0, failures = 0;
+    async function worker() {
+      while (!request.controller.signal.aborted && cursor < targets.length) {
+        const p = targets[cursor++];
+        const scope = { computer: p.computer, project: p.name };
+        try {
+          while (memoryReads.size >= 4) {
+            await Promise.race([...memoryReads].map((read) => read.catch(() => {})));
+          }
+          if (request.controller.signal.aborted) return;
+          const read = hookGet(p.computer, `/v1/projects/${encodeURIComponent(p.name)}/memory/search`, { q: query, limit: String(MEMORY_LIMIT) }, { signal: request.controller.signal });
+          memoryReads.add(read);
+          let body;
+          try { body = await read; }
+          finally { memoryReads.delete(read); }
+          hits.push(...memoryItems(body.results, scope).map((item, i) => ({ item, matched: body.results[i].matched ?? 0, score: body.results[i].score ?? 0, recency: Date.parse(p.lastSeen) || 0 })));
+          request.searched++;
+        } catch { failures++; }
+      }
     }
-    if (memory.key !== key || !overlayEl) return;
-    Object.assign(memory, next);
+    await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
+    if (request.controller.signal.aborted || memory !== request || !overlayEl) return;
+    hits.sort((a, b) => b.matched - a.matched || b.score - a.score || b.recency - a.recency || a.item.id.localeCompare(b.item.id));
+    request.items = hits.slice(0, MEMORY_LIMIT).map((hit) => hit.item);
+    request.state = failures === targets.length && failures ? "error" : "done";
+    request.error = failures ? `${failures} project searches failed.` : "";
     render(sources);
   }, MEMORY_DEBOUNCE_MS);
 }
 
-/** The line shown when `?` mode has no rows to list. */
-function memoryNote(query) {
-  const scope = memoryScope();
-  if (!scope) return "Open a session to ask its project's memory.";
-  if (!query) return `Ask what Phren remembers about ${scope.project}.`;
-  if (memory.state === "loading") return `Searching ${scope.project}…`;
+function memoryNote(query, everywhere) {
+  const scope = everywhere ? null : memoryScope();
+  const where = scope?.project || "all projects";
+  if (!query) return `Ask what Phren remembers about ${where}.`;
+  if (memory.state === "loading") return `Searching ${where}…`;
   if (memory.state === "error") return memory.error;
-  return `Phren has nothing on that in ${scope.project}.`;
+  return `Phren has nothing on that in ${where}.`;
 }
 
 // ------------------------------------------------------------ file list
@@ -311,6 +345,7 @@ let inputEl = null;
 let listEl = null;
 let items = []; // the ranked items currently shown
 let rowEls = []; // one row node per item, same order
+let keyedRows = new Map();
 let selected = 0;
 let lastQuery = "";
 let filePool = [];
@@ -324,6 +359,8 @@ export function openPalette({ sources = [] } = {}) {
   returnFocus = document.activeElement;
   filePool = [];
   const session = activeSession();
+  const project = session?.child ? projectOf(session.child) : "";
+  openedScope = project ? { computer: session.computer, project } : null;
 
   const backdrop = el("div", "palette-backdrop");
   backdrop.addEventListener("mousedown", (ev) => { if (ev.target === backdrop) closePalette(); });
@@ -343,7 +380,7 @@ export function openPalette({ sources = [] } = {}) {
   listEl.setAttribute("role", "listbox");
 
   const foot = el("div", "palette-foot");
-  foot.append(el("span", "", "↑↓ move"), el("span", "", "↵ open"), el("span", "", "esc close"), el("span", "", "> commands"), el("span", "", "? memory"));
+  foot.append(el("span", "", "↑↓ move"), el("span", "", "↵ open"), el("span", "", "esc close"), el("span", "", "> commands"), el("span", "", "? memory · ?? all projects"));
 
   card.append(inputEl, listEl, foot);
   backdrop.append(card);
@@ -377,9 +414,9 @@ export function closePalette() {
   if (returnFocus?.isConnected) returnFocus.focus();
   returnFocus = null;
   overlayEl = null; inputEl = null; listEl = null;
-  items = []; rowEls = []; selected = 0; lastQuery = ""; filePool = [];
-  clearTimeout(memory.timer);
-  memory = { key: "", state: "idle", items: [], timer: null };
+  items = []; rowEls = []; keyedRows.clear(); selected = 0; lastQuery = ""; filePool = [];
+  cancelMemory();
+  openedScope = null;
 }
 
 function collect(sources, query, commandsOnly) {
@@ -398,18 +435,19 @@ function collect(sources, query, commandsOnly) {
 }
 
 function render(sources) {
-  const { mode, query } = paletteMode(inputEl?.value);
+  const { mode, query, everywhere } = paletteMode(inputEl?.value);
   const commandsOnly = mode === "commands";
   lastQuery = query;
   if (mode === "memory") {
-    askMemory(sources, query);
-    const ask = memory.state === "loading" ? null : askItem(query, memoryScope(), openQuickChat);
+    askMemory(sources, query, everywhere);
+    const ask = memory.state === "loading" ? null : askItem(query, everywhere ? null : memoryScope(), openQuickChat);
     items = ask ? [...memory.items, ask] : memory.items;
     if (selected >= items.length) selected = Math.max(0, items.length - 1);
-    paint(memoryNote(query));
+    paint(memoryNote(query, everywhere));
     return;
   }
 
+  if (memory.key) cancelMemory();
   const scored = [];
   for (const item of collect(sources, query, commandsOnly)) {
     const score = bestScore(query, item);
@@ -429,23 +467,33 @@ function paint(emptyText = "No matches.") {
   if (!listEl) return;
   rowEls = [];
   const nodes = [];
+  const nextRows = new Map();
   let group = null;
   items.forEach((item, i) => {
     if (item.group !== group) { group = item.group; nodes.push(el("div", "palette-group", group)); }
-    const row = el("div", `palette-row${item.wrap ? " wrap" : ""}${i === selected ? " on" : ""}`);
-    row.setAttribute("role", "option");
-    row.append(el("span", `palette-icon ${item.kind || "idle"}`, item.icon || ""));
-    row.append(highlight("palette-title", item.title, lastQuery));
-    const meta = el("span", "palette-meta");
-    if (item.kind === "needs" || item.kind === "working") meta.append(el("span", `palette-dot ${item.kind}`));
-    if (item.meta) meta.append(el("span", "", item.meta));
-    if (meta.childNodes.length) row.append(meta);
-    if (item.shortcut) row.append(el("span", "palette-shortcut", item.shortcut));
-    row.addEventListener("click", () => activate(i));
+    const signature = JSON.stringify([item.title, item.meta, item.kind, item.icon, item.wrap, item.shortcut, lastQuery]);
+    const prior = keyedRows.get(item.id);
+    const row = prior?.signature === signature ? prior.row : el("div", `palette-row${item.wrap ? " wrap" : ""}`);
+    row.classList.toggle("on", i === selected);
+    if (row !== prior?.row) {
+      row.setAttribute("role", "option");
+      row.append(el("span", `palette-icon ${item.kind || "idle"}`, item.icon || ""));
+      row.append(highlight("palette-title", item.title, lastQuery));
+      const meta = el("span", "palette-meta");
+      if (item.kind === "needs" || item.kind === "working") meta.append(el("span", `palette-dot ${item.kind}`));
+      if (item.meta) meta.append(el("span", "", item.meta));
+      if (meta.childNodes.length) row.append(meta);
+      if (item.shortcut) row.append(el("span", "palette-shortcut", item.shortcut));
+      row.addEventListener("click", () => activate(items.findIndex((candidate) => candidate.id === item.id)));
+    }
+    nextRows.set(item.id, { row, signature });
     rowEls.push(row);
     nodes.push(row);
   });
   if (!items.length) nodes.push(el("div", "palette-empty", emptyText));
+  if (memory.total > 12 && memory.state !== "loading") nodes.push(el("div", "palette-empty", `Searched ${memory.searched} of ${memory.total} projects`));
+  if (memory.error && items.length) nodes.push(el("div", "palette-empty", memory.error));
+  keyedRows = nextRows;
   listEl.replaceChildren(...nodes);
 }
 

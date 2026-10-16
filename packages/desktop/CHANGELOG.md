@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.11] - unreleased
 
+- Search memory across projects on online computers from the command palette with `??`, or `?` without a project scope, with ranked, labelled results and cancellable searches.
+
 - Home’s Up next rows offer Run now with inline confirmation, launch status and errors; Working rows omit blank activity lines.
 
 ## [0.1.10] - 2026-10-16
