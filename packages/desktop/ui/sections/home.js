@@ -1,4 +1,5 @@
 import { createActiveTasks } from "./home/active-tasks.js";
+import { createSavedToday } from "./home/saved-today.js";
 import { hookGet, hookPost } from "../api.js";
 import { store } from "../shell/store.js";
 import { approvals } from "../shell/approvals.js";
@@ -64,6 +65,10 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         <h2 class="section-label">Active tasks <span class="count"></span></h2>
         <div class="home-list"></div>
       </section>
+      <section class="home-block" data-block="saved-today" hidden>
+        <h2 class="section-label">Saved today <span class="count"></span></h2>
+        <div class="home-list"></div>
+      </section>
       <section class="home-block" data-block="computers">
         <h2 class="section-label">Computers <span class="count"></span></h2>
         <div class="home-list"></div>
@@ -86,6 +91,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const checks = createChecks({ block, openPrs });
   const renderUpNext = createUpNext({ block, scheduleLists, state });
   const activeTasks = createActiveTasks({ block, state });
+  const savedToday = createSavedToday({ block, state });
   const renderComputers = createComputers(shared);
   const renderConductor = createConductor({ root, state, receipts, open });
   const unsubscribeAway = finished.subscribe();
@@ -155,6 +161,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     finished.renderReturns();
     renderUpNext();
     activeTasks.render();
+    savedToday.render();
     renderComputers();
   }
 
@@ -174,6 +181,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       visible = true;
       startPolling();
       activeTasks.show();
+      savedToday.show();
       checks.follow();
       stopUsage = followUsage(low.update);
       void loadQuotaState().then(() => { low.ready(); if (visible) low.render(); }).catch((error) => console.warn("Home usage preferences:", error));
@@ -183,6 +191,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       visible = false;
       stopPolling();
       activeTasks.hide();
+      savedToday.hide();
       checks.unfollow();
       stopUsage?.();
       stopUsage = null;
@@ -192,6 +201,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       visible = false;
       stopPolling();
       activeTasks.hide();
+      savedToday.hide();
       checks.unfollow();
       stopUsage?.();
       stopUsage = null;

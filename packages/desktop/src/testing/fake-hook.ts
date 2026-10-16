@@ -59,6 +59,12 @@ export const SAMPLE_FINDING = {
   },
 };
 
+/** The local calendar day as the Hook writes a finding's date. */
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 const VERSION = "0.3.33";
 const APP_PATH = "src/app.ts";
 const README_PATH = "README.md";
@@ -341,16 +347,25 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
       return { json: { project, revision: "sample-1", metadataWritable: true, items: {
         Active: titles.map((line, i) => ({ id: `A${i + 1}`, stableId: `${project}-${i}`, line, checked: false,
           createdAt: new Date(Date.UTC(2026, 9, 15, 12 - i, project === "phren" ? 30 : 0)).toISOString(), responsibility: "agent", readiness: "ready" })),
-        Queue: [], Done: [],
+        // Saved today (Home's "Saved today" card): created minutes ago, whatever the clock says.
+        Queue: [{ id: "Q1", stableId: `${project}-today`, line: project === "phren" ? "Sample task saved today: tidy the release checklist" : "Sample task saved today: compress the hero image",
+          checked: false, createdAt: new Date(Date.now() - (project === "phren" ? 12 : 40) * 60_000).toISOString(), responsibility: "agent", readiness: "ready" }],
+        Done: [],
       } } };
     },
     "GET /v1/projects/repos": () => ({ json: { repos: [
       { name: "phren", project: "phren", directory: "/Users/you/phren", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
       { name: "website", project: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
     ] } }),
-    "GET /v1/projects/website/memory": () => ({ json: { project: "website", findings: [{ id: "fid:website", text: "Route website requests through the preview host." }], truths: [], tasks: [] } }),
+    "GET /v1/projects/website/memory": () => ({ json: { project: "website", findings: [
+      { id: "fid:website-today", text: "Sample finding saved today: serve the hero image from the preview host.", type: "pattern", status: "active", created: localToday(), citation: null },
+      { id: "fid:website", text: "Route website requests through the preview host." },
+    ], truths: [], tasks: [] } }),
     "GET /v1/projects/website/memory/search": () => ({ json: { results: [{ kind: "finding", text: "Route website requests through the preview host.", score: 0.95, finding: { id: "fid:website", type: "pattern" } }] } }),
-    "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
+    "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [
+      { id: "fid:phren-today", text: "Sample finding saved today: the Hook caps findings at 500 per project.", type: "pitfall", status: "active", created: localToday(), citation: null },
+      SAMPLE_FINDING,
+    ], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),
     "GET /v1/harnesses": () => ({ json: { harnesses: [

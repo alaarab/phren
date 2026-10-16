@@ -463,6 +463,51 @@ test("the window opens on Home", async ({ page }) => {
   await expect(page).toHaveURL(/#\/home$/);
 });
 
+test("Home's Saved today card lists today's findings and tasks and each row opens its section", async ({ page }) => {
+  await page.route("**/api/memory/*/projects", route => route.fulfill({ json: { projects: [{ name: "phren", findings: 2 }, { name: "website", findings: 2 }] } }));
+  await page.route("**/api/memory/*/findings?*", route => route.fulfill({ json: { items: [
+    { id: "fid:phren-today", text: "[pitfall] Sample finding saved today: the Hook caps findings at 500 per project.", date: "2026-01-01" },
+  ] } }));
+  const memoryReads: string[] = [];
+  page.on("request", (request) => { if (/\/v1\/projects\/[^/]+\/memory$/.test(new URL(request.url()).pathname)) memoryReads.push(request.url()); });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const card = page.locator('[data-block="saved-today"]');
+  await expect(card.locator(".home-saved-row")).toHaveCount(4);
+  // Tasks carry a time and lead, newest first; findings (date only) follow.
+  const rows = card.locator(".home-saved-row");
+  await expect(rows.nth(0)).toContainText("tidy the release checklist");
+  await expect(rows.nth(0)).toContainText(/task.*phren.*12 min ago/);
+  await expect(rows.nth(1)).toContainText("compress the hero image");
+  await expect(rows.nth(2)).toContainText(/finding.*today/);
+  await expect(card.locator(".home-more")).toBeHidden();
+  // One memory read per project, not per render or poll.
+  expect(memoryReads).toHaveLength(2);
+
+  // A cold Tasks section (never opened) lands on the task's project and row.
+  await rows.filter({ hasText: "compress the hero image" }).click();
+  await expect(page).toHaveURL(/#\/tasks$/);
+  await expect(page.locator(".tasks-project.selected")).toContainText("website");
+  await expect(page.locator(".tasks-row.selected")).toContainText("compress the hero image");
+
+  await page.locator(".section-pill", { hasText: "Home" }).click();
+  await expect(rows).toHaveCount(4);
+  await rows.filter({ hasText: "caps findings at 500" }).click();
+  await expect(page).toHaveURL(/#\/memory$/);
+  await expect(page.locator(".mem-row", { hasText: "caps findings at 500" })).toBeVisible();
+
+  // Showing Home again inside the five minute window does not read memory again.
+  await page.locator(".section-pill", { hasText: "Home" }).click();
+  await expect(rows).toHaveCount(4);
+  expect(memoryReads).toHaveLength(2);
+});
+
+test("Home's Saved today card says so when every read fails", async ({ page }) => {
+  await page.route("**/v1/projects/*/memory", route => route.fulfill({ status: 500, json: { error: "boom" } }));
+  await page.route("**/v1/tasks?*", route => route.fulfill({ status: 500, json: { error: "boom" } }));
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await expect(page.locator('[data-block="saved-today"] .home-empty')).toHaveText("Couldn't read what was saved today.");
+});
+
 test("Home reads and handles keys only while shown, including a hidden first mount", async ({ page }) => {
   let receipts = 0;
   let schedules = 0;

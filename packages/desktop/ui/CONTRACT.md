@@ -701,6 +701,10 @@ wraps on narrow screens. Covered by `src/ui-home-jobs.test.ts`.
 
 `shell/task-cache.js` shares store discovery and per-computer/store/project task reads between Home and Tasks, including in-flight requests, for 60 seconds from request start (in-flight requests are still shared). Home reads on show and every 60 seconds while visible, dropping offline rows immediately; hide/destroy stops its timer and ignores late answers. Tasks writes update the shared document cache; conflict/deletion reloads force a fresh read. Tasks retains its existing per-store/project navigation under the Active filter.
 
+
+### Home Saved today
+
+`sections/home/saved-today.js` renders after Active tasks and hides when nothing was saved today (or shows "Couldn't read what was saved today." when every read failed). Tasks are the Active and Queue items whose `createdAt` falls inside the local day, from the shared task cache. Findings come from `GET /v1/projects/:project/memory`, read once per store and project from the preferred computer ("This computer" first), kept five minutes, at most two in flight per computer, one burst at a time; they are fetched when Home is shown (stale or missing) or when a computer first comes online (missing only, debounced), never on a timer. The Hook writes a finding's `created` as a UTC date, so `shell/saved-today.js` counts a finding as today when its date is one of the one or two UTC dates the local day spans (`utcDatesOfDay`); findings have no time of day and read "today" after the timed tasks. Items seen from several computers collapse by store, project and id. Eight rows show; `Show all N` expands; the day rolls over at local midnight. A finding opens Memory with the project selected and its text filter (`memorySearchFor`, Memory has no id target); a task opens Tasks through `openTask`, which also lands on the row after a cold store load. Exported for `src/ui-saved-today.test.ts`.
 ### Home Working stop
 
 `sections/home/working.js` owns keyed online working rows with separate chat and

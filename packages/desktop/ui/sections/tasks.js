@@ -179,6 +179,7 @@ export function mountTasks(root) {
     }
     renderProjects();
     renderMain();
+    syncSelection(); // a task opened from Home before the store loaded lands on its row
   }
 
   async function reloadProject(project) {
@@ -831,6 +832,16 @@ export function mountTasks(root) {
     hide() { closeMenu(); },
     focus() { /* the create field owns first focus */ },
     reload() { void loadStores(); },
+    /** Show one task: its store and project open, its row selected (Home's Saved today). */
+    openTask({ computer, storeId, project, id }) {
+      const key = `${computer}\u0000${storeId}`;
+      state.sectionFilter = null;
+      state.selectedProject = project;
+      state.selectedId = id;
+      if (!state.sources.some((s) => sourceKey(s) === key)) { state.activeKey = key; state.docs = new Map(); void loadStores(); return; }
+      if (state.activeKey !== key) { state.activeKey = key; state.docs = new Map(); renderStore(); void loadDocs(); return; }
+      renderProjects(); renderMain(); syncSelection();
+    },
     filterSection(section) { state.sectionFilter = section; renderMain(); },
   };
 }
