@@ -15,6 +15,9 @@ import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { storeBlobText, storeTree } from "../store-cache.js";
 import { skeleton } from "../shell/skeleton.js";
+import { todayGroups, sessionsForProject, TODAY_ROWS } from "../shell/project-today.js";
+import { loadFindings, openSaved } from "./home/saved-today.js";
+import { savedAgo } from "../shell/saved-today.js";
 
 // The five per-project knobs the CLI reads from <project>/phren.project.yaml,
 // under the file's top-level `config:` mapping (packages/cli/src/project-config.ts).
@@ -267,6 +270,7 @@ export function mountProjects(root) {
     detail: null, // { computer, name }
     data: new Map(), // computer -> { projects: Map, tree, at }
     loading: new Set(),
+    todayOpen: new Set(), // Today groups expanded past TODAY_ROWS on the open page
     failures: new Map(), // computer -> message
   };
 
@@ -512,7 +516,7 @@ export function mountProjects(root) {
     const last = sessions.map((row) => row.child.lastChangedAt).filter(Boolean).sort().pop() || project.lastSeen;
     if (last) stats.append(el("span", "pj-stat", `active ${age(last)}`));
     card.append(stats);
-    card.addEventListener("click", () => { state.view = "detail"; state.detail = { computer: project.computer, name: project.name }; loadDetailFiles(); loadForge(); render(); });
+    card.addEventListener("click", () => { state.view = "detail"; state.detail = { computer: project.computer, name: project.name }; state.todayOpen.clear(); loadDetailFiles(); loadForge(); loadToday(); render(); });
     return card;
   }
 
@@ -540,6 +544,39 @@ export function mountProjects(root) {
       else project.forge = { error: err?.message ?? String(err) };
     }
     if (state.detail === detail) renderDetail();
+  }
+
+  /** The project's findings for the Today block: the shared five-minute cache, so at most one memory read per page view. */
+  async function loadToday() {
+    const detail = state.detail;
+    const project = detail && state.data.get(detail.computer)?.projects.get(detail.name);
+    if (!project) return;
+    try {
+      project.todayFindings = await loadFindings(detail.computer, project.name, { fetchStale: true });
+      project.todayError = false;
+    } catch { project.todayError = true; }
+    if (state.detail === detail) renderDetail();
+  }
+
+  /** Where this project is checked out, per computer that has it: its repo directory, the host data's directory and any listed worktrees. */
+  function checkoutsOf(name) {
+    const out = new Map();
+    for (const [computer, entry] of state.data) {
+      const p = entry.projects.get(name);
+      if (!p) continue;
+      const git = p.forge?.data;
+      const listed = Array.isArray(git?.worktrees) ? git.worktrees.map((w) => w?.path ?? w?.directory) : [];
+      out.set(computer, [p.directory, git?.directory, ...listed].filter((d) => typeof d === "string" && d));
+    }
+    return out;
+  }
+
+  let midnight = null;
+  function scheduleMidnight() {
+    clearTimeout(midnight);
+    const d = new Date();
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    midnight = setTimeout(() => { if (state.view === "detail" && state.detail) renderDetail(); scheduleMidnight(); }, Math.max(1000, end - Date.now() + 1000));
   }
 
   /** The open tasks that name the checkout's branch, under the Code block. */
@@ -601,6 +638,9 @@ export function mountProjects(root) {
       return;
     }
 
+    const today = todayBlock(detail, project);
+    if (today) scope.append(today);
+
     const summary = el("section", "pj-block");
     summary.append(el("h2", "section-label", "Summary"));
     summary.append(el("p", "pj-summary" + (project.knows || project.summaryLine ? "" : " muted"), project.knows || project.summaryLine || "No summary yet."));
@@ -633,6 +673,75 @@ export function mountProjects(root) {
 
     scope.append(skillsBlock(project));
     scope.append(knobsBlock(project));
+  }
+
+  /** Chats, pull requests and memory from today, from what this page already holds. Hidden with no activity. */
+  function todayBlock(detail, project) {
+    const git = project.forge?.data;
+    const groups = todayGroups({
+      sessions: sessionsForProject(allSessions(state.merged), { name: detail.name, checkouts: checkoutsOf(detail.name) }),
+      pulls: Array.isArray(git?.pulls) ? git.pulls : [],
+      current: git?.current ?? null,
+      findings: project.todayFindings ?? [],
+      computer: detail.computer, project: project.name,
+    });
+    if (!groups.total && !project.todayError) return null;
+    const terms = hostTerms(git?.host);
+    const block = el("section", "pj-block pj-today");
+    block.dataset.block = "project-today";
+    block.append(el("h2", "section-label", "Today"));
+    if (project.todayError) block.append(el("div", "pj-empty slim danger", "Couldn't read today's memory."));
+    const now = Date.now();
+    const section = (id, label, items, makeRow) => {
+      if (!items.length) return;
+      const group = el("div", "pj-today-group");
+      group.dataset.group = id;
+      const head = el("h3", "pj-subhead", label);
+      head.append(el("span", "pj-count", String(items.length)));
+      group.append(head);
+      const list = el("div", "pj-list");
+      const open = state.todayOpen.has(id);
+      for (const item of open ? items : items.slice(0, TODAY_ROWS)) list.append(makeRow(item));
+      group.append(list);
+      if (items.length > TODAY_ROWS) {
+        const more = el("button", "pj-today-more", open ? "Show fewer" : `Show all ${items.length}`);
+        more.type = "button";
+        more.addEventListener("click", () => { if (open) state.todayOpen.delete(id); else state.todayOpen.add(id); renderDetail(); });
+        group.append(more);
+      }
+      block.append(group);
+    };
+    section("chats", "Chats", groups.chats, ({ row, at }) => {
+      const button = el("button", "pj-row");
+      const main = el("div", "pj-row-main");
+      main.append(el("span", "pj-row-title", row.child.title || row.child.label || projectOf(row.child)));
+      const meta = el("span", "pj-row-meta");
+      const status = row.child.approvalPending || row.child.agentStatus === "blocked" ? "waiting" : row.child.agentStatus;
+      if (status) meta.append(el("span", `pj-status ${status}`, status));
+      meta.append(el("span", "", savedAgo(at, now)));
+      button.append(main, meta);
+      button.addEventListener("click", () => openInAgents(row.computer, row.child));
+      return button;
+    });
+    section("prs", `${capitalize(terms.long)}s updated today`, groups.prs, ({ pull, at, merged }) => {
+      const row = pullRow(pull, terms);
+      row.querySelector(".pj-row-meta")?.replaceChildren(...[
+        merged ? el("span", "pj-checks passing", "Merged") : "",
+        checksPill(pull.checks),
+        el("span", "", savedAgo(at, now)),
+      ].filter(Boolean));
+      return row;
+    });
+    section("memory", "Memory", groups.memory, (entry) => {
+      const button = el("button", "pj-row");
+      const main = el("div", "pj-row-main");
+      main.append(el("span", "pj-row-title", entry.text));
+      button.append(main, el("span", "pj-row-meta", savedAgo(entry.at, now)));
+      button.title = entry.text;
+      button.addEventListener("click", () => openSaved(entry));
+      return button;
+    });
+    return block;
   }
 
   function forgeBlock(project) {
@@ -1061,8 +1170,13 @@ export function mountProjects(root) {
   render();
 
   return {
-    show() { ensureLoaded(); render(); },
-    hide() {},
+    show() {
+      ensureLoaded();
+      render();
+      if (state.view === "detail" && state.detail) void loadToday(); // cache-respecting: a read only when stale or failed
+      scheduleMidnight();
+    },
+    hide() { clearTimeout(midnight); midnight = null; },
     /** Every project loaded so far, across computers (⌘K lists them). */
     projects() {
       return [...state.data.values()].flatMap((entry) => [...entry.projects.values()].map((p) => ({ computer: p.computer, name: p.name, lastSeen: p.lastSeen })));
@@ -1077,6 +1191,8 @@ export function mountProjects(root) {
       state.detail = { computer, name };
       loadDetailFiles();
       loadForge();
+      state.todayOpen.clear();
+      loadToday();
       render();
     },
     destroy() { unsubscribe(); closeSheet(); },

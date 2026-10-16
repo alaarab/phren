@@ -1337,6 +1337,53 @@ test("Memory hides the out-of-date filter when no finding has freshness data", a
   await expect(page.locator('.mem-chip[data-filter="stale"]')).toHaveCount(0);
 });
 
+test("a project page opens with Today: its chats, pull request and memory from today", async ({ page }) => {
+  await page.routeWebSocket(/\/api\/overview$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      const msg = JSON.parse(String(message));
+      for (const c of msg.merged?.computers ?? []) for (const g of c.overview?.groups ?? []) for (const child of g.children ?? []) {
+        if (child.id === "sess-fix-login") child.lastChangedAt = new Date().toISOString();
+      }
+      ws.send(JSON.stringify(msg));
+    });
+  });
+  // The Memory section (opened by clicking a finding) reads the daemon's store mirror, not the Hook's /memory route.
+  await page.route("**/api/memory/*/projects", route => route.fulfill({ json: { projects: [{ name: "phren", findings: 1 }] } }));
+  await page.route("**/api/memory/*/findings?*", route => route.fulfill({ json: { items: [
+    { id: "fid:phren-today", text: "[pitfall] Sample finding saved today: the Hook caps findings at 500 per project.", date: "2026-01-01" },
+  ] } }));
+  const memoryReads: string[] = [];
+  page.on("request", (request) => { if (/\/v1\/projects\/phren\/memory$/.test(new URL(request.url()).pathname)) memoryReads.push(request.url()); });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".section-pill", { hasText: "Projects" }).click();
+  await page.locator(".pj-card", { hasText: "phren" }).first().click();
+  const today = page.locator('[data-block="project-today"]');
+  await expect(today.locator(".pj-today-group")).toHaveCount(3);
+  await expect(today.locator('[data-group="chats"] .pj-row')).toHaveCount(1);
+  await expect(today.locator('[data-group="chats"] .pj-row')).toContainText("Fix login");
+  await expect(today.locator('[data-group="prs"] .pj-row')).toHaveCount(1);
+  await expect(today.locator('[data-group="prs"] .pj-row')).toContainText("#42 Keep the session through the guard");
+  await expect(today.locator('[data-group="prs"] .pj-checks.failing')).toBeVisible();
+  await expect(today.locator('[data-group="memory"] .pj-row')).toContainText("the Hook caps findings at 500");
+  await expect(today.locator(".pj-today-more")).toHaveCount(0);
+  await expect(today.locator('[data-group="prs"] .pj-subhead')).toContainText("Pull requests updated today");
+  expect(memoryReads).toHaveLength(1); // the first view reads the project's memory once
+
+  await today.locator('[data-group="memory"] .pj-row').click();
+  await expect(page).toHaveURL(/#\/memory$/);
+  await expect(page.locator(".mem-row", { hasText: "caps findings at 500" })).toBeVisible();
+
+  await page.locator("button", { hasText: /^Projects$/ }).nth(1).click();
+  await expect(page).toHaveURL(/#\/projects$/);
+  // Back on the same project page; showing it again inside the five minute window reads nothing.
+  await expect(today).toBeVisible();
+  expect(memoryReads).toHaveLength(1);
+  await today.locator('[data-group="chats"] .pj-row').click();
+  await expect(page).toHaveURL(/#\/agents$/);
+});
+
 for (const width of [320, 360, 390, 420]) {
   test(`a chat fits a ${width} px window: title, send, pane actions and an on-demand Changes panel`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });

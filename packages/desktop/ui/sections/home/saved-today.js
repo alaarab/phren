@@ -21,7 +21,7 @@ function recent(findings) {
     .map((f) => ({ id: String(f.id), text: String(f.text ?? "").replace(/\s+/g, " ").trim(), created: f.created }));
 }
 
-function loadFindings(computer, project, { fetchStale }) {
+export function loadFindings(computer, project, { fetchStale }) {
   const key = readKey(computer, project);
   const cached = reads.get(key);
   if (cached?.pending) return cached.promise;
