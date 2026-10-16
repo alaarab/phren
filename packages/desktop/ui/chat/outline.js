@@ -95,14 +95,14 @@ const reducedMotion = () => !!(globalThis.matchMedia && globalThis.matchMedia("(
 /**
  * @param {{root: HTMLElement, scroll: HTMLElement,
  *   prompts: () => Array<{id: string, el: (HTMLElement|null), text: string}>,
- *   reveal: (id: string) => void,
+ *   reveal: (id: string) => void, onJump?: (goal: number) => void,
  *   earlier: () => (null | (() => Promise<void> | void))}} opts
  *   `prompts` is every loaded prompt in order; the folded ones (an earlier run)
  *   have no `el`. `reveal` opens the fold and calls `jumpToId` once the prompt
  *   is drawn. `earlier` is the action behind "↑ earlier" (null when no older
  *   history is unloaded).
  */
-export function createOutline({ root, scroll, prompts, reveal, earlier }) {
+export function createOutline({ root, scroll, prompts, reveal, earlier, onJump }) {
   const nav = document.createElement("nav");
   nav.className = "ct-outline";
   nav.setAttribute("aria-label", "Prompts");
@@ -137,6 +137,7 @@ export function createOutline({ root, scroll, prompts, reveal, earlier }) {
   let goalTimer = 0;
   let flashTimer = 0;
   let alive = true;
+  let retarget = 0;
 
   const container = () => root.closest(".session-doc") || root;
   const visible = () => !nav.hidden && nav.offsetParent !== null && getComputedStyle(nav).display !== "none";
@@ -232,6 +233,7 @@ export function createOutline({ root, scroll, prompts, reveal, earlier }) {
     // A press while a smooth scroll is still heading somewhere jumps instantly instead of chasing it.
     const instant = goal !== null || reducedMotion();
     goal = Math.max(0, top);
+    if (onJump) onJump(goal);
     clearTimeout(goalTimer);
     goalTimer = setTimeout(() => { goal = null; }, 800);
     scroll.scrollTo({ top: goal, behavior: instant ? "auto" : "smooth" });
@@ -250,9 +252,18 @@ export function createOutline({ root, scroll, prompts, reveal, earlier }) {
     const list = prompts();
     const index = list.findIndex((p) => p.id === id);
     if (index < 0 || !list[index].el) return;
-    const own = measure(list);
-    goTo(scrollTarget(own[index - list.filter((p) => !p.el).length], scroll.scrollHeight, scroll.clientHeight));
+    const drawnIndex = index - list.filter((p) => !p.el).length;
+    const target = () => scrollTarget(measure(prompts())[drawnIndex], scroll.scrollHeight, scroll.clientHeight);
+    goTo(target());
     flash(list[index].el);
+    // Rows settle after a jump (images, markdown): one re-measure on the next frame keeps the prompt where it was aimed.
+    const aimed = goal;
+    cancelAnimationFrame(retarget);
+    retarget = requestAnimationFrame(() => {
+      if (!alive || goal !== aimed) return;
+      const now = target();
+      if (Math.abs(now - aimed) > 2) goTo(now);
+    });
   }
 
   function jumpToIndex(index) {
@@ -307,6 +318,7 @@ export function createOutline({ root, scroll, prompts, reveal, earlier }) {
       alive = false;
       cancelAnimationFrame(frame);
       cancelAnimationFrame(markFrame);
+      cancelAnimationFrame(retarget);
       clearTimeout(goalTimer);
       clearTimeout(flashTimer);
       observer.disconnect();

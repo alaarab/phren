@@ -134,6 +134,42 @@ test("a long chat shows the prompt rail; clicking a tick scrolls that prompt in 
   expect(prevented).toBe(false);
 });
 
+test("a jump lands while the reply streams, and following the bottom resumes once the reader is back there", async ({ page }) => {
+  await openLongChat(page, 1280, 800);
+  let line = 12;
+  const stream = (text: string) => {
+    line += 1;
+    hook.pushTranscript(undefined, { type: "append", totalLines: line, entries: [{ line, raw: { type: "assistant", uuid: `s${line}`, message: { role: "assistant", content: [{ type: "text", text }] } } }] });
+  };
+  // Entries keep arriving while the reader jumps to a folded prompt.
+  let n = 0;
+  const timer = setInterval(() => { n += 1; stream(`Streaming chunk ${n}: still working through the guard.`); }, 60);
+  try {
+    await page.locator(".ct-outline-tick").first().click();
+    await expect.poll(() => topPrompt(page), { timeout: 10_000 }).toContain("Fix the login flow");
+    await page.waitForTimeout(600); // more chunks land after the jump settled; the view stays on the prompt
+    expect(await topPrompt(page)).toContain("Fix the login flow");
+  } finally {
+    clearInterval(timer);
+  }
+  // Back at the bottom: the next streamed entry is followed.
+  await page.locator(".ct-jump").click();
+  await expect(page.locator(".ct-jump")).toBeHidden();
+  stream("Streaming last: the follow resumed here.");
+  await expect(page.locator(".ct-column")).toContainText("the follow resumed here");
+  await expect.poll(() => page.locator(".ct-scroll").evaluate((s) => s.scrollHeight - s.scrollTop - s.clientHeight)).toBeLessThan(40);
+
+  // And a reader who scrolls back down by hand resumes following too.
+  await page.locator(".ct-outline-tick").first().click();
+  await expect.poll(() => topPrompt(page)).toContain("Fix the login flow");
+  await page.locator(".ct-scroll").hover();
+  await page.mouse.wheel(0, 100_000);
+  await expect(page.locator(".ct-jump")).toBeHidden();
+  stream("Streaming after manual scroll: followed.");
+  await expect(page.locator(".ct-column")).toContainText("followed.");
+  await expect.poll(() => page.locator(".ct-scroll").evaluate((s) => s.scrollHeight - s.scrollTop - s.clientHeight)).toBeLessThan(40);
+});
+
 test("with 80 prompts the rail merges crowded ticks into ranges that jump to the first", async ({ page }) => {
   await openLongChat(page, 1280, 800, "Step 2 of answer 80");
   const ticks = page.locator(".ct-outline-tick");

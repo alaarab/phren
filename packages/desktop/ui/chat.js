@@ -839,6 +839,9 @@ export function openChat(el, computerName, child, opts = {}) {
     if (!backlogLoaded) return { complete: !history.hasMore, failed: false };
     let failed = false;
     loadingOlder = true;
+    // "↑ earlier" during an export waits for these loads instead of doing nothing.
+    let release = () => {};
+    olderLoad = new Promise((resolve) => { release = resolve; });
     try {
       while (history.hasMore && history.startLine !== null && history.messages.length < EXPORT_MAX) {
         if (signal.aborted) break;
@@ -851,7 +854,7 @@ export function openChat(el, computerName, child, opts = {}) {
         history.receive(read);
         if (history.startLine === before) { failed = true; break; }
       }
-    } finally { loadingOlder = false; if (!closed) render(); }
+    } finally { loadingOlder = false; olderLoad = null; release(); if (!closed) render(); }
     return { complete: !history.hasMore, failed };
   }
   async function exportMarkdown() {
@@ -911,6 +914,7 @@ export function openChat(el, computerName, child, opts = {}) {
   /** Load the page before the oldest one; resolves once it is drawn (or at once when there is nothing to load). */
   function loadOlder() {
     // The snapshot's cursor is not usable until the live backlog replaces it.
+    if (loadingOlder && olderLoad) return olderLoad;   // a page or an export's loads in flight: wait for them
     if (!backlogLoaded || loadingOlder || !history.hasMore || history.startLine === null) return Promise.resolve();
     loadingOlder = true;
     olderLoad = hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) }, { signal: paneAbort.signal })
