@@ -1,4 +1,5 @@
 import { compareUsage, exhausted, limitingWindow, resetLabel, usedPercent, windowText } from "./usage-windows.js";
+import { dayUTC } from "../time.js";
 // The titlebar usage rings. The daemon's /api/usage has already merged every
 // computer's account reports; this draws one small ring per account (filled by
 // its tightest window) and opens a popover listing every account and window,
@@ -33,12 +34,6 @@ const ageText = (ms) => {
 
 const title = (row) => (row.account ? `${row.name} · ${row.account}` : row.name);
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** "Oct 7": a subscription date in UTC, as the phone writes it. */
-const dayUTC = (iso) => {
-  const d = new Date(iso);
-  return Number.isFinite(d.getTime()) ? `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` : "";
-};
 /**
  * Card titles by account id, as the phone names them: the provider, then the
  * email or label. One email on two plans (a personal plan and a Team seat)
