@@ -135,6 +135,45 @@ test("sidebar, chat and changes render against the fake Hook", async ({ page }) 
   await page.screenshot({ path: test.info().outputPath("desktop-smoke.png") });
 });
 
+test("Cmd/Ctrl+F finds in the open chat: counter, stepping, Escape restores and focuses the composer", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await expect(page.locator(".ct-column")).toContainText("Fixed. The guard now runs");
+
+  // The conversation's HTML without the lazily loaded images, to compare before and after.
+  const html = () => page.locator(".ct-column").evaluate((e) => { const c = e.cloneNode(true) as HTMLElement; c.querySelectorAll(".ct-images").forEach((n) => n.remove()); return c.innerHTML; });
+  const before = await html();
+  // Ctrl works on every platform in headless Chromium; the handler takes either.
+  await page.locator(".chat-pane .composer-input, .chat-pane [contenteditable], .chat-pane textarea").first().focus();
+  await page.keyboard.press("Control+f");
+  const bar = page.locator(".chat-find");
+  await expect(bar).toBeVisible();
+  await expect(bar.locator("input")).toBeFocused();
+
+  await page.keyboard.type("RUN");
+  await expect(bar.locator(".chat-find-count")).toHaveText("1/3");
+  await expect(page.locator(".ct-column mark.ct-find-hit")).toHaveCount(3);
+  await expect(page.locator(".ct-column mark.ct-find-current")).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(bar.locator(".chat-find-count")).toHaveText("2/3");
+  await page.keyboard.press("Shift+Enter");
+  await expect(bar.locator(".chat-find-count")).toHaveText("1/3");
+  await bar.getByRole("button", { name: "Next match" }).click();
+  await expect(bar.locator(".chat-find-count")).toHaveText("2/3");
+
+  // Narrow: the bar fits the pane.
+  await page.setViewportSize({ width: 420, height: 800 });
+  const box = await bar.boundingBox();
+  expect(box && box.x >= 0 && box.x + box.width <= 420).toBe(true);
+
+  await page.keyboard.press("Escape");
+  await expect(bar).toHaveCount(0);
+  await expect(page.locator(".ct-column mark")).toHaveCount(0);
+  expect(await html()).toBe(before);
+  await expect(page.locator(".chat-pane .chat-composer :focus")).toHaveCount(1);
+});
+
 test("queued chat stays pending through cancellation and recovers on a late delivered receipt", async ({ page }) => {
   let deliveryId = "";
   await page.route("**/v1/prompt", async (route) => {

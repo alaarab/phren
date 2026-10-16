@@ -1203,6 +1203,8 @@ export function createTimelineView(container, ctx = {}) {
     render,
     scrollToBottom,
     isAtBottom,
+    /** Earlier turns are behind the fold (find searches only what is drawn). */
+    isFolded: () => foldHidden,
     onScrollTop(fn) { onTop.push(fn); },
     destroy() {
       clearInterval(tick);
