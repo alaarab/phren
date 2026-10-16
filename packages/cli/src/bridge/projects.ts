@@ -368,12 +368,18 @@ const LISTENER_TRUST_MS = 1_000;
 export async function webServers(): Promise<LocalServer[]> {
   const servers = await serversCache.get("listeners", scanWebServers);
   if (!servers.some(server => server.pid !== undefined) || Date.now() - (scanStarted.get(servers) ?? 0) < LISTENER_TRUST_MS) return servers;
-  const live = await readListeners().catch(() => undefined);
+  const live = await sharedListeners();
   // The table could not be read (ss timed out, no lsof): ownership cannot be verified, so none is claimed.
   if (!live) return servers.map(({ pid: _pid, ...server }) => ({ ...server, unverified: true as const }));
   const kept = servers.filter(server => server.pid === undefined || live.get(listenerKey(server))?.pid === server.pid);
   if (kept.length !== servers.length) serversCache.invalidate(() => true);
   return kept;
+}
+
+/** Concurrent ownership checks share one socket-table read; a read is never reused once it has settled. */
+let listenersInFlight: Promise<Map<string, LocalServer> | undefined> | undefined;
+function sharedListeners(): Promise<Map<string, LocalServer> | undefined> {
+  return listenersInFlight ??= readListeners().catch(() => undefined).finally(() => { listenersInFlight = undefined; });
 }
 
 /** The key `addListener` files a server under: its host with the port always spelled out (a URL's host drops the default one). */
@@ -403,12 +409,12 @@ async function scanWebServers(): Promise<LocalServer[]> {
     .sort((a, b) => Number(a.port >= EPHEMERAL_PORT) - Number(b.port >= EPHEMERAL_PORT) || a.port - b.port)
     .slice(0, 64);
   const found: LocalServer[] = [];
-  for (let i = 0; i < candidates.length; i += 8) {
-    await Promise.all(candidates.slice(i, i + 8).map(async server => {
-      const name = await probe(server.port, server.origin.includes("[::1]") ? "::1" : "127.0.0.1");
-      if (name !== null) found.push({ ...server, name });
-    }));
-  }
+  // Every probe is bounded (1.2 s) and loopback-only, so they all run at once: in groups of eight
+  // a handful of listeners that accept and never answer cost 1.2 s per group.
+  await Promise.all(candidates.map(async server => {
+    const name = await probe(server.port, server.origin.includes("[::1]") ? "::1" : "127.0.0.1");
+    if (name !== null) found.push({ ...server, name });
+  }));
   const listing = found.sort((a, b) => a.port - b.port);
   scanStarted.set(listing, started);
   return listing;
