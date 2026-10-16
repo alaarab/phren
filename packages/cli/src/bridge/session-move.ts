@@ -762,7 +762,9 @@ export class SessionMover {
     const deadline = this.now + handoffMs;
     try {
       const sent = await this.deps.deliver(from, handoffRequest(record.id, record.to, record.mode), `move-${record.id}`);
-      if (sent.ok !== true && sent.queued !== true) return { reason: `the request could not be delivered (${String(sent.error ?? sent.state ?? "not confirmed")}).` };
+      // A lost delivery acknowledgement can still have reached the agent;
+      // its marked transcript reply is authoritative for the normal window.
+      if (sent.state !== "uncertain" && sent.ok !== true && sent.queued !== true) return { reason: `the request could not be delivered (${String(sent.error ?? sent.state ?? "not confirmed")}).` };
     } catch (error) { return { reason: `the request could not be delivered (${error instanceof Error ? error.message : String(error)}).` }; }
     while (this.now < deadline) {
       await this.sleep(this.poll);

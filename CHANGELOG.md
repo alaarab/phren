@@ -19,6 +19,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Continue a chat on another verified computer from the owner’s Continue in… picker (`moveToComputer`): checkout and account availability with remaining usage, a full hand-off over pinned SSH, confirmed new-chat launch and a link from the still-open source chat. Conductor moves keep worker state on the original Hook and transfer a fenced ownership generation to a prepared successor, with authenticated operation and return forwarding.
 
+## [0.3.53] - 2026-10-16
+
+### Fixed
+
+- Session moves wait for the marked hand-off reply when prompt delivery is uncertain. Codex launches disable startup updates and retry once if Codex exits during startup, reporting the last screen line if it exits again.
+
 ## [0.3.52] - 2026-10-16
 
 ### Added
