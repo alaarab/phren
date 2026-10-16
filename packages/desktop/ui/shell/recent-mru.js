@@ -1,0 +1,65 @@
+// The most-recently-used list behind the Ctrl+Tab chat switcher: pure data, no
+// DOM. Keys are `${computer}/${child.id}`, newest first.
+
+export const RECENT_LIMIT = 8;
+
+/** A MRU list of at most `limit` keys. */
+export function createMru(limit = RECENT_LIMIT, initial = []) {
+  let keys = [];
+  const mru = {
+    /** Move `key` to the front (adding it), dropping the oldest past the cap. */
+    touch(key) {
+      if (typeof key !== "string" || !key) return mru;
+      keys = [key, ...keys.filter((k) => k !== key)].slice(0, limit);
+      return mru;
+    },
+    /** Drop keys that `exists(key)` no longer accepts. */
+    prune(exists) {
+      keys = keys.filter((k) => exists(k));
+      return mru;
+    },
+    list() { return [...keys]; },
+  };
+  for (const key of [...initial].reverse()) mru.touch(key);
+  return mru;
+}
+
+/** The first selection when Ctrl+Tab opens: the previous session, or the oldest on Shift+Tab. */
+export function initialSelection(count, backward = false) {
+  if (count < 2) return -1;
+  return backward ? count - 1 : 1;
+}
+
+/** Tab (delta 1) and Shift+Tab (delta -1) wrap around the list. */
+export function moveSelection(index, count, delta) {
+  if (count < 1) return -1;
+  return (((index + delta) % count) + count) % count;
+}
+
+/** Terminals, editors and iframes keep Ctrl+Tab (the same exemption as ⌘1–9 in app.js). */
+export function ownsCtrlTab(target) {
+  return !!target?.closest?.(".monaco-editor, .xterm, iframe");
+}
+
+/**
+ * A key or pointer event with Ctrl up while the switcher is open means the
+ * Ctrl keyup was missed (focus moved into an iframe or terminal, a dialog, an
+ * IME). Commit when the overlay is showing, so what the user selected opens;
+ * cancel when it never showed, so a stray tap does nothing.
+ */
+export function lostCtrl(state, ev) {
+  if (!state || ev.ctrlKey) return null;
+  return state.shown ? "commit" : "cancel";
+}
+
+/** Held Tab repeats are ignored until the overlay shows, then at most one move per `gap` ms. */
+export function acceptTab({ repeat, shown, now, last }, gap = 150) {
+  if (!repeat) return true;
+  return shown && now - last >= gap;
+}
+
+/** Ids restored from sessionStorage: "computer/id" strings only, capped. */
+export function validKeys(value, limit = RECENT_LIMIT) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((k) => typeof k === "string" && k.length <= 300 && /^[^/]+\/.+$/.test(k)).slice(0, limit);
+}

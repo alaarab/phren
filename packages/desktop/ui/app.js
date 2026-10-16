@@ -22,13 +22,14 @@ import "./chat/find-command.js"; // registers "Find in chat" in the palette
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
 import { initTheme } from "./shell/theme.js";
-import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, stallNotifyEnabled } from "./sections/settings.js";
+import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, stallNotifyEnabled, recentSwitchEnabled } from "./sections/settings.js";
 import { quietNow } from "./shell/quiet.js";
 import { startCiWatch } from "./shell/ci-watch.js";
 import { startQuotaBack } from "./shell/quota-back.js";
 import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
 import { startSummon } from "./shell/summon.js";
+import { startRecentSwitcher } from "./shell/recent.js";
 import { startApprovals } from "./shell/approvals.js";
 import { startTray } from "./shell/tray.js";
 import { startNeedsNotify } from "./shell/needs-notify.js";
@@ -99,6 +100,7 @@ startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null
 startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
 startQuotaBack({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && !quietNow() });
 startSummon(shell);
+startRecentSwitcher({ open: openSession, enabled: recentSwitchEnabled });
 // Notifications for new needs-you rows; they and the tray menu open sessions by key.
 startNeedsNotify(shell, {
   enabled: () => notifyEnabled() && !quietNow(),

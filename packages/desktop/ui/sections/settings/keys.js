@@ -1,6 +1,7 @@
 // Settings › Keys: the shortcut bindings and the summon hotkey.
 import { DEFAULT_SUMMON, acceleratorFromEvent, formatAccelerator, setSummonKey, summonAvailable, summonKey } from "../../shell/summon.js";
-import { api, button, el, heading, noticeLine, showNotice } from "./ui.js";
+import { api, button, el, heading, noticeLine, showNotice, toggleRow } from "./ui.js";
+import { RECENT_KEY, recentSwitchEnabled, writeFlag } from "./prefs.js";
 
 // ------------------------------------------------------------ page: Keys
 export function buildKeys(page) {
@@ -12,6 +13,9 @@ export function buildKeys(page) {
   const content = el("div", "settings-keys");
   page.append(head, toolbar, notice);
   if (summonAvailable()) page.append(summonRow());
+  const recent = el("div", "settings-list");
+  recent.append(toggleRow("Ctrl+Tab switches recent chats", recentSwitchEnabled(), (on) => writeFlag(RECENT_KEY, on)));
+  page.append(recent);
   page.append(content);
 
   function fileLine(label, path) {

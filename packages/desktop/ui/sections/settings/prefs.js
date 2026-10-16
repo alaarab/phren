@@ -5,6 +5,7 @@ export const NOTIFY_KEY = "phren.desktop.notify";
 export const BADGE_KEY = "phren.desktop.badge";
 export const CI_KEY = "phren.desktop.notify-ci";
 export const STALL_KEY = "phren.desktop.notify-stalled";
+export const RECENT_KEY = "phren.desktop.recent-switch";
 export const SIZES = [12, 13, 14];
 
 // ------------------------------------------------------------ preferences
@@ -21,6 +22,7 @@ export function notifyEnabled() { return readFlag(NOTIFY_KEY); }
 export function stallNotifyEnabled() { return readFlag(STALL_KEY); }
 export function badgeEnabled() { return readFlag(BADGE_KEY); }
 export function ciNotifyEnabled() { return readFlag(CI_KEY); }
+export function recentSwitchEnabled() { return readFlag(RECENT_KEY); }
 
 export function readTranscriptSize() {
   try { const value = Number(localStorage.getItem(TRANSCRIPT_KEY)); return SIZES.includes(value) ? value : 13; }

@@ -137,6 +137,11 @@ active) session's branch turns failing or passing. It asks each project's Hook
 every two minutes, at most six projects. Turn it off in Settings ›
 Notifications.
 
+Hold Ctrl and press Tab to switch between your last eight chats: a tap
+jumps to the previous one, holding shows them with their status, Tab / Shift+Tab
+move, releasing Ctrl opens, Esc cancels. Turn it off in Settings › Keys;
+Prefix+n / Prefix+p still step through every session in order.
+
 ⌘K opens the palette (sessions, the open pull requests on watched sessions,
 projects on every computer, files, commands). From any other app,
 ⌘⇧Space (Ctrl+Shift+Space on Linux and Windows) brings Phren forward with the
