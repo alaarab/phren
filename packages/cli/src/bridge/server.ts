@@ -1,3 +1,5 @@
+import { StorePulls } from "./store-pull.js";
+import { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
@@ -207,6 +209,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     await unlink(socketPath());
   }
 
+  const storePulls = new StorePulls(scheduleStore);
+  const gitboyWebhooks = new GitboyWebhooks(root, storeId => storePulls.request(storeId));
   const stopRetention = modules.has("git") ? await startChangeRetention() : () => {};
   if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
   const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, settingsSwitcher, info, activeCapabilities });
@@ -222,7 +226,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
   const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams, returns, handOffs, inbox, mover }));
+    fanoutMessages, canary, streams, returns, handOffs, inbox, mover, storePulls, gitboyWebhooks }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   const socketPools = new Map<string, Set<WebSocket>>();
@@ -256,6 +260,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   });
   await new Promise<void>((resolve, reject) => { http.once("error", reject); http.listen(socketPath(), () => resolve()); });
   await chmod(socketPath(), 0o600);
+  await gitboyWebhooks.start();
   await agentHooks.start();
   // Codex panes on the Hook's own app-servers: their requests become
   // approval cards, and servers a previous Hook started are rejoined.
@@ -317,7 +322,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

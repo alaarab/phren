@@ -1,7 +1,7 @@
 /**
  * Transport-agnostic core for gitboy push webhooks: signature checks, push payload parsing,
- * matching a push to a store's branch, and delivery de-duplication. Prepared for webhook-driven
- * store sync; nothing in production calls it yet, and periodic polling (pull.ts) stays the fallback.
+ * matching a push to a store's branch, and delivery de-duplication. Used by the optional
+ * Hook receiver; periodic polling (pull.ts) stays the fallback.
  */
 import { createHmac, timingSafeEqual } from "crypto";
 

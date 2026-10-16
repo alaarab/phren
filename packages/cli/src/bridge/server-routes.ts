@@ -1,3 +1,5 @@
+import type { StorePulls } from "./store-pull.js";
+import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { ownerRequest } from "./request-origin.js";
 import { listMoves, moveSessionFields, readMove, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
@@ -103,6 +105,8 @@ export interface RouteContext {
   computerID: string;
   scheduleStore: string;
   scheduler?: Scheduler;
+  storePulls?: StorePulls;
+  gitboyWebhooks?: GitboyWebhooks;
   dispatches?: DispatchService;
   returns?: DispatchReturns;
   handOffs?: HandOffQueue;
@@ -391,6 +395,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         result = tokenRoute
           ? await projectHostToken(modules.store, project, await journal.recent(), await body(request))
           : await projectGit(modules.store, project, await journal.recent());
+      } else if (url.pathname === "/v1/store/pull-now") {
+        if (request.method !== "POST") throw new BridgeError(405, "Unsupported request method.");
+        if (!ctx.storePulls) throw new BridgeError(503, "Store pulls unavailable.");
+        result = ctx.storePulls.route(request, await body(request));
       } else if (url.pathname.startsWith("/v1/store/")) {
         result = await storeRoute(modules.store, request.method ?? "", url, request.method === "POST" ? await body(request) : undefined);
       } else if (request.method === "GET") {
@@ -401,7 +409,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/metrics": result = hookMetrics.snapshot(); break;
           case "/v1/health/details": result = { ...await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
             scheduler: scheduler ? { running: true, lastTickAt: scheduler.lastTickAt } : undefined, push: agentHooks.push.status }),
-            gitWrites: gitWrites.snapshot() }; break;
+            gitboyWebhooks: ctx.gitboyWebhooks?.status ?? { configured: false, listening: false }, gitWrites: gitWrites.snapshot() }; break;
           case "/v1/health/peers": {
             // A peer's health probe asks whether this computer lists it back.
             const caller = z.object({ name: z.string().max(253).optional(), hostKey: z.string().max(512).optional() })

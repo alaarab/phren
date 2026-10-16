@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Optional instant store sync from signed gitboy push webhooks: a private, default-off loopback receiver triggers coordinated pulls and nudges verified peer Hooks over SSH; health details report receiver and delivery state.
+
 ## [0.3.51] - 2026-10-15
 
 ### Added

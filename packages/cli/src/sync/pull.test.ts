@@ -123,6 +123,19 @@ describe("store polling with real Git repositories", () => {
     expect(git(reader, "status", "--porcelain")).toBe("");
   });
 
+  it("pulls a webhook immediately with polling off, bypassing due time but sharing locks", async () => {
+    const { reader, publish } = fixture();
+    expect((await pollStore(reader, 60, runPollGit, 100_000)).status).toBe("unchanged");
+    const remoteHead = publish("webhook update\n");
+    expect((await pollStore(reader, 0, runPollGit, 101_000)).status).toBe("not-due");
+    const release = tryFileLock(runtimeFile(reader, "pull-poll"))!;
+    expect(release).toBeTypeOf("function");
+    try { expect((await pollStore(reader, 0, runPollGit, 101_000, true)).status).toBe("deferred"); }
+    finally { release(); }
+    expect((await pollStore(reader, 0, runPollGit, 101_000, true)).status).toBe("updated");
+    expect(git(reader, "rev-parse", "HEAD")).toBe(remoteHead);
+  });
+
   it("commits uncommitted store writes before pulling instead of deferring them", async () => {
     const { reader, publish, commit } = fixture();
     publish();
