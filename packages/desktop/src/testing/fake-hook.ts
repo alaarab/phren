@@ -111,7 +111,7 @@ function defaultHealth() {
     computer: { id: "test-computer", name: "This computer" },
     capabilities: {
       fileWrite: true, fileSearch: true, gitReview: true, files: true, fileResolution: true, repositoryFiles: true,
-      schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
+      moveToComputer: true, moveNewChat: true, moveConductor: true, schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
     },
   };
 }
@@ -310,6 +310,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   await rm(socketPath, { force: true });
 
   const calls: FakeHookCall[] = [];
+  const moves = new Map<string, unknown>();
   const overviewSockets = new Set<WebSocket>();
   const transcriptSockets = new Set<{ ws: WebSocket; session: string }>();
   const statusSockets = new Set<WebSocket>();
@@ -343,6 +344,29 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),
+    "GET /v1/harnesses": () => ({ json: { harnesses: [
+      { source: "claude", installed: true, usable: true, accounts: [{ id: "default", label: "Personal", usable: true }] },
+      { source: "codex", installed: true, usable: true },
+    ] } }),
+    "GET /v1/sessions/move/computers": () => ({ json: { localClaudeLogins: 1, computers: [
+      { name: "This computer", self: true, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true }] },
+      { name: "Studio", self: false, online: true, hasCheckout: true, harnesses: [
+        { source: "claude", usable: true, accounts: [
+          { id: "work", label: "Work", fiveHourLeft: 62, weekLeft: 48, resetsAt: "2026-10-16T18:00:00Z" },
+          { id: "personal", label: "Personal", fiveHourLeft: 84, weekLeft: 71, resetsAt: "2026-10-16T19:00:00Z" },
+        ] }, { source: "codex", usable: true },
+      ] },
+      { name: "Laptop", self: false, online: false, hasCheckout: false, harnesses: [] },
+    ] } }),
+    "POST /v1/sessions/move": (_req, body) => {
+      const data = body as { id: string; target: object; to: { computer?: string; harness: string; account?: string } };
+      if (data.to.computer && data.to.computer !== "Studio") return { status: data.to.computer === "Laptop" ? 409 : 404, json: { error: "Computer unavailable" } };
+      const target = { ...data.target, source: data.to.harness, session: `continued-${data.id}` };
+      const move = { id: data.id, state: "moved", to: data.to, target, ...(data.to.computer ? { handedOffTo: { computer: data.to.computer, target } } : {}) };
+      moves.set(data.id, move);
+      return { json: { move } };
+    },
+    "GET /v1/sessions/move": (req) => ({ json: { move: moves.get(new URL(req.url ?? "/", "http://hook").searchParams.get("id") ?? "") } }),
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
     "POST /v1/keys": () => ({ json: { ok: true } }),
     "POST /v1/schedules": () => ({ status: 200, json: defaultSchedules() }),

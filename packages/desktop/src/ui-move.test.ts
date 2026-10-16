@@ -3,8 +3,8 @@ import { moveAccounts, moveChoices, moveStatus, openMoveSheet } from "../ui/shel
 
 import { hookGet, hookPost } from "../ui/api.js";
 vi.mock("../ui/api.js", () => ({ hookGet: vi.fn(), hookPost: vi.fn() }));
-const hooks = vi.hoisted(() => ({ caps: {} as { moveNewChat?: boolean }, rows: [] as Array<{ computer: string; child: object }>, open: vi.fn() }));
-vi.mock("../ui/shell/store.js", () => ({ store: { capabilities: async () => hooks.caps, sessions: () => hooks.rows } }));
+const hooks = vi.hoisted(() => ({ caps: {} as { moveNewChat?: boolean; moveToComputer?: boolean }, rows: [] as Array<{ computer: string; child: object }>, open: vi.fn() }));
+vi.mock("../ui/shell/store.js", () => ({ projectOf: (child: { cwd?: string }) => child.cwd?.split("/").pop() ?? "", store: { capabilities: async () => hooks.caps, sessions: () => hooks.rows } }));
 vi.mock("../ui/shell/sections.js", async (original) => ({ ...await original<object>(), showSection: vi.fn(), sectionHandle: () => ({ openSession: hooks.open }) }));
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.clearAllMocks(); hooks.caps = {}; hooks.rows = []; });
 
@@ -44,6 +44,9 @@ describe("continue in another agent", () => {
 type KeyEvent = { key: string; shiftKey: boolean; preventDefault: ReturnType<typeof vi.fn>; stopPropagation: ReturnType<typeof vi.fn> };
 class Node {
   children: Node[] = [];
+  dataset: Record<string, string> = {};
+  value = "";
+  classList = { toggle: (name: string, on: boolean) => { this.className = this.className.split(" ").filter((c) => c !== name).concat(on ? [name] : []).join(" "); }, add: (name: string) => { this.className += ` ${name}`; } };
   parent: Node | null = null;
   textContent = "";
   className = "";
@@ -75,7 +78,7 @@ function setupDom() {
   const body = new Node("body");
   const doc = {
     body, activeElement: body, listeners: new Map<string, (event?: KeyEvent) => void>(),
-    getElementById: () => ({}), createElement: (tag: string) => new Node(tag),
+    getElementById: () => ({}), createTextNode: (text: string) => { const node = new Node("text"); node.textContent = text; return node; }, createElement: (tag: string) => new Node(tag),
     addEventListener(type: string, fn: (event?: KeyEvent) => void) { this.listeners.set(type, fn); },
     removeEventListener(type: string, fn: (event?: KeyEvent) => void) { if (this.listeners.get(type) === fn) this.listeners.delete(type); },
   };
@@ -177,4 +180,91 @@ it("restores the current Switch control when an overview refresh replaced the in
   body.find("×")!.listeners.get("click")!();
   expect(dom.activeElement).toBe(change);
   expect(dom.listeners.size).toBe(0);
+});
+
+const peers = { localClaudeLogins: 1, computers: [
+  { name: "Desk", self: true, online: true, hasCheckout: true, harnesses: [] },
+  { name: "Studio", self: false, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [
+    { id: "work", label: "Work", fiveHourLeft: 62, weekLeft: 35 }, { id: "personal", label: "Personal", fiveHourLeft: 80 },
+  ] }] },
+  { name: "Laptop", self: false, online: false, hasCheckout: true, harnesses: [] },
+  { name: "No checkout", self: false, online: true, hasCheckout: false, harnesses: [{ source: "codex", usable: true }] },
+] };
+function remoteInventory(result = peers) {
+  vi.mocked(hookGet).mockImplementation(async (_computer, route) => route === "/v1/harnesses" ? { harnesses: inventory } : result);
+}
+
+it("gates peer inventory and the login hint on the session computer capability", async () => {
+  const { body } = setupDom();
+  remoteInventory();
+  await openMoveSheet({ computer: "Desk", child: { cwd: "/repo/phren", target: { source: "claude" } } });
+  expect(hookGet).toHaveBeenCalledTimes(1);
+  expect(body.find("On another computer")?.closest()).not.toBeNull();
+  expect(body.find("phren bridge accounts add <name>")).toBeUndefined();
+});
+
+it("shows peers, usage, disabled reasons and the exact copyable single-login hint with keyboard access", async () => {
+  hooks.caps = { moveToComputer: true };
+  const { body } = setupDom();
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  remoteInventory();
+  await openMoveSheet({ computer: "Desk", child: { cwd: "/repo/phren", target: { source: "claude" } } });
+  expect(hookGet).toHaveBeenCalledWith("Desk", "/v1/sessions/move/computers", { project: "phren" });
+  expect(body.find("Desk · Online")).toBeUndefined();
+  expect(body.find("Claude · Work · 62% left")).toBeDefined();
+  expect(body.find("Claude · Personal · 80% left")).toBeDefined();
+  expect(body.find("Laptop · Offline")!.disabled).toBe(true);
+  expect(body.find("No checkout · Online · No checkout of this project")!.disabled).toBe(true);
+  const copy = body.find("phren bridge accounts add <name>")!;
+  expect(copy.parent!.children.map((n) => n.textContent).join("")).toBe("Only one Claude login on Desk. Add another with phren bridge accounts add <name>, or continue on another computer.");
+  await copy.listeners.get("click")!();
+  expect(writeText).toHaveBeenCalledWith("phren bridge accounts add <name>");
+  body.find("×")!.focus();
+  for (let i = 0; i < 6 && dom.activeElement !== body.find("Studio · Online"); i++) press("ArrowDown");
+  expect(dom.activeElement).toBe(body.find("Studio · Online"));
+  body.find("Studio · Online")!.listeners.get("click")!();
+  body.find("Continue")!.focus();
+  expect(press("Tab").preventDefault).toHaveBeenCalled();
+  expect(dom.activeElement).toBe(body.find("×"));
+});
+
+it("posts the selected peer account in new-chat mode and opens handedOffTo on that computer", async () => {
+  vi.useFakeTimers();
+  hooks.caps = { moveToComputer: true };
+  const { body } = setupDom();
+  const target = { source: "claude", session: "old" };
+  const next = { source: "claude", session: "new" };
+  const nextChild = { target: next };
+  hooks.rows = [{ computer: "Studio", child: nextChild }];
+  remoteInventory({ ...peers, localClaudeLogins: 2 });
+  await openMoveSheet({ computer: "Desk", child: { target } });
+  expect(body.find("phren bridge accounts add <name>")).toBeUndefined();
+  body.find("Studio · Online")!.listeners.get("click")!();
+  const selector = body.find("Studio · Online")!.parent!.children[1];
+  selector.value = "1";
+  selector.listeners.get("change")!();
+  vi.mocked(hookPost).mockResolvedValue({ move: { id: "remote", state: "handing-off" } });
+  vi.mocked(hookGet).mockResolvedValue({ move: { state: "moved", handedOffTo: { computer: "Studio", target: next } } });
+  await body.find("Continue")!.listeners.get("click")!();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(hookPost).toHaveBeenCalledWith("Desk", "/v1/sessions/move", expect.objectContaining({ target, to: { computer: "Studio", harness: "claude", account: "personal" }, mode: "new-chat" }));
+  expect(hooks.open).toHaveBeenCalledWith("Studio", nextChild);
+});
+
+it.each([404, 409])("keeps a peer %s failure visible and allows returning to a local destination", async (status) => {
+  hooks.caps = { moveToComputer: true };
+  const { body } = setupDom();
+  remoteInventory();
+  await openMoveSheet({ computer: "Desk", child: { target: { source: "claude" } } });
+  body.find("Studio · Online")!.listeners.get("click")!();
+  vi.mocked(hookPost).mockRejectedValue({ status, message: "Studio is unavailable" });
+  await body.find("Continue")!.listeners.get("click")!();
+  expect(body.find("Studio is unavailable")).toBeDefined();
+  expect(body.find("Continue")!.disabled).toBe(false);
+  body.find("Codex")!.listeners.get("click")!();
+  vi.mocked(hookPost).mockResolvedValue({ move: { state: "failed" } });
+  vi.mocked(hookGet).mockResolvedValue({ move: { state: "failed" } });
+  await body.find("Continue")!.listeners.get("click")!();
+  expect(vi.mocked(hookPost).mock.calls.at(-1)![2].to).toEqual({ harness: "codex" });
 });

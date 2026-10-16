@@ -2,7 +2,7 @@ import { el } from "../dom.js";
 import { harnessLabel } from "../harness.js";
 import { movePlan } from "./handoff.js";
 import { openHandoffChat } from "./handoff-view.js";
-import { store } from "./store.js";
+import { projectOf, store } from "./store.js";
 // "Continue in…": move a live session to another harness or Claude account in
 // a pane or a new chat (Hook `POST /v1/sessions/move`, session-move.ts). The agent
 // writes a hand-off; the chosen one starts in the same folder with
@@ -59,7 +59,7 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   returnFocus ??= document.activeElement;
   installStyles();
   const current = child.target?.source ?? child.agent;
-  const state = { harness: to.harness ?? "", account: to.account ?? "", inventory: null, moveNewChat: false, mode: undefined, busy: false, timer: null };
+  const state = { harness: to.harness ?? "", account: to.account ?? "", inventory: null, computer: "", peers: [], moveNewChat: false, mode: undefined, busy: false, timer: null };
 
   const backdrop = el("div", "launch-backdrop");
   const sheet = el("div", "launch-sheet move-sheet");
@@ -89,7 +89,13 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   status.setAttribute("role", "status");
   const go = el("button", "launch-btn accent", "Continue");
   go.type = "button";
-  body.append(harnessField, accountField, status);
+  const remoteField = el("div", "launch-field");
+  remoteField.hidden = true;
+  const remoteRows = el("div", "launch-computers");
+  remoteField.append(el("span", "launch-label", "On another computer"), remoteRows);
+  const loginHint = el("div", "launch-note move-login-hint");
+  loginHint.hidden = true;
+  body.append(harnessField, accountField, remoteField, loginHint, status);
   const foot = el("div", "launch-foot");
   foot.append(go);
   sheet.append(head, body, foot);
@@ -105,6 +111,11 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
       event.preventDefault();
       event.stopPropagation();
       close();
+    } else if (["ArrowDown", "ArrowUp"].includes(event.key) && document.activeElement?.tagName !== "SELECT") {
+      const list = controls();
+      const index = list.indexOf(document.activeElement);
+      event.preventDefault();
+      list[(index + (event.key === "ArrowDown" ? 1 : -1) + list.length) % list.length]?.focus();
     } else if (event.key === "Tab") {
       const list = controls();
       const index = list.indexOf(document.activeElement);
@@ -132,25 +143,31 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
 
   function render() {
     const hadFocus = sheet.contains(document.activeElement);
+    const peer = state.peers.find((p) => p.name === state.computer);
     const choices = moveChoices(state.inventory, current, child.account?.id);
-    if (!choices.some((c) => c.source === state.harness && c.usable)) state.harness = selectDefault ? choices.find((c) => c.usable)?.source ?? "" : "";
+    if (!peer && !choices.some((c) => c.source === state.harness && c.usable)) state.harness = selectDefault ? choices.find((c) => c.usable)?.source ?? "" : "";
     harnessRow.replaceChildren(...choices.map((c) => {
-      const b = el("button", `launch-seg${c.source === state.harness ? " selected" : ""}`, c.label);
+      const b = el("button", `launch-seg${!peer && c.source === state.harness ? " selected" : ""}`, c.label);
       b.type = "button";
       b.disabled = !c.usable || state.busy;
       if (c.reason) b.title = c.reason;
-      b.addEventListener("click", () => { state.harness = c.source; render(); });
+      b.addEventListener("click", () => { state.computer = ""; state.harness = c.source; render(); });
       return b;
     }));
-    const accounts = state.harness === "claude" ? moveAccounts(state.inventory, { includeDefault: true }).filter((a) => current !== "claude" || a.id !== child.account?.id) : [];
+    const accounts = !peer && state.harness === "claude" ? moveAccounts(state.inventory, { includeDefault: true }).filter((a) => current !== "claude" || a.id !== child.account?.id) : [];
     accountField.hidden = accounts.length === 0;
     const accountOptions = accounts.length ? accounts.map((a) => [a.id, a.label || a.id]) : [["", "Default"]];
     accountSelect.replaceChildren(...accountOptions.map(([v, l]) => { const o = el("option", null, l); o.value = v; return o; }));
-    if (state.harness === "claude" && !accounts.some((a) => a.id === state.account)) state.account = accounts.find((a) => a.id === "default")?.id ?? accounts[0]?.id ?? "";
+    if (!peer && state.harness === "claude" && !accounts.some((a) => a.id === state.account)) state.account = accounts.find((a) => a.id === "default")?.id ?? accounts[0]?.id ?? "";
     accountSelect.value = accounts.some((a) => a.id === state.account) ? state.account : "";
     accountSelect.disabled = state.busy;
     const accountLabel = accounts.find((a) => a.id === state.account)?.label;
-    outcome.textContent = movePlan(current, { harness: state.harness, account: state.account, accountLabel }, state.moveNewChat).label;
+    outcome.textContent = peer ? `Opens a new ${harnessLabel(state.harness)} chat on ${peer.name} with a hand-off` : movePlan(current, { harness: state.harness, account: state.account, accountLabel }, state.moveNewChat).label;
+    for (const row of remoteRows.children) {
+      const selected = row.dataset.computer === state.computer;
+      row.classList.toggle("selected", selected);
+      for (const control of row.querySelectorAll("button, select")) control.disabled = row.dataset.unavailable === "true" || state.busy;
+    }
     go.disabled = !state.harness || state.busy;
     if (hadFocus && (!sheet.contains(document.activeElement) || document.activeElement.disabled || document.activeElement.closest("[hidden], [inert]"))) focusFirst();
   }
@@ -163,7 +180,7 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
     if (openSheet?.backdrop !== backdrop) return;
     if (move) status.textContent = moveStatus(move);
     if (move?.state === "moved") {
-      if (state.mode !== "new-chat" || move.target && openHandoffChat(computer, move.target)) {
+      if (state.mode !== "new-chat" || (move.handedOffTo?.target ?? move.target) && openHandoffChat(move.handedOffTo?.computer ?? (state.computer || computer), move.handedOffTo?.target ?? move.target)) {
         state.busy = false; render(); setTimeout(close, 1500); return;
       }
       status.textContent = "Hand-off ready; waiting for the new chat to appear…";
@@ -180,17 +197,18 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
     status.textContent = "Asking the agent for a hand-off…";
     render();
     const id = crypto.randomUUID();
-    const to = { harness: state.harness, ...(state.harness === "claude" && state.account ? { account: state.account } : {}) };
+    const to = { harness: state.harness, ...(state.computer ? { computer: state.computer } : {}), ...(state.harness === "claude" && state.account ? { account: state.account } : {}) };
     try {
       const caps = await store.capabilities(computer);
-      state.mode = movePlan(current, to, caps.moveNewChat).mode;
+      if (state.computer && !caps.moveToComputer) throw new Error("This computer's Hook cannot continue on another computer; update it first.");
+      state.mode = state.computer ? "new-chat" : movePlan(current, to, caps.moveNewChat).mode;
       const res = await hookPost(computer, "/v1/sessions/move", { target: child.target, to, id, ...(state.mode ? { mode: state.mode } : {}) });
       status.textContent = moveStatus(res.move) || "Moving…";
       void follow(res.move?.id ?? id, Date.now());
     } catch (err) {
       state.busy = false;
       status.classList.add("launch-error");
-      status.textContent = err?.status === 404 || err?.status === 503 ? "This computer's Hook cannot move sessions; update it first." : err?.message || "The move did not start.";
+      status.textContent = !state.computer && (err?.status === 404 || err?.status === 503) ? "This computer's Hook cannot move sessions; update it first." : err?.message || "The move did not start.";
       render();
     }
   });
@@ -203,7 +221,74 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
   ]);
   state.inventory = inventory?.harnesses ?? null;
   state.moveNewChat = caps.moveNewChat === true;
-  if (openSheet?.backdrop === backdrop) render();
+  if (openSheet?.backdrop !== backdrop) return;
+  render();
+  if (!caps.moveToComputer) return;
+  remoteField.hidden = false;
+  remoteRows.append(el("div", "launch-note", "Loading computers…"));
+  try {
+    const result = await hookGet(computer, "/v1/sessions/move/computers", { project: projectOf(child) });
+    if (openSheet?.backdrop !== backdrop) return;
+    state.peers = (result.computers ?? []).filter((p) => !p.self);
+    remoteRows.replaceChildren();
+    for (const peer of state.peers) {
+      const destinations = (peer.harnesses ?? []).flatMap((h) => {
+        const accounts = h.accounts?.length ? h.accounts : [null];
+        return accounts.map((a) => {
+          const left = a?.fiveHourLeft ?? a?.weekLeft;
+          const label = [harnessLabel(h.source), a?.label, Number.isFinite(left) ? `${left}% left` : ""].filter(Boolean).join(" · ");
+          const usage = [Number.isFinite(a?.fiveHourLeft) ? `5-hour: ${a.fiveHourLeft}% left` : "", Number.isFinite(a?.weekLeft) ? `Weekly: ${a.weekLeft}% left` : "", a?.resetsAt ? `Resets ${a.resetsAt}` : ""].filter(Boolean).join(" · ");
+          return { harness: h.source, account: a?.id, label, usage, usable: h.usable };
+        });
+      });
+      const reason = !peer.online ? "Offline" : !peer.hasCheckout ? "No checkout of this project" : !destinations.some((d) => d.usable) ? "No usable harness or account" : "";
+      const row = el("div", "launch-computer move-computer");
+      row.dataset.computer = peer.name;
+      row.dataset.unavailable = String(!!reason);
+      const choose = el("button", "launch-btn", `${peer.name} · ${peer.online ? "Online" : "Offline"}${reason && peer.online ? ` · ${reason}` : ""}`);
+      choose.type = "button";
+      choose.disabled = !!reason;
+      const select = el("select", "launch-select");
+      select.setAttribute("aria-label", `Harness and account on ${peer.name}`);
+      select.replaceChildren(...destinations.map((d, index) => {
+        const option = el("option", null, d.label);
+        option.value = String(index);
+        option.disabled = !d.usable;
+        option.title = d.usage;
+        return option;
+      }));
+      select.value = String(Math.max(0, destinations.findIndex((d) => d.usable)));
+      const selectPeer = () => {
+        const destination = destinations[Number(select.value)];
+        if (reason || !destination?.usable || state.busy) return;
+        state.computer = peer.name;
+        state.harness = destination.harness;
+        state.account = destination.account ?? "";
+        render();
+      };
+      choose.addEventListener("click", selectPeer);
+      select.addEventListener("change", selectPeer);
+      row.append(choose);
+      if (destinations.length) row.append(select);
+      remoteRows.append(row);
+    }
+    if (!state.peers.length) remoteRows.append(el("div", "launch-note", "No other computers linked."));
+    if (typeof result.localClaudeLogins === "number" && result.localClaudeLogins <= 1) {
+      loginHint.hidden = false;
+      const command = "phren bridge accounts add <name>";
+      const copy = el("button", "move-copy-command", command);
+      copy.type = "button";
+      copy.title = "Copy command";
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(command); copy.title = "Copied"; }
+        catch { copy.title = "Select the command to copy it"; }
+      });
+      loginHint.append(document.createTextNode(`Only one Claude login on ${computer}. Add another with `), copy, document.createTextNode(", or continue on another computer."));
+    }
+    render();
+  } catch (error) {
+    if (openSheet?.backdrop === backdrop) remoteRows.replaceChildren(el("div", "launch-error", error?.message || "Could not load computers."));
+  }
 }
 
 // ⌘K: the same sheet for the session open in Agents.

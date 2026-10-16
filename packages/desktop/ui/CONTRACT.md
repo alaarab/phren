@@ -730,3 +730,31 @@ A capped search shows “Searched N of M projects” (N successful reads); failu
 are reported without dropping successful results. Scoped `?` retains its quick
 chat action. Palette input retains focus while asynchronous results arrive.
 Coverage: `src/ui-palette-memory.test.ts`.
+
+### Continue on another computer
+
+The shared `shell/move.js` sheet (also opened by quota Switch through
+`quota-warn-sheet.js`) reads the session computer's health capabilities via
+`store.capabilities(computer)`. With `moveToComputer: true` it requests
+`GET /v1/sessions/move/computers?project=<projectOf(child)>` on that Hook.
+The answer is `{ computers: [{ name, self, online, hasCheckout, harnesses:
+[{ source, usable, accounts?: [{ id, label, fiveHourLeft?, weekLeft?, resetsAt? }] }]
+}], localClaudeLogins }`. “On another computer” shows one row per non-self
+computer, its online state, and a harness/account selector with remaining usage
+(e.g. “Claude · Work · 62% left”; each option's tooltip gives both windows and
+reset time). Offline computers, missing checkouts and unusable harnesses are
+disabled with reasons. Arrow keys and Tab reach rows inside the existing focus
+trap; native selects keep their arrow behavior.
+
+When `localClaudeLogins <= 1`, the sheet shows “Only one Claude login on
+<computer>. Add another with `phren bridge accounts add <name>`, or continue on
+another computer.” The command is a copy button. Without `moveToComputer`,
+there is no new request, section or hint. Inventory errors stay in the section.
+
+Remote Continue posts `{ target, to: { harness, account?, computer }, id,
+mode: "new-chat" }` to the source Hook's existing move route. The source stays
+open; the Hook owns hand-off creation and conductor role transfer. Status still
+polls the source Hook. A moved record's `handedOffTo: { computer, target }`
+opens that peer's chat once present in the shared overview (falling back to the
+selected computer and `move.target`). Peer 404/409 errors remain visible and
+allow retry or another choice. Coverage: `src/ui-move.test.ts`.
