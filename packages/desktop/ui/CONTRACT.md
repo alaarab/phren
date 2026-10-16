@@ -781,8 +781,34 @@ capability, posts `/v1/accounts/claude/add { slug }`, closes the sheet on succes
 and opens the returned live pane immediately through Agents' `openPane(computer,
 target)`. Both muxes use the known-pane console tile and carry the returned
 server and pane through `/pty`. For local tmux, the bridge resolves that pane's
-actual session/window/pane IDs and uses a fully qualified `attach-session -t`
-target on the returned server's socket, never an untargeted attach. Remote
+actual session/window/pane IDs, attaches that session and selects its window
+and pane on the returned server's socket, never using an untargeted attach. Remote
 panes use the Hook's existing SSH pane attachment path. Interactive login opens
 without waiting for a transcript or overview session. The Hook runs the login command; the client never builds shell commands.
 Coverage: `src/ui-move.test.ts`.
+
+The move inventory's `computerId` is the stable Hook identity, not its verified
+peer name. The sheet resolves it to a configured desktop computer from that
+computer's overview identity or `/v1/health computer.id`; it falls back to a
+matching name only when an ID is absent. Conflicting or unlinked identities
+never receive desktop reads or login requests. Their add/open actions are
+disabled with a link-in-desktop reason; the source Hook can still move there.
+Move requests keep the Hook peer name in `to.computer`; account addition,
+capabilities and opening the returned pane or landed chat use the mapped
+desktop alias, including `handedOffTo.computer` resolution.
+
+After a confirmed move, the sheet checks the shared overview for up to 30
+seconds without further move-status reads. If the chat never appears, it shows
+“Moved to <computer> — open it from there” and releases its controls. An
+in-flight account-add blocks Escape, Close and replacement sheets until its
+pane opens or its error returns; failed adds refocus the editable slug field.
+The single local add action moves into the single-login hint instead of being
+duplicated. Its `.move-add-account` class wraps long names within narrow sheets
+with automatic height and a 34 px minimum.
+
+A missing, unusable or partial `self` inventory is supplemented with the local
+harness inventory, retaining local Claude accounts and other harnesses. When
+`current` is absent, the session's Claude account ID is also excluded. Local
+tmux login attachment uses `attach-session -t <session>` followed by explicit
+`select-window` and `select-pane` commands in the same tmux queue. Regression
+coverage lives in `src/ui-move.test.ts` and `src/pty-bridge.test.ts`.

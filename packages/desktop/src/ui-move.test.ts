@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { moveAccounts, moveChoices, moveStatus, openMoveSheet } from "../ui/shell/move.js";
 
 import { hookGet, hookPost } from "../ui/api.js";
 vi.mock("../ui/api.js", () => ({ hookGet: vi.fn(), hookPost: vi.fn() }));
-const hooks = vi.hoisted(() => ({ caps: {} as { moveNewChat?: boolean; moveToComputer?: boolean; moveConductorToComputer?: boolean; claudeAccountAdd?: boolean }, capsFor: {} as Record<string, object>, rows: [] as Array<{ computer: string; child: object }>, open: vi.fn(), pane: vi.fn() }));
-vi.mock("../ui/shell/store.js", () => ({ projectOf: (child: { cwd?: string }) => child.cwd?.split("/").pop() ?? "", store: { capabilities: async (computer: string) => hooks.capsFor[computer] ?? hooks.caps, sessions: () => hooks.rows } }));
+const hooks = vi.hoisted(() => ({ caps: {} as { moveNewChat?: boolean; moveToComputer?: boolean; moveConductorToComputer?: boolean; claudeAccountAdd?: boolean }, capsFor: {} as Record<string, object>, merged: { computers: ["Desk", "Studio", "Laptop", "No checkout"].map((computer) => ({ computer })) } as { computers: Array<{ computer: string; overview?: object }> }, rows: [] as Array<{ computer: string; child: object }>, open: vi.fn(), pane: vi.fn(), capReads: vi.fn() }));
+vi.mock("../ui/shell/store.js", () => ({ projectOf: (child: { cwd?: string }) => child.cwd?.split("/").pop() ?? "", store: { get merged() { return hooks.merged; }, capabilities: async (computer: string) => { hooks.capReads(computer); return hooks.capsFor[computer] ?? hooks.caps; }, sessions: () => hooks.rows } }));
 vi.mock("../ui/shell/sections.js", async (original) => ({ ...await original<object>(), showSection: vi.fn(), sectionHandle: () => ({ openSession: hooks.open, openPane: hooks.pane }) }));
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.clearAllMocks(); hooks.caps = {}; hooks.capsFor = {}; hooks.rows = []; });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.clearAllMocks(); hooks.caps = {}; hooks.capsFor = {}; hooks.rows = []; hooks.merged = { computers: ["Desk", "Studio", "Laptop", "No checkout"].map((computer) => ({ computer })) }; });
 
 const inventory = [
   { source: "claude", installed: true, usable: true, accounts: [{ id: "default", usable: true }, { id: "work", label: "Work", usable: true }, { id: "old", usable: false }] },
@@ -56,7 +57,10 @@ class Node {
   style: Record<string, string> = {};
   listeners = new Map<string, (event?: KeyEvent) => void>();
   constructor(tag = "div") { this.tagName = tag.toUpperCase(); }
-  append(...children: Node[]) { for (const child of children) { child.parent = this; this.children.push(child); } }
+  append(...children: Node[]) { for (const child of children) {
+    if (child.parent) child.parent.children = child.parent.children.filter((node) => node !== child);
+    child.parent = this; this.children.push(child);
+  } }
   replaceChildren(...children: Node[]) { for (const child of this.children) child.parent = null; this.children = []; this.append(...children); }
   setAttribute() {}
   addEventListener(event: string, fn: (event?: KeyEvent) => void) { this.listeners.set(event, fn); }
@@ -323,7 +327,7 @@ it("keeps login launch errors editable and Cancel returns focus to the action", 
   const input = dom.activeElement; input.value = "work";
   vi.mocked(hookPost).mockRejectedValue(new Error("Login could not start"));
   await input.parent!.listeners.get("submit")!({ preventDefault: vi.fn() } as KeyEvent);
-  expect(body.find("Login could not start")).toBeDefined(); expect(input.disabled).toBe(false);
+  expect(body.find("Login could not start")).toBeDefined(); expect(input.disabled).toBe(false); expect(dom.activeElement).toBe(input);
   body.find("Cancel")!.listeners.get("click")!(); expect(dom.activeElement).toBe(action);
 });
 
@@ -347,4 +351,143 @@ it("rechecks conductor capability at submission after a peer account was selecte
   await body.find("Continue")!.listeners.get("click")!();
   expect(hookPost).not.toHaveBeenCalled();
   expect(body.find("Update Desk's Hook to move the conductor")).toBeDefined();
+});
+
+
+function aliasInventory() {
+  const result = structuredClone(peers);
+  const studio = result.computers.find((peer) => peer.name === "Studio")!;
+  Object.assign(studio, { name: "hook-studio", computerId: "studio-id" });
+  hooks.merged = { computers: [{ computer: "Desk" }, { computer: "My Studio" }] };
+  remoteInventory(result);
+  const get = vi.mocked(hookGet).getMockImplementation()!;
+  vi.mocked(hookGet).mockImplementation(async (name, route, ...rest) => route === "/v1/health"
+    ? { computer: { id: name === "My Studio" ? "studio-id" : "desk-id" } }
+    : get(name, route, ...rest));
+}
+
+it.each(["add", "move"])("maps stable peer IDs to desktop aliases for %s while preserving the Hook's move destination", async (action) => {
+  vi.useFakeTimers(); hooks.caps = { moveToComputer: true, claudeAccountAdd: true };
+  const { body } = setupDom(); aliasInventory();
+  await openMoveSheet({ computer: "Desk", child: session });
+  const target = { server: "tmux-login", pane: "p42", source: "claude", session: "new" };
+  if (action === "add") {
+    body.find("Add a Claude account on My Studio…")!.listeners.get("click")!();
+    const input = dom.activeElement; input.value = "work";
+    vi.mocked(hookPost).mockResolvedValue({ target });
+    await input.parent!.listeners.get("submit")!({ preventDefault: vi.fn() } as KeyEvent);
+    expect(hookPost).toHaveBeenCalledWith("My Studio", "/v1/accounts/claude/add", { slug: "work" });
+    expect(hooks.pane).toHaveBeenCalledWith("My Studio", target);
+  } else {
+    body.find(remoteLabel.replace("Studio", "hook-studio"))!.listeners.get("click")!();
+    const nextChild = { target }; hooks.rows = [{ computer: "My Studio", child: nextChild }];
+    vi.mocked(hookPost).mockResolvedValue({ move: { id: "alias" } });
+    vi.mocked(hookGet).mockResolvedValue({ move: { state: "moved", handedOffTo: { computer: "hook-studio", target } } });
+    await body.find("Continue")!.listeners.get("click")!(); await vi.advanceTimersByTimeAsync(0);
+    expect(vi.mocked(hookPost).mock.calls[0][2].to.computer).toBe("hook-studio");
+    expect(hooks.open).toHaveBeenCalledWith("My Studio", nextChild);
+  }
+  expect(hooks.capReads).toHaveBeenCalledWith("My Studio");
+  expect(hooks.capReads).not.toHaveBeenCalledWith("hook-studio");
+});
+
+it.each(["different-id", "not-linked"])("disables unmapped add/open actions for %s and never falls back to a conflicting name", async (id) => {
+  vi.useFakeTimers(); hooks.caps = { moveToComputer: true, claudeAccountAdd: true };
+  const { body } = setupDom();
+  const result = structuredClone(peers);
+  Object.assign(result.computers[1], { computerId: id });
+  hooks.merged = { computers: [{ computer: "Desk" }, ...(id === "different-id" ? [{ computer: "Studio", overview: { phren: { computer: { id: "actual-studio" } } } }] : [])] };
+  remoteInventory(result);
+  await openMoveSheet({ computer: "Desk", child: session });
+  const add = body.find("Add a Claude account on Studio…")!;
+  expect(add.disabled).toBe(true);
+  expect(body.find("Link Studio in desktop to add accounts or open chats here.")).toBeDefined();
+  expect(hooks.capReads).not.toHaveBeenCalledWith("Studio");
+  add.listeners.get("click")!(); expect(hookPost).not.toHaveBeenCalled();
+  body.find(remoteLabel)!.listeners.get("click")!();
+  const target = { source: "claude", session: "new" };
+  hooks.rows = [{ computer: "Studio", child: { target } }];
+  vi.mocked(hookPost).mockResolvedValue({ move: { id: "unmapped" } });
+  vi.mocked(hookGet).mockResolvedValue({ move: { state: "moved", handedOffTo: { computer: "Studio", target } } });
+  await body.find("Continue")!.listeners.get("click")!(); await vi.advanceTimersByTimeAsync(30_001);
+  expect(hooks.open).not.toHaveBeenCalled();
+  expect(body.find("Moved to Studio — open it from there")).toBeDefined();
+  expect(body.find("Continue")!.disabled).toBe(false);
+});
+
+it("releases controls 30 seconds after a confirmed move when the linked destination never appears", async () => {
+  vi.useFakeTimers(); hooks.caps = { moveToComputer: true };
+  const { body } = setupDom(); remoteInventory();
+  await openMoveSheet({ computer: "Desk", child: session });
+  body.find(remoteLabel)!.listeners.get("click")!();
+  vi.mocked(hookPost).mockResolvedValue({ move: { id: "missing-row" } });
+  vi.mocked(hookGet).mockResolvedValue({ move: { state: "moved", target: { source: "claude", session: "new" } } });
+  await body.find("Continue")!.listeners.get("click")!(); await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(29_999); expect(body.find("Continue")!.disabled).toBe(true);
+  await vi.advanceTimersByTimeAsync(2);
+  expect(body.find("Moved to Studio — open it from there")).toBeDefined();
+  expect(body.find("Continue")!.disabled).toBe(false);
+  const reads = vi.mocked(hookGet).mock.calls.length;
+  await vi.advanceTimersByTimeAsync(60_000); expect(hookGet).toHaveBeenCalledTimes(reads);
+});
+
+it("blocks Escape and close while adding so the returned login pane is always opened", async () => {
+  hooks.caps = { claudeAccountAdd: true }; const { body } = setupDom(); remoteInventory();
+  await openMoveSheet({ computer: "Desk", child: session });
+  body.find("Add a Claude account on Desk…")!.listeners.get("click")!();
+  const input = dom.activeElement; input.value = "work";
+  let resolve!: (value: object) => void;
+  vi.mocked(hookPost).mockImplementation(() => new Promise((done) => { resolve = done; }));
+  const adding = input.parent!.listeners.get("submit")!({ preventDefault: vi.fn() } as KeyEvent);
+  await Promise.resolve();
+  press("Escape");
+  expect(body.find("Continue")).toBeDefined();
+  body.find("×")!.listeners.get("click")!();
+  expect(body.find("Continue")).toBeDefined(); expect(body.find("×")!.disabled).toBe(true);
+  const target = { server: "default", pane: "login" };
+  resolve({ target }); await adding;
+  expect(hooks.pane).toHaveBeenCalledWith("Desk", target);
+  expect(body.find("Continue")).toBeUndefined();
+});
+
+it("shows exactly one local add action in the hint and uses the wrapping layout class", async () => {
+  hooks.caps = { moveToComputer: true, claudeAccountAdd: true }; const { body } = setupDom(); remoteInventory();
+  await openMoveSheet({ computer: "Desk", child: session });
+  const actions = body.querySelectorAll("button").filter((node) => node.textContent === "Add a Claude account on Desk…");
+  expect(actions).toHaveLength(1);
+  expect(body.find("phren bridge accounts add <name>")!.parent!.contains(actions[0])).toBe(true);
+  expect(actions[0].className).toContain("move-add-account");
+  const css = readFileSync(new URL("../ui/shell/launch.css", import.meta.url), "utf8");
+  const rule = css.match(/\.move-add-account\s*\{([^}]+)\}/)![1];
+  for (const declaration of ["box-sizing: border-box", "height: auto", "min-height: 34px", "white-space: normal", "overflow-wrap: anywhere", "max-width: 100%", "min-width: 0"]) expect(rule).toContain(declaration);
+});
+
+it.each(["missing", "empty", "unusable", "no-codex"])("keeps local accounts and other harnesses available with %s self inventory", async (kind) => {
+  vi.useFakeTimers(); hooks.caps = { moveToComputer: true }; const { body } = setupDom();
+  const result = structuredClone(peers);
+  if (kind === "missing") result.computers.shift();
+  else if (kind === "empty") result.computers[0].harnesses = [];
+  else if (kind === "no-codex") result.computers[0].harnesses = result.computers[0].harnesses.filter((h) => h.source === "claude");
+  else for (const harness of result.computers[0].harnesses) { harness.usable = false; for (const account of harness.accounts ?? []) account.usable = false; }
+  remoteInventory(result);
+  await openMoveSheet({ computer: "Desk", child: { ...session, account: { id: "default" } } });
+  const local = body.find("Claude accounts")!.parent!.querySelectorAll("button").find((node) => node.textContent.includes(" · Desk · ") && !node.disabled)!;
+  expect(local).toBeDefined(); local.listeners.get("click")!();
+  vi.mocked(hookPost).mockResolvedValue({ move: { id: "local" } });
+  vi.mocked(hookGet).mockResolvedValue({ move: { state: "moved" } });
+  await body.find("Continue")!.listeners.get("click")!(); await vi.advanceTimersByTimeAsync(0);
+  expect(vi.mocked(hookPost).mock.calls[0][2].to).toEqual({ harness: "claude", account: "work" });
+  expect(body.find("Codex · Desk")!.disabled).toBe(false);
+  body.find("Codex · Desk")!.listeners.get("click")!();
+  await body.find("Continue")!.listeners.get("click")!();
+  expect(vi.mocked(hookPost).mock.calls.at(-1)![2].to).toEqual({ harness: "codex" });
+});
+
+it("marks the session's account current when the Hook omits current", async () => {
+  hooks.caps = { moveToComputer: true }; const { body } = setupDom();
+  const result = structuredClone(peers);
+  delete result.computers[0].harnesses[0].accounts![1].current;
+  remoteInventory(result);
+  await openMoveSheet({ computer: "Desk", child: { ...session, account: { id: "work" } } });
+  expect(body.find(localLabel + " · Current account")!.disabled).toBe(true);
 });

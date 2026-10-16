@@ -6,6 +6,8 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.11] - unreleased
 
+- Continue in maps peer identities to desktop connections, recovers local choices from incomplete inventories, releases controls after a moved chat cannot be opened, and keeps account-login actions focused, unique and usable on narrow windows.
+
 - Continue in lists Claude accounts across computers first, with email, plan and usage; add an account through an interactive login pane, gate conductor transfers on Hook support, and resolve nested session folders to their registered project.
 
 - Continue a chat on another computer with harness/account usage, unavailable-computer reasons and a copyable single-Claude-login hint (Hook `moveToComputer`).

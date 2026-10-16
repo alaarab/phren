@@ -350,14 +350,14 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
       { source: "codex", installed: true, usable: true },
     ] } }),
     "GET /v1/sessions/move/computers": () => ({ json: { localClaudeLogins: 1, computers: [
-      { name: "This computer", self: true, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [{ id: "default", label: "Personal", email: "personal@example.com", plan: "Pro", usable: true, current: true, fiveHourLeft: 4, weekLeft: 12 }] }, { source: "codex", usable: true }] },
-      { name: "Studio", self: false, online: true, hasCheckout: true, harnesses: [
+      { name: "This computer", computerId: "test-computer", self: true, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [{ id: "default", label: "Personal", email: "personal@example.com", plan: "Pro", usable: true, current: true, fiveHourLeft: 4, weekLeft: 12 }] }, { source: "codex", usable: true }] },
+      { name: "Studio", computerId: "sample-studio", self: false, online: true, hasCheckout: true, harnesses: [
         { source: "claude", usable: true, accounts: [
           { id: "work", label: "Work", email: "work@example.com", plan: "Max", usable: true, current: false, fiveHourLeft: 62, weekLeft: 48, fiveHourResetsAt: "2026-10-16T18:00:00Z" },
           { id: "personal", label: "Personal", email: "personal@example.com", plan: "Pro", usable: true, current: false, fiveHourLeft: 84, weekLeft: 71, weekResetsAt: "2026-10-16T19:00:00Z" },
         ] }, { source: "codex", usable: true },
       ] },
-      { name: "Laptop", self: false, online: false, hasCheckout: false, harnesses: [] },
+      { name: "Laptop", computerId: "sample-laptop", self: false, online: false, hasCheckout: false, harnesses: [] },
     ] } }),
     "POST /v1/accounts/claude/add": (_req, body) => {
       const slug = (body as { slug?: string })?.slug ?? "";

@@ -193,12 +193,11 @@
 .quota-warning .launch-btn { height: auto; min-height: 30px; padding: 4px 10px; white-space: normal; }
 .quota-alternatives, .quota-warning .launch-hint { overflow-wrap: anywhere; }
 
-.move-computer { display: grid; min-width: 0; cursor: default; }
-.move-computer .launch-btn { height: auto; min-height: 34px; padding-block: 6px; text-align: left; white-space: normal; overflow-wrap: anywhere; }
-.move-computer:has(button:disabled) { opacity: .55; }
 .move-copy-command { font: inherit; font-family: var(--mono); color: inherit; background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; user-select: text; overflow-wrap: anywhere; }
 .move-login-hint { overflow-wrap: anywhere; }
 
 .move-destination { display: block; width: 100%; white-space: normal; overflow-wrap: anywhere; font: inherit; }
 .move-destination:disabled { opacity: .55; cursor: default; }
 .move-sheet [hidden] { display: none !important; }
+
+.move-add-account { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; height: auto; min-height: 34px; padding-block: 6px; white-space: normal; overflow-wrap: anywhere; text-align: left; }

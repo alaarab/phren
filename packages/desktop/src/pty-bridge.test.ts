@@ -11,7 +11,7 @@ it.each(["tmux", "tmux-login"])("attaches the returned pane in its actual sessio
   attachTerminal({ name: "Desk", local: true, server: "tmux" }, server, 100, 30, "p42");
   const socket = server === "tmux" ? [] : ["-L", "login"];
   expect(execFileSync).toHaveBeenCalledWith("tmux", [...socket, "display-message", "-p", "-t", "%42", "#{session_id}:#{window_id}.#{pane_id}"], expect.any(Object));
-  expect(spawn).toHaveBeenCalledWith("tmux", [...socket, "attach-session", "-t", "$7:@19.%42"], expect.objectContaining({ cols: 100, rows: 30 }));
+  expect(spawn).toHaveBeenCalledWith("tmux", [...socket, "attach-session", "-t", "$7", ";", "select-window", "-t", "$7:@19", ";", "select-pane", "-t", "$7:@19.%42"], expect.objectContaining({ cols: 100, rows: 30 }));
 });
 it("refuses a stale pane rather than attaching another session", () => {
   vi.mocked(execFileSync).mockReturnValue("$0:@0.%1\n");

@@ -119,8 +119,11 @@ export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols
       // Resolve the pane's session and window too, so attach never chooses the
       // default session or a similarly named target. Hook ids p42 mean %42.
       const target = execFileSync("tmux", [...socket, "display-message", "-p", "-t", `%${pane.slice(1)}`, "#{session_id}:#{window_id}.#{pane_id}"], { encoding: "utf8", timeout: 5_000, env: childEnv(true) }).trim();
-      if (!/^\$\d+:@\d+\.%\d+$/.test(target) || !target.endsWith(`.%${pane.slice(1)}`)) throw new Error("That pane is not open anymore.");
-      return wrap(spawnPty("tmux", [...socket, "attach-session", "-t", target], cols, rows, true));
+      const resolved = /^(\$\d+):(@\d+)\.(%\d+)$/.exec(target);
+      if (!resolved || resolved[3] !== `%${pane.slice(1)}`) throw new Error("That pane is not open anymore.");
+      // attach-session takes a session. Select its window and pane explicitly
+      // in the same tmux command queue rather than passing a pane as a session.
+      return wrap(spawnPty("tmux", [...socket, "attach-session", "-t", resolved[1], ";", "select-window", "-t", `${resolved[1]}:${resolved[2]}`, ";", "select-pane", "-t", target], cols, rows, true));
     }
     return wrap(spawnPty("herdr", ["--session", server, "terminal", "attach", localPaneTerminal(server, pane)], cols, rows, true));
   }
