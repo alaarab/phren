@@ -270,3 +270,50 @@
   background: rgba(0, 0, 0, .8); cursor: zoom-out;
 }
 .ct-lightbox-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 24px 64px rgba(0, 0, 0, .6); }
+
+/* Prompt outline: a rail of ticks along the right edge, one per user prompt. It
+   sits left of the scrollbar (--ct-sb, set by outline.js) and clear of "Jump to
+   latest" (centred); narrow panes (the chat container, #587) do without it. */
+.ct-scroll:focus { outline: none; }
+.ct-outline {
+  position: absolute; top: 14px; bottom: 56px; right: calc(var(--ct-sb, 0px) + 4px); width: 16px;
+  display: flex; flex-direction: column; align-items: stretch; z-index: 2;
+}
+.ct-outline[hidden] { display: none; }
+@container chat (max-width: 519px) { .ct-outline { display: none; } }
+.ct-outline-earlier {
+  flex: 0 0 auto; margin: 0 -6px 6px auto; padding: 1px 4px; border: none; border-radius: 4px;
+  background: transparent; color: var(--dim); font: 500 10px var(--mono); cursor: pointer; white-space: nowrap;
+}
+.ct-outline-earlier[hidden] { display: none; }
+.ct-outline-earlier:hover { color: var(--accent); background: var(--raised); }
+.ct-outline-track { position: relative; flex: 1; min-height: 0; }
+.ct-outline-tick {
+  position: absolute; right: 0; width: 16px; height: 10px; margin-top: -5px; padding: 0; border: none;
+  background: transparent; cursor: pointer;
+}
+.ct-outline-tick::after {
+  content: ""; position: absolute; right: 2px; top: 4px; width: 9px; height: 2px; border-radius: 1px;
+  background: var(--muted); opacity: .6; transition: width .15s ease, opacity .15s ease, background-color .15s ease;
+}
+.ct-outline-tick:hover::after, .ct-outline-tick:focus-visible::after { width: 14px; opacity: 1; background: var(--text-2); }
+.ct-outline-tick.current::after { width: 14px; height: 3px; top: 3.5px; opacity: 1; background: var(--accent); }
+.ct-outline-tick:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: 3px; }
+.ct-outline-tip {
+  position: absolute; right: calc(100% + 6px); transform: translateY(-50%); max-width: 280px;
+  padding: 5px 9px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--raised);
+  color: var(--text); font: 500 12px var(--prose); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .4); pointer-events: none;
+}
+.ct-outline-tip[hidden] { display: none; }
+
+/* The prompt a jump landed on. */
+.ct-outline-flash .ct-user-bubble { animation: ct-outline-flash 1.4s ease-out; }
+@keyframes ct-outline-flash {
+  0%, 35% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ct-outline-flash .ct-user-bubble { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+  .ct-outline-tick::after { transition: none; }
+}

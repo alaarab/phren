@@ -205,6 +205,20 @@ function defaultDiff() {
   };
 }
 
+/** A long conversation: `prompts` user prompts, each answered with a few paragraphs, tall enough to scroll for several screens. */
+export function longTranscript(prompts = 6): Array<{ raw: unknown }> {
+  const topics = ["Fix the login flow", "Add a retry to the token refresh", "Cover the guard with tests", "Rename the session module",
+    "Document the new auth settings", "Trim the startup path", "Check the logout redirect", "Wrap up with a summary"];
+  const frames: Array<{ raw: unknown }> = [];
+  for (let i = 0; i < prompts; i += 1) {
+    const topic = topics[i % topics.length];
+    frames.push({ raw: { type: "user", uuid: `lu${i}`, message: { role: "user", content: `${topic}\nSecond line of prompt ${i + 1} that the tooltip leaves out.` } } });
+    const paragraphs = Array.from({ length: 9 }, (_, p) => `Step ${p + 1} of answer ${i + 1}: the session token is read in the guard, checked against the store and written back before the route handler runs, so the redirect no longer drops it.`);
+    frames.push({ raw: { type: "assistant", uuid: `la${i}`, message: { role: "assistant", content: [{ type: "text", text: paragraphs.join("\n\n") }] } } });
+  }
+  return frames;
+}
+
 function defaultTranscript() {
   return [
     { raw: { type: "user", message: { content: "Fix the login flow" } } },

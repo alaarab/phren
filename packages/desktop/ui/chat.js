@@ -162,6 +162,8 @@ export function openChat(el, computerName, child, opts = {}) {
     openFile: typeof opts.openFile === "function" ? opts.openFile : undefined,
     openSubagent: (id) => openSubagent(id),
     insert: (text) => composer.insert(text),
+    hasOlder: () => !!history.hasMore && backlogLoaded,
+    loadOlder: () => loadOlder(),
   });
 
   // ---- the "Phren knows" drawer and "Remember this" selection ----
@@ -786,7 +788,7 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   // ---- older pages ----
-  timeline.onScrollTop?.(() => {
+  function loadOlder() {
     // The snapshot's cursor is not usable until the live backlog replaces it.
     if (!backlogLoaded || loadingOlder || !history.hasMore || history.startLine === null) return;
     loadingOlder = true;
@@ -797,7 +799,8 @@ export function openChat(el, computerName, child, opts = {}) {
       })
       .catch(() => {})
       .finally(() => { loadingOlder = false; });
-  });
+  }
+  timeline.onScrollTop?.(loadOlder);
 
   // ---- rename ----
   function startRename() {

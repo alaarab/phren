@@ -10,6 +10,7 @@ import * as kit from "/vendor/kit/index.js";
 import { parsePatch, wordSegments } from "../patch.js";
 import { renderMarkdownInto } from "./markdown.js";
 import { hookGet } from "../api.js";
+import { createOutline } from "./outline.js";
 
 let styleLinked = false;
 function ensureStyle() {
@@ -150,12 +151,18 @@ function countsAsMessage(entry) {
   return message.role === "user" || message.role === "assistant";
 }
 
+/** A prompt the outline lists: a user bubble with text (not a tool result or a queued echo). */
+function isPrompt(entry) {
+  return countsAsMessage(entry) && entry.messages[0].role === "user" && !!String(entry.messages[0].text || "").trim();
+}
+
 /**
  * The timeline view.
  * @param {HTMLElement} container element to fill and own
  * @param {{computer:string, source?:string, target?:object,
  *          openFile?:(path:string, opts?:object)=>void,
- *          openSubagent?:(child:any)=>void, insert?:(text:string)=>void}} ctx
+ *          openSubagent?:(child:any)=>void, insert?:(text:string)=>void,
+ *          hasOlder?:()=>boolean, loadOlder?:()=>void}} ctx
  */
 export function createTimelineView(container, ctx = {}) {
   ensureStyle();
@@ -165,6 +172,7 @@ export function createTimelineView(container, ctx = {}) {
   const scroll = h("div", "ct-scroll");
   const column = h("div", "ct-column");
   scroll.append(column);
+  scroll.tabIndex = -1; // a click in the transcript puts focus here, so Alt+Up/Down reach the outline
   const jump = h("button", "ct-jump", "Jump to latest");
   jump.type = "button";
   jump.hidden = true;
@@ -181,6 +189,8 @@ export function createTimelineView(container, ctx = {}) {
   let foldHidden = false;     // this render hid turns behind the fold
   let lastPreparation = null; // re-render arguments for the fold's click
   let lastPreview = null;
+  let promptRows = [];        // the user prompts drawn now: { id, el, text }
+  let promptTotal = 0;        // every loaded prompt, folded ones included
 
   const distanceFromBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
   const isAtBottom = () => distanceFromBottom() < 40;
@@ -213,6 +223,20 @@ export function createTimelineView(container, ctx = {}) {
   });
   follow.observe(column);
   follow.observe(scroll);
+
+  // The prompt outline: a rail of ticks along the right edge (chat/outline.js).
+  const outline = createOutline({
+    root: container, scroll,
+    prompts: () => promptRows,
+    total: () => promptTotal,
+    earlier: () => {
+      if (foldHidden) return () => { expandedAll = true; render(lastPreparation, lastPreview); };
+      if (ctx.hasOlder?.()) return () => ctx.loadOlder?.();
+      return null;
+    },
+  });
+  const outlineObserver = new ResizeObserver(() => outline.schedule());
+  outlineObserver.observe(column);
 
   // Images: transcript attachments and tool-result pictures, fetched through the
   // daemon only once their row scrolls into view. Object URLs are revoked with
@@ -355,6 +379,8 @@ export function createTimelineView(container, ctx = {}) {
 
     const live = [];
     const seen = new Set();
+    promptRows = [];
+    promptTotal = entries.filter(isPrompt).length;
     entries.forEach((entry, index) => {
       const id = ids[index];
       seen.add(id); // hidden rows keep their cache so expanding is instant
@@ -373,6 +399,7 @@ export function createTimelineView(container, ctx = {}) {
       if (row.live) live.push(row.live);
       row.el.setAttribute("data-row-id", id); // find in chat keeps its place across a re-rendered row
       ordered.push(row.el);
+      if (isPrompt(entry)) promptRows.push({ id, el: row.el, text: kit.VoiceMarker.hidden(entry.messages[0].text) });
     });
     for (const [id, row] of [...rows]) if (!seen.has(id)) { row.cleanup?.(); row.el.remove(); rows.delete(id); }
 
@@ -390,6 +417,7 @@ export function createTimelineView(container, ctx = {}) {
       scroll.scrollTop = beforeTop + (scroll.scrollHeight - beforeHeight);
     }
     updateJump();
+    outline.schedule();
   }
 
   /** The fold row at the top of the column: N previous messages, or hide earlier. */
@@ -1210,6 +1238,8 @@ export function createTimelineView(container, ctx = {}) {
     destroy() {
       clearInterval(tick);
       follow.disconnect();
+      outlineObserver.disconnect();
+      outline.destroy();
       imageObserver.disconnect();
       for (const row of rows.values()) row.cleanup?.();
       rows.clear();
