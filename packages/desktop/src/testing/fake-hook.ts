@@ -69,7 +69,8 @@ function defaultSession() {
     agent: "claude",
     agentStatus: "working",
     currentStep: "Checking the login guard",
-    cwd: "/Users/you/phren",
+    cwd: "/Users/you/phren-checkout/src",
+    project: "phren",
     branch: "main",
     lastChangedAt: new Date().toISOString(),
     target: { server: "default", workspace: "1", tab: "1", pane: "1", source: "claude", session: "sess-fix-login" },
@@ -111,7 +112,7 @@ function defaultHealth() {
     computer: { id: "test-computer", name: "This computer" },
     capabilities: {
       fileWrite: true, fileSearch: true, gitReview: true, files: true, fileResolution: true, repositoryFiles: true,
-      schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
+      moveToComputer: true, moveConductorToComputer: true, claudeAccountAdd: true, moveNewChat: true, moveConductor: true, schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
     },
   };
 }
@@ -310,6 +311,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   await rm(socketPath, { force: true });
 
   const calls: FakeHookCall[] = [];
+  const moves = new Map<string, unknown>();
   const overviewSockets = new Set<WebSocket>();
   const transcriptSockets = new Set<{ ws: WebSocket; session: string }>();
   const statusSockets = new Set<WebSocket>();
@@ -335,14 +337,42 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
       } } };
     },
     "GET /v1/projects/repos": () => ({ json: { repos: [
-      { name: "phren", directory: "/Users/you/phren", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
-      { name: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
+      { name: "phren-checkout", project: "phren", directory: "/Users/you/phren-checkout", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
+      { name: "website", project: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
     ] } }),
     "GET /v1/projects/website/memory": () => ({ json: { project: "website", findings: [{ id: "fid:website", text: "Route website requests through the preview host." }], truths: [], tasks: [] } }),
     "GET /v1/projects/website/memory/search": () => ({ json: { results: [{ kind: "finding", text: "Route website requests through the preview host.", score: 0.95, finding: { id: "fid:website", type: "pattern" } }] } }),
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [SAMPLE_FINDING], truths: [], tasks: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),
+    "GET /v1/harnesses": () => ({ json: { harnesses: [
+      { source: "claude", installed: true, usable: true, accounts: [{ id: "default", label: "Personal", usable: true }] },
+      { source: "codex", installed: true, usable: true },
+    ] } }),
+    "GET /v1/sessions/move/computers": () => ({ json: { localClaudeLogins: 1, computers: [
+      { name: "This computer", computerId: "test-computer", self: true, online: true, hasCheckout: true, harnesses: [{ source: "claude", usable: true, accounts: [{ id: "default", label: "Personal", email: "personal@example.com", plan: "Pro", usable: true, current: true, fiveHourLeft: 4, weekLeft: 12 }] }, { source: "codex", usable: true }] },
+      { name: "Studio", computerId: "sample-studio", self: false, online: true, hasCheckout: true, harnesses: [
+        { source: "claude", usable: true, accounts: [
+          { id: "work", label: "Work", email: "work@example.com", plan: "Max", usable: true, current: false, fiveHourLeft: 62, weekLeft: 48, fiveHourResetsAt: "2026-10-16T18:00:00Z" },
+          { id: "personal", label: "Personal", email: "personal@example.com", plan: "Pro", usable: true, current: false, fiveHourLeft: 84, weekLeft: 71, weekResetsAt: "2026-10-16T19:00:00Z" },
+        ] }, { source: "codex", usable: true },
+      ] },
+      { name: "Laptop", computerId: "sample-laptop", self: false, online: false, hasCheckout: false, harnesses: [] },
+    ] } }),
+    "POST /v1/accounts/claude/add": (_req, body) => {
+      const slug = (body as { slug?: string })?.slug ?? "";
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(slug) || slug === "default") return { status: 400, json: { error: "Invalid account short name" } };
+      return { json: { target: { server: "default", workspace: "1", tab: "login", pane: `login-${slug}` } } };
+    },
+    "POST /v1/sessions/move": (_req, body) => {
+      const data = body as { id: string; target: object; to: { computer?: string; harness: string; account?: string } };
+      if (data.to.computer && data.to.computer !== "Studio") return { status: data.to.computer === "Laptop" ? 409 : 404, json: { error: "Computer unavailable" } };
+      const target = { ...data.target, source: data.to.harness, session: `continued-${data.id}` };
+      const move = { id: data.id, state: "moved", to: data.to, target, ...(data.to.computer ? { handedOffTo: { computer: data.to.computer, target } } : {}) };
+      moves.set(data.id, move);
+      return { json: { move } };
+    },
+    "GET /v1/sessions/move": (req) => ({ json: { move: moves.get(new URL(req.url ?? "/", "http://hook").searchParams.get("id") ?? "") } }),
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),
     "POST /v1/keys": () => ({ json: { ok: true } }),
     "POST /v1/schedules": () => ({ status: 200, json: defaultSchedules() }),

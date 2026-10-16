@@ -6,6 +6,14 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [0.1.11] - unreleased
 
+- Continue in shows compact local reset times and scrolls all rows and the complete login hint above its pinned footer, including on narrow windows.
+
+- Continue in maps peer identities to desktop connections, recovers local choices from incomplete inventories, releases controls after a moved chat cannot be opened, and keeps account-login actions focused, unique and usable on narrow windows.
+
+- Continue in lists Claude accounts across computers first, with email, plan and usage; add an account through an interactive login pane, gate conductor transfers on Hook support, and resolve nested session folders to their registered project.
+
+- Continue a chat on another computer with harness/account usage, unavailable-computer reasons and a copyable single-Claude-login hint (Hook `moveToComputer`).
+
 - Search memory across projects on online computers from the command palette with `??`, or `?` without a project scope, with ranked, labelled results and cancellable searches.
 
 - Home’s Up next rows offer Run now with inline confirmation, launch status and errors; Working rows omit blank activity lines.

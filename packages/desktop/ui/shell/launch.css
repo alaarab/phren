@@ -192,3 +192,24 @@
 .quota-warning .launch-foot { padding: 6px 10px; gap: 6px; flex-wrap: wrap; }
 .quota-warning .launch-btn { height: auto; min-height: 30px; padding: 4px 10px; white-space: normal; }
 .quota-alternatives, .quota-warning .launch-hint { overflow-wrap: anywhere; }
+
+.move-copy-command { font: inherit; font-family: var(--mono); color: inherit; background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; user-select: text; overflow-wrap: anywhere; }
+.move-login-hint { overflow-wrap: anywhere; }
+
+.move-destination { display: block; width: 100%; white-space: normal; overflow-wrap: anywhere; font: inherit; }
+.move-destination:disabled { opacity: .55; cursor: default; }
+.move-sheet [hidden] { display: none !important; }
+
+.move-add-account { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; height: auto; min-height: 34px; padding-block: 6px; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.move-login-hint .move-add-account { display: block; margin-top: 10px; }
+.move-add-account + .launch-note { margin-top: 6px; }
+
+/* Keep every row in normal flow inside the scrollport; grid auto tracks can
+   compress below wrapped hints while the footer remains visible. */
+.move-sheet { max-height: min(88dvh, calc(100dvh - 48px)); min-height: 0; }
+.move-sheet .launch-body { display: block; flex: 1 1 auto; min-height: 0; padding-bottom: 18px; overflow-y: auto; overscroll-behavior: contain; }
+.move-sheet .launch-body > * { margin: 0 0 14px; }
+.move-sheet .launch-body > :last-child { margin-bottom: 0; }
+.move-sheet .launch-foot { position: static; flex: 0 0 auto; }
+.move-account-title { display: block; }
+.move-account-usage { display: block; white-space: nowrap; font-size: 11.5px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; }
