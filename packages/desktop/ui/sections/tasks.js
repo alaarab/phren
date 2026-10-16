@@ -179,6 +179,7 @@ export function mountTasks(root) {
     }
     renderProjects();
     renderMain();
+    syncSelection(); // a task opened from Home before the store loaded lands on its row
   }
 
   async function reloadProject(project) {
