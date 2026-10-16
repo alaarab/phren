@@ -15,7 +15,8 @@ const configSchema = z.object({ listenPort: z.number().int().min(1).max(65535), 
 
 async function privateText(file: string, cap: number): Promise<string> {
   const info = await lstat(file);
-  if (!info.isFile() || info.isSymbolicLink() || info.size > cap || (info.mode & 0o077)
+  // POSIX permission bits carry no meaning on Windows (ACLs); there only file type and size are checked.
+  if (!info.isFile() || info.isSymbolicLink() || info.size > cap || (process.platform !== "win32" && (info.mode & 0o077))
     || (process.getuid && info.uid !== process.getuid())) throw new Error("Unsafe private webhook file.");
   return readFile(file, "utf8");
 }
