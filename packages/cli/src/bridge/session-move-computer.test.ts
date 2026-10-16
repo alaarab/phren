@@ -228,6 +228,25 @@ describe("review regressions", () => {
     expect(f.sent.some(call => call.route.includes("/launch"))).toBe(false);
   });
 
+  it("does not route a moved worker's approvals to another SSH account on the same host", async () => {
+    const f = fixture();
+    const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
+    await f.mover.settled(from.server, from.pane);
+    const moved = (await readMove(move.id))!;
+    const observation = (await workerStates({ targets: [from] }, { moves: async () => [moved] } as never)).workers[0];
+    const enrolled = (await peers.hookPeers())[0];
+    const anotherAccount = { ...enrolled, username: "another_owner" };
+    const receipt = { id: "old", computer: "worker-source", harness: "claude", target: from } as Receipt;
+    observe(receipt, observation, Date.now(), [anotherAccount]);
+    expect(receipt.computer).toBe("worker-source");
+    expect(receipt.target).toEqual(from);
+    expect(receipt.error).toContain("destination identity");
+    // The same enrolled OS account still resolves through a different local alias.
+    observe(receipt, observation, Date.now(), [{ ...enrolled, name: "same-owner" }]);
+    expect(receipt.computer).toBe("same-owner");
+    expect(receipt.target).toEqual(target);
+  });
+
   it.each([true, false])("uses the dispatcher's pinned destination identity across differing aliases (identity known: %s)", async known => {
     const f = fixture();
     const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });

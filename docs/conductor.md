@@ -683,11 +683,11 @@ pins that choice in `to.account`, records `accountChoice`, and advertises the
 listing's `selectedAccount`, so the receiving launcher uses the reported login.
 
 Moved-worker observations carry `computerFingerprint`, derived from the
-verified SSH host key, and `computerId`, advertised by the destination Hook's
-local availability endpoint. A destination matching the dispatching Hook's own
-stable ID is routed locally, so A→B→A moves preserve returns and approvals
-without listing self as a peer. The dispatching Hook resolves it against its own pinned
-peer directory and records its own destination name. It never treats another
+verified SSH host key and enrolled SSH username, and `computerId`, advertised by
+the destination Hook's local availability endpoint. A destination matching the
+dispatching Hook's own stable ID is routed locally, so A→B→A moves preserve
+returns and approvals without listing self as a peer. The dispatching Hook
+resolves it against its own pinned peer directory and records its own destination name. It never treats another
 Hook's alias as a local address. An absent or ambiguous identity retains the
 previous receipt routing and reports an error; it cannot send returns or
 approvals to a different computer that happens to share the alias.

@@ -33,9 +33,9 @@ export function isLocalComputer(name: string, names: readonly string[] = localNa
   });
 }
 
-/** Public pinned host-key identity; aliases and trailing key comments are local. */
-export function peerFingerprint(peer: Pick<HookPeer, "hostKey">): string {
-  return createHash("sha256").update(peer.hostKey.trim().split(/\s+/).slice(0, 2).join(" ")).digest("hex");
+/** Pinned host and SSH account identity; aliases and key comments are local. */
+export function peerFingerprint(peer: Pick<HookPeer, "hostKey" | "username">): string {
+  return createHash("sha256").update(JSON.stringify([peer.hostKey.trim().split(/\s+/).slice(0, 2).join(" "), peer.username])).digest("hex");
 }
 
 export function peerHost(peer: HookPeer, request: typeof peerRequest = peerRequest): DispatchHost {
