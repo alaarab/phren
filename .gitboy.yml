@@ -1,0 +1,204 @@
+# Parallel release candidate on a gitboy instance (see docs/gitboy-ci.md).
+#
+# GitHub Actions stays authoritative: release.yml only reads GitHub's own RC
+# run. This pipeline runs the same RC suites on Linux Docker runners and on a
+# self-hosted macOS shell runner, and reports one advisory `gitboy/rc` commit
+# status back to GitHub. Windows, npm publish and the desktop installers stay
+# on GitHub.
+#
+# It is started only through the API (or the Console's Run pipeline), never by
+# a push: the RC job in .github/workflows/ci.yml posts
+#   POST /api/v1/repos/:owner/:repo/pipelines
+#   {"ref": "<sha>", "variables": {"PHREN_RC": "true", "PHREN_RC_SHA": "<sha>", ...}}
+# so the pipeline runs at exactly the commit GitHub's RC runs.
+
+workflow:
+  rules:
+    - if: '$PHREN_RC == "true" && $GITBOY_PIPELINE_SOURCE == "manual"'
+
+stages: [report-start, test, report]
+
+variables:
+  # Overridden by the trigger; the defaults keep a Console-started run useful.
+  PHREN_RC_SHA: ""
+  GITHUB_REPOSITORY: alaarab/phren
+  GITHUB_STATUS_CONTEXT: gitboy/rc
+  CI: "true"
+
+default:
+  image: node:26
+  tags: [docker, linux]
+  timeout: 30 minutes
+
+# pnpm at the version package.json pins, installed outside the workspace so it
+# never touches the runner's global tools (the macOS runner is a shell executor
+# on the owner's own account). Node 25+ ships without corepack.
+.pnpm:
+  before_script:
+    - node --version
+    - PNPM_VERSION="$(node -p "require('./package.json').packageManager.split('@')[1].split('+')[0]")"
+    - PNPM_TOOLS="${TMPDIR:-/tmp}/phren-ci-pnpm-$PNPM_VERSION"
+    - test -x "$PNPM_TOOLS/node_modules/.bin/pnpm" || npm install --silent --no-audit --no-fund --prefix "$PNPM_TOOLS" "pnpm@$PNPM_VERSION"
+    - export PATH="$PNPM_TOOLS/node_modules/.bin:$PATH"
+    - pnpm --version
+    - pnpm install --frozen-lockfile --store-dir .pnpm-store
+
+.linux:
+  extends: .pnpm
+  tags: [docker, linux]
+  cache:
+    key: {files: [pnpm-lock.yaml], prefix: pnpm-linux}
+    paths: [.pnpm-store/]
+
+.macos:
+  extends: .pnpm
+  tags: [macos]
+  cache:
+    key: {files: [pnpm-lock.yaml], prefix: pnpm-macos}
+    paths: [.pnpm-store/]
+
+# Mirrors ci.yml build-and-test (ubuntu, Node 22 and 26) in RC mode.
+build-and-test:
+  extends: .linux
+  stage: test
+  needs: []
+  image: node:$NODE
+  parallel:
+    matrix:
+      - {NODE: ["22", "26"]}
+  script:
+    # The tmux provider's integration test runs against a real tmux.
+    - apt-get update -qq && apt-get install -y -qq tmux >/dev/null
+    - pnpm build
+    - pnpm test --coverage --maxWorkers=2
+
+# Mirrors ci.yml build-and-test on macos. The shell executor ignores `image`,
+# so this uses the Mac's own Node (printed in before_script).
+build-and-test-macos:
+  extends: .macos
+  stage: test
+  needs: []
+  timeout: 45 minutes
+  script:
+    # Never install into the owner's Homebrew; without tmux the tmux provider's
+    # integration test skips itself.
+    - command -v tmux >/dev/null || echo "tmux not found; the tmux integration test will skip"
+    - pnpm build
+    - pnpm test --coverage --maxWorkers=2
+
+lint:
+  extends: .linux
+  stage: test
+  needs: []
+  timeout: 15 minutes
+  script:
+    - pnpm lint
+    - pnpm run check-private-strings
+    - pnpm build
+    - |
+      for package in cli code agent vscode push-relay; do
+        pnpm exec tsc --noEmit -p "packages/$package/tsconfig.json"
+      done
+
+agent-test:
+  extends: .linux
+  stage: test
+  needs: []
+  timeout: 15 minutes
+  script:
+    - pnpm exec turbo run build --filter=@phren/agent
+    - pnpm --filter @phren/agent test
+
+validate-docs:
+  extends: .linux
+  stage: test
+  needs: []
+  timeout: 10 minutes
+  script:
+    - pnpm run validate-docs
+
+# Mirrors ci.yml browser-test. Native Docker jobs run as the image's user
+# (root for node:26), so Playwright can install Chromium's system packages.
+browser-test:
+  extends: .linux
+  stage: test
+  needs: []
+  timeout: 45 minutes
+  script:
+    - pnpm exec playwright install --with-deps chromium
+    - pnpm test:e2e
+    - pnpm --filter @phren/desktop-kit build
+    - pnpm --filter @phren/desktop build
+    - pnpm --filter @phren/desktop-editor build
+    - pnpm exec playwright test -c packages/desktop/playwright.config.ts
+  artifacts:
+    name: desktop-playwright
+    paths: [coverage/desktop-playwright/]
+    when: on_failure
+    expire_in: 3 days
+
+# Commit status on GitHub. GITHUB_STATUS_TOKEN is a masked (not protected:
+# a pipeline at a bare SHA is never on a protected ref) repository CI variable
+# holding a fine-grained token with "Commit statuses: write" on the GitHub
+# repository. Without it, or when GitHub's API refuses, these jobs log and
+# succeed, so reporting never turns the gitboy result red.
+.github-status:
+  image: node:26
+  tags: [docker, linux]
+  timeout: 5 minutes
+  variables:
+    STATE: pending
+    DESCRIPTION: ""
+  script:
+    - |
+      if [ -z "${GITHUB_STATUS_TOKEN:-}" ]; then
+        echo "GITHUB_STATUS_TOKEN is not set; not posting $STATE to GitHub."
+        exit 0
+      fi
+      TARGET_URL="$GITBOY_SERVER_URL/$GITBOY_REPO_PATH/pipelines/$GITBOY_PIPELINE_IID"
+      BODY="$(STATE="$STATE" TARGET_URL="$TARGET_URL" DESCRIPTION="$DESCRIPTION" CONTEXT="$GITHUB_STATUS_CONTEXT" node -e '
+        const e = process.env;
+        process.stdout.write(JSON.stringify({ state: e.STATE, target_url: e.TARGET_URL, description: e.DESCRIPTION, context: e.CONTEXT }));
+      ')"
+      printf 'Authorization: Bearer %s\n' "$GITHUB_STATUS_TOKEN" | curl -fsS -o /dev/null \
+        -X POST -H @- \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        --data "$BODY" \
+        "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITBOY_SHA" \
+        && echo "Posted $STATE for $GITBOY_SHA to $GITHUB_REPOSITORY ($GITHUB_STATUS_CONTEXT)." \
+        || echo "Could not post $STATE to GitHub; the gitboy result above still stands."
+
+github-status-pending:
+  extends: .github-status
+  stage: report-start
+  needs: []
+  # Fails the pipeline when the trigger asked for one commit and gitboy
+  # resolved another.
+  variables:
+    STATE: pending
+    DESCRIPTION: Release candidate running on gitboy
+  before_script:
+    - |
+      if [ -n "$PHREN_RC_SHA" ] && [ "$PHREN_RC_SHA" != "$GITBOY_SHA" ]; then
+        echo "Asked for $PHREN_RC_SHA but the pipeline runs $GITBOY_SHA."
+        exit 1
+      fi
+
+github-status-success:
+  extends: .github-status
+  stage: report
+  needs: [github-status-pending, build-and-test, build-and-test-macos, lint, agent-test, validate-docs, browser-test]
+  when: on_success
+  variables:
+    STATE: success
+    DESCRIPTION: Release candidate passed on gitboy (Linux and macOS)
+
+github-status-failure:
+  extends: .github-status
+  stage: report
+  needs: [github-status-pending, build-and-test, build-and-test-macos, lint, agent-test, validate-docs, browser-test]
+  when: on_failure
+  variables:
+    STATE: failure
+    DESCRIPTION: Release candidate failed on gitboy
