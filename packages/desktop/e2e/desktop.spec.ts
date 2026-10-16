@@ -1251,9 +1251,12 @@ test("Memory can filter to findings that may be out of date and combine it with 
   await expect(toggle).toHaveText("May be out of date (3)");
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
+  const focusedFilter = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.filter);
   await toggle.focus();
   await page.keyboard.press("Enter");
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(await focusedFilter()).toBe("stale");
+  await expect(page.locator('.mem-chip[data-filter="all"]')).not.toHaveClass(/\bon\b/);
   await expect(rows).toHaveCount(3);
   await expect(page.locator(".mem-row .mem-tag.warn")).toHaveCount(3);
   await expect(toggle).toHaveText("May be out of date (3)");
@@ -1265,8 +1268,21 @@ test("Memory can filter to findings that may be out of date and combine it with 
   await expect(page.locator(".mem-empty")).toHaveText("No matches.");
 
   await page.locator(".mem-search").fill("");
-  await toggle.click();
+  await page.locator('.mem-chip[data-filter="stale"]').focus();
+  await page.keyboard.press("Enter");
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(await focusedFilter()).toBe("stale");
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  expect(await focusedFilter()).toBe("stale");
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+  // The count follows the chosen type: only the decision is stale among decisions.
+  await page.locator('.mem-chip[data-filter="tag:decision"]').click();
+  await expect(toggle).toHaveText("May be out of date (1)");
+  expect(await focusedFilter()).toBe("tag:decision");
+  await page.locator('.mem-chip[data-filter="tag:decision"]').click();
   await expect(rows).toHaveCount(5);
 });
 

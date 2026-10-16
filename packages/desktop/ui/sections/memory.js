@@ -385,7 +385,7 @@ export function mountMemory(root) {
   }
 
   // ── Findings ───────────────────────────────────────────────────────────
-  function renderFindings() {
+  function renderFindings(focusKey) {
     const inner = pane();
     const toolbar = el("div", "mem-toolbar");
     const search = el("input", "mem-search");
@@ -394,18 +394,20 @@ export function mountMemory(root) {
     search.value = state.search;
     toolbar.append(search);
     const tags = [...new Set(state.findings.map(findingTag).filter(Boolean))].sort();
-    const stale = staleCount(state.findings);
+    const stale = staleCount(state.type ? state.findings.filter((item) => findingTag(item) === state.type) : state.findings);
     if (!stale) state.stale = false;
     if (tags.length || stale) {
       const chips = el("div", "mem-chips");
-      const all = el("button", `mem-chip${state.type === null ? " on" : ""}`, "all");
+      const all = el("button", `mem-chip${state.type === null && !state.stale ? " on" : ""}`, "all");
       all.type = "button";
-      all.addEventListener("click", () => { state.type = null; renderFindings(); });
+      all.dataset.filter = "all";
+      all.addEventListener("click", () => { state.type = null; state.stale = false; renderFindings("all"); });
       chips.append(all);
       for (const tag of tags) {
         const chip = el("button", `mem-chip tag-${tag}${state.type === tag ? " on" : ""}`, tag);
         chip.type = "button";
-        chip.addEventListener("click", () => { state.type = state.type === tag ? null : tag; renderFindings(); });
+        chip.dataset.filter = `tag:${tag}`;
+        chip.addEventListener("click", () => { state.type = state.type === tag ? null : tag; renderFindings(`tag:${tag}`); });
         chips.append(chip);
       }
       if (stale) {
@@ -413,12 +415,16 @@ export function mountMemory(root) {
         chip.type = "button";
         chip.dataset.filter = "stale";
         chip.setAttribute("aria-pressed", String(state.stale));
-        chip.addEventListener("click", () => { state.stale = !state.stale; renderFindings(); });
+        chip.addEventListener("click", () => { state.stale = !state.stale; renderFindings("stale"); });
         chips.append(chip);
       }
       toolbar.append(chips);
     }
     inner.append(toolbar);
+    if (focusKey) {
+      const chips = [...toolbar.querySelectorAll("[data-filter]")];
+      (chips.find((chip) => chip.dataset.filter === focusKey) ?? chips.find((chip) => chip.dataset.filter === "all"))?.focus();
+    }
     const listEl = el("div", "mem-list");
     inner.append(listEl);
     search.addEventListener("input", () => { state.search = search.value; renderFindingList(listEl); });
