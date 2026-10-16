@@ -398,7 +398,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (url.pathname === "/v1/store/pull-now") {
         if (request.method !== "POST") throw new BridgeError(405, "Unsupported request method.");
         if (!ctx.storePulls) throw new BridgeError(503, "Store pulls unavailable.");
-        result = ctx.storePulls.route(request, await body(request));
+        result = await ctx.storePulls.route(request, await body(request));
       } else if (url.pathname.startsWith("/v1/store/")) {
         result = await storeRoute(modules.store, request.method ?? "", url, request.method === "POST" ? await body(request) : undefined);
       } else if (request.method === "GET") {

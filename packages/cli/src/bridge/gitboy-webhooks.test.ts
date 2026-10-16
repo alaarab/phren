@@ -10,7 +10,7 @@ import { GitboyWebhooks } from "./gitboy-webhooks.js";
 let root: string;
 let receiver: GitboyWebhooks;
 let port: number;
-const pull = vi.fn(() => true);
+const pull = vi.fn(() => "11223344");
 const transport = vi.hoisted(() => ({ send: vi.fn(async () => ({})) }));
 vi.mock("./peers.js", () => ({
   optionalHookPeers: async () => ({ peers: [{ name: "peer-a" }, { name: "peer-b" }] }),
@@ -24,7 +24,7 @@ beforeEach(async () => {
   await new Promise<void>(resolve => probe.close(() => resolve()));
   receiver = new GitboyWebhooks(root, pull);
 });
-afterEach(async () => { receiver.stop(); vi.clearAllMocks(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { receiver.stop(); vi.useRealTimers(); vi.clearAllMocks(); await rm(root, { recursive: true, force: true }); });
 const stores = [{ storeId: "1234abcd", owner: "alice", name: "memory", branch: "main", secret: "private-secret" }];
 async function configure(entries = stores) {
   await writeFile(path.join(root, "gitboy-webhooks.json"), JSON.stringify({ listenPort: port, stores: entries }), { mode: 0o600 });
@@ -34,11 +34,11 @@ async function configure(entries = stores) {
 function push(repo = "alice/memory", branch = "main") {
   return Buffer.from(JSON.stringify({ repository: { full_name: repo }, updates: [{ ref: `refs/heads/${branch}`, old: "a".repeat(40), new: "b".repeat(40) }] }));
 }
-function send(body: Buffer, signature: string | null = sign(body), delivery = "delivery-1", url = "/gitboy/push", method = "POST"): Promise<number> {
+function send(body: Buffer, signature: string | null = sign(body), delivery = "delivery-1", url = "/gitboy/push", method = "POST", headers: Record<string, string> = {}): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = request({ host: "127.0.0.1", port, path: url, method, headers: {
-      "Content-Length": body.length, "X-Gitboy-Event": "push", "X-Gitboy-Delivery": delivery,
-      ...(signature === null ? {} : { "X-Hub-Signature-256": signature }),
+      "Content-Type": "application/json", "Content-Length": body.length, "X-Gitboy-Event": "push", "X-Gitboy-Delivery": delivery,
+      ...(signature === null ? {} : { "X-Hub-Signature-256": signature }), ...headers,
     } }, res => { res.resume(); res.once("end", () => resolve(res.statusCode!)); });
     req.on("error", reject);
     // An oversized declared length is refused before the server reads bytes.
@@ -64,7 +64,7 @@ it("accepts a signed push quickly, pulls once, deduplicates retries and nudges p
   let release!: () => void;
   transport.send.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
   expect(await send(push())).toBe(202);
-  await vi.waitFor(() => expect(transport.send).toHaveBeenCalledWith({ name: "peer-b" }, "/v1/store/pull-now", { storeId: "1234abcd" }, 15_000));
+  await vi.waitFor(() => expect(transport.send).toHaveBeenCalledWith({ name: "peer-b" }, "/v1/store/pull-now", { storeId: "11223344", repository: "alice/memory", branch: "main" }, 15_000));
   expect(pull).toHaveBeenCalledExactlyOnceWith("1234abcd");
   expect(transport.send).toHaveBeenCalledTimes(2);
   expect(await send(push())).toBe(200);
@@ -83,9 +83,9 @@ it.each(["bad", "missing"])("refuses %s signatures without pulling or consuming 
   expect(await send(push())).toBe(202);
 });
 
-it("returns 404 for unknown repositories and 200 for a non-matching branch", async () => {
+it("returns 401 for unknown repositories and 200 for a non-matching branch", async () => {
   await configure();
-  expect(await send(push("other/memory"))).toBe(404);
+  expect(await send(push("other/memory"))).toBe(401);
   expect(await send(push("alice/memory", "other"))).toBe(200);
   expect(receiver.status.lastOutcome).toBe("non-matching");
   expect(pull).not.toHaveBeenCalled(); expect(transport.send).not.toHaveBeenCalled();
@@ -126,10 +126,57 @@ it("loads a private secret file relative to the bridge directory", async () => {
 it("ends a stalled body read after the short deadline", async () => {
   await configure();
   const status = await new Promise<number>((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, path: "/gitboy/push", method: "POST", headers: { "Content-Length": 100 } }, res => {
+    const req = request({ host: "127.0.0.1", port, path: "/gitboy/push", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": 100 } }, res => {
       res.resume(); res.once("end", () => resolve(res.statusCode!));
     });
     req.on("error", reject); req.write("{");
   });
   expect(status).toBe(408); expect(pull).not.toHaveBeenCalled();
+});
+
+it("authenticates bytes before parsing and gives unknown repos and invalid signatures the same refusal", async () => {
+  await configure();
+  expect(await send(Buffer.from("{"), "sha256=" + "0".repeat(64))).toBe(401);
+  expect(await send(push("other/repo"))).toBe(401);
+  expect(await send(push(), sign(push(), "wrong"))).toBe(401);
+  expect(await send(Buffer.from("{"))).toBe(400);
+  expect(pull).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["host", "rebound.example"], ["host", "127.0.0.1"], ["origin", "http://127.0.0.1"],
+  ["sec-fetch-mode", "cors"], ["sec-fetch-site", "none"], ["content-type", "text/plain"],
+])("rejects browser or non-JSON requests (%s: %s)", async (key, value) => {
+  await configure();
+  expect(await send(push(), sign(push()), "browser", "/gitboy/push", "POST", { [key]: value })).toBe(key === "content-type" ? 415 : 403);
+  expect(pull).not.toHaveBeenCalled(); expect(transport.send).not.toHaveBeenCalled();
+});
+
+it("accepts the explicit localhost authority", async () => {
+  await configure();
+  expect(await send(push(), sign(push()), "localhost", "/gitboy/push", "POST", { Host: `localhost:${port}` })).toBe(202);
+});
+
+it("deduplicates signed bytes even if an unsigned delivery header changes", async () => {
+  await configure();
+  expect(await send(push())).toBe(202);
+  await vi.waitFor(() => expect(pull).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(transport.send).toHaveBeenCalledTimes(2));
+  expect(await send(push(), sign(push()), "new-delivery-id")).toBe(200);
+  expect(pull).toHaveBeenCalledTimes(1); expect(transport.send).toHaveBeenCalledTimes(2);
+});
+
+it("coalesces peer fan-out for distinct signed pushes into one round per ten seconds", async () => {
+  await configure();
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  expect(await send(push())).toBe(202);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(transport.send).toHaveBeenCalledTimes(2);
+  for (let i = 0; i < 5; i++) {
+    const body = Buffer.from(push().toString().replace('"old":', `"sequence":${i},"old":`));
+    expect(await send(body, sign(body), `burst-${i}`)).toBe(202);
+  }
+  await vi.advanceTimersByTimeAsync(9999); expect(transport.send).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1); expect(transport.send).toHaveBeenCalledTimes(4);
+  await vi.advanceTimersByTimeAsync(20_000); expect(transport.send).toHaveBeenCalledTimes(4);
 });

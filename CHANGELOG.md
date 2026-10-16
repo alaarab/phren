@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Harden gitboy webhook sync: authenticate before parsing, reject browser requests, deduplicate signed bodies and rate-limit peer fan-out; resolve nudges by portable store identity and local checkout, and retry busy Git operations within a bounded budget.
+
 ### Added
 
 - Optional instant store sync from signed gitboy push webhooks: a private, default-off loopback receiver triggers coordinated pulls and nudges verified peer Hooks over SSH; health details report receiver and delivery state.
