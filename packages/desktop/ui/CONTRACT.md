@@ -719,7 +719,12 @@ The Projects handle's `projects()` supplies computer, name and `lastSeen` from
 its existing repo/store discovery. The newest 12 computer/project pairs are
 searched, with at most four `/v1/projects/:project/memory/search` reads in flight.
 An AbortController cancels reads on a new query, mode change or close; stale
-answers cannot paint. Results merge by descending Hook score, capped at 20.
+answers cannot paint. The palette shares its four pending reads across queries;
+the daemon holds four memory-search slots until the Hook request settles,
+including SSH teardown after a browser disconnect. The proxy forwards a per-request
+AbortSignal on an incomplete request close or response close before finish.
+Results merge by distinct query tokens `matched` descending, then Hook score,
+then project `lastSeen` recency, capped at 20.
 Each row labels project and computer and opens that exact Memory destination.
 A capped search shows “Searched N of M projects” (N successful reads); failures
 are reported without dropping successful results. Scoped `?` retains its quick

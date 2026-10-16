@@ -106,6 +106,8 @@ it.each(["? newer", "> command", "close"])("aborts in-flight searches on %s and 
   if (next === "? newer") {
     await vi.advanceTimersByTimeAsync(250);
     expect(state.get.mock.calls.slice(2).map((c) => c[2].q)).toEqual(["newer", "newer"]);
+    pending.slice(2).forEach((resolve) => resolve({ results: [] }));
+    await vi.advanceTimersByTimeAsync(0);
   }
 });
 
@@ -137,4 +139,40 @@ it("retains keyed memory rows and input focus when project discovery repaints th
   expect(nodes("palette-row")[0]).toBe(rows[0]);
   expect(doc.activeElement).toBe(input);
   expect(state.get).toHaveBeenCalledTimes(2);
+});
+
+it("ranks distinct matched tokens before project-relative score, then score and project recency", async () => {
+  state.projects = [
+    { name: "alpha", computer: "mini", lastSeen: "2026-10-15T12:00:00Z" },
+    { name: "beta", computer: "jets", lastSeen: "2026-10-14T12:00:00Z" },
+  ];
+  state.get.mockImplementation(async (computer: string) => ({ results: computer === "mini" ? [
+    { ...hit("one token", 1), matched: 1 },
+    { ...hit("recent tie", 0.3), finding: { id: "recent" }, matched: 2 },
+  ] : [
+    { ...hit("fuller match", 0.4), matched: 2 },
+    { ...hit("older tie", 0.3), finding: { id: "older" }, matched: 2 },
+  ] }));
+  openPalette(); type("?? login token");
+  await vi.advanceTimersByTimeAsync(250);
+  expect(nodes("palette-title").map(text)).toEqual(["fuller match", "recent tie", "older tie", "one token"]);
+});
+
+it("counts unsettled reads from a superseded query against the shared palette cap", async () => {
+  state.projects = Array.from({ length: 6 }, (_, i) => ({ name: `p${i}`, computer: "mini" }));
+  const pending: ((value: object) => void)[] = [];
+  state.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  openPalette(); type("? old");
+  await vi.advanceTimersByTimeAsync(250);
+  expect(state.get).toHaveBeenCalledTimes(4);
+  type("? new");
+  await vi.advanceTimersByTimeAsync(250);
+  expect(state.get).toHaveBeenCalledTimes(4);
+  pending.slice(0, 4).forEach((resolve) => resolve({ results: [] }));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(state.get).toHaveBeenCalledTimes(8);
+  expect(state.get.mock.calls.slice(4).every((call) => call[2].q === "new")).toBe(true);
+  closePalette();
+  pending.slice(4).forEach((resolve) => resolve({ results: [] }));
+  await vi.advanceTimersByTimeAsync(0);
 });

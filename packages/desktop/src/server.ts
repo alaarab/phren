@@ -9,7 +9,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
-import type { MergedOverview, StartServer, TerminalSession } from "./contract.js";
+import type { HookRequest, MergedOverview, StartServer, TerminalSession } from "./contract.js";
 import { ACTIONS, loadKeyConfig } from "./keys-config.js";
 import { linkComputer, revokeComputer } from "./keys.js";
 import { nodeExtensionsEnabled, rehStatus, setNodeExtensionsEnabled, stopReh } from "./reh.js";
@@ -264,6 +264,34 @@ async function readBody(req: IncomingMessage): Promise<Buffer | null> {
 }
 
 export const startServer: StartServer = async (o) => {
+  // Browser aborts settle fetch before SSH teardown finishes. Keep the shared
+  // memory-search slots until hookRequest itself settles, across all queries.
+  let memorySearches = 0;
+  const memoryWaiters = new Set<() => void>();
+  const proxyRequest: HookRequest = async (computer, method, requestPath, body, signal) => {
+    const memorySearch = method === "GET" && /^\/v1\/projects\/[^/]+\/memory\/search(?:\?|$)/.test(requestPath);
+    if (!memorySearch) return o.hookRequest(computer, method, requestPath, body, signal);
+    while (memorySearches >= 4) {
+      signal?.throwIfAborted();
+      await new Promise<void>((resolve) => {
+        const wake = () => {
+          memoryWaiters.delete(wake);
+          signal?.removeEventListener("abort", wake);
+          resolve();
+        };
+        memoryWaiters.add(wake);
+        signal?.addEventListener("abort", wake, { once: true });
+      });
+    }
+    signal?.throwIfAborted();
+    memorySearches++;
+    try { return await o.hookRequest(computer, method, requestPath, body, signal); }
+    finally {
+      memorySearches--;
+      for (const wake of memoryWaiters) wake();
+    }
+  };
+
   const overviewSockets = new Set<WebSocket>();
   const liveSockets = new Set<WebSocket>();
   const openHooks = new Set<WebSocket>();
@@ -840,35 +868,47 @@ export const startServer: StartServer = async (o) => {
         res.end("unknown computer");
         return;
       }
-      const buf = await readBody(req);
-      if (buf === null) {
-        res.writeHead(413, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end("payload too large");
-        return;
-      }
-      let body: unknown;
-      if (buf.length > 0) {
-        try {
-          body = JSON.parse(buf.toString("utf8"));
-        } catch {
-          res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-          res.end("invalid JSON");
+      const controller = new AbortController();
+      const requestClosed = () => { if (!req.complete) controller.abort(); };
+      const responseClosed = () => { if (!res.writableFinished) controller.abort(); };
+      req.on("close", requestClosed);
+      res.on("close", responseClosed);
+      try {
+        const buf = await readBody(req);
+        if (buf === null) {
+          res.writeHead(413, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("payload too large");
           return;
         }
-      }
-      try {
-        const hookRes = await o.hookRequest(computer, req.method ?? "GET", parsed.hookPath + url.search, body);
-        res.writeHead(hookRes.status, {
-          "Content-Type": headerValue(hookRes.headers, "content-type") ?? "application/json; charset=utf-8",
-          // Repository bytes (an .svg or .xml from /v1/files/range) must never
-          // run as a document on the app origin.
-          "X-Content-Type-Options": "nosniff",
-          "Content-Security-Policy": "sandbox",
-        });
-        res.end(hookRes.body);
-      } catch (err) {
-        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end(shortMessage(err));
+        let body: unknown;
+        if (buf.length > 0) {
+          try {
+            body = JSON.parse(buf.toString("utf8"));
+          } catch {
+            res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("invalid JSON");
+            return;
+          }
+        }
+        try {
+          const hookRes = await proxyRequest(computer, req.method ?? "GET", parsed.hookPath + url.search, body, controller.signal);
+          if (controller.signal.aborted) return;
+          res.writeHead(hookRes.status, {
+            "Content-Type": headerValue(hookRes.headers, "content-type") ?? "application/json; charset=utf-8",
+            // Repository bytes (an .svg or .xml from /v1/files/range) must never
+            // run as a document on the app origin.
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+          });
+          res.end(hookRes.body);
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end(shortMessage(err));
+        }
+      } finally {
+        req.off("close", requestClosed);
+        res.off("close", responseClosed);
       }
       return;
     }

@@ -57,7 +57,7 @@ interface Harness {
 
 const running: Harness[] = [];
 
-async function startHarness(track = true): Promise<Harness> {
+async function startHarness(track = true, proxy?: HookRequest): Promise<Harness> {
   const calls: Harness["calls"] = [];
   const hookRequest: HookRequest = async (_c, method, path, body) => {
     calls.push({ method, path, body });
@@ -77,7 +77,7 @@ async function startHarness(track = true): Promise<Harness> {
     token: TOKEN,
     computers: [{ name: "This computer", local: true, server: "default" }],
     hub,
-    hookRequest,
+    hookRequest: proxy ?? hookRequest,
     hookWebSocket,
     attachTerminal: () => {
       throw new Error("no terminal in tests");
@@ -503,5 +503,75 @@ describe("durable desktop quota settings", () => {
       expect((await send(second.port, { settings: { threshold: 100 } })).status).toBe(400);
       expect((await send(second.port, { settings: { backOn: "false" } })).status).toBe(400);
     } finally { vi.unstubAllEnvs(); await rm(config, { recursive: true, force: true }); }
+  });
+});
+
+
+describe("Hook proxy cancellation", () => {
+  it("keeps a completed browser GET alive until disconnect, then aborts its Hook request", async () => {
+    let signal: AbortSignal | undefined;
+    let started = false;
+    let finish = () => {};
+    const h = await startHarness(true, async (_c, _method, _path, _body, incoming) => {
+      started = true;
+      signal = incoming;
+      return new Promise((resolve, reject) => {
+        finish = () => resolve({ status: 200, headers: {}, body: Buffer.from("{}") });
+        incoming?.addEventListener("abort", () => reject(incoming.reason), { once: true });
+      });
+    });
+    const browser = new AbortController();
+    const answer = fetch(`http://127.0.0.1:${h.port}/hosts/This%20computer/v1/projects/phren/memory/search?q=token`, {
+      headers: cookieHeaders(), signal: browser.signal,
+    }).catch((err: Error) => err);
+    try {
+      await vi.waitFor(() => expect(started).toBe(true));
+      expect(signal).toBeDefined();
+      // IncomingMessage's normal close after a complete GET must not abort it.
+      expect(signal!.aborted).toBe(false);
+      browser.abort();
+      await answer;
+      await vi.waitFor(() => expect(signal!.aborted).toBe(true));
+    } finally {
+      browser.abort();
+      finish();
+      await answer;
+    }
+  });
+
+  it("holds four slots across browser aborts until Hook requests settle, across subsequent queries", async () => {
+    const pending: Array<{ signal: AbortSignal; finish: () => void }> = [];
+    let active = 0, peak = 0;
+    const h = await startHarness(true, async (_c, _method, route, _body, signal) => {
+      if (route === "/v1/probe") return { status: 200, headers: {}, body: Buffer.from("{}") };
+      peak = Math.max(peak, ++active);
+      return new Promise((resolve) => pending.push({ signal: signal!, finish: () => {
+        active--;
+        resolve({ status: 200, headers: {}, body: Buffer.from("{}") });
+      } }));
+    });
+    const get = (i: number, signal?: AbortSignal) => fetch(`http://127.0.0.1:${h.port}/hosts/This%20computer/v1/projects/p${i}/memory/search`, {
+      headers: cookieHeaders(), signal,
+    }).then((res) => res.text()).catch(() => undefined);
+    const old = new AbortController();
+    const requests = Array.from({ length: 4 }, (_, i) => get(i, old.signal));
+    try {
+      await vi.waitFor(() => expect(pending).toHaveLength(4));
+      old.abort();
+      await vi.waitFor(() => expect(pending.every((read) => read.signal.aborted)).toBe(true));
+      requests.push(...Array.from({ length: 4 }, (_, i) => get(i + 5)));
+      // A later ordinary proxy read stays usable while memory waits for slots.
+      const probe = await fetch(`http://127.0.0.1:${h.port}/hosts/This%20computer/v1/probe`, { headers: cookieHeaders() });
+      await probe.text();
+      expect(pending).toHaveLength(4);
+      pending[0].finish();
+      await vi.waitFor(() => expect(pending).toHaveLength(5));
+      expect(peak).toBe(4);
+      pending.slice(1, 4).forEach((read) => read.finish());
+      await vi.waitFor(() => expect(pending).toHaveLength(8));
+      expect(peak).toBe(4);
+      pending.slice(4).forEach((read) => read.finish());
+      await Promise.all(requests);
+    } finally { old.abort(); }
   });
 });

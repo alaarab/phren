@@ -220,6 +220,9 @@ const openQuickChat = (options) => { void import("./launch.js").then((m) => m.op
 // Each query owns its timer, controller and answer; late answers cannot repaint.
 let memory = { key: "", state: "idle", items: [], timer: null, controller: null };
 let openedScope = null;
+// Shared across superseded queries; the daemon also holds four SSH slots until
+// hookRequest confirms completion/abort, since fetch can reject sooner.
+const memoryReads = new Set();
 
 function memoryScope() { return openedScope; }
 
@@ -254,15 +257,23 @@ function askMemory(sources, query, everywhere) {
         const p = targets[cursor++];
         const scope = { computer: p.computer, project: p.name };
         try {
-          const body = await hookGet(p.computer, `/v1/projects/${encodeURIComponent(p.name)}/memory/search`, { q: query, limit: String(MEMORY_LIMIT) }, { signal: request.controller.signal });
-          hits.push(...memoryItems(body.results, scope).map((item, i) => ({ item, score: body.results[i].score ?? 0 })));
+          while (memoryReads.size >= 4) {
+            await Promise.race([...memoryReads].map((read) => read.catch(() => {})));
+          }
+          if (request.controller.signal.aborted) return;
+          const read = hookGet(p.computer, `/v1/projects/${encodeURIComponent(p.name)}/memory/search`, { q: query, limit: String(MEMORY_LIMIT) }, { signal: request.controller.signal });
+          memoryReads.add(read);
+          let body;
+          try { body = await read; }
+          finally { memoryReads.delete(read); }
+          hits.push(...memoryItems(body.results, scope).map((item, i) => ({ item, matched: body.results[i].matched ?? 0, score: body.results[i].score ?? 0, recency: Date.parse(p.lastSeen) || 0 })));
           request.searched++;
         } catch { failures++; }
       }
     }
     await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
     if (request.controller.signal.aborted || memory !== request || !overlayEl) return;
-    hits.sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id));
+    hits.sort((a, b) => b.matched - a.matched || b.score - a.score || b.recency - a.recency || a.item.id.localeCompare(b.item.id));
     request.items = hits.slice(0, MEMORY_LIMIT).map((hit) => hit.item);
     request.state = failures === targets.length && failures ? "error" : "done";
     request.error = failures ? `${failures} project searches failed.` : "";
