@@ -555,7 +555,7 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .tile-drop[data-zone="down"] { inset: 50% 6px 6px 6px; }
 
 /* A session tile: chat or the agent pane's own console. */
-.session-doc { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.session-doc { position: absolute; inset: 0; display: flex; flex-direction: column; container: chat / inline-size; }
 .session-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .session-console { background: var(--tool); padding: 6px; }
 .session-switch { position: absolute; top: 8px; right: 12px; z-index: 4; transform: scale(.92); transform-origin: top right; }
@@ -818,10 +818,10 @@ button.handoff-link:hover { color: var(--accent); }
   .layout-panel, .layout-more { display: inline-block; flex: none; }
   .layout-more { width: 28px; padding: 0; font-size: 15px; }
   .layout-panel[aria-expanded="true"], .layout-more[aria-expanded="true"] { background: var(--raised); color: var(--text); }
-  .layout-actions { display: none; position: absolute; top: 100%; right: 6px; z-index: 35; flex-direction: column; min-width: 160px; padding: 4px; gap: 2px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+  .layout-actions { display: none; position: absolute; top: 100%; inset-inline-end: 6px; z-index: 35; flex-direction: column; min-width: 160px; max-height: calc(100vh - 120px); overflow-y: auto; padding: 4px; gap: 2px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
   .layout-bar.more-open .layout-actions { display: flex; }
   .layout-actions .layout-btn { height: 32px; text-align: left; border-radius: 8px; }
   .layout-actions .layout-btn:hover { background: var(--surface); }
-  .side { width: calc(100vw - 48px) !important; max-width: 420px; }
-  .chat-pane { padding: 8px; }
+  /* An overlay under the layout bar (so its toggle stays reachable); a saved drag width is clamped, not overridden. */
+  .side { top: 32px; max-width: calc(100vw - 48px); }
 }

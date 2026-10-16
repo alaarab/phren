@@ -32,14 +32,21 @@ fraction has screen-reader text “computers online” at every width, rendered 
 At 1280 px the labels and spacing are unchanged.
 
 Agents at 760 px and below (`NARROW_QUERY` in `sections/agents.js`, the media
-queries in `theme.css`, `chat/chat.css` and `chat/composer.css`): the layout bar
-folds Mirror tab / Shell / Split / Zoom into a `.layout-more` ("⋯") menu (Escape
-or an outside press closes it), a `.layout-panel` button (`aria-expanded`) opens
-and closes the right panel, which starts closed and overlays the centre at
-`100vw - 48px`, the chat header gives the title the first line, and the composer
-footer tightens so the talk and send buttons stay on screen. Wider windows are
-unchanged: `.layout-more` and `.layout-panel` are hidden and `.layout-actions` is
-`display: contents`.
+query in `theme.css`): the layout bar folds Mirror tab / Shell / Split / Zoom into a
+`.layout-more` ("⋯") `role="menu"` (opens with focus on the first item; ArrowUp/Down,
+Home/End move; Escape, Tab or an outside press close it, Escape returning focus to the
+trigger). A `.layout-panel` button (`aria-expanded`) opens and closes the right panel,
+which overlays the centre below the layout bar, starts closed, is remembered per chat
+tab (`doc.panelOpen`), takes focus on open, and closes on Escape, on a press outside it
+or on its toggle. Crossing the breakpoint closes the menu; narrowing closes the panel,
+widening restores the panel's wide state. Wider windows are unchanged: `.layout-more`
+and `.layout-panel` are hidden and `.layout-actions` is `display: contents`.
+
+The chat header and composer compact by the chat pane's own width (`.session-doc` is
+an inline-size container named `chat`; `@container chat` at 460, 340 and 290 px in
+`chat/chat.css` and `chat/composer.css`), so a split tile gets them in a wide window.
+The project, branch and computer move into the title's tooltip; below 290 px the
+console, agents and workers shortcuts (`.pc-low`) fold away so send never clips.
 
 ## Daemon connections
 

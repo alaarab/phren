@@ -1337,7 +1337,7 @@ test("Memory hides the out-of-date filter when no finding has freshness data", a
   await expect(page.locator('.mem-chip[data-filter="stale"]')).toHaveCount(0);
 });
 
-for (const width of [360, 390, 420]) {
+for (const width of [320, 360, 390, 420]) {
   test(`a chat fits a ${width} px window: title, send, pane actions and an on-demand Changes panel`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -1352,7 +1352,7 @@ for (const width of [360, 390, 420]) {
     expect((await box(".chat-title")).width).toBeGreaterThan(80);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     // The titlebar's right end (computers count, Settings) stays on screen.
-    expect(inside(await box(".titlebar .section-icons"))).toBe(true);
+    if (width >= 360) expect(inside(await box(".titlebar .section-icons"))).toBe(true);
 
     // The composer's send and talk buttons are on screen and clickable.
     for (const selector of [".pc-primary", ".pc-talk"]) {
@@ -1400,4 +1400,107 @@ test("a wide window keeps the pane actions in the bar and the Changes panel open
   await expect(page.locator(".layout-more")).toBeHidden();
   await expect(page.locator(".layout-panel")).toBeHidden();
   for (const act of ["mirror", "terminal", "split-right", "split-down", "zoom"]) await expect(page.locator(`.layout-actions [data-act="${act}"]`)).toBeVisible();
+});
+
+async function openNarrowChat(page: import("@playwright/test").Page, width: number, title = "Fix login") {
+  await page.setViewportSize({ width, height: 844 });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: title }).click();
+  await expect(page.locator(".chat-title")).toHaveText(title);
+}
+
+test("the narrow pane actions are a keyboard menu", async ({ page }) => {
+  await openNarrowChat(page, 390);
+  const more = page.locator(".layout-more");
+  const menu = page.locator(".layout-actions");
+  await expect(menu).toHaveAttribute("role", "menu");
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await expect(more).toHaveAttribute("aria-expanded", "true");
+  const items = menu.getByRole("menuitem");
+  await expect(items).toHaveCount(5);
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(items.nth(4)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(items.nth(4)).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(more).toBeFocused();
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(0)).toBeFocused();
+  await page.keyboard.press("Tab"); // leaving the menu closes it
+  await expect(menu).toBeHidden();
+});
+
+test("the narrow Changes panel is an overlay below the bar: toggle, Escape and outside press close it", async ({ page }) => {
+  await openNarrowChat(page, 390);
+  const toggle = page.locator(".layout-panel");
+  await toggle.click();
+  await expect(page.locator("#side")).toBeVisible();
+  // The toggle and the menu stay above the overlay and focus moved into it.
+  const side = (await page.locator("#side").boundingBox())!;
+  const bar = (await toggle.boundingBox())!;
+  expect(side.y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
+  await expect(page.locator("#side .segment.selected")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#side")).toBeHidden();
+  await expect(toggle).toBeFocused();
+  await toggle.click();
+  await expect(page.locator("#side")).toBeVisible();
+  await page.mouse.click(10, 400); // the uncovered strip
+  await expect(page.locator("#side")).toBeHidden();
+  await toggle.click();
+  await toggle.click(); // the toggle itself closes it
+  await expect(page.locator("#side")).toBeHidden();
+});
+
+test("the narrow Changes panel is remembered per chat tab", async ({ page }) => {
+  await openNarrowChat(page, 390);
+  await page.locator(".layout-panel").click();
+  await expect(page.locator("#side")).toBeVisible();
+  const openRow = (name: string) => page.evaluate((text) => [...document.querySelectorAll<HTMLElement>(".sb-row")].find((row) => row.textContent?.includes(text))?.click(), name);
+  await openRow("Ship release");
+  await expect(page.locator(".chat-title:visible")).toHaveText("Ship release 0.3.34");
+  await expect(page.locator("#side")).toBeHidden(); // a new tab starts closed
+  await expect(page.locator(".layout-panel")).toHaveAttribute("aria-expanded", "false");
+  await openRow("Fix login");
+  await expect(page.locator(".chat-title:visible")).toHaveText("Fix login");
+  await expect(page.locator("#side")).toBeVisible(); // restored for the tab that had it open
+  await expect(page.locator(".layout-panel")).toHaveAttribute("aria-expanded", "true");
+});
+
+test("crossing the narrow breakpoint restores the wide layout and closes the narrow overlay and menu", async ({ page }) => {
+  await openNarrowChat(page, 390);
+  await page.locator(".layout-more").click();
+  await expect(page.locator(".layout-actions")).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await expect(page.locator(".layout-actions")).toBeVisible(); // the wide bar's own buttons
+  await expect(page.locator(".layout-bar")).not.toHaveClass(/more-open/);
+  await expect(page.locator("#side")).toBeVisible();
+  await expect(page.locator(".layout-actions")).toHaveAttribute("role", "group");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("#side")).toBeHidden();
+  await expect(page.locator(".layout-panel")).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".layout-actions")).toBeHidden();
+});
+
+test("a narrow pane in a wide window gets the compact chat header and composer", async ({ page }) => {
+  await openNarrowChat(page, 1280);
+  await expect(page.locator(".chat-sub")).toBeVisible();
+  await page.locator("#side").evaluate((el) => { (el as HTMLElement).style.width = "900px"; }); // the chat pane is now ~320 px
+  await expect(page.locator(".chat-sub")).toBeHidden();
+  await expect(page.locator(".chat-title")).toHaveAttribute("title", /phren/);
+  const pane = (await page.locator(".session-doc").first().boundingBox())!;
+  const send = (await page.locator(".pc-primary").first().boundingBox())!;
+  expect(send.x + send.width).toBeLessThanOrEqual(pane.x + pane.width);
 });

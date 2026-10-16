@@ -73,7 +73,8 @@ export function openChat(el, computerName, child, opts = {}) {
   const ring = node("div", "chat-ring"); // hidden; keeps the status colour wiring
   const dot = node("div", "chat-status-dot");
   const title = node("div", "chat-title", (child && (child.title || child.label)) || provider);
-  title.title = "Double-click to rename";
+  const where = [basename(child && child.cwd), child && child.branch, computerName].filter(Boolean).join(" \u00b7 ");
+  title.title = `${where ? `${where}\n` : ""}Double-click to rename`;
   title.addEventListener("dblclick", startRename);
   const sub = node("div", "chat-sub");
   sub.append(node("span", "chat-project", basename(child && child.cwd)));

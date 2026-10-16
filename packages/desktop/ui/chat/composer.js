@@ -727,6 +727,7 @@ export function createComposer({ computer, target, provider, branch, project, on
   const consoleBtn = onConsole ? iconButton("Console", ICON.console()) : null;
   const agentsBtn = onAgents ? iconButton("Agents", ICON.agents()) : null;
   const workersBtn = onWorkers ? iconButton("Workers", ICON.workers()) : null;
+  for (const low of [consoleBtn, agentsBtn, workersBtn]) low?.classList.add("pc-low"); // fold away first in a very narrow pane
   const workerBadge = node("span", "pc-badge"); workerBadge.hidden = true;
   if (workersBtn) workersBtn.append(workerBadge);
   const permissionSelect = selectButton("Permission mode");
