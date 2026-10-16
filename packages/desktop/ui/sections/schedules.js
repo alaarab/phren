@@ -9,6 +9,7 @@ import { hookGet, hookPost } from "../api.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { store } from "../shell/store.js";
 import { readAhead } from "../shell/read-ahead.js";
+import { runSchedule } from "../shell/schedule-run.js";
 import { updateSchedule } from "../schedule-update.js";
 
 const CSS_HREF = "./sections/schedules.css";
@@ -585,8 +586,7 @@ export function mountSchedules(root) {
     if (!entry.ownerOnline) return;
     setError("");
     try {
-      await hookPost(ownerName(entry.schedule), "/v1/schedules/run",
-        { project: entry.project, id: entry.id, expectedUpdatedAt: entry.schedule.updatedAt });
+      await runSchedule(ownerName(entry.schedule), entry.schedule);
     } catch (err) {
       setError(err?.status === 409 ? (err.message || "This schedule is already running.") : (err?.message ?? String(err)));
     }
