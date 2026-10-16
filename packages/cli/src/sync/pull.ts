@@ -103,11 +103,11 @@ function logPeriodicSync(phrenPath: string, detail: string): void {
 
 
 /** Shared timestamps + a process lock give all MCP clients one check per store/interval. */
-export async function pollStore(phrenPath: string, seconds: number, git: RunGit = runPollGit, now = Date.now()): Promise<PullResult> {
+export async function pollStore(phrenPath: string, seconds: number, git: RunGit = runPollGit, now = Date.now(), immediate = false): Promise<PullResult> {
   const skipped: PullResult = { status: "not-due", detail: "Periodic check not due." };
-  if (!seconds || !periodicPullEnabled(phrenPath) || !fs.existsSync(path.join(phrenPath, ".git"))) return skipped;
+  if ((!seconds && !immediate) || !periodicPullEnabled(phrenPath) || !fs.existsSync(path.join(phrenPath, ".git"))) return skipped;
   const releasePoll = tryFileLock(runtimeFile(phrenPath, "pull-poll"));
-  if (!releasePoll) return skipped;
+  if (!releasePoll) return immediate ? { status: "deferred", detail: "Coordinated pull is running." } : skipped;
   try {
     const auth = activeStoreAuthFailure(phrenPath);
     if (authBackoffActive(auth, now)) return { status: "not-due", detail: storeAuthDetail(auth!) };
@@ -115,7 +115,7 @@ export async function pollStore(phrenPath: string, seconds: number, git: RunGit 
     const previous = readPollState(phrenPath);
     const failures = Math.min(10, Math.max(0, Number(previous.failures) || 0));
     const delay = Math.min(seconds * 2 ** failures, Math.max(seconds, 1800)) * 1000;
-    if (typeof previous.checkedAt === "number" && now >= previous.checkedAt && now - previous.checkedAt < delay) return skipped;
+    if (!immediate && typeof previous.checkedAt === "number" && now >= previous.checkedAt && now - previous.checkedAt < delay) return skipped;
 
     const finish = async (result: PullResult, verifiedRemote = false): Promise<PullResult> => {
       atomicWriteText(runtimeFile(phrenPath, "pull-poll.json"), JSON.stringify({

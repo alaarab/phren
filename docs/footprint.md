@@ -120,6 +120,10 @@ Uploads are limited to 8 MiB each and 256 MiB total; uploads older than 14 days
 are removed on the next upload. Activity stores status and project metadata,
 not conversation text. See [Phren Hook](phren-hook.md).
 
+The optional `<bridge>/gitboy-webhooks.json` and its referenced secret files are
+private (0600), local configuration for loopback-only gitboy push sync. No file
+means no receiver. Delivery IDs and health outcomes are held in memory only.
+
 The Hook keeps the shipped conductor instructions at
 `<bridge>/conductor/brief.md` (0600). Its agent-only socket returns a bounded
 role reminder for the recorded conductor's turn; OpenCode and phren-agent ask through

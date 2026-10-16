@@ -1430,3 +1430,72 @@ editable, and unknown request keys are refused. For example:
 The Hook reads fresh under the CLI schedule writers' lock, validates the merged
 schedule, assigns a new `updatedAt`, and writes atomically. See
 [scheduled prompts](schedules.md#hook-routes) for timing and serialization details.
+
+## Instant sync from gitboy pushes
+
+This is off by default. Configure the receiver only on the computer running
+both gitboy and the Hook. Create `<bridge>/gitboy-webhooks.json` (normally
+`~/.local/share/phren/bridge/gitboy-webhooks.json`) with mode **0600**, then
+restart the Hook:
+
+```json
+{
+  "listenPort": 47392,
+  "stores": [
+    {
+      "storeId": "1234abcd",
+      "owner": "alice",
+      "name": "memory",
+      "branch": "main",
+      "secretFile": "gitboy-memory.secret"
+    }
+  ]
+}
+```
+
+Use the store's portable primary ID from its own `stores.yaml`. A local
+attachment ID from `phren store list` is also accepted in this computer's receiver
+config and translated to that portable ID for peer nudges. `secretFile` is an absolute
+path or a path relative to the private bridge directory; it must be a private
+regular file (0600), with the secret as text (surrounding whitespace is removed).
+Alternatively, supply `"secret": "your-webhook-secret"` in the config, using
+exactly one of `secret` and `secretFile`. Keep both files on this computer,
+outside the synced store. Invalid or unsafe config leaves the receiver disabled.
+Remove the config and restart to turn it off.
+
+In gitboy's repository webhook settings:
+
+- URL: `http://127.0.0.1:47392/gitboy/push` (use your configured port).
+- Add this destination computer to gitboy's `GITBOY_WEBHOOK_ALLOWLIST`.
+- Secret: the same signing secret configured above.
+- Events: **push**.
+- Branches filter: the configured store branch, such as `main`.
+
+The listener always binds to `127.0.0.1`. It accepts bodies up to 1 MiB with a
+five-second body deadline and verifies `X-Hub-Signature-256` over the exact bytes
+against every configured secret before parsing JSON. Unknown repositories and
+invalid signatures both receive the same empty 401 response. Requests must have
+Host `127.0.0.1:<port>` or `localhost:<port>`, Content-Type `application/json`
+(optionally with a charset), and no Origin or Sec-Fetch-* headers. This endpoint
+is for gitboy's server, not browser pages.
+Recent `X-Gitboy-Delivery` IDs and SHA-256 digests of authenticated bodies are
+deduplicated in memory (reset on Hook restart); changing the unsigned delivery
+header cannot replay a remembered body.
+A matching delivery receives 202 promptly while sync continues in the background.
+Other verified Hooks in this computer's private `hooks.yaml` get nudged over
+pinned SSH through `POST /v1/store/pull-now` with
+`{ "storeId": "1234abcd", "repository": "alice/memory", "branch": "main" }`.
+The ID comes from the store's own `stores.yaml`, not the machine-local attachment
+entry. The repository is a lowercase `owner/name`; SSH and HTTP remote URLs
+resolve to the same repository path. Each peer checks that portable ID, repository
+and upstream branch against its local checkout. The primary checkout always uses
+this computer's configured store root, even if synced metadata names another path.
+Missing or mismatched stores return 404 without details.
+Owner requests are also allowed; scoped gitboy keys and agent requests are refused.
+Peer fan-out and local pulls each coalesce to one pending round per store, with
+at most one start every ten seconds. Busy Git operations (including index locks
+and merge state) get three pull attempts at 0, 10 and 30 seconds; the Hook never
+clears another operation's state. Polling remains the fallback after that budget
+or if a peer is offline or a delivery fails.
+`GET /v1/health/details` reports `gitboyWebhooks`: configured/listening state,
+port, and last delivery time/outcome, without secrets or payloads.

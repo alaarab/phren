@@ -43,7 +43,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       { agents: ["claude", "codex", "copilot", "cursor"], events: ["Stop"], handler: "phren hook-stop" },
       { agents: ["claude"], events: ["PostToolUse"], handler: "phren hook-tool" },
     ],
-    hookRoutes: [...routes("GET", ["/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
+    hookRoutes: [...routes("GET", ["/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/pull-now", "/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
     capabilities: ["memory", "memoryStore", "memoryStoreBatch", "projectMemory"],
     storeFiles: [
       "phren.root.yaml", "machines.yaml", "profiles/*.yaml", ".config/modules.yaml", ".config/*.json",
@@ -104,7 +104,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
-    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json"],
+    localFiles: ["<bridge>/gitboy-webhooks.json", "<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json"],
     phoneScreens: [{ screen: "LiveSessionsView", capability: "hook" }, { screen: "AgentChatView", capability: "transcript" }],
     skills: [],
   },
