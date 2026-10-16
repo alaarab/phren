@@ -21,6 +21,7 @@ import { startDictation, createTalkMode } from "./chat/talk.js";
 import { openKnowsDrawer, installRememberSelection } from "./chat/knows.js";
 import { renderMarkdownInto } from "./chat/markdown.js";
 import { projectOf } from "./shell/store.js";
+import { takePrefetched } from "./shell/transcript-prefetch.js";
 
 function providerLetter(source) {
   return agentLabel(source).charAt(0).toUpperCase();
@@ -244,6 +245,18 @@ export function openChat(el, computerName, child, opts = {}) {
     timeline.render(preparation, preview);
     composer.setBackground(composerJobs());
     if (stick) timeline.scrollToBottom();
+    if (history.messages.length > 0) markRendered();
+  }
+
+  // click -> first transcript paint, as a performance measure (read it with
+  // performance.getEntriesByName("phren:click-to-transcript")).
+  let measured = false;
+  function markRendered() {
+    if (measured) return;
+    measured = true;
+    try {
+      performance.measure("phren:click-to-transcript", { start: performance.getEntriesByName("phren:chat-click").pop()?.startTime });
+    } catch { /* no click mark (opened another way) */ }
   }
 
   function setNotice(text) {
@@ -848,6 +861,11 @@ export function openChat(el, computerName, child, opts = {}) {
   });
 
   composer.setCounts({ agents: 0, workers: 0 });
+  // A snapshot read ahead while the pointer rested on the row: draw it now;
+  // the stream's backlog below replaces it, as it would a fresh load's first page.
+  const snapshot = takePrefetched(computerName, child);
+  const prefetched = snapshot && readFrame(snapshot);
+  if (prefetched) history.receive(prefetched);
   render();
 
   const stopWatchingShown = watchShown(el, () => {

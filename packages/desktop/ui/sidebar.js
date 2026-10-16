@@ -7,6 +7,7 @@ import { renderHandoffRow } from "./shell/handoff-view.js";
 import { backgroundLabel, stallLabel, stalledMinutes } from "./shell/stalls.js";
 import { openMoveSheet } from "./shell/move.js";
 import { showSection } from "./shell/sections.js";
+import { prefetchTranscript, cancelPrefetch } from "./shell/transcript-prefetch.js";
 import { hookPost, targetQuery } from "./api.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 
@@ -416,6 +417,7 @@ function openRow(sb, node) {
   const row = node.__row;
   if (!row) return;
   markSeen(sb, row.computer, row.child);
+  try { performance.mark("phren:chat-click"); } catch { /* timing is optional */ }
   sb.handlers.onOpenChat?.(row.computer, row.child);
   requestRender(sb);
 }
@@ -426,6 +428,13 @@ function makeRow(sb, desc) {
   node.tabIndex = 0;
   const open = () => openRow(sb, node);
   node.addEventListener("click", open);
+  // Resting on a row reads its transcript ahead, so the click opens a rendered chat.
+  const rest = () => { const row = node.__row; if (row) prefetchTranscript(row.computer, row.child); };
+  const leave = () => { const row = node.__row; if (row) cancelPrefetch(row.computer, row.child); };
+  node.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") rest(); });
+  node.addEventListener("pointerleave", leave);
+  node.addEventListener("focus", rest);
+  node.addEventListener("blur", leave);
   node.addEventListener("keydown", (event) => {
     if (event.target !== node) return;
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
