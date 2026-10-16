@@ -344,3 +344,50 @@
   .chat-sub { display: none; }
   .chat-trailing { flex: 0 1 auto; min-width: 0; gap: 4px; margin-inline-start: auto; }
 }
+
+/* Find in chat -------------------------------------------------------------- */
+
+.chat-find {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.chat-find-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.chat-find-input {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.chat-find-input:focus { outline: none; border-color: var(--accent); }
+.chat-find-count { flex: 0 0 auto; min-width: 3.2em; text-align: center; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.chat-find-count.none { color: var(--danger); }
+.chat-find-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-find-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
+.chat-find-btn:disabled { opacity: 0.35; cursor: default; }
+.chat-find-hint { font-size: 11px; color: var(--dim); padding: 0 2px; }
+.chat-find-hint[hidden] { display: none; }
+.chat-pane mark.ct-find-hit { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; }
+.chat-pane mark.ct-find-hit.ct-find-current { background: var(--accent); color: #1b1b1d; outline: 2px solid var(--accent); }

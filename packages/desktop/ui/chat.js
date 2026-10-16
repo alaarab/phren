@@ -15,6 +15,7 @@ import {
 } from "/vendor/kit/index.js";
 import { hookPost, hookGet } from "./api.js";
 import { createTimelineView } from "./chat/timeline-view.js";
+import { createFindBar } from "./chat/find-bar.js";
 import { createComposer, contextPercent } from "./chat/composer.js";
 import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
 import { startDictation, createTalkMode } from "./chat/talk.js";
@@ -180,6 +181,13 @@ export function openChat(el, computerName, child, opts = {}) {
 
   const error = node("div", "chat-error");
   el.append(header, handoffs, notice, timelineEl, interactions, quotaHost, composerHost, error);
+
+  // ⌘F / Ctrl+F inside this pane searches its conversation (chat/find-bar.js).
+  const find = createFindBar({
+    pane: el, root: timelineEl, before: timelineEl,
+    focusComposer: () => composer.focus(),
+    partial: () => !!history.hasMore || !!timeline.isFolded?.(),
+  });
 
   // ---- state ----
   const history = new AgentChatHistory();
@@ -887,6 +895,7 @@ export function openChat(el, computerName, child, opts = {}) {
     focus() { composer.focus(); },
     close() {
       closed = true;
+      find.destroy();
       setChatOpen(computerName, child, false);
       stopWatchingShown();
       dictation?.stop(); talk?.stop();
