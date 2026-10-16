@@ -73,3 +73,29 @@ export function redactNotice(value) {
   // Shorten after redacting, and never end inside a word that could be the start of a secret.
   return `${redacted.slice(0, NOTICE_MAX).replace(/\S*$/, "")}…`;
 }
+
+// ---- exported chats ---------------------------------------------------------
+// redactAll plus the command-line, header and token forms the peer hand-off
+// redactor (packages/cli/src/bridge/peer-handoff.ts) covers. Every pattern is
+// a single pass with bounded alternatives, so none backtracks quadratically.
+const VALUE = String.raw`(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)`;
+const HEADER_LINE = /(\b(?:Authorization|Cookie|Set-Cookie|X-API-Key|[A-Za-z0-9-]{0,40}-(?:Key|Token))[\t ]*:[\t ]*)[^\r\n]*/gi;
+const CURL_USER = new RegExp(String.raw`([\t ](?:-u|--user)[\t ]+)${VALUE}`, "g");
+const FLAG_VALUE = new RegExp(String.raw`(?<![\w-])(--(?:password|passwd|pass|pwd|token|api-key|apikey|secret|auth|access-token|auth-token)(?:[\t ]+|=))(?!-)${VALUE}`, "gi");
+const SLACK_WEBHOOK = /https:\/\/hooks\.slack\.com\/services\/T\w+\/B\w+\/\w+/g;
+const ANY_JWT = /(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]+/g;
+
+/** Redact text bound for the clipboard or a file. */
+export function redactExport(value) {
+  const text = String(value)
+    .replace(HEADER_LINE, "$1[redacted]")
+    .replace(/\b(?:mysql|curl)\b[^\r\n]*/gi, (line) => {
+      if (/\bmysql\b/i.test(line)) line = line.replace(/([\t ]-p)(?![\t ]|$)[^\s]+/g, "$1[redacted]");
+      if (/\bcurl\b/i.test(line)) line = line.replace(CURL_USER, "$1[redacted]");
+      return line;
+    })
+    .replace(FLAG_VALUE, "$1[redacted]")
+    .replace(SLACK_WEBHOOK, "[redacted]")
+    .replace(ANY_JWT, "[redacted]");
+  return redactAll(text);
+}

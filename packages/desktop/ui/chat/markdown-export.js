@@ -1,8 +1,8 @@
 // A chat as Markdown: built from the loaded transcript messages (the model the
 // timeline renders from, not the DOM). Tool calls become one-line bullets and
-// their output is left out. Everything passes through redactAll, so a token or
+// their output is left out. Everything passes through redactExport, so a token or
 // password in a message never reaches the clipboard or a file.
-import { redactAll } from "../redact.js";
+import { redactExport } from "../redact.js";
 
 /** Escape what would turn a title into markup, and keep it on one line. */
 export function escapeTitle(text) {
@@ -18,8 +18,21 @@ export function exportFilename(title, date = new Date()) {
   return `${slug}-${isoDate(date)}.md`;
 }
 
+/** Close a code fence the text leaves open, so it can't swallow the headings after it. HTML in a message passes through raw. */
+export function balanceFences(text) {
+  let open = null;
+  for (const line of String(text).split("\n")) {
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!m) continue;
+    if (!open) open = { ch: m[1][0], len: m[1].length };
+    else if (m[1][0] === open.ch && m[1].length >= open.len && !m[2].trim()) open = null;
+  }
+  return open ? `${text}\n${open.ch.repeat(open.len)}` : text;
+}
+
+// Redaction runs on the raw string, before escaping or clipping can split a secret.
 function inline(text) {
-  const t = String(text).replace(/\s+/g, " ").trim();
+  const t = redactExport(text).replace(/\s+/g, " ").trim();
   const clipped = t.length > 120 ? `${t.slice(0, 119)}…` : t;
   const fence = "`".repeat(Math.max(0, ...(clipped.match(/`+/g) || []).map((r) => r.length)) + 1);
   return `${fence}${clipped.startsWith("`") || clipped.endsWith("`") ? ` ${clipped} ` : clipped}${fence}`;
@@ -40,7 +53,7 @@ export function toolBullet(message, result) {
   if (typeof f.command === "string" || typeof f.cmd === "string") {
     line = `Ran ${inline(f.command ?? f.cmd)}${result ? (failed ? " — failed" : " — passed") : ""}`;
   } else if (lower === "apply_patch") {
-    const files = [...String(f.input || f.patch || message.text).matchAll(/\*\*\* (?:Update|Add|Delete) File: (.+)/g)].map((m) => m[1].trim());
+    const files = [...redactExport(String(f.input || f.patch || message.text)).matchAll(/\*\*\* (?:Update|Add|Delete) File: (.+)/g)].map((m) => m[1].trim());
     line = files.length ? `Edited ${files.map(inline).join(", ")}` : "Edited files";
   } else if (path && /^(edit|multiedit|notebookedit|str_replace_editor|str_replace_based_edit_tool|replace)$/.test(lower)) {
     line = `Edited ${inline(path)}`;
@@ -60,15 +73,16 @@ export function toolBullet(message, result) {
 /**
  * @param {Array} messages the history's rows, oldest first
  * @param {{title?:string, project?:string, computer?:string, harness?:string, agent?:string, date?:Date, earlierMissing?:boolean}} meta
- * @returns {{markdown:string, messages:number}} messages counts the user and assistant rows written
+ * @returns {{markdown:string, messages:number, title:string}} title is the redacted title; messages counts the user and assistant rows written
  */
 export function chatToMarkdown(messages, meta = {}) {
   const agent = meta.agent || meta.harness || "Agent";
   const results = new Map();
   for (const m of messages) if (m.role === "tool" && m.title === "Tool result" && m.toolCallID) results.set(m.toolCallID, m);
-  const out = [`# ${escapeTitle(meta.title) || "Chat"}`, ""];
+  const title = redactExport(String(meta.title || "")).replace(/\s+/g, " ").trim();
+  const out = [`# ${escapeTitle(title) || "Chat"}`, ""];
   out.push([meta.project, meta.computer, meta.harness, isoDate(meta.date || new Date())]
-    .filter(Boolean).map((s) => String(s).replace(/\s+/g, " ")).join(" · "), "");
+    .filter(Boolean).map((s) => redactExport(String(s)).replace(/\s+/g, " ")).join(" · "), "");
   if (meta.earlierMissing) out.push("_Earlier messages not included_", "");
   let count = 0;
   let heading = null;
@@ -86,7 +100,7 @@ export function chatToMarkdown(messages, meta = {}) {
     }
     if (m.role !== "user" && m.role !== "assistant") continue;
     const images = (m.imageBlocks?.length || 0) + (m.uploadImages?.length || 0);
-    const body = String(m.text || "").trim();
+    const body = balanceFences(redactExport(String(m.text || "").trim()));
     if (!body && !images) continue;
     if (bullets) { out.push(""); bullets = false; }
     head(m.role === "user" ? "You" : agent);
@@ -95,7 +109,7 @@ export function chatToMarkdown(messages, meta = {}) {
     count++;
   }
   while (out[out.length - 1] === "") out.pop();
-  return { markdown: `${redactAll(out.join("\n"))}\n`, messages: count };
+  return { markdown: `${redactExport(out.join("\n"))}\n`, messages: count, title };
 }
 
 /** Hand the text to the browser as a file; Electron asks where to save it. */

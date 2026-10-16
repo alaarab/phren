@@ -333,7 +333,7 @@ async function openMicrophone(onFrame) {
 
 /** A floating message for a failure or a status note; fades on its own. */
 export function toast(message, { tone, ms = 4200 } = {}) {
-  if (typeof document === "undefined") return () => {};
+  if (typeof document === "undefined") return Object.assign(() => {}, { el: null, update() {} });
   ensureStyles();
   const el = document.createElement("div");
   el.className = `pt-toast${tone === "danger" ? " danger" : ""}`;
@@ -342,7 +342,10 @@ export function toast(message, { tone, ms = 4200 } = {}) {
   document.body.append(el);
   const remove = () => { el.classList.add("fade"); setTimeout(() => el.remove(), 200); };
   const timer = setTimeout(remove, ms);
-  return () => { clearTimeout(timer); remove(); };
+  const dismiss = () => { clearTimeout(timer); remove(); };
+  dismiss.el = el;
+  dismiss.update = (text) => { el.firstChild ? (el.firstChild.nodeValue = String(text)) : el.append(String(text)); };
+  return dismiss;
 }
 
 // ---------------------------------------------------------------- dictation

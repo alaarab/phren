@@ -823,55 +823,83 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   // ---- copy or save as Markdown ----
-  // Older history is loaded first (up to EXPORT_MAX rows, through the same history
-  // route the scroll-up uses); past that the file says earlier messages are not included.
+  // Older history is loaded first (through the same history route the scroll-up uses) until
+  // none is left or EXPORT_MAX rows are held; if rows are still missing the file says so.
+  // Closing the pane, or Cancel, aborts the requests and nothing is written afterwards.
   const EXPORT_MAX = 2000;
-  let exporting = false;
-  async function loadAllHistory() {
-    if (!backlogLoaded || !history.hasMore) return;
-    if (loadingOlder) return;
+  const paneAbort = new AbortController();
+  let exportRun = null;
+  let olderLoad = null;
+  const plural = (n) => `${n} message${n === 1 ? "" : "s"}`;
+  async function loadAllHistory(signal, progress) {
+    // A scroll-up page already in flight: wait for it rather than exporting partial history.
+    if (olderLoad) await olderLoad;
+    if (!backlogLoaded) return { complete: !history.hasMore, failed: false };
+    let failed = false;
     loadingOlder = true;
-    let stop = null;
     try {
       while (history.hasMore && history.startLine !== null && history.messages.length < EXPORT_MAX) {
-        stop?.();
-        stop = toast(`Loading earlier messages\u2026 ${history.messages.length}`, { ms: 60_000 });
+        if (signal.aborted) break;
+        progress(history.messages.length);
         const before = history.startLine;
-        const read = readFrame(await hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(before) }));
-        if (!read) break;
+        let read = null;
+        try { read = readFrame(await hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(before) }, { signal })); }
+        catch { if (signal.aborted) break; }
+        if (!read) { failed = true; break; }
         history.receive(read);
-        if (history.startLine === before) break;
+        if (history.startLine === before) { failed = true; break; }
       }
-    } finally { stop?.(); loadingOlder = false; render(); }
+    } finally { loadingOlder = false; if (!closed) render(); }
+    return { complete: !history.hasMore, failed };
   }
   async function exportMarkdown() {
-    if (exporting) return null;
-    exporting = true;
+    if (exportRun) { toast("Already exporting\u2026"); return null; }
+    const run = new AbortController();
+    const stopRun = () => run.abort();
+    paneAbort.signal.addEventListener("abort", stopRun);
+    exportRun = run;
+    let progress = null;
     try {
-      await loadAllHistory();
-      const { markdown, messages } = chatToMarkdown(history.messages, {
+      const wait = history.hasMore || olderLoad;
+      if (wait) {
+        progress = toast("Loading earlier messages\u2026", { ms: 10 * 60_000 });
+        const cancel = node("button", "pt-toast-action", "Cancel");
+        cancel.type = "button";
+        cancel.addEventListener("click", stopRun);
+        progress.el.append(cancel);
+      }
+      const { failed } = await loadAllHistory(run.signal, (n) => progress?.update(`Loading earlier messages\u2026 ${n}`));
+      if (run.signal.aborted || closed) return null;
+      const rows = history.messages.slice(-EXPORT_MAX);
+      const earlierMissing = history.hasMore || rows.length < history.messages.length;
+      const out = chatToMarkdown(rows, {
         title: title.textContent, project: projectOf(child) || basename(child && child.cwd),
-        computer: computerName, harness: provider, agent: provider, earlierMissing: !!history.hasMore,
+        computer: computerName, harness: provider, agent: provider, earlierMissing,
       });
-      return { markdown, messages, name: exportFilename(title.textContent) };
+      return { ...out, name: exportFilename(out.title), failed, earlierMissing };
     } catch {
-      toast("Could not read the chat history", { tone: "danger" });
+      if (!run.signal.aborted && !closed) toast("Could not read the chat history", { tone: "danger" });
       return null;
-    } finally { exporting = false; }
+    } finally {
+      paneAbort.signal.removeEventListener("abort", stopRun);
+      progress?.();
+      exportRun = null;
+    }
   }
+  const failNote = (out) => out.failed ? `Couldn't load earlier messages; exported ${out.messages}` : null;
   async function copyMarkdown() {
     const out = await exportMarkdown();
-    if (!out) return;
+    if (!out || closed) return;
     try {
       await navigator.clipboard.writeText(out.markdown);
-      toast(`Copied ${out.messages} message${out.messages === 1 ? "" : "s"}`);
+      toast(failNote(out) || `Copied ${plural(out.messages)}`, out.failed ? { tone: "danger" } : {});
     } catch { toast("Could not copy to the clipboard", { tone: "danger" }); }
   }
   async function saveMarkdown() {
     const out = await exportMarkdown();
-    if (!out) return;
+    if (!out || closed) return;
     downloadText(out.name, out.markdown);
-    toast(`Saved ${out.messages} message${out.messages === 1 ? "" : "s"} as ${out.name}`);
+    toast(failNote(out) || `Saved ${plural(out.messages)} as ${out.name}`, out.failed ? { tone: "danger" } : {});
   }
   const exportHandle = { isUsable: () => el.isConnected && el.getClientRects().length > 0, copy: copyMarkdown, save: saveMarkdown };
   el.addEventListener("focusin", () => setExportPane(exportHandle));
@@ -882,13 +910,13 @@ export function openChat(el, computerName, child, opts = {}) {
     // The snapshot's cursor is not usable until the live backlog replaces it.
     if (!backlogLoaded || loadingOlder || !history.hasMore || history.startLine === null) return;
     loadingOlder = true;
-    hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) })
+    olderLoad = hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) }, { signal: paneAbort.signal })
       .then((frame) => {
         const read = readFrame(frame);
         if (read) { history.receive(read); render(); }
       })
       .catch(() => {})
-      .finally(() => { loadingOlder = false; });
+      .finally(() => { loadingOlder = false; olderLoad = null; });
   });
 
   // ---- rename ----
@@ -987,6 +1015,7 @@ export function openChat(el, computerName, child, opts = {}) {
     focus() { composer.focus(); },
     close() {
       closed = true;
+      paneAbort.abort();
       find.destroy();
       closeMenu();
       clearExportPane(exportHandle);
