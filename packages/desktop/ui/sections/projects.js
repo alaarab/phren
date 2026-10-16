@@ -15,7 +15,7 @@ import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { storeBlobText, storeTree } from "../store-cache.js";
 import { skeleton } from "../shell/skeleton.js";
-import { todayGroups, TODAY_ROWS } from "../shell/project-today.js";
+import { todayGroups, sessionsForProject, TODAY_ROWS } from "../shell/project-today.js";
 import { loadFindings, openSaved } from "./home/saved-today.js";
 import { savedAgo } from "../shell/saved-today.js";
 
@@ -516,7 +516,7 @@ export function mountProjects(root) {
     const last = sessions.map((row) => row.child.lastChangedAt).filter(Boolean).sort().pop() || project.lastSeen;
     if (last) stats.append(el("span", "pj-stat", `active ${age(last)}`));
     card.append(stats);
-    card.addEventListener("click", () => { state.view = "detail"; state.detail = { computer: project.computer, name: project.name }; loadDetailFiles(); loadForge(); loadToday(); render(); });
+    card.addEventListener("click", () => { state.view = "detail"; state.detail = { computer: project.computer, name: project.name }; state.todayOpen.clear(); loadDetailFiles(); loadForge(); loadToday(); render(); });
     return card;
   }
 
@@ -551,11 +551,32 @@ export function mountProjects(root) {
     const detail = state.detail;
     const project = detail && state.data.get(detail.computer)?.projects.get(detail.name);
     if (!project) return;
-    state.todayOpen.clear();
     try {
       project.todayFindings = await loadFindings(detail.computer, project.name, { fetchStale: true });
-    } catch { project.todayFindings = project.todayFindings ?? []; }
+      project.todayError = false;
+    } catch { project.todayError = true; }
     if (state.detail === detail) renderDetail();
+  }
+
+  /** Where this project is checked out, per computer that has it: its repo directory, the host data's directory and any listed worktrees. */
+  function checkoutsOf(name) {
+    const out = new Map();
+    for (const [computer, entry] of state.data) {
+      const p = entry.projects.get(name);
+      if (!p) continue;
+      const git = p.forge?.data;
+      const listed = Array.isArray(git?.worktrees) ? git.worktrees.map((w) => w?.path ?? w?.directory) : [];
+      out.set(computer, [p.directory, git?.directory, ...listed].filter((d) => typeof d === "string" && d));
+    }
+    return out;
+  }
+
+  let midnight = null;
+  function scheduleMidnight() {
+    clearTimeout(midnight);
+    const d = new Date();
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    midnight = setTimeout(() => { if (state.view === "detail" && state.detail) renderDetail(); scheduleMidnight(); }, Math.max(1000, end - Date.now() + 1000));
   }
 
   /** The open tasks that name the checkout's branch, under the Code block. */
@@ -658,17 +679,18 @@ export function mountProjects(root) {
   function todayBlock(detail, project) {
     const git = project.forge?.data;
     const groups = todayGroups({
-      sessions: sessionsFor(detail.computer, detail.name),
+      sessions: sessionsForProject(allSessions(state.merged), { name: detail.name, checkouts: checkoutsOf(detail.name) }),
       pulls: Array.isArray(git?.pulls) ? git.pulls : [],
       current: git?.current ?? null,
       findings: project.todayFindings ?? [],
       computer: detail.computer, project: project.name,
     });
-    if (!groups.total) return null;
+    if (!groups.total && !project.todayError) return null;
     const terms = hostTerms(git?.host);
     const block = el("section", "pj-block pj-today");
     block.dataset.block = "project-today";
     block.append(el("h2", "section-label", "Today"));
+    if (project.todayError) block.append(el("div", "pj-empty slim danger", "Couldn't read today's memory."));
     const now = Date.now();
     const section = (id, label, items, makeRow) => {
       if (!items.length) return;
@@ -701,7 +723,7 @@ export function mountProjects(root) {
       button.addEventListener("click", () => openInAgents(row.computer, row.child));
       return button;
     });
-    section("prs", `${capitalize(terms.long)}s`, groups.prs, ({ pull, at, merged }) => {
+    section("prs", `${capitalize(terms.long)}s updated today`, groups.prs, ({ pull, at, merged }) => {
       const row = pullRow(pull, terms);
       row.querySelector(".pj-row-meta")?.replaceChildren(...[
         merged ? el("span", "pj-checks passing", "Merged") : "",
@@ -1148,8 +1170,13 @@ export function mountProjects(root) {
   render();
 
   return {
-    show() { ensureLoaded(); render(); },
-    hide() {},
+    show() {
+      ensureLoaded();
+      render();
+      if (state.view === "detail" && state.detail) void loadToday(); // cache-respecting: a read only when stale or failed
+      scheduleMidnight();
+    },
+    hide() { clearTimeout(midnight); midnight = null; },
     /** Every project loaded so far, across computers (⌘K lists them). */
     projects() {
       return [...state.data.values()].flatMap((entry) => [...entry.projects.values()].map((p) => ({ computer: p.computer, name: p.name, lastSeen: p.lastSeen })));
@@ -1164,6 +1191,7 @@ export function mountProjects(root) {
       state.detail = { computer, name };
       loadDetailFiles();
       loadForge();
+      state.todayOpen.clear();
       loadToday();
       render();
     },

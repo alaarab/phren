@@ -4,6 +4,32 @@ import { dayBounds, savedToday } from "./saved-today.js";
 
 export const TODAY_ROWS = 5;
 
+const trimSlash = (p) => String(p ?? "").replace(/\/+$/, "");
+const lastSegment = (p) => String(p ?? "").split("/").filter(Boolean).pop() ?? "";
+
+/** Whether `cwd` is the checkout itself or inside it (a subfolder or a worktree under it); never a same-named folder elsewhere. */
+export function insideCheckout(cwd, checkout) {
+  const dir = trimSlash(checkout);
+  const at = trimSlash(cwd);
+  return !!dir && !!at && (at === dir || at.startsWith(`${dir}/`));
+}
+
+/**
+ * The overview sessions that belong to a project, on any computer that has it. `rows` are `{ computer, child }`;
+ * `checkouts` maps a computer to the project's known checkout paths there (its repo directory, the git host
+ * data's directory, listed worktrees). A computer with the project but no known path falls back to the folder
+ * name (the cwd's last segment, never the label); a computer without the project has none.
+ */
+export function sessionsForProject(rows, { name, checkouts }) {
+  return rows.filter((row) => {
+    const paths = checkouts.get(row.computer);
+    const cwd = row.child?.cwd;
+    if (!paths || !cwd) return false;
+    if (paths.length) return paths.some((dir) => insideCheckout(cwd, dir));
+    return lastSegment(cwd) === name;
+  });
+}
+
 const inDay = (iso, [start, end]) => {
   const at = Date.parse(iso ?? "");
   return Number.isFinite(at) && at >= start && at < end ? at : null;

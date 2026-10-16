@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "vitest";
 // @ts-expect-error plain ESM
-import { todayGroups } from "../ui/shell/project-today.js";
+import { todayGroups, sessionsForProject } from "../ui/shell/project-today.js";
 
 const ORIGINAL_TZ = process.env.TZ;
 afterEach(() => { if (ORIGINAL_TZ === undefined) delete process.env.TZ; else process.env.TZ = ORIGINAL_TZ; });
@@ -37,4 +37,32 @@ it("counts findings through the UTC-date rule, once each, and is empty with no a
   }, new Date(2026, 9, 16, 15).getTime());
   expect(out.memory.map((m: { id: string; text: string; project: string }) => [m.id, m.text, m.project])).toEqual([["f1", "saved today", "phren"]]);
   expect(todayGroups({ sessions: [chat("x", at(14, 9))], pulls: [{ number: 1, updated: at(14, 9) }], findings: [{ id: "f", created: "2026-10-14" }] }, now).total).toBe(0);
+});
+
+it("matches sessions by checkout path: worktrees and subfolders in, a same-named folder elsewhere out", () => {
+  const row = (computer: string, cwd: string | undefined, label = "") => ({ computer, child: { id: `${computer}:${cwd}`, cwd, label } });
+  const rows = [
+    row("A", "/Users/you/phren"),
+    row("A", "/Users/you/phren/packages/cli"),
+    row("A", "/Users/you/phren/.claude/worktrees/agent-1"),
+    row("A", "/Users/you/phren-feat-x"),
+    row("A", "/Users/you/tmp/phren"),
+    row("A", "/Users/you/phrenology"),
+    row("A", undefined, "phren"),
+    row("B", "/home/you/code/phren"),
+    row("B", "/home/you/other/phren"),
+    row("C", "/Users/you/phren"),
+    row("D", "/srv/work/phren"),
+    row("D", "/srv/work/phren-old"),
+  ];
+  const checkouts = new Map([
+    ["A", ["/Users/you/phren/", "/Users/you/phren-feat-x"]],
+    ["B", ["/home/you/code/phren"]],
+    ["D", []],
+  ]);
+  const found = sessionsForProject(rows, { name: "phren", checkouts }).map((r: { child: { cwd: string } }) => `${r.child.cwd}`);
+  expect(found).toEqual([
+    "/Users/you/phren", "/Users/you/phren/packages/cli", "/Users/you/phren/.claude/worktrees/agent-1", "/Users/you/phren-feat-x",
+    "/home/you/code/phren", "/srv/work/phren",
+  ]);
 });
