@@ -43,6 +43,7 @@
   color: var(--text); font: 12.5px system-ui; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   transition: opacity .18s ease;
 }
+.pt-toast-action { margin-left: 12px; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
 .pt-toast.fade { opacity: 0; }
 .pt-toast.danger { color: var(--danger); }
 

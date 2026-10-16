@@ -31,11 +31,11 @@ const KEY_WORDS = "password|passwd|pwd|passphrase|secret|token|api[_-]?key|acces
 const CAMEL_KEYS = "accessToken|refreshToken|authToken|idToken|apiKey|apiToken|clientSecret|secretKey|privateKey|accountKey|sharedAccessKey";
 const ASSIGNMENT = new RegExp(
   // The keyword is a whole word of the key (DB_PASSWORD, SECRET_KEY, api-key) or a known camelCase name.
-  `((?<![A-Za-z0-9_.-])["']?(?:(?:[A-Za-z0-9]+[_. -])*(?:${KEY_WORDS})(?:[_.-][A-Za-z0-9]+)*|${CAMEL_KEYS})["']?\\s{0,4}[=:]\\s{0,4})` +
-  `("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|[^\\s,;}\\])"']+)`, "gi");
+  `((?<![A-Za-z0-9_.-])["']?(?:(?:[A-Za-z0-9]+[_. -]){0,3}(?:${KEY_WORDS})(?:[_.-][A-Za-z0-9]+){0,3}|${CAMEL_KEYS})["']?\\s{0,4}[=:]\\s{0,4})` +
+  `(\\[redacted\\]|"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|[^\\s,;}\\])"']+)`, "gi");
 // Upper-case environment names ending in a credential word (PGPASSWORD, MYSQL_PWD): case-sensitive,
 // so code identifiers such as CancellationToken don't match.
-const ENV_ASSIGNMENT = /((?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN)\s{0,4}[=:]\s{0,4})("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;}\])"']+)/g;
+const ENV_ASSIGNMENT = /((?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN)\s{0,4}[=:]\s{0,4})(\[redacted\]|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;}\])"']+)/g;
 // Long unprefixed runs, judged by looksSecret.
 const LONG_RUN = /(?<![A-Za-z0-9_+/=-])[A-Za-z0-9_+/-]{32,}={0,2}(?![A-Za-z0-9_+/=-])/g;
 
@@ -53,10 +53,9 @@ function looksSecret(run) {
   return run.length >= 40 && /[a-z]/.test(run) && /[A-Z]/.test(run) && /[0-9]/.test(run);
 }
 
-/** Redact the whole notification text, cut to what a notification shows. */
-export function redactNotice(value) {
-  const text = value.length > SCAN_MAX ? value.slice(0, SCAN_MAX) : value;
-  const redacted = redactString(text)
+/** Redact a whole text with every pattern, without shortening it (an exported chat). */
+export function redactAll(value) {
+  return redactString(String(value))
     .replace(MORE_TOKENS, "[redacted]")
     .replace(AUTHORIZATION, "$1[redacted]")
     .replace(SIGNED_PARAMS, "$1[redacted]")
@@ -64,7 +63,44 @@ export function redactNotice(value) {
     .replace(ASSIGNMENT, "$1[redacted]")
     .replace(ENV_ASSIGNMENT, "$1[redacted]")
     .replace(LONG_RUN, (run) => (looksSecret(run) ? "[redacted]" : run));
+}
+
+/** Redact the whole notification text, cut to what a notification shows. */
+export function redactNotice(value) {
+  const text = value.length > SCAN_MAX ? value.slice(0, SCAN_MAX) : value;
+  const redacted = redactAll(text);
   if (redacted.length <= NOTICE_MAX && value.length <= SCAN_MAX) return redacted;
   // Shorten after redacting, and never end inside a word that could be the start of a secret.
   return `${redacted.slice(0, NOTICE_MAX).replace(/\S*$/, "")}…`;
+}
+
+// ---- exported chats ---------------------------------------------------------
+// redactAll plus the command-line, header and token forms the peer hand-off
+// redactor (packages/cli/src/bridge/peer-handoff.ts) covers. Every pattern is
+// a single pass with bounded alternatives, so none backtracks quadratically.
+const VALUE = String.raw`(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)`;
+const HEADER_LINE = /(\b(?:Authorization|Cookie|Set-Cookie|X-API-Key|[A-Za-z0-9-]{0,40}-(?:Key|Token))[\t ]*:[\t ]*)([^\r\n]*)/gi;
+const CURL_USER = new RegExp(String.raw`([\t ](?:-u|--user)[\t ]+)${VALUE}`, "g");
+// Any long flag whose name carries a credential word (--client-secret, --db-password, --bearer-token).
+const FLAG_VALUE = new RegExp(String.raw`(?<![\w-])(--[\w-]{0,40}(?:secret|token|passw(?:or)?d|pwd|auth(?!or)|credential|api[-_]?key)[\w-]{0,40}(?:=|[\t ]+))(?!-)${VALUE}`, "gi");
+// authorization=..., auth_header=..., and npm's //registry/:_authToken=...
+const AUTH_ASSIGNMENT = /((?<![A-Za-z0-9])_{0,2}(?:authorization|auth(?:[_-]?(?:token|header|key))?)["']?[\t ]{0,4}[=:][\t ]{0,4})(?:\[redacted\]|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\])"']+)/gi;
+const SLACK_WEBHOOK = /https:\/\/hooks\.slack\.com\/services\/T\w+\/B\w+\/\w+/g;
+const ANY_JWT = /(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]+/g;
+
+/** Redact text bound for the clipboard or a file. */
+export function redactExport(value) {
+  const text = String(value)
+    // A header runs to the end of the line; a closing quote around it (-H 'X-Auth-Token: x') is kept.
+    .replace(HEADER_LINE, (_m, head, rest) => `${head}[redacted]${/['"]$/.test(rest) ? rest.slice(-1) : ""}`)
+    .replace(/\b(?:mysql|curl)\b[^\r\n]*/gi, (line) => {
+      if (/\bmysql\b/i.test(line)) line = line.replace(/([\t ]-p)(?![\t ]|$)[^\s]+/g, "$1[redacted]");
+      if (/\bcurl\b/i.test(line)) line = line.replace(CURL_USER, "$1[redacted]");
+      return line;
+    })
+    .replace(FLAG_VALUE, "$1[redacted]")
+    .replace(AUTH_ASSIGNMENT, "$1[redacted]")
+    .replace(SLACK_WEBHOOK, "[redacted]")
+    .replace(ANY_JWT, "[redacted]");
+  return redactAll(text);
 }
