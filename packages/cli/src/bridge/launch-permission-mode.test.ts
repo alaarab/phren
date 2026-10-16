@@ -81,7 +81,7 @@ describe("launching in a permission mode", () => {
         if (rejected && !(recovers && attempts === 2)) throw new BridgeError(409, "not an active named agent", { herdrCode: "agent_not_ready" });
       },
       processes: async () => ({ shellPid: 10, foregroundPids: recovers && attempts === 2 ? [11] : [10] }),
-      readScreen: async () => "npm install -g @openai/codex\nPlease restart Codex\n\n",
+      readScreen: async () => attempts ? `Attempt ${attempts}\nnpm install -g @openai/codex\nPlease restart Codex\n\n` : "$ ",
     };
     const undo = setTerminalProvider({ kind: "fake", ...base } as unknown as TerminalProvider);
     try {
@@ -94,21 +94,61 @@ describe("launching in a permission mode", () => {
     } finally { undo(); }
   });
 
-  it("detects a startup exit while the terminal is still waiting for readiness", async () => {
+  it("waits for a delayed Codex start without retrying it", async () => {
     vi.useFakeTimers();
-    let attempts = 0;
+    let attempts = 0, running = false;
     const undo = setTerminalProvider({
-      kind: "fake", snapshot: async () => structuredClone(state),
-      startAgent: async () => { attempts++; return new Promise<void>(() => {}); },
-      processes: async () => ({ shellPid: 10, foregroundPids: [10] }),
-      readScreen: async () => "Please restart Codex",
+      kind: "fake", snapshot: async () => ({ panes: [{ pane_id: "w1:p1", agent: running ? "codex" : undefined, agent_status: running ? "idle" : "unknown",
+        agent_session: { kind: "id", agent: "codex", value: "00000004-2222-4222-8222-222222222222" } }] }),
+      startAgent: async () => { attempts++; await new Promise(resolve => setTimeout(resolve, 3_000)); running = true; },
+      processes: async () => ({ shellPid: 10, foregroundPids: running ? [11] : [10] }),
+      readScreen: async () => "$ ",
     } as unknown as TerminalProvider);
     try {
+      let settled = false;
+      const launch = launchSession("default", { cwd, label: "Delayed", kind: "codex" },
+        { into: { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" } });
+      const completed = expect(launch).resolves.toMatchObject({ ok: true }).then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(attempts).toBe(1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await completed;
+      expect(attempts).toBe(1);
+      expect(running).toBe(true);
+    } finally { undo(); vi.useRealTimers(); }
+  });
+
+  it.each([true, false])("settles each starter before retrying or reporting an exit (retry starts %s)", async recovers => {
+    vi.useFakeTimers();
+    let attempts = 0, pending = 0, running = false;
+    const undo = setTerminalProvider({
+      kind: "fake", snapshot: async () => ({ panes: [{ pane_id: "w1:p1", agent: "codex", agent_status: running ? "idle" : "unknown",
+        agent_session: { kind: "id", agent: "codex", value: "00000004-2222-4222-8222-222222222222" } }] }),
+      startAgent: async () => {
+        expect(pending).toBe(0);
+        attempts++; pending++;
+        await new Promise(resolve => setTimeout(resolve, 1_500));
+        pending--; running = recovers && attempts === 2;
+      },
+      processes: async () => ({ shellPid: 10, foregroundPids: running ? [11] : [10] }),
+      readScreen: async () => attempts ? `Attempt ${attempts}\nPlease restart Codex` : "$ ",
+    } as unknown as TerminalProvider);
+    try {
+      let settled = false;
       const launch = launchSession("default", { cwd, label: "Waiting", kind: "codex" },
         { into: { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" } });
-      const failed = expect(launch).rejects.toMatchObject({ message: "Codex exited at start: Please restart Codex" });
-      await vi.advanceTimersByTimeAsync(2_500);
-      await failed;
+      const outcome = recovers ? expect(launch).resolves.toMatchObject({ ok: true })
+        : expect(launch).rejects.toMatchObject({ message: "Codex exited at start: Please restart Codex" });
+      const completed = outcome.then(() => { expect(pending).toBe(0); settled = true; });
+      await vi.advanceTimersByTimeAsync(1_250);
+      expect(attempts).toBe(1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(attempts).toBe(2);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await completed;
       expect(attempts).toBe(2);
     } finally { undo(); vi.useRealTimers(); }
   });

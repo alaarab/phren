@@ -222,35 +222,49 @@ async function startWhenShellReady(server: string, pane: string, agent: AgentSta
   }
 }
 
-/** A startup can return to its shell even when the terminal reports an
- * unknown agent. Keep the existing pane and app-server thread for one retry. */
+/** Retry only a demonstrated exit, and serialize starters: neither terminal
+ * provider supports cancelling a start already submitted to its server. */
 async function startCodex(server: string, pane: string, agent: AgentStart): Promise<void> {
   const terminal = terminalProvider();
+  const screenText = async () => stripTerminal(await terminal.readScreen?.(server, pane,
+    { scope: "pane", source: "recent", lines: 20 }).catch(() => "") ?? "").trim();
   for (let attempt = 0; attempt < 2; attempt++) {
-    const startedAt = Date.now();
-    const deadline = startedAt + agent.timeoutMs;
+    const before = await screenText();
+    const deadline = Date.now() + agent.timeoutMs;
+    let ran = false;
     let result: { error?: unknown } | undefined;
     const starting = startWhenShellReady(server, pane, agent).then(
-      () => { result = {}; }, error => { result = { error }; });
-    for (;;) {
-      // A provider may wait for readiness while the process has already exited.
-      await Promise.race([starting, new Promise(resolve => setTimeout(resolve, 250))]);
-      const processes = await terminal.processes?.(server, pane).catch(() => undefined);
-      const shell = processes?.shellPid;
-      const exited = processes !== undefined && shell !== undefined && processes.foregroundPids.every(pid => pid === shell);
-      if (exited && (result || Date.now() - startedAt >= 1_000)) {
-        if (attempt === 0) break;
-        const screen = await terminal.readScreen(server, pane, { scope: "pane", source: "recent", lines: 20 }).catch(() => "");
-        const last = stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1);
-        throw new BridgeError(409, `Codex exited at start: ${last || "process returned to its shell"}`);
-      }
-      if (result?.error) throw result.error;
-      if (result) {
+      () => { result = {}; ran = true; }, error => { result = { error }; });
+    try {
+      for (;;) {
+        await Promise.race([starting, new Promise(resolve => setTimeout(resolve, 250))]);
+        const processes = await terminal.processes?.(server, pane).catch(() => undefined);
         const state = await terminal.snapshot(server);
-        const status = objects(state.panes).find(row => row.pane_id === pane)?.agent_status;
-        if (!processes || ["idle", "working", "blocked", "waiting"].includes(String(status)) || Date.now() >= deadline) return;
-        await new Promise(resolve => setTimeout(resolve, 250));
-      } else if (Date.now() >= deadline) { await starting; }
+        const current = objects(state.panes).find(row => row.pane_id === pane);
+        const shell = processes?.shellPid;
+        const atShell = processes !== undefined && shell !== undefined && processes.foregroundPids.every(pid => pid === shell);
+        if (processes && !atShell && current?.agent === "codex") ran = true;
+        if (atShell) {
+          const screen = await screenText();
+          const exitMessage = screen !== before && /please restart codex|codex exited(?: at start)?/i.test(screen);
+          if (ran || exitMessage) {
+            // A screen or process observation cannot cancel a pending start.
+            // Wait for it, then observe again: it might still launch Codex.
+            if (!result) { await starting; continue; }
+            if (attempt === 0) break;
+            const last = screen.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1);
+            throw new BridgeError(409, `Codex exited at start: ${last || "process returned to its shell"}`);
+          }
+        }
+        if (result && "error" in result) throw result.error;
+        if (result) {
+          if (!processes || ["idle", "working", "blocked", "waiting"].includes(String(current?.agent_status)) || Date.now() >= deadline) return;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        } else if (Date.now() >= deadline) { await starting; }
+      }
+    } finally {
+      // Even a failed process/snapshot read must not leave a starter behind.
+      await starting;
     }
   }
 }
