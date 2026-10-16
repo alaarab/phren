@@ -78,7 +78,54 @@ describe("redactExport", () => {
     ["other *-Token header", "X-Auth-Token: tok4567", "tok4567"],
     ["Slack webhook", "post https://hooks.slack.com/services/T123ABC/B456DEF/abcDEF789xyz", "abcDEF789xyz"],
     ["any JWT", "jwt eyJhbGciOiJIUzI1NiJ9.cGF5bG9hZA.c2lnbmF0dXJl end", "cGF5bG9hZA"],
+    ["--client-secret=", "run --client-secret=abc123", "abc123"],
+    ["--client-secret value", "run --client-secret abc123", "abc123"],
+    ["--foo-token", "run --foo-token xyz789", "xyz789"],
+    ["--db-password", "run --db-password xyz789", "xyz789"],
+    ["--bearer-token", "run --bearer-token xyz789", "xyz789"],
+    ["npm _authToken", "//registry.npmjs.org/:_authToken=abc123def", "abc123def"],
+    ["authorization=", "authorization=abc123", "abc123"],
+    ["auth_header=", "auth_header=abc123", "abc123"],
+    ["quoted header", "curl -H 'X-Auth-Token: abc123' https://x.test", "abc123"],
   ];
+  it("does not duplicate a closing quote or bracket", () => {
+    expect(redactExport("curl -H 'X-Auth-Token: abc123'")).toBe("curl -H 'X-Auth-Token: [redacted]'");
+  });
+  it("keeps ordinary words that start like a credential flag", () => {
+    expect(redactExport("git log --author bob")).toBe("git log --author bob");
+  });
+  it("takes at most 50 ms on 64 KB adversarial inputs for every pattern", () => {
+    const k = 64 * 1024;
+    const inputs: Record<string, string> = {
+      password: "password ".repeat(7000),
+      aPassword: `${"a password ".repeat(5000)}=`,
+      dashes: `--${"-".repeat(k)}`,
+      flagWords: `--${"token".repeat(13000)}`,
+      flagSep: `--token${" ".repeat(k)}`,
+      headerDashes: `${"a-".repeat(k / 2)}\n`,
+      mysql: `mysql ${"-p".repeat(k / 2)}`,
+      curl: `curl${" -u".repeat(k / 3)}`,
+      curlQuotes: `curl -u ${"'x ".repeat(k / 3)}`,
+      jwt: `eyJ${"a.".repeat(k / 2)}`,
+      jwtLong: `eyJ${"a".repeat(k)}`,
+      slack: `https://hooks.slack.com/services/T${"a".repeat(k)}`,
+      auth: `${"auth_".repeat(k / 5)}=`,
+      authSpaces: `auth${" ".repeat(k)}`,
+      upper: `${"A".repeat(k)}=`,
+      upperUnderscore: `${"A_".repeat(k / 2)}`,
+      camel: `${"authToken".repeat(7000)}`,
+      urlCreds: `http://${"a".repeat(k)}`,
+      key: `-----BEGIN PRIVATE KEY-----${"-----BEGIN PRIVATE KEY-----".repeat(2400)}`,
+      long: "A1b2".repeat(k / 4),
+      quotes: `password="${"\\".repeat(k)}`,
+      cookie: `Cookie:${" ".repeat(k)}`,
+    };
+    for (const [name, input] of Object.entries(inputs)) {
+      const start = performance.now();
+      redactExport(input);
+      expect(performance.now() - start, name).toBeLessThan(50);
+    }
+  });
   for (const [name, input, secret] of cases) {
     it(`removes ${name}`, () => {
       const out = redactExport(input);

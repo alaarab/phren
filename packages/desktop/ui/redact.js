@@ -31,11 +31,11 @@ const KEY_WORDS = "password|passwd|pwd|passphrase|secret|token|api[_-]?key|acces
 const CAMEL_KEYS = "accessToken|refreshToken|authToken|idToken|apiKey|apiToken|clientSecret|secretKey|privateKey|accountKey|sharedAccessKey";
 const ASSIGNMENT = new RegExp(
   // The keyword is a whole word of the key (DB_PASSWORD, SECRET_KEY, api-key) or a known camelCase name.
-  `((?<![A-Za-z0-9_.-])["']?(?:(?:[A-Za-z0-9]+[_. -])*(?:${KEY_WORDS})(?:[_.-][A-Za-z0-9]+)*|${CAMEL_KEYS})["']?\\s{0,4}[=:]\\s{0,4})` +
-  `("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|[^\\s,;}\\])"']+)`, "gi");
+  `((?<![A-Za-z0-9_.-])["']?(?:(?:[A-Za-z0-9]+[_. -]){0,3}(?:${KEY_WORDS})(?:[_.-][A-Za-z0-9]+){0,3}|${CAMEL_KEYS})["']?\\s{0,4}[=:]\\s{0,4})` +
+  `(\\[redacted\\]|"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|[^\\s,;}\\])"']+)`, "gi");
 // Upper-case environment names ending in a credential word (PGPASSWORD, MYSQL_PWD): case-sensitive,
 // so code identifiers such as CancellationToken don't match.
-const ENV_ASSIGNMENT = /((?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN)\s{0,4}[=:]\s{0,4})("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;}\])"']+)/g;
+const ENV_ASSIGNMENT = /((?<![A-Za-z0-9_])[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN)\s{0,4}[=:]\s{0,4})(\[redacted\]|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;}\])"']+)/g;
 // Long unprefixed runs, judged by looksSecret.
 const LONG_RUN = /(?<![A-Za-z0-9_+/=-])[A-Za-z0-9_+/-]{32,}={0,2}(?![A-Za-z0-9_+/=-])/g;
 
@@ -79,22 +79,27 @@ export function redactNotice(value) {
 // redactor (packages/cli/src/bridge/peer-handoff.ts) covers. Every pattern is
 // a single pass with bounded alternatives, so none backtracks quadratically.
 const VALUE = String.raw`(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)`;
-const HEADER_LINE = /(\b(?:Authorization|Cookie|Set-Cookie|X-API-Key|[A-Za-z0-9-]{0,40}-(?:Key|Token))[\t ]*:[\t ]*)[^\r\n]*/gi;
+const HEADER_LINE = /(\b(?:Authorization|Cookie|Set-Cookie|X-API-Key|[A-Za-z0-9-]{0,40}-(?:Key|Token))[\t ]*:[\t ]*)([^\r\n]*)/gi;
 const CURL_USER = new RegExp(String.raw`([\t ](?:-u|--user)[\t ]+)${VALUE}`, "g");
-const FLAG_VALUE = new RegExp(String.raw`(?<![\w-])(--(?:password|passwd|pass|pwd|token|api-key|apikey|secret|auth|access-token|auth-token)(?:[\t ]+|=))(?!-)${VALUE}`, "gi");
+// Any long flag whose name carries a credential word (--client-secret, --db-password, --bearer-token).
+const FLAG_VALUE = new RegExp(String.raw`(?<![\w-])(--[\w-]{0,40}(?:secret|token|passw(?:or)?d|pwd|auth(?!or)|credential|api[-_]?key)[\w-]{0,40}(?:=|[\t ]+))(?!-)${VALUE}`, "gi");
+// authorization=..., auth_header=..., and npm's //registry/:_authToken=...
+const AUTH_ASSIGNMENT = /((?<![A-Za-z0-9])_{0,2}(?:authorization|auth(?:[_-]?(?:token|header|key))?)["']?[\t ]{0,4}[=:][\t ]{0,4})(?:\[redacted\]|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\])"']+)/gi;
 const SLACK_WEBHOOK = /https:\/\/hooks\.slack\.com\/services\/T\w+\/B\w+\/\w+/g;
 const ANY_JWT = /(?<![\w-])eyJ[\w-]+\.[\w-]+\.[\w-]+/g;
 
 /** Redact text bound for the clipboard or a file. */
 export function redactExport(value) {
   const text = String(value)
-    .replace(HEADER_LINE, "$1[redacted]")
+    // A header runs to the end of the line; a closing quote around it (-H 'X-Auth-Token: x') is kept.
+    .replace(HEADER_LINE, (_m, head, rest) => `${head}[redacted]${/['"]$/.test(rest) ? rest.slice(-1) : ""}`)
     .replace(/\b(?:mysql|curl)\b[^\r\n]*/gi, (line) => {
       if (/\bmysql\b/i.test(line)) line = line.replace(/([\t ]-p)(?![\t ]|$)[^\s]+/g, "$1[redacted]");
       if (/\bcurl\b/i.test(line)) line = line.replace(CURL_USER, "$1[redacted]");
       return line;
     })
     .replace(FLAG_VALUE, "$1[redacted]")
+    .replace(AUTH_ASSIGNMENT, "$1[redacted]")
     .replace(SLACK_WEBHOOK, "[redacted]")
     .replace(ANY_JWT, "[redacted]");
   return redactAll(text);
