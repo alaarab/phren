@@ -84,8 +84,12 @@ async function hookFor(computer: string | undefined): Promise<{ request: Request
   return { peer: found, request: (route, body) => peerRequest(found, route, body) };
 }
 
-export async function handOff(input: unknown, options: { deliveryId?: string; notifySender?: boolean } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; queued?: boolean; deliveryId?: string; state?: string; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
+export async function handOff(input: unknown, options: { deliveryId?: string; notifySender?: boolean; bypassConductor?: boolean } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; queued?: boolean; deliveryId?: string; state?: string; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
   const data = handOffSchema.parse(input);
+  if (!options.bypassConductor) {
+    const here = await terminalPaneFromEnv();
+    if (here) return await hookRequest("/v1/conductor/call", { action: "hand_off", data, origin: here }) as unknown as Awaited<ReturnType<typeof handOff>>;
+  }
   const { request, peer } = await hookFor(data.computer);
   const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server, data.account);
   const target = data.target ?? resolved!.target;
@@ -212,10 +216,14 @@ export function claudeAccountRooms(answer: Json, computer: string, now = Date.no
   });
 }
 
-/** Login labels and remaining allowance for the continuation picker. No
- * emails, identity hashes, config paths or provider credentials cross it. */
-export function claudeMoveAccounts(answer: Json): Array<{ id: string; fiveHourLeft?: number; weekLeft?: number; resetsAt?: string }> {
+/** Owner-visible login metadata and remaining allowance for continuation.
+ * Config paths, identity hashes and provider credentials stay on the Hook. */
+export function claudeMoveAccounts(answer: Json): Array<{ id: string; email?: string; plan?: string; fiveHourLeft?: number; weekLeft?: number; resetsAt?: string; fiveHourResetsAt?: string; weekResetsAt?: string }> {
   return claudeAccountRooms(answer, "local").map(room => ({ id: room.account,
+    ...(room.email ? { email: room.email } : {}),
+    ...(typeof object(objects(answer.accounts).find(row => row.source === "claude" && object(row.account).id === room.account)?.subscription).plan === "string" ? { plan: String(object(objects(answer.accounts).find(row => row.source === "claude" && object(row.account).id === room.account)?.subscription).plan) } : {}),
+    ...(room.fiveHour?.resetsAt ? { fiveHourResetsAt: room.fiveHour.resetsAt } : {}),
+    ...(room.week?.resetsAt ? { weekResetsAt: room.week.resetsAt } : {}),
     ...(room.fiveHour?.leftPercent !== undefined ? { fiveHourLeft: room.fiveHour.leftPercent } : {}),
     ...(room.week?.leftPercent !== undefined ? { weekLeft: room.week.leftPercent } : {}),
     ...(room.fiveHour?.resetsAt ?? room.week?.resetsAt ? { resetsAt: room.fiveHour?.resetsAt ?? room.week?.resetsAt } : {}),

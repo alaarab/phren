@@ -7,13 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Reserve chat moves before asynchronous admission, re-check peer enrollment before sending hand-offs, redact short credential values, verify moved-worker Hook identities, require dispatcher relocation support, and reconcile uncertain peer launches by durable move ID.
+
 - Redact structural credentials across entire peer hand-offs, including fallback conversation text, before the final credential scan. Workers moved back to their dispatching Hook now route returns and approvals locally using its stable computer identity.
 
 - Harden cross-computer chat continuation: omit process command lines, scan the normalized outbound hand-off, disable unsupported peer Copilot moves with a reason, select and report an available Claude login, and resolve worker destinations by pinned host-key identity in the dispatching Hook’s own peer directory.
 
 ### Added
 
-- Continue a chat on another verified computer from the owner’s Continue in… picker (`moveToComputer`): checkout and account availability with remaining usage, a full hand-off over pinned SSH, confirmed new-chat launch and a link from the still-open source chat. Cross-computer conductor moves return 409 until ownership and worker routing can transfer safely between Hooks.
+- Account-first continuation lists every Claude login on self and peers with email, plan, both usage windows, usability and the current-login marker. The owner can open an interactive Claude account-add pane (`claudeAccountAdd`) and move conductor chats with their role (`moveConductorToComputer`).
+
+- Continue a chat on another verified computer from the owner’s Continue in… picker (`moveToComputer`): checkout and account availability with remaining usage, a full hand-off over pinned SSH, confirmed new-chat launch and a link from the still-open source chat. Conductor moves keep worker state on the original Hook and transfer a fenced ownership generation to a prepared successor, with authenticated operation and return forwarding.
 
 ## [0.3.52] - 2026-10-16
 

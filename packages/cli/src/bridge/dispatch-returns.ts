@@ -15,7 +15,7 @@ import { findPane, paneIdentity, sharedSnapshot, snapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer, peerFingerprint } from "./dispatch-hosts.js";
-import { BridgeError, objects, startingTargetSchema, targetSchema, type ApprovalDecision, type Json, type Provider, type Target } from "./protocol.js";
+import { BridgeError, object, objects, startingTargetSchema, targetSchema, type ApprovalDecision, type Json, type Provider, type Target } from "./protocol.js";
 import { isClaudeUsageLimit, ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 import { liveWork, runningTasks } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
@@ -573,6 +573,7 @@ export interface DispatchReturnsOptions {
   localComputer?: { id: string; name: string };
   peers?: () => Promise<HookPeer[]>;
   request?: typeof peerRequest;
+  forward?: (origin: OriginPane, text: string, deliveryId: string) => Promise<{ delivered: boolean } | undefined>;
   /** Worker states on this computer, for dispatches placed here without SSH. */
   localWorkers?: (input: Json) => Promise<{ workers: unknown[] }>;
   isLocal?: (computer: string) => boolean;
@@ -590,7 +591,7 @@ export interface DispatchReturnsOptions {
   localAnswer?: (target: Target, actionId: string, decision: ApprovalDecision) => Promise<unknown>;
   /** A worker's new forwarded request was recorded. Returns true when this Hook pushed it to its phone. */
   onApproval?: (receipt: Receipt, approval: NonNullable<Receipt["approval"]>) => boolean | void;
-  close?: (receipt: Receipt) => Promise<Json>;
+  close?: (receipt: Receipt, verifiedPeer?: HookPeer) => Promise<Json>;
   /** Continues Claude workers stopped by their usage limit on another account, after each poll (account-failover.ts). */
   failover?: { run: () => Promise<void> };
   now?: () => number;
@@ -606,6 +607,7 @@ export function noticeDeliveryId(receipts: readonly Receipt[]): string {
 
 /** Dispatching side: follows open dispatches and delivers their returns. */
 export class DispatchReturns {
+  private readonly forward?: DispatchReturnsOptions["forward"];
   private readonly localComputer?: DispatchReturnsOptions["localComputer"];
   private readonly peers: () => Promise<HookPeer[]>;
   private readonly request: typeof peerRequest;
@@ -630,6 +632,7 @@ export class DispatchReturns {
 
   constructor(options: DispatchReturnsOptions = {}) {
     this.localComputer = options.localComputer;
+    this.forward = options.forward;
     this.close = options.close;
     this.failover = options.failover;
     this.peers = options.peers ?? hookPeers;
@@ -648,12 +651,25 @@ export class DispatchReturns {
 
   private isSelf(receipt: Receipt): boolean { return !!this.localComputer && receipt.computerId === this.localComputer.id; }
 
+  private async verifiedMovedPeer(receipt: Receipt, peer: HookPeer, identity?: () => Promise<string | undefined>): Promise<boolean> {
+    const move = receipt.moves?.slice().reverse().find(move => move.to.computer);
+    if (!move) return true;
+    if (!move.computerId || !move.computerFingerprint || peerFingerprint(peer) !== move.computerFingerprint || peer.server !== receipt.target?.server) return false;
+    const id = identity ? await identity() : await this.request(peer, "/v1/health", undefined, 5_000)
+      .then(health => String(object(health.computer).id ?? ""), () => undefined);
+    return id === move.computerId;
+  }
+
   /** Send a decision for a worker's request to the Hook that runs it. */
   private async sendAnswer(receipt: Receipt, actionId: string, decision: ApprovalDecision): Promise<void> {
     const target = receipt.target;
     if (!target || !("session" in target)) throw new BridgeError(409, "This worker is not waiting on an approval.");
     const peer = this.isSelf(receipt) ? undefined : (await this.peers().catch(() => [] as HookPeer[])).find(candidate => candidate.name === receipt.computer);
-    if (peer) { await this.request(peer, "/v1/approvals/answer", { target, actionId, decision }); return; }
+    if (peer) {
+      if (!await this.verifiedMovedPeer(receipt, peer)) throw new BridgeError(503, "The moved worker's destination identity is no longer verified; its approval was retained.");
+      await this.request(peer, "/v1/approvals/answer", { target, actionId, decision }); return;
+    }
+    if (!this.isSelf(receipt) && receipt.moves?.some(move => move.to.computer)) throw new BridgeError(503, "The moved worker's verified destination is not reachable; its approval was retained.");
     if (!this.localAnswer || !(this.isSelf(receipt) || this.isLocal(receipt.computer))) throw new BridgeError(503, `${receipt.computer} is not reachable from here.`);
     await this.localAnswer(target, actionId, decision);
   }
@@ -710,6 +726,8 @@ export class DispatchReturns {
     for (const receipt of unconfirmed) {
       const peer = this.isSelf(receipt) ? undefined : peers.find(candidate => candidate.name === receipt.computer);
       if (!peer && !this.isSelf(receipt) && !this.isLocal(receipt.computer)) continue;
+      if (peer && !await this.verifiedMovedPeer(receipt, peer)) continue;
+      if (!peer && !this.isSelf(receipt) && receipt.moves?.some(move => move.to.computer)) continue;
       const arrival = await (peer ? arrivalOf({ request: route => this.request(peer, route) }, receipt.id) : this.localArrival(receipt.id)).catch(() => undefined);
       if (!arrival?.accepted) continue;
       const named = arrival.accepted.target;
@@ -730,6 +748,11 @@ export class DispatchReturns {
       && receipt.target && !receipt.closedAt && receipt.worker?.state !== "gone" && now - Date.parse(receipt.createdAt) < WATCH_MS);
     if (!open.length) return;
     const peers = await this.peers().catch(() => [] as HookPeer[]);
+    const identities = new Map<HookPeer, Promise<string | undefined>>();
+    const identity = (peer: HookPeer) => {
+      if (!identities.has(peer)) identities.set(peer, this.request(peer, "/v1/health", undefined, 5_000).then(health => typeof object(health.computer).id === "string" ? String(object(health.computer).id) : undefined, () => undefined));
+      return identities.get(peer)!;
+    };
     const byComputer = new Map<string, Receipt[]>();
     for (const receipt of open) {
       const key = this.isSelf(receipt) ? "\0self" : receipt.computer;
@@ -741,18 +764,44 @@ export class DispatchReturns {
       const peer = home ? undefined : peers.find(candidate => candidate.name === computer);
       const local = home || (!peer && this.isLocal(computer));
       if (!peer && !local) return;
-      for (let start = 0; start < receipts.length; start += 64) {
-        const batch = receipts.slice(start, start + 64);
+      const eligible = (await Promise.all(receipts.map(async receipt => {
+        const relocated = receipt.moves?.some(move => move.to.computer);
+        if (!home && relocated && (!peer || !await this.verifiedMovedPeer(receipt, peer, () => identity(peer)))) {
+          await updateReceipt(receipt.id, value => { value.error = "The moved worker's destination identity is no longer verified; receipt routing and approvals were retained."; return true; }).catch(() => undefined);
+          return undefined;
+        }
+        if (receipt.error?.startsWith("The moved worker's destination identity")) await updateReceipt(receipt.id, value => { delete value.error; return true; }).catch(() => undefined);
+        return receipt;
+      }))).filter((receipt): receipt is Receipt => !!receipt);
+      for (let start = 0; start < eligible.length; start += 64) {
+        const batch = eligible.slice(start, start + 64);
         const input = { targets: batch.map(receipt => ({ ...receipt.target!, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id })) };
         // An unreachable peer records nothing: silence is not a transition.
         const answer: Json | undefined = await (peer ? this.request(peer, "/v1/dispatch/workers", input) : this.localWorkers(input) as Promise<Json>).catch(() => undefined);
         const workers = objects(answer?.workers);
         if (workers.length !== batch.length) continue;
         for (const [index, receipt] of batch.entries()) {
-          const seen = await this.grantAnswered(receipt, workers[index]);
+          const observation = workers[index];
+          let routingPeers = peers;
+          const relocation = movedSchema.safeParse(observation.moved);
+          if (relocation.success && relocation.data.to.computer && relocation.data.computerId !== this.localComputer?.id) {
+            const move = relocation.data;
+            const candidates = peers.filter(candidate => peerFingerprint(candidate) === move.computerFingerprint && candidate.server === move.target.server);
+            const verified = (await Promise.all(candidates.map(async candidate => await identity(candidate) === move.computerId ? candidate : undefined))).filter((peer): peer is HookPeer => !!peer);
+            if (!move.computerId || verified.length !== 1) {
+              // Retain the old route and its pending approval until the enrolled
+              // SSH account proves the reported Hook identity itself.
+              await updateReceipt(receipt.id, value => {
+                value.error = "The moved worker's destination identity is not verified; receipt routing was retained."; return true;
+              }).catch(() => undefined);
+              continue;
+            }
+            routingPeers = peers.filter(peer => !candidates.includes(peer) || peer === verified[0]);
+          }
+          const seen = await this.grantAnswered(receipt, observation);
           let fresh: NonNullable<Receipt["approval"]> | undefined;
           const current = await updateReceipt(receipt.id, value => {
-            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), peers, this.localComputer);
+            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), routingPeers, this.localComputer);
             if (value.approval && value.approval.actionId !== before) fresh = value.approval;
             return changed;
           }).catch(() => undefined);
@@ -794,6 +843,12 @@ export class DispatchReturns {
     for (const [key, receipts] of byOrigin) {
       if (this.now() - (this.lastNotice.get(key) ?? -Infinity) < NOTICE_MS) continue;
       const origin = receipts[0].origin!;
+      let forwarded: { delivered: boolean } | undefined;
+      try { forwarded = await this.forward?.(origin, noticeLine(receipts), noticeDeliveryId(receipts)); }
+      catch { busy = true; continue; }
+      if (forwarded) {
+        if (!forwarded.delivered) { busy = true; continue; }
+      } else {
       const pane = findPane(await this.snapshot(origin.server).catch(() => ({})), { ...origin, source: origin.agent });
       // Never interrupt: only an agent that has stopped, in the same terminal, gets a notice.
       if (!pane || pane.terminal_id !== origin.terminal) continue;
@@ -804,6 +859,7 @@ export class DispatchReturns {
       this.lastNotice.set(key, this.now());
       const sent = await this.deliver(target.data, noticeLine(receipts), noticeDeliveryId(receipts)).catch(() => ({ delivered: false }));
       if (!sent.delivered) continue;
+      }
       const at = new Date(this.now()).toISOString();
       for (const receipt of receipts) {
         await updateReceipt(receipt.id, current => {
@@ -855,7 +911,9 @@ export class DispatchReturns {
   async cleanup(): Promise<void> {
     for (const receipt of await dispatchStatus()) {
       if (!receipt.closePending || receipt.closedAt || receipt.returned?.at !== receipt.closePending.at || receipt.returned.state !== "done" || !receipt.returned.read) continue;
-      const result = await (this.close ? this.close(receipt) : this.closeRemote(receipt)).catch(() => undefined);
+      const peer = this.isSelf(receipt) ? undefined : (await this.peers().catch(() => [])).find(peer => peer.name === receipt.computer);
+      if (!this.isSelf(receipt) && receipt.moves?.some(move => move.to.computer) && (!peer || !await this.verifiedMovedPeer(receipt, peer))) continue;
+      const result = await (this.close ? this.close(receipt, peer) : this.closeRemote(receipt, peer)).catch(() => undefined);
       if (result?.closed === true) await updateReceipt(receipt.id, current => {
         if (current.closePending?.at !== receipt.closePending!.at) return false;
         current.closedAt = new Date(this.now()).toISOString(); delete current.closePending; return true;
@@ -863,8 +921,8 @@ export class DispatchReturns {
       else if (result?.closed === false) await updateReceipt(receipt.id, current => { delete current.closePending; return true; });
     }
   }
-  private async closeRemote(receipt: Receipt): Promise<Json> {
-    const peer = (await this.peers()).find(peer => peer.name === receipt.computer);
+  private async closeRemote(receipt: Receipt, verifiedPeer?: HookPeer): Promise<Json> {
+    const peer = verifiedPeer ?? (await this.peers()).find(peer => peer.name === receipt.computer);
     if (!peer) return { closed: false };
     return this.request(peer, "/v1/dispatch/close", { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn });
   }

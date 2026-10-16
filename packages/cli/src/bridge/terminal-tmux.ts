@@ -382,6 +382,7 @@ export const tmuxTerminal: TerminalProvider = {
     const target = toTmuxId(pane, "p");
     for (const call of sendKeysCalls(target, keys)) await tmux(server, call);
   },
+  async shellCommand(server, pane, command) { await tmuxTerminal.prompt(server, pane, command); },
   async prompt(server, pane, text, signal) {
     const target = toTmuxId(pane, "p"), buffer = `phren-${process.pid}-${Date.now().toString(36)}`;
     // The text reaches tmux on stdin and the pane as one bracketed paste

@@ -1,3 +1,7 @@
+import type { ConductorSuccessionService, ConductorExecutor } from "./conductor-succession.js";
+import { relocationSupport } from "./worker-relocation.js";
+import { continuationPlacement, launchContinuation } from "./continuation-launch.js";
+import { addClaudeAccount } from "./account-add.js";
 import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
@@ -30,7 +34,7 @@ import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId, readLaunchBrief } from "./launch-brief.js";
 import { listApprovalRules, changeApprovalRule } from "./approval-rules.js";
-import { addGrant, listNamedGrants, removeGrant } from "./grants.js";
+import { addGrant, listGrants, listNamedGrants, removeGrant } from "./grants.js";
 import { clearProjectAuthority, confirmAuthority, listConfirmations, projectAuthority, readAuthority, setProjectAuthority } from "./authority.js";
 import { readComputers } from "./computer-identity.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
@@ -113,6 +117,7 @@ export interface RouteContext {
   handOffs?: HandOffQueue;
   inbox?: OwnerInbox;
   mover?: SessionMover;
+  succession?: ConductorSuccessionService;
   agentHooks: AgentHooks;
   journal: ActivityJournal;
   tabActivity: TabActivityStore;
@@ -157,7 +162,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, claudeAccountAdd: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -421,16 +426,46 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // A session move (session-move.ts) by its id, or this computer's recent moves.
+          case "/v1/conductor/move/launch": {
+            if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+            result = await ctx.succession.launchIntent(z.string().uuid().parse(url.searchParams.get("id"))); break;
+          }
+          case "/v1/conductor/move/status": {
+            if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+            result = await ctx.succession.status(z.string().uuid().parse(url.searchParams.get("id"))); break;
+          }
+          case "/v1/conductor/move/operation": {
+            if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+            result = await ctx.succession.outgoing(z.string().uuid().parse(url.searchParams.get("id")), z.string().uuid().parse(url.searchParams.get("operationId"))); break;
+          }
+          case "/v1/conductor/move/notification": {
+            if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+            result = await ctx.succession.notification(z.string().uuid().parse(url.searchParams.get("id")), z.string().parse(url.searchParams.get("deliveryId"))); break;
+          }
+          case "/v1/dispatch/relocation": {
+            result = await relocationSupport(z.string().parse(url.searchParams.get("id")), z.string().parse(url.searchParams.get("session"))); break;
+          }
+          case "/v1/sessions/move/launch": {
+            result = await continuationPlacement(z.string().uuid().parse(url.searchParams.get("id"))) ?? { state: "missing" }; break;
+          }
           case "/v1/sessions/move/computers": {
             if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner can list continuation computers.");
+            const session = url.searchParams.get("session");
+            let currentAccount: string | undefined;
+            if (session) {
+              const server = selectedServer(url);
+              const rows = objects((await readWorkspaces(server, await snapshot(server), false)).groups).flatMap(group => objects(group.children));
+              const current = rows.find(row => object(row.target).session === session && row.agent === "claude");
+              if (current) currentAccount = String(object(current.account).id ?? "default");
+            }
             result = await moveComputers(url.searchParams.get("project"), info.computer.name,
-              () => localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true)));
+              () => localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true), url.searchParams.get("conductor") === "1"), currentAccount, url.searchParams.get("conductor") === "1");
             break;
           }
           // Local facts only: peers may probe these without starting a move or fanning out.
           case "/v1/sessions/move/availability": {
             if (!ownerRequest(request, {}) && request.headers["x-phren-origin"] !== "peer") throw new BridgeError(403, "Only the owner or a verified peer can read continuation availability.");
-            result = { ...await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true)), computerId: info.computer.id };
+            result = { ...await localMoveAvailability(url.searchParams.get("project"), () => accountUsage.read(new Set(["claude"]), true), url.searchParams.get("conductor") === "1"), computerId: info.computer.id };
             break;
           }
           case "/v1/sessions/move": {
@@ -672,7 +707,42 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/tasks/launch") {
+        const executeConductor: ConductorExecutor = async (action, payload, origin) => {
+          if (action === "dispatch") return dispatches!.dispatch(payload, { server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane });
+          if (action === "hand_off") return handOff(payload, { bypassConductor: true });
+          if (action === "returns") return { returns: await ctx.returns!.take() };
+          if (action === "approve") {
+            const parsed = z.object({ id: z.string().uuid(), decision: z.enum(approvalDecisions), actionId: z.string().min(1).max(200) }).strict().parse(payload);
+            await ctx.returns!.answerApproval(parsed.id, parsed.decision, parsed.actionId, origin); return { ok: true };
+          }
+          if (action === "grants-list") return { grants: await listGrants() };
+          if (action === "grants-add") return { grant: await addGrant(payload) };
+          return { grant: await removeGrant(payload) };
+        };
+        const conductorCall = (action: Parameters<ConductorExecutor>[0], payload: Json, origin: unknown, run: () => Promise<Json>) => {
+          if (request.headers["x-phren-origin"] === "peer") {
+            if (action === "hand_off") return run();
+            throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
+          }
+          return ctx.succession ? ctx.succession.call(action, payload, origin, run) : run();
+        };
+        if (url.pathname === "/v1/conductor/move/prepare") {
+          if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+          result = await ctx.succession.prepare(data);
+        } else if (url.pathname === "/v1/conductor/move/commit") {
+          if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+          result = await ctx.succession.activate(data);
+        } else if (url.pathname === "/v1/conductor/move/operate") {
+          if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+          result = await ctx.succession.operate(data, executeConductor);
+        } else if (url.pathname === "/v1/conductor/move/notice") {
+          if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
+          result = await ctx.succession.notice(data);
+        } else if (url.pathname === "/v1/conductor/call") {
+          if (request.headers["x-phren-origin"] === "peer") throw new BridgeError(403, "Only local agents use the conductor call route.");
+          const parsed = z.object({ action: z.enum(["dispatch", "hand_off", "returns", "approve", "grants-list", "grants-add", "grants-remove"]), data: z.record(z.string(), z.unknown()), origin: targetSchema.omit({ source: true, session: true }) }).strict().parse(data);
+          result = await conductorCall(parsed.action, parsed.data, parsed.origin, () => executeConductor(parsed.action, parsed.data, parsed.origin));
+        } else if (url.pathname === "/v1/tasks/launch") {
           result = await launches.run(async () => launchTaskRoute(modules.store, selectedServer(url), data));
         } else if (url.pathname === "/v1/tasks/save") {
           result = saveTaskRoute(modules.store, data);
@@ -701,6 +771,18 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (!ctx.mover) throw new BridgeError(503, "This Hook cannot move sessions.");
           const { origin: _origin, ...input } = data;
           result = { ok: true, move: await ctx.mover.start(input, { owner: ownerRequest(request, data) }) };
+        } else if (url.pathname === "/v1/sessions/move/launch") {
+          if (data.computerId !== info.computer.id) throw new BridgeError(409, "The destination Hook identity changed; no chat was launched.");
+          const verified = ctx.succession ? await ctx.succession.verifiedLaunch(data) : data;
+          result = await launchContinuation(verified, (input, onPlaced) => launches.run(async () => {
+            const role = await (await import("./conductor-role.js")).readRoleState();
+            const prepared = role?.succession?.side === "successor" && role.succession.id === input.brief.id && role.succession.phase !== "aborted";
+            const cwd = prepared ? defaultPhrenPath() : await dispatchProjectDirectory(input.project);
+            return launchSession(selectedServer(url), { cwd, kind: input.to.harness, account: input.to.account, model: input.to.model, effort: input.to.effort, label: input.label, brief: input.brief }, { trustFolder: true, onPlaced });
+          }));
+        } else if (url.pathname === "/v1/accounts/claude/add") {
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can add a Claude account.");
+          result = await launches.run(() => addClaudeAccount(data, selectedServer(url)));
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/jobs/cleanup") {
@@ -736,25 +818,27 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/dispatch/close-self") {
           result = await closeOwnPane(data);
         } else if (url.pathname === "/v1/hand-off") {
-          result = await ctx.handOffs!.enqueue(data);
+          result = await conductorCall("hand_off", data, data.origin, () => ctx.handOffs!.enqueue(data));
         } else if (url.pathname === "/v1/hand-off/status") {
           const body = z.object({ deliveryId: z.string().min(8).max(64), target: targetSchema }).strict().parse(data);
           result = await ctx.handOffs!.status(body.deliveryId, body.target);
         } else if (url.pathname === "/v1/dispatch") {
           // `origin` is the caller's own pane, added by the MCP tool or CLI from Herdr's variables.
           const { origin, ...brief } = data;
-          result = await dispatches!.dispatch(brief, origin);
+          result = await conductorCall("dispatch", brief, origin, () => dispatches!.dispatch(brief, origin));
         } else if (url.pathname === "/v1/dispatch/workers") {
           result = await hookWorkers(agentHooks)(data);
         } else if (url.pathname === "/v1/dispatch/returns") {
-          result = { returns: await ctx.returns!.take() };
+          result = await conductorCall("returns", {}, data.origin, async () => ({ returns: await ctx.returns!.take() }));
         } else if (url.pathname === "/v1/dispatch/approve") {
           const body = z.object({ id: z.string().uuid(), decision: z.enum(approvalDecisions), actionId: z.string().min(1).max(200), origin: originPaneSchema.optional() }).strict().parse(data);
-          await ctx.returns!.answerApproval(body.id, body.decision, body.actionId, body.origin); result = { ok: true };
+          const { origin, ...answer } = body;
+          result = await conductorCall("approve", answer, origin, async () => { await ctx.returns!.answerApproval(body.id, body.decision, body.actionId, origin); return { ok: true }; });
         } else if (url.pathname === "/v1/approval-rules") {
           result = await changeApprovalRule(data, "POST");
         } else if (url.pathname === "/v1/conductor/grants") {
-          result = { ok: true, grant: await addGrant(data) };
+          const { origin, ...grant } = data;
+          result = await conductorCall("grants-add", grant, origin, async () => ({ ok: true, grant: await addGrant(grant) }));
         } else if (url.pathname === "/v1/authority" || url.pathname === "/v1/authority/confirm") {
           // The owner writes the policy from the phone; an agent's call names its pane.
           if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
@@ -766,7 +850,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await launches.run(async () => makeConductor(selectedServer(url), data));
         } else if (url.pathname === "/v1/conductor/stop") {
           if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change the conductor.");
-          result = await launches.run(async () => stopConductor(data));
+          result = await launches.run(async () => await ctx.succession?.stopOrigin(data.paneId) ?? stopConductor(data));
         } else if (url.pathname === "/v1/sets/name") {
           result = await nameSet(data);
         } else if (url.pathname === "/v1/sets/link") {
@@ -838,6 +922,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "DELETE") {
         if (url.pathname !== "/v1/conductor/grants" && url.pathname !== "/v1/authority" && url.pathname !== "/v1/approval-rules") throw new BridgeError(404, "Unknown Phren Hook route.");
         const data = await body(request);
+        if (url.pathname === "/v1/conductor/grants" && request.headers["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
         if (url.pathname === "/v1/approval-rules") {
           result = await changeApprovalRule(data, "DELETE");
         } else if (url.pathname === "/v1/authority") {

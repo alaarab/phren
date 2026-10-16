@@ -141,8 +141,11 @@ describe("built-in registration declarations", () => {
     const declared = BUILTIN_MODULES.flatMap(module => module.hookRoutes);
     const identities = declared.map(route => `${route.method} ${route.path}`);
     expect(new Set(identities).size).toBe(identities.length);
-    for (const path of ["/v1/sessions/move/computers", "/v1/sessions/move/availability"]) {
+    for (const path of ["/v1/sessions/move/computers", "/v1/sessions/move/availability", "/v1/sessions/move/launch", "/v1/dispatch/relocation", "/v1/conductor/move/status", "/v1/conductor/move/launch", "/v1/conductor/move/operation", "/v1/conductor/move/notification"]) {
       expect(declared.find(route => route.method === "GET" && route.path === path)).toBeDefined();
+    }
+    for (const path of ["/v1/accounts/claude/add", "/v1/sessions/move/launch", "/v1/conductor/call", "/v1/conductor/move/prepare", "/v1/conductor/move/commit", "/v1/conductor/move/operate", "/v1/conductor/move/notice"]) {
+      expect(declared.find(route => route.method === "POST" && route.path === path)).toBeDefined();
     }
     const server = source("bridge/server-routes.ts");
     const getBlock = server.slice(server.indexOf('if (request.method === "GET")'), server.indexOf('} else if (request.method === "POST")'));

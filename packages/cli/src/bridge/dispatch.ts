@@ -14,10 +14,10 @@ import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, r
 import { hookPeers } from "./peers.js";
 import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
 import { prepareDispatchOriginHandover, trackDispatchOrigin, type DispatchOriginWindow } from "./dispatch-origins.js";
-import { recordedConductor, type ConductorRecord } from "./conductor-role.js";
+import { readRoleState, recordedConductor, type ConductorRecord } from "./conductor-role.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
-import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
+import { object, atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
@@ -699,13 +699,33 @@ export class DispatchService {
 
   /** Owner continuation: use the same pinned transport and launch/arrival
    * protocol as dispatch, without turning the new chat into a worker. */
-  async continueChat(peer: DispatchHost, project: string, to: z.infer<typeof moveToSchema>, brief: { id: string; text: string }, label: string): Promise<Target> {
+  async continueChat(peer: DispatchHost, project: string, to: z.infer<typeof moveToSchema>, brief: { id: string; text: string }, label: string, placed?: (target: unknown) => Promise<void>, computerId?: string, worker = false): Promise<Target> {
     if (to.harness === "copilot") throw new BridgeError(409, PEER_COPILOT_REASON);
-    const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-      { project, kind: to.harness, ...(to.account ? { account: to.account } : {}),
-        ...(to.model ? { model: to.model } : {}), ...(to.effort ? { effort: to.effort } : {}), label, brief }, 65_000);
+    const { computer: _computer, ...destination } = to;
+    const readPlacement = async () => {
+      const saved = await peer.request(`/v1/sessions/move/launch?id=${encodeURIComponent(brief.id)}`, undefined, 5_000).catch(() => undefined);
+      if (saved?.paneTarget) await placed?.({ paneTarget: saved.paneTarget });
+      if (object(saved?.result).target) await placed?.(object(saved?.result).target);
+    };
+    let complete = false;
+    const pendingLaunch = peer.request(`/v1/sessions/move/launch?server=${encodeURIComponent(peer.server)}`,
+      { computerId, project, to: destination, label, brief, worker }, 65_000).then(result => { complete = true; return { result }; }, error => { complete = true; return { error }; });
+    // Track a created pane while its harness is still starting. Every probe
+    // is bounded, and completion stops the monitor before any later move.
+    const monitor = (async () => {
+      while (!complete) {
+        await new Promise(resolve => setTimeout(resolve, this.settleIntervalMs));
+        if (!complete) await readPlacement();
+      }
+    })().catch(() => undefined);
+    const outcome = await pendingLaunch;
+    await monitor;
+    if ("error" in outcome) { await readPlacement(); throw outcome.error; }
+    const launched = outcome.result;
+    if (launched.target) await placed?.(launched.target);
     const settled = launched.target ? { target: launched.target } : await settledTarget(peer, launched, to.harness, this.settleIntervalMs);
     const target = remoteTarget.parse(settled.target);
+    await placed?.(target);
     if (target.server !== peer.server || target.source !== to.harness) throw new BridgeError(502, "The peer returned a different launch target.");
     if (launched.briefLaunched !== true) {
       if (!("session" in target)) throw new BridgeError(409, "The peer chat is not ready to receive its hand-off; the old chat remains open.");
@@ -815,7 +835,9 @@ export class DispatchService {
   private async conductorCaller(value: unknown): Promise<string | undefined> {
     const pane = originPaneSchema.safeParse(value);
     if (!pane.success) return undefined;
-    const conductor = await recordedConductor().catch(() => undefined);
+    let conductor = await recordedConductor().catch(() => undefined);
+    const delegated = (await readRoleState())?.succession;
+    if (!conductor && delegated?.side === "origin" && delegated.phase === "committed") conductor = delegated.previous;
     if (!conductor || conductor.server !== pane.data.server || conductor.pane !== pane.data.pane) return undefined;
     return callerQuery(await localCaller());
   }

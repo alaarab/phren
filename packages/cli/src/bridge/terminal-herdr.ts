@@ -96,6 +96,18 @@ export const herdrTerminal: TerminalProvider = {
       await rpc(server, "pane.send_keys", { pane_id: pane, keys });
     }
   },
+  async shellCommand(server, pane, command) {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      const info = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
+      if (Number.isSafeInteger(info.shell_pid) && info.foreground_process_group_id === info.shell_pid) break;
+      if (Date.now() >= deadline) throw new BridgeError(409, "The new pane did not become ready at its shell prompt.");
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    // An empty shell is not a named agent: agent.prompt cannot address it.
+    await rpc(server, "pane.send_text", { pane_id: pane, text: command });
+    await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["Enter"] });
+  },
   async prompt(server, pane, text, signal) {
     try {
       if (signal) await rpc(server, "agent.prompt", { target: pane, text }, signal);

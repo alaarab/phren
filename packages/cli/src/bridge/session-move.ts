@@ -1,3 +1,4 @@
+import type { ConductorSuccessionService } from "./conductor-succession.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 // Moving a live session to another agent: the agent in the pane writes a
 // hand-off, exits the way it normally does, and the target harness starts in
@@ -34,7 +35,7 @@ import { DISPATCH_HARNESSES, DispatchService, dispatchProjectDirectory, projectN
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { findPane } from "./herdr.js";
 import { briefArrival, briefId, briefRoot, writeLaunchBrief } from "./launch-brief.js";
-import { atomic, BridgeError, bridgeRoot, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, object, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
 import { publicAssistant } from "./schedule-watch.js";
 import type { TerminalProvider } from "./terminal.js";
 
@@ -53,7 +54,7 @@ export const moveRequestSchema = z.object({
   handoffTimeoutMs: z.number().int().min(5_000).max(900_000).optional(),
 }).strict();
 
-const MOVE_STATES = ["handing-off", "exiting", "launching", "linking", "moved", "failed"] as const;
+const MOVE_STATES = ["handing-off", "exiting", "launching", "linking", "uncertain", "moved", "failed"] as const;
 const timestamp = z.string().datetime();
 const moveRecordSchema = z.object({
   id: z.string().uuid(),
@@ -64,6 +65,7 @@ const moveRecordSchema = z.object({
   computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   computerId: z.string().uuid().optional(),
   accountChoice: z.string().max(400).optional(),
+  project: projectName.optional(),
   mode: z.enum(["replace", "new-chat"]).optional(),
   modeForced: z.literal("conductor").optional(),
   handedOffTo: z.object({ computer: z.string().optional(), target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
@@ -389,6 +391,7 @@ const placeOf = (target: Target) => ({ workspace: target.workspace, tab: target.
 const briefText = (value: string) => value.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
 
 export interface MoverDeps {
+  succession?: ConductorSuccessionService;
   snapshot: (server: string) => Promise<Json>;
   /** The conversation the pane runs now. */
   identity: (server: string, pane: Json) => Promise<string | undefined>;
@@ -427,6 +430,7 @@ const DEFAULT_HANDOFF_MS = 240_000;
 /** Runs moves on the computer that runs the session. A move outlives the
  * request that started it (the Hook answers in seconds); its record says where it is. */
 export class SessionMover {
+  private readonly admissions = new Set<string>();
   private readonly running = new Map<string, Promise<void>>();
   constructor(private readonly deps: MoverDeps) {}
 
@@ -436,6 +440,18 @@ export class SessionMover {
 
   /** Checks the move can happen, records it and starts it. Refuses before anything is typed. */
   async start(input: unknown, caller: { owner?: boolean } = {}): Promise<MoveRecord> {
+    const data = moveRequestSchema.parse(input);
+    const key = `${data.target.server}\0${data.target.pane}`;
+    if (this.admissions.has(key)) throw new BridgeError(409, "This session is already being moved.");
+    this.admissions.add(key);
+    let release: (() => void) | undefined;
+    try {
+      release = this.deps.succession?.reserveCaller(data.target);
+      return await this.admit(data, caller);
+    } finally { release?.(); this.admissions.delete(key); }
+  }
+
+  private async admit(input: unknown, caller: { owner?: boolean }): Promise<MoveRecord> {
     const data = moveRequestSchema.parse(input);
     if (data.to.computer && !caller.owner) throw new BridgeError(403, "Only the owner can continue a chat on another computer.");
     if (data.id) {
@@ -466,7 +482,7 @@ export class SessionMover {
     if (holdsRole && (!conductor || conductor.server !== target.server || conductor.pane !== target.pane)) {
       throw new BridgeError(409, "The conductor changed during the move; nothing was transferred.");
     }
-    if (conductor && peer) throw new BridgeError(409, "Cross-computer conductor moves are unavailable: conductor ownership, worker returns and approvals are local to each Hook. The old conductor keeps its role.");
+    if (conductor && peer && !this.deps.succession) throw new BridgeError(409, "Update this Hook to move the conductor to another computer.");
     if (conductor && to.harness === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
     const account = target.source === "claude" ? this.deps.paneAccount?.(target.server, pane) ?? DEFAULT_ACCOUNT : undefined;
     const sameHarness = to.harness === target.source && (to.harness !== "claude" || (to.account ?? account) === account);
@@ -498,18 +514,24 @@ export class SessionMover {
         const directory = await dispatchProjectDirectory(name).catch(() => undefined);
         if (directory && directory.length > longest && (sourceDirectory === directory || sourceDirectory.startsWith(directory + path.sep))) { project = name; longest = directory.length; }
       }
+      if (!project && conductor) project = "phren-conductor";
       if (!project) throw new BridgeError(409, "The source folder is not a registered project checkout.");
       projectName.parse(project);
-      const selected = await checkMovePeer(peer, project, to);
+      const selected = await checkMovePeer(peer, project, to, !!conductor);
       computerId = selected.computerId;
       if (selected.account) { to.account = selected.account; accountChoice = selected.accountChoice; }
     }
     const dispatch = await this.deps.paneDispatch?.(target.server, pane).catch(() => undefined);
+    if (peer && dispatch) await (await import("./worker-relocation.js")).preflightWorkerRelocation(dispatch, target);
     const label = [pane.label, pane.title, pane.terminal_title_stripped, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
     const at = new Date(this.now).toISOString();
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: "handing-off", createdAt: at, updatedAt: at,
-      mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
+      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}) };
+    if (conductor && peer) {
+      if (!computerId) throw new BridgeError(409, "The destination did not report its verified Hook identity.");
+      await this.deps.succession!.begin(record.id, conductor, target, peer, computerId, record);
+    }
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
     const work = this.run(record, data.handoffTimeoutMs ?? DEFAULT_HANDOFF_MS, conductor, peer, project).finally(() => this.running.delete(key));
@@ -555,21 +577,18 @@ export class SessionMover {
       }
       let launched: Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">;
       if (peer) {
-        // Full inline text only: the peer cannot read this Hook's brief path.
-        // Preserve commit ids and the complete hand-off, refusing credentials
-        // rather than applying the lossy approval/log summarizer to it.
-        const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
-        const remotePrompt = redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
-        if (scanForSecrets(remotePrompt)) throw new BridgeError(409, "The hand-off contains a credential; nothing was sent to the peer.");
-        if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
-        const checked = await (await import("./move-computers.js")).checkMovePeer(peer, project!, record.to);
-        if (record.computerId && checked.computerId !== record.computerId) throw new BridgeError(409, "The destination Hook identity changed during the move; nothing was launched.");
-        await this.checkPromotion(record);
-        const target = await new DispatchService().continueChat(peer, project!, record.to, { id: record.id, text: remotePrompt }, redactSecretsForLog(redactPeerHandoff(redactApproval(briefText(record.from.label ?? "Continued chat")))));
+        peer = await (await import("./move-computers.js")).currentMovePeer(peer);
+        const target = await this.continueOnPeer(record, peer, project!, document);
         launched = { target, to: record.to, placement: "peer" };
       } else launched = await this.relaunch(record, prompt);
       await this.checkPromotion(record);
-      if (conductor) {
+      if (conductor && peer) {
+        if (!launched.target || !("session" in launched.target)) throw new BridgeError(409, "The prepared successor conversation was not confirmed.");
+        await this.deps.succession!.prepared(record.id, launched.target);
+        await this.deps.succession!.commit(record.id);
+        roleTransferred = true;
+        await this.deps.succession!.finish(record.id);
+      } else if (conductor) {
         try {
           if (launched.linkPending || !launched.target || !("session" in launched.target)) throw new Error("The new conductor conversation is not linked; the hand-over was not confirmed.");
           const confirmedTarget = launched.target;
@@ -608,7 +627,7 @@ export class SessionMover {
       if (roleTransferred) {
         // update() has already populated the complete moved record. The role
         // and worker routes committed; a later status save cannot undo them.
-        record.state = "moved";
+        record.state = peer ? "uncertain" : "moved";
         record.notice = `Conductor moved with worker routing, but saving move status failed: ${message}`.slice(0, 500);
         delete record.error;
         landedMoves.set(recordFile(record.id), record);
@@ -617,15 +636,94 @@ export class SessionMover {
         logger.warn("move", record.notice);
         return;
       }
-      if (conductor && record.paneTarget) {
+      if (conductor && peer) {
+        await this.deps.succession!.abort(record.id).catch(() => undefined);
+        const status = await this.deps.succession!.status(record.id).catch(() => undefined);
+        if (status?.phase === "committed") {
+          await this.update(record, { state: "uncertain", error: "The ownership commit is being reconciled; the previous generation remains fenced." }).catch(() => undefined);
+          return;
+        }
+      }
+      if (conductor && record.paneTarget && !peer) {
         record.notice = await this.conductorNotice(record,
           "The conductor hand-over failed; you are not the conductor. The previous conductor keeps coordinating.", "failed")
           ?? "The new chat was told the conductor hand-over failed; it is not the conductor.";
       }
       const stopped = record.exit !== undefined;
       const hint = stopped && record.handoff ? ` The old agent has exited; start ${HARNESS_NAMES[record.to.harness]} in the pane with the hand-off at ${record.handoff.path}.` : "";
-      await this.update(record, { state: "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
+      await this.update(record, { state: record.state === "uncertain" ? "uncertain" : "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
       logger.warn("move", `Moving pane ${from.pane} to ${record.to.harness} failed: ${message}`);
+    }
+  }
+
+  private async continueOnPeer(record: MoveRecord, peer: DispatchHost, project: string, document: string): Promise<Target> {
+    // Full inline text only: the peer cannot read this Hook's brief path.
+    // Preserve commit ids and the complete hand-off, refusing credentials
+    // rather than applying the lossy approval/log summarizer to it.
+    const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
+    const remotePrompt = redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
+    if (scanForSecrets(remotePrompt)) throw new BridgeError(409, "The hand-off contains a credential; nothing was sent to the peer.");
+    if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
+    const checked = await (await import("./move-computers.js")).checkMovePeer(peer, project, record.to, record.modeForced === "conductor");
+    if (record.computerId && checked.computerId !== record.computerId) throw new BridgeError(409, "The destination Hook identity changed during the move; nothing was launched.");
+    await this.checkPromotion(record);
+    await this.update(record, { state: "uncertain", placement: "peer" });
+    const label = redactSecretsForLog(redactPeerHandoff(redactApproval(briefText(record.from.label ?? "Continued chat"))));
+    if (record.modeForced === "conductor") {
+      const { computer: _computer, ...to } = record.to;
+      await this.deps.succession!.saveLaunch(record.id, { computerId: record.computerId, project, to, label, brief: { id: record.id, text: remotePrompt }, worker: !!record.dispatch });
+    }
+    const target = await new DispatchService().continueChat(peer, project, record.to, { id: record.id, text: remotePrompt }, label, async target => {
+      const parsed = targetSchema.safeParse(target);
+      const pane = targetSchema.omit({ session: true }).safeParse(object(target).paneTarget);
+      if (pane.success) await this.update(record, { state: "uncertain", paneTarget: pane.data, placement: "peer" });
+      if (parsed.success) {
+        await this.update(record, { state: "uncertain", target: parsed.data, placement: "peer" });
+        if (record.modeForced === "conductor") await this.deps.succession!.prepared(record.id, parsed.data);
+      }
+    }, record.computerId, !!record.dispatch);
+    return target;
+  }
+
+  /** Startup and tick recovery reuse the receiving Hook's durable move id.
+   * No fresh id, brief or pane is created after an uncertain launch. */
+  async reconcile(): Promise<void> {
+    const transaction = (await (await import("./conductor-role.js")).readRoleState())?.succession;
+    if (transaction?.side === "origin" && ["preparing", "prepared"].includes(transaction.phase) && transaction.resume && !await readMove(transaction.id)) await saveMove(moveRecordSchema.parse(transaction.resume));
+    for (const record of await listMoves(this.now)) {
+      if (["moved", "failed"].includes(record.state) || !record.to.computer || !record.project) continue;
+      const key = `${record.from.target.server}\0${record.from.target.pane}`;
+      if (this.running.has(key) || this.admissions.has(key)) continue;
+      const work = (async () => {
+        try {
+          const { movePeer, currentMovePeer } = await import("./move-computers.js");
+          const enrolled = await movePeer(record.to.computer);
+          if (!enrolled || enrolled.fingerprint !== record.computerFingerprint) throw new BridgeError(409, "The destination enrollment changed; reconciliation is paused.");
+          const peer = await currentMovePeer(enrolled);
+          if (record.modeForced === "conductor" && transaction?.id === record.id && transaction.phase === "aborted") {
+            await this.update(record, { state: "failed", error: transaction.revoked ? "The owner stopped the delegated conductor; no previous chat regained the role." : "The hand-over was aborted; the previous conductor keeps the role." }); return;
+          }
+          if (record.modeForced === "conductor") await this.deps.succession!.ensurePrepared(record.id);
+          const document = await readFile(handoffPath(record.id), "utf8").catch(() => undefined);
+          if (!document) {
+            await this.run(record, DEFAULT_HANDOFF_MS, record.modeForced === "conductor" ? transaction?.previous : undefined, peer, record.project); return;
+          }
+          const target = await this.continueOnPeer(record, peer, record.project!, document);
+          if (record.modeForced === "conductor") {
+            const status = await this.deps.succession!.status(record.id);
+            if (status.phase !== "committed") {
+              await this.deps.succession!.prepared(record.id, target);
+              await this.deps.succession!.commit(record.id);
+            }
+            await this.deps.succession!.finish(record.id);
+          }
+          await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), target, placement: "peer", error: undefined,
+            handedOffTo: { computer: peer.name, target }, handedOffFrom: { target: record.from.target, title: record.from.label ?? record.from.target.source } });
+        } catch (error) {
+          await this.update(record, { state: "uncertain", error: String(error instanceof Error ? error.message : error).slice(0, 500) }).catch(() => undefined);
+        }
+      })().finally(() => this.running.delete(key));
+      this.running.set(key, work);
     }
   }
 

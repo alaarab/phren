@@ -14,7 +14,7 @@ import { atomic, bridgeRoot } from "./protocol.js";
 import { claudePlan, monthlyAnniversary, subscriptionDate, type Subscription } from "./subscription.js";
 
 export const DEFAULT_ACCOUNT = "default";
-const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
+const SLUG = /^[a-z0-9-]{1,32}$/;
 
 export interface ClaudeHome {
   /** "default", or the slug of ~/.claude-<slug>. */
