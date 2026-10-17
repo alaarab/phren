@@ -4,6 +4,13 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## Unreleased
+
+### New
+
+- **Copy session id** in a chat's menu copies the agent's own session id, for resuming it elsewhere.
+- Home shows when it last loaded ("Updated 12s ago") and has a **Refresh** button that reads everything again; a failed refresh keeps what's shown and says so.
+
 ## [0.1.12] - 2026-10-17
 
 ### New
