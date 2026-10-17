@@ -695,7 +695,8 @@ export function mountAgents(root) {
     });
     if (!entry) {
       if (unknown) toastNotice("That chat's computer is offline");
-      else if (gone || !sawOpen) toastNotice("That chat is gone"); // a chat that is already open is not gone
+      else if (gone) toastNotice("That chat is gone");
+      else if (!sawOpen) toastNotice("No closed chats to reopen"); // a chat that is already open is neither
       return false;
     }
     tabs.open(chatDoc(row.computer, row.child, entry.mode === "console" ? "console" : "chat"), { tile: entry.tile, at: entry.index });

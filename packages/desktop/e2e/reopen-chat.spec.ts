@@ -44,7 +44,7 @@ test("reopens closed chats newest first, again goes further back", async ({ page
   await expect(page.locator(".doc-tab")).toHaveCount(2);
 });
 
-test("skips a session that no longer exists, then says the chat is gone", async ({ page }) => {
+test("skips a session that no longer exists, then says nothing is left", async ({ page }) => {
   await openAndClose(page, ["Alpha chat", "Bravo chat", "Charlie chat"]);
   h!.hook.pushOverview(overviewFrame([alpha, charlie]));
   await expect(page.locator(".sb-row")).toHaveCount(2);
@@ -54,8 +54,17 @@ test("skips a session that no longer exists, then says the chat is gone", async 
   await page.keyboard.press("ControlOrMeta+Shift+O");
   await expect(active(page)).toHaveText("Charlie chat");
   await page.keyboard.press("ControlOrMeta+Shift+O");
-  await expect(page.locator(".pt-toast")).toHaveText("That chat is gone");
+  await expect(page.locator(".pt-toast")).toHaveText("No closed chats to reopen");
   await expect(page.locator(".doc-tab")).toHaveCount(2);
+});
+
+test("says the chat is gone when the only closed chat vanished", async ({ page }) => {
+  await openAndClose(page, ["Bravo chat"]);
+  h!.hook.pushOverview(overviewFrame([alpha, charlie]));
+  await expect(page.locator(".sb-row")).toHaveCount(2);
+  await page.keyboard.press("ControlOrMeta+Shift+O");
+  await expect(page.locator(".pt-toast")).toHaveText("That chat is gone");
+  await expect(page.locator(".doc-tab")).toHaveCount(0);
 });
 
 test("the palette offers Reopen closed chat only while something is closed", async ({ page }) => {
