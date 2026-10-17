@@ -93,6 +93,7 @@ export function mountAgents(root) {
   const panelBtn = layoutBar.querySelector(".layout-panel");
 
   let session = null; // { computer, child } of the active tab
+  let focusedDoc = null; // the focused tab of any kind (files, terminals and consoles have no child, so activeDoc skips them)
   let activeDoc = null; // the active chat tab; carries its own `panelOpen` while narrow
   let widePanelOpen = true; // the panel's state at wide widths, restored on widening
 
@@ -358,6 +359,9 @@ export function mountAgents(root) {
     },
     emptyText: "Pick a session, or press \u2318K.",
     onActivate(doc) {
+      // The focused tab of the focused tile, whatever its kind: the window title's source (shell/window-title.js).
+      focusedDoc = doc;
+      document.dispatchEvent(new Event("phren:tabs-changed"));
       if (!doc.child) { quotaWarning.close(); return; }
       const key = `${doc.computer}/${doc.child.id}`;
       session = { computer: doc.computer, child: doc.child };
@@ -382,6 +386,7 @@ export function mountAgents(root) {
     onEmpty() {
       session = null;
       activeDoc = null;
+      focusedDoc = null;
       document.dispatchEvent(new Event("phren:tabs-changed"));
       quotaWarning.close();
       bench.sessionKey = null;
@@ -795,8 +800,8 @@ export function mountAgents(root) {
     previousTab: () => tabs.step(-1),
     toggleZoom() { if (sideEl.hidden) showPane(bench.pane ?? "changes"); document.body.classList.toggle("bench-max"); },
     currentSession: () => session,
-    /** The active tab's title when it is a chat (not a file, diff or terminal), else null: the window title's name. */
-    activeChatTitle: () => (activeDoc?.kind === "chat" ? activeDoc.title || null : null),
+    /** The focused tab's title when it is a chat (not a file, diff, terminal or console), else null: the window title's name. */
+    activeChatTitle: () => (focusedDoc?.kind === "chat" ? focusedDoc.title || null : null),
     /** Open a file of any session's repository as a centre tab, at a line when given. */
     openFileFor: (computer, child, path, options = {}) => { showSection("agents"); return openFileDoc(computer, child, path, options); },
   };

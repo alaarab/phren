@@ -6,17 +6,17 @@
 export const TITLE_MAX = 60;
 const APP = "Phren";
 
-/** One line, trimmed, at most `max` characters with a trailing ellipsis when clipped. */
+/** One line, trimmed, at most `max` characters with a trailing ellipsis when clipped. Control and format characters (bidi overrides, zero-width) are dropped first so a title cannot reorder or fake the count prefix. */
 export function clipTitle(text, max = TITLE_MAX) {
-  const line = String(text ?? "").replace(/\s+/g, " ").trim();
+  const line = String(text ?? "").replace(/[\p{Cc}\p{Cf}]/gu, (c) => (/\s/.test(c) ? " " : "")).replace(/\s+/g, " ").trim();
   const chars = [...line];
   return chars.length > max ? `${chars.slice(0, max - 1).join("").trimEnd()}…` : line;
 }
 
-/** The title for a needs-you count, the active chat's title (or null) and the section's label (or null). */
-export function windowTitle({ needs = 0, chat = null, section = null } = {}) {
+/** The title for a needs-you count, the active chat's title (or null) and the section's label (or null). `showChat: false` (Settings › Appearance) keeps chat titles out of it. */
+export function windowTitle({ needs = 0, chat = null, section = null, showChat = true } = {}) {
   const prefix = needs > 0 ? `(${needs}) ` : "";
-  const name = clipTitle(chat) || clipTitle(section);
+  const name = (showChat && clipTitle(chat)) || clipTitle(section);
   return name ? `${prefix}${name} — ${APP}` : `${prefix}${APP}`;
 }
 

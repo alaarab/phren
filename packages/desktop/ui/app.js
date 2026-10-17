@@ -23,7 +23,7 @@ import "./chat/export-command.js"; // registers "Copy / Save chat as Markdown" i
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
 import { initTheme } from "./shell/theme.js";
-import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, prNotifyEnabled, stallNotifyEnabled, recentSwitchEnabled } from "./sections/settings.js";
+import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled, prNotifyEnabled, stallNotifyEnabled, recentSwitchEnabled, titleChatEnabled } from "./sections/settings.js";
 import { quietNow } from "./shell/quiet.js";
 import { startCiWatch } from "./shell/ci-watch.js";
 import { startQuotaBack } from "./shell/quota-back.js";
@@ -98,6 +98,7 @@ const windowTitle = startWindowTitle(() => {
     needs: store.needsYou().length,
     chat: id === "agents" ? sectionHandle("agents")?.activeChatTitle?.() ?? null : null,
     section: id ? sectionLabel(id) : null,
+    showChat: titleChatEnabled(),
   };
 });
 

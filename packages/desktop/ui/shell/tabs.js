@@ -86,7 +86,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     if (subtitle !== undefined) entry.doc.subtitle = subtitle;
     entry.tab.querySelector(".doc-tab-title").textContent = title || "Untitled";
     entry.tab.title = entry.doc.subtitle ? `${title} · ${entry.doc.subtitle}` : title;
-    document.dispatchEvent(new Event("phren:tabs-changed")); // the window title follows a rename
+    document.dispatchEvent(new Event("phren:tabs-changed")); // the window title follows a rename (it reads the focused tab only)
   }
 
   function activate(id) {
@@ -105,7 +105,6 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     entry.tab.scrollIntoView({ block: "nearest", inline: "nearest" });
     entry.handle.focus?.();
     onActivate?.(entry.doc, entry.handle);
-    document.dispatchEvent(new Event("phren:tabs-changed")); // the window title follows the active tab
     save();
   }
 

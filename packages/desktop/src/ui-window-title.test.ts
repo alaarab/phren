@@ -27,6 +27,20 @@ describe("windowTitle", () => {
   });
 });
 
+describe("windowTitle privacy and spoofing", () => {
+  it("uses the section when showChat is off", () => {
+    expect(windowTitle({ needs: 2, chat: "Secret merger plan", section: "Agents", showChat: false })).toBe("(2) Agents \u2014 Phren");
+    expect(windowTitle({ needs: 0, chat: "Secret", section: null, showChat: false })).toBe("Phren");
+  });
+
+  it("strips bidi overrides, zero-width and control characters", () => {
+    expect(clipTitle("\u202Eevil\u202C title\u200B\u0007")).toBe("evil title");
+    expect(clipTitle("a\u2028b\n\tc")).toBe("a b c");
+    // a title that tries to open with its own count still sits after the real prefix
+    expect(windowTitle({ needs: 1, chat: "\u202E(9) all clear" })).toBe("(1) (9) all clear \u2014 Phren");
+  });
+});
+
 describe("startWindowTitle", () => {
   it("rewrites the title when refreshed or on a tabs change, once per burst", async () => {
     const listeners = new Map<string, () => void>();

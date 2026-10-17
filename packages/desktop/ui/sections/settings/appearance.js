@@ -1,7 +1,7 @@
 // Settings › Appearance: theme, transcript size and sidebar rows.
 import { applyTheme, currentTheme, themes as themeList } from "../../shell/theme.js";
-import { el, heading } from "./ui.js";
-import { SIDEBAR_ROWS_KEY, SIZES, TRANSCRIPT_KEY, applyTranscriptSize, readSidebarRows, readTranscriptSize } from "./prefs.js";
+import { el, heading, toggleRow } from "./ui.js";
+import { SIDEBAR_ROWS_KEY, SIZES, TITLE_CHAT_KEY, titleChatEnabled, writeFlag, TRANSCRIPT_KEY, applyTranscriptSize, readSidebarRows, readTranscriptSize } from "./prefs.js";
 
 // ------------------------------------------------------------ page: Appearance
 export function buildAppearance(page) {
@@ -74,5 +74,11 @@ export function buildAppearance(page) {
   }
   rowField.append(segs);
   page.append(rowField);
+
+  page.append(el("div", "settings-group-label", "WINDOW"));
+  page.append(toggleRow("Show the chat's title in the window title", titleChatEnabled(), (on) => {
+    writeFlag(TITLE_CHAT_KEY, on);
+    document.dispatchEvent(new Event("phren:tabs-changed")); // the window title re-reads it
+  }));
   return null;
 }

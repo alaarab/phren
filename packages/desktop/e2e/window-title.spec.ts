@@ -22,7 +22,6 @@ test("the window title follows the active chat, its rename, the section and the 
   await expect(page).toHaveTitle("Alpha chat — Phren");
   await row(page, "Bravo chat").click();
   await expect(page).toHaveTitle("Bravo chat — Phren");
-  await page.screenshot({ path: test.info().outputPath("title-bravo.png") });
 
   // Another tab in the same section: switching back by its tab.
   await page.locator(".doc-tab", { hasText: "Alpha chat" }).click();
@@ -51,4 +50,38 @@ test("the window title follows the active chat, its rename, the section and the 
   const title = await page.title();
   expect(title.endsWith("… — Phren")).toBe(true);
   expect([...title.replace(" — Phren", "")]).toHaveLength(60);
+});
+
+test("a focused Shell tab names the section, and focusing each tile switches the title", async ({ page }) => {
+  h = await startHarness("window-title-tiles", { overviewFrames: [frame("Alpha chat")] });
+  await page.goto(h.url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await row(page, "Alpha chat").click();
+  await expect(page).toHaveTitle("Alpha chat — Phren");
+
+  await page.locator('.layout-btn[data-act="terminal"]').click(); // a shell in a new tile
+  await expect(page.locator(".doc-tab", { hasText: /Shell|Terminal/ })).toBeVisible();
+  await expect(page).toHaveTitle("Agents — Phren");
+
+  await page.locator(".doc-tab", { hasText: "Alpha chat" }).click(); // back to the chat's tile
+  await expect(page).toHaveTitle("Alpha chat — Phren");
+  await page.locator(".doc-tab", { hasText: /Shell|Terminal/ }).click();
+  await expect(page).toHaveTitle("Agents — Phren");
+});
+
+test("Settings can keep the chat title out of the window title", async ({ page }) => {
+  h = await startHarness("window-title-privacy", { overviewFrames: [frame("Alpha chat")] });
+  await page.goto(h.url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await row(page, "Alpha chat").click();
+  await expect(page).toHaveTitle("Alpha chat — Phren");
+  await page.locator('.section-pill[data-section="settings"]').click();
+  await page.locator(".settings-tab", { hasText: "Appearance" }).click();
+  const toggle = page.locator(".settings-toggle", { hasText: "Show the chat's title in the window title" });
+  await toggle.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("settings-toggle.png") });
+  await toggle.locator(".track").click();
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(page).toHaveTitle("Agents — Phren");
+  await page.evaluate(() => localStorage.removeItem("phren.desktop.title-chat"));
 });
