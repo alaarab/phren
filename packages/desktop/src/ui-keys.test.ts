@@ -30,15 +30,17 @@ it("leaves nested control activation alone while Enter on a sidebar row still op
   }
   const row = new Element("DIV", null, true);
   let keydown!: (event: object) => void;
+  const listened: string[] = [];
   vi.stubGlobal("Element", Element);
   vi.stubGlobal("window", { addEventListener: vi.fn() });
   vi.stubGlobal("document", {
     createElement: () => ({}), head: { append: vi.fn() },
-    getElementById: () => ({ addEventListener: (_type: string, handler: typeof keydown) => { keydown = handler; } }),
+    getElementById: () => ({ addEventListener: (type: string, handler: typeof keydown) => { listened.push(type); if (type === "keydown") keydown = handler; } }),
     querySelectorAll: () => [row],
   });
   vi.stubGlobal("fetch", async () => ({ json: async () => ({ bindings: {}, appBindings: {} }) }));
   await installKeys({});
+  expect(listened).toContain("phren:focus-filter");
 
   for (const tag of ["BUTTON", "A", "INPUT"]) {
     const control = new Element(tag, row);

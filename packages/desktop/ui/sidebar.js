@@ -15,6 +15,7 @@ import { snoozes } from "./shell/snooze.js";
 import { muted } from "./shell/muted.js";
 import { mutedMark } from "./shell/muted-mark.js";
 import { filterSessionRows, filterWords } from "./shell/sidebar-filter.js";
+import { filterButtonLabel } from "./keys.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 import { countOf } from "./text.js";
 
@@ -768,6 +769,33 @@ function clearFilter(sb, focus) {
   requestRender(sb);
 }
 
+const FILTER_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16l-6.2 7.2v5.3l-3.6 1.8v-7.1z"/></svg>';
+
+/**
+ * The icon strip hides the filter box, so it gets a button that does what the
+ * shortcut does (keys.js listens for `phren:focus-filter`: expand the strip, focus the box).
+ * A dot on it says a filter is still narrowing the rows.
+ */
+function stripFilterButton(sb) {
+  const button = el("button", "sb-strip-filter");
+  button.type = "button";
+  const label = filterButtonLabel();
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = FILTER_ICON;
+  button.append(el("span", "sb-strip-dot"));
+  button.addEventListener("click", () => button.dispatchEvent(new CustomEvent("phren:focus-filter", { bubbles: true })));
+  return button;
+}
+
+function syncStripFilter(sb) {
+  const button = sb.el.querySelector(":scope > .sb-strip-filter");
+  if (!button) return;
+  const active = filterWords(sb.filter).length > 0;
+  button.classList.toggle("active", active);
+  button.setAttribute("aria-pressed", String(active));
+}
+
 function filterBox(sb) {
   const box = el("div", "sb-filter");
   const input = el("input", "sb-filter-input");
@@ -812,6 +840,8 @@ export function renderSidebar(element, merged, handlers = {}) {
   }
 
   if (!element.querySelector(":scope > .sb-filter")) element.append(filterBox(sb));
+  if (!element.querySelector(":scope > .sb-strip-filter")) element.append(stripFilterButton(sb));
+  syncStripFilter(sb);
 
   let mode = element.querySelector(":scope > .sb-mode");
   if (!mode) {
