@@ -4,6 +4,12 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## Unreleased
+
+### New
+
+- **Mute notifications** in a chat's menu: a muted chat sends no desktop notification and adds nothing to the dock badge or menu-bar icon, but still shows in Home's Needs you and the sidebar, with a small muted bell on its row and in its header.
+
 ## [0.1.13] - 2026-10-17
 
 ### New

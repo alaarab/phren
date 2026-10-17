@@ -7,6 +7,7 @@ import { hookPost } from "../api.js";
 import { projectOf, sessions, store } from "./store.js";
 import { newlyStalled, stalledMinutes } from "./stalls.js";
 import { snoozes } from "./snooze.js";
+import { muted, notifiable } from "./muted.js";
 import { parsePullsKey } from "./ci-watch.js";
 
 /** What the shell shows for a needs-you row. Only a plain wait takes a reply:
@@ -97,7 +98,8 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
         if (!id || remember(row) || notified.has(id)) continue;
         if (baselineApprovals.delete(row.key)) continue;
         if (hushed.delete(row.key)) continue;
-        if (enabled()) {
+        // A muted chat is still remembered as announced, so unmuting it does not replay the old notice.
+        if (enabled() && notifiable(row, muted.keys())) {
           const { title, body, key, reply } = needsNotice(row, { stillWaiting: woken.has(row.key) });
           shell.notify(title, body, { key, reply, ...(reply ? { binding: replyBinding(row.child) } : {}) });
         }
@@ -109,7 +111,7 @@ export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, open
   store.subscribe((merged) => {
     const all = sessions(merged);
     if (stalled && stallsEnabled()) {
-      for (const row of newlyStalled(all, stalled)) {
+      for (const row of newlyStalled(all, stalled).filter((r) => notifiable(r, muted.keys()))) {
         const { title, body, key } = stalledNotice(row);
         shell.notify(title, body, { key });
       }

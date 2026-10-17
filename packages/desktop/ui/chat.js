@@ -24,6 +24,8 @@ import { startDictation, createTalkMode, toast } from "./chat/talk.js";
 import { openKnowsDrawer, installRememberSelection } from "./chat/knows.js";
 import { renderMarkdownInto } from "./chat/markdown.js";
 import { projectOf } from "./shell/store.js";
+import { muted } from "./shell/muted.js";
+import { mutedMark } from "./shell/muted-mark.js";
 import { takePrefetched, setChatOpen } from "./shell/transcript-prefetch.js";
 
 function providerLetter(source) {
@@ -79,6 +81,8 @@ export function openChat(el, computerName, child, opts = {}) {
   const where = [basename(child && child.cwd), child && child.branch, computerName].filter(Boolean).join(" \u00b7 ");
   title.title = `${where ? `${where}\n` : ""}Double-click to rename`;
   title.addEventListener("dblclick", startRename);
+  const muteKey = `${computerName}/${child && child.id}`;
+  const mutedBell = mutedMark("chat-muted");
   const sub = node("div", "chat-sub");
   sub.append(node("span", "chat-project", basename(child && child.cwd)));
   sub.append(node("span", "chat-branch", (child && child.branch) || ""));
@@ -106,6 +110,17 @@ export function openChat(el, computerName, child, opts = {}) {
   // The harness's own conversation id (what `claude --resume` takes); the item is absent when the row has none.
   const agentSessionId = String(target.session || "").trim();
   if (agentSessionId) menu.append(menuItem("Copy session id", () => copySessionId()));
+  // Mute notifications for this chat (a per-viewer preference, shell/muted.js); the label follows the state.
+  const muteItem = menuItem("Mute notifications", () => muted.toggle(muteKey));
+  muteItem.dataset.action = "mute";
+  const showMuted = () => {
+    const on = muted.has(muteKey);
+    muteItem.textContent = on ? "Unmute notifications" : "Mute notifications";
+    mutedBell.hidden = !on;
+  };
+  const stopMuted = muted.subscribe(showMuted);
+  showMuted();
+  menu.append(muteItem);
   const moreWrap = node("div", "chat-more-wrap");
   moreWrap.append(more, menu);
   function closeMenu() {
@@ -133,7 +148,7 @@ export function openChat(el, computerName, child, opts = {}) {
   const trailing = node("div", "chat-trailing");
   trailing.append(knowsBtn, contextRing);
   const header = node("div", "chat-header");
-  header.append(ring, dot, title, sub, moreWrap, trailing);
+  header.append(ring, dot, title, mutedBell, sub, moreWrap, trailing);
 
   const handoffs = node("div", "chat-handoffs");
   const updateOverview = (row) => renderHandoffLinks(handoffs, computerName, row);
@@ -1087,6 +1102,7 @@ export function openChat(el, computerName, child, opts = {}) {
       paneAbort.abort();
       find.destroy();
       closeMenu();
+      stopMuted();
       clearExportPane(exportHandle);
       setChatOpen(computerName, child, false);
       stopWatchingShown();
