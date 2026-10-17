@@ -12,6 +12,7 @@ import { carriesFiles, createRowDrop, leftRow } from "./shell/row-drop.js";
 import { hookPost, targetQuery } from "./api.js";
 import { age } from "./time.js";
 import { snoozes } from "./shell/snooze.js";
+import { filterSessionRows, filterWords } from "./shell/sidebar-filter.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 
 // answerApproval is written in a parallel change under ui/chat/. Import it
@@ -154,7 +155,7 @@ function stateOf(el) {
   if (!el.__sb) {
     el.__sb = {
       el, mode: readMode(), rows: readRows(), pinned: [], seen: {},
-      merged: null, handlers: {}, rowsListener: null, rowDrop: createRowDrop(),
+      merged: null, handlers: {}, filter: "", rowsListener: null, rowDrop: createRowDrop(),
       nodes: new Map(), prCache: new Map(), prInflight: new Set(),
       approvals: new Map(), approvalSockets: new Map(),
     };
@@ -182,13 +183,19 @@ function computerDesc(co, sessions) { return { id: `c:${co.computer}`, kind: "co
 
 function buildModel(sb) {
   const merged = sb.merged || {};
-  const rows = sessions(merged, { includeOffline: true });
+  const all = sessions(merged, { includeOffline: true });
+  const rows = filterSessionRows(all, sb.filter);
+  const filtering = filterWords(sb.filter).length > 0;
   const computers = merged.computers || [];
   const desired = [];
+
+  // A filter that keeps nothing says so; computers are not sessions and stay out of its way.
+  if (filtering && !rows.length) return [{ id: "nomatch", kind: "nomatch" }];
 
   if (sb.mode === "computer") {
     for (const co of computers) {
       const mine = rows.filter((r) => r.computer === co.computer).sort(newestFirst);
+      if (filtering && !mine.length) continue;
       desired.push(header(`co:${co.computer}`, co.computer, mine.length));
       if (co.state !== "online") desired.push(computerDesc(co, mine));
       let groupId = null;
@@ -227,7 +234,7 @@ function buildModel(sb) {
 
   if (computers.length) {
     desired.push(header("computers", "Computers"));
-    for (const co of computers) desired.push(computerDesc(co, rows.filter((r) => r.computer === co.computer)));
+    for (const co of computers) desired.push(computerDesc(co, all.filter((r) => r.computer === co.computer)));
     desired.push({ id: "add", kind: "add" });
   }
   return desired;
@@ -313,6 +320,15 @@ function makeNode(sb, desc) {
     node.append(folderGlyph(), el("span", "sb-project-name"));
     return node;
   }
+  if (desc.kind === "nomatch") {
+    const node = el("div", "sb-nomatch");
+    node.setAttribute("role", "status");
+    const clear = el("button", "sb-nomatch-clear", "Clear");
+    clear.type = "button";
+    clear.addEventListener("click", () => clearFilter(sb, true));
+    node.append(el("span", null, "No sessions match"), clear);
+    return node;
+  }
   if (desc.kind === "add") {
     const node = el("div", "sb-computer-row sb-add");
     node.setAttribute("role", "button");
@@ -358,7 +374,7 @@ function updateNode(sb, node, desc) {
     return;
   }
   if (desc.kind === "computer") { updateComputer(node, desc); return; }
-  if (desc.kind === "add") return;
+  if (desc.kind === "add" || desc.kind === "nomatch") return;
   updateRow(sb, node, desc);
 }
 
@@ -737,6 +753,43 @@ function syncPulls(sb, merged) {
   }
 }
 
+// ---------------------------------------------------------------- filter
+function clearFilter(sb, focus) {
+  sb.filter = "";
+  const input = sb.el.querySelector(":scope > .sb-filter .sb-filter-input");
+  if (input) { input.value = ""; if (focus) input.focus(); }
+  sb.el.querySelector(":scope > .sb-filter")?.classList.remove("has-text");
+  requestRender(sb);
+}
+
+function filterBox(sb) {
+  const box = el("div", "sb-filter");
+  const input = el("input", "sb-filter-input");
+  input.type = "text";
+  input.placeholder = "Filter sessions";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("aria-label", "Filter sessions");
+  const clear = el("button", "sb-filter-clear", "\u00D7");
+  clear.type = "button";
+  clear.title = "Clear filter";
+  clear.setAttribute("aria-label", "Clear filter");
+  input.addEventListener("input", () => {
+    sb.filter = input.value;
+    box.classList.toggle("has-text", input.value !== "");
+    requestRender(sb);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (input.value) clearFilter(sb, true); else input.blur();
+  });
+  clear.addEventListener("click", () => clearFilter(sb, true));
+  box.append(input, clear);
+  return box;
+}
+
 // ---------------------------------------------------------------- public
 export function renderSidebar(element, merged, handlers = {}) {
   const sb = stateOf(element);
@@ -751,6 +804,8 @@ export function renderSidebar(element, merged, handlers = {}) {
     sb.rowsListener = () => { sb.rows = readRows(); requestRender(sb); };
     document.addEventListener("phren:sidebar-rows", sb.rowsListener);
   }
+
+  if (!element.querySelector(":scope > .sb-filter")) element.append(filterBox(sb));
 
   let mode = element.querySelector(":scope > .sb-mode");
   if (!mode) {

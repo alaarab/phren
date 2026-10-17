@@ -58,6 +58,7 @@ export const ACTIONS: KeyAction[] = [
   { action: "terminal", group: "Direct", label: "Show the terminal pane", herdr: false, app: true },
   { action: "sidebar", group: "Direct", label: "Show or hide the sidebar", herdr: false, app: true },
   { action: "next_needs_you", group: "Direct", label: "Go to the next session that needs you", herdr: false, app: true },
+  { action: "filter_sessions", group: "Direct", label: "Filter the sessions sidebar", herdr: false, app: true },
   { action: "close_tab", group: "Direct", label: "Close the current tab", herdr: false, app: true },
   { action: "split_right", group: "Direct", label: "Split the focused tile side by side", herdr: false, app: true },
   { action: "split_down", group: "Direct", label: "Split the focused tile top and bottom", herdr: false, app: true },
@@ -92,7 +93,7 @@ export const DEFAULTS_APP: Record<string, string[]> = {
   usage: ["cmd+alt+u"],
   palette: ["cmd+k"], open_file: ["cmd+p"],
   terminal: ["cmd+j"], sidebar: ["cmd+b"],
-  next_needs_you: ["cmd+shift+a"], close_tab: ["cmd+w"],
+  next_needs_you: ["cmd+shift+a"], filter_sessions: ["cmd+shift+e"], close_tab: ["cmd+w"],
   split_right: ["cmd+\\"], split_down: ["cmd+shift+\\"], console: ["cmd+shift+t"],
 };
 // Cmd/Ctrl+1–9 belong to the titlebar's pills (app.js); sessions keep prefix+1..9,
