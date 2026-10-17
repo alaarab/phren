@@ -4,27 +4,27 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
-## [0.1.12] - unreleased
+## [0.1.12] - 2026-10-17
 
 ### New
 
+- **Pull requests on Home**: every open pull or merge request across your projects, the ones that need you first.
+- **Find in chat**: Cmd/Ctrl+F searches the open conversation and steps through matches.
+- **Switch between recent chats with Ctrl+Tab**: hold Ctrl to see your last eight chats and their status.
+- **Snooze** a chat that's waiting on you from Home; it comes back when the time's up or something new happens.
+- **Saved today on Home**: what you and your agents saved to memory or tasks today, across projects and computers.
+- Notifications when a pull request you're working on gets changes requested, is approved, or hits conflicts.
+- **Today on each project page**: the project's chats, pull requests and memory from today in one place.
+- **Prompt outline** in long chats: a rail of your prompts to jump between them (Alt+↑/↓).
+- Chats open instantly when you rest the pointer on them in the sidebar first: Phren loads the conversation ahead of the click.
+- **Copy or save a chat as Markdown** from its menu, with credentials removed.
+- The command palette remembers what you use: recent picks show first, and frequent ones rank higher.
 - Chats say when they've lost their computer and are reconnecting, with Retry when it takes a while.
+- **Sync now** asks a computer to pull its Phren store and refreshes Memory when the store changes.
+- Memory can show only findings that may be out of date, so you can review what changed under them.
 - Settings › Computers shows whether each computer can reach its linked computers.
 - Settings shows each computer's standing approval rules.
-- **Sync now** asks a computer to pull its Phren store and refreshes Memory when the store changes.
-- **Pull requests on Home**: every open pull or merge request across your projects, the ones that need you first.
-- Notifications when a pull request you're working on gets changes requested, is approved, or hits conflicts.
-- **Snooze** a chat that's waiting on you from Home; it comes back when the time's up or something new happens.
-- **Switch between recent chats with Ctrl+Tab**: hold Ctrl to see your last eight chats and their status.
-- **Prompt outline** in long chats: a rail of your prompts to jump between them (Alt+↑/↓).
-- **Copy or save a chat as Markdown** from its menu, with credentials removed.
-- **Find in chat**: Cmd/Ctrl+F searches the open conversation and steps through matches.
-- **Today on each project page**: the project's chats, pull requests and memory from today in one place.
-- Memory can show only findings that may be out of date, so you can review what changed under them.
 - Dragging files over a chat in the sidebar now says which chat they'll attach to, and tab drags no longer look like file drops.
-- **Saved today on Home**: what you and your agents saved to memory or tasks today, across projects and computers.
-- Chats open instantly when you rest the pointer on them in the sidebar first: Phren loads the conversation ahead of the click.
-- The command palette remembers what you use: recent picks show first, and frequent ones rank higher.
 
 ### Changed
 

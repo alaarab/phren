@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.55] - 2026-10-17
+
 ### Changed
 
 - The Hook answers repeat pull-request polls in a few milliseconds instead of about 85 ms by reusing a checkout's root, branch and host while HEAD and git config are unchanged, and finds local web servers in one probe round instead of groups of eight (cold scan 2.0 s to 1.4 s).
