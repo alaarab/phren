@@ -10,7 +10,8 @@ import path from "node:path";
 import { paneIdentity, snapshot } from "./herdr.js";
 import { objects, type Json } from "./protocol.js";
 import { launchSession } from "./server-launch.js";
-import { readMove, SessionMover } from "./session-move.js";
+import { claudeHome } from "./claude-accounts.js";
+import { copyClaudeConversation, readMove, SessionMover } from "./session-move.js";
 import { resetTmuxBinary, tmuxBinary, tmuxTerminal } from "./terminal-tmux.js";
 import { privateTmuxServer, testSocketName } from "./tmux-test-server.js";
 
@@ -68,6 +69,7 @@ describe.skipIf(!binary || process.platform === "win32")("moving a session on a 
     // Stand-in Claude: answers the hand-off request in its transcript, and exits on /exit.
     transcript = path.join(folder, "transcript.jsonl");
     await writeFile(path.join(folder, "claude"), `#!${process.execPath}\nconst fs = require("node:fs");\n`
+      + `fs.appendFileSync(${JSON.stringify(path.join(folder, "claude-starts.jsonl"))}, JSON.stringify({ args: process.argv.slice(2), config: process.env.CLAUDE_CONFIG_DIR ?? null }) + "\\n");\n`
       + `const rl = require("node:readline").createInterface({ input: process.stdin });\nprocess.stdout.write("fake claude ready\\n");\n`
       + `rl.on("line", line => {\n  if (line.trim() === "/exit") process.exit(0);\n`
       + `  const m = /=== PHREN HANDOFF (\\w+) BEGIN ===/.exec(line);\n  if (!m) return;\n`
@@ -133,5 +135,47 @@ describe.skipIf(!binary || process.platform === "win32")("moving a session on a 
     expect(await readFile(path.join(path.dirname(record.handoff!.path), "brief.md"), "utf8")).toContain("Fix the parser.");
     // The work in progress is still there, uncommitted.
     expect(execFileSync("git", ["-C", repo, "status", "--porcelain"]).toString()).toContain(" M parser.ts");
+  }, 90_000);
+
+  it("switches a Claude conversation to another account on real tmux: no hand-off, the transcript copied, the same session resumed", async () => {
+    const home = process.env.HOME!;
+    const key = repo.replace(/[^a-zA-Z0-9]/g, "-");
+    const source = path.join(home, ".claude", "projects", key, `${SESSION}.jsonl`);
+    await mkdir(path.dirname(source), { recursive: true });
+    await writeFile(source, `${JSON.stringify({ type: "user", message: { role: "user", content: "Fix the parser" } })}\n`);
+    await mkdir(path.join(home, ".claude-work"), { recursive: true });
+    await writeFile(path.join(home, ".claude-work", ".claude.json"), "{}");
+    await rm(path.join(folder, "claude-starts.jsonl"), { force: true });
+    await tmuxTerminal.create(server, { label: "base", cwd: repo });
+    const launched = await launchSession(server, { cwd: repo, label: "parser fix", kind: "claude" });
+    const place = { server, workspace: String(launched.workspaceId), tab: String(launched.tabId), pane: String(launched.paneId) };
+    await until(() => tmuxTerminal.readScreen(server, place.pane, { scope: "pane", source: "visible", lines: 50 }), text => text.includes("fake claude ready"));
+
+    const typed: string[] = [];
+    const mover = new SessionMover({
+      snapshot: value => snapshot(value),
+      identity: async (value, pane) => await paneIdentity(value, pane).catch(() => undefined) ?? SESSION,
+      terminal: { ...tmuxTerminal, prompt: async (value, pane, text) => { typed.push(text); return tmuxTerminal.prompt(value, pane, text); } },
+      deliver: async () => { throw new Error("nothing is delivered on a resume"); },
+      launch: (value, data, options) => launchSession(value, data, { trustFolder: true, ...options }),
+      inventory: async () => undefined,
+      transcript: async () => [],
+      copyConversation: async (_target, to) => copyClaudeConversation(source, to),
+      envAtStart: () => true,
+      pollMs: 200,
+      exitMs: 10_000,
+    });
+    const started = await mover.start({ target: { ...place, source: "claude", session: SESSION }, to: { harness: "claude", account: "work" }, continuation: "resume" });
+    await mover.settled(server, place.pane);
+    const record = (await readMove(started.id))!;
+    expect(record, record.error).toMatchObject({ state: "moved", continuation: "resume", placement: "same-pane", exit: "clean", to: { harness: "claude", account: "work" } });
+    expect(record.handoff).toBeUndefined();
+    expect(typed).toEqual(["/exit"]);
+    // The same conversation, in the work account's home.
+    expect(await readFile(path.join(home, ".claude-work", "projects", key, `${SESSION}.jsonl`), "utf8")).toBe(await readFile(source, "utf8"));
+    const starts = (await until(() => readFile(path.join(folder, "claude-starts.jsonl"), "utf8").catch(() => ""), text => text.trim().split("\n").length >= 2))
+      .trim().split("\n").map(line => JSON.parse(line) as { args: string[]; config: string | null });
+    expect(starts).toHaveLength(2);
+    expect(starts[1]).toEqual({ args: ["--resume", SESSION], config: claudeHome("work")!.dir });
   }, 90_000);
 });

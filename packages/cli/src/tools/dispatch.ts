@@ -128,13 +128,14 @@ export function register(server: McpServer): void {
   });
   server.registerTool("move_session", {
     title: "◆ phren · move session",
-    description: "Move a live session to another agent on its own computer: the agent writes a structured hand-off (goal, done, current state, decisions, next steps, open questions, key files), exits with its own exit command, and the target harness (claude with an optional account, codex, opencode or copilot, with an optional model and effort) starts in the same pane and folder with that hand-off as its first prompt. If the agent writes no hand-off in time, Phren builds one from the end of its transcript, the git state and the original brief. Nothing is committed; the hand-off lists the uncommitted changes. Only harnesses signed in and usable on that computer are accepted. A dispatched worker keeps its dispatch: its receipt follows the new agent and records the move under moves. Waits up to five minutes; pass id with status:true to check a move later.",
+    description: "Move a live session to another agent on its own computer: the agent writes a structured hand-off (goal, done, current state, decisions, next steps, open questions, key files), exits with its own exit command, and the target harness (claude with an optional account, codex, opencode or copilot, with an optional model and effort) starts in the same pane and folder with that hand-off as its first prompt. If the agent writes no hand-off in time, Phren builds one from the end of its transcript, the git state and the original brief. Nothing is committed; the hand-off lists the uncommitted changes. Only harnesses signed in and usable on that computer are accepted. A dispatched worker keeps its dispatch: its receipt follows the new agent and records the move under moves. With resume:true (Claude to another Claude account on the same computer) there is no hand-off: the transcript is copied into the target account's home and the same conversation resumes, so an exhausted account can still switch. Waits up to five minutes; pass id with status:true to check a move later.",
     inputSchema: moveSessionSchema,
   }, async input => {
     try {
       const result = await moveSession(input, { agent: true });
       const move = result.move;
-      const message = move.state === "moved" ? `Moved to ${String(object(move.to).harness)} (${String(move.placement)}); hand-off at ${String(object(move.handoff).path)}.`
+      const message = move.state === "moved" ? move.continuation === "resume" ? `Switched to Claude account ${String(object(move.to).account)} (${String(move.placement)}); the same conversation resumed.`
+        : `Moved to ${String(object(move.to).harness)} (${String(move.placement)}); hand-off at ${String(object(move.handoff).path)}.`
         : move.state === "failed" ? `Move failed: ${String(move.error ?? "unknown error")}` : `Move ${String(move.id)} is ${String(move.state)}; check again with status:true.`;
       return mcpResponse({ ok: result.ok, data: result, message });
     } catch (error) {

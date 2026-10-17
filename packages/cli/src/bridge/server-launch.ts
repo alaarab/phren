@@ -309,6 +309,10 @@ export interface LaunchOptions {
   /** The `PHREN_DISPATCH_ID` the agent gets when it is not the brief's own id:
    * a moved worker keeps the dispatch it was launched for. */
   dispatchId?: string;
+  /** Resume this Claude conversation (`claude --resume`) instead of starting a
+   * new one: a conversation switched to another account (session-move.ts).
+   * An option, not request data, so only the Hook itself resumes a session. */
+  resumeClaude?: string;
 }
 
 /**
@@ -385,6 +389,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   if (role === "conductor" && data.mode === "chat") throw new BridgeError(400, "A conductor needs agent mode with tools.");
   const phrenArgs = await phrenLaunchArgs(kind, data);
+  const resumeClaude = options.resumeClaude === undefined ? undefined : z.string().uuid("resumeClaude must be a Claude session id.").parse(options.resumeClaude);
+  if (resumeClaude && (kind !== "claude" || role !== "agent" || data.brief != null)) throw new BridgeError(400, "Only a Claude worker without a brief resumes a conversation.");
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
@@ -425,7 +431,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? [...await prepareConductor(kind, effort, model), ...(kind === "phren" ? phrenArgs : [])]
     : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
-      ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
+      ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(resumeClaude ? ["--resume", resumeClaude] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
   // first turn. The typed arguments below stay the fallback.
