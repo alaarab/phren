@@ -161,6 +161,8 @@ installKeys({
   toggleConsole: () => agents().toggleConsole(),
   nextTab: () => agents().nextTab(),
   previousTab: () => agents().previousTab(),
+  // Next/previous tab in the focused tile; only while the Agents section is showing, so a key pressed on Home does nothing.
+  stepTab: (delta) => { if (currentSection() === "agents") (delta < 0 ? agents().previousTab() : agents().nextTab()); },
   currentSession: () => agents().currentSession(),
 });
 
