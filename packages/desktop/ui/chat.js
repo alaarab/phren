@@ -103,6 +103,9 @@ export function openChat(el, computerName, child, opts = {}) {
     menuItem("Copy as Markdown", () => copyMarkdown()),
     menuItem("Save as Markdown\u2026", () => saveMarkdown()),
   );
+  // The harness's own conversation id (what `claude --resume` takes); the item is absent when the row has none.
+  const agentSessionId = String(target.session || "").trim();
+  if (agentSessionId) menu.append(menuItem("Copy session id", () => copySessionId()));
   const moreWrap = node("div", "chat-more-wrap");
   moreWrap.append(more, menu);
   function closeMenu() {
@@ -900,6 +903,12 @@ export function openChat(el, computerName, child, opts = {}) {
     try {
       await navigator.clipboard.writeText(out.markdown);
       toast(failNote(out) || `Copied ${plural(out.messages)}`, out.failed ? { tone: "danger" } : {});
+    } catch { toast("Could not copy to the clipboard", { tone: "danger" }); }
+  }
+  async function copySessionId() {
+    try {
+      await navigator.clipboard.writeText(agentSessionId);
+      toast("Copied session id");
     } catch { toast("Could not copy to the clipboard", { tone: "danger" }); }
   }
   async function saveMarkdown() {
