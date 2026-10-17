@@ -11,7 +11,7 @@ const LAYOUT_KEY = "phren.desktop.layout";
 const MIN_RATIO = 0.12;
 let nextLeaf = 1;
 
-export function createTiles(rootEl, { onActivate, onEmpty, onClose } = {}) {
+export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = {}) {
   rootEl.classList.add("tiles");
   let root = null;     // node: { kind: "leaf", id, el, bar, body, tabs } | { kind: "split", dir: "row"|"col", ratio, a, b, el, gutter }
   let focused = null;  // the leaf keyboard and new documents go to
@@ -119,6 +119,7 @@ export function createTiles(rootEl, { onActivate, onEmpty, onClose } = {}) {
     if (zoomed) render();
     const doc = leaf.tabs.active();
     if (doc) onActivate?.(doc, leaf.tabs.activeHandle());
+    else onBlank?.();
   }
 
   // ------------------------------------------------------------ splitting
@@ -135,6 +136,7 @@ export function createTiles(rootEl, { onActivate, onEmpty, onClose } = {}) {
     replace(leaf, node);
     focused = fresh;
     render();
+    onBlank?.();
     save();
     return fresh;
   }

@@ -1,7 +1,7 @@
 // The window title: "(N) <chat title> — Phren" while a chat is the active tab, "(N) <Section> — Phren"
 // otherwise, "Phren" alone before anything is shown. N is the needs-you count and is left off at zero.
 // The Electron window follows `document.title` (the shell never sets its own after creation), so the
-// macOS title/dock and the Windows taskbar show this too. Kept short: chat titles clip at 60 characters.
+// Window menu, Mission Control, the app switcher and the Windows/Linux taskbar show this too. Kept short: chat titles clip at 60 characters.
 
 export const TITLE_MAX = 60;
 const APP = "Phren";

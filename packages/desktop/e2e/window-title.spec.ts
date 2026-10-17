@@ -67,6 +67,17 @@ test("a focused Shell tab names the section, and focusing each tile switches the
   await expect(page).toHaveTitle("Alpha chat — Phren");
   await page.locator(".doc-tab", { hasText: /Shell|Terminal/ }).click();
   await expect(page).toHaveTitle("Agents — Phren");
+
+  // An empty tile: splitting focuses it, and clicking back into it after the chat names the section again.
+  await page.locator(".doc-tab", { hasText: "Alpha chat" }).click();
+  await expect(page).toHaveTitle("Alpha chat — Phren");
+  await page.locator(".layout-btn", { hasText: "Split →" }).click();
+  await expect(page.locator(".tile-empty:visible")).toHaveCount(1);
+  await expect(page).toHaveTitle("Agents — Phren");
+  await page.locator(".doc-tab", { hasText: "Alpha chat" }).click();
+  await expect(page).toHaveTitle("Alpha chat — Phren");
+  await page.locator(".tile-empty:visible").click({ position: { x: 5, y: 5 } });
+  await expect(page).toHaveTitle("Agents — Phren");
 });
 
 test("Settings can keep the chat title out of the window title", async ({ page }) => {

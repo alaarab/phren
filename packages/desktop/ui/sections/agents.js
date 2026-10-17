@@ -383,6 +383,11 @@ export function mountAgents(root) {
       syncTerminal();
       void quotaWarning.check();
     },
+    onBlank() {
+      // An empty tile took focus: no tab is focused, so the title falls back to the section.
+      focusedDoc = null;
+      document.dispatchEvent(new Event("phren:tabs-changed"));
+    },
     onEmpty() {
       session = null;
       activeDoc = null;
