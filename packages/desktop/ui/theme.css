@@ -850,3 +850,13 @@ button.handoff-link:hover { color: var(--accent); }
   .settings-field { flex-wrap: wrap; }
   .settings-field > .settings-input, .settings-field > .settings-select { min-width: 0; flex: 1 1 140px; max-width: 100%; }
 }
+
+/* Settings approvals page */
+.approval-computers { display: grid; gap: 16px; }
+.approval-computer { display: grid; gap: 6px; }
+.approval-body { display: grid; gap: 4px; }
+.approval-rule { align-items: flex-start; padding: 8px 12px; }
+.approval-sentence { overflow-wrap: anywhere; }
+.approval-meta { margin-top: 2px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.approval-status { flex: none; font-size: 11px; color: var(--done); }
+.approval-off, .approval-expired { color: var(--muted); }

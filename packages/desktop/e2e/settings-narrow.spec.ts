@@ -4,7 +4,7 @@ import { chatRow, linkUi, overviewFrame, startHarness, type Harness } from "./he
 let h: Harness | undefined;
 let unlinkUi: () => void;
 
-const PAGES = ["Computers", "Keys", "Extensions", "Appearance", "Notifications", "Diagnostics", "About"];
+const PAGES = ["Computers", "Approvals", "Keys", "Extensions", "Appearance", "Notifications", "Diagnostics", "About"];
 
 test.beforeAll(() => { unlinkUi = linkUi(); });
 test.afterAll(() => { unlinkUi(); });

@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- Settings shows each computer's standing approval rules.
 - **Sync now** asks a computer to pull its Phren store and refreshes Memory when the store changes.
 - **Pull requests on Home**: every open pull or merge request across your projects, the ones that need you first.
 - Notifications when a pull request you're working on gets changes requested, is approved, or hits conflicts.
