@@ -7,6 +7,7 @@ import { openExtensions } from "../extensions.js";
 import { registerPauseCommand } from "../shell/pause-all.js";
 import { button, el, heading } from "./settings/ui.js";
 import { buildComputers } from "./settings/computers.js";
+import { buildApprovals } from "./settings/approvals.js";
 import { buildKeys } from "./settings/keys.js";
 import { buildAppearance } from "./settings/appearance.js";
 import { buildNotifications } from "./settings/notifications.js";
@@ -22,6 +23,7 @@ registerPauseCommand();
 // ------------------------------------------------------------ section
 const PAGES = [
   { id: "computers", label: "Computers" },
+  { id: "approvals", label: "Approvals" },
   { id: "keys", label: "Keys" },
   { id: "extensions", label: "Extensions" },
   { id: "appearance", label: "Appearance" },
@@ -88,6 +90,7 @@ export function mountSettings(root) {
 
 const BUILDERS = {
   computers: buildComputers,
+  approvals: buildApprovals,
   keys: buildKeys,
   extensions: buildExtensions,
   appearance: buildAppearance,
