@@ -463,6 +463,13 @@ button.settings-summon-key.recording { color: var(--text); border-color: var(--a
 .sb-nomatch-clear { height: 26px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); color: var(--text-2); font: 600 12px system-ui; cursor: pointer; }
 .sb-nomatch-clear:hover { color: var(--accent); }
 .sidebar.compact .sb-filter, .sidebar.compact .sb-nomatch { display: none; }
+.sb-strip-filter { display: none; position: relative; flex: none; align-items: center; justify-content: center; width: 36px; height: 32px; margin: 6px auto 0; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; }
+.sidebar.compact .sb-strip-filter { display: flex; }
+.sb-strip-filter:hover { background: var(--surface); color: var(--text); }
+.sb-strip-filter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sb-strip-dot { display: none; position: absolute; top: 5px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+.sb-strip-filter.active { color: var(--accent); }
+.sb-strip-filter.active .sb-strip-dot { display: block; }
 .sb-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 4px 12px; }
 .sb-section { margin: 0 0 8px; }
 .sb-header { display: flex; align-items: center; gap: 6px; padding: 10px 8px 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
