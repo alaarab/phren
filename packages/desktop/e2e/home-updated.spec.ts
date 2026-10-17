@@ -25,12 +25,13 @@ test("Home says how long ago it loaded, ticks, and Refresh reloads and resets th
   await page.goto(h!.url, { waitUntil: "domcontentloaded" });
   await expect(label(page)).toHaveText("Updated just now");
   await page.screenshot({ path: test.info().outputPath("home-fresh.png") });
+  // Hold every read from here, so the 30 s background poll can't reset the label.
+  let release!: () => void;
+  gate = new Promise<void>((resolve) => { release = resolve; });
   await page.clock.fastForward(35_000);
   await expect(label(page)).toHaveText(/Updated 3\ds ago/);
   await page.screenshot({ path: test.info().outputPath("home-aged.png") });
   const before = h!.hook.calls.filter((c) => c.path === "/v1/dispatch").length;
-  let release!: () => void;
-  gate = new Promise<void>((resolve) => { release = resolve; });
   await refresh(page).click();
   await expect(refresh(page)).toBeDisabled();
   await expect(label(page)).toHaveText(/Updated 3\ds ago/);
@@ -44,9 +45,9 @@ test("a failed Refresh keeps the old label and says Refresh failed", async ({ pa
   await page.clock.install();
   await page.goto(h!.url, { waitUntil: "domcontentloaded" });
   await expect(label(page)).toHaveText("Updated just now");
+  dispatchStatus = 500; // the background poll fails too, so it leaves the label alone
   await page.clock.fastForward(35_000);
   await expect(label(page)).toHaveText(/Updated 3\ds ago/);
-  dispatchStatus = 500;
   await refresh(page).click();
   await expect(page.locator(".pt-toast")).toHaveText("Refresh failed");
   await expect(label(page)).toHaveText(/Updated 3\ds ago/);
@@ -54,4 +55,14 @@ test("a failed Refresh keeps the old label and says Refresh failed", async ({ pa
   await page.screenshot({ path: test.info().outputPath("home-failed.png") });
   await page.clock.fastForward(5_000);
   await expect(page.locator(".pt-toast")).toHaveCount(0);
+});
+
+test("a background poll that succeeds resets the label", async ({ page }) => {
+  await page.clock.install();
+  await page.goto(h!.url, { waitUntil: "domcontentloaded" });
+  await expect(label(page)).toHaveText("Updated just now");
+  await page.clock.fastForward(25_000);
+  await expect(label(page)).toHaveText(/Updated 2\ds ago/);
+  await page.clock.fastForward(10_000);
+  await expect(label(page)).toHaveText("Updated just now");
 });
