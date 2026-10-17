@@ -29,7 +29,7 @@ function codeKey(ev) {
 const EVENT_NAMES = { arrowup: "up", arrowdown: "down", arrowleft: "left", arrowright: "right", escape: "esc", enter: "enter", tab: "tab", " ": " " };
 const SYMBOLS = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", super: "⌘" };
 // "cmd" in a binding means Command on macOS and Control everywhere else.
-const IS_MAC = (typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent || navigator.platform || ""))
+export const IS_MAC = (typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent || navigator.platform || ""))
   || (typeof document !== "undefined" && document.documentElement.classList.contains("platform-darwin"));
 
 /** "prefix+shift+t" → { prefix, ctrl, alt, shift, cmd, key, range? } */
@@ -75,6 +75,32 @@ export function matches(spec, ev) {
 }
 
 /** How a binding reads on the shortcut sheet: "⌃B  ⇧T". */
+/** The first filter_sessions binding as "⌘⇧E" (Mac) or "Ctrl+Shift+E", "" while unbound. */
+function filterShortcutText() {
+  const binds = config?.bindings?.filter_sessions ?? config?.appBindings?.filter_sessions ?? (config ? [] : ["cmd+shift+e"]);
+  const text = binds.find((b) => !b.includes("prefix"));
+  if (!text) return "";
+  const spec = parseBinding(text);
+  const mods = ["cmd", "ctrl", "alt", "shift"].filter((m) => spec[m]);
+  const key = spec.key.length === 1 ? spec.key.toUpperCase() : spec.key;
+  if (IS_MAC) return mods.map((m) => SYMBOLS[m]).join("") + key;
+  return [...mods.map((m) => (m === "cmd" ? "Ctrl" : m[0].toUpperCase() + m.slice(1))), key].join("+");
+}
+
+/** The icon-strip filter button's title and accessible name, following the current binding. */
+export function filterButtonLabel() {
+  const text = filterShortcutText();
+  return text ? `Filter sessions (${text})` : "Filter sessions";
+}
+
+function syncFilterButton() {
+  const button = document.querySelector?.("#sidebar .sb-strip-filter");
+  if (!button) return;
+  const label = filterButtonLabel();
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+
 function keycaps(binding) {
   return binding.split(/\s+/).map((text) => {
     const spec = parseBinding(text);
@@ -502,6 +528,7 @@ const BUILTINS = [
 ];
 
 function registerBuiltins() {
+  syncFilterButton();
   for (const [action, title] of BUILTINS) {
     const binds = config.bindings[action] ?? config.appBindings?.[action] ?? [];
     registerCommand({ id: `keys.${action}`, title, group: "Commands", keys: binds.map(keycaps).join("  "), run: () => run(action) });
@@ -556,14 +583,14 @@ export async function installKeys(actions) {
   style.id = "keys-style";
   style.textContent = STYLE;
   document.head.append(style);
+  // The strip's filter button works before the bindings load (and if they never do).
+  const sidebar = document.getElementById("sidebar");
+  sidebar.addEventListener("phren:focus-filter", () => focusFilter());
   await load();
   registerBuiltins();
   // Capture phase, so Monaco and inputs do not swallow the prefix first.
   window.addEventListener("keydown", onKeyDown, true);
-  const sidebar = document.getElementById("sidebar");
   sidebar.addEventListener("keydown", onSidebarKey);
-  // The sidebar's icon-strip filter button asks for what the shortcut does.
-  sidebar.addEventListener("phren:focus-filter", () => focusFilter());
 }
 
 /** Mark the session the chat shows, so next/previous start from it. */

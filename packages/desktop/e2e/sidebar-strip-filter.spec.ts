@@ -40,6 +40,15 @@ test("the strip's filter button expands it and focuses the box", async ({ page }
   await expect(button(page)).toBeHidden();
 });
 
+test("the label follows the binding and aria-pressed follows the filter", async ({ page }) => {
+  await openStrip(page);
+  await expect(button(page)).toHaveAttribute("aria-pressed", "false");
+  await button(page).click();
+  await input(page).fill("login");
+  await page.locator(".doc-sidebar-toggle").click();
+  await expect(button(page)).toHaveAttribute("aria-pressed", "true");
+});
+
 test("a dot shows while a filter is active, also in the strip", async ({ page }) => {
   await openStrip(page);
   await expect(page.locator(".sb-strip-dot")).toBeHidden();

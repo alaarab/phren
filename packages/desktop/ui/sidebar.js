@@ -15,6 +15,7 @@ import { snoozes } from "./shell/snooze.js";
 import { muted } from "./shell/muted.js";
 import { mutedMark } from "./shell/muted-mark.js";
 import { filterSessionRows, filterWords } from "./shell/sidebar-filter.js";
+import { filterButtonLabel } from "./keys.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 import { countOf } from "./text.js";
 
@@ -768,8 +769,6 @@ function clearFilter(sb, focus) {
   requestRender(sb);
 }
 
-const IS_MAC = /mac/i.test(globalThis.navigator?.userAgent || globalThis.navigator?.platform || "")
-  || !!globalThis.document?.documentElement?.classList.contains("platform-darwin");
 const FILTER_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16l-6.2 7.2v5.3l-3.6 1.8v-7.1z"/></svg>';
 
 /**
@@ -780,7 +779,7 @@ const FILTER_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none"
 function stripFilterButton(sb) {
   const button = el("button", "sb-strip-filter");
   button.type = "button";
-  const label = `Filter sessions (${IS_MAC ? "\u2318\u21E7E" : "Ctrl+Shift+E"})`;
+  const label = filterButtonLabel();
   button.title = label;
   button.setAttribute("aria-label", label);
   button.innerHTML = FILTER_ICON;
@@ -790,7 +789,11 @@ function stripFilterButton(sb) {
 }
 
 function syncStripFilter(sb) {
-  sb.el.querySelector(":scope > .sb-strip-filter")?.classList.toggle("active", filterWords(sb.filter).length > 0);
+  const button = sb.el.querySelector(":scope > .sb-strip-filter");
+  if (!button) return;
+  const active = filterWords(sb.filter).length > 0;
+  button.classList.toggle("active", active);
+  button.setAttribute("aria-pressed", String(active));
 }
 
 function filterBox(sb) {
