@@ -29,8 +29,8 @@ const localRows = [
   row("cond", "Conductor", "idle", "phren", "Two workers finished.", { role: "conductor", agent: "codex" }),
 ];
 const peerRows = [
-  row("sync", "Faster store sync", "working", "phren", "Profiling the pull path.", { branch: "perf/sync" }),
-  row("a11y", "Review accessibility", "idle", "website", "Found three contrast issues."),
+  row("sync", "Faster store sync", "working", "api-gateway", "Profiling the pull path.", { branch: "perf/sync" }),
+  row("a11y", "Review accessibility", "idle", "mobile-app", "Found three contrast issues."),
 ];
 
 const PROJECTS = [
@@ -43,15 +43,57 @@ const FINDINGS = [
   { id: "fid:4", text: "[pattern] Read the config once at startup.", date: "2026-10-09" },
 ];
 
+// A sample memory store per computer, so Projects shows summaries and counts (the UI reads them from the store routes).
+const CAPABILITIES = { memoryStore: true, fileWrite: true, fileSearch: true, gitReview: true, files: true, fileResolution: true, repositoryFiles: true, schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true };
+const SAMPLE_PROJECTS: Record<string, { summary: string; tasks: string[]; findings: number }> = {
+  phren: { summary: "Memory for coding agents: findings, tasks and a hook that recalls them.", tasks: ["Polish the Home dashboard", "Review the launch flow", "Check the release notes"], findings: 24 },
+  website: { summary: "The marketing site: landing page, docs and the getting started guide.", tasks: ["Refresh the landing page", "Review accessibility"], findings: 11 },
+  "api-gateway": { summary: "Routes requests by host and enforces per-tenant rate limits.", tasks: ["Drain the queue before closing the socket"], findings: 7 },
+  "mobile-app": { summary: "The phone client: sessions, approvals and talk mode.", tasks: ["Improve mobile navigation", "Cache the host lookup", "Ship the onboarding flow", "Fix the login redirect"], findings: 15 },
+};
+const b64 = (text: string) => Buffer.from(text).toString("base64");
+function storeRoutes(names: string[]) {
+  const blobs = new Map<string, string>();
+  const tree: Array<{ path: string; type: string; sha: string }> = [];
+  for (const name of names) {
+    const p = SAMPLE_PROJECTS[name];
+    const files: Record<string, string> = {
+      "summary.md": `${p.summary}\n`,
+      "tasks.md": `## Active\n${p.tasks.map((t) => `- ${t}`).join("\n")}\n\n## Done\n`,
+      "FINDINGS.md": `${Array.from({ length: p.findings }, (_, i) => `- [pattern] Sample finding ${i + 1}`).join("\n")}\n`,
+    };
+    for (const [file, text] of Object.entries(files)) {
+      const sha = `${name}-${file}`.replace(/[^a-z0-9]/gi, "").toLowerCase().padEnd(40, "0").slice(0, 40);
+      blobs.set(sha, text);
+      tree.push({ path: `${name}/${file}`, type: "blob", sha });
+    }
+  }
+  return {
+    "GET /v1/health": () => ({ json: { ok: true, product: "phren-hook", protocol: 1, version: "0.3.55", computer: { id: "docs", name: "docs" }, capabilities: CAPABILITIES } }),
+    "GET /v1/projects/repos": () => ({ json: { repos: names.map((name) => ({ name, project: name, directory: `/Users/you/${name}`, registered: true, lastSeen: ago(30) })) } }),
+    "GET /v1/store/head": () => ({ json: { sha: `head-${names.join("-")}` } }),
+    "GET /v1/store/tree": () => ({ json: { tree } }),
+    "GET /v1/store/blob": (_req: unknown, _body: unknown, url: URL) => ({ json: { content: b64(blobs.get(url.searchParams.get("sha") ?? "") ?? "") } }),
+  };
+}
+
+/** The overview frame the Hooks push, declaring the store routes the Projects section reads. */
+const frame = (rows: object[]) => {
+  const f = overviewFrame(rows);
+  f.phren.capabilities = { ...f.phren.capabilities, ...CAPABILITIES } as typeof f.phren.capabilities;
+  return f;
+};
+
 let h: Harness;
 let unlinkUi: () => void;
 test.beforeAll(async () => {
   mkdirSync(OUT, { recursive: true });
   unlinkUi = linkUi();
   h = await startHarness("docs", {
-    overviewFrames: [overviewFrame(localRows)],
+    overviewFrames: [frame(localRows)],
     transcriptFrames: transcript,
-    peer: { name: "Studio", options: { overviewFrames: [overviewFrame(peerRows)] } },
+    routes: storeRoutes(["phren", "website"]),
+    peer: { name: "Studio", options: { overviewFrames: [frame(peerRows)], routes: storeRoutes(["api-gateway", "mobile-app"]) } },
   });
 });
 test.afterAll(async () => { await h?.close(); unlinkUi(); });
@@ -110,7 +152,7 @@ test("screenshots", async ({ page }) => {
 
   await section(page, "projects");
   await expect(page.locator(".pj-card").first()).toBeVisible();
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(1500);
   await shot(page, "projects");
 
   await section(page, "settings");
