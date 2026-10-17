@@ -17,6 +17,7 @@ import { createStaging } from "./changes/stage.js";
 import { age } from "./time.js";
 import { CHANGES_CSS } from "./changes/styles.js";
 import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, span, tileClass } from "./changes/util.js";
+import { countOf } from "./text.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
 // "Session" is what this agent changed, from the Hook's per-call capture.
@@ -291,7 +292,7 @@ export function openChanges(el, ctx) {
     try {
       const res = await hookPost(computer, `/v1/git/${kind}`, scopeBody({ expectedRepository: repo() }));
       if (res && res.ok === false) state.notice = { title: kind === "pull" ? "The pull was refused" : "The fetch was refused", message: res.output || `git ${kind} failed.` };
-      else state.landed = kind === "pull" ? (res.commits ? `Pulled ${res.commits} commit${res.commits === 1 ? "" : "s"}` : "Already up to date") : `Fetched ${res.remote || "origin"}`;
+      else state.landed = kind === "pull" ? (res.commits ? `Pulled ${countOf(res.commits, "commit")}` : "Already up to date") : `Fetched ${res.remote || "origin"}`;
       pullsRequested = false;
       announce();
       await loadStatusQuiet();
@@ -309,7 +310,7 @@ export function openChanges(el, ctx) {
       if (res && res.ok === false) state.notice = { title: "Git refused the switch", message: res.output || "git switch failed." };
       else {
         state.landed = res.created ? `Created and switched to ${res.branch}` : `Switched to ${res.branch}`;
-        if (res.carried) state.landed += ` with ${res.carried} uncommitted file${res.carried === 1 ? "" : "s"}`;
+        if (res.carried) state.landed += ` with ${countOf(res.carried, "uncommitted file")}`;
         state.sheet = null; state.log = null; state.commit = null; pullsRequested = false; state.pulls = null;
       }
       announce();
@@ -399,7 +400,7 @@ export function openChanges(el, ctx) {
     // The branch bar above names the branch; this line counts the work.
     const n = s.totalFiles != null ? s.totalFiles : (s.files || []).length;
     if (!n) return "Nothing uncommitted";
-    let line = `${n} file${n === 1 ? "" : "s"} changed`;
+    let line = `${countOf(n, "file")} changed`;
     const counts = [];
     if (s.additions) counts.push("+" + s.additions);
     if (s.deletions) counts.push("−" + s.deletions);
@@ -409,7 +410,7 @@ export function openChanges(el, ctx) {
 
   function worktreeCaption(res) {
     const rows = Array.isArray(res) ? res : (res.worktrees || []);
-    return `${rows.length} worktree${rows.length === 1 ? "" : "s"}`;
+    return countOf(rows.length, "worktree");
   }
 
   // ---- body ----------------------------------------------------------------
@@ -768,7 +769,7 @@ export function openChanges(el, ctx) {
     const row = div("chg-log-row");
     const mid = div("chg-log-mid");
     mid.appendChild(div("chg-log-subject", "Uncommitted changes"));
-    mid.appendChild(div("chg-log-meta", `${u.files} file${u.files === 1 ? "" : "s"}`));
+    mid.appendChild(div("chg-log-meta", countOf(u.files, "file")));
     row.appendChild(mid);
     const stat = div("chg-stat");
     if (u.additions) stat.appendChild(span("chg-adds", "+" + u.additions));
@@ -812,7 +813,7 @@ export function openChanges(el, ctx) {
     if (d.committer && d.committer !== d.author) meta.appendChild(span("", `committed by ${d.committer}`));
     if ((d.parents || []).length > 1) meta.appendChild(span("chg-chip", `merge of ${d.parents.length}`));
     const stat = div("chg-stat");
-    stat.appendChild(span("", `${d.totalFiles} file${d.totalFiles === 1 ? "" : "s"}`));
+    stat.appendChild(span("", countOf(d.totalFiles, "file")));
     if (d.additions) stat.appendChild(span("chg-adds", "+" + d.additions));
     if (d.deletions) stat.appendChild(span("chg-dels", "−" + d.deletions));
     meta.appendChild(stat);
@@ -862,7 +863,7 @@ export function openChanges(el, ctx) {
       body.appendChild(empty);
       return body;
     }
-    body.appendChild(div("chg-session-sum", `${res.calls} tool call${res.calls === 1 ? "" : "s"} changed ${res.totalFiles} file${res.totalFiles === 1 ? "" : "s"} · +${res.additions} −${res.deletions}` + (res.others ? ` · ${res.others} in other repositories` : "")));
+    body.appendChild(div("chg-session-sum", `${countOf(res.calls, "tool call")} changed ${countOf(res.totalFiles, "file")} · +${res.additions} −${res.deletions}` + (res.others ? ` · ${res.others} in other repositories` : "")));
     const sec = div("chg-sec");
     sec.appendChild(sectionHead("CHANGED BY THIS AGENT", files.length));
     const uncommitted = new Set((state.status?.files || []).map((f) => f.path));
@@ -872,7 +873,7 @@ export function openChanges(el, ctx) {
       row.appendChild(div("chg-tile " + tileClass(f.status), f.status));
       const main = div("chg-main");
       main.appendChild(div("chg-name", basename(f.path)));
-      main.appendChild(div("chg-folder", [dirname(f.path), `${f.edits.length} edit${f.edits.length === 1 ? "" : "s"}`, uncommitted.has(f.path) ? "uncommitted" : "committed"].filter(Boolean).join(" · ")));
+      main.appendChild(div("chg-folder", [dirname(f.path), countOf(f.edits.length, "edit"), uncommitted.has(f.path) ? "uncommitted" : "committed"].filter(Boolean).join(" · ")));
       row.appendChild(main);
       const st = div("chg-stat");
       if (f.added) st.appendChild(span("chg-adds", "+" + f.added));
@@ -1117,8 +1118,8 @@ export function openChanges(el, ctx) {
     const chips = div("chg-req-chips");
     const review = { APPROVED: ["Approved", "ok"], CHANGES_REQUESTED: ["Changes requested", "bad"], REVIEW_REQUIRED: ["Review required", "wait"] }[p.reviewDecision];
     if (review) chips.appendChild(span("chg-pill " + review[1], review[0] + (p.approvals ? ` · ${p.approvals.given}${p.approvals.required ? `/${p.approvals.required}` : ""}` : "")));
-    else if (p.approvals && p.approvals.given) chips.appendChild(span("chg-pill ok", `${p.approvals.given} approval${p.approvals.given === 1 ? "" : "s"}`));
-    if (typeof p.comments === "number" && p.comments) chips.appendChild(span("chg-pill", `${p.comments} comment${p.comments === 1 ? "" : "s"}`));
+    else if (p.approvals && p.approvals.given) chips.appendChild(span("chg-pill ok", countOf(p.approvals.given, "approval")));
+    if (typeof p.comments === "number" && p.comments) chips.appendChild(span("chg-pill", countOf(p.comments, "comment")));
     if (p.conflicts) chips.appendChild(span("chg-pill bad", "Conflicts"));
     if (chips.childNodes.length) card.appendChild(chips);
 

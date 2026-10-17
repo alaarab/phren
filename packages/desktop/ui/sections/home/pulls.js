@@ -2,6 +2,7 @@ import { el } from "../../dom.js";
 import { rowShell, age } from "./rows.js";
 import { checksWord, hostTerms, pullStanding } from "../../git-review.js";
 import { createPullsFeed } from "../../shell/project-pulls.js";
+import { countOf } from "../../text.js";
 
 export const PULLS_SHOWN = 8;
 
@@ -111,7 +112,7 @@ export function createPulls({ block, computers, openProject, isVisible, active, 
     if (item.stale) { shell.button.classList.add("stale"); shell.button.title = "This computer could not be read just now; showing what it said earlier."; }
     shell.button.dataset.key = item.key;
     shell.title.textContent = `${item.terms.ref}${item.number} ${item.title}`;
-    shell.title.title = [item.standing, item.comments ? `${item.comments} comment${item.comments === 1 ? "" : "s"}` : "", item.url].filter(Boolean).join(" · ");
+    shell.title.title = [item.standing, item.comments ? countOf(item.comments, "comment") : "", item.url].filter(Boolean).join(" · ");
     const meta = el("span", "home-row-meta home-pull-meta");
     const project = el("span", "home-project", item.project);
     project.title = `${item.project} · ${item.computer}`;
@@ -152,7 +153,7 @@ export function createPulls({ block, computers, openProject, isVisible, active, 
       more.addEventListener("click", () => { expanded = !expanded; render(); });
       nodes.push(more);
     }
-    const lost = [result.unread ? `${result.unread} project${result.unread === 1 ? "" : "s"}` : "", result.unreadComputers ? `${result.unreadComputers} computer${result.unreadComputers === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+    const lost = [result.unread ? countOf(result.unread, "project") : "", result.unreadComputers ? countOf(result.unreadComputers, "computer") : ""].filter(Boolean).join(" and ");
     nodes.push(paintFoot(lost ? `Couldn\u2019t read ${lost}` : ""));
     list.replaceChildren(...nodes);
   }

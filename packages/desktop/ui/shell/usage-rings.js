@@ -1,5 +1,6 @@
 import { compareUsage, exhausted, limitingWindow, resetLabel, usedPercent, windowText } from "./usage-windows.js";
 import { dayUTC } from "../time.js";
+import { countOf } from "../text.js";
 // The titlebar usage rings. The daemon's /api/usage has already merged every
 // computer's account reports; this draws one small ring per account (filled by
 // its tightest window) and opens a popover listing every account and window,
@@ -88,7 +89,7 @@ export function creditsValue(credits) {
 function usageSummary(view) {
   const accounts = view?.accounts ?? [];
   const computers = view?.computers ?? [];
-  const parts = [`${accounts.length} account${accounts.length === 1 ? "" : "s"} across ${computers.length} computer${computers.length === 1 ? "" : "s"}.`];
+  const parts = [`${countOf(accounts.length, "account")} across ${countOf(computers.length, "computer")}.`];
   const out = accounts.filter(exhausted);
   if (out.length) parts.push(`Out of quota: ${out.map(title).join("; ")}.`);
   const stale = accounts.filter((row) => row.stale);

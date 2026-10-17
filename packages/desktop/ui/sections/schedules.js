@@ -11,6 +11,7 @@ import { store } from "../shell/store.js";
 import { readAhead } from "../shell/read-ahead.js";
 import { runSchedule } from "../shell/schedule-run.js";
 import { updateSchedule } from "../schedule-update.js";
+import { countOf } from "../text.js";
 
 const CSS_HREF = "./sections/schedules.css";
 const MAX_NAME = 80;
@@ -391,7 +392,7 @@ export function mountSchedules(root) {
     } else {
       setError("");
     }
-    setStatus(online.length ? `${online.length} computer${online.length === 1 ? "" : "s"} online` : "No computers online");
+    setStatus(online.length ? `${countOf(online.length, "computer")} online` : "No computers online");
     render();
     if (state.pending) { state.pending = false; void loadAll(); }
   }

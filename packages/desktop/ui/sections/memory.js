@@ -9,6 +9,7 @@ import { citationData, freshnessChip, isStale, staleCount } from "../citation-fr
 import { store } from "../shell/store.js";
 import { skeleton } from "../shell/skeleton.js";
 import { createSyncControl } from "../store-sync.js";
+import { countOf } from "../text.js";
 
 const CSS_ID = "memory-css";
 const SEGMENTS = [
@@ -320,9 +321,9 @@ export function mountMemory(root) {
     titleEl.textContent = project ? project.name : "Memory";
     const parts = [];
     if (project) {
-      if (project.findings) parts.push(`${project.findings} finding${project.findings === 1 ? "" : "s"}`);
+      if (project.findings) parts.push(countOf(project.findings, "finding"));
       if (project.review) parts.push(`${project.review} to review`);
-      if (project.notes) parts.push(`${project.notes} note${project.notes === 1 ? "" : "s"}`);
+      if (project.notes) parts.push(countOf(project.notes, "note"));
     }
     subEl.textContent = parts.join(" · ");
     subEl.hidden = !parts.length;
@@ -720,7 +721,7 @@ export function mountMemory(root) {
         : typeof item.findings === "number" ? item.findings : null;
       const meta = el("div", "mem-row-meta");
       meta.append(el("span", "mem-tag type", "topic"));
-      if (count != null) meta.append(el("span", "mem-meta-dim", `${count} finding${count === 1 ? "" : "s"}`));
+      if (count != null) meta.append(el("span", "mem-meta-dim", countOf(count, "finding")));
       const date = String(item.date ?? "").trim();
       if (date) meta.append(el("span", "mem-date", date));
       row.append(meta);
@@ -824,7 +825,7 @@ export function mountMemory(root) {
       side.append(list);
     }
     const total = node.connections?.total;
-    if (total) side.append(el("div", "mem-graph-sub", `${total} connection${total === 1 ? "" : "s"}`));
+    if (total) side.append(el("div", "mem-graph-sub", countOf(total, "connection")));
     wrap.append(side);
   }
 

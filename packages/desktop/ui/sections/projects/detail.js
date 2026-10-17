@@ -3,6 +3,7 @@ import { el } from "../../dom.js";
 import { projectOf } from "../../shell/store.js";
 import { storeBlobText } from "../../store-cache.js";
 import { KNOBS, age, clear, parseFrontmatter, parseKnobs, skillsFromTree } from "./data.js";
+import { countOf } from "../../text.js";
 
 export function createDetail(ctx) {
   const { state, body, sessionsFor, openInAgents, todayBlock, forgeBlock, openKnobs } = ctx;
@@ -71,8 +72,8 @@ export function createDetail(ctx) {
     const chips = el("div", "pj-chips");
     const findings = project.counts?.findings ?? 0;
     const tasks = project.counts?.tasks ?? 0;
-    chips.append(el("span", "pj-chip", `${findings} finding${findings === 1 ? "" : "s"}`));
-    chips.append(el("span", "pj-chip", `${tasks} open task${tasks === 1 ? "" : "s"}`));
+    chips.append(el("span", "pj-chip", countOf(findings, "finding")));
+    chips.append(el("span", "pj-chip", countOf(tasks, "open task")));
     work.append(chips);
     scope.append(work);
 

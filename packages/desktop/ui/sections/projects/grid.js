@@ -2,6 +2,7 @@
 import { el } from "../../dom.js";
 import { skeleton } from "../../shell/skeleton.js";
 import { age, clear } from "./data.js";
+import { countOf } from "../../text.js";
 
 export function createGrid(ctx) {
   const { state, body, onlineComputers, sessionsFor, loadDetailFiles, loadForge, loadToday, render } = ctx;
@@ -56,9 +57,9 @@ export function createGrid(ctx) {
     const summary = el("div", "pj-card-summary", project.summaryLine || (project.hydrated ? "No summary yet." : "\u00a0"));
     card.append(summary);
     const stats = el("div", "pj-card-stats");
-    if (typeof project.counts?.findings === "number") stats.append(el("span", "pj-stat", `${project.counts.findings} finding${project.counts.findings === 1 ? "" : "s"}`));
-    if (typeof project.counts?.tasks === "number") stats.append(el("span", "pj-stat", `${project.counts.tasks} open task${project.counts.tasks === 1 ? "" : "s"}`));
-    if (sessions.length) stats.append(el("span", "pj-stat", `${sessions.length} session${sessions.length === 1 ? "" : "s"}`));
+    if (typeof project.counts?.findings === "number") stats.append(el("span", "pj-stat", countOf(project.counts.findings, "finding")));
+    if (typeof project.counts?.tasks === "number") stats.append(el("span", "pj-stat", countOf(project.counts.tasks, "open task")));
+    if (sessions.length) stats.append(el("span", "pj-stat", countOf(sessions.length, "session")));
     const last = sessions.map((row) => row.child.lastChangedAt).filter(Boolean).sort().pop() || project.lastSeen;
     if (last) stats.append(el("span", "pj-stat", `active ${age(last)}`));
     card.append(stats);
