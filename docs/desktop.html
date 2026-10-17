@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phren desktop</title>
+<meta name="description" content="Phren desktop: a cockpit for every computer that runs your coding agents, with tiled chats, a command palette, changes and memory. macOS, Windows and Linux.">
+<link rel="icon" href="phren-icon-64.svg"><link rel="stylesheet" href="app.css">
+</head><body><main>
+<nav class="appnav" aria-label="App"><a class="home" href="index.html">phren</a><a href="get-started.html">Get started</a><a href="apps.html">Apps</a><a href="ios.html">iPhone</a><a href="android.html">Android</a><a href="phren-hook.html">Phren Hook</a><a href="support.html">Support</a><a href="privacy.html">Privacy</a><a href="docs.html">Docs</a></nav>
+
+<div class="eyebrow">Phren desktop</div>
+<h1>Every computer.<br>One cockpit.</h1>
+<p class="lead">Phren desktop shows what needs you, the agents that are working and your conductor, across every computer you run agents on. It does everything the phone app does, and adds tiled chats and consoles, a review station and a code editor.</p>
+<p><span class="status">Version 0.1.12 · macOS, Windows, Linux · installers on GitHub releases</span></p>
+<div class="cta"><a class="button" href="#install">Install</a><a class="button secondary" href="https://github.com/alaarab/phren/blob/main/docs/desktop.md">Full guide</a></div>
+<p class="note">Screenshots use sample projects and sample computers.</p>
+
+<figure class="single wide"><img src="apps/desktop/home.png" width="1440" height="900" loading="lazy" alt="Phren desktop Home: the conductor, what needs you, working agents and what runs next"><figcaption>Home: the conductor, who needs you, what is working, what runs next and active tasks, across two computers.</figcaption></figure>
+
+<h2>What's in it</h2>
+<div class="shots wide">
+<figure><img src="apps/desktop/chat.png" width="1440" height="900" loading="lazy" alt="A chat with a Claude Code session beside the Changes panel"><figcaption>Chats show the phone's timeline, tool cards and approvals, with Changes, Files and Search beside them.</figcaption></figure><figure><img src="apps/desktop/tiles.png" width="1440" height="900" loading="lazy" alt="Two chats tiled side by side"><figcaption>Tile chats and consoles like Herdr panes: split, move, swap and zoom.</figcaption></figure><figure><img src="apps/desktop/palette.png" width="1440" height="900" loading="lazy" alt="The command palette searching for a session"><figcaption>Cmd+K finds sessions, projects, files and commands. Type ? to search memory.</figcaption></figure><figure><img src="apps/desktop/changes.png" width="1440" height="900" loading="lazy" alt="The Changes panel with two changed files"><figcaption>Changes, history, branches and pull requests for the open session.</figcaption></figure><figure><img src="apps/desktop/projects.png" width="1440" height="900" loading="lazy" alt="The Projects section with a card per project and computer"><figcaption>Projects across every computer, with summaries, counts and live sessions.</figcaption></figure><figure><img src="apps/desktop/settings.png" width="1440" height="900" loading="lazy" alt="Settings Appearance page with theme choices"><figcaption>Settings: computers, approvals, keys, extensions, themes and notifications.</figcaption></figure>
+</div>
+
+<h2>Flows</h2>
+<h3>Switch between recent chats</h3>
+<p>Hold Ctrl and press Tab to see your last eight chats and their status. Tab and Shift+Tab move, releasing Ctrl opens, Esc cancels.</p>
+<figure class="single wide"><img class="gif" src="apps/desktop/switcher.gif" width="900" height="563" loading="lazy" alt="A recording of holding Ctrl and pressing Tab to step through three recent chats"><figcaption>Ctrl+Tab through your recent chats.</figcaption></figure>
+<h3>Find in a chat</h3>
+<p>Cmd/Ctrl+F searches the open conversation and steps through the matches.</p>
+<figure class="single wide"><img class="gif" src="apps/desktop/find.gif" width="900" height="563" loading="lazy" alt="A recording of searching a chat for a word and stepping through the matches"><figcaption>Cmd/Ctrl+F: type, then Enter and Shift+Enter to step.</figcaption></figure>
+
+<h2>Sections</h2>
+<p>The titlebar has Home, Agents, Review, Projects and Fleet, with Settings behind the gear.</p>
+<ul>
+<li><strong>Home</strong>: the conductor, who needs you (Enter approves, D denies, O opens), what is working, the scheduled prompts that run next and your active tasks. Further down: open pull requests, what you and your agents saved today, and each computer's load.</li>
+<li><strong>Agents</strong>: sessions by status or computer, tiled chats and consoles, and a tool panel for Changes, Files and Search.</li>
+<li><strong>Review</strong>: worker returns with reports and diffs, and open pull requests with their checks.</li>
+<li><strong>Projects</strong>, with Tasks, Memory and Code beside it: every project with its summary and counts, tasks with readiness, findings and the review queue, and what changed in the code index.</li>
+<li><strong>Fleet</strong>: the Conductor with its dispatches, returns and grants, Schedules with run now, and Previews, every computer's local web servers and simulators.</li>
+<li><strong>Continue in…</strong> (a session's menu): hand a chat to another Claude account, harness or computer with a written hand-off.</li>
+</ul>
+
+<h2 id="install">Install</h2>
+<p>Download the newest build from the <a href="https://github.com/alaarab/phren/releases/latest">latest release</a>.</p>
+<ul>
+<li><strong>macOS, Apple Silicon:</strong> <a href="https://github.com/alaarab/phren/releases/latest/download/Phren-mac-arm64.dmg">Phren-mac-arm64.dmg</a>. Open it and drag Phren to Applications. The build is not signed with a Developer ID yet, so macOS blocks the first open: choose <strong>Open Anyway</strong> in System Settings › Privacy &amp; Security.</li>
+<li><strong>Windows, x64:</strong> <a href="https://github.com/alaarab/phren/releases/latest/download/Phren-win-x64.exe">Phren-win-x64.exe</a>. It installs for your user. SmartScreen asks first: choose <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+<li><strong>Linux, x86-64:</strong> <a href="https://github.com/alaarab/phren/releases/latest/download/Phren-linux-x86_64.AppImage">Phren-linux-x86_64.AppImage</a>. <code>chmod +x</code> it and run it. AppImages need FUSE 2.</li>
+</ul>
+<p>The app brings its own Node. It needs this computer's Hook (the <code>phren</code> CLI with its Hook running), plus <code>ssh</code> for other computers and Herdr or tmux for consoles. Link another computer with <strong>Settings › Computers</strong>. The desktop has its own SSH key, separate from the phone's, and you can revoke it per computer.</p>
+<p>Updates arrive as a chip in the titlebar; click it for What's new. The <a href="https://github.com/alaarab/phren/blob/main/docs/desktop.md">full guide</a> covers keys, tiles, notifications and trust and safety.</p>
+
+<footer><a href="get-started.html">Get started</a> · <a href="apps.html">Apps</a> · <a href="ios.html">iPhone</a> · <a href="android.html">Android</a> · <a href="support.html">Support</a> · <a href="privacy.html">Privacy</a></footer>
+</main></body></html>
