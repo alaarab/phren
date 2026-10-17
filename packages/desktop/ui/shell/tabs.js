@@ -10,9 +10,10 @@ const STORAGE_KEY = "phren.desktop.tabs";
 /**
  * options.storageKey: localStorage key for the open-tab list, or null to not
  * save (tiles save the whole layout instead). options.onFocus: called on any
- * pointer interaction inside the group.
+ * pointer interaction inside the group. options.onMenu(doc, { x, y, tab }): a
+ * right-click, Shift+F10 or the context-menu key on a tab (x/y: where to put it).
  */
-export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClosing, onChange, storageKey = STORAGE_KEY } = {}) {
+export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClosing, onChange, onMenu, storageKey = STORAGE_KEY } = {}) {
   const docs = new Map(); // id -> entry { doc, tab, el, handle, owner }
   let active = null;
 
@@ -45,7 +46,28 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     // Handlers go through entry.owner, so a tab moved to another group talks to it.
     close.addEventListener("click", (ev) => { ev.stopPropagation(); entry.owner.close(doc.id); });
     tab.append(label, close);
+    tab.tabIndex = -1; // roving: the selected tab is the one tab stop (see activate)
     tab.addEventListener("click", () => entry.owner.activate(doc.id));
+    // Right-click and the keyboard route share one opener; Chromium may also send a contextmenu
+    // event for the key we already handled, so one that follows it closely is swallowed.
+    let keyedAt = 0;
+    const openMenu = (x, y) => entry.owner.menu?.(doc.id, { x, y, tab });
+    tab.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      if (Date.now() - keyedAt < 400) return;
+      const r = tab.getBoundingClientRect();
+      const keyboard = ev.clientX === 0 && ev.clientY === 0; // from the keyboard: no pointer position
+      openMenu(keyboard ? r.left : ev.clientX, keyboard ? r.bottom : ev.clientY);
+    });
+    tab.addEventListener("keydown", (ev) => {
+      if (ev.target !== tab) return; // the close button keeps its own keys
+      if (!(ev.key === "ContextMenu" || (ev.key === "F10" && ev.shiftKey))) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      keyedAt = Date.now();
+      const r = tab.getBoundingClientRect();
+      openMenu(r.left, r.bottom);
+    });
     tab.addEventListener("auxclick", (ev) => { if (ev.button === 1) entry.owner.close(doc.id); });
     tab.addEventListener("dragstart", (ev) => {
       ev.dataTransfer.setData("text/phren-tab", doc.id);
@@ -100,6 +122,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
       }
       e.tab.classList.toggle("selected", on);
       e.tab.setAttribute("aria-selected", String(on));
+      e.tab.tabIndex = on ? 0 : -1;
     }
     active = id;
     entry.tab.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -163,6 +186,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
   }
 
   const api = {
+    menu: (id, at) => onMenu?.(docs.get(id)?.doc, at),
     open, activate, close: closeTab, step, setTitle, saved, detach, adopt,
     has: (id) => docs.has(id),
     size: () => docs.size,

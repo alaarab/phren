@@ -5,7 +5,7 @@ import { watchQuotaWarnings } from "../shell/quota-warn-sheet.js";
 // The right panel follows the active tab's session; the terminal attaches to
 // that session's server.
 import { renderSidebar } from "../sidebar.js";
-import { openChat } from "../chat.js";
+import { openChat, copySessionIdToClipboard } from "../chat.js";
 import { openTerminal } from "../terminal.js";
 import { openChanges } from "../changes.js";
 import { openFileTree, openEditorDoc } from "../editor.js";
@@ -353,6 +353,17 @@ export function mountAgents(root) {
   const closedChats = createClosedStack();
   let bulkClose = false; // Mirror tab closes every tile at once; that is not the owner closing chats
   const tabs = createTiles(tilesRoot, {
+    // The tab menu closes through the same paths as the close button: a file with unsaved changes asks first.
+    requestClose(id) { const handle = tabs.handle(id); if (handle?.tryClose) handle.tryClose(); else tabs.close(id); },
+    isDirty: (id) => tabs.handle(id)?.isDirty?.() === true,
+    onNotice: (text) => toastNotice(text),
+    menuExtras(doc) {
+      const extras = [];
+      const session = doc.kind === "chat" ? String(doc.child?.target?.session ?? "").trim() : "";
+      if (session) extras.push({ id: "copy-session", label: "Copy session id", run: () => void copySessionIdToClipboard(session) });
+      if (closedChats.size() > 0) extras.push({ id: "reopen", label: "Reopen closed chat", run: () => reopenClosedChat() });
+      return extras;
+    },
     onClose(doc, where) {
       if (bulkClose || doc.kind !== "chat" || !doc.child) return;
       closedChats.push({ computer: doc.computer, id: doc.child.id, tile: where?.tile, index: where?.index, mode: doc.persist?.mode });

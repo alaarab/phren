@@ -6,12 +6,20 @@
 // The API mirrors shell/tabs.js (open, activate, close, step, setTitle, has,
 // active, activeHandle, list), so a section can switch from tabs to tiles.
 import { createTabs } from "./tabs.js";
+import { closeTargets, keptNotice, planClose, tabMenuItems } from "./tab-close.js";
+import { openTabMenu } from "./tab-menu.js";
 
 const LAYOUT_KEY = "phren.desktop.layout";
 const MIN_RATIO = 0.12;
 let nextLeaf = 1;
 
-export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = {}) {
+/**
+ * Tab menu hooks (all optional): `requestClose(docId)` closes one tab the way its owner wants
+ * (a file with unsaved changes asks first), `isDirty(docId)` says which tabs would ask,
+ * `menuExtras(doc)` returns more `{ id, label, run, enabled? }` entries for the tab's menu,
+ * and `onNotice(text)` shows a short message.
+ */
+export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, requestClose, isDirty, menuExtras, onNotice } = {}) {
   rootEl.classList.add("tiles");
   let root = null;     // node: { kind: "leaf", id, el, bar, body, tabs } | { kind: "split", dir: "row"|"col", ratio, a, b, el, gutter }
   let focused = null;  // the leaf keyboard and new documents go to
@@ -57,6 +65,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
       },
       onEmpty() { empty.hidden = false; tileEmptied(leaf); },
       onChange: () => save(),
+      onMenu: (doc, at) => showTabMenu(leaf, doc, at),
     });
     leaf.el.addEventListener("pointerdown", () => focus(leaf), true);
     installDrop(leaf);
@@ -192,6 +201,41 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
     if (from.tabs.size() === 0 && from !== target) tileEmptied(from);
     render();
     save();
+  }
+
+  // ------------------------------------------------------------ tab menu
+  const closeOne = (leaf, id) => { if (requestClose) requestClose(id); else leaf.tabs.close(id); };
+
+  /**
+   * Close others / Close to the right: the same close path as a single close (so chats land on
+   * the reopen stack), tab by tab. A tab with unsaved changes is asked about like a single close,
+   * one at a time; the others of them stay open.
+   */
+  function closeMany(leaf, id, mode) {
+    const targets = closeTargets(leaf.tabs.list().map((d) => d.id), id, mode);
+    if (!targets.length) return;
+    focus(leaf);
+    leaf.tabs.activate(id);
+    const plan = planClose(targets, (t) => isDirty?.(t) === true);
+    for (const t of plan.clean) leaf.tabs.close(t);
+    if (plan.ask) { leaf.tabs.activate(plan.ask); closeOne(leaf, plan.ask); }
+    const note = keptNotice(plan.kept);
+    if (note) onNotice?.(note);
+  }
+
+  function showTabMenu(leaf, doc, { x, y, tab }) {
+    if (!doc) return;
+    const id = doc.id;
+    const order = leaf.tabs.list().map((d) => d.id);
+    const run = {
+      close: () => closeOne(leaf, id),
+      others: () => closeMany(leaf, id, "others"),
+      right: () => closeMany(leaf, id, "right"),
+      split: () => moveDoc(id, leaf, "right"),
+    };
+    const items = tabMenuItems(order, id).map((item) => ({ ...item, run: run[item.id] }));
+    for (const extra of menuExtras?.(doc) ?? []) items.push(extra);
+    openTabMenu({ items, x, y, label: `${doc.title || "Tab"} menu`, returnTo: tab });
   }
 
   // ------------------------------------------------------------ directions

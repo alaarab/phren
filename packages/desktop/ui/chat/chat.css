@@ -82,6 +82,9 @@
 .chat-menu[hidden] { display: none; }
 .chat-menu button { height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: 12.5px system-ui; text-align: left; cursor: pointer; white-space: nowrap; }
 .chat-menu button:hover, .chat-menu button:focus-visible { background: var(--raised); color: var(--text); outline: none; }
+.chat-menu button[aria-disabled="true"] { opacity: .45; cursor: default; }
+.chat-menu button[aria-disabled="true"]:hover { background: transparent; color: var(--text-2); }
+.chat-menu button[aria-disabled="true"]:focus-visible { background: var(--raised); }
 .chat-more:hover { background: var(--raised); color: var(--text-2); }
 .chat-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chat-trailing {
