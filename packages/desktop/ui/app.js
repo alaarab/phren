@@ -5,7 +5,7 @@ import { renderComputerCount } from "./shell/titlebar.js";
 import { installKeys } from "./keys.js";
 import { hookPost } from "./api.js";
 import { connectStore, store } from "./shell/store.js";
-import { canGoBack, canGoForward, goBack, goForward, installSections, onTrailChange, registerSection, sectionHandle, setSectionBadge, showPillAt, showSection } from "./shell/sections.js";
+import { canGoBack, canGoForward, currentSection, goBack, goForward, installSections, onSectionChange, onTrailChange, registerSection, sectionHandle, sectionLabel, setSectionBadge, showPillAt, showSection } from "./shell/sections.js";
 import { openLaunchSheet } from "./shell/launch.js";
 import { mountAgents } from "./sections/agents.js";
 import { mountHome } from "./sections/home.js";
@@ -38,6 +38,7 @@ import { startNeedsNotify } from "./shell/needs-notify.js";
 import { snoozes } from "./shell/snooze.js";
 import { startAway } from "./shell/away.js";
 import { startUpdateChip } from "./shell/update-chip.js";
+import { startWindowTitle } from "./shell/window-title.js";
 import { startWarm } from "./shell/warm.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
@@ -90,13 +91,24 @@ needsEl.addEventListener("click", () => {
   if (first) openSession(first.computer, first.child);
 });
 
+// The window title: needs-you count, then the active chat's title or the section's name (shell/window-title.js).
+const windowTitle = startWindowTitle(() => {
+  const id = currentSection();
+  return {
+    needs: store.needsYou().length,
+    chat: id === "agents" ? sectionHandle("agents")?.activeChatTitle?.() ?? null : null,
+    section: id ? sectionLabel(id) : null,
+  };
+});
+
 // Native badge and the needs-you count in the window title.
 store.subscribe(() => {
   const rows = store.needsYou();
   // A muted chat still counts in the title and on Home, but never on the dock icon.
   shell?.setBadge(badgeEnabled() ? unmutedRows(rows, muted.keys()).length : 0);
-  document.title = rows.length ? `(${rows.length}) Phren` : "Phren";
+  windowTitle.refresh();
 });
+onSectionChange(() => windowTitle.refresh());
 
 // Native notifications when a session branch's pull request checks settle,
 // and the last look behind Home's Checks strip.

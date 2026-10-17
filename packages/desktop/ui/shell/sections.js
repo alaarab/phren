@@ -113,6 +113,9 @@ export function sectionHandle(id) {
   return def.handle;
 }
 
+/** The id of the section shown now, or null before the first. */
+export function currentSection() { return current; }
+
 export function onSectionChange(fn) { changeListeners.add(fn); return () => changeListeners.delete(fn); }
 
 /** The section ids in titlebar order. */

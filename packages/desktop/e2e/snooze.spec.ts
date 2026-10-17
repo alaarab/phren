@@ -64,7 +64,7 @@ test("snoozing a waiting chat hides its row and lowers every needs-you count; Wa
   await expect(needs(page).locator(".home-row", { hasText: "Fix login" })).toHaveCount(0);
   await expect(page.locator("#needs-pill")).toHaveText("3 need you");
   await expect(needs(page).locator(".count")).toHaveText("3");
-  await expect(page).toHaveTitle("(3) Phren");
+  await expect(page).toHaveTitle("(3) Home \u2014 Phren");
   // The sidebar still lists the chat under Needs you, marked as snoozed.
   await page.locator('.section-pill[data-section="agents"]').click();
   await expect(page.locator(".sb-row", { hasText: "Fix login" }).locator(".sb-snoozed")).toHaveAttribute("title", /^Snoozed until /);

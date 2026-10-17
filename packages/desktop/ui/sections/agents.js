@@ -382,6 +382,7 @@ export function mountAgents(root) {
     onEmpty() {
       session = null;
       activeDoc = null;
+      document.dispatchEvent(new Event("phren:tabs-changed"));
       quotaWarning.close();
       bench.sessionKey = null;
       resetBench();
@@ -794,6 +795,8 @@ export function mountAgents(root) {
     previousTab: () => tabs.step(-1),
     toggleZoom() { if (sideEl.hidden) showPane(bench.pane ?? "changes"); document.body.classList.toggle("bench-max"); },
     currentSession: () => session,
+    /** The active tab's title when it is a chat (not a file, diff or terminal), else null: the window title's name. */
+    activeChatTitle: () => (activeDoc?.kind === "chat" ? activeDoc.title || null : null),
     /** Open a file of any session's repository as a centre tab, at a line when given. */
     openFileFor: (computer, child, path, options = {}) => { showSection("agents"); return openFileDoc(computer, child, path, options); },
   };
