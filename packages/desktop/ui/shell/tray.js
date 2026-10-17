@@ -4,6 +4,7 @@
 // closing the window while the icon is on only hides it, so this keeps running.
 import { approvals } from "./approvals.js";
 import { projectOf, store } from "./store.js";
+import { muted, unmutedRows } from "./muted.js";
 
 const KEY = "phren.desktop.tray";
 const MAX_ROWS = 12;
@@ -50,7 +51,7 @@ export function startTray(shell) {
   if (!shell?.setTray) return;
   let last = "";
   push = () => {
-    const rows = store.needsYou();
+    const rows = unmutedRows(store.needsYou(), muted.keys());
     const state = trayState(rows, trayEnabled(), (key) => approvals.approval(key));
     const json = JSON.stringify(state);
     if (json === last) return;

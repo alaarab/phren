@@ -12,6 +12,8 @@ import { carriesFiles, createRowDrop, leftRow } from "./shell/row-drop.js";
 import { hookPost, targetQuery } from "./api.js";
 import { age } from "./time.js";
 import { snoozes } from "./shell/snooze.js";
+import { muted } from "./shell/muted.js";
+import { mutedMark } from "./shell/muted-mark.js";
 import { filterSessionRows, filterWords } from "./shell/sidebar-filter.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
 
@@ -470,7 +472,8 @@ function rowSig(sb, desc) {
     JSON.stringify(rowHandoff(sb, desc)), c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : "",
-    snoozes.until({ key: keyOf(desc.computer, c), child: c }) ?? ""].join("|");
+    snoozes.until({ key: keyOf(desc.computer, c), child: c }) ?? "",
+    muted.has(keyOf(desc.computer, c)) ? "m" : ""].join("|");
 }
 
 /** A moon on a chat snoozed from Home, so the sidebar's needs-you group and Home's count do not seem to disagree. */
@@ -519,6 +522,7 @@ function rowContent(sb, node, desc) {
   if (unread) top.append(el("span", "sb-unread"));
   const snooze = snoozeMark(desc);
   if (snooze) top.append(snooze);
+  if (muted.has(keyOf(computer, child))) top.append(mutedMark("sb-muted"));
   main.append(top);
 
   const bottom = el("span", "sb-line");
@@ -585,6 +589,7 @@ function compactRowContent(sb, node, desc) {
   if (unread) out.push(el("span", "sb-unread"));
   const snooze = snoozeMark(desc);
   if (snooze) out.push(snooze);
+  if (muted.has(keyOf(computer, child))) out.push(mutedMark("sb-muted"));
 
   // Hidden terminal trigger: keys.js's 't' clicks `.sb-term`.
   const term = el("span", "sb-term");

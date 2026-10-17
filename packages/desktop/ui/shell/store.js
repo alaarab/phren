@@ -4,6 +4,7 @@
 // its own.
 
 import { snoozes } from "./snooze.js";
+import { muted } from "./muted.js";
 
 const listeners = new Set();
 let merged = null;
@@ -85,13 +86,15 @@ export function sessions(m = merged, { includeOffline = false } = {}) {
   return rows;
 }
 
-// Snoozing, waking and expiry change what needs you without a new frame.
-snoozes.subscribe(() => {
+// Snoozing, waking and expiry change what needs you without a new frame; muting changes the badge and the tray.
+const refresh = () => {
   if (!merged) return;
   for (const fn of listeners) {
     try { fn(merged); } catch (err) { console.error(err); }
   }
-});
+};
+snoozes.subscribe(refresh);
+muted.subscribe(refresh);
 
 let retry = 1000;
 const states = new Map(); // computer -> state, to refresh capabilities on reconnect
@@ -106,6 +109,7 @@ export function connectStore() {
     if (msg.type !== "overview") return;
     merged = msg.merged;
     snoozes.reconcile(sessions(merged, { includeOffline: true }));
+    muted.prune(new Set(sessions(merged, { includeOffline: true }).map((row) => row.key)));
     for (const c of merged?.computers ?? []) {
       if (c.state === "online" && states.get(c.computer) !== "online") capabilities.delete(c.computer);
       states.set(c.computer, c.state);

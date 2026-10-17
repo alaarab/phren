@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- **Mute notifications** in a chat's menu: a muted chat sends no desktop notification and adds nothing to the dock badge or menu-bar icon, but still shows in Home's Needs you and the sidebar, with a small muted bell on its row and in its header.
 - **Filter sessions** box at the top of the Agents sidebar: type words to narrow rows by title, project, branch, computer or harness (every word must match), Esc clears it, ⌘⇧E (⌃⇧E elsewhere) focuses it, and it is not remembered across restarts.
 
 ## [0.1.13] - 2026-10-17

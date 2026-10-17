@@ -33,6 +33,7 @@ import { startSummon } from "./shell/summon.js";
 import { startRecentSwitcher } from "./shell/recent.js";
 import { startApprovals } from "./shell/approvals.js";
 import { startTray } from "./shell/tray.js";
+import { muted, unmutedRows } from "./shell/muted.js";
 import { startNeedsNotify } from "./shell/needs-notify.js";
 import { snoozes } from "./shell/snooze.js";
 import { startAway } from "./shell/away.js";
@@ -92,7 +93,8 @@ needsEl.addEventListener("click", () => {
 // Native badge and the needs-you count in the window title.
 store.subscribe(() => {
   const rows = store.needsYou();
-  shell?.setBadge(badgeEnabled() ? rows.length : 0);
+  // A muted chat still counts in the title and on Home, but never on the dock icon.
+  shell?.setBadge(badgeEnabled() ? unmutedRows(rows, muted.keys()).length : 0);
   document.title = rows.length ? `(${rows.length}) Phren` : "Phren";
 });
 

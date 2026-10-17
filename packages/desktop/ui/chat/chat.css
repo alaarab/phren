@@ -74,6 +74,9 @@
   transition: background .18s ease, color .18s ease;
 }
 .chat-more-wrap { position: relative; flex: 0 0 auto; }
+.chat-muted { flex: none; display: inline-flex; width: 14px; height: 14px; margin-left: 6px; color: var(--muted); }
+.chat-muted[hidden] { display: none; }
+.chat-muted svg { width: 100%; height: 100%; }
 .chat-menu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; min-width: 176px; padding: 4px; background: var(--card); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.45); display: flex; flex-direction: column; }
 .chat-menu.end { left: auto; right: 0; }
 .chat-menu[hidden] { display: none; }
