@@ -4,6 +4,7 @@ import { defineConfig } from "@playwright/test";
 // process, driven through a headless browser.
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "**/docs-capture.spec.ts", // the docs capture has its own config
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,

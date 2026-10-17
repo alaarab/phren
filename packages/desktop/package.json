@@ -20,7 +20,8 @@
     "start": "node dist/src/main.js",
     "lint": "biome lint --config-path ../../biome.json src/",
     "app": "electron electron/main.js",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "docs:capture": "playwright test -c playwright.docs.config.ts"
   },
   "dependencies": {
     "@phren/cli": "workspace:*",
