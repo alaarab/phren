@@ -9,6 +9,7 @@ import { showSection } from "./shell/sections.js";
 import { closePalette, isPaletteOpen, openPalette, registerCommand } from "./shell/palette.js";
 
 import { openUsage } from "./shell/usage-rings.js";
+import { ownsCtrlTab } from "./shell/recent-mru.js";
 
 let config = null; // { bindings, sources, files, errors, actions }
 let app = null; // actions supplied by app.js
@@ -170,6 +171,8 @@ function onKeyDown(ev) {
   }
   // Direct Cmd/Ctrl shortcuts come next, so they work even inside a terminal.
   const appHit = findAppAction(ev);
+  // Terminals, editors and iframes keep their own keys, as they keep Ctrl+Tab.
+  if (appHit?.action === "reopen_chat" && ownsCtrlTab(ev.target)) return;
   if (appHit) { ev.preventDefault(); ev.stopPropagation(); run(appHit.action, appHit.arg); return; }
   if (inTerminal(ev.target)) return;
   if (config.bindings.prefix.some((text) => matches(parseBinding(text), ev) === true)) {
@@ -245,6 +248,7 @@ function run(action, arg) {
     case "new_tab":
     case "terminal": return app.showPane("terminal");
     case "filter_sessions": return focusFilter();
+    case "reopen_chat": return reopenChat();
     case "usage": return openUsage();
     case "palette": return isPaletteOpen() ? closePalette() : openPalette();
     case "open_file": return openQuickFile();
@@ -254,6 +258,13 @@ function run(action, arg) {
     default:
       if (/^session_[1-9]$/.test(action)) return openRow(rows()[Number(action.slice(8)) - 1]);
   }
+}
+
+/** reopen_chat: bring back the most recently closed chat tab; again goes further back. */
+function reopenChat() {
+  if (!app.reopenClosedChat) return;
+  showSection("agents");
+  app.reopenClosedChat();
 }
 
 /** filter_sessions: reveal the sidebar and put the caret in its filter box. */
@@ -506,6 +517,12 @@ function registerBuiltins() {
     const binds = config.bindings[action] ?? config.appBindings?.[action] ?? [];
     registerCommand({ id: `keys.${action}`, title, group: "Commands", keys: binds.map(keycaps).join("  "), run: () => run(action) });
   }
+  // Hidden while nothing is waiting to be reopened.
+  const reopenBinds = config.bindings.reopen_chat ?? config.appBindings?.reopen_chat ?? [];
+  registerCommand({
+    id: "keys.reopen_chat", title: "Reopen closed chat", group: "Commands", keys: reopenBinds.map(keycaps).join("  "),
+    when: () => !!app.canReopenChat?.(), run: () => run("reopen_chat"),
+  });
 }
 
 // ------------------------------------------------------------ setup

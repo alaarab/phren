@@ -11,12 +11,13 @@ const LAYOUT_KEY = "phren.desktop.layout";
 const MIN_RATIO = 0.12;
 let nextLeaf = 1;
 
-export function createTiles(rootEl, { onActivate, onEmpty } = {}) {
+export function createTiles(rootEl, { onActivate, onEmpty, onClose } = {}) {
   rootEl.classList.add("tiles");
   let root = null;     // node: { kind: "leaf", id, el, bar, body, tabs } | { kind: "split", dir: "row"|"col", ratio, a, b, el, gutter }
   let focused = null;  // the leaf keyboard and new documents go to
   let zoomed = false;
   let restoring = false;
+  let closing = null;  // { tile, index } of the tab being closed, for onClose
 
   // ------------------------------------------------------------ nodes
   function makeLeaf() {
@@ -46,6 +47,9 @@ export function createTiles(rootEl, { onActivate, onEmpty } = {}) {
     leaf.el.append(leaf.bar, leaf.body);
     leaf.tabs = createTabs(leaf.bar, leaf.body, {
       storageKey: null,
+      // Where the tab was, read before it leaves (closing the last tab of a tile collapses it).
+      onClosing(doc, { index }) { closing = { tile: leaf.id, index }; },
+      onClose(doc) { const where = closing; closing = null; onClose?.(doc, where); },
       onActivate(doc, handle) {
         empty.hidden = true;
         if (leaf === focused) onActivate?.(doc, handle);
@@ -153,16 +157,16 @@ export function createTiles(rootEl, { onActivate, onEmpty } = {}) {
   // ------------------------------------------------------------ documents
   function find(docId) { return leaves().find((l) => l.tabs.has(docId)) ?? null; }
 
-  function open(doc, { background = false, split: side } = {}) {
+  function open(doc, { background = false, split: side, tile, at } = {}) {
     const home = find(doc.id);
     if (home) {
       if (!background) { focus(home); home.tabs.activate(doc.id); }
       return home.tabs.handle(doc.id);
     }
     if (!root) render();
-    let target = focused;
+    let target = (tile && leaves().find((l) => l.id === tile)) || focused;
     if (side) target = split(focused, side);
-    const handle = target.tabs.open(doc, { background });
+    const handle = target.tabs.open(doc, { background, at });
     if (!background) focus(target);
     return handle;
   }
