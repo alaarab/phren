@@ -10,8 +10,9 @@ export const DRAFT_EVENT = "phren:draft";
 /**
  * The row keys (`<computer>/<child id>`) whose draft is in `storageKeys`; rows are `{ computer, child }`.
  * The composer keys a draft by the target it captured when the tab opened, and `target.session` can
- * appear or change afterwards, so a row matches on its pane identity (source, server, pane) alone:
- * the key without the session, or that key followed by ":<session>".
+ * appear afterwards, so a row matches the key without the session too. A key with a different
+ * session belongs to an earlier conversation in a reused pane and does not mark this one; a row
+ * with no session yet matches any session's key in its pane.
  */
 export function draftRowKeys(storageKeys, rows) {
   const out = new Set();
@@ -19,9 +20,10 @@ export function draftRowKeys(storageKeys, rows) {
   const keys = [...storageKeys];
   for (const { computer, child } of rows) {
     if (!child?.target) continue;
-    const { source, server, pane } = child.target;
+    const { source, server, pane, session } = child.target;
     const base = draftKey({ source, server, pane }, computer);
-    if (keys.some((key) => key === base || key.startsWith(`${base}:`))) out.add(`${computer}/${child.id}`);
+    const own = session ? (key) => key === base || key === draftKey(child.target, computer) : (key) => key === base || key.startsWith(`${base}:`);
+    if (keys.some(own)) out.add(`${computer}/${child.id}`);
   }
   return out;
 }

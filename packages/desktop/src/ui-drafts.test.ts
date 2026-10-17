@@ -23,9 +23,11 @@ describe("draftRowKeys", () => {
     const keys = new Set([draftKey(captured, "Desk")]);
     const live = { computer: "Desk", child: { id: "a", target: { ...captured, session: "s-late" } } };
     expect([...draftRowKeys(keys, [live])]).toEqual(["Desk/a"]);
-    // and the other way: a key made with an older session still marks the row once the session changes
+    // a key from an earlier conversation in the same pane does not mark the new one
     const older = new Set([draftKey({ ...captured, session: "s-old" }, "Desk")]);
-    expect([...draftRowKeys(older, [live])]).toEqual(["Desk/a"]);
+    expect(draftRowKeys(older, [live]).size).toBe(0);
+    // a row whose session has not arrived yet matches its pane's keys
+    expect([...draftRowKeys(older, [{ computer: "Desk", child: { id: "a", target: captured } }])]).toEqual(["Desk/a"]);
     // pane 7 must not claim pane 70's draft
     const other = new Set([draftKey({ ...captured, pane: "70" }, "Desk")]);
     expect(draftRowKeys(other, [live]).size).toBe(0);
