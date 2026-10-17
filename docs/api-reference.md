@@ -254,13 +254,14 @@ one of `target`, `session` or `pane`, or `id` with `status: true`.
 | `account` | string | no | Claude account id; only for `claude`. Without it a Claude target keeps the pane's account. |
 | `model` | string | no | Model for the new agent. |
 | `effort` | string | no | Reasoning effort for the new agent. |
+| `resume` | boolean | no | Switch a Claude conversation to another Claude account on the same computer without a hand-off: the old agent exits, its transcript is copied into the account's home and the same conversation resumes (`claude --resume`). Works when the current account is out of usage. Needs `harness: "claude"` and `account`, no `computer`; not for the conductor yet. |
 | `id` | string | no | Move id. Keep it on a retry; with `status: true`, read the move. |
 | `wait` | boolean | no | Wait up to five minutes for the move to finish. Defaults to true. |
 
 Returns `{ ok, settled, move }`, where `move` is the record described in
 docs/conductor.md. A harness or account that is not usable on that computer is
 refused with 409 `harness_unavailable` or `account_unavailable` before anything
-is typed. CLI equivalent: `phren move <session-or-pane> --to codex [--model M] [--effort E] [--account A] [--computer <name>]`.
+is typed. CLI equivalent: `phren move <session-or-pane> --to codex [--model M] [--effort E] [--account A] [--computer <name>]`; `phren move <pane> --to claude --account A --resume` switches the account with no hand-off.
 
 ### Standing grants
 
