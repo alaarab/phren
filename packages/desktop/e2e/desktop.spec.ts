@@ -1133,7 +1133,9 @@ test("a session continues in another agent from the sidebar menu", async ({ page
   const row = page.locator(".sb-row", { hasText: "Fix login" });
   await row.hover();
   await row.locator(".sb-more").click();
-  await row.locator(".sb-menu button", { hasText: "Continue in…" }).click();
+  // A Claude row offers Switch account first; other agents are behind it.
+  await row.locator(".sb-menu button", { hasText: "Switch account…" }).click();
+  await page.locator(".switch-account-sheet").getByRole("button", { name: "Other agents and computers…" }).click();
   const sheet = page.locator(".move-sheet");
   await expect(sheet.locator(".launch-seg")).toHaveText(["Codex", "OpenCode", "Copilot"]);
   await expect(sheet.locator(".launch-seg.selected")).toHaveText("Codex");
