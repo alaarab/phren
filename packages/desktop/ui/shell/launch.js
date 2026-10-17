@@ -11,6 +11,7 @@ import { hookGet, hookPost } from "../api.js";
 import { registerCommand } from "./palette.js";
 import { projectOf, sessions as allSessions, store } from "./store.js";
 import { sectionHandle, showSection } from "./sections.js";
+import { countOf } from "../text.js";
 
 const CSS_ID = "launch-styles";
 
@@ -621,7 +622,7 @@ function renderRecommendation(ui) {
   const usage = state.usage;
   if (usage?.accounts?.length) {
     const out = usage.accounts.filter(exhausted).length;
-    parts.push(`${usage.accounts.length} account${usage.accounts.length === 1 ? "" : "s"}${out ? `, ${out} out of quota` : ""}`);
+    parts.push(`${countOf(usage.accounts.length, "account")}${out ? `, ${out} out of quota` : ""}`);
   }
   ui.computerHint.textContent = parts.join(" \u00b7 ");
   renderComputers(ui);

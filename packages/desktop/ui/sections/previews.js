@@ -7,6 +7,7 @@ import { el } from "../dom.js";
 // port directly, so preview code never runs on the daemon's origin.
 import { hookGet, hookPost } from "../api.js";
 import { store } from "../shell/store.js";
+import { countOf } from "../text.js";
 
 const CSS_HREF = "./sections/previews.css";
 const SERVERS_POLL_MS = 15_000;
@@ -141,7 +142,7 @@ export function mountPreviews(root) {
   async function refreshLists() {
     const online = (store.merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer);
     state.computers = online;
-    statusEl.textContent = online.length ? `${online.length} computer${online.length === 1 ? "" : "s"} online` : "No computers online";
+    statusEl.textContent = online.length ? `${countOf(online.length, "computer")} online` : "No computers online";
     for (const computer of [...state.servers.keys()]) if (!online.includes(computer)) state.servers.delete(computer);
     for (const computer of [...state.simulators.keys()]) if (!online.includes(computer)) state.simulators.delete(computer);
     await Promise.all(online.map(loadComputer));

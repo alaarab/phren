@@ -6,6 +6,7 @@ import { shortDate } from "../time.js";
 
 import { hookGet, hookPost } from "../api.js";
 import { renderMarkdownInto } from "./markdown.js";
+import { countOf } from "../text.js";
 
 let styleLinked = false;
 function ensureStyle() {
@@ -235,7 +236,7 @@ function topicRow(item) {
   const row = el("div", "knows-topic");
   row.append(el("span", "knows-topic-name", topicLabel(item)));
   const count = topicCount(item);
-  if (count) row.append(el("span", "knows-topic-count", `${count} finding${count === 1 ? "" : "s"}`));
+  if (count) row.append(el("span", "knows-topic-count", countOf(count, "finding")));
   return row;
 }
 

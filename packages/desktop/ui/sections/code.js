@@ -15,6 +15,7 @@ import { showSection, sectionHandle } from "../shell/sections.js";
 import { hookGet, hookPost } from "../api.js";
 import { openEditorDoc } from "../editor.js";
 import { age } from "../time.js";
+import { countOf } from "../text.js";
 
 const CSS_ID = "code-css";
 const SEGMENTS = [
@@ -1139,7 +1140,7 @@ export function mountCode(root) {
     const last = Math.min(def.symbol.endLine ?? start, start + lines.length - 1);
     const label = el("div", "cd-block-label");
     label.append(el("span", "section-label", "Definition"));
-    label.append(el("span", "cd-count", `${lines.length} line${lines.length === 1 ? "" : "s"}`));
+    label.append(el("span", "cd-count", countOf(lines.length, "line")));
     body.append(label);
     const snippet = el("div", "cd-snippet");
     lines.forEach((text, i) => {

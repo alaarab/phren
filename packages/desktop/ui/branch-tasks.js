@@ -3,6 +3,7 @@
 // pull request card). Done completes one by its stable id. Used by Changes ›
 // PRs for the current request and by the project page's Code block.
 import { hookGet, hookPost } from "./api.js";
+import { countOf } from "./text.js";
 
 const CSS = `
 .bt{margin:8px 0 0;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden}
@@ -45,7 +46,7 @@ export function renderBranchTasks({ computer, project, branch, state, rerender }
   box.className = "bt";
   const head = document.createElement("div");
   head.className = "bt-h";
-  head.append(span("bt-mark", "◆"), span("", `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"} for this branch`), span("bt-sub", branch));
+  head.append(span("bt-mark", "◆"), span("", `${countOf(state.tasks.length, "task")} for this branch`), span("bt-sub", branch));
   box.append(head);
   for (const task of state.tasks) {
     const finished = state.done.has(task.id);

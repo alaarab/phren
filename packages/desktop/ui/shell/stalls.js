@@ -1,6 +1,7 @@
 // Stalled sessions: the Hook marks a working session `stalled` (with
 // `stalledSince`) when its screen and transcript have not changed for its
 // threshold (5 minutes by default) and no awaited work explains the silence.
+import { countOf } from "../text.js";
 
 /** Whole minutes a stalled row has been silent, or null when it is not stalled. */
 export function stalledMinutes(child, now = Date.now()) {
@@ -20,7 +21,7 @@ export function stallLabel(minutes) {
 export function backgroundLabel(child) {
   const n = Number(child?.backgroundTasks);
   if (!(n > 0) || child.agentStatus !== "working") return "";
-  return `${n} background task${n === 1 ? "" : "s"}`;
+  return countOf(n, "background task");
 }
 
 /** Rows that turned stalled since the last look (`seen`: keys already stalled). */

@@ -16,6 +16,7 @@ import { muted } from "./shell/muted.js";
 import { mutedMark } from "./shell/muted-mark.js";
 import { filterSessionRows, filterWords } from "./shell/sidebar-filter.js";
 import { store, projectOf, sessions, sessionKind as kindOf } from "./shell/store.js";
+import { countOf } from "./text.js";
 
 // answerApproval is written in a parallel change under ui/chat/. Import it
 // lazily so a missing module never takes the whole sidebar down; the fallback
@@ -387,7 +388,7 @@ function updateComputer(node, desc) {
   node.tabIndex = mux ? 0 : -1;
   node.setAttribute("role", mux ? "button" : "listitem");
   const count = desc.sessions.length;
-  let state = count ? `${count} session${count === 1 ? "" : "s"}` : "No sessions";
+  let state = count ? countOf(count, "session") : "No sessions";
   if (co.state === "connecting") state = "Connecting\u2026";
   else if (co.state === "offline" || co.state === "verify") {
     const seen = age(co.updatedAt);

@@ -11,6 +11,7 @@ import { additionHunks, parsePatch } from "../patch.js";
 import { renderMarkdown } from "../chat/markdown.js";
 import { mountTrains } from "./trains.js";
 import { readAhead } from "../shell/read-ahead.js";
+import { countOf } from "../text.js";
 
 const CSS_ID = "review-css";
 const POLL_MS = 15_000;
@@ -230,7 +231,7 @@ export function mountReview(root) {
     const diff = state.diffs.get(item.key);
     if (!diff || diff.error || diff.loading) return "";
     const n = diff.files.length;
-    return n ? `${n} file${n === 1 ? "" : "s"}` : "no changes";
+    return n ? countOf(n, "file") : "no changes";
   }
 
   function queueRow(item) {
@@ -824,7 +825,7 @@ export function mountReview(root) {
     trayEl.append(list);
     const foot = el("div", "review-tray-foot");
     const worker = item?.receipt?.label || item?.receipt?.project || "the worker";
-    const send = el("button", "review-btn accent", `Send ${comments.length} comment${comments.length === 1 ? "" : "s"} to ${worker}`);
+    const send = el("button", "review-btn accent", `Send ${countOf(comments.length, "comment")} to ${worker}`);
     send.disabled = !item || !canSend(item) || state.send?.status === "sending";
     send.addEventListener("click", () => { if (item) void sendComments(item); });
     foot.append(send);

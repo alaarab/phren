@@ -11,6 +11,7 @@ import { parsePatch, wordSegments } from "../patch.js";
 import { renderMarkdownInto } from "./markdown.js";
 import { hookGet } from "../api.js";
 import { createOutline } from "./outline.js";
+import { countOf } from "../text.js";
 
 let styleLinked = false;
 function ensureStyle() {
@@ -494,7 +495,7 @@ export function createTimelineView(container, ctx = {}) {
     button.type = "button";
     button.textContent = expandedAll
       ? "Hide earlier messages ‹"
-      : `${count} previous message${count === 1 ? "" : "s"} ›`;
+      : `${countOf(count, "previous message")} ›`;
     button.addEventListener("click", () => {
       expandedAll = !expandedAll;
       render(lastPreparation, lastPreview);

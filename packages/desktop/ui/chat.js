@@ -27,6 +27,7 @@ import { projectOf } from "./shell/store.js";
 import { muted } from "./shell/muted.js";
 import { mutedMark } from "./shell/muted-mark.js";
 import { takePrefetched, setChatOpen } from "./shell/transcript-prefetch.js";
+import { countOf } from "./text.js";
 
 function providerLetter(source) {
   return agentLabel(source).charAt(0).toUpperCase();
@@ -852,7 +853,7 @@ export function openChat(el, computerName, child, opts = {}) {
   const paneAbort = new AbortController();
   let exportRun = null;
   let olderLoad = null;
-  const plural = (n) => `${n} message${n === 1 ? "" : "s"}`;
+  const plural = (n) => countOf(n, "message");
   async function loadAllHistory(signal, progress) {
     // A scroll-up page already in flight: wait for it rather than exporting partial history.
     if (olderLoad) await olderLoad;
