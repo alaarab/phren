@@ -131,7 +131,8 @@ export async function openSwitchAccountSheet({ computer, child, returnFocus }) {
     document.removeEventListener("focusin", keepFocus);
     backdrop.remove();
     openSheet = null;
-    if (returnFocus?.isConnected) returnFocus.focus();
+    if (typeof returnFocus === "function") returnFocus();
+    else if (returnFocus?.isConnected) returnFocus.focus();
   }
   openSheet = { close, backdrop };
   closeBtn.addEventListener("click", close);

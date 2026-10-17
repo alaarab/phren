@@ -7,11 +7,17 @@ import { store } from "./store.js";
 import { onSectionChange } from "./sections.js";
 import { followUsage } from "./usage-rings.js";
 import { moveAccounts, moveChoices, openMoveSheet } from "./move.js";
+import { openSwitchAccountSheet } from "./switch-account.js";
 import { quotaDestinations, quotaDestinationText, quotaSessionKey, quotaWarnings, sessionUsage } from "./quota-warn.js";
 import { loadQuotaState, unmarkQuotaSeen, markQuotaSeen, quotaSeen, quotaSettings, quotaSuppressed, suppressQuotaChat } from "./quota-warn-prefs.js";
 
-/** Shared Switch entry point: rank fresh room, then use the capability-aware move sheet. */
-export function openQuotaSwitch(session, inventory, accounts, { returnFocus } = {}) {
+/** Shared Switch entry point. A Claude chat on a Hook that resumes under another
+ * account opens Switch account (nothing is asked of the exhausted one); otherwise
+ * rank fresh room, then use the capability-aware move sheet. */
+export async function openQuotaSwitch(session, inventory, accounts, { returnFocus } = {}) {
+  if ((session.child.target?.source ?? session.child.agent) === "claude" && (await store.capabilities(session.computer).catch(() => ({}))).moveResume === true) {
+    return openSwitchAccountSheet({ ...session, returnFocus });
+  }
   const destinations = quotaDestinations(session,
     moveChoices(inventory ?? [], session.child.target?.source ?? session.child.agent),
     moveAccounts(inventory, { includeDefault: true }), accounts ?? []);

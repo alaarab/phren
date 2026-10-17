@@ -66,6 +66,15 @@ test("Switch account is the Claude chat's first menu item and resumes the same c
   await expect(sheet.locator(".launch-status")).toHaveText("Switched", { timeout: 10_000 });
 });
 
+test("the out-of-usage card's Switch opens Switch account for a Claude chat", async ({ page }) => {
+  await start(page, { moveResume: true });
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  const warning = page.getByRole("region", { name: /Claude is at/ });
+  await warning.getByRole("button", { name: "Switch", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Switch account" })).toBeVisible();
+  await expect(page.locator(".switch-account-row")).toHaveCount(4);
+});
+
 test("an older Hook says so, and other agents stay one click away", async ({ page }) => {
   await start(page, {});
   const row = page.locator(".sb-row", { hasText: "Fix login" });
