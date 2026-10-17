@@ -57,7 +57,7 @@ export function inboxRows(reads) {
 }
 
 // How much one read says about a request, to pick between copies of the same one.
-const detail = (row) => (row.checks ? 1 : 0) + (row.review ? 1 : 0) + (row.mergeState ? 1 : 0);
+const detail = (row) => (row.checks ? 1 : 0) + (row.review ? 1 : 0) + (row.mergeState ? 1 : 0) + (row.draft ? 1 : 0) + (row.comments > 0 ? 1 : 0);
 // Copies of one request: a current read over a stale one, then the fuller read, then the fresher.
 const better = (a, b) => (a.stale ? 1 : 0) < (b.stale ? 1 : 0) || (a.stale === b.stale && (detail(a) > detail(b) || (detail(a) === detail(b) && a.at > b.at)));
 const CHECKS = new Set(["failing", "pending", "passing"]);
