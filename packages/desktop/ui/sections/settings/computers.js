@@ -4,6 +4,7 @@ import { hookGet, hookPost } from "../../api.js";
 import { hookDrift, updateCommand } from "../../shell/hook-drift.js";
 import { formatGitWrites } from "./git-writes.js";
 import { createHealthRead } from "./health-read.js";
+import { peerChips } from "./peer-chips.js";
 import { api, button, el, heading, input, noticeLine, post, showNotice } from "./ui.js";
 
 // ------------------------------------------------------------ page: Computers
@@ -254,6 +255,9 @@ function computerCard(initial, meta, rerender) {
   // This computer talks to its Hook over the local socket: there is no key to revoke.
   if (initial.computer === "This computer") actions.append(refresh); else actions.append(refresh, revoke);
   head.append(toggle, actions);
+  // Whether this computer can dispatch and hand off to each linked computer; empty until its health has loaded.
+  const peerRow = el("div", "comp-peer-row");
+  peerRow.hidden = true;
 
   revoke.addEventListener("click", () => {
     actions.replaceChildren(el("span", "settings-inline-note", `Revoke ${state.computer}?`));
@@ -277,7 +281,7 @@ function computerCard(initial, meta, rerender) {
   const shared = el("div", "comp-section");
   const files = el("div", "comp-section");
   body.append(checks, resources, peers, activity, shared, files);
-  card.append(head, body);
+  card.append(head, peerRow, body);
 
   const state = {
     computer: initial.computer, expanded: false,
@@ -316,9 +320,25 @@ function computerCard(initial, meta, rerender) {
       ? "Git writes without a repository check: Could not load"
       : formatGitWrites(state.health?.gitWrites);
     gitWrites.title = state.healthError || "Counts since this Hook started.";
-    renderChecks(); renderPeers();
+    renderChecks(); renderPeers(); renderPeerRow();
   });
   const loadHealth = (force) => healthRead.load(force);
+
+  function renderPeerRow() {
+    const chips = state.health ? peerChips(state.health, store.version(state.computer)) : [];
+    peerRow.replaceChildren();
+    if (state.healthError) {
+      peerRow.append(el("span", "comp-peer-error", `Peers: ${state.healthError}`));
+    } else {
+      if (chips.length) peerRow.append(el("span", "comp-peer-label", "Peers"));
+      for (const chip of chips) {
+        const node = el("span", `comp-chip comp-peer ${chip.level}`, chip.label);
+        node.title = chip.title;
+        peerRow.append(node);
+      }
+    }
+    peerRow.hidden = !peerRow.childElementCount;
+  }
 
   async function loadActivity() {
     try { state.activity = (await hookGet(state.computer, "/v1/activity")).events ?? []; state.activityError = null; }
@@ -353,7 +373,7 @@ function computerCard(initial, meta, rerender) {
 
   toggle.addEventListener("click", () => (state.expanded ? collapse() : expand()));
   refresh.addEventListener("click", () => {
-    if (!state.expanded) { expand(); return; }
+    if (!state.expanded) { expand(); loadHealth(true); return; }
     state.activityLoaded = false; state.resourcesLoaded = false;
     update(state.lastComputer ?? { computer: state.computer, state: "online" });
     loadHealth(true); state.activityLoaded = true; loadActivity(); loadResources(true); filesBrowser.reload();

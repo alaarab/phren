@@ -580,6 +580,12 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .comp-chip { padding: 2px 8px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11.5px; }
 .comp-chip.missing { color: var(--dim); }
 .comp-chip.warn { color: var(--waiting); }
+.comp-peer-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 12px 10px 24px; min-width: 0; }
+.comp-peer-row[hidden] { display: none; }
+.comp-peer-label { color: var(--muted); font: 600 11px system-ui; letter-spacing: .08em; text-transform: uppercase; }
+.comp-peer { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.comp-peer.fail { color: var(--danger); }
+.comp-peer-error { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 .comp-check { display: flex; align-items: flex-start; gap: 8px; min-height: 24px; padding: 4px 0; }
 .comp-check-dot { flex: none; width: 8px; height: 8px; margin-top: 5px; border-radius: 999px; background: var(--muted); }
 .comp-check.ok .comp-check-dot { background: var(--done); }
