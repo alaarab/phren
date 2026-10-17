@@ -21,7 +21,7 @@ export function windowTitle({ needs = 0, chat = null, section = null, showChat =
 }
 
 /**
- * Keep `document.title` current. `read()` returns `{ needs, chat, section }` now; the title is
+ * Keep `document.title` current. `read()` returns `{ needs, chat, section, showChat }` now; the title is
  * rewritten on `refresh()`, on the `phren:tabs-changed` event (tab switch, chat rename, last tab
  * closed) and when the window gains focus. Section and store changes call `refresh()` from app.js.
  */

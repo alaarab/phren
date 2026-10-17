@@ -153,6 +153,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
     render();
     const doc = focused.tabs.active();
     if (doc) onActivate?.(doc, focused.tabs.activeHandle());
+    else onBlank?.();
     save();
   }
 
@@ -357,6 +358,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
       render();
       const doc = focused.tabs.active();
       if (doc) onActivate?.(doc, focused.tabs.activeHandle());
+      else onBlank?.();
     }
     return missing;
   }
