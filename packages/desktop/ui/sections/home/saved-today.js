@@ -22,11 +22,11 @@ function recent(findings) {
     .map((f) => ({ id: String(f.id), text: String(f.text ?? "").replace(/\s+/g, " ").trim(), created: f.created }));
 }
 
-export function loadFindings(computer, project, { fetchStale }) {
+export function loadFindings(computer, project, { fetchStale, force = false }) {
   const key = readKey(computer, project);
   const cached = reads.get(key);
   if (cached?.pending) return cached.promise;
-  if (cached && (!fetchStale || Date.now() - cached.at < FINDINGS_TTL_MS)) return Promise.resolve(cached.value);
+  if (cached && !force && (!fetchStale || Date.now() - cached.at < FINDINGS_TTL_MS)) return Promise.resolve(cached.value);
   const entry = { at: Date.now(), pending: true, value: cached?.value ?? [] };
   entry.promise = hookGet(computer, `/v1/projects/${encodeURIComponent(project)}/memory`).then((body) => {
     entry.pending = false;
@@ -50,7 +50,7 @@ async function pool(jobs, limit, alive, run) {
 }
 
 const rankOf = (computer) => (computer === "This computer" ? 0 : 1);
-const PRIORITY = { tick: 0, online: 1, show: 2 };
+const PRIORITY = { tick: 0, online: 1, show: 2, force: 3 };
 
 /** What Memory's own filter matches: comments and the leading [type] tag removed, whitespace collapsed. */
 export function memorySearchFor(text) {
@@ -164,7 +164,7 @@ export function createSavedToday({ block, state }) {
       const tasks = (await Promise.all(sources.flatMap((source) => source.projects.map(async (project) => {
         attempts++;
         try {
-          const doc = await loadTaskDoc(source, project);
+          const doc = await loadTaskDoc(source, project, mode === "force");
           ok++;
           return [...(doc.items?.Active ?? []), ...(doc.items?.Queue ?? [])].filter((item) => !item.checked && item.createdAt).map((item) => {
             const id = item.stableId ?? item.id;
@@ -192,7 +192,7 @@ export function createSavedToday({ block, state }) {
         if (mode === "tick" && !known) return;
         attempts++;
         try {
-          const read = mode === "tick" ? known.value : await loadFindings(computer, project, { fetchStale: mode === "show" });
+          const read = mode === "tick" ? known.value : await loadFindings(computer, project, { fetchStale: mode === "show" || mode === "force", force: mode === "force" });
           ok++;
           for (const f of read) {
             findings.push({
@@ -223,6 +223,8 @@ export function createSavedToday({ block, state }) {
 
   return {
     render,
+    /** Read every task document and project's findings again, ignoring what is cached. */
+    reload() { return refresh("force"); },
     show() {
       visible = true;
       onlineKey = onlineKeyNow();
