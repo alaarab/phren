@@ -1,0 +1,75 @@
+// Which chats have an unsent draft, for the small "Draft" mark on sidebar rows. The composer keeps
+// one draft per chat in localStorage under `draftKey(target, computer)`; this module caches the set
+// of those keys that hold text (one scan at startup), then follows the composer's `phren:draft`
+// event and other windows' `storage` events, so a render never reads storage.
+import { draftKey } from "../chat/composer.js";
+
+const PREFIX = "phren.composer.draft.";
+export const DRAFT_EVENT = "phren:draft";
+
+/** The row keys (`<computer>/<child id>`) whose scoped draft key is in `storageKeys`; rows are `{ computer, child }`. */
+export function draftRowKeys(storageKeys, rows) {
+  const out = new Set();
+  if (!storageKeys.size) return out;
+  for (const { computer, child } of rows) {
+    if (child?.target && storageKeys.has(draftKey(child.target, computer))) out.add(`${computer}/${child.id}`);
+  }
+  return out;
+}
+
+/** True when a saved draft value is worth marking (whitespace alone is not). */
+export function isDraftText(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function defaultStorage() {
+  try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
+}
+
+/** The draft-key cache over `storage`. `note(key, value)` is the composer's write; `reload()` rescans. */
+export function createDrafts({ storage = defaultStorage() } = {}) {
+  let keys = new Set();
+  const listeners = new Set();
+  const emit = () => { for (const fn of [...listeners]) fn(); };
+
+  function scan() {
+    keys = new Set();
+    try {
+      for (let i = 0; storage && i < storage.length; i++) {
+        const key = storage.key(i);
+        if (key && key.startsWith(PREFIX) && isDraftText(storage.getItem(key))) keys.add(key);
+      }
+    } catch { /* storage unavailable */ }
+  }
+  scan();
+
+  const api = {
+    keys: () => keys,
+    /** One key's new value: updates the cache and notifies only when membership changed. */
+    note(key, value) {
+      if (!key.startsWith(PREFIX)) return;
+      const has = keys.has(key);
+      const next = isDraftText(value);
+      if (next === has) return;
+      if (next) keys.add(key); else keys.delete(key);
+      emit();
+    },
+    reload() {
+      const before = keys.size;
+      const old = keys;
+      scan();
+      if (keys.size !== before || [...keys].some((k) => !old.has(k))) emit();
+    },
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+  };
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener(DRAFT_EVENT, (event) => api.note(String(event.detail?.key ?? ""), event.detail?.value));
+    window.addEventListener("storage", (event) => {
+      if (event.key === null) api.reload();
+      else if (event.key.startsWith(PREFIX)) api.note(event.key, event.newValue);
+    });
+  }
+  return api;
+}
+
+export const drafts = createDrafts();
