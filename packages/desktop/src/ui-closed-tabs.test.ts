@@ -18,26 +18,37 @@ describe("closedEntry", () => {
 });
 
 describe("createClosedStack", () => {
+  const ok = () => "ok" as const;
   it("reopens the newest first, and again goes further back", () => {
     const stack = createClosedStack();
     stack.push(chat("a")); stack.push(chat("b")); stack.push(chat("c"));
-    const all = () => true;
-    expect(stack.reopen(all)?.id).toBe("c");
-    expect(stack.reopen(all)?.id).toBe("b");
-    expect(stack.reopen(all)?.id).toBe("a");
-    expect(stack.reopen(all)).toBeNull();
+    expect(stack.reopen(ok).entry?.id).toBe("c");
+    expect(stack.reopen(ok).entry?.id).toBe("b");
+    expect(stack.reopen(ok).entry?.id).toBe("a");
+    expect(stack.reopen(ok).entry).toBeNull();
   });
-  it("skips and discards entries that no longer exist", () => {
+  it("discards gone and already open entries and reports gone", () => {
     const stack = createClosedStack();
-    stack.push(chat("a")); stack.push(chat("gone")); stack.push(chat("gone2"));
-    expect(stack.reopen((e) => !e.id.startsWith("gone"))?.id).toBe("a");
+    stack.push(chat("a")); stack.push(chat("gone")); stack.push(chat("open"));
+    const result = stack.reopen((e) => (e.id === "gone" ? "gone" : e.id === "open" ? "open" : "ok"));
+    expect(result).toMatchObject({ entry: { id: "a" }, gone: true, unknown: 0 });
     expect(stack.size()).toBe(0);
   });
-  it("returns null and empties the stack when nothing exists", () => {
+  it("an already open entry alone is neither gone nor unknown", () => {
     const stack = createClosedStack();
     stack.push(chat("a"));
-    expect(stack.reopen(() => false)).toBeNull();
+    expect(stack.reopen(() => "open")).toEqual({ entry: null, unknown: 0, gone: false });
     expect(stack.size()).toBe(0);
+  });
+  it("keeps entries whose computer is not reporting, in order, and counts them", () => {
+    const stack = createClosedStack();
+    stack.push(chat("a", { computer: "away" })); stack.push(chat("b", { computer: "away" })); stack.push(chat("c"));
+    const away = (e: { computer: string }) => (e.computer === "away" ? "unknown" : "gone");
+    expect(stack.reopen(away)).toEqual({ entry: null, unknown: 2, gone: true });
+    expect(stack.entries().map((e) => e.id)).toEqual(["a", "b"]);
+    // Back online: the newest of them comes first again.
+    expect(stack.reopen(ok).entry?.id).toBe("b");
+    expect(stack.entries().map((e) => e.id)).toEqual(["a"]);
   });
   it("holds the last ten, dropping the oldest", () => {
     const stack = createClosedStack();
@@ -50,7 +61,7 @@ describe("createClosedStack", () => {
     stack.push(chat("a", { tile: "t1", index: 0 })); stack.push(chat("b"));
     stack.push(chat("a", { tile: "t2", index: 2 }));
     expect(stack.entries().map((e) => e.id)).toEqual(["b", "a"]);
-    expect(stack.reopen(() => true)).toMatchObject({ id: "a", tile: "t2", index: 2 });
+    expect(stack.reopen(ok).entry).toMatchObject({ id: "a", tile: "t2", index: 2 });
   });
   it("ignores malformed pushes and forgets a dropped key", () => {
     const stack = createClosedStack();

@@ -362,6 +362,7 @@ export function mountAgents(root) {
       const key = `${doc.computer}/${doc.child.id}`;
       session = { computer: doc.computer, child: doc.child };
       activeDoc = doc;
+      if (doc.kind === "chat") closedChats.drop(`${doc.computer}/${doc.child.id}`); // opened by any route: nothing left to reopen
       setActiveSession(doc.computer, doc.child);
       noteActiveSession(doc.computer, doc.child);
       const changed = bench.sessionKey !== key;
@@ -681,11 +682,22 @@ export function mountAgents(root) {
    * goes further back. Chats that no longer exist (offline rows count) are skipped.
    */
   function reopenClosedChat() {
-    const rows = store.sessions({ includeOffline: true });
+    const merged = store.merged;
     let row = null;
-    const entry = closedChats.reopen((e) => !tabs.has(`chat:${e.computer}/${e.id}`) && (row = rows.find((r) => r.computer === e.computer && r.child.id === e.id) ?? null) !== null);
-    if (!entry) { toastNotice("That chat is gone"); return false; }
-    showSection("agents");
+    let sawOpen = false;
+    const { entry, unknown, gone } = closedChats.reopen((e) => {
+      if (tabs.has(`chat:${e.computer}/${e.id}`)) { sawOpen = true; return "open"; }
+      const co = merged?.computers?.find((c) => c.computer === e.computer);
+      // Only a computer that is online with its overview loaded can say a session is gone.
+      row = store.sessions({ includeOffline: true }).find((r) => r.computer === e.computer && r.child.id === e.id) ?? null;
+      if (row) return "ok";
+      return co?.state === "online" && co.overview ? "gone" : "unknown";
+    });
+    if (!entry) {
+      if (unknown) toastNotice("That chat's computer is offline");
+      else if (gone || !sawOpen) toastNotice("That chat is gone"); // a chat that is already open is not gone
+      return false;
+    }
     tabs.open(chatDoc(row.computer, row.child, entry.mode === "console" ? "console" : "chat"), { tile: entry.tile, at: entry.index });
     return true;
   }

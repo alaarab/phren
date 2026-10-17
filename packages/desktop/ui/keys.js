@@ -262,9 +262,7 @@ function run(action, arg) {
 
 /** reopen_chat: bring back the most recently closed chat tab; again goes further back. */
 function reopenChat() {
-  if (!app.reopenClosedChat) return;
-  showSection("agents");
-  app.reopenClosedChat();
+  app.reopenClosedChat?.();
 }
 
 /** filter_sessions: reveal the sidebar and put the caret in its filter box. */

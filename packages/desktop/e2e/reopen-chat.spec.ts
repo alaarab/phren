@@ -63,13 +63,92 @@ test("the palette offers Reopen closed chat only while something is closed", asy
   await page.locator('.section-pill[data-section="agents"]').click();
   await row(page, "Alpha chat").click();
   await page.keyboard.press("ControlOrMeta+K");
-  await page.keyboard.type(">Reopen closed");
+  await page.keyboard.type(">Close");
+  // A positive control: the same query lists another command, so hidden means hidden.
+  await expect(page.getByText("Close Tab", { exact: true })).toBeVisible();
   await expect(page.getByText("Reopen closed chat")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.keyboard.press("ControlOrMeta+W");
   await page.keyboard.press("ControlOrMeta+K");
-  await page.keyboard.type(">Reopen closed");
+  await page.keyboard.type(">Close");
+  await expect(page.getByText("Close Tab", { exact: true })).toBeVisible();
   await expect(page.getByText("Reopen closed chat")).toBeVisible();
-  await page.keyboard.press("Enter");
+  await page.keyboard.press("ArrowDown");
+  await page.getByText("Reopen closed chat").click();
   await expect(active(page)).toHaveText("Alpha chat");
+});
+
+test("a chat opened from the sidebar is no longer waiting to be reopened", async ({ page }) => {
+  await openAndClose(page, ["Alpha chat", "Bravo chat"]); // closes Bravo, then Alpha
+  await row(page, "Alpha chat").click();
+  await page.keyboard.press("ControlOrMeta+Shift+O");
+  await expect(active(page)).toHaveText("Bravo chat");
+  await expect(page.locator(".doc-tab")).toHaveCount(2);
+  await page.keyboard.press("ControlOrMeta+Shift+O");
+  await expect(page.locator(".doc-tab")).toHaveCount(2); // Alpha is open once, not twice
+});
+
+test("a chat comes back at its tab position when its tile is still there", async ({ page }) => {
+  await page.goto(h!.url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  for (const title of ["Alpha chat", "Bravo chat", "Charlie chat"]) await row(page, title).click();
+  await page.locator(".doc-tab", { hasText: "Bravo chat" }).click();
+  await page.keyboard.press("ControlOrMeta+W");
+  await expect(page.locator(".doc-tab .doc-tab-title")).toHaveText(["Alpha chat", "Charlie chat"]);
+  await page.keyboard.press("ControlOrMeta+Shift+O");
+  await expect(page.locator(".doc-tab .doc-tab-title")).toHaveText(["Alpha chat", "Bravo chat", "Charlie chat"]);
+});
+
+test("when its tile is gone the chat opens last in the focused tile", async ({ page }) => {
+  await page.goto(h!.url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await row(page, "Alpha chat").click();
+  await row(page, "Charlie chat").click();
+  await page.keyboard.press("ControlOrMeta+\\"); // split: the new tile is focused
+  await expect(page.locator(".tile")).toHaveCount(2);
+  await row(page, "Bravo chat").click();
+  await page.keyboard.press("ControlOrMeta+W"); // its tile was Bravo's alone, so it collapses
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await page.keyboard.press("ControlOrMeta+Shift+O");
+  await expect(page.locator(".doc-tab .doc-tab-title")).toHaveText(["Alpha chat", "Charlie chat", "Bravo chat"]);
+});
+
+test("the key belongs to a terminal or an editor when focus is inside one", async ({ page }) => {
+  await openAndClose(page, ["Alpha chat"]);
+  for (const cls of ["xterm", "monaco-editor"]) {
+    await page.evaluate((c) => {
+      const box = document.createElement("div");
+      box.className = c;
+      const input = document.createElement("textarea");
+      input.id = `probe-${c}`;
+      box.append(input);
+      document.body.append(box);
+      input.focus();
+    }, cls);
+    await page.keyboard.press("ControlOrMeta+Shift+O");
+    await page.waitForTimeout(300);
+    await expect(page.locator(".doc-tab")).toHaveCount(0);
+    await page.evaluate((c) => document.querySelector(`.${c}`)?.remove(), cls);
+  }
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("ControlOrMeta+Shift+O");
+  await expect(active(page)).toHaveText("Alpha chat");
+});
+
+test("a chat whose computer has dropped off still reopens from its last-seen row, never as gone", async ({ page }) => {
+  await h!.close();
+  h = await startHarness("reopen-chat-peer", {
+    overviewFrames: [overviewFrame([alpha])],
+    peer: { name: "Devbox", options: { overviewFrames: [overviewFrame([chat("far", "Far chat")])] } },
+  });
+  await page.goto(h.url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await row(page, "Far chat").click();
+  await expect(active(page)).toHaveText("Far chat");
+  await page.keyboard.press("ControlOrMeta+W");
+  await h.peerHook!.close();
+  await expect(page.locator("#sidebar .sb-cstate", { hasText: /not found|offline|unreachable/i })).toBeVisible({ timeout: 30_000 });
+  await page.keyboard.press("ControlOrMeta+Shift+O");
+  await expect(active(page)).toHaveText("Far chat");
+  await expect(page.locator(".pt-toast")).toHaveCount(0);
 });

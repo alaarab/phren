@@ -35,15 +35,26 @@ export function createClosedStack(limit = CLOSED_LIMIT) {
     size: () => list.length,
     entries: () => list.map((e) => ({ ...e })),
     /**
-     * Take the newest entry for which `exists(entry)` holds. Entries that no
-     * longer exist are discarded on the way; null when nothing is left.
+     * Take the newest entry that `check(entry)` calls "ok". Entries it calls
+     * "open" (already open) or "gone" (the session no longer exists) are
+     * discarded; "unknown" ones (their computer is not reporting right now) are
+     * kept for later. Returns `{ entry, unknown, gone }`: the entry to reopen or
+     * null, how many unknown entries were passed over, and whether any entry
+     * was discarded as gone.
      */
-    reopen(exists) {
-      while (list.length) {
+    reopen(check) {
+      const kept = [];
+      let found = null;
+      let gone = false;
+      while (list.length && !found) {
         const entry = list.pop();
-        if (exists(entry)) return { ...entry };
+        const verdict = check(entry);
+        if (verdict === "ok") found = entry;
+        else if (verdict === "unknown") kept.unshift(entry);
+        else if (verdict === "gone") gone = true;
       }
-      return null;
+      list = [...list, ...kept];
+      return { entry: found ? { ...found } : null, unknown: kept.length, gone };
     },
   };
 }

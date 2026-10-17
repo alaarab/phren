@@ -164,9 +164,11 @@ export function createTiles(rootEl, { onActivate, onEmpty, onClose } = {}) {
       return home.tabs.handle(doc.id);
     }
     if (!root) render();
-    let target = (tile && leaves().find((l) => l.id === tile)) || focused;
+    const saved = tile && leaves().find((l) => l.id === tile);
+    let target = saved || focused;
     if (side) target = split(focused, side);
-    const handle = target.tabs.open(doc, { background, at });
+    // The position only means something in the tile it was in; elsewhere the tab goes last.
+    const handle = target.tabs.open(doc, { background, at: saved && target === saved ? at : undefined });
     if (!background) focus(target);
     return handle;
   }
