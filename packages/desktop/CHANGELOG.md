@@ -4,6 +4,12 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## Unreleased
+
+### New
+
+- Home shows when it last loaded ("Updated 12s ago") and has a **Refresh** button that reads everything again; a failed refresh keeps what's shown and says so.
+
 ## [0.1.12] - 2026-10-17
 
 ### New
@@ -18,7 +24,6 @@ GitHub release notes, and the app shows them when that version is available.
 - **Prompt outline** in long chats: a rail of your prompts to jump between them (Alt+↑/↓).
 - Chats open instantly when you rest the pointer on them in the sidebar first: Phren loads the conversation ahead of the click.
 - **Copy or save a chat as Markdown** from its menu, with credentials removed.
-- Home shows when it last loaded ("Updated 12s ago") and has a **Refresh** button that reads everything again; a failed refresh keeps what's shown and says so.
 - The command palette remembers what you use: recent picks show first, and frequent ones rank higher.
 - Chats say when they've lost their computer and are reconnecting, with Retry when it takes a while.
 - **Sync now** asks a computer to pull its Phren store and refreshes Memory when the store changes.

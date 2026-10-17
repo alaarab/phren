@@ -96,7 +96,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const state = { merged: null };
   const updatedEl = root.querySelector(".home-updated");
   const refreshBtn = root.querySelector(".home-refresh");
-  let updatedAt = Date.now();
+  let updatedAt = null;
   let updatedTimer = null;
   let loading = false;
   let visible = false;
@@ -220,8 +220,9 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   function startPolling() {
     if (pollTimer !== null) return;
     polledFor = (state.merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
-    void pollReceipts();
-    pollTimer = setInterval(() => { void pollReceipts(); }, RETURN_POLL_MS);
+    const poll = () => { void pollReceipts().then((ok) => { if (ok && visible) markUpdated(); }); };
+    poll();
+    pollTimer = setInterval(poll, RETURN_POLL_MS);
   }
 
   function stopPolling() {
@@ -257,7 +258,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     show() {
       if (visible) return;
       visible = true;
-      markUpdated();
       startUpdatedTicks();
       startPolling();
       activeTasks.show();
