@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLOSED_LIMIT, closedEntry, closedKey, createClosedStack } from "../ui/shell/closed-tabs.js";
+import { CLOSED_LIMIT, closedEntry, closedKey, createClosedStack, reopenPosition } from "../ui/shell/closed-tabs.js";
 
 const chat = (id: string, extra: object = {}) => ({ computer: "box", id, ...extra });
 
@@ -69,5 +69,36 @@ describe("createClosedStack", () => {
     stack.push(chat("a"));
     stack.drop("box/a");
     expect(stack.size()).toBe(0);
+  });
+});
+
+describe("reopenPosition", () => {
+  it("goes right after the tab that was on its left", () => {
+    expect(reopenPosition(["a", "file"], { index: 5, after: "file" })).toBe(2);
+    expect(reopenPosition(["a", "file", "b"], { index: 0, after: "a" })).toBe(1);
+  });
+  it("falls back to the old index, clamped, when that tab is gone; last when nothing is known", () => {
+    expect(reopenPosition(["a", "b"], { index: 1, after: "gone" })).toBe(1);
+    expect(reopenPosition(["a"], { index: 4 })).toBe(1);
+    expect(reopenPosition(["a"], {})).toBeUndefined();
+    expect(reopenPosition(["a"])).toBeUndefined();
+  });
+  it("keeps a mixed tile [A, file, B, C] in order when Close others closes C, B, A and they come back newest first", () => {
+    // Closed right to left: C (left neighbour B), B (file), A (none).
+    const stack = createClosedStack();
+    stack.push(chat("c", { tile: "t1", index: 3, after: "chat:box/b" }));
+    stack.push(chat("b", { tile: "t1", index: 2, after: "file" }));
+    stack.push(chat("a", { tile: "t1", index: 0 }));
+    let order = ["file"];
+    for (const expected of ["a", "b", "c"]) {
+      const { entry } = stack.reopen(() => "ok");
+      expect(entry!.id).toBe(expected);
+      order.splice(reopenPosition(order, entry!) ?? order.length, 0, `chat:box/${entry!.id}`);
+    }
+    expect(order).toEqual(["chat:box/a", "file", "chat:box/b", "chat:box/c"]);
+  });
+  it("closedEntry keeps `after` and drops a non-string one", () => {
+    expect(closedEntry(chat("a", { after: "x" }))).toMatchObject({ after: "x" });
+    expect(closedEntry(chat("a", { after: 3 }))).not.toHaveProperty("after");
   });
 });

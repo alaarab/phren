@@ -8,7 +8,7 @@ export const CLOSED_LIMIT = 10;
 export const closedKey = (computer, id) => `${computer}/${id}`;
 
 /**
- * `{ key, computer, id, tile?, index?, mode? }` rows, or null for anything
+ * `{ key, computer, id, tile?, index?, after?, mode? }` rows, or null for anything
  * malformed. `tile` is the id of the tile it closed in, `index` its tab position.
  */
 export function closedEntry(value) {
@@ -16,8 +16,21 @@ export function closedEntry(value) {
   const entry = { key: closedKey(value.computer, value.id), computer: value.computer, id: value.id };
   if (typeof value.tile === "string") entry.tile = value.tile;
   if (Number.isInteger(value.index) && value.index >= 0) entry.index = value.index;
+  if (typeof value.after === "string" && value.after) entry.after = value.after; // the tab on its left: position survives other tabs coming and going
   if (value.mode === "console") entry.mode = "console";
   return entry;
+}
+
+/**
+ * Where a reopened tab goes in `order` (the tile's tab ids, left to right): right after the tab
+ * that was on its left when it closed if that one is still there, else at its old index, else
+ * last (undefined). Anchoring on a neighbour keeps the order right when other tabs, such as
+ * files, sat between closed chats.
+ */
+export function reopenPosition(order, { index, after } = {}) {
+  const anchor = typeof after === "string" ? order.indexOf(after) : -1;
+  if (anchor >= 0) return anchor + 1;
+  return Number.isInteger(index) && index >= 0 ? Math.min(index, order.length) : undefined;
 }
 
 export function createClosedStack(limit = CLOSED_LIMIT) {

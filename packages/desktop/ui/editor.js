@@ -713,7 +713,7 @@ export function openEditorDoc(el, opts) {
   closeActions.append(
     saveBtn,
     mkButton("Don't save", () => { hideCloseAsk(); opts.onCloseRequest?.(); }),
-    mkButton("Cancel", () => hideCloseAsk()),
+    mkButton("Cancel", () => { hideCloseAsk(); const cb = cancelCb; cancelCb = null; cb?.(); }),
   );
   closeCard.append(closeMsg, closeActions);
   closeAsk.appendChild(closeCard);
@@ -933,8 +933,9 @@ export function openEditorDoc(el, opts) {
     if (!dirty) opts.onCloseRequest?.();
   });
 
-  function tryClose() {
-    if (dirty) { showCloseAsk(); return; }
+  let cancelCb = null; // called when the user cancels the save prompt a bulk close raised
+  function tryClose(o) {
+    if (dirty) { cancelCb = o?.onCancel ?? null; showCloseAsk(); return; }
     opts.onCloseRequest?.();
   }
 
