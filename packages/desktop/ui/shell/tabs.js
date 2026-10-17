@@ -152,7 +152,9 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
 
   function step(delta) {
     const target = stepTarget([...barEl.children].map((t) => t.dataset.doc), active, delta);
-    if (target) activate(target);
+    if (!target || target === active) return false; // nothing to go to
+    activate(target);
+    return true;
   }
 
   /** The saved tab list from the last run: [{ kind, ...persist }] and the active id. */

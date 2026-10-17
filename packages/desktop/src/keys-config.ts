@@ -97,7 +97,7 @@ export const DEFAULTS_APP: Record<string, string[]> = {
   palette: ["cmd+k"], open_file: ["cmd+p"],
   terminal: ["cmd+j"], sidebar: ["cmd+b"],
   next_needs_you: ["cmd+shift+a"], filter_sessions: ["cmd+shift+e"], close_tab: ["cmd+w"], reopen_chat: ["cmd+shift+o"],
-  tab_next: ["ctrl+pagedown", "cmd+shift+]"], tab_previous: ["ctrl+pageup", "cmd+shift+["],
+  tab_next: ["ctrl+pagedown"], tab_previous: ["ctrl+pageup"],
   split_right: ["cmd+\\"], split_down: ["cmd+shift+\\"], console: ["cmd+shift+t"],
 };
 // Cmd/Ctrl+1–9 belong to the titlebar's pills (app.js); sessions keep prefix+1..9,

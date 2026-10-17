@@ -369,7 +369,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
     open, moveDoc, split: (side = "auto") => split(focused, side), focusDir, moveDir, swapDir, resize, zoom, restore, saved,
     activate(docId) { const l = find(docId); if (l) { focus(l); l.tabs.activate(docId); } },
     close(docId) { const l = docId ? find(docId) : focused; if (l) l.tabs.close(docId ?? l.tabs.activeId()); },
-    step(delta) { focused.tabs.step(delta); },
+    step(delta) { return focused.tabs.step(delta); },
     setTitle(docId, title, subtitle) { find(docId)?.tabs.setTitle(docId, title, subtitle); },
     has: (docId) => !!find(docId),
     active: () => focused?.tabs.active() ?? null,

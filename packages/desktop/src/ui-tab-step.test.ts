@@ -27,30 +27,32 @@ describe("stepTarget", () => {
 });
 
 describe("widgetKeepsTabKey", () => {
-  const press = (fields: object) => ({ ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...fields });
-  it("a terminal or editor keeps a bare Ctrl+PageUp / PageDown", () => {
-    expect(widgetKeepsTabKey(press({ ctrlKey: true }), true)).toBe(true);
+  it("a terminal, editor or iframe keeps the key, whatever the modifiers", () => {
+    expect(widgetKeepsTabKey(true)).toBe(true);
   });
-  it("but not the shifted pair or Cmd, and nothing outside a widget", () => {
-    expect(widgetKeepsTabKey(press({ ctrlKey: true, shiftKey: true }), true)).toBe(false);
-    expect(widgetKeepsTabKey(press({ metaKey: true, shiftKey: true }), true)).toBe(false);
-    expect(widgetKeepsTabKey(press({ ctrlKey: true }), false)).toBe(false);
+  it("nothing else does", () => {
+    expect(widgetKeepsTabKey(false)).toBe(false);
+    expect(widgetKeepsTabKey(null)).toBe(false);
   });
 });
 
 describe("the default bindings", () => {
   const ev = (fields: object) => ({ key: "", code: "", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, getModifierState: () => false, ...fields });
   const hit = (action: string, e: object) => DEFAULTS_APP[action].some((text) => matches(parseBinding(text), ev(e)) !== false);
-  it("Ctrl+PageDown / PageUp step forward and back", () => {
+  it("are Ctrl+PageDown / PageUp only", () => {
+    expect(DEFAULTS_APP.tab_next).toEqual(["ctrl+pagedown"]);
+    expect(DEFAULTS_APP.tab_previous).toEqual(["ctrl+pageup"]);
     expect(hit("tab_next", { key: "PageDown", code: "PageDown", ctrlKey: true })).toBe(true);
     expect(hit("tab_previous", { key: "PageUp", code: "PageUp", ctrlKey: true })).toBe(true);
     expect(hit("tab_next", { key: "PageUp", code: "PageUp", ctrlKey: true })).toBe(false);
     expect(hit("tab_next", { key: "PageDown", code: "PageDown" })).toBe(false);
   });
-  it("Command+Shift+] / [ step on a Mac keyboard, whatever character Shift makes", () => {
-    expect(hit("tab_next", { key: "}", code: "BracketRight", metaKey: true, shiftKey: true })).toBe(true);
-    expect(hit("tab_previous", { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true })).toBe(true);
-    expect(DEFAULTS_APP.tab_next).toContain("cmd+shift+]");
-    expect(DEFAULTS_APP.tab_previous).toContain("cmd+shift+[");
+  it("never match the bracket keys section navigation uses", () => {
+    for (const [key, code] of [["[", "BracketLeft"], ["]", "BracketRight"]]) {
+      for (const mods of [{ metaKey: true }, { ctrlKey: true }]) {
+        expect(hit("tab_next", { key, code, ...mods })).toBe(false);
+        expect(hit("tab_previous", { key, code, ...mods })).toBe(false);
+      }
+    }
   });
 });

@@ -32,12 +32,16 @@ test("Ctrl+PageDown and Ctrl+PageUp step through the tabs and wrap", async ({ pa
   await page.screenshot({ path: test.info().outputPath("tab-step.png") });
 });
 
-test("Cmd/Ctrl+Shift+] and [ step too", async ({ page }) => {
+test("Cmd/Ctrl+[ and ] still walk the visited sections with the step keys installed", async ({ page }) => {
   await openThree(page);
-  await page.keyboard.press("ControlOrMeta+Shift+BracketRight");
-  await expect(active(page)).toHaveText("Alpha chat");
-  await page.keyboard.press("ControlOrMeta+Shift+BracketLeft");
-  await expect(active(page)).toHaveText("Charlie chat");
+  await page.locator('.section-pill[data-section="home"]').click();
+  await expect(page).toHaveURL(/#\/home$/);
+  await page.keyboard.press("ControlOrMeta+BracketLeft");
+  await expect(page).toHaveURL(/#\/agents$/);
+  await page.keyboard.press("ControlOrMeta+BracketRight");
+  await expect(page).toHaveURL(/#\/home$/);
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await expect(active(page)).toHaveText("Charlie chat"); // no tab stepped
 });
 
 test("it steps within the focused tile only", async ({ page }) => {
@@ -57,29 +61,49 @@ test("it steps within the focused tile only", async ({ page }) => {
   await expect(page.locator(".tile:not(.tile-focused) .doc-tab.selected .doc-tab-title")).toHaveText("Alpha chat");
 });
 
-test("a terminal or editor keeps Ctrl+PageDown, but not Cmd/Ctrl+Shift+]", async ({ page }) => {
+test("a terminal, editor or iframe keeps Ctrl+PageDown", async ({ page }) => {
   await openThree(page);
-  await page.evaluate(() => {
-    const box = document.createElement("div");
-    box.className = "xterm";
-    const input = document.createElement("textarea");
-    box.append(input);
-    document.body.append(box);
-    input.focus();
-  });
+  for (const [name, html] of [
+    ["xterm", '<div class="xterm"><textarea id="probe"></textarea></div>'],
+    ["bench-terminal", '<div class="bench-terminal"><textarea id="probe"></textarea></div>'],
+    ["monaco", '<div class="monaco-editor"><textarea id="probe"></textarea></div>'],
+    ["iframe", '<iframe id="probe-frame" srcdoc="<textarea id=t></textarea>"></iframe>'],
+  ]) {
+    await page.evaluate((markup) => {
+      const host = document.createElement("div");
+      host.id = "probe-host";
+      host.innerHTML = markup;
+      document.body.append(host);
+      (host.querySelector("#probe") as HTMLElement | null)?.focus();
+      const frame = host.querySelector("iframe");
+      if (frame) frame.focus();
+    }, html);
+    await page.keyboard.press("Control+PageDown");
+    await page.waitForTimeout(250);
+    await expect(active(page), name).toHaveText("Charlie chat");
+    await page.evaluate(() => document.getElementById("probe-host")?.remove());
+  }
+  // Positive control: with focus back on the page the same key steps.
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("Control+PageDown");
-  await page.waitForTimeout(300);
-  await expect(active(page)).toHaveText("Charlie chat");
-  await page.keyboard.press("ControlOrMeta+Shift+BracketRight");
   await expect(active(page)).toHaveText("Alpha chat");
 });
 
-test("it does nothing outside the Agents section", async ({ page }) => {
+test("a key that stepped nothing is not prevented", async ({ page }) => {
   await openThree(page);
+  const prevented = () => page.evaluate(() => new Promise<boolean>((resolve) => {
+    const ev = new KeyboardEvent("keydown", { key: "PageDown", code: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(ev);
+    resolve(ev.defaultPrevented);
+  }));
+  expect(await prevented()).toBe(true); // stepped: handled
   await page.locator('.section-pill[data-section="home"]').click();
-  await page.keyboard.press("Control+PageDown");
+  expect(await prevented()).toBe(false); // other section: left alone
   await page.locator('.section-pill[data-section="agents"]').click();
-  await expect(active(page)).toHaveText("Charlie chat");
+  await page.keyboard.press("ControlOrMeta+W");
+  await page.keyboard.press("ControlOrMeta+W");
+  await expect(page.locator(".doc-tab")).toHaveCount(1);
+  expect(await prevented()).toBe(false); // a lone tab: nothing to step to
 });
 
 test("the command palette lists the new actions", async ({ page }) => {

@@ -201,7 +201,12 @@ function onKeyDown(ev) {
   const appHit = findAppAction(ev);
   // Terminals, editors and iframes keep their own keys, as they keep Ctrl+Tab.
   if (appHit?.action === "reopen_chat" && ownsCtrlTab(ev.target)) return;
-  if ((appHit?.action === "tab_next" || appHit?.action === "tab_previous") && widgetKeepsTabKey(ev, ownsCtrlTab(ev.target))) return;
+  if (appHit?.action === "tab_next" || appHit?.action === "tab_previous") {
+    // A terminal, editor or iframe keeps the key; so does anything else when no tab stepped.
+    if (widgetKeepsTabKey(ownsCtrlTab(ev.target) || inTerminal(ev.target))) return;
+    if (run(appHit.action) === true) { ev.preventDefault(); ev.stopPropagation(); }
+    return;
+  }
   if (appHit) { ev.preventDefault(); ev.stopPropagation(); run(appHit.action, appHit.arg); return; }
   if (inTerminal(ev.target)) return;
   if (config.bindings.prefix.some((text) => matches(parseBinding(text), ev) === true)) {

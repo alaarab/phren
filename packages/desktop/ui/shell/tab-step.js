@@ -11,11 +11,7 @@ export function stepTarget(order, activeId, delta) {
   return order[(((at + delta) % order.length) + order.length) % order.length];
 }
 
-/**
- * Whether the focused widget keeps this press instead of the app: a terminal or an editor owns
- * a bare Ctrl+PageUp / Ctrl+PageDown (shells, tmux and vim use them), but not the
- * Cmd/Ctrl+Shift+[ ] pair, so a terminal tab can always be left by keyboard.
- */
-export function widgetKeepsTabKey(ev, owned) {
-  return !!owned && ev.ctrlKey === true && !ev.metaKey && !ev.shiftKey && !ev.altKey;
+/** Whether the focused widget (a terminal, editor or iframe) keeps the press: it owns it, whatever the modifiers. */
+export function widgetKeepsTabKey(owned) {
+  return !!owned;
 }
