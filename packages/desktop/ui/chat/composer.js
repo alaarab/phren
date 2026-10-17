@@ -349,6 +349,7 @@ export function createComposer({ computer, target, provider, branch, project, on
         input.value = saved;
         localStorage.setItem(key, saved);
         localStorage.removeItem(legacy);
+        window.dispatchEvent(new CustomEvent("phren:draft", { detail: { key, value: saved } }));
       }
     }
     if (saved) input.value = saved;
@@ -361,8 +362,12 @@ export function createComposer({ computer, target, provider, branch, project, on
   const promptHistory = createPromptHistory(sent);
 
   function saveDraft() {
-    try { localStorage.setItem(draftKey(target, computer), input.value); draftError.textContent = ""; }
-    catch { draftError.textContent = "Couldn't save this draft on this computer."; }
+    try {
+      const key = draftKey(target, computer);
+      localStorage.setItem(key, input.value);
+      draftError.textContent = "";
+      window.dispatchEvent(new CustomEvent("phren:draft", { detail: { key, value: input.value } }));
+    } catch { draftError.textContent = "Couldn't save this draft on this computer."; }
   }
 
   // ---- delivery ----
