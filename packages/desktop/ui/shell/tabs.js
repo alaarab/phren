@@ -12,7 +12,7 @@ const STORAGE_KEY = "phren.desktop.tabs";
  * save (tiles save the whole layout instead). options.onFocus: called on any
  * pointer interaction inside the group.
  */
-export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onChange, storageKey = STORAGE_KEY } = {}) {
+export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClosing, onChange, storageKey = STORAGE_KEY } = {}) {
   const docs = new Map(); // id -> entry { doc, tab, el, handle, owner }
   let active = null;
 
@@ -60,7 +60,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onChan
     return tab;
   }
 
-  function open(doc, { background = false } = {}) {
+  function open(doc, { background = false, at } = {}) {
     let entry = docs.get(doc.id);
     if (!entry) {
       const el = document.createElement("div");
@@ -69,7 +69,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onChan
       bodyEl.append(el);
       entry = { doc, tab: null, el, handle: null, owner: api };
       entry.tab = buildTab(entry);
-      barEl.append(entry.tab);
+      barEl.insertBefore(entry.tab, Number.isInteger(at) ? barEl.children[at] ?? null : null);
       docs.set(doc.id, entry);
       setTitle(doc.id, doc.title, doc.subtitle);
       entry.handle = doc.mount(el) ?? {};
@@ -140,6 +140,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onChan
   function closeTab(id = active) {
     const entry = docs.get(id);
     if (!entry) return false;
+    onClosing?.(entry.doc, { index: [...barEl.children].findIndex((t) => t.dataset.doc === id) });
     try { entry.handle.close?.(); } catch { /* already closed */ }
     detach(id);
     onClose?.(entry.doc);

@@ -142,6 +142,8 @@ installKeys({
   toggleZoom: () => agents().toggleZoom(),
   closePanel: () => agents().closePanel(),
   closeTab: () => agents().closeTab(),
+  reopenClosedChat: () => agents().reopenClosedChat(),
+  canReopenChat: () => agents().canReopenChat(),
   get tiles() { return agents().tiles; },
   toggleConsole: () => agents().toggleConsole(),
   nextTab: () => agents().nextTab(),

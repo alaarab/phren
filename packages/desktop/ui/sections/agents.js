@@ -14,6 +14,7 @@ import { setActiveSession } from "../keys.js";
 import { store, projectOf } from "../shell/store.js";
 import { noteActiveSession } from "../shell/recent.js";
 import { createTiles } from "../shell/tiles.js";
+import { createClosedStack } from "../shell/closed-tabs.js";
 import { openLaunchSheet } from "../shell/launch.js";
 import { layoutTree } from "../shell/herdr-layout.js";
 import { showSection } from "../shell/sections.js";
@@ -347,13 +348,21 @@ export function mountAgents(root) {
     const row = store.sessions().find((row) => row.computer === session.computer && row.child.id === session.child.id);
     return row ? { ...row, quotaHost: tabs.active().quotaHost, interactionsPending: tabs.active().quotaInteractionPending !== false || row.child.approvalPending === true } : null;
   });
+  // The last closed chats of this window, for Reopen closed chat (⌘⇧O). Not saved across launches.
+  const closedChats = createClosedStack();
+  let bulkClose = false; // Mirror tab closes every tile at once; that is not the owner closing chats
   const tabs = createTiles(tilesRoot, {
+    onClose(doc, where) {
+      if (bulkClose || doc.kind !== "chat" || !doc.child) return;
+      closedChats.push({ computer: doc.computer, id: doc.child.id, tile: where?.tile, index: where?.index, mode: doc.persist?.mode });
+    },
     emptyText: "Pick a session, or press \u2318K.",
     onActivate(doc) {
       if (!doc.child) { quotaWarning.close(); return; }
       const key = `${doc.computer}/${doc.child.id}`;
       session = { computer: doc.computer, child: doc.child };
       activeDoc = doc;
+      if (doc.kind === "chat") closedChats.drop(`${doc.computer}/${doc.child.id}`); // opened by any route: nothing left to reopen
       setActiveSession(doc.computer, doc.child);
       noteActiveSession(doc.computer, doc.child);
       const changed = bench.sessionKey !== key;
@@ -634,8 +643,13 @@ export function mountAgents(root) {
       focused: panes.some((p) => p.pane_id === (layout.focused_pane_id ?? target.pane)),
     }));
     if (!tree) return;
-    for (const doc of tabs.list()) tabs.close(doc.id);
+    bulkClose = true;
+    try { for (const doc of tabs.list()) tabs.close(doc.id); } finally { bulkClose = false; }
     tabs.restore(tree, resolveSaved);
+  }
+
+  function toastNotice(message) {
+    import("../chat/talk.js").then(({ toast }) => toast(message)).catch(() => {});
   }
 
   function toastError(message) {
@@ -661,6 +675,32 @@ export function mountAgents(root) {
     const folder = server ? undefined : session?.child?.cwd;
     if (!server && !folder) return;
     tabs.open(terminalDoc(computer, { server, folder }), { split: tabs.list().length ? "auto" : undefined });
+  }
+
+  /**
+   * Reopen the most recently closed chat in the tile and position it had; again
+   * goes further back. Chats that no longer exist (offline rows count) are skipped.
+   */
+  function reopenClosedChat() {
+    const merged = store.merged;
+    let row = null;
+    let sawOpen = false;
+    const { entry, unknown, gone } = closedChats.reopen((e) => {
+      if (tabs.has(`chat:${e.computer}/${e.id}`)) { sawOpen = true; return "open"; }
+      const co = merged?.computers?.find((c) => c.computer === e.computer);
+      // Only a computer that is online with its overview loaded can say a session is gone.
+      row = store.sessions({ includeOffline: true }).find((r) => r.computer === e.computer && r.child.id === e.id) ?? null;
+      if (row) return "ok";
+      return co?.state === "online" && co.overview ? "gone" : "unknown";
+    });
+    if (!entry) {
+      if (unknown) toastNotice("That chat's computer is offline");
+      else if (gone) toastNotice("That chat is gone");
+      else if (!sawOpen) toastNotice("No closed chats to reopen"); // a chat that is already open is neither
+      return false;
+    }
+    tabs.open(chatDoc(row.computer, row.child, entry.mode === "console" ? "console" : "chat"), { tile: entry.tile, at: entry.index });
+    return true;
   }
 
   function openSession(computer, child, options) {
@@ -744,6 +784,8 @@ export function mountAgents(root) {
     showPane,
     closePanel,
     closeTab: closeActiveTab,
+    reopenClosedChat,
+    canReopenChat: () => closedChats.size() > 0,
     tiles: tabs,
     toggleConsole() { tabs.activeHandle()?.toggleMode?.(); },
     openTerminalDoc,
