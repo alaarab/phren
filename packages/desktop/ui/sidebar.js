@@ -13,6 +13,7 @@ import { hookPost, targetQuery } from "./api.js";
 import { age } from "./time.js";
 import { snoozes } from "./shell/snooze.js";
 import { muted } from "./shell/muted.js";
+import { drafts, draftRowKeys } from "./shell/drafts.js";
 import { mutedMark } from "./shell/muted-mark.js";
 import { filterSessionRows, filterWords } from "./shell/sidebar-filter.js";
 import { filterButtonLabel } from "./keys.js";
@@ -475,7 +476,8 @@ function rowSig(sb, desc) {
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : "",
     snoozes.until({ key: keyOf(desc.computer, c), child: c }) ?? "",
-    muted.has(keyOf(desc.computer, c)) ? "m" : ""].join("|");
+    muted.has(keyOf(desc.computer, c)) ? "m" : "",
+    sb.drafted?.has(keyOf(desc.computer, c)) ? "d" : ""].join("|");
 }
 
 /** A moon on a chat snoozed from Home, so the sidebar's needs-you group and Home's count do not seem to disagree. */
@@ -488,6 +490,19 @@ function snoozeMark(desc) {
   mark.title = `Snoozed until ${at.toDateString() === new Date().toDateString() ? time : `${at.toLocaleDateString([], { weekday: "short" })} ${time}`}`;
   mark.setAttribute("role", "img");
   mark.setAttribute("aria-label", mark.title);
+  return mark;
+}
+
+/** Row keys with a draft; the session rows are only built when some draft exists. */
+function draftedRows(merged) {
+  return drafts.keys().size ? draftRowKeys(drafts.keys(), sessions(merged, { includeOffline: true })) : new Set();
+}
+
+/** "Draft" on a chat with unsent text in its composer. The set changes only when a draft goes empty or non-empty, so typing does not redraw rows. */
+function draftMark(sb, computer, child) {
+  if (!sb.drafted?.has(keyOf(computer, child))) return null;
+  const mark = el("span", "sb-draft", "Draft");
+  mark.title = "Unsent draft";
   return mark;
 }
 
@@ -525,6 +540,8 @@ function rowContent(sb, node, desc) {
   const snooze = snoozeMark(desc);
   if (snooze) top.append(snooze);
   if (muted.has(keyOf(computer, child))) top.append(mutedMark("sb-muted"));
+  const draft = draftMark(sb, computer, child);
+  if (draft) top.append(draft);
   main.append(top);
 
   const bottom = el("span", "sb-line");
@@ -592,6 +609,8 @@ function compactRowContent(sb, node, desc) {
   const snooze = snoozeMark(desc);
   if (snooze) out.push(snooze);
   if (muted.has(keyOf(computer, child))) out.push(mutedMark("sb-muted"));
+  const draft = draftMark(sb, computer, child);
+  if (draft) out.push(draft);
 
   // Hidden terminal trigger: keys.js's 't' clicks `.sb-term`.
   const term = el("span", "sb-term");
@@ -832,12 +851,15 @@ export function renderSidebar(element, merged, handlers = {}) {
   sb.rows = readRows();
   sb.pinned = readPinned();
   sb.seen = readSeen();
+  sb.drafted = draftedRows(merged);
   element.classList.add("sb-root");
   element.classList.toggle("rows-compact", sb.rows === "compact");
   if (!sb.rowsListener) {
     sb.rowsListener = () => { sb.rows = readRows(); requestRender(sb); };
     document.addEventListener("phren:sidebar-rows", sb.rowsListener);
   }
+
+  if (!sb.draftsListener) sb.draftsListener = drafts.subscribe(() => { sb.drafted = draftedRows(sb.merged); requestRender(sb); });
 
   if (!element.querySelector(":scope > .sb-filter")) element.append(filterBox(sb));
   if (!element.querySelector(":scope > .sb-strip-filter")) element.append(stripFilterButton(sb));
