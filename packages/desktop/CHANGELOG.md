@@ -4,6 +4,12 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## Unreleased
+
+### New
+
+- **Filter sessions** box at the top of the Agents sidebar: type words to narrow rows by title, project, branch, computer or harness (every word must match), Esc clears it, ⌘⇧E (⌃⇧E elsewhere) focuses it, and it is not remembered across restarts.
+
 ## [0.1.13] - 2026-10-17
 
 ### New

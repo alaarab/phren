@@ -5,6 +5,7 @@ import { el } from "./dom.js";
 // is a real Herdr or tmux client, so keys typed there are never intercepted.
 
 import { hookPost } from "./api.js";
+import { showSection } from "./shell/sections.js";
 import { closePalette, isPaletteOpen, openPalette, registerCommand } from "./shell/palette.js";
 
 import { openUsage } from "./shell/usage-rings.js";
@@ -243,6 +244,7 @@ function run(action, arg) {
     case "close_tab": return app.closeTab ? app.closeTab() : app.closePanel();
     case "new_tab":
     case "terminal": return app.showPane("terminal");
+    case "filter_sessions": return focusFilter();
     case "usage": return openUsage();
     case "palette": return isPaletteOpen() ? closePalette() : openPalette();
     case "open_file": return openQuickFile();
@@ -252,6 +254,19 @@ function run(action, arg) {
     default:
       if (/^session_[1-9]$/.test(action)) return openRow(rows()[Number(action.slice(8)) - 1]);
   }
+}
+
+/** filter_sessions: reveal the sidebar and put the caret in its filter box. */
+function focusFilter() {
+  document.body.classList.remove("sidebar-hidden");
+  let input = document.querySelector("#sidebar .sb-filter-input");
+  if (!input || input.offsetParent === null) {
+    showSection("agents");
+    input = document.querySelector("#sidebar .sb-filter-input");
+  }
+  if (!input) return flash("Open the Agents section to filter sessions.");
+  input.focus();
+  input.select();
 }
 
 /** next_agent / next_needs_you: open the next sidebar row waiting on the owner. */
@@ -481,6 +496,7 @@ const BUILTINS = [
   ["next_tab", "Next Tab"],
   ["zoom", "Toggle Zoom"],
   ["toggle_sidebar", "Toggle Sidebar"],
+  ["filter_sessions", "Filter Sessions"],
 ];
 
 function registerBuiltins() {
