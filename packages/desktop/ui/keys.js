@@ -10,6 +10,7 @@ import { closePalette, isPaletteOpen, openPalette, registerCommand } from "./she
 
 import { openUsage } from "./shell/usage-rings.js";
 import { ownsCtrlTab } from "./shell/recent-mru.js";
+import { widgetKeepsTabKey } from "./shell/tab-step.js";
 
 let config = null; // { bindings, sources, files, errors, actions }
 let app = null; // actions supplied by app.js
@@ -102,12 +103,13 @@ function syncFilterButton() {
   button.setAttribute("aria-label", label);
 }
 
+const KEY_LABELS = { pagedown: "PgDn", pageup: "PgUp" };
 function keycaps(binding) {
   return binding.split(/\s+/).map((text) => {
     const spec = parseBinding(text);
     const mods = ["ctrl", "alt", "shift", "cmd"].filter((m) => spec[m])
       .map((m) => (m === "cmd" && !IS_MAC ? SYMBOLS.ctrl : SYMBOLS[m])).join("");
-    const key = spec.range ? `${spec.range[0]}…${spec.range[1]}` : (spec.key.length === 1 ? spec.key.toUpperCase() : spec.key);
+    const key = spec.range ? `${spec.range[0]}…${spec.range[1]}` : (spec.key.length === 1 ? spec.key.toUpperCase() : KEY_LABELS[spec.key] ?? spec.key);
     const own = mods + key;
     if (!spec.prefix) return own;
     const prefix = (config.bindings.prefix || ["ctrl+b"])[0];
@@ -199,6 +201,12 @@ function onKeyDown(ev) {
   const appHit = findAppAction(ev);
   // Terminals, editors and iframes keep their own keys, as they keep Ctrl+Tab.
   if (appHit?.action === "reopen_chat" && ownsCtrlTab(ev.target)) return;
+  if (appHit?.action === "tab_next" || appHit?.action === "tab_previous") {
+    // A terminal, editor or iframe keeps the key; so does anything else when no tab stepped.
+    if (widgetKeepsTabKey(ownsCtrlTab(ev.target) || inTerminal(ev.target))) return;
+    if (run(appHit.action) === true) { ev.preventDefault(); ev.stopPropagation(); }
+    return;
+  }
   if (appHit) { ev.preventDefault(); ev.stopPropagation(); run(appHit.action, appHit.arg); return; }
   if (inTerminal(ev.target)) return;
   if (config.bindings.prefix.some((text) => matches(parseBinding(text), ev) === true)) {
@@ -237,6 +245,8 @@ function run(action, arg) {
     case "reload_config": return load().then(() => { registerBuiltins(); flash("Key settings reloaded."); });
     case "goto": return showGoto();
     case "workspace_picker": return navigate();
+    case "tab_next": return app.stepTab?.(1);
+    case "tab_previous": return app.stepTab?.(-1);
     case "next_tab": return step(1);
     case "previous_tab": return step(-1);
     case "switch_tab": return openRow(rows()[(arg ?? 1) - 1]);
@@ -531,6 +541,8 @@ const BUILTINS = [
   ["terminal", "Show Terminal"],
   ["close_tab", "Close Tab"],
   ["next_tab", "Next Tab"],
+  ["tab_next", "Next Tab in This Tile"],
+  ["tab_previous", "Previous Tab in This Tile"],
   ["zoom", "Toggle Zoom"],
   ["toggle_sidebar", "Toggle Sidebar"],
   ["filter_sessions", "Filter Sessions"],

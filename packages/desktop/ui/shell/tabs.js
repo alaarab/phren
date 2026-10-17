@@ -5,6 +5,8 @@
 // A document: { id, kind, title, subtitle?, mount(el) -> { close(), focus?(), show?(), hide?() }, persist? }
 // `persist` is a small JSON-able value saved for restore on relaunch.
 
+import { stepTarget } from "./tab-step.js";
+
 const STORAGE_KEY = "phren.desktop.tabs";
 
 /**
@@ -149,10 +151,10 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
   }
 
   function step(delta) {
-    const order = [...barEl.children].map((t) => t.dataset.doc);
-    if (!order.length) return;
-    const i = order.indexOf(active);
-    activate(order[(i + delta + order.length) % order.length]);
+    const target = stepTarget([...barEl.children].map((t) => t.dataset.doc), active, delta);
+    if (!target || target === active) return false; // nothing to go to
+    activate(target);
+    return true;
   }
 
   /** The saved tab list from the last run: [{ kind, ...persist }] and the active id. */

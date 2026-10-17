@@ -14,6 +14,7 @@ GitHub release notes, and the app shows them when that version is available.
 - A small **Draft** mark on a sidebar row when that chat has unsent text in its message box, including chats you're not looking at; it clears when you send or empty the box, and follows edits made in another window.
 - **Reopen closed chat** (⌘⇧O, ⌃⇧O elsewhere, or "Reopen closed chat" in ⌘K): brings back the last closed chat tab in its tile (at its old position) if that tile still exists, else last in the focused tile, again goes further back (up to 10), and skips chats that no longer exist; a chat on a computer that is not reporting stays queued. ⌘⇧T keeps switching a chat between Chat and Console.
 - A **Filter sessions** button in the compact icon strip (windows under 1440 px, or a sidebar you collapsed): it expands and pins the strip open and focuses the filter box like ⌘⇧E, and shows a dot while a filter is narrowing the rows.
+- **Switch tabs from the keyboard**: Ctrl+PageDown / Ctrl+PageUp step to the next or previous tab in the focused tile and wrap around. A terminal or editor keeps the keys. Rebind them in Settings › Keys.
 
 ## [0.1.13] - 2026-10-17
 
