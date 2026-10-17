@@ -5,6 +5,8 @@
 // A document: { id, kind, title, subtitle?, mount(el) -> { close(), focus?(), show?(), hide?() }, persist? }
 // `persist` is a small JSON-able value saved for restore on relaunch.
 
+import { reopenPosition } from "./closed-tabs.js";
+
 const STORAGE_KEY = "phren.desktop.tabs";
 
 /**
@@ -61,6 +63,18 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     });
     tab.addEventListener("keydown", (ev) => {
       if (ev.target !== tab) return; // the close button keeps its own keys
+      // Roving focus along the tab bar; Enter / Space activate the focused tab.
+      const move = { ArrowRight: 1, ArrowLeft: -1, Home: "first", End: "last" }[ev.key];
+      if (move !== undefined) {
+        const tabs = [...barEl.children];
+        const at = tabs.indexOf(tab);
+        const next = move === "first" ? 0 : move === "last" ? tabs.length - 1 : (at + move + tabs.length) % tabs.length;
+        ev.preventDefault();
+        ev.stopPropagation();
+        tabs[next]?.focus();
+        return;
+      }
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); entry.owner.activate(doc.id); return; }
       if (!(ev.key === "ContextMenu" || (ev.key === "F10" && ev.shiftKey))) return;
       ev.preventDefault();
       ev.stopPropagation();
@@ -82,7 +96,14 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     return tab;
   }
 
-  function open(doc, { background = false, at } = {}) {
+  /** One tab stop for the bar: the selected tab, or the first when none is selected. */
+  function syncTabStops() {
+    const tabs = [...barEl.children];
+    const stop = tabs.find((t) => t.classList.contains("selected")) ?? tabs[0];
+    for (const t of tabs) t.tabIndex = t === stop ? 0 : -1;
+  }
+
+  function open(doc, { background = false, at, after } = {}) {
     let entry = docs.get(doc.id);
     if (!entry) {
       const el = document.createElement("div");
@@ -91,12 +112,15 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
       bodyEl.append(el);
       entry = { doc, tab: null, el, handle: null, owner: api };
       entry.tab = buildTab(entry);
-      barEl.insertBefore(entry.tab, Number.isInteger(at) ? barEl.children[at] ?? null : null);
+      // Back next to the tab that was on its left when `after` still names one here, else at index `at`.
+      const pos = reopenPosition([...barEl.children].map((t) => t.dataset.doc), { index: at, after });
+      barEl.insertBefore(entry.tab, Number.isInteger(pos) ? barEl.children[pos] ?? null : null);
       docs.set(doc.id, entry);
       setTitle(doc.id, doc.title, doc.subtitle);
       entry.handle = doc.mount(el) ?? {};
     }
     if (!background) activate(doc.id);
+    syncTabStops();
     save();
     return entry.handle;
   }
@@ -122,8 +146,8 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
       }
       e.tab.classList.toggle("selected", on);
       e.tab.setAttribute("aria-selected", String(on));
-      e.tab.tabIndex = on ? 0 : -1;
     }
+    syncTabStops();
     active = id;
     entry.tab.scrollIntoView({ block: "nearest", inline: "nearest" });
     entry.handle.focus?.();
@@ -140,6 +164,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     entry.tab.remove();
     entry.el.remove();
     docs.delete(id);
+    syncTabStops();
     if (active === id) {
       active = null;
       const next = order[index + 1] ?? order[index - 1];
@@ -157,6 +182,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     barEl.append(entry.tab);
     bodyEl.append(entry.el);
     docs.set(entry.doc.id, entry);
+    syncTabStops();
     if (!background) activate(entry.doc.id);
     save();
   }
@@ -164,7 +190,9 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
   function closeTab(id = active) {
     const entry = docs.get(id);
     if (!entry) return false;
-    onClosing?.(entry.doc, { index: [...barEl.children].findIndex((t) => t.dataset.doc === id) });
+    const order = [...barEl.children].map((t) => t.dataset.doc);
+    const index = order.indexOf(id);
+    onClosing?.(entry.doc, { index, after: index > 0 ? order[index - 1] : undefined });
     try { entry.handle.close?.(); } catch { /* already closed */ }
     detach(id);
     onClose?.(entry.doc);

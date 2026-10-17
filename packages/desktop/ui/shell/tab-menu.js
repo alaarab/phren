@@ -22,6 +22,7 @@ export function openTabMenu({ items, x = 0, y = 0, label = "Tab menu", returnTo 
   const menu = document.createElement("div");
   menu.className = "chat-menu tab-menu";
   menu.setAttribute("role", "menu");
+  menu.addEventListener("contextmenu", (ev) => ev.preventDefault()); // no browser menu on top of ours
   menu.setAttribute("aria-label", label);
   const buttons = [];
   let done = false;

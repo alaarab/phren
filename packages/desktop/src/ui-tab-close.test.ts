@@ -53,7 +53,7 @@ describe("planClose", () => {
 describe("keptNotice", () => {
   it("is silent for none and counts the rest", () => {
     expect(keptNotice(0)).toBeNull();
-    expect(keptNotice(1)).toBe("1 more tab has unsaved changes and stayed open");
-    expect(keptNotice(3)).toBe("3 more tabs have unsaved changes and stayed open");
+    expect(keptNotice(1)).toBe("Asking about the rightmost unsaved file; 1 more unsaved file stays open");
+    expect(keptNotice(3)).toBe("Asking about the rightmost unsaved file; 3 more unsaved files stay open");
   });
 });

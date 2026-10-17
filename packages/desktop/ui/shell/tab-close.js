@@ -41,7 +41,7 @@ export function planClose(ids, isDirty) {
   return { clean, ask: dirty[0] ?? null, kept: Math.max(0, dirty.length - 1) };
 }
 
-/** What the menu says after a bulk close left tabs open: null when nothing did. */
+/** What the menu says while it asks about the rightmost unsaved file: null when no other unsaved file stays open. */
 export function keptNotice(kept) {
-  return kept > 0 ? `${kept} more ${kept === 1 ? "tab has" : "tabs have"} unsaved changes and stayed open` : null;
+  return kept > 0 ? `Asking about the rightmost unsaved file; ${kept} more unsaved ${kept === 1 ? "file stays" : "files stay"} open` : null;
 }

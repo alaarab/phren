@@ -354,7 +354,7 @@ export function mountAgents(root) {
   let bulkClose = false; // Mirror tab closes every tile at once; that is not the owner closing chats
   const tabs = createTiles(tilesRoot, {
     // The tab menu closes through the same paths as the close button: a file with unsaved changes asks first.
-    requestClose(id) { const handle = tabs.handle(id); if (handle?.tryClose) handle.tryClose(); else tabs.close(id); },
+    requestClose(id, opts) { const handle = tabs.handle(id); if (handle?.tryClose) handle.tryClose(opts); else tabs.close(id); },
     isDirty: (id) => tabs.handle(id)?.isDirty?.() === true,
     onNotice: (text) => toastNotice(text),
     menuExtras(doc) {
@@ -366,7 +366,7 @@ export function mountAgents(root) {
     },
     onClose(doc, where) {
       if (bulkClose || doc.kind !== "chat" || !doc.child) return;
-      closedChats.push({ computer: doc.computer, id: doc.child.id, tile: where?.tile, index: where?.index, mode: doc.persist?.mode });
+      closedChats.push({ computer: doc.computer, id: doc.child.id, tile: where?.tile, index: where?.index, after: where?.after, mode: doc.persist?.mode });
     },
     emptyText: "Pick a session, or press \u2318K.",
     onActivate(doc) {
@@ -721,7 +721,7 @@ export function mountAgents(root) {
       else if (!sawOpen) toastNotice("No closed chats to reopen"); // a chat that is already open is neither
       return false;
     }
-    tabs.open(chatDoc(row.computer, row.child, entry.mode === "console" ? "console" : "chat"), { tile: entry.tile, at: entry.index });
+    tabs.open(chatDoc(row.computer, row.child, entry.mode === "console" ? "console" : "chat"), { tile: entry.tile, at: entry.index, after: entry.after });
     return true;
   }
 

@@ -56,7 +56,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, req
     leaf.tabs = createTabs(leaf.bar, leaf.body, {
       storageKey: null,
       // Where the tab was, read before it leaves (closing the last tab of a tile collapses it).
-      onClosing(doc, { index }) { closing = { tile: leaf.id, index }; },
+      onClosing(doc, { index, after }) { closing = { tile: leaf.id, index, after }; },
       onClose(doc) { const where = closing; closing = null; onClose?.(doc, where); },
       onActivate(doc, handle) {
         empty.hidden = true;
@@ -169,7 +169,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, req
   // ------------------------------------------------------------ documents
   function find(docId) { return leaves().find((l) => l.tabs.has(docId)) ?? null; }
 
-  function open(doc, { background = false, split: side, tile, at } = {}) {
+  function open(doc, { background = false, split: side, tile, at, after } = {}) {
     const home = find(doc.id);
     if (home) {
       if (!background) { focus(home); home.tabs.activate(doc.id); }
@@ -180,7 +180,8 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, req
     let target = saved || focused;
     if (side) target = split(focused, side);
     // The position only means something in the tile it was in; elsewhere the tab goes last.
-    const handle = target.tabs.open(doc, { background, at: saved && target === saved ? at : undefined });
+    const here = saved && target === saved;
+    const handle = target.tabs.open(doc, { background, at: here ? at : undefined, after: here ? after : undefined });
     if (!background) focus(target);
     return handle;
   }
@@ -204,7 +205,12 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, req
   }
 
   // ------------------------------------------------------------ tab menu
-  const closeOne = (leaf, id) => { if (requestClose) requestClose(id); else leaf.tabs.close(id); };
+  /** Close one tab the way its owner wants. A tab that will ask first is brought forward, since its prompt lives in its own (hidden) document. */
+  function closeOne(leaf, id, opts) {
+    if (!requestClose) { leaf.tabs.close(id); return; }
+    if (isDirty?.(id) === true) { focus(leaf); leaf.tabs.activate(id); }
+    requestClose(id, opts);
+  }
 
   /**
    * Close others / Close to the right: the same close path as a single close (so chats land on
@@ -218,7 +224,8 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, req
     leaf.tabs.activate(id);
     const plan = planClose(targets, (t) => isDirty?.(t) === true);
     for (const t of plan.clean) leaf.tabs.close(t);
-    if (plan.ask) { leaf.tabs.activate(plan.ask); closeOne(leaf, plan.ask); }
+    // Cancelling the ask leaves the tab the menu was opened on in front.
+    if (plan.ask) closeOne(leaf, plan.ask, { onCancel: () => { if (find(id) === leaf) { focus(leaf); leaf.tabs.activate(id); } } });
     const note = keptNotice(plan.kept);
     if (note) onNotice?.(note);
   }
@@ -227,11 +234,13 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, req
     if (!doc) return;
     const id = doc.id;
     const order = leaf.tabs.list().map((d) => d.id);
+    // The tab may have closed or moved while the menu was open: act only if it is still here.
+    const here = (fn) => () => { if (find(id) === leaf) fn(); };
     const run = {
-      close: () => closeOne(leaf, id),
-      others: () => closeMany(leaf, id, "others"),
-      right: () => closeMany(leaf, id, "right"),
-      split: () => moveDoc(id, leaf, "right"),
+      close: here(() => closeOne(leaf, id)),
+      others: here(() => closeMany(leaf, id, "others")),
+      right: here(() => closeMany(leaf, id, "right")),
+      split: here(() => moveDoc(id, leaf, "right")),
     };
     const items = tabMenuItems(order, id).map((item) => ({ ...item, run: run[item.id] }));
     for (const extra of menuExtras?.(doc) ?? []) items.push(extra);
