@@ -7,7 +7,7 @@ import { ruleDates, ruleScope, ruleSentence, ruleStatus } from "./approval-rule-
 
 export function buildApprovals(page) {
   const [head, count] = heading("Approvals");
-  const intro = el("div", "settings-note", "Standing rules that make an agent ask, or stop it, before it runs a command. Adding or revoking a rule happens from the phone, because each change needs a signature from a paired key.");
+  const intro = el("div", "settings-note", "Standing rules that make an agent ask, or stop it, before it runs a command. Adding or revoking a rule happens from the phone, because each change needs a signature from a paired key. Rules apply when the agent asks permission for a command; an agent running with auto-approve or bypass modes, or a native allowlist, is not stopped by them.");
   const toolbar = el("div", "settings-toolbar");
   const refreshBtn = button("Refresh");
   toolbar.append(el("div", "settings-note", "Read from each online computer when this page opens."), refreshBtn);
