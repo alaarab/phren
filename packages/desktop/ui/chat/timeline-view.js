@@ -547,6 +547,20 @@ export function createTimelineView(container, ctx = {}) {
     return buildAssistant(message);
   }
 
+  /** A small Copy button that appears on hover or focus; copies the message's own text. */
+  function copyButton(text) {
+    const copy = h("button", "ct-copy", "Copy");
+    copy.type = "button";
+    copy.setAttribute("aria-label", "Copy message");
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(text); copy.textContent = "Copied"; }
+      catch { copy.textContent = "Couldn't copy"; }
+      copy.classList.add("shown");
+      setTimeout(() => { copy.textContent = "Copy"; copy.classList.remove("shown"); }, 1200);
+    });
+    return copy;
+  }
+
   function buildUserBubble(message) {
     const row = h("div", "ct-msg-row ct-user-row");
     const spoken = /^\s*\[voice\]/i.test(message.text);
@@ -556,6 +570,8 @@ export function createTimelineView(container, ctx = {}) {
     if (message.isQueued) bubble.append(h("div", "ct-queued", "Queued in the agent"));
     const images = buildImageStrip([message]);
     if (images) bubble.append(images);
+    const text = kit.VoiceMarker.hidden(message.text);
+    if (text.trim()) row.prepend(copyButton(text));
     row.append(bubble);
     return row;
   }
@@ -563,6 +579,7 @@ export function createTimelineView(container, ctx = {}) {
   function buildAssistant(message) {
     const row = h("div", "ct-msg-row ct-assistant-row");
     row.append(limitedMarkdown(message.text));
+    if ((message.text ?? "").trim()) row.append(copyButton(message.text));
     const images = buildImageStrip([message]);
     if (images) row.append(images);
     return row;

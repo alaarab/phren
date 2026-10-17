@@ -10,7 +10,7 @@ export const MAX_HITS = 1000;
 // Chrome, not conversation: controls, icons, status marks, labels, the bar itself.
 const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "TEXTAREA", "INPUT", "SELECT", "SVG"]);
 const SKIP_CLASSES = [
-  "ct-icon", "ct-chevron", "ct-status", "ct-md-copy", "ct-md-pre-bar", "ct-fold", "ct-jump", "ct-more",
+  "ct-icon", "ct-chevron", "ct-status", "ct-md-copy", "ct-copy", "ct-md-pre-bar", "ct-fold", "ct-jump", "ct-more",
   "ct-caret", "ct-detail-label", "ct-activity-arc", "ct-activity-time", "ct-chip", "chat-find", "ct-outline",
 ];
 // Buttons whose text is the conversation (a tool row's title and summary, a path the agent named).

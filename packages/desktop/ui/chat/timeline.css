@@ -47,6 +47,16 @@
    paths, commands and tool cards stay monospace. */
 .ct-assistant-row { display: block; font-family: var(--prose); font-size: calc(var(--transcript-size, 13px) + 1.5px); }
 .ct-assistant { font-family: var(--prose); color: var(--text); }
+/* Copy message: shown while the row is hovered or holds focus (always, faintly, where there is no hover). */
+.ct-assistant-row { position: relative; }
+.ct-copy {
+  align-self: center; padding: 2px 8px; border: none; border-radius: 6px; background: transparent;
+  color: var(--muted); font: 500 11px system-ui; cursor: pointer; opacity: 0;
+}
+.ct-assistant-row > .ct-copy { position: absolute; top: 0; right: 0; background: var(--raised); }
+.ct-msg-row:hover > .ct-copy, .ct-copy:focus-visible, .ct-copy.shown { opacity: 1; }
+.ct-copy:hover { color: var(--accent); }
+@media (hover: none) { .ct-copy { opacity: .6; } }
 .ct-queued { margin-top: 6px; color: var(--dim); font-size: 11px; }
 .ct-pending { opacity: .5; }
 .ct-pending-note { max-width: 80%; margin-top: 4px; text-align: right; }
