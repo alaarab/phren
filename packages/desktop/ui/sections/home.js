@@ -16,6 +16,7 @@ import { computerReady } from "../shell/transcript-prefetch.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { sessionsForProject } from "../shell/project-today.js";
 import { createUpNext } from "./home/up-next.js";
+import { updatedLabel, UPDATED_TICK_MS } from "./home/updated.js";
 import { createComputers } from "./home/computers.js";
 import { createConductor } from "./home/conductor.js";
 
@@ -36,6 +37,10 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const openPrs = typeof openPulls === "function" ? openPulls : open;
   root.innerHTML = `
     <div class="home">
+      <div class="home-bar">
+        <span class="home-updated" role="status"></span>
+        <button class="home-refresh" type="button" title="Refresh Home" aria-label="Refresh Home">\u21bb</button>
+      </div>
       <section class="home-block" data-block="conductor">
         <div class="home-list" data-conductor></div>
       </section>
@@ -89,6 +94,11 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   const block = (name) => root.querySelector(`[data-block="${name}"]`);
 
   const state = { merged: null };
+  const updatedEl = root.querySelector(".home-updated");
+  const refreshBtn = root.querySelector(".home-refresh");
+  let updatedAt = null;
+  let updatedTimer = null;
+  let loading = false;
   let visible = false;
   let pollTimer = null;
   let stopUsage = null;
@@ -129,20 +139,23 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     void Promise.resolve(projects?.load?.()).catch(() => {}).then(() => projects?.open?.({ computer: pull.computer, name: pull.project }));
   }
 
+  /** Reads receipts and runs; resolves false when a computer's dispatch list could not be read (its old rows stay). */
   async function pollReceipts() {
+    let ok = true;
     const online = (state.merged?.computers ?? []).filter((c) => c.state === "online");
     const answers = await Promise.all(online.map(async (c) => {
       try {
         const body = await hookGet(c.computer, "/v1/dispatch");
         const list = Array.isArray(body.dispatches) ? body.dispatches : [];
         return [c.computer, list.map((receipt) => ({ receipt, computer: receipt.computer || c.computer }))];
-      } catch {
-        return [c.computer, []];
+      } catch (error) {
+        if (error?.status !== 404) ok = false; // an older Hook without the route is not a failure
+        return [c.computer, receipts.get(c.computer) ?? []];
       }
     }));
     receipts.clear();
     for (const [computer, list] of answers) receipts.set(computer, list);
-    if (!visible) return;
+    if (!visible) return ok;
     // Finished runs of the schedules each computer owns.
     const scheduled = await Promise.all(online.map(async (c) => {
       try {
@@ -170,13 +183,46 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     finished.renderReturns();
     renderUpNext();
     renderConductor();
+    return ok;
   }
+
+  function paintUpdated() { updatedEl.textContent = updatedLabel(updatedAt); }
+  function markUpdated() { updatedAt = Date.now(); paintUpdated(); }
+  function startUpdatedTicks() {
+    paintUpdated();
+    if (updatedTimer === null) updatedTimer = setInterval(paintUpdated, UPDATED_TICK_MS);
+  }
+  function stopUpdatedTicks() {
+    if (updatedTimer !== null) { clearInterval(updatedTimer); updatedTimer = null; }
+  }
+
+  // Refetch everything Home reads. A failure keeps what is shown, says so briefly and leaves the label alone.
+  async function reload() {
+    if (loading) return;
+    loading = true;
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("loading");
+    refreshBtn.setAttribute("aria-busy", "true");
+    let ok = true;
+    try {
+      const results = await Promise.all([pollReceipts(), pulls.reload(), activeTasks.reload(), savedToday.reload()]);
+      ok = results[0] !== false;
+    } catch { ok = false; }
+    loading = false;
+    refreshBtn.disabled = false;
+    refreshBtn.classList.remove("loading");
+    refreshBtn.removeAttribute("aria-busy");
+    if (ok) markUpdated();
+    else void import("../chat/talk.js").then(({ toast }) => toast("Refresh failed", { tone: "danger", ms: 3000 })).catch(() => {});
+  }
+  refreshBtn.addEventListener("click", () => { void reload(); });
 
   function startPolling() {
     if (pollTimer !== null) return;
     polledFor = (state.merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
-    void pollReceipts();
-    pollTimer = setInterval(() => { void pollReceipts(); }, RETURN_POLL_MS);
+    const poll = () => { void pollReceipts().then((ok) => { if (ok && visible) markUpdated(); }); };
+    poll();
+    pollTimer = setInterval(poll, RETURN_POLL_MS);
   }
 
   function stopPolling() {
@@ -212,6 +258,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     show() {
       if (visible) return;
       visible = true;
+      startUpdatedTicks();
       startPolling();
       activeTasks.show();
       savedToday.show();
@@ -223,6 +270,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     },
     hide() {
       visible = false;
+      stopUpdatedTicks();
       stopPolling();
       activeTasks.hide();
       savedToday.hide();
@@ -234,6 +282,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     },
     destroy() {
       visible = false;
+      stopUpdatedTicks();
       stopPolling();
       activeTasks.hide();
       savedToday.hide();

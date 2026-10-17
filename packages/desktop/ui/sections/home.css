@@ -241,3 +241,13 @@ button.home-job:focus-visible { outline: 2px solid var(--accent); outline-offset
 .home-pulls-refresh { margin-left: auto; padding: 4px 2px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; }
 .home-pulls-refresh:hover { color: var(--accent-hover); }
 .home-pulls-refresh:disabled { cursor: default; opacity: .6; }
+
+/* Home's "Updated 12s ago" and Refresh. */
+.home-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: -12px; }
+.home-updated { color: var(--muted); font-size: 12px; }
+.home-refresh { width: var(--control-h); height: var(--control-h); border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; }
+.home-refresh:hover { background: var(--raised); color: var(--text); }
+.home-refresh:disabled { cursor: default; opacity: .6; }
+.home-refresh.loading { animation: home-spin 1s linear infinite; }
+@keyframes home-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .home-refresh.loading { animation: none; } }

@@ -169,6 +169,8 @@ export function createPulls({ block, computers, openProject, isVisible, active, 
     render,
     /** Home's online computers changed (or Home opened): read what is missing or stale. */
     update() { if (isVisible()) void feed.read(); },
+    /** One forced round; resolves when it ends. */
+    reload() { return feed.read({ force: true }); },
     show() {
       document.addEventListener("visibilitychange", onVisibility);
       globalThis.window?.addEventListener?.("focus", onFocus);
