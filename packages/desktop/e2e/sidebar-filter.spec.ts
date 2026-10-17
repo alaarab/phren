@@ -79,7 +79,7 @@ test("pinned rows obey the filter, and the filter is not remembered across a rel
 test("the shortcut focuses the filter from anywhere and is listed in Settings â€º Keys", async ({ page }) => {
   await page.goto(h!.url, { waitUntil: "domcontentloaded" });
   await page.locator(".section-pill", { hasText: "Home" }).click();
-  await page.keyboard.press("Control+Shift+E");
+  await page.keyboard.press("ControlOrMeta+Shift+E");
   await expect(filter(page)).toBeFocused();
   await page.keyboard.type("docs");
   await expect(titles(page)).toHaveText(["Review the docs"]);
@@ -87,4 +87,14 @@ test("the shortcut focuses the filter from anywhere and is listed in Settings â€
   await page.locator('.section-pill[data-section="settings"]').click();
   await page.locator(".settings-tab", { hasText: "Keys" }).click();
   await expect(page.getByText("Filter the sessions sidebar")).toBeVisible();
+});
+
+test("in a window under 1440 px the shortcut expands the icon strip to reach the filter", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openAgents(page);
+  await expect(page.locator("#sidebar")).toHaveClass(/compact/);
+  await expect(filter(page)).toBeHidden();
+  await page.keyboard.press("ControlOrMeta+Shift+E");
+  await expect(page.locator("#sidebar")).not.toHaveClass(/compact/);
+  await expect(filter(page)).toBeFocused();
 });

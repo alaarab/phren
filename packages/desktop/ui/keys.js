@@ -259,12 +259,14 @@ function run(action, arg) {
 /** filter_sessions: reveal the sidebar and put the caret in its filter box. */
 function focusFilter() {
   document.body.classList.remove("sidebar-hidden");
-  let input = document.querySelector("#sidebar .sb-filter-input");
-  if (!input || input.offsetParent === null) {
+  const find = () => document.querySelector("#sidebar .sb-filter-input");
+  if (!find() || find().offsetParent === null) {
     showSection("agents");
-    input = document.querySelector("#sidebar .sb-filter-input");
+    // Below 1440 px the sidebar is the icon strip; the filter needs it expanded.
+    if (document.querySelector("#sidebar.compact")) document.querySelector(".doc-sidebar-toggle")?.click();
   }
-  if (!input) return flash("Open the Agents section to filter sessions.");
+  const input = find();
+  if (!input || input.offsetParent === null) return flash("Open the Agents section to filter sessions.");
   input.focus();
   input.select();
 }
