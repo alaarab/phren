@@ -69,8 +69,10 @@ export function createDetail(ctx) {
     const work = el("section", "pj-block");
     work.append(el("h2", "section-label", "Open work"));
     const chips = el("div", "pj-chips");
-    chips.append(el("span", "pj-chip", `${project.counts?.findings ?? 0} findings`));
-    chips.append(el("span", "pj-chip", `${project.counts?.tasks ?? 0} open tasks`));
+    const findings = project.counts?.findings ?? 0;
+    const tasks = project.counts?.tasks ?? 0;
+    chips.append(el("span", "pj-chip", `${findings} finding${findings === 1 ? "" : "s"}`));
+    chips.append(el("span", "pj-chip", `${tasks} open task${tasks === 1 ? "" : "s"}`));
     work.append(chips);
     scope.append(work);
 
