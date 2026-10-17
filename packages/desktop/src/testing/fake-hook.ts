@@ -50,6 +50,8 @@ export interface FakeHook {
   calls: FakeHookCall[];
   /** How many transcript backlogs have been sent (after `transcriptDelayMs`), to wait on a delayed stream. */
   backlogsSent(): number;
+  /** Drop every open transcript and status socket and refuse new ones (`true`), or accept them again (`false`); a lost computer link. */
+  holdStreams(on: boolean): void;
   /** Push an overview frame to every open overview socket. */
   pushOverview(frame: unknown): void;
   /** Push a transcript frame; `target` a session id (or `{session}`), else all. */
@@ -358,6 +360,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   const overviewSockets = new Set<WebSocket>();
   const transcriptSockets = new Set<{ ws: WebSocket; session: string }>();
   const statusSockets = new Set<WebSocket>();
+  let streamsHeld = false;
   const overviewFrames = options.overviewFrames ?? [defaultOverview(), { type: "resources", resources: defaultResources() }];
   const transcriptFrames = options.transcriptFrames ?? defaultTranscript();
   let backlogs = 0;
@@ -559,6 +562,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url ?? "/", "http://phren.local");
     calls.push({ method: "GET", path: req.url ?? "/", body: undefined, headers: req.headers });
+    if (streamsHeld && (url.pathname === "/v1/transcripts" || url.pathname === "/v1/status")) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => {
       const session = nextSession(url.pathname, url.search);
       if (session) {
@@ -618,6 +622,12 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     socketPath,
     calls,
     backlogsSent: () => backlogs,
+    holdStreams(on: boolean): void {
+      streamsHeld = on;
+      if (!on) return;
+      for (const ws of statusSockets) ws.terminate();
+      for (const entry of transcriptSockets) entry.ws.terminate();
+    },
     pushOverview(frame: unknown): void {
       for (const ws of overviewSockets) send(ws, frame);
     },

@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- Chats say when they've lost their computer and are reconnecting, with Retry when it takes a while.
 - Settings › Computers shows whether each computer can reach its linked computers.
 - Settings shows each computer's standing approval rules.
 - **Sync now** asks a computer to pull its Phren store and refreshes Memory when the store changes.

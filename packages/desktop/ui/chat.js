@@ -17,6 +17,7 @@ import { hookPost, hookGet } from "./api.js";
 import { createTimelineView } from "./chat/timeline-view.js";
 import { createFindBar } from "./chat/find-bar.js";
 import { chatToMarkdown, downloadText, exportFilename, setExportPane, clearExportPane } from "./chat/markdown-export.js";
+import { createLinkWatch, createLinkStrip } from "./chat/link-watch.js";
 import { createComposer, contextPercent } from "./chat/composer.js";
 import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
 import { startDictation, createTalkMode, toast } from "./chat/talk.js";
@@ -189,6 +190,7 @@ export function openChat(el, computerName, child, opts = {}) {
     talk.feedReply(replies.map((m) => m.text).join("\n\n"));
   }
   const quotaHost = node("div", "chat-quota-host");
+  const linkStripHost = node("div", "chat-link-host");
   const composerHost = node("div", "chat-composer");
   composerHost.append(composer.el);
 
@@ -219,7 +221,7 @@ export function openChat(el, computerName, child, opts = {}) {
   });
 
   const error = node("div", "chat-error");
-  el.append(header, handoffs, notice, timelineEl, interactions, quotaHost, composerHost, error);
+  el.append(header, handoffs, notice, timelineEl, interactions, linkStripHost, quotaHost, composerHost, error);
 
   // ⌘F / Ctrl+F inside this pane searches its conversation (chat/find-bar.js).
   const find = createFindBar({
@@ -969,16 +971,29 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   // ---- sockets, reconnecting with backoff ----
-  function connectSocket(path, onFrame, onOpen) {
-    let backoff = 500, timer = null, ws = null, stopped = false;
+  // `link` ({ up, down }) reports whether the socket is really live: the daemon accepts the browser's
+  // socket before it reaches the Hook, so "open" alone is not proof. Up = first frame, or open for 1.5 s.
+  function connectSocket(path, onFrame, onOpen, link) {
+    let backoff = 500, timer = null, ws = null, stopped = false, settle = null;
+    const clearSettle = () => { if (settle) { clearTimeout(settle); settle = null; } };
     const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/hosts/${encodeURIComponent(computerName)}${path}`;
     const open = () => {
       if (stopped) return;
       ws = new WebSocket(url);
-      ws.onopen = () => { backoff = 500; if (onOpen) onOpen(); };
-      ws.onmessage = (event) => { let frame; try { frame = JSON.parse(event.data); } catch { return; } onFrame(frame); };
+      ws.onopen = () => {
+        backoff = 500;
+        if (onOpen) onOpen();
+        clearSettle();
+        if (link) settle = setTimeout(() => { settle = null; link.up(); }, 1500);
+      };
+      ws.onmessage = (event) => {
+        if (link) { clearSettle(); link.up(); }
+        let frame; try { frame = JSON.parse(event.data); } catch { return; } onFrame(frame);
+      };
       ws.onclose = () => {
+        clearSettle();
         if (stopped) return;
+        if (link) link.down();
         timer = setTimeout(open, backoff);
         backoff = Math.min(backoff * 2, 5000);
       };
@@ -986,18 +1001,29 @@ export function openChat(el, computerName, child, opts = {}) {
     };
     open();
     return {
-      close() { stopped = true; if (timer) clearTimeout(timer); try { ws && ws.close(); } catch { /* already closing */ } },
+      /** Reopen now with the backoff reset (the strip's Retry). */
+      retry() {
+        if (stopped) return;
+        backoff = 500;
+        if (ws && ws.readyState <= 1 && !timer) return;
+        if (timer) { clearTimeout(timer); timer = null; }
+        open();
+      },
+      close() { stopped = true; clearSettle(); if (timer) clearTimeout(timer); try { ws && ws.close(); } catch { /* already closing */ } },
     };
   }
 
+  const linkStrip = createLinkStrip({ computer: computerName, onRetry: () => { transcriptSocket.retry(); statusSocket.retry(); } });
+  linkStripHost.append(linkStrip.el);
+  const linkWatch = createLinkWatch({ onView: (view) => linkStrip.update(view) });
   const transcriptSocket = connectSocket(`/v1/transcripts?${qs}&sideAnswers=1&deliveries=1`, onTranscript, () => {
     preview = null;
     maybeFetchSubagents(true);
-  });
+  }, { up: () => linkWatch.up("transcript"), down: () => linkWatch.down("transcript") });
   const statusSocket = connectSocket(`/v1/status?${qs}`, onStatus, () => {
     maybeFetchSubagents(true);
     maybeFetchSudo(true);
-  });
+  }, { up: () => linkWatch.up("status"), down: () => linkWatch.down("status") });
 
   composer.setCounts({ agents: 0, workers: 0 });
   // A snapshot read ahead while the pointer rested on the row: draw it now;
@@ -1033,6 +1059,7 @@ export function openChat(el, computerName, child, opts = {}) {
       dictation?.stop(); talk?.stop();
       transcriptSocket.close();
       statusSocket.close();
+      linkWatch.destroy();
       closeWork();
       knows?.close?.();
       rememberSelection.destroy?.();
