@@ -10,6 +10,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 - **Copy session id** in a chat's menu copies the agent's own session id, for resuming it elsewhere.
 - Home shows when it last loaded ("Updated 12s ago") and has a **Refresh** button that reads everything again; a failed refresh keeps what's shown and says so.
+- **Copy a message**: hover a prompt or an agent reply in a chat and press Copy to copy just that message.
 
 ### Fixed
 
