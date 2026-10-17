@@ -14,7 +14,7 @@ import { buildNotifications } from "./settings/notifications.js";
 import { buildDiagnostics } from "./settings/diagnostics.js";
 import { buildAbout } from "./settings/about.js";
 
-export { badgeEnabled, ciNotifyEnabled, notifyEnabled, prNotifyEnabled, recentSwitchEnabled, stallNotifyEnabled } from "./settings/prefs.js";
+export { badgeEnabled, ciNotifyEnabled, notifyEnabled, prNotifyEnabled, recentSwitchEnabled, stallNotifyEnabled, titleChatEnabled } from "./settings/prefs.js";
 
 // The "Pause all agents" palette command is app-wide: register it once, at
 // import, so it is there before the Computers page is ever opened.

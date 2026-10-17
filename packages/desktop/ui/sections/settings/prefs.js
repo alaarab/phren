@@ -7,6 +7,7 @@ export const CI_KEY = "phren.desktop.notify-ci";
 export const PR_KEY = "phren.desktop.notify-pr";
 export const STALL_KEY = "phren.desktop.notify-stalled";
 export const RECENT_KEY = "phren.desktop.recent-switch";
+export const TITLE_CHAT_KEY = "phren.desktop.title-chat";
 export const SIZES = [12, 13, 14];
 
 // ------------------------------------------------------------ preferences
@@ -24,6 +25,7 @@ export function stallNotifyEnabled() { return readFlag(STALL_KEY); }
 export function badgeEnabled() { return readFlag(BADGE_KEY); }
 export function ciNotifyEnabled() { return readFlag(CI_KEY); }
 export function prNotifyEnabled() { return readFlag(PR_KEY); }
+export function titleChatEnabled() { return readFlag(TITLE_CHAT_KEY); }
 export function recentSwitchEnabled() { return readFlag(RECENT_KEY); }
 
 export function readTranscriptSize() {
