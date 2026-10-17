@@ -493,7 +493,12 @@ function snoozeMark(desc) {
   return mark;
 }
 
-/** "Draft" on a chat with unsent text in its composer; the active row hides it in CSS (its box is on screen). */
+/** Row keys with a draft; the session rows are only built when some draft exists. */
+function draftedRows(merged) {
+  return drafts.keys().size ? draftRowKeys(drafts.keys(), sessions(merged, { includeOffline: true })) : new Set();
+}
+
+/** "Draft" on a chat with unsent text in its composer. The set changes only when a draft goes empty or non-empty, so typing does not redraw rows. */
 function draftMark(sb, computer, child) {
   if (!sb.drafted?.has(keyOf(computer, child))) return null;
   const mark = el("span", "sb-draft", "Draft");
@@ -846,7 +851,7 @@ export function renderSidebar(element, merged, handlers = {}) {
   sb.rows = readRows();
   sb.pinned = readPinned();
   sb.seen = readSeen();
-  sb.drafted = draftRowKeys(drafts.keys(), sessions(merged, { includeOffline: true }));
+  sb.drafted = draftedRows(merged);
   element.classList.add("sb-root");
   element.classList.toggle("rows-compact", sb.rows === "compact");
   if (!sb.rowsListener) {
@@ -854,7 +859,7 @@ export function renderSidebar(element, merged, handlers = {}) {
     document.addEventListener("phren:sidebar-rows", sb.rowsListener);
   }
 
-  if (!sb.draftsListener) sb.draftsListener = drafts.subscribe(() => { sb.drafted = draftRowKeys(drafts.keys(), sessions(sb.merged, { includeOffline: true })); requestRender(sb); });
+  if (!sb.draftsListener) sb.draftsListener = drafts.subscribe(() => { sb.drafted = draftedRows(sb.merged); requestRender(sb); });
 
   if (!element.querySelector(":scope > .sb-filter")) element.append(filterBox(sb));
   if (!element.querySelector(":scope > .sb-strip-filter")) element.append(stripFilterButton(sb));

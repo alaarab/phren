@@ -7,12 +7,21 @@ import { draftKey } from "../chat/composer.js";
 const PREFIX = "phren.composer.draft.";
 export const DRAFT_EVENT = "phren:draft";
 
-/** The row keys (`<computer>/<child id>`) whose scoped draft key is in `storageKeys`; rows are `{ computer, child }`. */
+/**
+ * The row keys (`<computer>/<child id>`) whose draft is in `storageKeys`; rows are `{ computer, child }`.
+ * The composer keys a draft by the target it captured when the tab opened, and `target.session` can
+ * appear or change afterwards, so a row matches on its pane identity (source, server, pane) alone:
+ * the key without the session, or that key followed by ":<session>".
+ */
 export function draftRowKeys(storageKeys, rows) {
   const out = new Set();
   if (!storageKeys.size) return out;
+  const keys = [...storageKeys];
   for (const { computer, child } of rows) {
-    if (child?.target && storageKeys.has(draftKey(child.target, computer))) out.add(`${computer}/${child.id}`);
+    if (!child?.target) continue;
+    const { source, server, pane } = child.target;
+    const base = draftKey({ source, server, pane }, computer);
+    if (keys.some((key) => key === base || key.startsWith(`${base}:`))) out.add(`${computer}/${child.id}`);
   }
   return out;
 }
@@ -65,6 +74,7 @@ export function createDrafts({ storage = defaultStorage() } = {}) {
   if (typeof window !== "undefined" && window.addEventListener) {
     window.addEventListener(DRAFT_EVENT, (event) => api.note(String(event.detail?.key ?? ""), event.detail?.value));
     window.addEventListener("storage", (event) => {
+      if (event.storageArea && storage && event.storageArea !== storage) return;
       if (event.key === null) api.reload();
       else if (event.key.startsWith(PREFIX)) api.note(event.key, event.newValue);
     });

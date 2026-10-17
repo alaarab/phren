@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // @ts-expect-error plain ESM UI module
 import { createDrafts, draftRowKeys, isDraftText } from "../ui/shell/drafts.js";
 // @ts-expect-error plain ESM UI module
@@ -16,6 +16,24 @@ describe("draftRowKeys", () => {
     const keys = new Set([draftKey(target("1"), "Desk"), draftKey(target("3"), "Desk")]);
     const rows = [row("Desk", "a", "1"), row("Desk", "b", "2"), row("Laptop", "c", "3"), row("Desk", "d", "3")];
     expect([...draftRowKeys(keys, rows)]).toEqual(["Desk/a", "Desk/d"]);
+  });
+
+  it("matches when the tab's captured target and the row's live target differ only in a late session", () => {
+    const captured = { source: "claude", server: "default", pane: "7" }; // composer key made before a session existed
+    const keys = new Set([draftKey(captured, "Desk")]);
+    const live = { computer: "Desk", child: { id: "a", target: { ...captured, session: "s-late" } } };
+    expect([...draftRowKeys(keys, [live])]).toEqual(["Desk/a"]);
+    // and the other way: a key made with an older session still marks the row once the session changes
+    const older = new Set([draftKey({ ...captured, session: "s-old" }, "Desk")]);
+    expect([...draftRowKeys(older, [live])]).toEqual(["Desk/a"]);
+    // pane 7 must not claim pane 70's draft
+    const other = new Set([draftKey({ ...captured, pane: "70" }, "Desk")]);
+    expect(draftRowKeys(other, [live]).size).toBe(0);
+  });
+
+  it("maps a conductor row like any other (it is an overview row with a target)", () => {
+    const conductor = { computer: "Desk", child: { id: "cond", role: "conductor", target: { source: "claude", server: "default", pane: "2", session: "c1" } } };
+    expect([...draftRowKeys(new Set([draftKey(conductor.child.target, "Desk")]), [conductor])]).toEqual(["Desk/cond"]);
   });
 
   it("never matches the unscoped legacy key or a row without a target", () => {
@@ -61,5 +79,39 @@ describe("createDrafts", () => {
     expect(isDraftText(" x ")).toBe(true);
     expect(isDraftText(" \n")).toBe(false);
     expect(isDraftText(null)).toBe(false);
+  });
+});
+
+describe("window listeners", () => {
+  const key = draftKey(target("1"), "Desk");
+  function withWindow(run: (fire: (name: string, event: object) => void, storage: ReturnType<typeof memory>) => void) {
+    const handlers = new Map<string, (e: object) => void>();
+    vi.stubGlobal("window", { addEventListener: (name: string, fn: (e: object) => void) => handlers.set(name, fn) });
+    try { run((name, event) => handlers.get(name)!(event), memory()); } finally { vi.unstubAllGlobals(); }
+  }
+
+  it("follows phren:draft from the composer", () => {
+    withWindow((fire, mem) => {
+      const drafts = createDrafts({ storage: mem.storage });
+      fire("phren:draft", { detail: { key, value: "typing" } });
+      expect(drafts.keys().has(key)).toBe(true);
+      fire("phren:draft", { detail: { key, value: "" } });
+      expect(drafts.keys().has(key)).toBe(false);
+    });
+  });
+
+  it("follows storage events from this storage, rescans on a null key and ignores other areas", () => {
+    withWindow((fire, mem) => {
+      const drafts = createDrafts({ storage: mem.storage });
+      fire("storage", { key, newValue: "from elsewhere", storageArea: mem.storage });
+      expect(drafts.keys().has(key)).toBe(true);
+      fire("storage", { key, newValue: null, storageArea: mem.storage }); // removed in another window
+      expect(drafts.keys().has(key)).toBe(false);
+      fire("storage", { key, newValue: "session storage", storageArea: {} });
+      expect(drafts.keys().has(key)).toBe(false);
+      mem.data.set(key, "cleared storage then rewritten");
+      fire("storage", { key: null, newValue: null, storageArea: mem.storage }); // clear() rescans
+      expect(drafts.keys().has(key)).toBe(true);
+    });
   });
 });
