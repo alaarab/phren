@@ -494,6 +494,12 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     "POST /v1/git/status": () => ({ status: 200, json: defaultGitStatus() }),
     "POST /v1/diff": () => ({ status: 200, json: defaultDiff() }),
     "POST /v1/prompt": () => ({ status: 200, json: { ok: true } }),
+    // The Hook queues the pull and answers at once; it names the store by storeId, repository and branch.
+    "POST /v1/store/pull-now": (_req, body) => {
+      const b = body as { storeId?: unknown; repository?: unknown; branch?: unknown } | undefined;
+      return b && typeof b.storeId === "string" && typeof b.repository === "string" && typeof b.branch === "string"
+        ? { status: 200, json: { ok: true } } : { status: 400, json: { error: "Invalid pull request." } };
+    },
   };
 
   const handlers: Record<string, FakeHookHandler> = { ...defaults, ...options.routes };

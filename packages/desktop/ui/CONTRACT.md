@@ -708,6 +708,20 @@ combined with the type chips and search, cleared on project change); it uses the
 loaded findings and makes no request. Covered by `src/ui-citation-freshness.test.ts` and the desktop
 Memory browser smoke test.
 
+Memory's rail has a **Sync now** button (`store-sync.js`, `createSyncControl`;
+"Sync primary store" when the computer has several stores; disabled with the
+title "Computer offline" when none is online). It reads `GET /v1/tasks/stores`
+for the primary store's `{storeId, repository, branch}` and POSTs
+`/v1/store/pull-now`, which only queues the pull and reports no outcome. The
+line reads "Sync requested", then the desktop reads `GET /v1/store/head` at 2, 4,
+8, 16 and 15 s (a failed read is skipped): a changed head says "Memory updated"
+and reloads Memory; otherwise "Sync requested — no new changes so far". Only the
+POST failing shows an error. Repeat clicks wait 10 s. **Results are approximate
+until the Hook reports pull outcomes**: the head is a working-tree snapshot, so a
+local edit also counts, and a late pull is missed; the desktop never says "Up to
+date" or counts changes. Tested in `src/ui-store-sync.test.ts` and
+`e2e/sync-now.spec.ts`.
+
 Home’s Computers block reads `computer.resources.heavy` from the shared overview
 store, as Settings › Computers does, with no extra Hook requests. Jobs sort by
 CPU descending, show at most three plus “+N more”, and hide when empty or the
