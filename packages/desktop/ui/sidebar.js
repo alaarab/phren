@@ -6,6 +6,7 @@ import { renderHandoffRow } from "./shell/handoff-view.js";
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
 import { backgroundLabel, stallLabel, stalledMinutes } from "./shell/stalls.js";
 import { openMoveSheet } from "./shell/move.js";
+import { openSwitchAccountSheet } from "./shell/switch-account.js";
 import { showSection } from "./shell/sections.js";
 import { prefetchTranscript, cancelPrefetch } from "./shell/transcript-prefetch.js";
 import { carriesFiles, createRowDrop, leftRow } from "./shell/row-drop.js";
@@ -683,13 +684,15 @@ function rowMenu(sb, desc) {
     togglePin(sb, desc);
     requestRender(sb);
   });
-  // Hand the session to another harness or Claude account in the same pane (Hook sessionMove).
-  const move = el("button", null, "Continue in…");
+  // A Claude chat switches account (other agents and computers are behind it,
+  // in the sheet); any other chat continues in another harness (Hook sessionMove).
+  const claude = (desc.child.target?.source ?? desc.child.agent) === "claude";
+  const move = el("button", null, claude ? "Switch account…" : "Continue in…");
   move.type = "button";
   move.addEventListener("click", (event) => {
     event.stopPropagation();
     hideMenus();
-    void openMoveSheet({ computer: desc.computer, child: desc.child });
+    void (claude ? openSwitchAccountSheet : openMoveSheet)({ computer: desc.computer, child: desc.child });
   });
   menu.append(openTerminal, pin, rename, move, input);
   return menu;

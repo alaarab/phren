@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const hooks = vi.hoisted(() => ({
-  get: vi.fn(), move: vi.fn(),
+  get: vi.fn(), move: vi.fn(), switchAccount: vi.fn(), caps: { moveNewChat: true } as Record<string, boolean>,
   usage: (_value: unknown) => {}, overview: () => {}, section: () => {},
 }));
 vi.mock("../ui/api.js", () => ({ hookGet: hooks.get }));
-vi.mock("../ui/shell/store.js", () => ({ store: { capabilities: async () => ({ moveNewChat: true }), can: () => true, subscribe: (fn: () => void) => { hooks.overview = fn; return () => {}; } } }));
+vi.mock("../ui/shell/store.js", () => ({ store: { capabilities: async () => hooks.caps, can: () => true, subscribe: (fn: () => void) => { hooks.overview = fn; return () => {}; } } }));
 vi.mock("../ui/shell/sections.js", () => ({ onSectionChange: (fn: () => void) => { hooks.section = fn; } }));
 vi.mock("../ui/shell/usage-rings.js", async (original) => ({ ...await original<object>(), followUsage: (fn: typeof hooks.usage) => { hooks.usage = fn; return () => {}; } }));
 vi.mock("../ui/shell/move.js", async (original) => ({ ...await original<object>(), openMoveSheet: hooks.move }));
+vi.mock("../ui/shell/switch-account.js", () => ({ openSwitchAccountSheet: hooks.switchAccount }));
 
 class Node {
   children: Node[] = [];
@@ -27,7 +28,7 @@ class Node {
   click() { if (!this.disabled) this.listeners.get("click")?.(); }
 }
 
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); hooks.get.mockReset(); hooks.move.mockReset(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); hooks.get.mockReset(); hooks.move.mockReset(); hooks.switchAccount.mockReset(); hooks.caps = { moveNewChat: true }; });
 
 async function setup(pending = false, saved = { settings: { on: true, threshold: 90 }, suppressed: [] as string[], seen: [] as string[] }) {
   vi.resetModules();
@@ -68,8 +69,17 @@ describe("quota sheet lifecycle", () => {
     expect(sheet.find("Claude · Personal · 90% left of 5-hour · reset time unknown")).toBeDefined();
     expect(sheet.find("Codex · Exhausted of 5-hour · reset time unknown")).toBeDefined();
     sheet.find("Switch")!.click();
-    expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ to: { harness: "claude", account: "default" } }));
+    await vi.waitFor(() => expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ to: { harness: "claude", account: "default" } })));
     expect(ui.sheets()).toHaveLength(0);
+  });
+
+  it("opens Switch account for a Claude chat when its Hook resumes under another account", async () => {
+    hooks.caps = { moveNewChat: true, moveResume: true };
+    const ui = await setup();
+    await vi.advanceTimersByTimeAsync(0);
+    ui.sheets()[0].find("Switch")!.click();
+    await vi.waitFor(() => expect(hooks.switchAccount).toHaveBeenCalledWith(expect.objectContaining({ computer: expect.any(String), child: expect.objectContaining({ target: expect.objectContaining({ source: "claude" }) }) })));
+    expect(hooks.move).not.toHaveBeenCalled();
   });
 
   it("shows the weekly warning for an unaccounted conductor on a single-login computer", async () => {
@@ -86,7 +96,7 @@ describe("quota sheet lifecycle", () => {
     expect(ui.sheets()[0]?.find("Claude is at 96% of its weekly limit")).toBeDefined();
     expect(ui.sheets()[0]?.find("Claude · default · Usage unknown · reset time unknown")).toBeUndefined();
     ui.sheets()[0].find("Switch")!.click();
-    expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ child: expect.objectContaining({ role: "conductor" }) }));
+    await vi.waitFor(() => expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ child: expect.objectContaining({ role: "conductor" }) })));
   });
 
   it("dismisses until exhaustion, then persists the chat opt-out across watcher recreation", async () => {
@@ -130,7 +140,7 @@ describe("quota sheet lifecycle", () => {
     hooks.usage(ui.usage);
     await vi.advanceTimersByTimeAsync(0);
     button.click();
-    expect(hooks.move).toHaveBeenLastCalledWith(expect.objectContaining({ to: { harness: "codex" } }));
+    await vi.waitFor(() => expect(hooks.move).toHaveBeenLastCalledWith(expect.objectContaining({ to: { harness: "codex" } })));
   });
 
   it("opens Continue in with no preselection and an explanation when no destination has room", async () => {
@@ -140,7 +150,7 @@ describe("quota sheet lifecycle", () => {
     hooks.usage(ui.usage);
     await vi.advanceTimersByTimeAsync(0);
     ui.sheets()[0].find("Switch")!.click();
-    expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ to: undefined, selectDefault: false, notice: "No other account or harness has known room. Choose where to continue." }));
+    await vi.waitFor(() => expect(hooks.move).toHaveBeenCalledWith(expect.objectContaining({ to: undefined, selectDefault: false, notice: "No other account or harness has known room. Choose where to continue." })));
   });
 
   it("prioritises weekly exhaustion over an open 5-hour threshold warning", async () => {

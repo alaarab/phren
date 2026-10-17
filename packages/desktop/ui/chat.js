@@ -1,5 +1,6 @@
 import { el as node } from "./dom.js";
 import { agentLabel } from "./harness.js";
+import { openSwitchAccountSheet } from "./shell/switch-account.js";
 import { renderHandoffLinks } from "./shell/handoff-view.js";
 import { quotaInteractionPending } from "./shell/quota-warn.js";
 // The chat pane: the phone's chat on the desktop. Plain browser ES module.
@@ -103,6 +104,12 @@ export function openChat(el, computerName, child, opts = {}) {
     item.addEventListener("click", () => { closeMenu(); run(); });
     return item;
   };
+  // A Claude chat's first item: the same conversation on another Claude account (shell/switch-account.js).
+  if (source === "claude") {
+    const switchItem = menuItem("Switch account\u2026", () => void openSwitchAccountSheet({ computer: computerName, child, returnFocus: more }));
+    switchItem.dataset.action = "switch-account";
+    menu.append(switchItem);
+  }
   menu.append(
     menuItem("Rename", () => startRename()),
     menuItem("Copy as Markdown", () => copyMarkdown()),
