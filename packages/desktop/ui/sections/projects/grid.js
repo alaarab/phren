@@ -56,8 +56,8 @@ export function createGrid(ctx) {
     const summary = el("div", "pj-card-summary", project.summaryLine || (project.hydrated ? "No summary yet." : "\u00a0"));
     card.append(summary);
     const stats = el("div", "pj-card-stats");
-    if (typeof project.counts?.findings === "number") stats.append(el("span", "pj-stat", `${project.counts.findings} findings`));
-    if (typeof project.counts?.tasks === "number") stats.append(el("span", "pj-stat", `${project.counts.tasks} open tasks`));
+    if (typeof project.counts?.findings === "number") stats.append(el("span", "pj-stat", `${project.counts.findings} finding${project.counts.findings === 1 ? "" : "s"}`));
+    if (typeof project.counts?.tasks === "number") stats.append(el("span", "pj-stat", `${project.counts.tasks} open task${project.counts.tasks === 1 ? "" : "s"}`));
     if (sessions.length) stats.append(el("span", "pj-stat", `${sessions.length} session${sessions.length === 1 ? "" : "s"}`));
     const last = sessions.map((row) => row.child.lastChangedAt).filter(Boolean).sort().pop() || project.lastSeen;
     if (last) stats.append(el("span", "pj-stat", `active ${age(last)}`));

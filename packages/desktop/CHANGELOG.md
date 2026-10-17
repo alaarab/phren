@@ -11,6 +11,10 @@ GitHub release notes, and the app shows them when that version is available.
 - **Copy session id** in a chat's menu copies the agent's own session id, for resuming it elsewhere.
 - Home shows when it last loaded ("Updated 12s ago") and has a **Refresh** button that reads everything again; a failed refresh keeps what's shown and says so.
 
+### Fixed
+
+- Project cards say "1 open task" and "1 finding" instead of "1 open tasks".
+
 ## [0.1.12] - 2026-10-17
 
 ### New
