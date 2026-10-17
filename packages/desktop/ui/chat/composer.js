@@ -20,6 +20,7 @@ import { agentLabel } from "../harness.js";
 
 import { hookPost, hookGet } from "../api.js";
 import { createRecall } from "./recall.js";
+import { createPromptHistory, historyKey } from "./prompt-history.js";
 
 /** Provider display name. */
 export function providerLabel(provider) {
@@ -353,6 +354,12 @@ export function createComposer({ computer, target, provider, branch, project, on
     if (saved) input.value = saved;
   } catch { /* storage unavailable */ }
 
+  // ---- prompt history (ArrowUp in an empty draft) ----
+  const historyStore = historyKey(draftKey(target, computer));
+  let sent = [];
+  try { const raw = JSON.parse(localStorage.getItem(historyStore) ?? "[]"); if (Array.isArray(raw)) sent = raw.filter((t) => typeof t === "string"); } catch { /* storage unavailable */ }
+  const promptHistory = createPromptHistory(sent);
+
   function saveDraft() {
     try { localStorage.setItem(draftKey(target, computer), input.value); draftError.textContent = ""; }
     catch { draftError.textContent = "Couldn't save this draft on this computer."; }
@@ -535,6 +542,16 @@ export function createComposer({ computer, target, provider, branch, project, on
       updateSlash();
       return;
     }
+    if ((event.key === "ArrowUp" || event.key === "ArrowDown") && slashEl.hidden && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey && !event.isComposing) {
+      const recalled = event.key === "ArrowUp" ? promptHistory.older(input.value, input.selectionStart) : promptHistory.newer(input.value, input.selectionStart);
+      if (recalled !== null) {
+        event.preventDefault();
+        input.value = recalled;
+        onInput();
+        input.setSelectionRange(recalled.length, recalled.length);
+      }
+      return;
+    }
     if (event.key !== "Enter") return;
     if (event.shiftKey) return; // newline
     const sendShortcut = event.metaKey || event.ctrlKey;
@@ -565,6 +582,8 @@ export function createComposer({ computer, target, provider, branch, project, on
     const text = input.value;
     const sending = attachments.slice();
     const id = crypto.randomUUID();
+    promptHistory.record(text);
+    try { localStorage.setItem(historyStore, JSON.stringify(promptHistory.list)); } catch { /* storage unavailable */ }
     input.value = "";
     attachments = [];
     slashEl.hidden = true;
