@@ -52,6 +52,8 @@ export interface FakeHook {
   backlogsSent(): number;
   /** Drop every open transcript and status socket and refuse new ones (`true`), or accept them again (`false`); a lost computer link. */
   holdStreams(on: boolean): void;
+  /** Drop every open stream and, until `null`, accept new transcript and status sockets but send nothing and close each after `ms` (an unreachable Hook behind a live daemon). */
+  flapStreams(ms: number | null): void;
   /** Push an overview frame to every open overview socket. */
   pushOverview(frame: unknown): void;
   /** Push a transcript frame; `target` a session id (or `{session}`), else all. */
@@ -361,6 +363,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   const transcriptSockets = new Set<{ ws: WebSocket; session: string }>();
   const statusSockets = new Set<WebSocket>();
   let streamsHeld = false;
+  let streamFlapMs: number | null = null;
   const overviewFrames = options.overviewFrames ?? [defaultOverview(), { type: "resources", resources: defaultResources() }];
   const transcriptFrames = options.transcriptFrames ?? defaultTranscript();
   let backlogs = 0;
@@ -564,6 +567,12 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     calls.push({ method: "GET", path: req.url ?? "/", body: undefined, headers: req.headers });
     if (streamsHeld && (url.pathname === "/v1/transcripts" || url.pathname === "/v1/status")) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => {
+      if (streamFlapMs !== null && (url.pathname === "/v1/transcripts" || url.pathname === "/v1/status")) {
+        // Accepted, silent, then closed: the daemon's browser socket when the Hook behind it is unreachable.
+        const timer = setTimeout(() => ws.close(), streamFlapMs);
+        ws.once("close", () => clearTimeout(timer));
+        return;
+      }
       const session = nextSession(url.pathname, url.search);
       if (session) {
         // Replay the Hook's frames in order, keeping their spacing (capped at 2 s).
@@ -622,6 +631,12 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     socketPath,
     calls,
     backlogsSent: () => backlogs,
+    flapStreams(ms: number | null): void {
+      streamFlapMs = ms;
+      if (ms === null) return;
+      for (const ws of statusSockets) ws.terminate();
+      for (const entry of transcriptSockets) entry.ws.terminate();
+    },
     holdStreams(on: boolean): void {
       streamsHeld = on;
       if (!on) return;

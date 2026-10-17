@@ -972,44 +972,69 @@ export function openChat(el, computerName, child, opts = {}) {
 
   // ---- sockets, reconnecting with backoff ----
   // `link` ({ up, down }) reports whether the socket is really live: the daemon accepts the browser's
-  // socket before it reaches the Hook, so "open" alone is not proof. Up = first frame, or open for 1.5 s.
+  // socket before it reaches the Hook, so "open" alone is not proof. Up = first frame, or open for 5 s.
   function connectSocket(path, onFrame, onOpen, link) {
-    let backoff = 500, timer = null, ws = null, stopped = false, settle = null;
+    const SETTLE_MS = 5000;
+    let backoff = 500, timer = null, ws = null, stopped = false, settle = null, live = false;
     const clearSettle = () => { if (settle) { clearTimeout(settle); settle = null; } };
     const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/hosts/${encodeURIComponent(computerName)}${path}`;
+    // Drop a socket: its handlers go first, so a late event from it cannot touch the current one.
+    const detach = (sock) => {
+      if (!sock) return;
+      sock.onopen = sock.onmessage = sock.onclose = sock.onerror = null;
+      try { sock.close(); } catch { /* already closing */ }
+    };
+    // Live = a first frame, or still open after the settle window (the status socket may be silent).
+    // Only then does the backoff reset and the link count as up: the daemon accepts the browser's
+    // socket before it reaches the Hook and closes it ~2 s later when the Hook is unreachable.
+    const markLive = (sock) => {
+      if (sock !== ws) return;
+      clearSettle();
+      if (live) return;
+      live = true;
+      backoff = 500;
+      if (link) link.up();
+    };
     const open = () => {
       if (stopped) return;
-      ws = new WebSocket(url);
-      ws.onopen = () => {
-        backoff = 500;
+      if (timer) { clearTimeout(timer); timer = null; }
+      clearSettle();
+      detach(ws);
+      live = false;
+      const sock = new WebSocket(url);
+      ws = sock;
+      sock.onopen = () => {
+        if (sock !== ws) return;
         if (onOpen) onOpen();
         clearSettle();
-        if (link) settle = setTimeout(() => { settle = null; link.up(); }, 1500);
+        settle = setTimeout(() => { settle = null; markLive(sock); }, SETTLE_MS);
       };
-      ws.onmessage = (event) => {
-        if (link) { clearSettle(); link.up(); }
+      sock.onmessage = (event) => {
+        if (sock !== ws) return;
+        markLive(sock);
         let frame; try { frame = JSON.parse(event.data); } catch { return; } onFrame(frame);
       };
-      ws.onclose = () => {
+      sock.onclose = () => {
+        if (sock !== ws) return;
         clearSettle();
         if (stopped) return;
+        live = false;
         if (link) link.down();
+        if (timer) clearTimeout(timer);
         timer = setTimeout(open, backoff);
         backoff = Math.min(backoff * 2, 5000);
       };
-      ws.onerror = () => { try { ws.close(); } catch { /* already closing */ } };
+      sock.onerror = () => { if (sock === ws) { try { sock.close(); } catch { /* already closing */ } } };
     };
     open();
     return {
-      /** Reopen now with the backoff reset (the strip's Retry). */
+      /** Replace the socket now with the backoff reset (the strip's Retry): exactly one socket stays. */
       retry() {
         if (stopped) return;
         backoff = 500;
-        if (ws && ws.readyState <= 1 && !timer) return;
-        if (timer) { clearTimeout(timer); timer = null; }
         open();
       },
-      close() { stopped = true; clearSettle(); if (timer) clearTimeout(timer); try { ws && ws.close(); } catch { /* already closing */ } },
+      close() { stopped = true; clearSettle(); if (timer) clearTimeout(timer); timer = null; const sock = ws; ws = null; detach(sock); },
     };
   }
 
