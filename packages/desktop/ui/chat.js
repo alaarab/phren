@@ -17,6 +17,7 @@ import { hookPost, hookGet } from "./api.js";
 import { createTimelineView } from "./chat/timeline-view.js";
 import { createFindBar } from "./chat/find-bar.js";
 import { chatToMarkdown, downloadText, exportFilename, setExportPane, clearExportPane } from "./chat/markdown-export.js";
+import { createLinkWatch, createLinkStrip } from "./chat/link-watch.js";
 import { createComposer, contextPercent } from "./chat/composer.js";
 import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
 import { startDictation, createTalkMode, toast } from "./chat/talk.js";
@@ -189,6 +190,7 @@ export function openChat(el, computerName, child, opts = {}) {
     talk.feedReply(replies.map((m) => m.text).join("\n\n"));
   }
   const quotaHost = node("div", "chat-quota-host");
+  const linkStripHost = node("div", "chat-link-host");
   const composerHost = node("div", "chat-composer");
   composerHost.append(composer.el);
 
@@ -219,7 +221,7 @@ export function openChat(el, computerName, child, opts = {}) {
   });
 
   const error = node("div", "chat-error");
-  el.append(header, handoffs, notice, timelineEl, interactions, quotaHost, composerHost, error);
+  el.append(header, handoffs, notice, timelineEl, interactions, linkStripHost, quotaHost, composerHost, error);
 
   // ⌘F / Ctrl+F inside this pane searches its conversation (chat/find-bar.js).
   const find = createFindBar({
@@ -969,35 +971,84 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   // ---- sockets, reconnecting with backoff ----
-  function connectSocket(path, onFrame, onOpen) {
-    let backoff = 500, timer = null, ws = null, stopped = false;
+  // `link` ({ up, down }) reports whether the socket is really live: the daemon accepts the browser's
+  // socket before it reaches the Hook, so "open" alone is not proof. Up = first frame, or open for 5 s.
+  function connectSocket(path, onFrame, onOpen, link) {
+    const SETTLE_MS = 5000;
+    let backoff = 500, timer = null, ws = null, stopped = false, settle = null, live = false;
+    const clearSettle = () => { if (settle) { clearTimeout(settle); settle = null; } };
     const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/hosts/${encodeURIComponent(computerName)}${path}`;
+    // Drop a socket: its handlers go first, so a late event from it cannot touch the current one.
+    const detach = (sock) => {
+      if (!sock) return;
+      sock.onopen = sock.onmessage = sock.onclose = sock.onerror = null;
+      try { sock.close(); } catch { /* already closing */ }
+    };
+    // Live = a first frame, or still open after the settle window (the status socket may be silent).
+    // Only then does the backoff reset and the link count as up: the daemon accepts the browser's
+    // socket before it reaches the Hook and closes it ~2 s later when the Hook is unreachable.
+    const markLive = (sock) => {
+      if (sock !== ws) return;
+      clearSettle();
+      if (live) return;
+      live = true;
+      backoff = 500;
+      if (link) link.up();
+    };
     const open = () => {
       if (stopped) return;
-      ws = new WebSocket(url);
-      ws.onopen = () => { backoff = 500; if (onOpen) onOpen(); };
-      ws.onmessage = (event) => { let frame; try { frame = JSON.parse(event.data); } catch { return; } onFrame(frame); };
-      ws.onclose = () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      clearSettle();
+      detach(ws);
+      live = false;
+      const sock = new WebSocket(url);
+      ws = sock;
+      sock.onopen = () => {
+        if (sock !== ws) return;
+        if (onOpen) onOpen();
+        clearSettle();
+        settle = setTimeout(() => { settle = null; markLive(sock); }, SETTLE_MS);
+      };
+      sock.onmessage = (event) => {
+        if (sock !== ws) return;
+        markLive(sock);
+        let frame; try { frame = JSON.parse(event.data); } catch { return; } onFrame(frame);
+      };
+      sock.onclose = () => {
+        if (sock !== ws) return;
+        clearSettle();
         if (stopped) return;
+        live = false;
+        if (link) link.down();
+        if (timer) clearTimeout(timer);
         timer = setTimeout(open, backoff);
         backoff = Math.min(backoff * 2, 5000);
       };
-      ws.onerror = () => { try { ws.close(); } catch { /* already closing */ } };
+      sock.onerror = () => { if (sock === ws) { try { sock.close(); } catch { /* already closing */ } } };
     };
     open();
     return {
-      close() { stopped = true; if (timer) clearTimeout(timer); try { ws && ws.close(); } catch { /* already closing */ } },
+      /** Replace the socket now with the backoff reset (the strip's Retry): exactly one socket stays. */
+      retry() {
+        if (stopped) return;
+        backoff = 500;
+        open();
+      },
+      close() { stopped = true; clearSettle(); if (timer) clearTimeout(timer); timer = null; const sock = ws; ws = null; detach(sock); },
     };
   }
 
+  const linkStrip = createLinkStrip({ computer: computerName, onRetry: () => { transcriptSocket.retry(); statusSocket.retry(); } });
+  linkStripHost.append(linkStrip.el);
+  const linkWatch = createLinkWatch({ onView: (view) => linkStrip.update(view) });
   const transcriptSocket = connectSocket(`/v1/transcripts?${qs}&sideAnswers=1&deliveries=1`, onTranscript, () => {
     preview = null;
     maybeFetchSubagents(true);
-  });
+  }, { up: () => linkWatch.up("transcript"), down: () => linkWatch.down("transcript") });
   const statusSocket = connectSocket(`/v1/status?${qs}`, onStatus, () => {
     maybeFetchSubagents(true);
     maybeFetchSudo(true);
-  });
+  }, { up: () => linkWatch.up("status"), down: () => linkWatch.down("status") });
 
   composer.setCounts({ agents: 0, workers: 0 });
   // A snapshot read ahead while the pointer rested on the row: draw it now;
@@ -1033,6 +1084,7 @@ export function openChat(el, computerName, child, opts = {}) {
       dictation?.stop(); talk?.stop();
       transcriptSocket.close();
       statusSocket.close();
+      linkWatch.destroy();
       closeWork();
       knows?.close?.();
       rememberSelection.destroy?.();
