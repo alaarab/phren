@@ -560,7 +560,10 @@ export async function installKeys(actions) {
   registerBuiltins();
   // Capture phase, so Monaco and inputs do not swallow the prefix first.
   window.addEventListener("keydown", onKeyDown, true);
-  document.getElementById("sidebar").addEventListener("keydown", onSidebarKey);
+  const sidebar = document.getElementById("sidebar");
+  sidebar.addEventListener("keydown", onSidebarKey);
+  // The sidebar's icon-strip filter button asks for what the shortcut does.
+  sidebar.addEventListener("phren:focus-filter", () => focusFilter());
 }
 
 /** Mark the session the chat shows, so next/previous start from it. */

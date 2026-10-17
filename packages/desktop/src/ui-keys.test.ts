@@ -34,7 +34,7 @@ it("leaves nested control activation alone while Enter on a sidebar row still op
   vi.stubGlobal("window", { addEventListener: vi.fn() });
   vi.stubGlobal("document", {
     createElement: () => ({}), head: { append: vi.fn() },
-    getElementById: () => ({ addEventListener: (_type: string, handler: typeof keydown) => { keydown = handler; } }),
+    getElementById: () => ({ addEventListener: (type: string, handler: typeof keydown) => { if (type === "keydown") keydown = handler; } }),
     querySelectorAll: () => [row],
   });
   vi.stubGlobal("fetch", async () => ({ json: async () => ({ bindings: {}, appBindings: {} }) }));
