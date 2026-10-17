@@ -65,12 +65,12 @@ export function createActiveTasks({ block, state }) {
       focused?.focus();
     }
   }
-  async function refresh() {
+  async function refresh(force = false) {
     const mine = ++generation;
     const sources = await loadTaskSources(state.merged?.computers ?? []);
     const groups = await Promise.all(sources.flatMap((source) => source.projects.map(async (project) => {
       try {
-        const doc = await loadTaskDoc(source, project);
+        const doc = await loadTaskDoc(source, project, force);
         return (doc.items?.Active ?? []).filter((item) => !item.checked).map((item) => ({
           source, project, item, revision: doc.revision, key: `${taskSourceKey(source)}:${project}:${item.stableId ?? item.id}`,
         }));
@@ -82,6 +82,8 @@ export function createActiveTasks({ block, state }) {
   }
   return {
     render,
+    /** Read every task document again, ignoring the shared cache. */
+    reload() { return refresh(true); },
     show() {
       visible = true;
       onlineKey = (state.merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
