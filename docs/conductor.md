@@ -934,7 +934,12 @@ path. `dispatch_returns` rows carry `moves`.
 `hand_off` uses the receiving Hook's durable queue. A busy worker returns
 `{ok:true, queued:true, delivered:false, deliveryId, state:"queued", target}`.
 The Hook waits for idle or done in the same conversation and terminal, then
-attempts the message once. Keep `deliveryId` on any retry. Query it with
+attempts the message once. A Claude session whose turn ended while its
+background agents still run ("Waiting for N background agents to finish")
+counts as done though Herdr reads it working, unless the Hook holds an
+approval or question for it or its screen shows a dialog. Two hours after that
+turn's Stop, a lead still waiting on background work is held until idle again.
+Return notices to a dispatching agent follow the same rule. Keep `deliveryId` on any retry. Query it with
 `hand_off(target|session, computer?, deliveryId, status:true)` and no text,
 or `phren hand-off local --session <id> --status --delivery-id <id>`.
 A local sender receives a queued delivery notice when the outcome changes.

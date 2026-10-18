@@ -499,6 +499,7 @@ export class AgentHooks {
     if (typeof pane.terminal_id !== "string") return;
     await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
       ...(dispatch ? { dispatch } : {}),
+      ...(body.event === "SessionStart" && typeof body.startSource === "string" ? { start: body.startSource } : {}),
       ...(typeof body.background === "number" ? { background: body.background } : {}),
       ...(typeof body.reply === "string" ? { reply: body.reply } : {}),
       ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);

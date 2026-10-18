@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, sessionTitle } from "./session-activity.js";
-import { nextTurn, type TurnRecord } from "./turn-records.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, sessionTitle, takesPrompt } from "./session-activity.js";
+import { nextTurn, noteTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
 const pane = { pane_id: "w1:p1", terminal_id: "term_a" };
@@ -183,4 +186,71 @@ describe("last reply on a session row", () => {
     expect(replyExcerpt(record())).toBeUndefined();
     expect(replyExcerpt(undefined)).toBeUndefined();
   });
+});
+
+describe("a session that takes a typed prompt", () => {
+  const claudePane = (agent_status: string, agent = "claude") => ({ pane_id: "w1:p1", terminal_id: "term_a", agent, agent_status });
+  async function withBridge(run: () => Promise<void>) {
+    const bridge = await mkdtemp(path.join(tmpdir(), "phren-takes-"));
+    vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
+    try { await run(); } finally { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); }
+  }
+  const note = (event: "UserPromptSubmit" | "Stop", background?: number, source: "claude" | "codex" = "claude", at = Date.now()) =>
+    noteTurn("default", "w1:p1", { event, terminal: "term_a", source, session, ...(background !== undefined ? { background } : {}), at });
+
+  it("is a Claude lead whose turn ended while its background agents run, though Herdr reads it working", () => withBridge(async () => {
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit"); await note("Stop", 2);
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(true);
+    // A later prompt started a turn: it is working again.
+    await note("UserPromptSubmit");
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+  }));
+
+  it("is not a working pane whose last Stop left nothing running, nor a record of another conversation or terminal", () => withBridge(async () => {
+    await note("UserPromptSubmit"); await note("Stop");
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit"); await note("Stop", 1);
+    expect(await takesPrompt("default", claudePane("working"), "00000002-1111-4111-8111-111111111111")).toBe(false);
+    expect(await takesPrompt("default", { ...claudePane("working"), terminal_id: "term_b" }, session)).toBe(false);
+    for (const status of ["blocked", "waiting", "unknown"]) expect(await takesPrompt("default", claudePane(status), session)).toBe(false);
+    expect(await takesPrompt("default", claudePane("idle"), session)).toBe(true);
+    expect(await takesPrompt("default", claudePane("done"), undefined)).toBe(true);
+  }));
+
+  it("is not a lead whose turn ended with background work when a dialog may be open there", () => withBridge(async () => {
+    // Claude starts a turn on its own when a background agent finishes, with no UserPromptSubmit; a dialog
+    // that turn opens can still read working. Pasted text plus Enter would answer its first option.
+    await note("UserPromptSubmit"); await note("Stop", 1);
+    const dialog = " Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend";
+    const waiting = "✻ Waiting for 1 background agent to finish\n────\n❯ \n────";
+    const working = claudePane("working");
+    expect(await takesPrompt("default", working, session, { held: () => true, screen: async () => waiting })).toBe(false);
+    expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => dialog })).toBe(false);
+    expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => { throw new Error("no screen"); } })).toBe(false);
+    expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => waiting })).toBe(true);
+    // An idle pane is not read at all.
+    const screen = vi.fn(async () => dialog);
+    expect(await takesPrompt("default", claudePane("idle"), session, { screen })).toBe(true);
+    expect(screen).not.toHaveBeenCalled();
+  }));
+
+  it("forgets the background agents a resumed or cleared conversation no longer runs, but not across a compaction", () => withBridge(async () => {
+    await note("UserPromptSubmit"); await note("Stop", 2);
+    await noteTurn("default", "w1:p1", { event: "SessionStart", terminal: "term_a", source: "claude", session, start: "compact" });
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(true);
+    await noteTurn("default", "w1:p1", { event: "SessionStart", terminal: "term_a", source: "claude", session, start: "resume" });
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit"); await note("Stop", 1);
+    await noteTurn("default", "w1:p1", { event: "SessionStart", terminal: "term_a", source: "claude", session, start: "clear" });
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+  }));
+
+  it("is not a Stop older than the background cap, nor another harness", () => withBridge(async () => {
+    const old = Date.now() - BACKGROUND_STALE_MS - 60_000;
+    await note("UserPromptSubmit", undefined, "claude", old); await note("Stop", 3, "claude", old);
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit", undefined, "codex"); await note("Stop", 1, "codex");
+    expect(await takesPrompt("default", claudePane("working", "codex"), session)).toBe(false);
+  }));
 });
