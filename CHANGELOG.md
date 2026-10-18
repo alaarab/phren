@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Phone messages sent while Claude Code is busy are each confirmed when Claude takes them together. Claude submits the messages it held as one turn, joined by newlines, and the Hook matched only the whole prompt, so every one of them stayed "Queued in the agent" and could later be reported as not taken. Each held message whose words are whole lines of the submitted prompt now settles delivered; a short reply never settles inside a longer line ("yes" inside "yes, but later").
+
 ## [0.3.56] - 2026-10-17
 
 ### Fixed

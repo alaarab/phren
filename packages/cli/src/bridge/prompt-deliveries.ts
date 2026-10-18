@@ -43,6 +43,12 @@ export function promptKey(text: string): string {
 }
 const PICTURE_PATH_LINE = /^\s*\/.*\.(?:png|jpe?g|gif|webp)\s*$/i;
 export const promptHash = (text: string) => createHash("sha256").update(promptKey(text)).digest("hex");
+/** A submitted prompt is searched for held messages joined into it over at most this many of its lines. */
+const JOINED_MAX_LINES = 64;
+/** Of the open messages in a pane, at most this many are matched against a joined prompt's lines. */
+const JOINED_MAX_OPEN = 32;
+/** The line runs hashed for one joined prompt come to at most this many characters. */
+const JOINED_MAX_CHARS = 1_048_576;
 
 const recordSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).optional(), hash: z.string().regex(/^[0-9a-f]{64}$/),
@@ -245,7 +251,7 @@ export class PromptDeliveries {
       return open.find(entry => entry.session === target.session) ?? open[0];
     };
     let record = pick();
-    if (!record) return;
+    if (!record) { if (this.settleJoined(target, prompt, stop)) this.save(); return; }
     let entry: number | undefined;
     if (target.source === "claude") {
       // A hook settles a message only by claiming a row for it: rows all claimed by earlier messages is a
@@ -271,6 +277,33 @@ export class PromptDeliveries {
     }
     this.settle(record, entry, target.session, entry !== undefined ? true : undefined);
     this.save();
+  }
+  /** Claude submits the messages it held while busy as one turn, joined by newlines, so no single message's
+   * hash matches the prompt. Each open message in the pane whose words are a run of whole lines of it settles,
+   * the longest run first at each line and the oldest of identical messages first, so "yes" never settles
+   * inside "yes, but later". Only hashes of the line runs are compared, never stored. */
+  private settleJoined(target: Target, prompt: string, stop: number): boolean {
+    const candidates = this.records.filter(record => this.samePane(record, target) && record.state !== "delivered"
+      && (record.state !== "failed" || (record.settledAt ?? record.at) >= stop)).sort((a, b) => a.at - b.at).slice(0, JOINED_MAX_OPEN);
+    if (!candidates.length) return false;
+    const lines = unwrapPastedContent(prompt).split("\n").filter(line => !PICTURE_PATH_LINE.test(line));
+    if (lines.length < 2 || lines.length > JOINED_MAX_LINES) return false;
+    const matched: Record[] = [];
+    let budget = JOINED_MAX_CHARS;
+    for (let start = 0; start < lines.length;) {
+      let next = start + 1;
+      for (let end = lines.length; end > start; end--) {
+        const run = lines.slice(start, end).join("\n");
+        if ((budget -= run.length) < 0) break;
+        if (!promptKey(run)) continue;
+        const hash = promptHash(run), same = candidates.filter(record => record.hash === hash && !matched.includes(record));
+        const record = same.find(entry => entry.session === target.session) ?? same[0];
+        if (record) { matched.push(record); next = end; break; }
+      }
+      start = next;
+    }
+    for (const record of matched) this.settle(record, undefined, target.session);
+    return matched.length > 0;
   }
   /** Marks `record` delivered, with the transcript entry that settled it when known. */
   private settle(record: Record, entry?: number, session?: string, hook?: boolean) {

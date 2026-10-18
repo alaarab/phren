@@ -82,6 +82,42 @@ describe("phone messages bound to their pane", () => {
   });
 });
 
+describe("held messages Claude submits as one turn", () => {
+  it("settle each of two short messages joined by a newline", async () => {
+    const store = deliveries();
+    await send(store, "join-0001", "Run the suite", claudeTarget);
+    await send(store, "join-0002", "Then open the PR", claudeTarget);
+    await store.submitted(claudeTarget, "Run the suite\nThen open the PR");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "delivered"]);
+  });
+
+  it("settle only whole lines: a short reply does not settle inside a longer line", async () => {
+    const store = deliveries();
+    await send(store, "part-0001", "yes", claudeTarget);
+    await send(store, "part-0002", "Check the logs", claudeTarget);
+    await store.submitted(claudeTarget, "yes, but later\nCheck the logs");
+    expect(store.status("part-0001", claudeTarget).state).toBe("queued");
+    expect(store.status("part-0002", claudeTarget).state).toBe("delivered");
+  });
+
+  it("settle three messages, one of them several lines long", async () => {
+    const store = deliveries();
+    await send(store, "three-0001", "First step", claudeTarget);
+    await send(store, "three-0002", "Second step\nwith a detail", claudeTarget);
+    await send(store, "three-0003", "yes", claudeTarget);
+    await store.submitted(claudeTarget, "First step\nSecond step\nwith a detail\nyes");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "delivered", "delivered"]);
+  });
+
+  it("leave messages held in another pane alone", async () => {
+    const store = deliveries();
+    await send(store, "other-0001", "Run the suite", claudeTarget);
+    await send(store, "other-0002", "Then open the PR", claudeTarget);
+    await store.submitted({ ...claudeTarget, pane: "w6:p2" }, "Run the suite\nThen open the PR");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["queued", "queued"]);
+  });
+});
+
 describe("a message the agent never takes fails loudly", () => {
   it("when its pane closes or its agent restarts", async () => {
     const store = deliveries();
