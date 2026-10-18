@@ -23,7 +23,7 @@ test.describe("a chat that fits one page", () => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await openChat(page, h.url, "Fix login", OPENED);
     await page.locator(".chat-more").click();
-    await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Copy as Markdown", "Save as Markdown…", "Copy session id"]);
+    await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Copy as Markdown", "Save as Markdown…", "Copy session id", "Mute notifications"]);
     await page.getByRole("menuitem", { name: "Copy as Markdown" }).click();
     await expect(page.locator(".pt-toast")).toHaveText(/Copied \d+ messages?/);
     const text = await page.evaluate(() => navigator.clipboard.readText());
