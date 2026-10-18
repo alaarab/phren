@@ -5,13 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.56] - 2026-10-17
+
 ### Fixed
 
 - A message typed into a Claude Code pane is confirmed as soon as the agent submits it. Claude writes the message to its transcript only after its own UserPromptSubmit hooks return, so the Hook waited 4 to 9 seconds for a transcript row. By then the phone showed "Queued in the agent" and every `hand_off` came back "uncertain".
-- Messages a working Claude took into its running turn after another queued message are no longer reported as failed. Claude writes the earlier message's attachment rows after the removal that took the later one, and the transcript scan stopped at the first of those older rows. On 2026-10-17 three of the owner's voice messages were reported "not taken", and he sent them again.
+- Messages a working Claude took into its running turn after another queued message are no longer reported as failed. Claude writes the earlier message's attachment rows after the removal that took the later one, and the transcript scan stopped at the first of those older rows. On 2026-10-17 three voice messages from the phone were reported "not taken" and were sent again.
 - A `hand_off` reported "uncertain" now becomes delivered or failed once the agent takes the message or the Hook knows it won't. The sender hears that outcome instead of an early "uncertain".
 - The hand-off queue doesn't type the next message into a pane while the last one is still waiting to be taken. Herdr shows the pane as idle while the agent runs its hooks, and messages sent 5 seconds apart piled up unsent in one input line.
 - A message that will never be confirmed no longer holds a pane's hand-offs: one Herdr refused is forgotten at once, and one typed into a pane whose agent sends no hooks (Copilot, Codex or OpenCode without them) holds it for 45 seconds at most, after which the sender hears "uncertain".
+- A Claude lead whose turn ended while its background agents or shells keep running ("Waiting for N background agents to finish") now receives hand-offs, queued phone messages and worker-return notices. The Hook used to wait for full idle, which never came, so messages to a busy orchestrator stayed queued for over an hour. It still never types while the agent holds an approval, a question or an on-screen dialog.
 - Repeating a short reply ("yes") is confirmed correctly: a message settled by its hook keeps the transcript row written after it, so a later identical message that was dropped is no longer reported delivered, and one absorbed into a running turn no longer leaves the next identical reply "queued".
 
 ## [0.3.55] - 2026-10-17
