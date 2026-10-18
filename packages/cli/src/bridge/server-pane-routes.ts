@@ -139,6 +139,9 @@ function claudeQuestionAnswer(data: unknown): { questions: DialogQuestion[]; ans
 /** A secret typed into a terminal prompt: printable, bounded, never logged. */
 const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.test(t));
 
+/** Herdr answered the request with a refusal (a 409 carrying its own error code): it performed nothing. */
+const herdrRefused = (error: unknown) => error instanceof BridgeError && error.status === 409 && typeof error.details?.herdrCode === "string";
+
 /** An idle agent that has not taken typed text within the first wait
  * likely lost the Enter while it redrew (an update notice, a resize): the
  * text sits in its input line. Press Enter once more and wait again. A
@@ -146,7 +149,9 @@ const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.tes
  * so the phone shows the message as not sent instead of waiting forever. */
 async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: string): Promise<DeliveryOutcome | "unsubmitted"> {
   const status = async () => { try { return String(findPane(await snapshot(target.server), target)?.agent_status ?? "unknown"); } catch { return "unknown"; } };
-  if (await status() === "working") return "pending";
+  // A pane that turned working started a turn: its UserPromptSubmit is on its way (the agent runs its
+  // other hooks too). Wait for it rather than answering "queued" for a message the agent took.
+  if (await status() === "working") return await agentHooks.deliveries.awaitLate(target, text);
   const late = agentHooks.deliveries.awaitLate(target, text);
   await terminalProvider().sendKeys(target.server, target.pane, ["enter"]);
   const outcome = await late;
@@ -413,9 +418,11 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       const refused = new AbortController();
       const expected = agentHooks.deliveries.expect(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal, deliveryId,
         typeof pane.terminal_id === "string" ? pane.terminal_id : undefined);
-      await typing();
-      try { await terminalProvider().prompt(target.server, target.pane, text); } catch (error) {
-        if (agentNotReady(error)) refused.abort();
+      let typed = false;
+      try { await typing(); typed = true; await terminalProvider().prompt(target.server, target.pane, text); } catch (error) {
+        // Nothing reached the pane: the reservation failed first, the agent was not ready, or Herdr refused the
+        // request (its `agent.prompt` is one call). The record goes, or it would hold the pane's hand-offs.
+        if (!typed || agentNotReady(error) || herdrRefused(error)) refused.abort();
         throw error;
       }
       return expected;

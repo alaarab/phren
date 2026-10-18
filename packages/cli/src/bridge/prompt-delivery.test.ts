@@ -122,6 +122,27 @@ describe("hand-off submission confirmation", () => {
   });
 });
 
+describe("a prompt the terminal refused", () => {
+  const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId }, {} as never);
+  it("drops its delivery record when Herdr refused it, so it holds nothing", async () => {
+    prompt.mockRejectedValue(new BridgeError(409, "Herdr: pane w1:p1 is not an agent", { herdrCode: "agent_not_found" }));
+    await expect(send()).rejects.toMatchObject({ status: 409 });
+    expect(expectDelivery.mock.calls.map(call => (call[3] as AbortSignal).aborted)).toEqual([true]);
+  });
+});
+
+describe("an idle Claude pane that turned working after the paste", () => {
+  it("waits for its hook instead of pressing Enter again, and answers delivered when it comes", async () => {
+    const claude = { ...target, source: "claude" as const };
+    pane.agent = "claude";
+    vi.mocked(snapshot).mockImplementation(async () => ({ panes: [{ ...pane, agent_status: "working" }] }));
+    deliveries.awaitLate.mockResolvedValue("delivered");
+    expect(await paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: claude, text, deliveryId }, {} as never))
+      .toEqual({ ok: true, delivered: true, state: "delivered" });
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+});
+
 describe("a queued message its own hook takes during the identity probe", () => {
   const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId }, {} as never);
 
