@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A `hand_off` can no longer pass Claude Code's own prompt suggestion off as the owner's message. After a turn Claude draws a dim guess at the owner's next message in its empty input box. A plain screen read shows it like typed text, and Enter doesn't send it. A conductor took three of these for unsent phone messages and handed them to their panes, one of them a merge instruction the owner never gave. The receiving Hook now refuses a hand-off that repeats the pane's current suggestion (`409 prompt-suggestion`) before typing anything, and the conductor skill says not to relay input-box text. A message sent from the phone is never refused this way.
+
 ## [0.3.56] - 2026-10-17
 
 ### Fixed

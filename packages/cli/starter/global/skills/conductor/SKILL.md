@@ -212,6 +212,13 @@ A `stalled` return or `live_sessions` row with `stalled:true` means both the
 screen and transcript have stopped changing while working. Check it and report
 what is known; do not launch a duplicate or interrupt it just because of the flag.
 
+Never submit, clear or relay text you read in a Claude pane's input box as the
+owner's words. After a turn Claude draws its own guess at the owner's next
+message there, dim; a plain screen read shows it as if typed, and Enter does not
+send it. The Hook keeps a delivery record for each phone message, so an owner
+message never needs rescuing from a pane. Ask the owner instead. The Hook
+refuses a hand-off that repeats a pane's suggestion (`prompt-suggestion`).
+
 An uncertain delivery is never retried automatically. Inspect its known target
 or status before deciding with the owner whether a replacement is needed. Keep
 unavailable workers visible instead of giving their work to another agent

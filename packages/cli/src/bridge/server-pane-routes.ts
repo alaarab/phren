@@ -32,6 +32,7 @@ import { fileSearchSchema, listRepositoryFiles, searchRepository } from "./file-
 import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
 import { promptWithStartupRetry } from "./prompt-startup.js";
 import { sendServedPrompt, servedPane } from "./opencode-panes.js";
+import { claudeSuggestion } from "./claude-suggestion.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
  * secrets, uploads, diffs, git, approvals and questions. A starting pane (no
@@ -145,6 +146,18 @@ const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.tes
 export function promptGuards(agentHooks: Pick<AgentHooks, "approval" | "terminalPrompt" | "servedQuestion">, target: Target): PromptGuards {
   return { held: () => !!(agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)),
     screen: () => terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }) };
+}
+
+/** Whether a hand-off would relay the Claude pane's own prompt suggestion: the dim guess at the owner's next message
+ * that Claude draws in its empty input box. Read as plain text it looks like an owner message left unsent, Enter does
+ * not submit it, and a conductor watching panes relayed three of them as the owner's words, one a merge instruction
+ * the owner never gave (2026-10-18). An unreadable screen does not refuse. */
+async function relaysSuggestion(target: Target, text: string): Promise<boolean> {
+  let screen = "";
+  try { screen = await terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }); } catch { return false; }
+  const suggestion = claudeSuggestion(screen);
+  const plain = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
+  return suggestion !== undefined && plain(suggestion) === plain(text);
 }
 
 /** Herdr answered the request with a refusal (a 409 carrying its own error code): it performed nothing. */
@@ -368,6 +381,9 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     const status = String(pane.agent_status);
     // A Claude lead waiting on its background agents takes a prompt though Herdr reads it working (`takesPrompt`).
     if (data.hookQueued === true && !await takesPrompt(target.server, pane, target.session, promptGuards(agentHooks, target))) throw new BridgeError(409, "The worker is busy; the hand-off remains queued.", { code: "hand-off-busy" });
+    if (data.hookQueued === true && target.source === "claude" && typeof data.text === "string" && await relaysSuggestion(target, data.text)) {
+      throw new BridgeError(409, "That text is Claude's own suggested next prompt, drawn dim in the agent's empty input box. The owner did not send it, so it was not typed.", { code: "prompt-suggestion" });
+    }
     if (status === "unknown" || (["blocked", "waiting"].includes(status) && (agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)))) {
       throw new BridgeError(409, "This agent needs input in the terminal first.");
     }
