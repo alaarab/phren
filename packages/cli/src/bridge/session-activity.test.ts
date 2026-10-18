@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, sessionTitle } from "./session-activity.js";
-import { nextTurn, type TurnRecord } from "./turn-records.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, sessionTitle, takesPrompt } from "./session-activity.js";
+import { nextTurn, noteTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
 const pane = { pane_id: "w1:p1", terminal_id: "term_a" };
@@ -183,4 +186,43 @@ describe("last reply on a session row", () => {
     expect(replyExcerpt(record())).toBeUndefined();
     expect(replyExcerpt(undefined)).toBeUndefined();
   });
+});
+
+describe("a session that takes a typed prompt", () => {
+  const claudePane = (agent_status: string, agent = "claude") => ({ pane_id: "w1:p1", terminal_id: "term_a", agent, agent_status });
+  async function withBridge(run: () => Promise<void>) {
+    const bridge = await mkdtemp(path.join(tmpdir(), "phren-takes-"));
+    vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
+    try { await run(); } finally { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); }
+  }
+  const note = (event: "UserPromptSubmit" | "Stop", background?: number, source: "claude" | "codex" = "claude", at = Date.now()) =>
+    noteTurn("default", "w1:p1", { event, terminal: "term_a", source, session, ...(background !== undefined ? { background } : {}), at });
+
+  it("is a Claude lead whose turn ended while its background agents run, though Herdr reads it working", () => withBridge(async () => {
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit"); await note("Stop", 2);
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(true);
+    // A later prompt started a turn: it is working again.
+    await note("UserPromptSubmit");
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+  }));
+
+  it("is not a working pane whose last Stop left nothing running, nor a record of another conversation or terminal", () => withBridge(async () => {
+    await note("UserPromptSubmit"); await note("Stop");
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit"); await note("Stop", 1);
+    expect(await takesPrompt("default", claudePane("working"), "00000002-1111-4111-8111-111111111111")).toBe(false);
+    expect(await takesPrompt("default", { ...claudePane("working"), terminal_id: "term_b" }, session)).toBe(false);
+    for (const status of ["blocked", "waiting", "unknown"]) expect(await takesPrompt("default", claudePane(status), session)).toBe(false);
+    expect(await takesPrompt("default", claudePane("idle"), session)).toBe(true);
+    expect(await takesPrompt("default", claudePane("done"), undefined)).toBe(true);
+  }));
+
+  it("is not a Stop older than the background cap, nor another harness", () => withBridge(async () => {
+    const old = Date.now() - BACKGROUND_STALE_MS - 60_000;
+    await note("UserPromptSubmit", undefined, "claude", old); await note("Stop", 3, "claude", old);
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit", undefined, "codex"); await note("Stop", 1, "codex");
+    expect(await takesPrompt("default", claudePane("working", "codex"), session)).toBe(false);
+  }));
 });

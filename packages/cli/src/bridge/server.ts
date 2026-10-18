@@ -60,6 +60,7 @@ import { SessionMover, transcriptTail } from "./session-move.js";
 import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import { paneAccount, paneAccountKey } from "./pane-accounts.js";
 import { readTurn } from "./turn-records.js";
+import { takesPrompt } from "./session-activity.js";
 import { readLaunchBrief } from "./launch-brief.js";
 import { conductorPane, readRoleState } from "./conductor-role.js";
 import { terminalKind, terminalProvider } from "./terminal.js";
@@ -150,6 +151,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     delivery: (target, deliveryId) => agentHooks.deliveries.status(deliveryId, target),
     inFlight: target => agentHooks.deliveries.holding(target),
     held: (target, deliveryId) => agentHooks.deliveries.held(deliveryId, target),
+    ready: (target, pane) => takesPrompt(target.server, pane, target.session),
   }) : undefined;
   // Moving a session to another agent (session-move.ts): its hand-off request
   // takes the hand_off path, and the new agent starts through the launch path.

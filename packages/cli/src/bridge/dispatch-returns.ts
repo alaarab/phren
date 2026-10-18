@@ -17,7 +17,7 @@ import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer, peerFingerprint } from "./dispatch-hosts.js";
 import { BridgeError, object, objects, startingTargetSchema, targetSchema, type ApprovalDecision, type Json, type Provider, type Target } from "./protocol.js";
 import { isClaudeUsageLimit, ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
-import { liveWork, runningTasks } from "./session-activity.js";
+import { liveWork, runningTasks, takesPrompt } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
 import { childAgentTree, runningChildAgents } from "./transcripts.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
@@ -580,6 +580,8 @@ export interface DispatchReturnsOptions {
   /** A recent Herdr snapshot of a local server, to see whether the dispatching agent is idle. */
   snapshot?: (server: string) => Promise<Json>;
   identity?: (server: string, pane: Json) => Promise<string | undefined>;
+  /** Whether the dispatching agent takes a typed notice now (session-activity.ts `takesPrompt`). */
+  takesPrompt?: (server: string, pane: Json, session: string | undefined) => Promise<boolean>;
   /** Types the notice into the dispatching agent, through the ordinary hand-off
    * path; the same notice keeps one delivery id, so a retry is never typed twice. */
   deliver?: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
@@ -615,6 +617,7 @@ export class DispatchReturns {
   private readonly isLocal: (computer: string) => boolean;
   private readonly snapshot: (server: string) => Promise<Json>;
   private readonly identity: (server: string, pane: Json) => Promise<string | undefined>;
+  private readonly takesPrompt: (server: string, pane: Json, session: string | undefined) => Promise<boolean>;
   private readonly deliver: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
   private readonly localArrival: (id: string) => Promise<BriefArrival | undefined>;
   private readonly now: () => number;
@@ -641,6 +644,7 @@ export class DispatchReturns {
     this.isLocal = options.isLocal ?? (computer => isLocalComputer(computer));
     this.snapshot = options.snapshot ?? (server => sharedSnapshot(server, SNAPSHOT_AGE_MS));
     this.identity = options.identity ?? ((server, pane) => paneIdentity(server, pane));
+    this.takesPrompt = options.takesPrompt ?? ((server, pane, session) => takesPrompt(server, pane, session));
     this.deliver = options.deliver ?? ((target, text, deliveryId) => handOff({ target, text }, { deliveryId, bypassConductor: true }));
     this.localArrival = options.localArrival ?? briefArrival;
     this.now = options.now ?? Date.now;
@@ -859,10 +863,12 @@ export class DispatchReturns {
         if (!forwarded.delivered) { busy = true; continue; }
       } else {
       const pane = findPane(await this.snapshot(origin.server).catch(() => ({})), { ...origin, source: origin.agent });
-      // Never interrupt: only an agent that has stopped, in the same terminal, gets a notice.
+      // Never interrupt: only an agent that has stopped, in the same terminal, gets a notice. A Claude
+      // lead whose turn ended while its background agents run on has stopped, though Herdr reads it working.
       if (!pane || pane.terminal_id !== origin.terminal) continue;
-      if (!["idle", "done"].includes(String(pane.agent_status))) { busy = true; continue; }
+      if (!["idle", "done", "working"].includes(String(pane.agent_status))) { busy = true; continue; }
       const session = await this.identity(origin.server, pane).catch(() => undefined);
+      if (!await this.takesPrompt(origin.server, pane, session).catch(() => false)) { busy = true; continue; }
       const target = targetSchema.safeParse({ server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane, source: origin.agent, session });
       if (!target.success) continue;
       this.lastNotice.set(key, this.now());

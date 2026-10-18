@@ -53,6 +53,28 @@ export function recordedBackground(record: TurnRecord | undefined, finishedTasks
   return backgroundLeft(phase.background, phase.at, finishedTasks) || undefined;
 }
 
+/**
+ * Whether the agent in a pane takes a typed prompt now: Herdr reads it idle or
+ * done, or it is a Claude session Herdr reads `working` whose own turn record
+ * ended with background tasks still running (`recordedBackground`). That is
+ * Claude's "Waiting for N background agents to finish": its turn is over and
+ * pasted text plus Enter submits at once and starts a turn (seen live, Claude
+ * Code 2.1.302), but Herdr keeps it `working` until the last background agent
+ * ends. Waiting for idle there held a hand-off or a dispatch-return notice for
+ * as long as a lead kept sub-agents running, over an hour. Another working
+ * pane, or one blocked, waiting or unknown, does not take one. The record is
+ * read only for a working Claude pane, through the same guard the session
+ * rows use (`paneRecord`), so a leftover record of an earlier conversation
+ * never speaks for this one; once the prompt is submitted its
+ * UserPromptSubmit makes the turn working again.
+ */
+export async function takesPrompt(server: string, pane: Json, session: string | undefined, now = Date.now()): Promise<boolean> {
+  const status = String(pane.agent_status);
+  if (status === "idle" || status === "done") return true;
+  if (status !== "working" || pane.agent !== "claude") return false;
+  return !!recordedBackground(await paneRecord(server, pane, session), [], now);
+}
+
 /** The background shells and monitors a turn still awaits, from its transcript
  * final turn. A recorded ended turn bounds `FinalTurn.awaited` by the Stop's
  * count less the tasks that finished since, and by the 2-hour cap; a Stop that

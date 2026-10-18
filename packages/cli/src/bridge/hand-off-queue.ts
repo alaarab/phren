@@ -34,6 +34,10 @@ export interface QueueOptions {
   /** Whether the message typed under `deliveryId` may still be taken: held, and not past the time a pane
    * that sends no hooks is given (prompt-deliveries.ts `held`). */
   held?: (target: Target, deliveryId: string) => boolean;
+  /** Whether the target's agent takes a typed prompt now (session-activity.ts `takesPrompt`): idle or
+   * done, or a Claude turn that ended while its background agents run on, which Herdr reads working.
+   * Without it, only an idle or done pane is typed into. */
+  ready?: (target: Target, pane: Json) => Promise<boolean>;
   now?: () => number;
   root?: string;
 }
@@ -172,7 +176,7 @@ export class HandOffQueue {
       return; // Offline is not gone and does not discard a queued message.
     }
     if (pane.terminal_id !== row.terminal) { row.state = "failed"; row.error = "The worker's terminal changed before delivery."; await this.save(row); return; }
-    if (!["idle", "done"].includes(String(pane.agent_status))) return;
+    if (!(this.options.ready ? await this.options.ready(row.target, pane).catch(() => false) : ["idle", "done"].includes(String(pane.agent_status)))) return;
     // Herdr reads a pane idle for a few seconds after a prompt was submitted, while the agent runs its
     // hooks; typing the next message then left both in the input line (2026-10-17, five 5 s apart).
     if (this.options.inFlight?.(row.target)) return;

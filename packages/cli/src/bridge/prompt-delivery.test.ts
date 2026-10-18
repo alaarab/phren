@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hookRequest } from "./client.js";
 import { CodexServerUnavailable, codexServers } from "./codex-servers.js";
@@ -6,6 +9,7 @@ import { paneIdentity, snapshot, validateStartingTarget, validateTarget } from "
 import { BridgeError, type Json, type Target } from "./protocol.js";
 import { paneRoute, type PaneRouteContext } from "./server-pane-routes.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
+import { noteTurn } from "./turn-records.js";
 
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
 vi.mock("./grants.js", () => ({ findGrant: vi.fn(), grantLabel: vi.fn() }));
@@ -140,6 +144,34 @@ describe("an idle Claude pane that turned working after the paste", () => {
     expect(await paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: claude, text, deliveryId }, {} as never))
       .toEqual({ ok: true, delivered: true, state: "delivered" });
     expect(sendKeys).not.toHaveBeenCalled();
+  });
+});
+
+describe("a hand-off to a Claude lead waiting on its background agents", () => {
+  // Live: in "Waiting for 1 background agent to finish" Herdr reads the lead working, and pasted text plus
+  // Enter submits at once. The Hook answered every hand-off "busy" until the agents ended, over an hour.
+  const claude = { ...target, source: "claude" as const }, turn = { terminal: "terminal-1", source: "claude" as const, session: target.session };
+  const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: claude, text, deliveryId, hookQueued: true }, {} as never);
+  let bridge: string;
+  beforeEach(async () => { bridge = await mkdtemp(path.join(tmpdir(), "phren-background-")); vi.stubEnv("PHREN_BRIDGE_HOME", bridge); pane.agent = "claude"; pane.agent_status = "working"; });
+  afterEach(async () => { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); });
+
+  it("is typed once its turn ended with background work, and confirmed by its hook", async () => {
+    await noteTurn("default", target.pane, { event: "UserPromptSubmit", ...turn });
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    expect(prompt).not.toHaveBeenCalled();
+    await noteTurn("default", target.pane, { event: "Stop", ...turn, background: 1 });
+    expectDelivery.mockResolvedValue("delivered");
+    expect(await send()).toEqual({ ok: true, delivered: true, state: "delivered" });
+    expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, text);
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it("stays busy for a working lead whose last Stop left nothing running", async () => {
+    await noteTurn("default", target.pane, { event: "UserPromptSubmit", ...turn });
+    await noteTurn("default", target.pane, { event: "Stop", ...turn });
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    expect(prompt).not.toHaveBeenCalled();
   });
 });
 
