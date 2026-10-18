@@ -24,7 +24,9 @@ let pane: Json, restore: () => void, sequence = 0, deliveryId: string;
 const prompt = vi.fn(), sendKeys = vi.fn(), expectDelivery = vi.fn();
 const deliveries = { expect: expectDelivery, queue: vi.fn(), status: vi.fn(() => ({ state: "unknown" })), sameMessage: vi.fn(() => true),
   delivered: vi.fn(), fail: vi.fn(), pending: vi.fn(() => false), awaitLate: vi.fn(async () => "pending") };
-const context = { agentHooks: { deliveries }, modelSwitcher: { assertAvailable() {} },
+const held = { approval: vi.fn(), terminalPrompt: vi.fn(), servedQuestion: vi.fn() };
+const readScreen = vi.fn(async () => "");
+const context = { agentHooks: { deliveries, ...held }, modelSwitcher: { assertAvailable() {} },
   settingsSwitcher: { assertAvailable() {} }, permissionModeSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as unknown as PaneRouteContext;
 const hand = (where = target) => handOff({ target: where, text }, { deliveryId });
 
@@ -39,7 +41,7 @@ beforeEach(() => {
   prompt.mockResolvedValue(undefined);
   expectDelivery.mockResolvedValue("pending");
   deliveries.status.mockReturnValue({ state: "unknown" }); deliveries.sameMessage.mockReturnValue(true);
-  restore = setTerminalProvider({ prompt, sendKeys } as unknown as TerminalProvider);
+  restore = setTerminalProvider({ prompt, sendKeys, readScreen } as unknown as TerminalProvider);
   vi.mocked(hookRequest).mockImplementation(async (route, body) => {
     if (route !== "/v1/hand-off") return {};
     const result = await paneRoute(context, new URL("http://phren.local/v1/prompt"), body!, {} as never) as Json;
@@ -153,7 +155,8 @@ describe("a hand-off to a Claude lead waiting on its background agents", () => {
   const claude = { ...target, source: "claude" as const }, turn = { terminal: "terminal-1", source: "claude" as const, session: target.session };
   const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: claude, text, deliveryId, hookQueued: true }, {} as never);
   let bridge: string;
-  beforeEach(async () => { bridge = await mkdtemp(path.join(tmpdir(), "phren-background-")); vi.stubEnv("PHREN_BRIDGE_HOME", bridge); pane.agent = "claude"; pane.agent_status = "working"; });
+  beforeEach(async () => { bridge = await mkdtemp(path.join(tmpdir(), "phren-background-")); vi.stubEnv("PHREN_BRIDGE_HOME", bridge); pane.agent = "claude"; pane.agent_status = "working";
+    readScreen.mockResolvedValue("✻ Waiting for 1 background agent to finish\n❯ "); });
   afterEach(async () => { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); });
 
   it("is typed once its turn ended with background work, and confirmed by its hook", async () => {
@@ -165,6 +168,17 @@ describe("a hand-off to a Claude lead waiting on its background agents", () => {
     expect(await send()).toEqual({ ok: true, delivered: true, state: "delivered" });
     expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, text);
     expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it("stays busy while that lead may have a dialog open: one the Hook holds, or one on its screen", async () => {
+    // A background agent's finish starts a turn with no UserPromptSubmit; Enter would answer its dialog.
+    await noteTurn("default", target.pane, { event: "UserPromptSubmit", ...turn });
+    await noteTurn("default", target.pane, { event: "Stop", ...turn, background: 1 });
+    held.approval.mockReturnValueOnce({ tool: "Bash" });
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    readScreen.mockResolvedValue(" Ready to code?\n ❯ 1. Yes, proceed\n   2. No, keep planning\n\n Esc to cancel");
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    expect(prompt).not.toHaveBeenCalled();
   });
 
   it("stays busy for a working lead whose last Stop left nothing running", async () => {

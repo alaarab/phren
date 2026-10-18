@@ -1,4 +1,5 @@
 import { briefLabel } from "./launch-brief.js";
+import { screenDialog } from "./pane-status.js";
 import { type Json, provider } from "./protocol.js";
 import type { FinalTurn } from "./schedule-watch.js";
 import { backgroundLeft, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
@@ -53,6 +54,18 @@ export function recordedBackground(record: TurnRecord | undefined, finishedTasks
   return backgroundLeft(phase.background, phase.at, finishedTasks) || undefined;
 }
 
+/** What may still be open in a pane whose turn record says it ended: Claude
+ * starts a turn on its own when a background agent finishes (its task
+ * notification, with no UserPromptSubmit), and that turn can open a dialog
+ * Herdr still reads as working (plan approval, an MCP elicitation, a
+ * permission request the Hook holds). Pasted text plus Enter would answer it. */
+export interface PromptGuards {
+  /** An approval the Hook holds, a terminal prompt or a question it serves for this pane. */
+  held?: () => boolean;
+  /** The pane's visible screen; a dialog there (pane-status.ts `screenDialog`) or a failed read refuses. */
+  screen?: () => Promise<string>;
+}
+
 /**
  * Whether the agent in a pane takes a typed prompt now: Herdr reads it idle or
  * done, or it is a Claude session Herdr reads `working` whose own turn record
@@ -62,17 +75,21 @@ export function recordedBackground(record: TurnRecord | undefined, finishedTasks
  * Code 2.1.302), but Herdr keeps it `working` until the last background agent
  * ends. Waiting for idle there held a hand-off or a dispatch-return notice for
  * as long as a lead kept sub-agents running, over an hour. Another working
- * pane, or one blocked, waiting or unknown, does not take one. The record is
- * read only for a working Claude pane, through the same guard the session
- * rows use (`paneRecord`), so a leftover record of an earlier conversation
- * never speaks for this one; once the prompt is submitted its
- * UserPromptSubmit makes the turn working again.
+ * pane, or one blocked, waiting or unknown, does not take one, nor one with a
+ * dialog open (`guards`). The record is read only for a working Claude pane,
+ * through the same guard the session rows use (`paneRecord`), so a leftover
+ * record of an earlier conversation never speaks for this one; once the prompt
+ * is submitted its UserPromptSubmit makes the turn working again. Past
+ * BACKGROUND_STALE_MS after the Stop the pane waits for idle again.
  */
-export async function takesPrompt(server: string, pane: Json, session: string | undefined, now = Date.now()): Promise<boolean> {
+export async function takesPrompt(server: string, pane: Json, session: string | undefined, guards: PromptGuards = {}, now = Date.now()): Promise<boolean> {
   const status = String(pane.agent_status);
   if (status === "idle" || status === "done") return true;
   if (status !== "working" || pane.agent !== "claude") return false;
-  return !!recordedBackground(await paneRecord(server, pane, session), [], now);
+  if (!recordedBackground(await paneRecord(server, pane, session), [], now) || guards.held?.()) return false;
+  if (!guards.screen) return true;
+  const screen = await guards.screen().catch(() => undefined);
+  return screen !== undefined && !screenDialog("claude", screen);
 }
 
 /** The background shells and monitors a turn still awaits, from its transcript

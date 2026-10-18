@@ -12,7 +12,7 @@ import { hookPeers, peerRequest } from "./peers.js";
 import { handOff } from "./hand-off.js";
 import { sessionStalls } from "./stalls.js";
 import { HandOffQueue } from "./hand-off-queue.js";
-import { paneRouteOnce } from "./server-pane-routes.js";
+import { paneRouteOnce, promptGuards } from "./server-pane-routes.js";
 import { FanoutMessages } from "./fanout-messages.js";
 import { activateModules as moduleSnapshot } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
@@ -103,6 +103,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // Follows what dispatched workers do and tells the dispatching agent.
   let succession: ConductorSuccessionService | undefined;
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
+    takesPrompt: (target, pane) => takesPrompt(target.server, pane, target.session, promptGuards(agentHooks, target)),
     localComputer: { id: computerID, name: hostname() },
     forward: (origin, text, deliveryId) => succession?.forward(origin, text, deliveryId) ?? Promise.resolve(undefined),
     // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
@@ -151,7 +152,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     delivery: (target, deliveryId) => agentHooks.deliveries.status(deliveryId, target),
     inFlight: target => agentHooks.deliveries.holding(target),
     held: (target, deliveryId) => agentHooks.deliveries.held(deliveryId, target),
-    ready: (target, pane) => takesPrompt(target.server, pane, target.session),
+    ready: (target, pane) => takesPrompt(target.server, pane, target.session, promptGuards(agentHooks, target)),
   }) : undefined;
   // Moving a session to another agent (session-move.ts): its hand-off request
   // takes the hand_off path, and the new agent starts through the launch path.

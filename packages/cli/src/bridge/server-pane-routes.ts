@@ -20,7 +20,7 @@ import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { PERMISSION_MODE_VALUES, refuseAgentOrigin, type PermissionModeSwitcher } from "./permission-mode.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import { sessionWebServers } from "./session-servers.js";
-import { takesPrompt } from "./session-activity.js";
+import { type PromptGuards, takesPrompt } from "./session-activity.js";
 import { gitRoot, repositoryDiff, withGitReadDeadline } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
@@ -139,6 +139,13 @@ function claudeQuestionAnswer(data: unknown): { questions: DialogQuestion[]; ans
 
 /** A secret typed into a terminal prompt: printable, bounded, never logged. */
 const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.test(t));
+
+/** What `takesPrompt` checks before typing into a Claude pane Herdr reads working: nothing structured
+ * pending there and no dialog on its screen. */
+export function promptGuards(agentHooks: Pick<AgentHooks, "approval" | "terminalPrompt" | "servedQuestion">, target: Target): PromptGuards {
+  return { held: () => !!(agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)),
+    screen: () => terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }) };
+}
 
 /** Herdr answered the request with a refusal (a 409 carrying its own error code): it performed nothing. */
 const herdrRefused = (error: unknown) => error instanceof BridgeError && error.status === 409 && typeof error.details?.herdrCode === "string";
@@ -360,7 +367,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // status Herdr cannot read. Otherwise the answer keys are the way.
     const status = String(pane.agent_status);
     // A Claude lead waiting on its background agents takes a prompt though Herdr reads it working (`takesPrompt`).
-    if (data.hookQueued === true && !await takesPrompt(target.server, pane, target.session)) throw new BridgeError(409, "The worker is busy; the hand-off remains queued.", { code: "hand-off-busy" });
+    if (data.hookQueued === true && !await takesPrompt(target.server, pane, target.session, promptGuards(agentHooks, target))) throw new BridgeError(409, "The worker is busy; the hand-off remains queued.", { code: "hand-off-busy" });
     if (status === "unknown" || (["blocked", "waiting"].includes(status) && (agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)))) {
       throw new BridgeError(409, "This agent needs input in the terminal first.");
     }

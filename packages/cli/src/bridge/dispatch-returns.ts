@@ -580,8 +580,9 @@ export interface DispatchReturnsOptions {
   /** A recent Herdr snapshot of a local server, to see whether the dispatching agent is idle. */
   snapshot?: (server: string) => Promise<Json>;
   identity?: (server: string, pane: Json) => Promise<string | undefined>;
-  /** Whether the dispatching agent takes a typed notice now (session-activity.ts `takesPrompt`). */
-  takesPrompt?: (server: string, pane: Json, session: string | undefined) => Promise<boolean>;
+  /** Whether the dispatching agent takes a typed notice now (session-activity.ts `takesPrompt`, with
+   * the Hook's `promptGuards`, so a dialog in a lead Herdr reads working is never answered). */
+  takesPrompt?: (target: Target, pane: Json) => Promise<boolean>;
   /** Types the notice into the dispatching agent, through the ordinary hand-off
    * path; the same notice keeps one delivery id, so a retry is never typed twice. */
   deliver?: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
@@ -617,7 +618,7 @@ export class DispatchReturns {
   private readonly isLocal: (computer: string) => boolean;
   private readonly snapshot: (server: string) => Promise<Json>;
   private readonly identity: (server: string, pane: Json) => Promise<string | undefined>;
-  private readonly takesPrompt: (server: string, pane: Json, session: string | undefined) => Promise<boolean>;
+  private readonly takesPrompt: (target: Target, pane: Json) => Promise<boolean>;
   private readonly deliver: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
   private readonly localArrival: (id: string) => Promise<BriefArrival | undefined>;
   private readonly now: () => number;
@@ -644,7 +645,7 @@ export class DispatchReturns {
     this.isLocal = options.isLocal ?? (computer => isLocalComputer(computer));
     this.snapshot = options.snapshot ?? (server => sharedSnapshot(server, SNAPSHOT_AGE_MS));
     this.identity = options.identity ?? ((server, pane) => paneIdentity(server, pane));
-    this.takesPrompt = options.takesPrompt ?? ((server, pane, session) => takesPrompt(server, pane, session));
+    this.takesPrompt = options.takesPrompt ?? ((target, pane) => takesPrompt(target.server, pane, target.session));
     this.deliver = options.deliver ?? ((target, text, deliveryId) => handOff({ target, text }, { deliveryId, bypassConductor: true }));
     this.localArrival = options.localArrival ?? briefArrival;
     this.now = options.now ?? Date.now;
@@ -868,9 +869,9 @@ export class DispatchReturns {
       if (!pane || pane.terminal_id !== origin.terminal) continue;
       if (!["idle", "done", "working"].includes(String(pane.agent_status))) { busy = true; continue; }
       const session = await this.identity(origin.server, pane).catch(() => undefined);
-      if (!await this.takesPrompt(origin.server, pane, session).catch(() => false)) { busy = true; continue; }
       const target = targetSchema.safeParse({ server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane, source: origin.agent, session });
       if (!target.success) continue;
+      if (!await this.takesPrompt(target.data, pane).catch(() => false)) { busy = true; continue; }
       this.lastNotice.set(key, this.now());
       const sent = await this.deliver(target.data, noticeLine(receipts), noticeDeliveryId(receipts)).catch(() => ({ delivered: false }));
       if (!sent.delivered) continue;

@@ -218,6 +218,34 @@ describe("a session that takes a typed prompt", () => {
     expect(await takesPrompt("default", claudePane("done"), undefined)).toBe(true);
   }));
 
+  it("is not a lead whose turn ended with background work when a dialog may be open there", () => withBridge(async () => {
+    // Claude starts a turn on its own when a background agent finishes, with no UserPromptSubmit; a dialog
+    // that turn opens can still read working. Pasted text plus Enter would answer its first option.
+    await note("UserPromptSubmit"); await note("Stop", 1);
+    const dialog = " Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend";
+    const waiting = "✻ Waiting for 1 background agent to finish\n────\n❯ \n────";
+    const working = claudePane("working");
+    expect(await takesPrompt("default", working, session, { held: () => true, screen: async () => waiting })).toBe(false);
+    expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => dialog })).toBe(false);
+    expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => { throw new Error("no screen"); } })).toBe(false);
+    expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => waiting })).toBe(true);
+    // An idle pane is not read at all.
+    const screen = vi.fn(async () => dialog);
+    expect(await takesPrompt("default", claudePane("idle"), session, { screen })).toBe(true);
+    expect(screen).not.toHaveBeenCalled();
+  }));
+
+  it("forgets the background agents a resumed or cleared conversation no longer runs, but not across a compaction", () => withBridge(async () => {
+    await note("UserPromptSubmit"); await note("Stop", 2);
+    await noteTurn("default", "w1:p1", { event: "SessionStart", terminal: "term_a", source: "claude", session, start: "compact" });
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(true);
+    await noteTurn("default", "w1:p1", { event: "SessionStart", terminal: "term_a", source: "claude", session, start: "resume" });
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+    await note("UserPromptSubmit"); await note("Stop", 1);
+    await noteTurn("default", "w1:p1", { event: "SessionStart", terminal: "term_a", source: "claude", session, start: "clear" });
+    expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
+  }));
+
   it("is not a Stop older than the background cap, nor another harness", () => withBridge(async () => {
     const old = Date.now() - BACKGROUND_STALE_MS - 60_000;
     await note("UserPromptSubmit", undefined, "claude", old); await note("Stop", 3, "claude", old);

@@ -479,6 +479,15 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     expect(turnPhase((await readTurn("default", "w1:p2"))!)).toMatchObject({ phase: "ended", background: 1, reply: "Started the suite." });
   });
 
+  it("drops the Stop's background count when the conversation is resumed, and keeps it across a compaction", async () => {
+    await post({ target, event: "UserPromptSubmit", prompt: "Run the parser checks" });
+    await post({ target, event: "Stop", background: 2 });
+    await post({ target, event: "SessionStart", startSource: "compact" });
+    expect(turnPhase((await readTurn("default", "w1:p2"))!)).toMatchObject({ phase: "ended", background: 2 });
+    await post({ target, event: "SessionStart", startSource: "resume" });
+    expect(turnPhase((await readTurn("default", "w1:p2"))!)).not.toHaveProperty("background");
+  });
+
   it("confirms a picture send, which Claude submits with an [Image #N] label in place of its path", async () => {
     await post({ target, event: "SessionStart" });
     const typed = "Look at this probe picture\n\nAttached files on this computer:\n/Users/me/.local/share/phren/bridge/uploads/s/1c74-Screen Shot.png";
