@@ -141,6 +141,8 @@ export class PromptDeliveries {
   }
   /** A message Phren typed into `target`'s pane that no conversation there has submitted yet. */
   pending(target: Target, text: string): boolean { return !!this.open(target, text); }
+  /** Whether any message typed into `target`'s pane is still waiting to be taken or refused. */
+  holding(target: Pick<Target, "server" | "pane" | "source">): boolean { return this.records.some(record => PromptDeliveries.open(record) && this.samePane(record, target)); }
   /** Wait again for a message `expect` reported pending, after a second Enter. */
   awaitLate(target: Target, text: string, waitMs = 2_500): Promise<DeliveryOutcome> {
     const record = this.open(target, text);
@@ -236,13 +238,15 @@ export class PromptDeliveries {
       if (!record) return;
       // Claims are per conversation: another conversation's rows can sit at the same byte offset.
       const claimed = new Set(this.records.filter(other => other.hash === hash && this.samePane(other, target) && other.session === target.session && other.entry !== undefined).map(other => other.entry));
-      // A transcript that cannot be read settles on the hook's word, unless a message with these words already
-      // claimed a row in this conversation: the callback may be that message's, late, so it waits for a row.
-      if (!rows && !claimed.size) { this.settle(record, undefined, target.session); this.save(); return; }
-      // The claim is looked for in the conversation that made it (it may have replaced the one the message was typed for).
-      if (!rows?.length) { record.hookClaim = true; record.session = target.session; return; }
-      const free = rows.filter(row => !claimed.has(row.offset)).sort((a, b) => a.offset - b.offset)[0];
-      if (!free) return;
+      const free = rows?.filter(row => !claimed.has(row.offset)).sort((a, b) => a.offset - b.offset)[0];
+      // Claude writes the submitted row only after its UserPromptSubmit hooks return, and this callback is one
+      // of them: the row for this submission is never readable yet. So no free row (or a transcript that cannot
+      // be read) settles on the hook's word at once, as the agent took it and started its turn. The row it
+      // writes next stays this message's (`taken` counts hook-settled messages first). Only when a message
+      // with these words already claimed a row in this conversation may the callback be that message's, late:
+      // then it waits for a row of its own, looked for in the conversation that made the claim.
+      if (!free && !claimed.size) { this.settle(record, undefined, target.session); this.save(); return; }
+      if (!free) { if (!rows?.length) { record.hookClaim = true; record.session = target.session; } return; }
       entry = free.offset;
     }
     this.settle(record, entry, target.session);
@@ -368,8 +372,11 @@ export function matchingOffsets(buffer: Buffer, start: number, record: { hash: s
     offset -= Buffer.byteLength(line) + (index < lines.length - 1 ? 1 : 0);
     let row: Json;
     try { row = object(JSON.parse(line)); } catch { continue; }
+    // Rows are not in time order: Claude writes a queued message's attachment rows, stamped when it was
+    // typed, after the queue removal that took it. An older row is skipped, never the end of the scan,
+    // or a message typed after an earlier queued one is never found (seen 2026-10-17: taken, reported failed).
     const stamp = Date.parse(String(row.timestamp ?? ""));
-    if (Number.isFinite(stamp) && stamp < record.at - 5_000) break;
+    if (Number.isFinite(stamp) && stamp < record.at - 5_000) continue;
     // One entry per row, even when its content repeats the words.
     if (userTexts(row).some(text => promptHash(text) === record.hash)) entries.push({ offset, hook: row.type === "user" });
   }

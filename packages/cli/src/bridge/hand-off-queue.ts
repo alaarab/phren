@@ -5,6 +5,7 @@ import { z } from "zod";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json, type Target, targetSchema, computerName } from "./protocol.js";
 import { deliveryIdSchema } from "./prompt-once.js";
 import { agentNotReady } from "./terminal.js";
+import type { DeliveryStatus } from "./prompt-deliveries.js";
 
 export const queuedHandOffSchema = z.object({
   target: targetSchema, text: z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)),
@@ -24,6 +25,12 @@ export interface QueueOptions {
   notify?: (target: Target, text: string, deliveryId: string, computer: string) => Promise<Json>;
   /** The conversation the target's pane shows now, and its terminal. */
   current?: (target: Target) => Promise<{ session: string; terminal: unknown } | undefined>;
+  /** What became of the message typed under `deliveryId` (prompt-deliveries.ts): an agent whose
+   * UserPromptSubmit comes after the send returned settles it there, later. */
+  delivery?: (target: Target, deliveryId: string) => DeliveryStatus;
+  /** Whether text typed into the target's pane is still waiting to be taken. Nothing more is typed
+   * there until it is: a second paste would land in the same input line, after the first. */
+  inFlight?: (target: Target) => boolean;
   now?: () => number;
   root?: string;
 }
@@ -71,7 +78,23 @@ export class HandOffQueue {
     if (!info.isFile() || info.isSymbolicLink() || info.size > 100_000) throw new BridgeError(409, "The hand-off record cannot be read safely.");
     const row = rowSchema.parse(JSON.parse(await readFile(file, "utf8")));
     if (row.state === "attempting") { row.state = "uncertain"; row.error = "The Hook restarted before delivery was confirmed."; await this.save(row); }
+    await this.follow(row);
     return row;
+  }
+  /** An uncertain row takes the outcome its typed message came to: delivered once the agent's
+   * UserPromptSubmit came, failed (with why) once the Hook knows the agent will not take it. A
+   * failed row still turns delivered when the agent takes the message late. */
+  private async follow(row: Row): Promise<void> {
+    if ((row.state !== "uncertain" && row.state !== "failed") || !this.options.delivery) return;
+    const known = this.options.delivery(row.target, row.deliveryId);
+    if (known.state === "delivered") { row.state = "delivered"; delete row.error; await this.save(row); }
+    else if (known.state === "failed" && row.state === "uncertain") {
+      row.state = "failed"; row.error = (known.reason ?? "The agent did not take the message.").slice(0, 500); await this.save(row);
+    }
+  }
+  /** Uncertain only while the agent may still take it: its typed message is held, not yet settled. */
+  private stillHeld(row: Row): boolean {
+    return row.state === "uncertain" && this.options.delivery?.(row.target, row.deliveryId).state === "queued";
   }
   private async rows(): Promise<Row[]> {
     const names = await readdir(this.root).catch(error => { if (error.code === "ENOENT") return []; throw error; });
@@ -146,6 +169,9 @@ export class HandOffQueue {
     }
     if (pane.terminal_id !== row.terminal) { row.state = "failed"; row.error = "The worker's terminal changed before delivery."; await this.save(row); return; }
     if (!["idle", "done"].includes(String(pane.agent_status))) return;
+    // Herdr reads a pane idle for a few seconds after a prompt was submitted, while the agent runs its
+    // hooks; typing the next message then left both in the input line (2026-10-17, five 5 s apart).
+    if (this.options.inFlight?.(row.target)) return;
     let typed = false;
     try {
       const result = await this.options.send(row.target, row.text, row.deliveryId, async () => {
@@ -179,7 +205,8 @@ export class HandOffQueue {
         if (attempted.has(key)) continue;
         attempted.add(key); await this.attempt(row);
       }
-      for (const row of rows) if (row.origin && !row.notified && ["delivered", "failed", "uncertain"].includes(row.state)) {
+      // A sender hears the outcome once there is one: not "uncertain" for a message the agent still holds.
+      for (const row of rows) if (row.origin && !row.notified && ["delivered", "failed", "uncertain"].includes(row.state) && !this.stillHeld(row)) {
         if (row.originComputer) { remote.push(row); continue; }
         const forwarded = await this.options.forward?.(row.origin, `Hand-off ${row.deliveryId}: ${row.state}.`, this.noticeId(row)).catch(() => ({ delivered: false }));
         if (forwarded) {

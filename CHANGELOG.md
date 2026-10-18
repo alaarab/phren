@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A message typed into a Claude Code pane is confirmed as soon as the agent submits it. Claude writes the message to its transcript only after its own UserPromptSubmit hooks return, so the Hook waited 4 to 9 seconds for a transcript row. By then the phone showed "Queued in the agent" and every `hand_off` came back "uncertain".
+- Messages a working Claude took into its running turn after another queued message are no longer reported as failed. Claude writes the earlier message's attachment rows after the removal that took the later one, and the transcript scan stopped at the first of those older rows. On 2026-10-17 three of the owner's voice messages were reported "not taken", and he sent them again.
+- A `hand_off` reported "uncertain" now becomes delivered or failed once the agent takes the message or the Hook knows it won't. The sender hears that outcome instead of an early "uncertain".
+- The hand-off queue doesn't type the next message into a pane while the last one is still waiting to be taken. Herdr shows the pane as idle while the agent runs its hooks, and messages sent 5 seconds apart piled up unsent in one input line.
+
 ## [0.3.55] - 2026-10-17
 
 ### Changed

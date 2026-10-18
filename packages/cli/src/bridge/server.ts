@@ -147,6 +147,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     },
     notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false, bypassConductor: true }),
     send: sendPrompt,
+    delivery: (target, deliveryId) => agentHooks.deliveries.status(deliveryId, target),
+    inFlight: target => agentHooks.deliveries.holding(target),
   }) : undefined;
   // Moving a session to another agent (session-move.ts): its hand-off request
   // takes the hand_off path, and the new agent starts through the launch path.

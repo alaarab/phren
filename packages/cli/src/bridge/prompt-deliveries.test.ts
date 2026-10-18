@@ -314,15 +314,36 @@ describe("a message the agent took into its running turn", () => {
     await store.observe("default", [claudePane("idle")]);
     expect(store.status("race-0001", claudeTarget).state).toBe("delivered");
   });
-  it("keeps a hook's claim that came before its row was readable, and applies it when the row appears", async () => {
+  it("settles at once on a hook that came before its row was written, as Claude writes the row after its hooks", async () => {
     const store = deliveries();
     await send(store, "early-0001", "yes", claudeTarget);
     hookRows = true;
     await store.submitted(claudeTarget, "yes");
-    expect(store.status("early-0001", claudeTarget).state).toBe("queued");
+    expect(store.status("early-0001", claudeTarget).state).toBe("delivered");
+    // Its row, written once the hooks returned, is not offered to the next identical message.
+    clock += 1_000; await send(store, "early-0002", "yes", claudeTarget);
     landed = true; clock += 3_000;
     await store.observe("default", [claudePane("working")]);
-    expect(store.status("early-0001", claudeTarget).state).toBe("delivered");
+    clock += 1; store.stopped(claudeTarget);
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("early-0002", claudeTarget).state).toBe("failed");
+  });
+  it("keeps a hook's claim waiting for its own row when an identical message already claimed one in the conversation", async () => {
+    const store = deliveries();
+    await send(store, "claimed-01", "yes", claudeTarget);
+    landed = true; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("claimed-01", claudeTarget).state).toBe("delivered");
+    clock += 10_000; await send(store, "claimed-02", "yes", claudeTarget);
+    // The first message's row is past this one's scan window: none readable yet for the callback.
+    landed = false; hookRows = true;
+    await store.submitted(claudeTarget, "yes");
+    expect(store.status("claimed-02", claudeTarget).state).toBe("queued");
+    landed = true; matches = 2; clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("claimed-02", claudeTarget).state).toBe("delivered");
   });
   it("does not let a late hook whose transcript cannot be read confirm a later identical message", async () => {
     let readable = true;
@@ -354,32 +375,21 @@ describe("a message the agent took into its running turn", () => {
     clock += 3_000; await restarted.observe("default", [claudePane("working")]);
     expect(restarted.status("unread-b1", claudeTarget).state).toBe("queued");
   });
-  it("looks for a deferred hook claim in the conversation that made it", async () => {
+  it("settles in the conversation that submitted it, and turns a failed message delivered when its late hook comes", async () => {
     const next: Target = { ...claudeTarget, session: "00000000-cccc-7000-8000-00000000000d" };
-    let rowIn: string | undefined;
-    const store = new PromptDeliveries(undefined, () => clock, async record => record.session === rowIn ? [{ offset: 0, hook: true }] : []);
-    stores.push(store);
-    await send(store, "clear-0001", "yes", claudeTarget);
-    // /clear, then the new conversation submits it before its row is readable.
-    await store.submitted(next, "yes");
-    expect(store.status("clear-0001", claudeTarget).state).toBe("queued");
-    rowIn = next.session; clock += 3_000;
-    await store.observe("default", [claudePane("working")]);
-    expect(store.status("clear-0001", claudeTarget)).toEqual({ state: "delivered", session: next.session });
-  });
-  it("turns a failed message delivered when its late hook's row appears", async () => {
     const store = deliveries();
-    await send(store, "late-0001", "yes", claudeTarget);
+    await send(store, "clear-0001", "yes", claudeTarget);
+    // /clear, then the new conversation submits it before its row is written.
+    await store.submitted(next, "yes");
+    expect(store.status("clear-0001", claudeTarget)).toEqual({ state: "delivered", session: next.session });
+    await send(store, "late-0001", "go", claudeTarget);
     clock += 1; store.stopped(claudeTarget);
     await store.observe("default", [claudePane("idle")]);
     clock += DELIVERY_GIVE_UP_MS;
     await store.observe("default", [claudePane("idle")]);
     expect(store.status("late-0001", claudeTarget).state).toBe("failed");
     hookRows = true;
-    await store.submitted(claudeTarget, "yes");
-    expect(store.status("late-0001", claudeTarget).state).toBe("failed");
-    landed = true; clock += 3_000;
-    await store.observe("default", [claudePane("working")]);
+    await store.submitted(claudeTarget, "go");
     expect(store.status("late-0001", claudeTarget).state).toBe("delivered");
   });
   it("keeps the row a message without a phone id claimed across a restart", async () => {
@@ -410,6 +420,22 @@ describe("a message the agent took into its running turn", () => {
     expect(offsets.map(entry => entry.offset)).toEqual([100 + Buffer.byteLength(lines[0] + "\n" + lines[1] + "\n"), 100 + Buffer.byteLength(lines[0] + "\n")]);
     expect(offsets.every(entry => entry.hook)).toBe(true);
     expect(matchingOffsets(Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "yes", timestamp: "2026-10-14T00:00:02.000Z" }) + "\n"), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false }]);
+  });
+  it("finds a queued message taken mid-turn behind the older attachment rows Claude writes after it", () => {
+    // Linuxbox 2026-10-17 22:34: two voice messages queued, both taken at :27; the attachment of the first,
+    // stamped when it was typed, follows the removals and is older than the second message's window.
+    const line = (row: Json) => JSON.stringify(row);
+    const lines = [
+      line({ type: "queue-operation", operation: "enqueue", content: "[voice] you just pissed yourself", timestamp: "2026-10-17T22:34:23.699Z" }),
+      line({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "[voice] you just pissed yourself", timestamp: "2026-10-17T22:34:27.049Z" }),
+      line({ type: "attachment", timestamp: "2026-10-17T22:34:15.589Z" }),
+      line({ type: "attachment", timestamp: "2026-10-17T22:34:21.692Z" }),
+    ];
+    const at = Date.parse("2026-10-17T22:34:21.379Z");
+    expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] you just pissed yourself"), at }))
+      .toEqual([{ offset: Buffer.byteLength(lines[0] + "\n"), hook: false }]);
+    // A row with these words from before the window still does not count.
+    expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] you just pissed yourself"), at: at + 60_000 })).toEqual([]);
   });
 });
 

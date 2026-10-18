@@ -146,7 +146,9 @@ const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.tes
  * so the phone shows the message as not sent instead of waiting forever. */
 async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: string): Promise<DeliveryOutcome | "unsubmitted"> {
   const status = async () => { try { return String(findPane(await snapshot(target.server), target)?.agent_status ?? "unknown"); } catch { return "unknown"; } };
-  if (await status() === "working") return "pending";
+  // A pane that turned working started a turn: its UserPromptSubmit is on its way (the agent runs its
+  // other hooks too). Wait for it rather than answering "queued" for a message the agent took.
+  if (await status() === "working") return await agentHooks.deliveries.awaitLate(target, text);
   const late = agentHooks.deliveries.awaitLate(target, text);
   await terminalProvider().sendKeys(target.server, target.pane, ["enter"]);
   const outcome = await late;
