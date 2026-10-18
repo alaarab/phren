@@ -425,20 +425,20 @@ describe("a message the agent took into its running turn", () => {
     expect(matchingOffsets(Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "yes", timestamp: "2026-10-14T00:00:02.000Z" }) + "\n"), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false, at: Date.parse("2026-10-14T00:00:02.000Z") }]);
   });
   it("finds a queued message taken mid-turn behind the older attachment rows Claude writes after it", () => {
-    // Linuxbox 2026-10-17 22:34: two voice messages queued, both taken at :27; the attachment of the first,
+    // 2026-10-17: two voice messages queued, both taken at :27; the attachment of the first,
     // stamped when it was typed, follows the removals and is older than the second message's window.
     const line = (row: Json) => JSON.stringify(row);
     const lines = [
-      line({ type: "queue-operation", operation: "enqueue", content: "[voice] you just pissed yourself", timestamp: "2026-10-17T22:34:23.699Z" }),
-      line({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "[voice] you just pissed yourself", timestamp: "2026-10-17T22:34:27.049Z" }),
+      line({ type: "queue-operation", operation: "enqueue", content: "[voice] check the build again", timestamp: "2026-10-17T22:34:23.699Z" }),
+      line({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "[voice] check the build again", timestamp: "2026-10-17T22:34:27.049Z" }),
       line({ type: "attachment", timestamp: "2026-10-17T22:34:15.589Z" }),
       line({ type: "attachment", timestamp: "2026-10-17T22:34:21.692Z" }),
     ];
     const at = Date.parse("2026-10-17T22:34:21.379Z");
-    expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] you just pissed yourself"), at }))
+    expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] check the build again"), at }))
       .toEqual([{ offset: Buffer.byteLength(lines[0] + "\n"), hook: false, at: Date.parse("2026-10-17T22:34:27.049Z") }]);
     // A row with these words from before the window still does not count.
-    expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] you just pissed yourself"), at: at + 60_000 })).toEqual([]);
+    expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] check the build again"), at: at + 60_000 })).toEqual([]);
   });
 });
 
