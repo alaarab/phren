@@ -31,6 +31,9 @@ export interface QueueOptions {
   /** Whether text typed into the target's pane is still waiting to be taken. Nothing more is typed
    * there until it is: a second paste would land in the same input line, after the first. */
   inFlight?: (target: Target) => boolean;
+  /** Whether the message typed under `deliveryId` may still be taken: held, and not past the time a pane
+   * that sends no hooks is given (prompt-deliveries.ts `held`). */
+  held?: (target: Target, deliveryId: string) => boolean;
   now?: () => number;
   root?: string;
 }
@@ -92,9 +95,10 @@ export class HandOffQueue {
       row.state = "failed"; row.error = (known.reason ?? "The agent did not take the message.").slice(0, 500); await this.save(row);
     }
   }
-  /** Uncertain only while the agent may still take it: its typed message is held, not yet settled. */
+  /** Uncertain only while the agent may still take it: its typed message is held, not yet settled, and
+   * in a pane whose hooks will settle it or typed only moments ago. Past that the sender hears "uncertain". */
   private stillHeld(row: Row): boolean {
-    return row.state === "uncertain" && this.options.delivery?.(row.target, row.deliveryId).state === "queued";
+    return row.state === "uncertain" && !!this.options.held?.(row.target, row.deliveryId);
   }
   private async rows(): Promise<Row[]> {
     const names = await readdir(this.root).catch(error => { if (error.code === "ENOENT") return []; throw error; });

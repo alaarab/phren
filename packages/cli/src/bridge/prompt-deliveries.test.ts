@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, matchingOffsets, promptHash, PromptDeliveries, userTexts } from "./prompt-deliveries.js";
+import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, IN_FLIGHT_MS, matchingOffsets, promptHash, PromptDeliveries, userTexts } from "./prompt-deliveries.js";
 import type { Json, Target } from "./protocol.js";
 
 const target: Target = { server: "default", workspace: "w6", tab: "w6:t1", pane: "w6:p1", source: "codex", session: "01a10831-4b62-7000-8000-000000000001" };
@@ -333,12 +333,14 @@ describe("a message the agent took into its running turn", () => {
   it("keeps a hook's claim waiting for its own row when an identical message already claimed one in the conversation", async () => {
     const store = deliveries();
     await send(store, "claimed-01", "yes", claudeTarget);
-    landed = true; clock += 3_000;
+    // Its user row, seen on two checks in a pane that has sent no callbacks yet.
+    landed = true; hookRows = true; clock += 3_000;
     await store.observe("default", [claudePane("working")]);
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
     expect(store.status("claimed-01", claudeTarget).state).toBe("delivered");
     clock += 10_000; await send(store, "claimed-02", "yes", claudeTarget);
     // The first message's row is past this one's scan window: none readable yet for the callback.
-    landed = false; hookRows = true;
+    landed = false;
     await store.submitted(claudeTarget, "yes");
     expect(store.status("claimed-02", claudeTarget).state).toBe("queued");
     landed = true; matches = 2; clock += 3_000;
@@ -347,11 +349,12 @@ describe("a message the agent took into its running turn", () => {
   });
   it("does not let a late hook whose transcript cannot be read confirm a later identical message", async () => {
     let readable = true;
-    const store = new PromptDeliveries(undefined, () => clock, async () => { if (!readable) throw new Error("EIO"); return [{ offset: 0, hook: false }]; });
+    const store = new PromptDeliveries(undefined, () => clock, async () => { if (!readable) throw new Error("EIO"); return [{ offset: 0, hook: true }]; });
     stores.push(store);
     await send(store, "unread-01", "yes", claudeTarget);
-    clock += 3_000;
-    await store.observe("default", [claudePane("working")]);
+    // Its user row, seen on two checks in a pane that has sent no callbacks yet.
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
     expect(store.status("unread-01", claudeTarget).state).toBe("delivered");
     clock += 1_000; await send(store, "unread-02", "yes", claudeTarget);
     // The first message's hook, late, and the transcript unreadable now.
@@ -419,7 +422,7 @@ describe("a message the agent took into its running turn", () => {
     const offsets = matchingOffsets(buffer, 100, { hash: promptHash("yes"), at });
     expect(offsets.map(entry => entry.offset)).toEqual([100 + Buffer.byteLength(lines[0] + "\n" + lines[1] + "\n"), 100 + Buffer.byteLength(lines[0] + "\n")]);
     expect(offsets.every(entry => entry.hook)).toBe(true);
-    expect(matchingOffsets(Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "yes", timestamp: "2026-10-14T00:00:02.000Z" }) + "\n"), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false }]);
+    expect(matchingOffsets(Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "yes", timestamp: "2026-10-14T00:00:02.000Z" }) + "\n"), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false, at: Date.parse("2026-10-14T00:00:02.000Z") }]);
   });
   it("finds a queued message taken mid-turn behind the older attachment rows Claude writes after it", () => {
     // Linuxbox 2026-10-17 22:34: two voice messages queued, both taken at :27; the attachment of the first,
@@ -433,9 +436,66 @@ describe("a message the agent took into its running turn", () => {
     ];
     const at = Date.parse("2026-10-17T22:34:21.379Z");
     expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] you just pissed yourself"), at }))
-      .toEqual([{ offset: Buffer.byteLength(lines[0] + "\n"), hook: false }]);
+      .toEqual([{ offset: Buffer.byteLength(lines[0] + "\n"), hook: false, at: Date.parse("2026-10-17T22:34:27.049Z") }]);
     // A row with these words from before the window still does not count.
     expect(matchingOffsets(Buffer.from(lines.join("\n") + "\n"), 0, { hash: promptHash("[voice] you just pissed yourself"), at: at + 60_000 })).toEqual([]);
+  });
+});
+
+describe("a message that will never settle", () => {
+  it("holds its pane only while young, unless the pane's hooks will settle it", async () => {
+    // A Copilot pane, or Codex without hooks: no UserPromptSubmit or Stop ever settles what was typed there.
+    const store = deliveries(), hooked: Target = { ...target, pane: "w6:p2" };
+    store.stopped(hooked);
+    clock += 1; await send(store, "nohook-0001", "Run the suite");
+    await send(store, "hooked-0001", "Run the suite", hooked);
+    expect([store.holding(target), store.held("nohook-0001", target), store.holding(hooked)]).toEqual([true, true, true]);
+    clock += IN_FLIGHT_MS;
+    expect([store.holding(target), store.held("nohook-0001", target)]).toEqual([false, false]);
+    // Still queued for the phone: only the hold on the pane ends.
+    expect(store.status("nohook-0001", target).state).toBe("queued");
+    expect([store.holding(hooked), store.held("hooked-0001", hooked)]).toEqual([true, true]);
+  });
+  it("is not taken late by an identical prompt after the pane's next Stop", async () => {
+    const store = deliveries();
+    await send(store, "lost-0001", "go");
+    store.fail("lost-0001", target, "The agent did not take the message; it may still be in its input line.");
+    clock += 1; store.stopped(target);
+    clock += 60_000; await store.submitted(target, "go");
+    expect(store.status("lost-0001", target).state).toBe("failed");
+  });
+});
+
+describe("identical Claude messages and their rows", () => {
+  it("gives a message its hook settled the row written after it, not a later identical message that was dropped", async () => {
+    // A "yes" settled by its hook at t, its row written after the hooks; a second "yes" typed 6 s later and dropped (Esc).
+    let rows: { offset: number; hook: boolean; at?: number }[] = [];
+    const store = new PromptDeliveries(undefined, () => clock, async () => rows);
+    stores.push(store);
+    await send(store, "hooked-a1", "yes", claudeTarget);
+    clock += 1_000; await store.submitted(claudeTarget, "yes");
+    expect(store.status("hooked-a1", claudeTarget).state).toBe("delivered");
+    const settledAt = clock;
+    clock += 6_000; await send(store, "dropped-b1", "yes", claudeTarget);
+    rows = [{ offset: 0, hook: true, at: settledAt + 3_000 }];
+    clock += 1; store.stopped(claudeTarget);
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("dropped-b1", claudeTarget).state).toBe("failed");
+  });
+  it("settles a repeated short reply on its hook after an earlier one was taken mid-turn", async () => {
+    // The first "yes" was absorbed into the running turn (a queue removal, no hook); the second starts a turn.
+    let rows: { offset: number; hook: boolean }[] = [{ offset: 0, hook: false }];
+    const store = new PromptDeliveries(undefined, () => clock, async () => rows);
+    stores.push(store);
+    await send(store, "steer-0001", "yes", claudeTarget);
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    expect(store.status("steer-0001", claudeTarget).state).toBe("delivered");
+    clock += 1_000; await send(store, "turn-00002", "yes", claudeTarget);
+    rows = [{ offset: 0, hook: false }];
+    await store.submitted(claudeTarget, "yes");
+    expect(store.status("turn-00002", claudeTarget).state).toBe("delivered");
   });
 });
 
