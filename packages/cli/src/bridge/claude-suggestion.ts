@@ -33,7 +33,9 @@ export function claudeSuggestion(screen: string): string | undefined {
  * reads "Message @<agent>…". Text typed there goes to that agent, not the
  * conversation, so a phone message typed into it never reaches the turn;
  * Escape returns to the main view. */
-export const SUBAGENT_VIEW = /^Message @\S.*…$/;
+// Only the bare placeholder, one agent name and nothing else: a suggestion
+// that a narrow pane cut short ("Message @researcher to check…") is not one.
+export const SUBAGENT_VIEW = /^Message @[\w.-]+…$/;
 export function claudeSubagentView(screen: string): boolean {
   const text = liveInputDimText(screen);
   return !!text && SUBAGENT_VIEW.test(text);

@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { snapshot } from "./herdr.js";
+import { validateTarget } from "./herdr.js";
 import { TURN_ENDED_WITHOUT_IT } from "./prompt-deliveries.js";
 import type { Json, Target } from "./protocol.js";
 import { leaveClaudeSubagentView, retryAfterSubagentView } from "./server-pane-routes.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
-vi.mock("./herdr.js", async original => ({ ...await original<typeof import("./herdr.js")>(), snapshot: vi.fn() }));
+vi.mock("./herdr.js", async original => ({ ...await original<typeof import("./herdr.js")>(), validateTarget: vi.fn() }));
 
 // The owner's report (2026-10-21, Hub on omarchy): Claude Code showed a subagent's view, its input
 // reading "Message @general-purpose…", so a phone message went to that subagent and failed when
@@ -48,10 +48,16 @@ describe("a Claude pane showing a subagent's view", () => {
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
-  it("presses Escape at most twice when the view stays", async () => {
+  it("presses Escape once: a view still showing after it is left alone", async () => {
     screens = [subagentView];
-    expect(await leaveClaudeSubagentView({ paneAnsi }, target, 0)).toBe(true);
-    expect(sendKeys).toHaveBeenCalledTimes(2);
+    expect(await leaveClaudeSubagentView({ paneAnsi }, target, 0)).toBe(false);
+    expect(sendKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not a main-view suggestion that a narrow pane cut to look like one (Codex review)", async () => {
+    screens = [recorded.replace("merged 313 and 314", "Message @researcher to check…")];
+    expect(await leaveClaudeSubagentView({ paneAnsi }, target, 0)).toBe(false);
+    expect(sendKeys).not.toHaveBeenCalled();
   });
 });
 
@@ -65,7 +71,7 @@ describe("a phone message the turn ended without, with a subagent's view on scre
   const settle = () => new Promise(resolve => setTimeout(resolve, 30));
 
   it("leaves the view and types it again, once, under the same id", async () => {
-    vi.mocked(snapshot).mockResolvedValue({ panes: [{ ...pane }] } as never);
+    vi.mocked(validateTarget).mockResolvedValue({ ...pane } as never);
     screens = [subagentView, mainView];
     const agentHooks = hooks(() => ({ state: "failed", reason: TURN_ENDED_WITHOUT_IT }));
     retryAfterSubagentView(agentHooks as never, target, "terminal-1", "Go for it", "delivery-1", 1, 600_000, 0);
@@ -77,7 +83,7 @@ describe("a phone message the turn ended without, with a subagent's view on scre
   });
 
   it("types nothing again in the main view, for another failure, or once it was taken", async () => {
-    vi.mocked(snapshot).mockResolvedValue({ panes: [{ ...pane }] } as never);
+    vi.mocked(validateTarget).mockResolvedValue({ ...pane } as never);
     const failed = () => ({ state: "failed", reason: TURN_ENDED_WITHOUT_IT });
     retryAfterSubagentView(hooks(failed, mainView) as never, target, "terminal-1", "Go", "d-2", 1, 600_000, 0);
     retryAfterSubagentView(hooks(() => ({ state: "failed", reason: "The agent's pane closed before it took the message." }), subagentView) as never,
@@ -86,6 +92,26 @@ describe("a phone message the turn ended without, with a subagent's view on scre
     // A different terminal in the pane is another agent: never retyped there.
     retryAfterSubagentView(hooks(failed, subagentView) as never, target, "terminal-2", "Go", "d-5", 1, 600_000, 0);
     await settle();
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("types nothing when a retry from the phone delivered it while the view was left (Codex review)", async () => {
+    vi.mocked(validateTarget).mockResolvedValue({ ...pane } as never);
+    screens = [subagentView, mainView];
+    let looks = 0;
+    const agentHooks = hooks(() => (++looks === 1 ? { state: "failed", reason: TURN_ENDED_WITHOUT_IT } : { state: "delivered" }));
+    retryAfterSubagentView(agentHooks as never, target, "terminal-1", "Go", "d-6", 1, 600_000, 0);
+    await settle();
+    expect(agentHooks.deliveries.expect).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("types nothing into another conversation in the same terminal (/clear, /resume) (Codex review)", async () => {
+    vi.mocked(validateTarget).mockRejectedValue(new Error("The conversation in this pane changed."));
+    screens = [subagentView, mainView];
+    retryAfterSubagentView(hooks(() => ({ state: "failed", reason: TURN_ENDED_WITHOUT_IT })) as never, target, "terminal-1", "Go", "d-7", 1, 600_000, 0);
+    await settle();
+    expect(sendKeys).not.toHaveBeenCalled();
     expect(prompt).not.toHaveBeenCalled();
   });
 });

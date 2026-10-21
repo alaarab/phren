@@ -171,21 +171,23 @@ async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: stri
 /** A Claude pane showing a subagent's view (its empty input reads "Message
  * @<agent>…") takes typed text for that subagent, so a phone message never
  * reached the turn and failed when it ended (owner, 2026-10-21). Escape returns
- * to the main view; it is pressed only while that view shows (in the main view
- * Escape would interrupt the turn), at most twice. True when it was needed. */
+ * to the main view. It is pressed once, only while that view shows: in the main
+ * view Escape would interrupt the turn, so a view still showing after it is left
+ * as it is and logged. True when the view was left. */
 export async function leaveClaudeSubagentView(agentHooks: Pick<AgentHooks, "paneAnsi">, target: Target, waitMs = 250): Promise<boolean> {
   if (target.source !== "claude") return false;
-  let left = false;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const shows = async () => {
     let screen: string | undefined;
     try { screen = await agentHooks.paneAnsi?.(target); } catch { screen = undefined; }
-    if (screen === undefined || !claudeSubagentView(screen)) return left;
-    process.stderr.write(`phren hook: ${target.server}:${target.pane} shows a subagent view; Escape back to the conversation before typing\n`);
-    await terminalProvider().sendKeys(target.server, target.pane, ["esc"]);
-    left = true;
-    await sleep(waitMs);
-  }
-  return left;
+    return screen !== undefined && claudeSubagentView(screen);
+  };
+  if (!await shows()) return false;
+  process.stderr.write(`phren hook: ${target.server}:${target.pane} shows a subagent view; Escape back to the conversation before typing\n`);
+  await terminalProvider().sendKeys(target.server, target.pane, ["esc"]);
+  await sleep(waitMs);
+  if (!await shows()) return true;
+  process.stderr.write(`phren hook: ${target.server}:${target.pane} still shows a subagent view after Escape; not pressing it again\n`);
+  return false;
 }
 
 /** A phone message the turn ended without, in a Claude pane that now shows a
@@ -200,10 +202,16 @@ export function retryAfterSubagentView(agentHooks: AgentHooks, target: Target, t
     const status = agentHooks.deliveries.status(id, target);
     if (status.state !== "failed") { if (status.state !== "delivered") schedule(); return; }
     if (status.reason !== TURN_ENDED_WITHOUT_IT) return;
+    // The same conversation, as the route checks it: a /clear or /resume in the
+    // same terminal is another conversation, never given the old message.
     let pane: Json | undefined;
-    try { pane = findPane(await snapshot(target.server), target); } catch { return; }
+    try { pane = await validateTarget(target, true, true); } catch { return; }
     if (!pane || pane.terminal_id !== terminal || !["idle", "done"].includes(String(pane.agent_status))) return;
     if (!await leaveClaudeSubagentView(agentHooks, target, escapeWaitMs)) return;
+    // Checked again with nothing awaited before the record is replaced: a retry
+    // from the phone may have delivered it meanwhile.
+    const now = agentHooks.deliveries.status(id, target);
+    if (now.state !== "failed" || now.reason !== TURN_ENDED_WITHOUT_IT) return;
     process.stderr.write(`phren hook: retrying phone message ${id} in the conversation after leaving the subagent view\n`);
     const expected = agentHooks.deliveries.expect(target, text, 1_500, undefined, id, typeof terminal === "string" ? terminal : undefined);
     await terminalProvider().prompt(target.server, target.pane, text);
