@@ -24,15 +24,35 @@ const PLACEHOLDERS = [/^Try ".*"$/, /^Press (?:up|Enter) to /, /^Message @.*…$
  * offered, since sending half a sentence would be worse than nothing.
  */
 export function claudeSuggestion(screen: string): string | undefined {
+  const text = liveInputDimText(screen);
+  if (!text || text.endsWith("…") || text.length > MAX_SUGGESTION || PLACEHOLDERS.some(pattern => pattern.test(text))) return undefined;
+  return text;
+}
+
+/** Claude Code showing a subagent's (or teammate's) view: its empty input box
+ * reads "Message @<agent>…". Text typed there goes to that agent, not the
+ * conversation, so a phone message typed into it never reaches the turn;
+ * Escape returns to the main view. */
+// Only the bare placeholder, one agent name and nothing else: a suggestion
+// that a narrow pane cut short ("Message @researcher to check…") is not one.
+// Claude Code (2.1.303) cuts a name past 20 columns with its own "…" before the
+// placeholder's: "Message @researcher-performa……".
+export const SUBAGENT_VIEW = /^Message @[\w.-]{1,20}…?…$/;
+export function claudeSubagentView(screen: string): boolean {
+  const text = liveInputDimText(screen);
+  return !!text && SUBAGENT_VIEW.test(text);
+}
+
+/** The dim text in the live input box (between its two rules), "" when the
+ * box holds typed text, undefined when there is no live box on screen. */
+function liveInputDimText(screen: string): string | undefined {
   const lines = screen.split("\n").map(line => line.replace(/\r$/, ""));
   for (let index = lines.length - 2; index > 0; index--) {
     const plain = stripTerminal(lines[index]);
     if (!/^\s*❯/.test(plain)) continue;
     // Only the live input box: a sent prompt in the history has no rules around it.
     if (!rule(stripTerminal(lines[index - 1])) || !rule(stripTerminal(lines[index + 1]))) return undefined;
-    const text = dimText(lines[index]);
-    if (!text || text.endsWith("…") || text.length > MAX_SUGGESTION || PLACEHOLDERS.some(pattern => pattern.test(text))) return undefined;
-    return text;
+    return dimText(lines[index]);
   }
   return undefined;
 }
