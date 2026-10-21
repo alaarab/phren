@@ -204,9 +204,15 @@ export function retryAfterSubagentView(agentHooks: AgentHooks, target: Target, t
     if (status.reason !== TURN_ENDED_WITHOUT_IT) return;
     // The same conversation, as the route checks it: a /clear or /resume in the
     // same terminal is another conversation, never given the old message.
+    // A refusal (409: the conversation changed or the pane went) ends the watch;
+    // a look that failed for now (a timeout) or an agent busy again waits.
     let pane: Json | undefined;
-    try { pane = await validateTarget(target, true, true); } catch { return; }
-    if (!pane || pane.terminal_id !== terminal || !["idle", "done"].includes(String(pane.agent_status))) return;
+    try { pane = await validateTarget(target, true, true); } catch (error) {
+      if (error instanceof BridgeError && error.status === 409) return;
+      schedule(); return;
+    }
+    if (!pane || pane.terminal_id !== terminal) return;
+    if (!["idle", "done"].includes(String(pane.agent_status))) { schedule(); return; }
     if (!await leaveClaudeSubagentView(agentHooks, target, escapeWaitMs)) return;
     // Checked again with nothing awaited before the record is replaced: a retry
     // from the phone may have delivered it meanwhile.

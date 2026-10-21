@@ -35,7 +35,9 @@ export function claudeSuggestion(screen: string): string | undefined {
  * Escape returns to the main view. */
 // Only the bare placeholder, one agent name and nothing else: a suggestion
 // that a narrow pane cut short ("Message @researcher to check…") is not one.
-export const SUBAGENT_VIEW = /^Message @[\w.-]+…$/;
+// Claude Code (2.1.303) cuts a name past 20 columns with its own "…" before the
+// placeholder's: "Message @researcher-performa……".
+export const SUBAGENT_VIEW = /^Message @[\w.-]{1,20}…?…$/;
 export function claudeSubagentView(screen: string): boolean {
   const text = liveInputDimText(screen);
   return !!text && SUBAGENT_VIEW.test(text);

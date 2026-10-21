@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateTarget } from "./herdr.js";
 import { TURN_ENDED_WITHOUT_IT } from "./prompt-deliveries.js";
-import type { Json, Target } from "./protocol.js";
+import { BridgeError, type Json, type Target } from "./protocol.js";
 import { leaveClaudeSubagentView, retryAfterSubagentView } from "./server-pane-routes.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
@@ -51,6 +51,12 @@ describe("a Claude pane showing a subagent's view", () => {
   it("presses Escape once: a view still showing after it is left alone", async () => {
     screens = [subagentView];
     expect(await leaveClaudeSubagentView({ paneAnsi }, target, 0)).toBe(false);
+    expect(sendKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it("knows a long agent name Claude cut short (Codex review, Claude 2.1.303)", async () => {
+    screens = [recorded.replace("merged 313 and 314", "Message @researcher-performa……"), mainView];
+    expect(await leaveClaudeSubagentView({ paneAnsi }, target, 0)).toBe(true);
     expect(sendKeys).toHaveBeenCalledTimes(1);
   });
 
@@ -107,11 +113,20 @@ describe("a phone message the turn ended without, with a subagent's view on scre
   });
 
   it("types nothing into another conversation in the same terminal (/clear, /resume) (Codex review)", async () => {
-    vi.mocked(validateTarget).mockRejectedValue(new Error("The conversation in this pane changed."));
+    vi.mocked(validateTarget).mockRejectedValue(new BridgeError(409, "The conversation in this pane changed."));
     screens = [subagentView, mainView];
     retryAfterSubagentView(hooks(() => ({ state: "failed", reason: TURN_ENDED_WITHOUT_IT })) as never, target, "terminal-1", "Go", "d-7", 1, 600_000, 0);
     await settle();
     expect(sendKeys).not.toHaveBeenCalled();
     expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("keeps watching past a look that failed for now, then retries (Codex review)", async () => {
+    vi.mocked(validateTarget).mockRejectedValueOnce(new Error("Herdr timed out")).mockResolvedValue({ ...pane } as never);
+    screens = [subagentView, mainView];
+    const agentHooks = hooks(() => ({ state: "failed", reason: TURN_ENDED_WITHOUT_IT }));
+    retryAfterSubagentView(agentHooks as never, target, "terminal-1", "Go", "d-8", 1, 600_000, 0);
+    await settle();
+    expect(prompt).toHaveBeenCalledTimes(1);
   });
 });
