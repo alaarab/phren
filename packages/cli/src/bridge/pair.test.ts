@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { keyFingerprint, newPairingCode, normalizeCode, pairingCheckCode, pairingProof, pairingURL, startPairing } from "./pair.js";
+import { keyFingerprint, newPairingCode, normalizeCode, pairingCheckCode, pairingProof, pairingURL, printableName, startPairing } from "./pair.js";
 
 let root: string, publicKey: string;
 beforeEach(async () => {
@@ -89,4 +89,10 @@ it("asks about typed phones one at a time, each answer for its own phone", async
   expect([first.status, second.status].sort()).toEqual([200, 410]);
   const keys = await readFile(path.join(sshDirectory, "authorized_keys"), "utf8");
   expect(keys.trim().split("\n")).toHaveLength(1);
+});
+
+it("prints a phone's name without terminal escapes that could forge the check", () => {
+  expect(printableName("Sam's iPhone\u001b[8m Check: AAAA BBBB\r\nAllow")).toBe("Sam's iPhone[8m Check: AAAA BBBBAllow");
+  expect(printableName("ok\u202Eevil")).toBe("okevil");
+  expect(printableName("x".repeat(200))).toHaveLength(80);
 });

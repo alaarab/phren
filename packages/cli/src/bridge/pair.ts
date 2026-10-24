@@ -265,6 +265,11 @@ async function runScopedPair(args: string[], version: string): Promise<number> {
   return 0;
 }
 
+/** A name safe to print in a terminal: control and format characters dropped, at most 80 characters. */
+export function printableName(name: string): string {
+  return name.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "").slice(0, 80);
+}
+
 /** How long the terminal waits for an answer: less than the phone waits, so a late yes never authorizes a phone that gave up. */
 const APPROVAL_WAIT_MS = 100_000;
 
@@ -283,7 +288,10 @@ async function askToAllow(phone: PairingApproval, cancel: () => void): Promise<b
   const timer = setTimeout(() => abort.abort(), APPROVAL_WAIT_MS);
   prompt.on("SIGINT", () => { abort.abort(); cancel(); });
   try {
-    const who = phone.name ? `"${phone.name}"` : "A phone";
+    // The name comes from the request: printed without control characters, so
+    // it can't hide or forge the check line with terminal escapes.
+    const name = phone.name ? printableName(phone.name) : "";
+    const who = name ? `"${name}"` : "A phone";
     console.log(`\n  ${who} typed the code. Its screen shows a key check${phone.check ? `; it should be:  ${phone.check}` : "."}`);
     const answer = await prompt.question("  Allow this phone? [y/N] ", { signal: abort.signal });
     return /^y(es)?$/i.test(answer.trim());
