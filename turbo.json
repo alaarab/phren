@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["biome.json", "scripts/build.mjs", "scripts/build-code.mjs"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
