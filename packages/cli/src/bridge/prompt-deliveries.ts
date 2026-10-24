@@ -5,6 +5,9 @@ import { z } from "zod";
 import { atomicInPrivateDir, object, objects, provider, type Json, type Provider, type Target } from "./protocol.js";
 import { transcriptPath, unwrapPastedContent } from "./transcripts.js";
 
+/** A delivery the agent's turn ended without: the reason the phone shows. */
+export const TURN_ENDED_WITHOUT_IT = "The agent finished its turn without taking the message.";
+
 export type DeliveryOutcome = "delivered" | "pending";
 /** What a phone message is known to have become. `queued`: typed into the
  * pane and held by the agent until its turn ends. `failed` carries a reason
@@ -386,7 +389,7 @@ export class PromptDeliveries {
       // Settled delivered by its hook while the transcript was read: never downgraded.
       if (!PromptDeliveries.open(record)) continue;
       record.state = "failed"; record.settledAt = now; changed = true;
-      record.reason = "The agent finished its turn without taking the message.";
+      record.reason = TURN_ENDED_WITHOUT_IT;
     }
     if (changed) this.save();
   }

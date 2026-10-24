@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { claudeSuggestion } from "./claude-suggestion.js";
+import { claudeSubagentView, claudeSuggestion } from "./claude-suggestion.js";
 
 // Screens recorded from Claude Code 2.1.284 with their styles: Herdr's
 // `pane.read --format ansi` (trimmed to the input box) and tmux `capture-pane -e`.
@@ -37,5 +37,17 @@ describe("Claude's suggested next prompt", () => {
     expect(claudeSuggestion(screen.replace(/\x1b\[[0-9;]*m/g, ""))).toBeUndefined();
     expect(claudeSuggestion(screen.replace("\x1b[2mmerged", "merged\x1b[2m"))).toBeUndefined();
     expect(claudeSuggestion("")).toBeUndefined();
+  });
+
+  it("tells a subagent's view by its empty input reading \"Message @<agent>…\"", () => {
+    const box = (text: string) => recorded("next-suggestion-herdr.ansi").replace("merged 313 and 314", text);
+    expect(claudeSubagentView(box("Message @general-purpose…"))).toBe(true);
+    expect(claudeSubagentView(box("Message @researcher…"))).toBe(true);
+    // A suggestion, an empty box, typed text and plain text are the main view.
+    expect(claudeSubagentView(box("run the tests again"))).toBe(false);
+    expect(claudeSubagentView(recorded("empty-prompt-herdr.ansi"))).toBe(false);
+    expect(claudeSubagentView(recorded("owner-typing-tmux.ansi"))).toBe(false);
+    expect(claudeSubagentView(box("Message @general-purpose…").replace(/\x1b\[[0-9;]*m/g, ""))).toBe(false);
+    expect(claudeSubagentView("")).toBe(false);
   });
 });
