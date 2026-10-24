@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A message from the phone's Agent Chat to a dispatched worker no longer fails with "is not an active named agent (HTTP 409)". Herdr's `agent.prompt` takes only agents it holds as named and ready, and a worker that went straight to work on its brief, or an agent restarted in its pane, can stay outside that list. When Herdr refuses such a pane and the harness it detects there is the pane's foreground program, idle or working, the Hook now types the message into the pane and submits it, as the terminal view does, and tracks it by its delivery id like any other message.
+
 ## [0.3.56] - 2026-10-17
 
 ### Fixed

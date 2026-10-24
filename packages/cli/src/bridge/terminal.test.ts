@@ -143,9 +143,35 @@ describe("the Herdr provider", () => {
       ["s", "pane.send_keys", { pane_id: "p", keys: ["Enter"] }, undefined],
       ["s", "pane.send_keys", { pane_id: "p", keys: ["esc"] }],
     ]);
-    // Any other pane keeps Herdr's refusal.
+    // Any other pane keeps Herdr's refusal unless its harness is in the foreground.
     agent = "claude";
     await expect(herdrTerminal.prompt("s", "p", "hi")).rejects.toBe(unnamed);
+  });
+
+  it("types into a pane Herdr refuses by name when the detected harness is its foreground program", async () => {
+    const unnamed = new BridgeError(409, "Herdr: agent w1:p2 is not an active named agent", { herdrCode: "agent_not_ready" });
+    let status = "working", foreground = "/usr/local/bin/claude --permission-mode auto", shellInFront = false;
+    vi.mocked(rpc).mockImplementation(async (_server, method) => {
+      if (method === "agent.prompt") throw unnamed;
+      if (method === "pane.get") return { pane: { pane_id: "w1:p2", agent: "claude", agent_status: status } };
+      if (method === "pane.process_info") return { process_info: { pane_id: "w1:p2", shell_pid: 100,
+        foreground_process_group_id: shellInFront ? 100 : 200, foreground_processes: [{ pid: 200, cmdline: foreground }] } };
+      return {};
+    });
+    const typed = () => vi.mocked(rpc).mock.calls.filter(call => call[1].startsWith("pane.send"));
+    await herdrTerminal.prompt("s", "w1:p2", "Sample follow-up");
+    expect(typed()).toStrictEqual([
+      ["s", "pane.send_text", { pane_id: "w1:p2", text: "\x1b[200~Sample follow-up\x1b[201~" }, undefined],
+      ["s", "pane.send_keys", { pane_id: "w1:p2", keys: ["Enter"] }, undefined],
+    ]);
+    vi.mocked(rpc).mockClear();
+    // Never into a starting harness, a dialog it draws, a shell, or another program.
+    for (const [nextStatus, nextForeground, nextShell] of [["unknown", foreground, false], ["blocked", foreground, false],
+      ["idle", foreground, true], ["idle", "/usr/local/bin/codex", false], ["idle", "vim notes.txt", false]] as const) {
+      status = nextStatus; foreground = nextForeground; shellInFront = nextShell;
+      await expect(herdrTerminal.prompt("s", "w1:p2", "Sample follow-up")).rejects.toBe(unnamed);
+    }
+    expect(typed()).toStrictEqual([]);
   });
 
   it("lists panes with Herdr's agent report as hints, and none for a plain shell", () => {
