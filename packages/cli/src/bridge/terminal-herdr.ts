@@ -24,14 +24,28 @@ export function phrenCommandLine(args: string[]): string {
     `herdr pane release-agent "$HERDR_PANE_ID" --source ${PHREN_REPORT_SOURCE} --agent phren >/dev/null 2>&1`].join("; ");
 }
 
-/** Whether `pane` runs phren-agent as Herdr reports it, for the prompt and key fallbacks below. */
-async function reportedPhren(server: string, pane: string): Promise<boolean> {
+/** Herdr's `agent.prompt` and `agent.send_keys` take only agents it started
+ * and still holds as active. A worker launched with its brief as the
+ * harness's first prompt goes straight to work and can stay `launch_pending`
+ * there, and an agent restarted in its pane (or alive across a Herdr restart)
+ * is detected but never named again; Herdr refuses all of them with
+ * `agent_not_ready` for good. Such a pane is typed into instead, the way the
+ * terminal view types, when its foreground program is the harness Herdr
+ * detects there (phren-agent counts by report alone, as Herdr cannot detect
+ * it). For a prompt Herdr must also read the agent at rest or at work, so
+ * text never lands in a starting harness or answers a dialog it draws. */
+async function typableAgent(server: string, pane: string, forPrompt: boolean): Promise<boolean> {
   const info = object((await rpc(server, "pane.get", { pane_id: pane }).catch((): Json => ({}))).pane);
-  return info.agent === "phren";
+  if (info.agent === "phren") return true;
+  if (typeof info.agent !== "string" || !info.agent) return false;
+  if (forPrompt && !["idle", "working", "done"].includes(String(info.agent_status))) return false;
+  const processes = object((await rpc(server, "pane.process_info", { pane_id: pane }).catch((): Json => ({}))).process_info);
+  // The shell in the foreground would run the text as a command.
+  if (!Number.isSafeInteger(processes.foreground_process_group_id) || processes.foreground_process_group_id === processes.shell_pid) return false;
+  return objects(processes.foreground_processes).some(p => typeof p.cmdline === "string" && agentFromCommand(p.cmdline) === info.agent);
 }
 
-/** Herdr's `agent.prompt` and `agent.send_keys` take only agents it started;
- * a phren-agent pane it knows by report gets the pane calls instead. */
+/** The refusal `typableAgent` answers: an agent Herdr does not hold as named. */
 function unnamedAgent(error: unknown): boolean {
   return error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready" && /not an active named agent/.test(error.message);
 }
@@ -92,7 +106,7 @@ export const herdrTerminal: TerminalProvider = {
   },
   async sendKeys(server, pane, keys) {
     try { await rpc(server, "agent.send_keys", { target: pane, keys }); } catch (error) {
-      if (!unnamedAgent(error) || !await reportedPhren(server, pane)) throw error;
+      if (!unnamedAgent(error) || !await typableAgent(server, pane, false)) throw error;
       await rpc(server, "pane.send_keys", { pane_id: pane, keys });
     }
   },
@@ -113,8 +127,10 @@ export const herdrTerminal: TerminalProvider = {
       if (signal) await rpc(server, "agent.prompt", { target: pane, text }, signal);
       else await rpc(server, "agent.prompt", { target: pane, text });
     } catch (error) {
-      if (!unnamedAgent(error) || !await reportedPhren(server, pane)) throw error;
-      // One bracketed paste keeps the newlines in phren-agent's composer; Enter submits it.
+      if (!unnamedAgent(error) || !await typableAgent(server, pane, true)) throw error;
+      // One bracketed paste keeps the newlines in the agent's composer; Enter submits it.
+      // The route's delivery record (by deliveryId) is already armed: the agent's
+      // UserPromptSubmit settles it, as for a prompt Herdr typed.
       await rpc(server, "pane.send_text", { pane_id: pane, text: `\x1b[200~${text}\x1b[201~` }, signal);
       await new Promise(resolve => setTimeout(resolve, 150));
       await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["Enter"] }, signal);

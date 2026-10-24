@@ -29,6 +29,14 @@ export function claudeSuggestion(screen: string): string | undefined {
   return text;
 }
 
+/** The suggestion as drawn, a narrow pane's cut one ("…" at the end) included, for refusing a relay of what
+ * a screen read shows; undefined when there is none. */
+export function claudeSuggestionShown(screen: string): string | undefined {
+  const text = liveInputDimText(screen);
+  if (!text || text.length > MAX_SUGGESTION || PLACEHOLDERS.some(pattern => pattern.test(text)) || SUBAGENT_VIEW.test(text)) return undefined;
+  return text;
+}
+
 /** Claude Code showing a subagent's (or teammate's) view: its empty input box
  * reads "Message @<agent>…". Text typed there goes to that agent, not the
  * conversation, so a phone message typed into it never reaches the turn;

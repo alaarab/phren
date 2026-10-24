@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A `hand_off` can no longer pass Claude Code's own prompt suggestion off as the owner's message. After a turn Claude draws a dim guess at the owner's next message in its empty input box. A plain screen read shows it like typed text, and Enter doesn't send it. A conductor took three of these for unsent phone messages and handed them to their panes, one of them a merge instruction the owner never gave. The receiving Hook now refuses a hand-off that repeats the pane's current suggestion (`409 prompt-suggestion`) before typing anything, and the conductor skill says not to relay input-box text. A message sent from the phone is never refused this way.
+- A message from the phone's Agent Chat to a dispatched worker no longer fails with "is not an active named agent (HTTP 409)". Herdr's `agent.prompt` takes only agents it holds as named and ready, and a worker that went straight to work on its brief, or an agent restarted in its pane, can stay outside that list. When Herdr refuses such a pane and the harness it detects there is the pane's foreground program, idle or working, the Hook now types the message into the pane and submits it, as the terminal view does, and tracks it by its delivery id like any other message.
+
 ## [0.3.56] - 2026-10-17
 
 ### Fixed

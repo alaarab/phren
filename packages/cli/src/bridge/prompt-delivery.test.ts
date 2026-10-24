@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -186,6 +187,43 @@ describe("a hand-off to a Claude lead waiting on its background agents", () => {
     await noteTurn("default", target.pane, { event: "Stop", ...turn });
     await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
     expect(prompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("a hand-off that repeats a Claude pane's own prompt suggestion", () => {
+  // Live: Claude draws its guess at the owner's next message dim in the empty input box. Read as plain
+  // text it looks like an unsent owner message (Enter does not submit it), and a conductor relayed
+  // three such guesses to their panes by hand-off as the owner's words.
+  const claude = { ...target, source: "claude" as const };
+  const suggested = readFileSync(new URL("./fixtures/claude/2.1.284/next-suggestion-herdr.ansi", import.meta.url), "utf8");
+  const send = (words: string, hookQueued = true) => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: claude, text: words, deliveryId: `${deliveryId}-${++sequence}`, ...(hookQueued ? { hookQueued } : {}) }, {} as never);
+  beforeEach(() => { pane.agent = "claude"; readScreen.mockResolvedValue(suggested); expectDelivery.mockResolvedValue("delivered"); });
+
+  it("is refused before anything is typed", async () => {
+    await expect(send("merged 313 and 314")).rejects.toMatchObject({ status: 409, details: { code: "prompt-suggestion" } });
+    await expect(send("  merged 313   and 314 ")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    await expect(send("[voice] merged 313 and 314")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(expectDelivery).not.toHaveBeenCalled();
+  });
+
+  it("is refused for a narrow pane's cut suggestion, as a screen read shows it", async () => {
+    readScreen.mockResolvedValue(readFileSync(new URL("./fixtures/claude/2.1.284/narrow-truncated-tmux.ansi", import.meta.url), "utf8"));
+    await expect(send("no, skip …")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    await expect(send("no, skip")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    // Longer words that only start the same way are the sender's own.
+    expect(await send("no, skip the release")).toMatchObject({ delivered: true });
+  });
+
+  it("does not stop other words, a phone message, or a pane whose screen cannot be read", async () => {
+    expect(await send("check the release notes")).toMatchObject({ delivered: true });
+    // Case can tell file and branch names apart, so other casing is other words.
+    expect(await send("Merged 313 and 314")).toMatchObject({ delivered: true });
+    // The owner choosing the suggestion on the phone sends it as their own message.
+    expect(await send("merged 313 and 314", false)).toMatchObject({ delivered: true });
+    readScreen.mockRejectedValue(new Error("unreadable"));
+    expect(await send("merged 313 and 314")).toMatchObject({ delivered: true });
+    expect(prompt).toHaveBeenCalledTimes(4);
   });
 });
 

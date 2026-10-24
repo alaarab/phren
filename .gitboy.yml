@@ -20,10 +20,20 @@
 # candidate that only touches, say, the VS Code extension skips the browser
 # suite. Jobs whose result depends on most of the repository declare none and
 # always run.
+#
+# Everything else (a push or PR made on gitboy itself, or a pipeline started
+# without PHREN_RC) runs `fast-check` instead: the development build's checks
+# (build, lint, private strings, typecheck, agent build, docs; tests stay
+# deferred to the RC, as on GitHub) in one job, on only the packages a change
+# touches, starting from a warm pnpm store and turbo cache. Pull mirror syncs
+# start no CI, so on a mirrored repository start it through the API like the
+# RC, with PHREN_BASE_SHA set to the commit to compare with:
+#   {"ref": "<sha>", "variables": {"PHREN_BASE_SHA": "<base sha>"}}
 
 workflow:
   rules:
     - if: '$PHREN_RC == "true" && $GITBOY_PIPELINE_SOURCE == "manual"'
+    - if: '$PHREN_RC != "true" && ($GITBOY_PIPELINE_SOURCE == "push" || $GITBOY_PIPELINE_SOURCE == "pr" || $GITBOY_PIPELINE_SOURCE == "manual")'
 
 stages: [report-start, test, report]
 
@@ -42,6 +52,9 @@ default:
 # never touches the runner's global tools (the macOS runner is a shell executor
 # on the owner's own account). Node 25+ ships without corepack.
 .pnpm:
+  # The RC jobs; fast-check (below) sets its own rules.
+  rules:
+    - if: '$PHREN_RC == "true"'
   before_script:
     - node --version
     - PNPM_VERSION="$(node -p "require('./package.json').packageManager.split('@')[1].split('+')[0]")"
@@ -210,12 +223,93 @@ browser-test:
     when: on_failure
     expire_in: 3 days
 
+# The development build's checks in one job: one install and one build shared
+# by every check, instead of one per job. Only the packages changed since the
+# comparison commit (and the packages that depend on them) are built, linted
+# and typechecked; a change outside packages/ and docs/, or no usable
+# comparison commit, checks everything. The pnpm store and turbo's cache come
+# back from the last successful run, so unchanged packages replay from cache.
+fast-check:
+  extends: .linux
+  stage: test
+  needs: []
+  timeout: 20 minutes
+  interruptible: true
+  rules:
+    - if: '$PHREN_RC != "true"'
+  variables:
+    PHREN_BASE_SHA: ""
+    TURBO_TELEMETRY_DISABLED: "1"
+  cache:
+    key: {files: [pnpm-lock.yaml], prefix: fast-linux}
+    paths: [.pnpm-store/, .turbo/cache/]
+  script:
+    - |
+      started=$(date +%s)
+      base="${PHREN_BASE_SHA:-${GITBOY_BEFORE_SHA:-}}"
+      case "$base" in ""|*[!0]*) ;; *) base="" ;; esac  # all zeros: a new branch
+      affected=""
+      if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null \
+        && git merge-base --is-ancestor "$base" HEAD 2>/dev/null; then
+        if git diff --name-only "$base" HEAD | grep -qvE '^(packages|docs)/|\.md$'; then
+          echo "Files outside packages/ changed since $base; checking every package."
+        else
+          export TURBO_SCM_BASE="$base" TURBO_SCM_HEAD=HEAD
+          affected="--affected"
+          echo "Checking the packages changed since $base and the packages that depend on them."
+        fi
+      else
+        echo "No comparison commit in this checkout; checking every package."
+      fi
+      tsc_dirs="cli code agent vscode push-relay"
+      if [ -n "$affected" ]; then
+        if changed="$(pnpm exec turbo run build --affected --dry=json | node -e '
+          let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+            for (const p of JSON.parse(s).packages) console.log(p);
+          })')"; then
+          keep=""
+          for dir in $tsc_dirs; do
+            name="$(node -p "require('./packages/$dir/package.json').name")"
+            if printf '%s\n' "$changed" | grep -qxF "$name"; then keep="$keep $dir"; fi
+          done
+          tsc_dirs="$keep"
+          echo "Changed packages: $(printf '%s ' $changed)"
+        else
+          echo "Could not list changed packages; checking every package."
+          affected=""
+        fi
+      fi
+      # Checks run side by side; each one's output is shown only if it fails.
+      mkdir -p .ci-logs
+      pids=""
+      start() { name="$1"; shift; "$@" > ".ci-logs/$name.log" 2>&1 & pids="$pids $!:$name"; }
+      finish() {
+        failed=""
+        for entry in $pids; do
+          if wait "${entry%%:*}"; then echo "ok   ${entry#*:}"; else echo "FAIL ${entry#*:}"; failed="$failed ${entry#*:}"; fi
+        done
+        pids=""
+        for name in $failed; do echo "----- $name -----"; cat ".ci-logs/$name.log"; done
+        [ -z "$failed" ]
+      }
+      start private-strings pnpm run check-private-strings
+      start validate-docs pnpm run validate-docs
+      start build-and-lint pnpm exec turbo run build lint $affected --cache-dir=.turbo/cache
+      finish
+      for dir in $tsc_dirs; do start "tsc-$dir" pnpm exec tsc --noEmit -p "packages/$dir/tsconfig.json"; done
+      finish
+      # Keep the cache to what recent runs use.
+      find .turbo/cache -type f -mtime +7 -delete 2>/dev/null || true
+      echo "Checks passed in $(( $(date +%s) - started )) s. Tests are deferred to the release candidate; none ran."
+
 # Commit status on GitHub. GITHUB_STATUS_TOKEN is a masked (not protected:
 # a pipeline at a bare SHA is never on a protected ref) repository CI variable
 # holding a fine-grained token with "Commit statuses: write" on the GitHub
 # repository. Without it, or when GitHub's API refuses, these jobs log and
 # succeed, so reporting never turns the gitboy result red.
 .github-status:
+  rules:
+    - if: '$PHREN_RC == "true"'
   image: node:26
   tags: [docker, linux]
   timeout: 5 minutes
