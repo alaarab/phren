@@ -201,18 +201,21 @@ describe("a hand-off that repeats a Claude pane's own prompt suggestion", () => 
 
   it("is refused before anything is typed", async () => {
     await expect(send("merged 313 and 314")).rejects.toMatchObject({ status: 409, details: { code: "prompt-suggestion" } });
-    await expect(send("  Merged 313   and 314 ")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    await expect(send("  merged 313   and 314 ")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    await expect(send("[voice] merged 313 and 314")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
     expect(prompt).not.toHaveBeenCalled();
     expect(expectDelivery).not.toHaveBeenCalled();
   });
 
   it("does not stop other words, a phone message, or a pane whose screen cannot be read", async () => {
     expect(await send("check the release notes")).toMatchObject({ delivered: true });
+    // Case can tell file and branch names apart, so other casing is other words.
+    expect(await send("Merged 313 and 314")).toMatchObject({ delivered: true });
     // The owner choosing the suggestion on the phone sends it as their own message.
     expect(await send("merged 313 and 314", false)).toMatchObject({ delivered: true });
     readScreen.mockRejectedValue(new Error("unreadable"));
     expect(await send("merged 313 and 314")).toMatchObject({ delivered: true });
-    expect(prompt).toHaveBeenCalledTimes(3);
+    expect(prompt).toHaveBeenCalledTimes(4);
   });
 });
 

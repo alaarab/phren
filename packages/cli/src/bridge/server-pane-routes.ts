@@ -157,7 +157,8 @@ async function relaysSuggestion(target: Target, text: string): Promise<boolean> 
   let screen = "";
   try { screen = await terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }); } catch { return false; }
   const suggestion = claudeSuggestion(screen);
-  const plain = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
+  // Case is kept (file and branch names differ by it); a leading voice marker says nothing about who wrote the words.
+  const plain = (value: string) => value.replace(/\s+/g, " ").trim().replace(/^\[voice\]\s*/i, "");
   return suggestion !== undefined && plain(suggestion) === plain(text);
 }
 
