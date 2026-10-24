@@ -4,7 +4,8 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import type { AgentHooks } from "./agent-hooks.js";
-import type { DeliveryOutcome } from "./prompt-deliveries.js";
+import { TURN_ENDED_WITHOUT_IT, type DeliveryOutcome } from "./prompt-deliveries.js";
+import { claudeSubagentView } from "./claude-suggestion.js";
 import type { DialogAnswer, DialogQuestion } from "./claude-question-dialog.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitShow, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
@@ -20,6 +21,7 @@ import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { PERMISSION_MODE_VALUES, refuseAgentOrigin, type PermissionModeSwitcher } from "./permission-mode.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import { sessionWebServers } from "./session-servers.js";
+import { type PromptGuards, takesPrompt } from "./session-activity.js";
 import { gitRoot, repositoryDiff, withGitReadDeadline } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
@@ -139,6 +141,16 @@ function claudeQuestionAnswer(data: unknown): { questions: DialogQuestion[]; ans
 /** A secret typed into a terminal prompt: printable, bounded, never logged. */
 const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.test(t));
 
+/** What `takesPrompt` checks before typing into a Claude pane Herdr reads working: nothing structured
+ * pending there and no dialog on its screen. */
+export function promptGuards(agentHooks: Pick<AgentHooks, "approval" | "terminalPrompt" | "servedQuestion">, target: Target): PromptGuards {
+  return { held: () => !!(agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)),
+    screen: () => terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }) };
+}
+
+/** Herdr answered the request with a refusal (a 409 carrying its own error code): it performed nothing. */
+const herdrRefused = (error: unknown) => error instanceof BridgeError && error.status === 409 && typeof error.details?.herdrCode === "string";
+
 /** An idle agent that has not taken typed text within the first wait
  * likely lost the Enter while it redrew (an update notice, a resize): the
  * text sits in its input line. Press Enter once more and wait again. A
@@ -146,12 +158,73 @@ const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.tes
  * so the phone shows the message as not sent instead of waiting forever. */
 async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: string): Promise<DeliveryOutcome | "unsubmitted"> {
   const status = async () => { try { return String(findPane(await snapshot(target.server), target)?.agent_status ?? "unknown"); } catch { return "unknown"; } };
-  if (await status() === "working") return "pending";
+  // A pane that turned working started a turn: its UserPromptSubmit is on its way (the agent runs its
+  // other hooks too). Wait for it rather than answering "queued" for a message the agent took.
+  if (await status() === "working") return await agentHooks.deliveries.awaitLate(target, text);
   const late = agentHooks.deliveries.awaitLate(target, text);
   await terminalProvider().sendKeys(target.server, target.pane, ["enter"]);
   const outcome = await late;
   if (outcome !== "pending") return outcome;
   return await status() === "working" ? "pending" : "unsubmitted";
+}
+
+/** A Claude pane showing a subagent's view (its empty input reads "Message
+ * @<agent>…") takes typed text for that subagent, so a phone message never
+ * reached the turn and failed when it ended (owner, 2026-10-21). Escape returns
+ * to the main view. It is pressed once, only while that view shows: in the main
+ * view Escape would interrupt the turn, so a view still showing after it is left
+ * as it is and logged. True when the view was left. */
+export async function leaveClaudeSubagentView(agentHooks: Pick<AgentHooks, "paneAnsi">, target: Target, waitMs = 250): Promise<boolean> {
+  if (target.source !== "claude") return false;
+  const shows = async () => {
+    let screen: string | undefined;
+    try { screen = await agentHooks.paneAnsi?.(target); } catch { screen = undefined; }
+    return screen !== undefined && claudeSubagentView(screen);
+  };
+  if (!await shows()) return false;
+  process.stderr.write(`phren hook: ${target.server}:${target.pane} shows a subagent view; Escape back to the conversation before typing\n`);
+  await terminalProvider().sendKeys(target.server, target.pane, ["esc"]);
+  await sleep(waitMs);
+  if (!await shows()) return true;
+  process.stderr.write(`phren hook: ${target.server}:${target.pane} still shows a subagent view after Escape; not pressing it again\n`);
+  return false;
+}
+
+/** A phone message the turn ended without, in a Claude pane that now shows a
+ * subagent's view (opened while the message waited): leave the view and type
+ * it again under the same delivery id, once. Any other outcome, a changed
+ * pane, or ten minutes end the watch. */
+export function retryAfterSubagentView(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, id: string,
+  intervalMs = 2_000, limitMs = 600_000, escapeWaitMs = 250): void {
+  const started = Date.now();
+  const look = async () => {
+    if (Date.now() - started > limitMs) return;
+    const status = agentHooks.deliveries.status(id, target);
+    if (status.state !== "failed") { if (status.state !== "delivered") schedule(); return; }
+    if (status.reason !== TURN_ENDED_WITHOUT_IT) return;
+    // The same conversation, as the route checks it: a /clear or /resume in the
+    // same terminal is another conversation, never given the old message.
+    // A refusal (409: the conversation changed or the pane went) ends the watch;
+    // a look that failed for now (a timeout) or an agent busy again waits.
+    let pane: Json | undefined;
+    try { pane = await validateTarget(target, true, true); } catch (error) {
+      if (error instanceof BridgeError && error.status === 409) return;
+      schedule(); return;
+    }
+    if (!pane || pane.terminal_id !== terminal) return;
+    if (!["idle", "done"].includes(String(pane.agent_status))) { schedule(); return; }
+    if (!await leaveClaudeSubagentView(agentHooks, target, escapeWaitMs)) return;
+    // Checked again with nothing awaited before the record is replaced: a retry
+    // from the phone may have delivered it meanwhile.
+    const now = agentHooks.deliveries.status(id, target);
+    if (now.state !== "failed" || now.reason !== TURN_ENDED_WITHOUT_IT) return;
+    process.stderr.write(`phren hook: retrying phone message ${id} in the conversation after leaving the subagent view\n`);
+    const expected = agentHooks.deliveries.expect(target, text, 1_500, undefined, id, typeof terminal === "string" ? terminal : undefined);
+    await terminalProvider().prompt(target.server, target.pane, text);
+    if (await expected === "pending") await resubmitIfIdle(agentHooks, target, text);
+  };
+  const schedule = () => { const timer = setTimeout(() => void look().catch(() => undefined), intervalMs); timer.unref?.(); };
+  schedule();
 }
 
 /** A busy Claude Code queues typed text on Enter, but after a long paste
@@ -353,7 +426,8 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // is pending there: an approval the Hook holds or saw, or a
     // status Herdr cannot read. Otherwise the answer keys are the way.
     const status = String(pane.agent_status);
-    if (data.hookQueued === true && !["idle", "done"].includes(status)) throw new BridgeError(409, "The worker is busy; the hand-off remains queued.", { code: "hand-off-busy" });
+    // A Claude lead waiting on its background agents takes a prompt though Herdr reads it working (`takesPrompt`).
+    if (data.hookQueued === true && !await takesPrompt(target.server, pane, target.session, promptGuards(agentHooks, target))) throw new BridgeError(409, "The worker is busy; the hand-off remains queued.", { code: "hand-off-busy" });
     if (status === "unknown" || (["blocked", "waiting"].includes(status) && (agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)))) {
       throw new BridgeError(409, "This agent needs input in the terminal first.");
     }
@@ -413,9 +487,15 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       const refused = new AbortController();
       const expected = agentHooks.deliveries.expect(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal, deliveryId,
         typeof pane.terminal_id === "string" ? pane.terminal_id : undefined);
-      await typing();
-      try { await terminalProvider().prompt(target.server, target.pane, text); } catch (error) {
-        if (agentNotReady(error)) refused.abort();
+      let typed = false;
+      try {
+        await typing(); typed = true;
+        await leaveClaudeSubagentView(agentHooks, target);
+        await terminalProvider().prompt(target.server, target.pane, text);
+      } catch (error) {
+        // Nothing reached the pane: the reservation failed first, the agent was not ready, or Herdr refused the
+        // request (its `agent.prompt` is one call). The record goes, or it would hold the pane's hand-offs.
+        if (!typed || agentNotReady(error) || herdrRefused(error)) refused.abort();
         throw error;
       }
       return expected;
@@ -434,6 +514,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       if (!busy) outcome = await resubmitIfIdle(agentHooks, target, text);
       else followQueuedDelivery(agentHooks, target, pane.terminal_id, text);
     }
+    if (deliveryId && target.source === "claude" && outcome !== "delivered") retryAfterSubagentView(agentHooks, target, pane.terminal_id, text, deliveryId);
     // A bare slash command opens the agent's own menu; the phone may
     // walk it with keys for the next half minute. The command rides
     // along so a Codex /permissions walk can find its confirmation.

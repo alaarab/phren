@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HAND_OFF_MAX_ROWS, HAND_OFF_RETENTION_MS, HandOffQueue } from "./hand-off-queue.js";
+import { IN_FLIGHT_MS, PromptDeliveries } from "./prompt-deliveries.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
+import { takesPrompt } from "./session-activity.js";
+import { noteTurn } from "./turn-records.js";
 
 const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
 let root: string, pane: Json;
@@ -100,6 +103,90 @@ describe("durable Hook hand-off queue", () => {
     expect(notify).toHaveBeenCalledTimes(1);
     expect(JSON.parse(await readFile(path.join(root, "handoff-0001.json"), "utf8"))).toMatchObject({ notified: true });
     await q.tick(); expect(notify).toHaveBeenCalledTimes(1);
+  });
+  it("settles an uncertain hand-off by its typed message's outcome, and tells the sender only once there is one", async () => {
+    // The agent's UserPromptSubmit came seconds after the send returned (2026-10-17: every hand-off read "uncertain").
+    const states = new Map<string, "queued" | "delivered" | "failed">();
+    const delivery = vi.fn((_target: Target, id: string) => ({ state: states.get(id) ?? "unknown" as const, ...(states.get(id) === "failed" ? { reason: "The agent finished its turn without taking the message." } : {}) }));
+    const held = (_target: Target, id: string) => states.get(id) === "queued";
+    const q = new HandOffQueue({ root, validate, send, delivery, held }), origin = { ...target, pane: "sender" };
+    const senderPane = { terminal_id: "term1", agent_status: "idle" };
+    validate.mockImplementation(async (where: Target) => where.pane === "sender" ? senderPane : pane);
+    pane.agent_status = "idle";
+    send.mockImplementation(async (_t, _s, id, typing) => { await typing(); states.set(id, "queued"); return { ok: true, queued: true, state: "queued" }; });
+    expect(await q.enqueue({ ...message(), origin })).toMatchObject({ state: "uncertain" });
+    await q.tick();
+    expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser"]);
+    states.set("handoff-0001", "delivered");
+    expect(await q.status("handoff-0001", target)).toMatchObject({ ok: true, delivered: true, state: "delivered" });
+    await q.tick(); await q.tick();
+    expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser", "Hand-off handoff-0001: delivered."]);
+    send.mockImplementation(async (_t, _s, id, typing) => { await typing(); states.set(id, "queued"); return { ok: true, queued: true }; });
+    await q.enqueue(message("handoff-0002", "Next change"));
+    states.set("handoff-0002", "failed");
+    expect(await q.status("handoff-0002", target)).toMatchObject({ state: "failed", error: "The agent finished its turn without taking the message." });
+  });
+  it("types nothing more into a pane while its last message waits to be taken", async () => {
+    // Herdr read the pane idle while the agent ran its hooks; four hand-offs 5 s apart piled into one input line.
+    let holding = false;
+    const q = new HandOffQueue({ root, validate, send, inFlight: () => holding });
+    pane.agent_status = "idle";
+    send.mockImplementation(async (_t, _s, _i, typing) => { await typing(); holding = true; return { ok: true, queued: true }; });
+    await q.enqueue(message());
+    await q.enqueue(message("handoff-0002", "Next change"));
+    await q.tick(); await q.tick();
+    expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser"]);
+    expect(await q.status("handoff-0002", target)).toMatchObject({ queued: true });
+    holding = false; await q.tick();
+    expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser", "Next change"]);
+  });
+  it("delivers to a Claude lead waiting on its background agents, which Herdr reads working, one message at a time", async () => {
+    // Live: a lead in "Waiting for 1 background agent to finish" took pasted text plus Enter at once, while
+    // Herdr read it working for as long as the agents ran; its hand-offs stayed queued for over an hour.
+    vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    try {
+      let holding = false;
+      const q = new HandOffQueue({ root: path.join(root, "hand-offs"), validate, send, inFlight: () => holding, ready: (where, p) => takesPrompt(where.server, p, where.session) });
+      pane = { pane_id: "p1", terminal_id: "term1", agent: "claude", agent_status: "working" };
+      send.mockImplementation(async (_t, _s, _i, typing) => { await typing(); holding = true; return { ok: true, queued: true }; });
+      expect(await q.enqueue(message())).toMatchObject({ queued: true });
+      expect(send).not.toHaveBeenCalled();
+      const turn = { terminal: "term1", source: "claude" as const, session: target.session };
+      await noteTurn("default", "p1", { event: "UserPromptSubmit", ...turn });
+      await noteTurn("default", "p1", { event: "Stop", ...turn, background: 1 });
+      await q.enqueue(message("handoff-0002", "Next change"));
+      await q.tick(); await q.tick();
+      expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser"]);
+      // Its UserPromptSubmit started a turn: the next waits for that turn to end.
+      await noteTurn("default", "p1", { event: "UserPromptSubmit", ...turn });
+      holding = false; await q.tick();
+      expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser"]);
+      await noteTurn("default", "p1", { event: "Stop", ...turn, background: 1 }); await q.tick();
+      expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser", "Next change"]);
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it("stops holding a pane whose agent sends no hooks once its message has had its time, and tells the sender", async () => {
+    // A Copilot pane (or Codex without hooks): nothing ever settles the typed message, which held every later hand-off for 24 h.
+    let clock = 1_000_000;
+    const store = new PromptDeliveries(undefined, () => clock, async () => []);
+    const copilot: Target = { ...target, source: "copilot" }, origin = { ...copilot, pane: "sender" };
+    const forward = vi.fn(async () => ({ delivered: true }));
+    pane.agent_status = "idle";
+    send.mockImplementation(async (where, text, id, typing) => {
+      const taken = store.expect(where, text, 1, undefined, id, "term1");
+      await typing(); expect(await taken).toBe("pending"); store.queue(id, where);
+      return { ok: true, queued: true };
+    });
+    const q = new HandOffQueue({ root, validate, send, forward, now: () => clock, delivery: (where, id) => store.status(id, where),
+      inFlight: where => store.holding(where), held: (where, id) => store.held(id, where) });
+    expect(await q.enqueue({ deliveryId: "handoff-0001", target: copilot, text: "Review parser", origin })).toMatchObject({ state: "uncertain" });
+    await q.enqueue({ deliveryId: "handoff-0002", target: copilot, text: "Next change" });
+    await q.tick();
+    expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser"]);
+    expect(forward).not.toHaveBeenCalled();
+    clock += IN_FLIGHT_MS; await q.tick();
+    expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser", "Next change"]);
+    expect(forward).toHaveBeenCalledExactlyOnceWith(origin, "Hand-off handoff-0001: uncertain.", expect.any(String));
   });
   it("follows its pane to the conversation that replaced the one it was queued for", async () => {
     // A Codex pane went through four threads in six hours (w6D, 2026-10-04);

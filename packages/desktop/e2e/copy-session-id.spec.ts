@@ -28,5 +28,5 @@ test("the item is hidden when the session id is unknown", async ({ page }) => {
   h = await startHarness("copy-session-none", { overviewFrames: [overviewFrame([withSession(undefined)])], transcriptFrames: reply });
   await openChat(page, h.url, "Fix login", "Patched the login form");
   await page.locator(".chat-more").click();
-  await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Copy as Markdown", "Save as Markdown…"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Copy as Markdown", "Save as Markdown…", "Mute notifications"]);
 });
