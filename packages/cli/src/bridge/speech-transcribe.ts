@@ -96,7 +96,8 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
     const origin = options.origin ?? (await resolveSpeechRegion()).origin;
     if (hungUp) return;
     const upstream = connect(transcribeURL(query, origin), key);
-    let pending: Buffer[] = [], pendingBytes = 0, closed = false;
+    // Held until ElevenLabs answers; null is the phone's stop, kept in its place.
+    let pending: Array<Buffer | null> = [], pendingBytes = 0, closed = false;
     const finish = (code = 1000, reason = "") => {
       if (closed) return;
       closed = true;
@@ -115,6 +116,7 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
       if (!isBinary) {
         // The phone's only text frame: the person stopped, commit what's left.
         if (upstream.readyState === OPEN) upstream.send(chunk(Buffer.alloc(0), true));
+        else pending.push(null);
         return;
       }
       if (upstream.readyState === OPEN) { upstream.send(chunk(data)); return; }
@@ -128,7 +130,7 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
     client.on("error", () => finish());
 
     upstream.on("open", () => {
-      for (const audio of pending) upstream.send(chunk(audio));
+      for (const audio of pending) upstream.send(audio ? chunk(audio) : chunk(Buffer.alloc(0), true));
       pending = []; pendingBytes = 0;
       if (!closed) tell({ type: "ready" });
     });

@@ -81,6 +81,22 @@ describe("Scribe transcription relay", () => {
     expect(opened).toBe(false);
   });
 
+  // A short reply ("yes") can end before ElevenLabs answers: its stop is
+  // kept and sent after the held audio, or the last words never commit.
+  it("commits a stop that arrives before ElevenLabs answers, after the held audio", async () => {
+    const client = new FakeSocket(), upstream = new FakeSocket();
+    upstream.readyState = 0;
+    await relayTranscription(client, new URLSearchParams(), { key: async () => "sk-test", origin: "wss://api.elevenlabs.io", connect: () => upstream });
+    client.emit("message", Buffer.from([1, 2]), true);
+    client.emit("message", Buffer.from("{\"type\":\"commit\"}"), false);
+    // The next utterance starts before the answer: it stays after the stop.
+    client.emit("message", Buffer.from([3]), true);
+    expect(upstream.sent).toEqual([]);
+    upstream.readyState = 1; upstream.emit("open");
+    expect(frames(upstream).map(frame => [frame.audio_base_64, frame.commit])).toEqual([
+      [Buffer.from([1, 2]).toString("base64"), false], ["", true], [Buffer.from([3]).toString("base64"), false]]);
+  });
+
   // phren-apps #237: dictation stopped on quiet closes the phone had to guess about.
   it("says why before every close the phone did not ask for", async () => {
     vi.useFakeTimers();
