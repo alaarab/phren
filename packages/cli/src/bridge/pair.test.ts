@@ -63,9 +63,11 @@ it("a phone that typed the code is authorized only once the computer allows it",
   expect(asked).toEqual([{ device: "ios", name: "Sam's iPhone", check: pairingCheckCode(keyFingerprint(publicKey)) }]);
   await expect(readFile(path.join(sshDirectory, "authorized_keys"), "utf8")).rejects.toThrow();
   denied.close();
+  await expect(denied.done).rejects.toThrow("Pairing cancelled.");
   const noTerminal = await startPairing({ code: "ABC234", user: "me", sshPort: 22, name: "box", port: 0, sshDirectory });
   expect((await post(noTerminal.port, { v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), typed: true })).status).toBe(403);
   noTerminal.close();
+  await expect(noTerminal.done).rejects.toThrow("Pairing cancelled.");
   const allowed = await startPairing({ code: "ABC234", user: "me", sshPort: 22, name: "box", port: 0, sshDirectory, approve: async () => true });
   expect((await post(allowed.port, { v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), typed: true })).status).toBe(200);
   await expect(allowed.done).resolves.toMatchObject({ device: "ios" });
