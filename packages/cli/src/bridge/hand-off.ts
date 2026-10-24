@@ -132,12 +132,14 @@ export const moveSessionSchema = z.object({
   account: moveToSchema.shape.account,
   model: moveToSchema.shape.model,
   effort: moveToSchema.shape.effort,
+  resume: z.boolean().optional().describe("Switch a Claude conversation to another Claude account on this computer without a hand-off: the old agent exits, its transcript is copied into that account's home and the same conversation resumes there, so an account at its usage limit can still switch. Needs harness claude and account."),
   id: z.string().uuid().optional().describe("Move id: keep it on a retry, or pass it with status:true to read where the move is."),
   status: z.boolean().optional().describe("Read the move's state without starting one; requires id."),
   wait: z.boolean().optional().describe("Wait (up to five minutes) until the move finished or failed. Defaults to true."),
 }).strict().superRefine((value, context) => {
   if (!value.status && [value.target, value.session, value.pane].filter(item => item !== undefined).length !== 1) context.addIssue({ code: "custom", message: "Provide exactly one of target, session or pane." });
   if (value.status && !value.id) context.addIssue({ code: "custom", message: "A status query requires id." });
+  if (value.resume && (value.harness !== "claude" || !value.account || value.computer)) context.addIssue({ code: "custom", message: "resume switches a Claude conversation on its own computer to another account: harness claude, an account, and no computer." });
 });
 
 const MOVE_WAIT_MS = 5 * 60_000;
@@ -166,7 +168,8 @@ export async function moveSession(input: unknown, options: { waitMs?: number; po
     const target = data.target ?? (data.session ? (await targetFromOverview(request, data.session, peer?.server)).target : await paneTarget(request, data.pane!, peer?.server));
     if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
     const to = { harness: data.harness, ...(data.account ? { account: data.account } : {}), ...(data.model ? { model: data.model } : {}), ...(data.effort ? { effort: data.effort } : {}) };
-    move = object((await request("/v1/sessions/move", { target, to: moveToSchema.parse(to), ...(options.agent ? { origin: "agent" } : {}), ...(data.id ? { id: data.id } : {}) })).move);
+    move = object((await request("/v1/sessions/move", { target, to: moveToSchema.parse(to), ...(options.agent ? { origin: "agent" } : {}), ...(data.id ? { id: data.id } : {}),
+      ...(data.resume ? { continuation: "resume" } : {}) })).move);
     if (data.wait !== false && typeof move.id === "string") {
       const until = Date.now() + (options.waitMs ?? MOVE_WAIT_MS);
       while (!settled(move) && Date.now() < until) {

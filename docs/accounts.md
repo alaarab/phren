@@ -27,6 +27,8 @@ The login stays in the home, and so do `.claude.json`'s account and onboarding s
 
 `phren bridge accounts` lists the computer's harnesses and accounts, which is the same data as `GET /v1/harnesses`.
 
+Because transcripts live in `projects/` inside each home, a conversation started under one account is not visible to `claude --resume` under another. Switching a chat's account (`phren move <pane> --to claude --account <slug> --resume`) copies its transcript into the target home first; see conductor.md, "Switch a Claude conversation to another account".
+
 An owner who wants different settings for one account can replace that home's `settings.json` symlink with a real file. `phren bridge install` writes the Hook's hooks into every home whose `settings.json` is a real file and skips symlinks that point to another home's settings.
 
 Labels come from `<bridge>/accounts.yaml`:

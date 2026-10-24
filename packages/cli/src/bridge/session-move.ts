@@ -24,14 +24,14 @@ import { stableComputerName } from "./computer-names.js";
 import type { DispatchHost } from "./dispatch-hosts.js";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { quoted, withOriginalBrief } from "./account-failover.js";
 import { recordedConductor, runsAgent, transferConductor, type ConductorRecord } from "./conductor-role.js";
-import { DEFAULT_ACCOUNT } from "./claude-accounts.js";
+import { claudeHome, claudeHomes, DEFAULT_ACCOUNT, type ClaudeHome } from "./claude-accounts.js";
 import { DISPATCH_HARNESSES, DispatchService, dispatchProjectDirectory, projectName, moveToSchema, repointDispatchOrigins } from "./dispatch.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { findPane } from "./herdr.js";
@@ -49,6 +49,11 @@ export const moveRequestSchema = z.object({
   target: targetSchema,
   to: moveToSchema,
   mode: z.enum(["replace", "new-chat"]).default("replace"),
+  /** `resume` switches a Claude conversation to another account on this
+   * computer without a hand-off: the transcript is copied into the target
+   * account's home and the same conversation resumes there (`claude --resume`),
+   * so an account at its usage limit can still switch. */
+  continuation: z.enum(["handoff", "resume"]).default("handoff"),
   /** Kept on a retry: the same id returns the move already under way. */
   id: z.string().uuid().optional(),
   /** How long the agent gets to write its hand-off before Phren builds one. */
@@ -68,6 +73,7 @@ const moveRecordSchema = z.object({
   accountChoice: z.string().max(400).optional(),
   project: projectName.optional(),
   mode: z.enum(["replace", "new-chat"]).optional(),
+  continuation: z.literal("resume").optional(),
   modeForced: z.literal("conductor").optional(),
   handedOffTo: z.object({ computer: z.string().optional(), target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
   handedOffFrom: z.object({ target: targetSchema, title: z.string().max(200) }).strict().optional(),
@@ -402,10 +408,13 @@ export interface MoverDeps {
   /** The `hand_off` delivery path: queued while the agent is busy. */
   deliver: (target: Target, text: string, deliveryId: string) => Promise<Json>;
   /** Starts the new agent (`startSession`), in `into` when given. */
-  launch: (server: string, data: Json, options: { into?: { workspaceId: string; tabId: string; paneId: string }; dispatchId?: string }) => Promise<Json>;
+  launch: (server: string, data: Json, options: { into?: { workspaceId: string; tabId: string; paneId: string }; dispatchId?: string; resumeClaude?: string }) => Promise<Json>;
   inventory: () => Promise<HarnessInventory | undefined>;
   /** The conversation's transcript lines, its tail is enough. */
   transcript: (target: Target) => Promise<string[]>;
+  /** Copies a Claude conversation into another account's home (`copyClaudeConversation` over its transcript).
+   * With `check`, only resolves and validates both ends, so a move is refused before the old agent exits. */
+  copyConversation?: (target: Target, to: ClaudeHome, check?: boolean) => Promise<string>;
   git?: (directory: string) => Promise<GitState | undefined>;
   processesBelow?: (pids: readonly number[]) => Promise<string[]>;
   /** The Claude account the pane runs under, when known. */
@@ -492,6 +501,17 @@ export class SessionMover {
     const account = target.source === "claude" ? this.deps.paneAccount?.(target.server, pane) ?? DEFAULT_ACCOUNT : undefined;
     const sameHarness = to.harness === target.source && (to.harness !== "claude" || (to.account ?? account) === account);
     if (!peer && sameHarness && !to.model && !to.effort) throw new BridgeError(400, "The session already runs there. Choose another harness, account, model or effort.");
+    if (data.continuation === "resume") {
+      if (peer) throw new BridgeError(400, "Switching account keeps the conversation on this computer; continue on another computer with a hand-off.");
+      if (target.source !== "claude" || to.harness !== "claude") throw new BridgeError(400, "Only a Claude conversation can switch account.");
+      if (!target.session) throw new BridgeError(409, "The conversation has no session id yet, so it cannot resume under another account.");
+      if (data.mode === "new-chat") throw new BridgeError(400, "Switching account continues the same conversation; it cannot keep the old chat running.");
+      if (conductor) throw new BridgeError(409, "Switching the conductor's account is not supported yet; use Continue in… for the conductor.");
+      if (!to.account || to.account === account) throw new BridgeError(400, "Choose another Claude account to switch to.");
+      if (!claudeHome(to.account)) throw new BridgeError(409, `No Claude account "${to.account}" on this computer.`, { code: "account_unavailable" });
+      if (!this.deps.copyConversation) throw new BridgeError(503, "This Hook cannot switch accounts.");
+      await this.deps.copyConversation(target, claudeHome(to.account)!, true);
+    }
     // Only harnesses signed in and usable here; an inventory that cannot be read lets the move go on, as a launch does.
     const inventory = peer ? undefined : await this.deps.inventory().catch(() => undefined);
     if (inventory) {
@@ -530,8 +550,9 @@ export class SessionMover {
     const workerDispatch = peer && dispatch ? await (await import("./worker-relocation.js")).preflightWorkerRelocation(dispatch, target) : undefined;
     const label = [pane.label, pane.title, pane.terminal_title_stripped, pane.agent_name].find(value => typeof value === "string" && value.trim() && !/^\d+$/.test(value)) as string | undefined;
     const at = new Date(this.now).toISOString();
-    const record: MoveRecord = { id: data.id ?? randomUUID(), state: "handing-off", createdAt: at, updatedAt: at,
-      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
+    const resume = data.continuation === "resume";
+    const record: MoveRecord = { id: data.id ?? randomUUID(), state: resume ? "exiting" : "handing-off", createdAt: at, updatedAt: at,
+      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}), ...(workerDispatch ? { workerDispatch } : {}) };
     await assertUnusedLaunchId(record.id);
     if (conductor && peer) {
@@ -540,7 +561,7 @@ export class SessionMover {
     }
     await saveMove(record);
     const key = `${target.server}\0${target.pane}`;
-    const work = this.run(record, data.handoffTimeoutMs ?? DEFAULT_HANDOFF_MS, conductor, peer, project).finally(() => this.running.delete(key));
+    const work = (resume ? this.switchAccount(record) : this.run(record, data.handoffTimeoutMs ?? DEFAULT_HANDOFF_MS, conductor, peer, project)).finally(() => this.running.delete(key));
     this.running.set(key, work);
     return record;
   }
@@ -849,6 +870,35 @@ export class SessionMover {
       ...(record.dispatch ? { dispatch: record.dispatch } : {}), ...(record.from.label ? { label: record.from.label } : {}) });
   }
 
+  /** The same conversation under another Claude account: the old agent exits,
+   * its transcript (now final) is copied into the target home, and Claude
+   * resumes it there. Nothing is asked of the old agent, so its quota does not matter. */
+  private async switchAccount(record: MoveRecord): Promise<void> {
+    const from = record.from.target;
+    let copied = false;
+    try {
+      const exit = await this.exit(record);
+      await this.update(record, { exit });
+      await this.checkPromotion(record);
+      const home = claudeHome(record.to.account);
+      if (!home) throw new BridgeError(409, `No Claude account "${record.to.account}" on this computer.`);
+      await this.deps.copyConversation!(from, home);
+      copied = true;
+      await this.update(record, { state: "launching" });
+      const launched = await this.relaunch(record, { resume: from.session! });
+      await this.update(record, { state: "moved", movedAt: new Date(this.now).toISOString(), ...launched });
+      logger.info("move", `Switched Claude in pane ${from.pane} from account ${record.from.account ?? DEFAULT_ACCOUNT} to ${record.to.account} (${launched.placement}).`);
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f\x7f]+/g, " ");
+      // Until the copy is complete only the old account holds the conversation.
+      const resumeHome = claudeHome(copied ? record.to.account : record.from.account);
+      const hint = record.exit !== undefined
+        ? ` The old agent has exited; resume it with \`claude --resume ${from.session}\`${resumeHome && !resumeHome.isDefault ? ` under CLAUDE_CONFIG_DIR=${resumeHome.dir}` : ""}.` : "";
+      await this.update(record, { state: "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
+      logger.warn("move", `Switching the account of pane ${from.pane} failed: ${message}`);
+    }
+  }
+
   /** Ends the old agent with its own exit command; an interrupt, then a kill, only when it hangs. */
   private async exit(record: MoveRecord): Promise<"clean" | "interrupted" | "killed"> {
     const from = record.from.target;
@@ -887,7 +937,8 @@ export class SessionMover {
   }
 
   /** Starts the target in the old pane when its shell has what the target needs, else in a new tab beside it. */
-  private async relaunch(record: MoveRecord, prompt: string): Promise<Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">> {
+  private async relaunch(record: MoveRecord, start: string | { resume: string }): Promise<Pick<MoveRecord, "placement" | "target" | "to" | "linkPending" | "notice">> {
+    const prompt = typeof start === "string" ? start : undefined;
     const from = record.from.target;
     const s = await this.deps.snapshot(from.server);
     const pane = findPane(s, placeOf(from));
@@ -898,10 +949,11 @@ export class SessionMover {
     const samePane = record.mode !== "new-chat" && ((this.deps.envAtStart?.(from.server) ?? false) || record.to.harness !== "claude" || account === shellAccount);
     const data: Json = { kind: record.to.harness, label: record.from.label ?? HARNESS_NAMES[record.to.harness], cwd: record.cwd,
       ...(record.to.model ? { model: record.to.model } : {}), ...(record.to.effort ? { effort: record.to.effort } : {}), ...(account ? { account } : {}),
-      brief: { id: record.id, text: prompt }, ...(samePane ? {} : { workspaceId: from.workspace }) };
+      ...(prompt === undefined ? {} : { brief: { id: record.id, text: prompt } }), ...(samePane ? {} : { workspaceId: from.workspace }) };
     const into = samePane ? { workspaceId: from.workspace, tabId: from.tab, paneId: from.pane } : undefined;
     await this.checkPromotion(record);
-    const launched = await this.deps.launch(from.server, data, { ...(into ? { into } : {}), ...(record.dispatch && record.modeForced !== "conductor" ? { dispatchId: record.dispatch } : {}) });
+    const launched = await this.deps.launch(from.server, data, { ...(into ? { into } : {}), ...(record.dispatch && record.modeForced !== "conductor" ? { dispatchId: record.dispatch } : {}),
+      ...(prompt === undefined ? { resumeClaude: (start as { resume: string }).resume } : {}) });
     // Keep the launched location even if delivering its first prompt fails.
     const paneTarget = targetSchema.omit({ session: true }).parse({ server: from.server,
       workspace: launched.workspaceId, tab: launched.tabId, pane: launched.paneId, source: record.to.harness });
@@ -909,7 +961,7 @@ export class SessionMover {
     await this.update(record, { paneTarget, placement: samePane ? "same-pane" : "adjacent-pane",
       ...(launchedTarget.success ? { target: launchedTarget.data } : {}) });
     // The target that takes no brief at launch (Copilot) gets it typed, as dispatch does.
-    if (launched.briefLaunched === false) {
+    if (prompt !== undefined && launched.briefLaunched === false) {
       try {
         const typedTo = targetSchema.safeParse(launched.target);
         if (typedTo.success) {
@@ -963,4 +1015,57 @@ export async function transcriptTail(file: string, bytes = 512 * 1024): Promise<
     const lines = buffer.toString("utf8").split("\n");
     return start > 0 ? lines.slice(1) : lines;
   } finally { await handle.close(); }
+}
+
+/**
+ * Copies a Claude conversation into another account's home, at the same
+ * `projects/<folder key>/<session>.jsonl` path Claude reads it from with
+ * `--resume`, together with the session's own folder (subagent transcripts,
+ * tool results) when it has one. A copy already there is replaced: the
+ * source is the conversation as it stands now. Returns the copied transcript.
+ * Both ends are checked against the homes' real `projects` folders, so a
+ * symlinked folder inside the target home cannot redirect the write. With
+ * `check`, nothing is written.
+ */
+export async function copyClaudeConversation(file: string, to: ClaudeHome, env: NodeJS.ProcessEnv = process.env, check = false): Promise<string> {
+  const real = async (dir: string) => realpath(dir).catch(() => path.resolve(dir));
+  const inside = (child: string, parent: string) => child.startsWith(parent + path.sep);
+  const source = await real(file);
+  // A home's projects folder may be a link elsewhere, as transcriptPath allows.
+  const homes = await Promise.all(claudeHomes(env).map(async home => ({ home, dir: await real(home.dir), projects: await real(path.join(home.dir, "projects")) })));
+  const longest = (list: typeof homes) => list.sort((a, b) => b.projects.length - a.projects.length)[0];
+  const match = longest(homes.filter(item => inside(source, item.projects))) ?? longest(homes.filter(item => inside(source, item.dir)));
+  if (!match) throw new BridgeError(409, "The conversation's transcript is not in a Claude home on this computer.");
+  const from = match.home;
+  if (from.dir === to.dir) throw new BridgeError(400, "The conversation already belongs to that account.");
+  const projects = match.projects;
+  const relative = path.relative(projects, source);
+  if (!relative || !inside(source, projects) || !relative.endsWith(".jsonl")) {
+    throw new BridgeError(409, "The conversation's transcript is not under its Claude home's projects folder.");
+  }
+  const targetProjects = path.join(to.dir, "projects");
+  const destination = path.join(targetProjects, relative);
+  // The deepest folder that exists on the way must resolve inside the target home's projects folder (or be the home itself).
+  const targetRoot = await real(targetProjects);
+  let existing = path.dirname(destination);
+  while (!(await lstat(existing).catch(() => undefined)) && existing !== path.dirname(existing) && existing !== to.dir) existing = path.dirname(existing);
+  const resolved = await real(existing);
+  if (resolved !== targetRoot && !inside(resolved, targetRoot) && resolved !== await real(to.dir)) {
+    throw new BridgeError(409, "The other account's projects folder points outside its Claude home.");
+  }
+  if (check) return destination;
+  await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  try {
+    await copyFile(source, temporary);
+    await rename(temporary, destination);
+  } catch (error) { await rm(temporary, { force: true }).catch(() => undefined); throw error; }
+  const folder = source.slice(0, -".jsonl".length);
+  if ((await stat(folder).catch(() => undefined))?.isDirectory()) {
+    const folderTo = destination.slice(0, -".jsonl".length);
+    // A link left at the folder's place is replaced, never followed.
+    if ((await lstat(folderTo).catch(() => undefined))?.isSymbolicLink()) await rm(folderTo, { force: true });
+    await cp(folder, folderTo, { recursive: true, force: true, verbatimSymlinks: true });
+  }
+  return destination;
 }

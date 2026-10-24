@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Switch a Claude chat to another Claude account on the same computer without a hand-off (`phren move <pane> --to claude --account <id> --resume`, `move_session` `resume: true`, `continuation: "resume"` on the Hook's move route): the old agent exits, its transcript is copied into the other account's home and the same conversation resumes there, so an account that is out of usage can still switch. Not for the conductor yet.
+
 ### Fixed
 
 - Phone messages sent while Claude Code is busy are each confirmed when Claude takes them together. Claude submits the messages it held as one turn, joined by newlines, and the Hook matched only the whole prompt, so every one of them stayed "Queued in the agent" and could later be reported as not taken. Each held message whose words are whole lines of the submitted prompt now settles delivered; a short reply never settles inside a longer line ("yes" inside "yes, but later").

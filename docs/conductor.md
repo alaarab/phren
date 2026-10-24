@@ -862,6 +862,32 @@ and effort. The Hook:
    in a new tab of the same workspace and the old pane is closed. tmux always
    uses the same pane.
 
+### Switch a Claude conversation to another account (no hand-off)
+
+With `capabilities.moveResume: true`, `POST /v1/sessions/move` takes
+`continuation: "resume"` (`move_session` `resume: true`, `phren move <pane>
+--to claude --account <id> --resume`). It needs a Claude session on this
+computer, a Claude target with another account, and `mode: "replace"`. Nothing
+is asked of the old agent, so an account at 100% of its usage can still switch:
+
+1. The Hook types `/exit` (then Ctrl-C and signals, as above) and waits for the
+   agent to leave the pane.
+2. It copies the conversation's transcript, now final, from its Claude home to
+   the same `projects/<folder key>/<session>.jsonl` path under the target
+   account's home (`~/.claude-<slug>`, or `~/.claude` for `default`), with the
+   session's folder (subagent transcripts, tool results) when there is one. An
+   older copy there is replaced.
+3. It starts `claude --resume <session>` under that account's
+   `CLAUDE_CONFIG_DIR`: in the same pane on tmux, in a new tab of the same
+   workspace on Herdr (whose panes get variables only when created), closing
+   the old pane.
+
+The record has `continuation: "resume"` and no `handoff`; the conversation
+keeps its session id. If the copy or the launch fails after the old agent
+exited, the error names the `claude --resume` command to run by hand. The
+conductor is refused for now (409): its role transfer waits on a hand-off
+brief, so it switches accounts through a new-chat move.
+
 The conductor can move too, including an account switch from the phone. With
 `capabilities.moveConductor: true` in `/v1/health`, every conductor move uses
 `mode: "new-chat"`, even when the request asks for replacement. The record

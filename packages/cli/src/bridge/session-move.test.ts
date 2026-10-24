@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,8 @@ import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { Json, Target } from "./protocol.js";
-import { listMoves, moveSessionFields, readMove, SessionMover, type MoverDeps, type MoveRecord } from "./session-move.js";
+import { claudeHome } from "./claude-accounts.js";
+import { copyClaudeConversation, listMoves, moveSessionFields, readMove, SessionMover, type MoverDeps, type MoveRecord } from "./session-move.js";
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-move-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
@@ -635,3 +636,157 @@ describe("a dispatch whose worker moved", () => {
 });
 
 const object = (value: unknown): Json => value && typeof value === "object" ? value as Json : {};
+
+describe("switching a Claude conversation to another account (resume)", () => {
+  /** HOME with the default ~/.claude and a signed-in ~/.claude-work, and the world's launch taking a resume instead of a brief. */
+  async function resumeWorld(options: { tmux?: boolean } = {}) {
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+    for (const dir of [".claude", ".claude-work"]) await mkdir(path.join(root, dir), { recursive: true });
+    await writeFile(path.join(root, ".claude-work", ".claude.json"), "{}");
+    const w = world({ tmux: options.tmux });
+    const copies: { target: Target; dir: string }[] = [];
+    w.deps.copyConversation = async (target, home, check) => { if (!check) copies.push({ target, dir: home.dir }); return path.join(home.dir, "projects", "k", `${SESSION}.jsonl`); };
+    w.deps.launch = async (_server, data, launchOptions) => {
+      w.launches.push({ data, options: launchOptions as Json });
+      const place = launchOptions.into ?? { workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2" };
+      if (!launchOptions.into) w.panes.push({ pane_id: place.paneId, tab_id: place.tabId, workspace_id: place.workspaceId, agent: data.kind, agent_status: "idle", terminal_id: "term-2" });
+      else w.pane.agent = data.kind;
+      return { ok: true, ...place, target: { server: "default", workspace: place.workspaceId, tab: place.tabId, pane: place.paneId, source: "claude", session: SESSION } };
+    };
+    return { ...w, copies };
+  }
+
+  it("exits the old agent without asking for a hand-off, copies the conversation and resumes it under the new account", async () => {
+    const { deps, typed, copies, launches, closed } = await resumeWorld();
+    const record = await move(deps, { harness: "claude", account: "work" }, { continuation: "resume" });
+    expect(record.state, record.error).toBe("moved");
+    expect(record.continuation).toBe("resume");
+    expect(typed).toEqual(["/exit"]); // nothing asked of an agent whose account may be out of usage
+    expect(record.handoff).toBeUndefined();
+    expect(copies).toEqual([{ target: from, dir: path.join(root, ".claude-work") }]);
+    expect(launches).toHaveLength(1);
+    expect(launches[0].options.resumeClaude).toBe(SESSION);
+    expect(launches[0].data.brief).toBeUndefined();
+    expect(launches[0].data.account).toBe("work");
+    // Herdr sets a pane's variables only at creation, so another account starts beside it and the old pane closes.
+    expect(record.placement).toBe("adjacent-pane");
+    expect(closed).toEqual(["w1:p1"]);
+    expect(record.to.account).toBe("work");
+    expect(record.target).toMatchObject({ pane: "w1:p2", session: SESSION });
+  });
+
+  it("resumes in the same pane under tmux, which sets variables on every start", async () => {
+    const { deps, launches } = await resumeWorld({ tmux: true });
+    const record = await move(deps, { harness: "claude", account: "work" }, { continuation: "resume" });
+    expect(record.placement).toBe("same-pane");
+    expect(launches[0].options.into).toEqual({ workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" });
+  });
+
+  it.each([
+    ["another harness", { harness: "codex" }, {}, "Only a Claude conversation can switch account."],
+    ["the same account", { harness: "claude", account: "default", model: "opus" }, {}, "Choose another Claude account to switch to."],
+    ["an account not on this computer", { harness: "claude", account: "spare" }, {}, 'No Claude account "spare" on this computer.'],
+    ["keeping the old chat", { harness: "claude", account: "work" }, { mode: "new-chat" }, "Switching account continues the same conversation; it cannot keep the old chat running."],
+  ] as const)("refuses %s before anything is typed", async (_case, to, extra, message) => {
+    const { deps, typed, launches } = await resumeWorld();
+    const inventoryAll = { harnesses: inventory.harnesses.map(h => h.source === "claude" ? { ...h, accounts: h.accounts!.map(a => ({ ...a, signedIn: true, usable: true })) } : h) } as HarnessInventory;
+    deps.inventory = async () => inventoryAll;
+    await expect(new SessionMover(deps).start({ target: from, to, continuation: "resume", ...extra }, { owner: true })).rejects.toThrow(message);
+    expect(typed).toEqual([]);
+    expect(launches).toEqual([]);
+  });
+
+  it("refuses the conductor, whose role does not follow a resume yet", async () => {
+    const { deps, pane, typed } = await resumeWorld();
+    await recordConductor(from.server, pane, "owner", SESSION);
+    await expect(new SessionMover(deps).start({ target: from, to: { harness: "claude", account: "work" }, continuation: "resume" }, { owner: true }))
+      .rejects.toThrow("Switching the conductor's account is not supported yet");
+    expect(typed).toEqual([]);
+  });
+
+  it("fails with the resume command when the copy fails after the old agent exited", async () => {
+    const { deps, launches } = await resumeWorld();
+    deps.copyConversation = async (_target, home, check) => { if (check) return home.dir; throw new Error("disk full"); };
+    const record = await move(deps, { harness: "claude", account: "work" }, { continuation: "resume" });
+    expect(record.state).toBe("failed");
+    expect(record.error).toContain("disk full");
+    // The copy never finished, so only the old (default) account can resume it.
+    expect(record.error).toContain(`claude --resume ${SESSION}`);
+    expect(record.error).not.toContain("CLAUDE_CONFIG_DIR");
+    expect(launches).toEqual([]);
+  });
+
+  it("names the new account's home in the resume command once the copy is done", async () => {
+    const { deps } = await resumeWorld();
+    deps.launch = async () => { throw new Error("launch refused"); };
+    const record = await move(deps, { harness: "claude", account: "work" }, { continuation: "resume" });
+    expect(record.state).toBe("failed");
+    expect(record.error).toContain(`CLAUDE_CONFIG_DIR=${path.join(root, ".claude-work")}`);
+  });
+
+  it("refuses before anything is typed when the conversation cannot be copied", async () => {
+    const { deps, typed, launches } = await resumeWorld();
+    deps.copyConversation = async () => { throw new Error("The conversation's transcript is not in a Claude home on this computer."); };
+    await expect(new SessionMover(deps).start({ target: from, to: { harness: "claude", account: "work" }, continuation: "resume" }, { owner: true }))
+      .rejects.toThrow("not in a Claude home");
+    expect(typed).toEqual([]);
+    expect(launches).toEqual([]);
+  });
+});
+
+describe("copyClaudeConversation", () => {
+  it("copies the transcript and its session folder to the same projects path in the other home, replacing an older copy", async () => {
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+    const key = "-work-repo";
+    const source = path.join(root, ".claude", "projects", key);
+    await mkdir(path.join(source, SESSION, "subagents"), { recursive: true });
+    await writeFile(path.join(source, `${SESSION}.jsonl`), `${user("hello")}\n`);
+    await writeFile(path.join(source, SESSION, "subagents", "agent-1.jsonl"), "{}\n");
+    await mkdir(path.join(root, ".claude-work", "projects", key), { recursive: true });
+    await writeFile(path.join(root, ".claude-work", ".claude.json"), "{}");
+    await writeFile(path.join(root, ".claude-work", "projects", key, `${SESSION}.jsonl`), "stale\n");
+    const copied = await copyClaudeConversation(path.join(source, `${SESSION}.jsonl`), claudeHome("work")!);
+    expect(copied).toBe(path.join(root, ".claude-work", "projects", key, `${SESSION}.jsonl`));
+    expect(await readFile(copied, "utf8")).toBe(`${user("hello")}\n`);
+    expect(await readFile(path.join(root, ".claude-work", "projects", key, SESSION, "subagents", "agent-1.jsonl"), "utf8")).toBe("{}\n");
+  });
+
+  it("refuses a file outside a Claude home's projects folder, and a copy onto its own home", async () => {
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+    await mkdir(path.join(root, ".claude-work"), { recursive: true });
+    await writeFile(path.join(root, ".claude-work", ".claude.json"), "{}");
+    await writeFile(path.join(root, "loose.jsonl"), "{}");
+    await expect(copyClaudeConversation(path.join(root, "loose.jsonl"), claudeHome("work")!)).rejects.toThrow("not in a Claude home");
+    await mkdir(path.join(root, ".claude", "projects"), { recursive: true });
+    await writeFile(path.join(root, ".claude", "settings.jsonl"), "{}");
+    await expect(copyClaudeConversation(path.join(root, ".claude", "settings.jsonl"), claudeHome("work")!)).rejects.toThrow("not under its Claude home's projects folder");
+    await writeFile(path.join(root, ".claude-work", "projects.jsonl"), "{}");
+    await expect(copyClaudeConversation(path.join(root, ".claude-work", "projects.jsonl"), claudeHome("work")!)).rejects.toThrow("already belongs to that account");
+  });
+
+  it("follows a source projects folder that is a link, and refuses a target folder that links outside the account", async () => {
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+    const key = "-work-repo";
+    const elsewhere = path.join(root, "elsewhere");
+    await mkdir(path.join(elsewhere, key), { recursive: true });
+    await mkdir(path.join(root, ".claude"), { recursive: true });
+    await symlink(elsewhere, path.join(root, ".claude", "projects"));
+    const transcript = await realpath(path.join(elsewhere, key, `${SESSION}.jsonl`)).catch(() => path.join(elsewhere, key, `${SESSION}.jsonl`));
+    await writeFile(transcript, `${user("hello")}\n`);
+    await mkdir(path.join(root, ".claude-work", "projects"), { recursive: true });
+    await writeFile(path.join(root, ".claude-work", ".claude.json"), "{}");
+    const copied = await copyClaudeConversation(await realpath(transcript), claudeHome("work")!);
+    expect(await readFile(copied, "utf8")).toBe(`${user("hello")}\n`);
+    // The target's <key> folder points outside its home: nothing is written there.
+    const outside = path.join(root, "outside");
+    await mkdir(outside, { recursive: true });
+    await rm(path.join(root, ".claude-work", "projects", key), { recursive: true, force: true });
+    await symlink(outside, path.join(root, ".claude-work", "projects", key));
+    await expect(copyClaudeConversation(await realpath(transcript), claudeHome("work")!)).rejects.toThrow("points outside its Claude home");
+    expect(await readdir(outside)).toEqual([]);
+  });
+});
