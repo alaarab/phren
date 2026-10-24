@@ -382,6 +382,16 @@ again for Codex. Inspect the pane before sending another hand-off. If the prompt
 route reports `unsubmitted`, hand-off preserves that flag. An older Hook that
 returns only `ok` cannot confirm delivery either.
 
+Text in a Claude pane's empty input box is not a message from the owner.
+After a turn, Claude Code draws its own guess at the owner's next message
+there, dim. A plain-text screen read such as `herdr pane read` shows it like
+typed text, and Enter does not send it. The owner's phone messages each have a
+delivery record on the receiving Hook, so none needs rescuing from a pane. The
+receiving Hook refuses a hand-off whose words match the target pane's current
+suggestion with `409 prompt-suggestion`, before typing anything. A message the
+owner sends from the phone is never refused this way, even when it repeats the
+suggestion.
+
 A freshly dispatched session may appear before Herdr accepts prompts for its
 named agent. On the explicit `agent_not_ready` refusal, the receiving Hook
 retries every half second for up to 20 seconds. Each retry checks the same
