@@ -127,6 +127,13 @@ agent-test:
     - pnpm-workspace.yaml
     - turbo.json
     - vitest.config.ts
+    - docs/agent-stream-json.schema.json
+    # Every workspace manifest: the job's install reads them all.
+    - packages/desktop/package.json
+    - packages/desktop-editor/package.json
+    - packages/desktop-kit/package.json
+    - packages/push-relay/package.json
+    - packages/vscode/package.json
     - .gitboy.yml
   script:
     - pnpm exec turbo run build --filter=@phren/agent
@@ -151,6 +158,13 @@ validate-docs:
     - package.json
     - pnpm-lock.yaml
     - pnpm-workspace.yaml
+    # Every workspace manifest: the job's install reads them all.
+    - packages/code/package.json
+    - packages/desktop/package.json
+    - packages/desktop-editor/package.json
+    - packages/desktop-kit/package.json
+    - packages/push-relay/package.json
+    - packages/vscode/package.json
     - .gitboy.yml
   script:
     - pnpm run validate-docs
@@ -178,6 +192,10 @@ browser-test:
     - pnpm-lock.yaml
     - pnpm-workspace.yaml
     - turbo.json
+    # Every workspace manifest: the job's install reads them all.
+    - packages/agent/package.json
+    - packages/push-relay/package.json
+    - packages/vscode/package.json
     - .gitboy.yml
   script:
     - pnpm exec playwright install --with-deps chromium
