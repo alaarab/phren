@@ -44,6 +44,18 @@ function sameProof(expected: string, received: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * The short check a phone that typed the code shows to confirm: the first
+ * eight characters of the host key fingerprint, as "abcd efgh". A typed code
+ * alone could be guessed by someone on the network during pairing; matching
+ * this shows the phone reached this computer. Same as the app's `checkCode`.
+ */
+export function pairingCheckCode(fingerprint: string | undefined | null): string | null {
+  if (!fingerprint?.startsWith("SHA256:")) return null;
+  const body = fingerprint.slice("SHA256:".length);
+  return body.length >= 8 ? `${body.slice(0, 4)} ${body.slice(4, 8)}` : null;
+}
+
 /** OpenSSH's SHA256 fingerprint of a public key line, as the phone computes it. */
 export function keyFingerprint(publicKeyLine: string): string | undefined {
   const blob = publicKeyLine.trim().split(/\s+/)[1];
@@ -100,18 +112,30 @@ export function pairingURL(offer: PairingOffer): string {
 const request = z.object({
   v: z.literal(1), publicKey: z.string().max(512), proof: z.string().max(128),
   device: z.enum(["ios", "android"]).default("ios"), name: z.string().max(80).optional(),
+  typed: z.boolean().optional(),
 });
 
 export interface Paired { device: "ios" | "android"; name?: string; publicKey: string }
 
 export interface PairingSession { port: number; done: Promise<Paired>; close(): void }
 
+/** A phone that typed the code, waiting for the person at the computer to allow it. */
+export interface PairingApproval { device: "ios" | "android"; name?: string; check: string | null }
+
 /** Listen for one phone. Resolves once its key is authorized; rejects on timeout or too many bad proofs. */
 export async function startPairing(options: {
   code: string; user: string; sshPort: number; fingerprint?: string; name: string;
   port?: number; timeoutMs?: number; sshDirectory?: string;
+  /**
+   * Asked before a phone that typed the code is authorized: a typed code can
+   * be cracked from a captured request, so the person at the computer allows
+   * the phone whose key check matches the one it shows. Without it, typed
+   * pairing is refused.
+   */
+  approve?: (phone: PairingApproval) => Promise<boolean>;
 }): Promise<PairingSession> {
   let failures = 0, finished = false, timer: NodeJS.Timeout | undefined;
+  let approvals: Promise<unknown> = Promise.resolve();
   let resolve!: (paired: Paired) => void, reject!: (error: Error) => void;
   const done = new Promise<Paired>((yes, no) => { resolve = yes; reject = no; });
   const server = createServer((incoming, response) => { void handle(incoming, response); });
@@ -136,6 +160,18 @@ export async function startPairing(options: {
         failures++;
         if (failures >= MAX_FAILURES) setImmediate(() => finish(new Error("Too many wrong pairing codes; pairing closed. Run phren pair again.")));
         throw new BridgeError(403, "That pairing code doesn't match this computer.");
+      }
+      if (input.typed) {
+        // One question at a time, each bound to its own phone: a single answer
+        // never allows two keys.
+        const ask = approvals.then(() => finished || incoming.socket.destroyed ? false
+          : options.approve ? options.approve({ device: input.device, name: input.name, check: pairingCheckCode(keyFingerprint(publicKey)) }) : false);
+        approvals = ask.catch(() => false);
+        const allowed = await ask;
+        if (finished) throw new BridgeError(410, "Pairing is closed. Run phren pair again.");
+        // A phone that gave up while the question waited gets nothing written.
+        if (incoming.socket.destroyed) return;
+        if (!allowed) throw new BridgeError(403, "The computer didn't allow this phone. Run phren pair again and allow it there.");
       }
       const comment = input.device === "android" ? "phren-android" : "phren-iphone";
       const encoded = publicKey.split(" ")[1];
@@ -229,6 +265,42 @@ async function runScopedPair(args: string[], version: string): Promise<number> {
   return 0;
 }
 
+/** A name safe to print in a terminal: control and format characters dropped, at most 80 characters. */
+export function printableName(name: string): string {
+  return name.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "").slice(0, 80);
+}
+
+/** How long the terminal waits for an answer: less than the phone waits, so a late yes never authorizes a phone that gave up. */
+const APPROVAL_WAIT_MS = 100_000;
+
+/**
+ * The terminal's say on a phone that typed the code; no terminal, no typed
+ * pairing. No answer in time is no, and Ctrl-C at the question cancels pairing.
+ */
+async function askToAllow(phone: PairingApproval, cancel: () => void): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    console.log("\n  A phone typed the code, but there's no terminal here to allow it. Scan the QR code instead.");
+    return false;
+  }
+  const { createInterface } = await import("node:readline/promises");
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), APPROVAL_WAIT_MS);
+  prompt.on("SIGINT", () => { abort.abort(); cancel(); });
+  try {
+    // The name comes from the request: printed without control characters, so
+    // it can't hide or forge the check line with terminal escapes.
+    const name = phone.name ? printableName(phone.name) : "";
+    const who = name ? `"${name}"` : "A phone";
+    console.log(`\n  ${who} typed the code. Its screen shows a key check${phone.check ? `; it should be:  ${phone.check}` : "."}`);
+    const answer = await prompt.question("  Allow this phone? [y/N] ", { signal: abort.signal });
+    return /^y(es)?$/i.test(answer.trim());
+  } catch {
+    console.log("\n  Not allowed.");
+    return false;
+  } finally { clearTimeout(timer); prompt.close(); }
+}
+
 export async function runPair(args: string[], version: string): Promise<number> {
   if (args.includes("--scope")) return runScopedPair(args, version);
   let minutes = 5, port: number | undefined, installHook = true;
@@ -252,7 +324,10 @@ export async function runPair(args: string[], version: string): Promise<number> 
   const name = await computerDisplayName(), user = userInfo().username, fingerprint = await hostFingerprint();
   const hosts = await pairingHosts();
   if (!hosts.length) { console.error("No network address found. Connect to Wi-Fi or Tailscale and try again."); return 1; }
-  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000 });
+  let cancelPairing = () => {};
+  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000,
+    approve: phone => askToAllow(phone, () => cancelPairing()) });
+  cancelPairing = () => session.close();
   const url = pairingURL({ hosts, port: session.port, user, sshPort, fingerprint, code, name });
   const { renderUnicodeCompact } = await import("uqr");
   console.log(`\nConnect your phone to ${name}`);
@@ -260,6 +335,8 @@ export async function runPair(args: string[], version: string): Promise<number> 
   console.log(renderUnicodeCompact(url, { border: 2 }));
   const typed = `${code.slice(0, 3)}-${code.slice(3)}`;
   console.log(`\n  Can't scan? Choose "Enter code" and type:  ${hosts[0]}${session.port === PAIR_PORT ? "" : `:${session.port}`}   ${typed}`);
+  const check = pairingCheckCode(fingerprint);
+  if (check) console.log(`  The phone then asks you to match:  Check: ${check}`);
   if (process.env.WSL_DISTRO_NAME) {
     console.log(`\n  This is WSL: Windows may block inbound port ${session.port} (and SSH) from the phone. If it cannot connect, run once in an admin PowerShell:`);
     console.log(`    New-NetFirewallHyperVRule -Name phren-pair -DisplayName "Phren pairing" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts ${session.port},22`);

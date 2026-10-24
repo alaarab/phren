@@ -56,7 +56,7 @@ import { typedMuxRequest } from "./mux-wire.js";
 import { overviewStream } from "./server-overview.js";
 import { transcriptStreams } from "./server-stream.js";
 import { launchSession } from "./server-launch.js";
-import { SessionMover, transcriptTail } from "./session-move.js";
+import { copyClaudeConversation, SessionMover, transcriptTail } from "./session-move.js";
 import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import { paneAccount, paneAccountKey } from "./pane-accounts.js";
 import { readTurn } from "./turn-records.js";
@@ -171,6 +171,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     launch: (server, data, options) => launches.run(() => launchSession(server, data, { trustFolder: true, ...options })),
     inventory: () => launchCheckOff() ? Promise.resolve(undefined) : harnessInventoryWithin(2_500),
     transcript: async target => transcriptTail(await targetTranscriptPath(target)),
+    copyConversation: async (target, home, check) => copyClaudeConversation(await targetTranscriptPath(target), home, process.env, check),
     paneAccount: (server, pane) => paneAccount(paneAccountKey(server, pane.pane_id), typeof pane.terminal_id === "string" ? pane.terminal_id : undefined)?.id,
     paneDispatch: async (server, pane) => {
       const dispatch = (await readTurn(server, String(pane.pane_id)))?.dispatch;

@@ -50,6 +50,18 @@ describe("launching in a permission mode", () => {
     }
   });
 
+  it("resumes a Claude conversation only when the Hook passes resumeClaude (an account switch), never with a brief or for another harness", async () => {
+    const session = "00000003-1111-4111-8111-111111111111";
+    await launchSession("default", { cwd, label: "Switched", kind: "claude", permissionMode: "auto" }, { resumeClaude: session });
+    expect(starts.at(-1)!.args).toEqual(["--permission-mode", "auto", "--resume", session]);
+    // Request data cannot ask for a resume: only the option does.
+    await launchSession("default", { cwd, label: "Plain", kind: "claude", resumeClaude: session });
+    expect(starts.at(-1)!.args).toEqual([]);
+    await expect(launchSession("default", { cwd, label: "Briefed", kind: "claude", brief: { id: "b".repeat(8) + "-0000-4000-8000-000000000000", text: "Do it." } }, { resumeClaude: session }))
+      .rejects.toThrow("Only a Claude worker without a brief resumes a conversation.");
+    await expect(launchSession("default", { cwd, label: "Codex", kind: "codex" }, { resumeClaude: session })).rejects.toThrow("Only a Claude worker without a brief resumes a conversation.");
+  });
+
   it("starts a typed Codex with the matching approval and sandbox flags", async () => {
     const wanted: Record<string, string[]> = {
       supervised: ["-a", "untrusted", "-s", "read-only"],
