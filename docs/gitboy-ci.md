@@ -24,7 +24,7 @@ The gitboy jobs run the same commands as the GitHub jobs. Differences: the macOS
 ## How a run starts
 
 1. You dispatch CI on GitHub with `release_candidate=true` on the default branch, as for any RC.
-2. That starts `.github/workflows/gitboy-rc.yml` through `workflow_run` on CI's `requested` event, so both RCs run side by side and CI never waits for it. It runs only when the CI run is an `RC validation` dispatch started by the repository owner on the default branch, and uses that run's `head_sha`. Its `trigger` job asks the gitboy pull mirror to sync (best effort), then calls `POST /api/v1/repos/:owner/:repo/pipelines` with `ref` set to the commit's SHA and the variables `PHREN_RC=true`, `PHREN_RC_SHA`, `GITHUB_REPOSITORY` and `GITHUB_RUN_URL`. While the mirror doesn't have the commit yet, gitboy answers `400 Ref does not resolve to a commit` and the job retries for about four minutes.
+2. That starts `.github/workflows/gitboy-rc.yml` through `workflow_run` on CI's `requested` event, so both RCs run side by side and CI never waits for it. It runs only when the CI run is an `RC validation` dispatch started by the repository owner on the default branch, and uses that run's `head_sha`. Its `trigger` job asks the gitboy pull mirror to sync (best effort), then calls `POST /api/v1/repos/:owner/:repo/pipelines` with `ref` set to the commit's SHA and the variables `PHREN_RC=true` and `GITHUB_REPOSITORY`, then checks that the pipeline gitboy started is at that SHA. No per-run values go into the variables, because gitboy's content-hash reuse includes them in its key (see below). While the mirror doesn't have the commit yet, gitboy answers `400 Ref does not resolve to a commit` and the job retries for about four minutes.
 3. `.gitboy.yml`'s `workflow.rules` admits only manual (API or Console) pipelines with `PHREN_RC=true`, so mirror syncs and pushes never start it.
 4. `github-status-pending` posts `pending` for `gitboy/rc` on the commit and checks that gitboy resolved the SHA it was asked for. The test jobs run in parallel.
 5. When they finish, `github-status-success` or `github-status-failure` posts the result. The status links to the gitboy pipeline page.
@@ -69,3 +69,9 @@ A pipeline whose jobs wait for a runner that is offline (the Mac asleep, for ins
 - Windows. gitboy has no Windows runner; the GitHub RC remains the only Windows gate.
 - Publishing. npm publish with provenance needs GitHub's OIDC, and desktop installers ship as GitHub releases for the auto-updater, so both stay on GitHub.
 - Feature pull requests. Only the RC runs on gitboy; pushes and pull requests build on GitHub only.
+
+## Reusing earlier runs
+
+`agent-test`, `browser-test` and `validate-docs` declare `inputs:`, the repository paths their result depends on. gitboy reuses an earlier green run of such a job when those paths, the job's definition, its variables and the repository's CI variables are all unchanged, so a release candidate that changes only, say, the VS Code extension doesn't run the browser suite again. `build-and-test`, its macOS leg and `lint` depend on most of the repository and always run. The status jobs set `checkout: none`: they only call GitHub's API, and a gitboy server with `GITBOY_API_ONLY_JOBS` on starts them without a checkout.
+
+When a job's result starts depending on a new path, add it to that job's `inputs:`; a path left out can let a stale green result stand. A manual retry always runs.
