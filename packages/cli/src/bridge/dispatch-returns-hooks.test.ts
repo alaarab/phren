@@ -479,6 +479,15 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     expect(turnPhase((await readTurn("default", "w1:p2"))!)).toMatchObject({ phase: "ended", background: 1, reply: "Started the suite." });
   });
 
+  it("drops the Stop's background count when the conversation is resumed, and keeps it across a compaction", async () => {
+    await post({ target, event: "UserPromptSubmit", prompt: "Run the parser checks" });
+    await post({ target, event: "Stop", background: 2 });
+    await post({ target, event: "SessionStart", startSource: "compact" });
+    expect(turnPhase((await readTurn("default", "w1:p2"))!)).toMatchObject({ phase: "ended", background: 2 });
+    await post({ target, event: "SessionStart", startSource: "resume" });
+    expect(turnPhase((await readTurn("default", "w1:p2"))!)).not.toHaveProperty("background");
+  });
+
   it("confirms a picture send, which Claude submits with an [Image #N] label in place of its path", async () => {
     await post({ target, event: "SessionStart" });
     const typed = "Look at this probe picture\n\nAttached files on this computer:\n/Users/me/.local/share/phren/bridge/uploads/s/1c74-Screen Shot.png";
@@ -564,5 +573,22 @@ describe("notices to the dispatching agent", () => {
     clock += 5_000;
     await returns.tick();
     expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells a conductor whose turn ended while its background agents run, though Herdr reads it working", async () => {
+    // Live: a lead waiting on its background agents took typed text at once; Herdr read it working throughout.
+    const value = receipt({ origin });
+    observe(value, { state: "done", hook: true, completed: true, endedAt: "2026-09-27T12:00:00.000Z", reply: "Done." }, 1);
+    await atomicInPrivateDir(path.join(bridge, "dispatches", `${value.id}.json`), value);
+    const lead = "00000002-1111-4111-8111-111111111111", turn = { terminal: "term-c", source: "claude" as const, session: lead };
+    const deliver = vi.fn(async (_target: Target, _text: string, _id: string) => ({ delivered: true }));
+    const returns = new DispatchReturns({ peers: async () => [], isLocal: () => false, snapshot: async () => conductor("working"),
+      identity: async () => lead, deliver });
+    await noteTurn("default", "w1:p1", { event: "UserPromptSubmit", ...turn });
+    await returns.tick();
+    expect(deliver).not.toHaveBeenCalled();
+    await noteTurn("default", "w1:p1", { event: "Stop", ...turn, background: 2 });
+    await returns.tick();
+    expect(deliver).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ session: lead }), noticeLine([value]), noticeDeliveryId([value]));
   });
 });

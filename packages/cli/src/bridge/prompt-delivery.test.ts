@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hookRequest } from "./client.js";
 import { CodexServerUnavailable, codexServers } from "./codex-servers.js";
@@ -6,6 +9,7 @@ import { paneIdentity, snapshot, validateStartingTarget, validateTarget } from "
 import { BridgeError, type Json, type Target } from "./protocol.js";
 import { paneRoute, type PaneRouteContext } from "./server-pane-routes.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
+import { noteTurn } from "./turn-records.js";
 
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
 vi.mock("./grants.js", () => ({ findGrant: vi.fn(), grantLabel: vi.fn() }));
@@ -20,7 +24,9 @@ let pane: Json, restore: () => void, sequence = 0, deliveryId: string;
 const prompt = vi.fn(), sendKeys = vi.fn(), expectDelivery = vi.fn();
 const deliveries = { expect: expectDelivery, queue: vi.fn(), status: vi.fn(() => ({ state: "unknown" })), sameMessage: vi.fn(() => true),
   delivered: vi.fn(), fail: vi.fn(), pending: vi.fn(() => false), awaitLate: vi.fn(async () => "pending") };
-const context = { agentHooks: { deliveries }, modelSwitcher: { assertAvailable() {} },
+const held = { approval: vi.fn(), terminalPrompt: vi.fn(), servedQuestion: vi.fn() };
+const readScreen = vi.fn(async () => "");
+const context = { agentHooks: { deliveries, ...held }, modelSwitcher: { assertAvailable() {} },
   settingsSwitcher: { assertAvailable() {} }, permissionModeSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as unknown as PaneRouteContext;
 const hand = (where = target) => handOff({ target: where, text }, { deliveryId });
 
@@ -35,7 +41,7 @@ beforeEach(() => {
   prompt.mockResolvedValue(undefined);
   expectDelivery.mockResolvedValue("pending");
   deliveries.status.mockReturnValue({ state: "unknown" }); deliveries.sameMessage.mockReturnValue(true);
-  restore = setTerminalProvider({ prompt, sendKeys } as unknown as TerminalProvider);
+  restore = setTerminalProvider({ prompt, sendKeys, readScreen } as unknown as TerminalProvider);
   vi.mocked(hookRequest).mockImplementation(async (route, body) => {
     if (route !== "/v1/hand-off") return {};
     const result = await paneRoute(context, new URL("http://phren.local/v1/prompt"), body!, {} as never) as Json;
@@ -119,6 +125,67 @@ describe("hand-off submission confirmation", () => {
     await expect(hand()).rejects.toThrow("reply lost");
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(sendKeys).not.toHaveBeenCalled();
+  });
+});
+
+describe("a prompt the terminal refused", () => {
+  const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId }, {} as never);
+  it("drops its delivery record when Herdr refused it, so it holds nothing", async () => {
+    prompt.mockRejectedValue(new BridgeError(409, "Herdr: pane w1:p1 is not an agent", { herdrCode: "agent_not_found" }));
+    await expect(send()).rejects.toMatchObject({ status: 409 });
+    expect(expectDelivery.mock.calls.map(call => (call[3] as AbortSignal).aborted)).toEqual([true]);
+  });
+});
+
+describe("an idle Claude pane that turned working after the paste", () => {
+  it("waits for its hook instead of pressing Enter again, and answers delivered when it comes", async () => {
+    const claude = { ...target, source: "claude" as const };
+    pane.agent = "claude";
+    vi.mocked(snapshot).mockImplementation(async () => ({ panes: [{ ...pane, agent_status: "working" }] }));
+    deliveries.awaitLate.mockResolvedValue("delivered");
+    expect(await paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: claude, text, deliveryId }, {} as never))
+      .toEqual({ ok: true, delivered: true, state: "delivered" });
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+});
+
+describe("a hand-off to a Claude lead waiting on its background agents", () => {
+  // Live: in "Waiting for 1 background agent to finish" Herdr reads the lead working, and pasted text plus
+  // Enter submits at once. The Hook answered every hand-off "busy" until the agents ended, over an hour.
+  const claude = { ...target, source: "claude" as const }, turn = { terminal: "terminal-1", source: "claude" as const, session: target.session };
+  const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: claude, text, deliveryId, hookQueued: true }, {} as never);
+  let bridge: string;
+  beforeEach(async () => { bridge = await mkdtemp(path.join(tmpdir(), "phren-background-")); vi.stubEnv("PHREN_BRIDGE_HOME", bridge); pane.agent = "claude"; pane.agent_status = "working";
+    readScreen.mockResolvedValue("✻ Waiting for 1 background agent to finish\n❯ "); });
+  afterEach(async () => { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); });
+
+  it("is typed once its turn ended with background work, and confirmed by its hook", async () => {
+    await noteTurn("default", target.pane, { event: "UserPromptSubmit", ...turn });
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    expect(prompt).not.toHaveBeenCalled();
+    await noteTurn("default", target.pane, { event: "Stop", ...turn, background: 1 });
+    expectDelivery.mockResolvedValue("delivered");
+    expect(await send()).toEqual({ ok: true, delivered: true, state: "delivered" });
+    expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, text);
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it("stays busy while that lead may have a dialog open: one the Hook holds, or one on its screen", async () => {
+    // A background agent's finish starts a turn with no UserPromptSubmit; Enter would answer its dialog.
+    await noteTurn("default", target.pane, { event: "UserPromptSubmit", ...turn });
+    await noteTurn("default", target.pane, { event: "Stop", ...turn, background: 1 });
+    held.approval.mockReturnValueOnce({ tool: "Bash" });
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    readScreen.mockResolvedValue(" Ready to code?\n ❯ 1. Yes, proceed\n   2. No, keep planning\n\n Esc to cancel");
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("stays busy for a working lead whose last Stop left nothing running", async () => {
+    await noteTurn("default", target.pane, { event: "UserPromptSubmit", ...turn });
+    await noteTurn("default", target.pane, { event: "Stop", ...turn });
+    await expect(send()).rejects.toMatchObject({ details: { code: "hand-off-busy" } });
+    expect(prompt).not.toHaveBeenCalled();
   });
 });
 
