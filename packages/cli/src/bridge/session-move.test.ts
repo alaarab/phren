@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -646,7 +646,7 @@ describe("switching a Claude conversation to another account (resume)", () => {
     await writeFile(path.join(root, ".claude-work", ".claude.json"), "{}");
     const w = world({ tmux: options.tmux });
     const copies: { target: Target; dir: string }[] = [];
-    w.deps.copyConversation = async (target, home) => { copies.push({ target, dir: home.dir }); return path.join(home.dir, "projects", "k", `${SESSION}.jsonl`); };
+    w.deps.copyConversation = async (target, home, check) => { if (!check) copies.push({ target, dir: home.dir }); return path.join(home.dir, "projects", "k", `${SESSION}.jsonl`); };
     w.deps.launch = async (_server, data, launchOptions) => {
       w.launches.push({ data, options: launchOptions as Json });
       const place = launchOptions.into ?? { workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2" };
@@ -707,12 +707,30 @@ describe("switching a Claude conversation to another account (resume)", () => {
 
   it("fails with the resume command when the copy fails after the old agent exited", async () => {
     const { deps, launches } = await resumeWorld();
-    deps.copyConversation = async () => { throw new Error("disk full"); };
+    deps.copyConversation = async (_target, home, check) => { if (check) return home.dir; throw new Error("disk full"); };
     const record = await move(deps, { harness: "claude", account: "work" }, { continuation: "resume" });
     expect(record.state).toBe("failed");
     expect(record.error).toContain("disk full");
+    // The copy never finished, so only the old (default) account can resume it.
     expect(record.error).toContain(`claude --resume ${SESSION}`);
-    expect(record.error).toContain("CLAUDE_CONFIG_DIR=~/.claude-work");
+    expect(record.error).not.toContain("CLAUDE_CONFIG_DIR");
+    expect(launches).toEqual([]);
+  });
+
+  it("names the new account's home in the resume command once the copy is done", async () => {
+    const { deps } = await resumeWorld();
+    deps.launch = async () => { throw new Error("launch refused"); };
+    const record = await move(deps, { harness: "claude", account: "work" }, { continuation: "resume" });
+    expect(record.state).toBe("failed");
+    expect(record.error).toContain(`CLAUDE_CONFIG_DIR=${path.join(root, ".claude-work")}`);
+  });
+
+  it("refuses before anything is typed when the conversation cannot be copied", async () => {
+    const { deps, typed, launches } = await resumeWorld();
+    deps.copyConversation = async () => { throw new Error("The conversation's transcript is not in a Claude home on this computer."); };
+    await expect(new SessionMover(deps).start({ target: from, to: { harness: "claude", account: "work" }, continuation: "resume" }, { owner: true }))
+      .rejects.toThrow("not in a Claude home");
+    expect(typed).toEqual([]);
     expect(launches).toEqual([]);
   });
 });
@@ -747,5 +765,28 @@ describe("copyClaudeConversation", () => {
     await expect(copyClaudeConversation(path.join(root, ".claude", "settings.jsonl"), claudeHome("work")!)).rejects.toThrow("not under its Claude home's projects folder");
     await writeFile(path.join(root, ".claude-work", "projects.jsonl"), "{}");
     await expect(copyClaudeConversation(path.join(root, ".claude-work", "projects.jsonl"), claudeHome("work")!)).rejects.toThrow("already belongs to that account");
+  });
+
+  it("follows a source projects folder that is a link, and refuses a target folder that links outside the account", async () => {
+    vi.stubEnv("HOME", root);
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+    const key = "-work-repo";
+    const elsewhere = path.join(root, "elsewhere");
+    await mkdir(path.join(elsewhere, key), { recursive: true });
+    await mkdir(path.join(root, ".claude"), { recursive: true });
+    await symlink(elsewhere, path.join(root, ".claude", "projects"));
+    const transcript = await realpath(path.join(elsewhere, key, `${SESSION}.jsonl`)).catch(() => path.join(elsewhere, key, `${SESSION}.jsonl`));
+    await writeFile(transcript, `${user("hello")}\n`);
+    await mkdir(path.join(root, ".claude-work", "projects"), { recursive: true });
+    await writeFile(path.join(root, ".claude-work", ".claude.json"), "{}");
+    const copied = await copyClaudeConversation(await realpath(transcript), claudeHome("work")!);
+    expect(await readFile(copied, "utf8")).toBe(`${user("hello")}\n`);
+    // The target's <key> folder points outside its home: nothing is written there.
+    const outside = path.join(root, "outside");
+    await mkdir(outside, { recursive: true });
+    await rm(path.join(root, ".claude-work", "projects", key), { recursive: true, force: true });
+    await symlink(outside, path.join(root, ".claude-work", "projects", key));
+    await expect(copyClaudeConversation(await realpath(transcript), claudeHome("work")!)).rejects.toThrow("points outside its Claude home");
+    expect(await readdir(outside)).toEqual([]);
   });
 });
