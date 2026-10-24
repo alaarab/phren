@@ -104,6 +104,22 @@ test("Move to new split sends the tab to a tile on its right", async ({ page }) 
   await expect(page.locator(".tile")).toHaveCount(2);
   await expect(page.locator(".tile").nth(0).locator(".doc-tab-title")).toHaveText(["Bravo chat"]);
   await expect(page.locator(".tile").nth(1).locator(".doc-tab-title")).toHaveText(["Alpha chat"]);
+  // The moved tab's arrows walk its new bar, not the one it left.
+  const moved = page.locator(".tile").nth(1).locator(".doc-tab");
+  await moved.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(moved).toBeFocused();
+});
+
+test("opening the command palette closes the menu and leaves the keys to the palette", async ({ page }) => {
+  await openAll(page, ["Alpha", "Bravo"]);
+  await tab(page, "Alpha").click({ button: "right" });
+  await expect(menu(page)).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+K");
+  await expect(page.locator(".palette-input")).toBeFocused();
+  await expect(menu(page)).toHaveCount(0);
+  await page.keyboard.press("Tab");
+  await expect(menu(page)).toHaveCount(0);
 });
 
 test("Copy session id is offered for chats that have one; Reopen closed chat only after a close", async ({ page, context }) => {

@@ -1,7 +1,8 @@
 // The tab right-click menu: the chat header's menu look (`.chat-menu`), placed at
 // the pointer or under a keyboard-focused tab. Focus moves into it and is trapped
-// (Tab cycles), arrows / Home / End move, Esc or an outside press closes it and
-// focus goes back to the tab that opened it.
+// (Tab cycles), arrows / Home / End move. Esc, an outside press or focus moving
+// elsewhere (another overlay opened) closes it; after Esc focus goes back to the
+// tab that opened it.
 //
 // openTabMenu({ items: [{ label, run, enabled?, id? }], x, y, label, returnTo? }) -> { close() }
 
@@ -32,6 +33,7 @@ export function openTabMenu({ items, x = 0, y = 0, label = "Tab menu", returnTo 
     done = true;
     document.removeEventListener("pointerdown", onOutside, true);
     document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("focusin", onFocusIn, true);
     window.removeEventListener("blur", onAway);
     window.removeEventListener("resize", onAway);
     menu.remove();
@@ -71,6 +73,8 @@ export function openTabMenu({ items, x = 0, y = 0, label = "Tab menu", returnTo 
   }
   function onOutside(ev) { if (!menu.contains(ev.target)) close(false); }
   function onAway() { close(false); }
+  // Another overlay (the command palette, a dialog) took focus: it owns the keys now.
+  function onFocusIn(ev) { if (!menu.contains(ev.target)) close(false); }
 
   menu.style.position = "fixed";
   menu.style.left = "0px";
@@ -89,5 +93,7 @@ export function openTabMenu({ items, x = 0, y = 0, label = "Tab menu", returnTo 
   window.addEventListener("resize", onAway);
   current = api;
   buttons[0]?.focus();
+  document.addEventListener("focusin", onFocusIn, true); // after the first focus, which is inside
+
   return api;
 }

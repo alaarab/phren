@@ -66,7 +66,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
       // Roving focus along the tab bar; Enter / Space activate the focused tab.
       const move = { ArrowRight: 1, ArrowLeft: -1, Home: "first", End: "last" }[ev.key];
       if (move !== undefined) {
-        const tabs = [...barEl.children];
+        const tabs = [...(tab.parentElement?.children ?? [])]; // the bar it is in now: a moved tab changed bars
         const at = tabs.indexOf(tab);
         const next = move === "first" ? 0 : move === "last" ? tabs.length - 1 : (at + move + tabs.length) % tabs.length;
         ev.preventDefault();
@@ -192,7 +192,7 @@ export function createTabs(barEl, bodyEl, { onActivate, onEmpty, onClose, onClos
     if (!entry) return false;
     const order = [...barEl.children].map((t) => t.dataset.doc);
     const index = order.indexOf(id);
-    onClosing?.(entry.doc, { index, after: index > 0 ? order[index - 1] : undefined });
+    onClosing?.(entry.doc, { index, after: index > 0 ? order.slice(0, index).reverse() : undefined });
     try { entry.handle.close?.(); } catch { /* already closed */ }
     detach(id);
     onClose?.(entry.doc);

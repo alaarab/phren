@@ -16,20 +16,25 @@ export function closedEntry(value) {
   const entry = { key: closedKey(value.computer, value.id), computer: value.computer, id: value.id };
   if (typeof value.tile === "string") entry.tile = value.tile;
   if (Number.isInteger(value.index) && value.index >= 0) entry.index = value.index;
-  if (typeof value.after === "string" && value.after) entry.after = value.after; // the tab on its left: position survives other tabs coming and going
+  // The tabs on its left, nearest first: its position survives other tabs coming and going, and
+  // closing several at once (a file between them never comes back, so the next one left anchors it).
+  const after = (Array.isArray(value.after) ? value.after : [value.after]).filter((id) => typeof id === "string" && id).slice(0, 50);
+  if (after.length) entry.after = after;
   if (value.mode === "console") entry.mode = "console";
   return entry;
 }
 
 /**
- * Where a reopened tab goes in `order` (the tile's tab ids, left to right): right after the tab
- * that was on its left when it closed if that one is still there, else at its old index, else
- * last (undefined). Anchoring on a neighbour keeps the order right when other tabs, such as
- * files, sat between closed chats.
+ * Where a reopened tab goes in `order` (the tile's tab ids, left to right): right after the
+ * nearest tab that was on its left when it closed and is still there (`after`: an id, or ids
+ * nearest first), else at its old index, else last (undefined). Anchoring on a neighbour keeps
+ * the order right when other tabs, such as files, sat between closed chats.
  */
 export function reopenPosition(order, { index, after } = {}) {
-  const anchor = typeof after === "string" ? order.indexOf(after) : -1;
-  if (anchor >= 0) return anchor + 1;
+  for (const id of Array.isArray(after) ? after : [after]) {
+    const anchor = typeof id === "string" ? order.indexOf(id) : -1;
+    if (anchor >= 0) return anchor + 1;
+  }
   return Number.isInteger(index) && index >= 0 ? Math.min(index, order.length) : undefined;
 }
 

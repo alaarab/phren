@@ -77,6 +77,22 @@ describe("reopenPosition", () => {
     expect(reopenPosition(["a", "file"], { index: 5, after: "file" })).toBe(2);
     expect(reopenPosition(["a", "file", "b"], { index: 0, after: "a" })).toBe(1);
   });
+  it("anchors on the nearest left neighbour still there", () => {
+    expect(reopenPosition(["a", "k"], { index: 2, after: ["file", "a"] })).toBe(1);
+  });
+  it("keeps [A, clean file, B, K] as [A, B, K] when Close others on K also closes the file", () => {
+    // Closed right to left: B (left neighbours file, A), the file (never reopens), A (none).
+    const stack = createClosedStack();
+    stack.push(chat("b", { tile: "t1", index: 2, after: ["file", "chat:box/a"] }));
+    stack.push(chat("a", { tile: "t1", index: 0 }));
+    const order = ["chat:box/k"];
+    for (const expected of ["a", "b"]) {
+      const { entry } = stack.reopen(() => "ok");
+      expect(entry!.id).toBe(expected);
+      order.splice(reopenPosition(order, entry!) ?? order.length, 0, `chat:box/${entry!.id}`);
+    }
+    expect(order).toEqual(["chat:box/a", "chat:box/b", "chat:box/k"]);
+  });
   it("falls back to the old index, clamped, when that tab is gone; last when nothing is known", () => {
     expect(reopenPosition(["a", "b"], { index: 1, after: "gone" })).toBe(1);
     expect(reopenPosition(["a"], { index: 4 })).toBe(1);
@@ -98,7 +114,8 @@ describe("reopenPosition", () => {
     expect(order).toEqual(["chat:box/a", "file", "chat:box/b", "chat:box/c"]);
   });
   it("closedEntry keeps `after` and drops a non-string one", () => {
-    expect(closedEntry(chat("a", { after: "x" }))).toMatchObject({ after: "x" });
+    expect(closedEntry(chat("a", { after: "x" }))).toMatchObject({ after: ["x"] });
+    expect(closedEntry(chat("a", { after: ["x", 3, "y"] }))).toMatchObject({ after: ["x", "y"] });
     expect(closedEntry(chat("a", { after: 3 }))).not.toHaveProperty("after");
   });
 });
