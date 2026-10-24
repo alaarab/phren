@@ -56,6 +56,18 @@ Add two repository secrets (**Settings → Secrets and variables → Actions**):
 
 If the gitboy repository's path differs from `alaarab/phren`, also add the Actions variable `GITBOY_REPO` (for example `phren/phren`). Remove either secret to turn the gitboy RC off.
 
+## Fast checks (`fast-check`)
+
+Any gitboy pipeline that isn't the RC runs one job, `fast-check`: a push or pull request made on gitboy itself, or a pipeline started through the API or the Console without `PHREN_RC`. It runs the development build's checks, the same set GitHub runs on a feature PR (build, lint, private strings, typecheck, the agent build and validate-docs). Tests stay deferred to the RC and are never reported as passed.
+
+It is built to be fast:
+
+- **One job.** One install and one build feed every check, instead of six jobs that each install and build. Lint and the build run together under turbo, alongside the private-strings and docs checks, and the typechecks then run side by side. Each check's output is printed only when it fails.
+- **Only what changed.** The job compares the commit with `PHREN_BASE_SHA`, or for a push with the previous branch head (`GITBOY_BEFORE_SHA`). It builds, lints and typechecks only the packages changed since then and the packages that depend on them (turbo `--affected`). It checks every package when files outside `packages/` and `docs/` changed (scripts, lockfile, root config), when the comparison commit isn't in the checkout (a new branch, or more than 50 commits back), or when the package list can't be read.
+- **Warm start.** The pnpm store and turbo's cache (`.turbo/cache`) are one gitboy cache, keyed by `pnpm-lock.yaml`. Every successful run refreshes it, so the next run installs from the local store and replays unchanged packages from turbo's cache. Root files the builds and lint read (`biome.json`, `scripts/build.mjs`, `scripts/build-code.mjs`) are `globalDependencies` in `turbo.json`, so changing one misses the cache rather than replaying an old result. Entries unused for 7 days are dropped.
+
+Pull mirror syncs start no CI, so on a mirrored repository start it through the API like the RC: `POST /api/v1/repos/:owner/:repo/pipelines` with `{"ref": "<sha>", "variables": {"PHREN_BASE_SHA": "<sha to compare with>"}}`. Without `PHREN_BASE_SHA` it checks everything.
+
 ## Reading results
 
 - On GitHub, the commit (and any pull request at that head) shows `gitboy/rc` next to the Actions checks. Its link opens the gitboy pipeline.
