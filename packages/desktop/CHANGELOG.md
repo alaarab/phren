@@ -4,7 +4,7 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
-## Unreleased
+## [0.1.14] - 2026-10-24
 
 ### New
 
