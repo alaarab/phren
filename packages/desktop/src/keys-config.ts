@@ -61,6 +61,8 @@ export const ACTIONS: KeyAction[] = [
   { action: "filter_sessions", group: "Direct", label: "Filter the sessions sidebar", herdr: false, app: true },
   { action: "close_tab", group: "Direct", label: "Close the current tab", herdr: false, app: true },
   { action: "reopen_chat", group: "Direct", label: "Reopen the last closed chat (again goes further back)", herdr: false, app: true },
+  { action: "tab_next", group: "Direct", label: "Next tab in the focused tile", herdr: false, app: true },
+  { action: "tab_previous", group: "Direct", label: "Previous tab in the focused tile", herdr: false, app: true },
   { action: "split_right", group: "Direct", label: "Split the focused tile side by side", herdr: false, app: true },
   { action: "split_down", group: "Direct", label: "Split the focused tile top and bottom", herdr: false, app: true },
   { action: "console", group: "Direct", label: "Switch the session between chat and console", herdr: false, app: true },
@@ -95,6 +97,7 @@ export const DEFAULTS_APP: Record<string, string[]> = {
   palette: ["cmd+k"], open_file: ["cmd+p"],
   terminal: ["cmd+j"], sidebar: ["cmd+b"],
   next_needs_you: ["cmd+shift+a"], filter_sessions: ["cmd+shift+e"], close_tab: ["cmd+w"], reopen_chat: ["cmd+shift+o"],
+  tab_next: ["ctrl+pagedown"], tab_previous: ["ctrl+pageup"],
   split_right: ["cmd+\\"], split_down: ["cmd+shift+\\"], console: ["cmd+shift+t"],
 };
 // Cmd/Ctrl+1–9 belong to the titlebar's pills (app.js); sessions keep prefix+1..9,
