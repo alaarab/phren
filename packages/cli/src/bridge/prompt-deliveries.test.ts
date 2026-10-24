@@ -132,6 +132,21 @@ describe("held messages Claude submits as one turn", () => {
     expect(store.status("rowj-0003", claudeTarget).state).toBe("delivered");
   });
 
+  it("leave the joined turn's own row to it, not to a later message with the same words", async () => {
+    const store = deliveries();
+    await send(store, "rowc-0001", "A", claudeTarget);
+    await send(store, "rowc-0002", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    // Only the joined turn's row is in the transcript; the new message was never taken.
+    clock += 1_000; await send(store, "rowc-0003", "A\nB", claudeTarget);
+    clock += 1; store.stopped(claudeTarget);
+    landed = true; matches = 1; hookRows = true;
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("rowc-0003", claudeTarget).state).toBe("failed");
+  });
+
   it("match only held messages, never a failed one", async () => {
     const store = deliveries();
     await send(store, "fail-0001", "A\nB", claudeTarget);

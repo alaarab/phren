@@ -313,8 +313,13 @@ export class PromptDeliveries {
       }
       start = next;
     }
+    if (!matched.length) return false;
     for (const record of matched) { record.joined = true; this.settle(record, undefined, target.session); }
-    return matched.length > 0;
+    // The turn's row carries the joined words: a hook-settled record of them (no phone id) claims it as
+    // `taken` lets any hook-settled message, so a later message with the same words cannot take it.
+    this.records.push({ hash: promptHash(prompt), server: target.server, pane: target.pane, source: target.source, session: target.session,
+      state: "delivered", at: this.now(), settledAt: this.now() });
+    return true;
   }
   /** Marks `record` delivered, with the transcript entry that settled it when known. */
   private settle(record: Record, entry?: number, session?: string, hook?: boolean) {
