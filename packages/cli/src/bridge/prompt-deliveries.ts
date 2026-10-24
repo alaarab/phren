@@ -46,6 +46,12 @@ export function promptKey(text: string): string {
 }
 const PICTURE_PATH_LINE = /^\s*\/.*\.(?:png|jpe?g|gif|webp)\s*$/i;
 export const promptHash = (text: string) => createHash("sha256").update(promptKey(text)).digest("hex");
+/** A submitted prompt is searched for held messages joined into it over at most this many of its lines. */
+const JOINED_MAX_LINES = 64;
+/** Of the open messages in a pane, at most this many are matched against a joined prompt's lines. */
+const JOINED_MAX_OPEN = 32;
+/** The line runs hashed for one joined prompt come to at most this many characters. */
+const JOINED_MAX_CHARS = 1_048_576;
 
 const recordSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).optional(), hash: z.string().regex(/^[0-9a-f]{64}$/),
@@ -56,6 +62,9 @@ const recordSchema = z.object({
   entry: z.number().optional(),
   /** Whether that entry is a user row (one its agent's UserPromptSubmit fired for), not a mid-turn queue removal. */
   entryHook: z.boolean().optional(),
+  /** From a joined prompt (`settleJoined`): "part", a message settled inside it, claims no row of its own (the turn's
+   * row carries other words); "turn", the joined words themselves, no message of anyone's, claims that row. */
+  joined: z.enum(["part", "turn"]).optional(),
 }).strict();
 /** In memory only: `hookClaim`, a UserPromptSubmit came for these words before any row was readable, so the
  * row (in the callback's conversation, now the record's) may settle it when it appears, even once failed; `seenRow`, a user row a working check saw in a pane that has sent no
@@ -108,7 +117,7 @@ export class PromptDeliveries {
   private save() {
     if (!this.file) return;
     // A record without a phone id is kept once it claimed a transcript row, so after a restart that row is not offered to another message.
-    const rows = this.records.filter(record => record.id || record.entry !== undefined).map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, ...row }) => row);
+    const rows = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn").map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, ...row }) => row);
     const file = this.file;
     this.writing = this.writing.then(() => atomicInPrivateDir(file, { records: rows })).catch(() => undefined);
   }
@@ -248,7 +257,12 @@ export class PromptDeliveries {
       return open.find(entry => entry.session === target.session) ?? open[0];
     };
     let record = pick();
-    if (!record) return;
+    if (!record) {
+      // A prompt that is one known message's own words (a late hook for a message already settled) is not a join.
+      // Records from an earlier join never get a hook of their own, so they do not count.
+      if (!this.records.some(other => other.hash === hash && this.samePane(other, target) && other.joined === undefined) && this.settleJoined(target, prompt)) this.save();
+      return;
+    }
     let entry: number | undefined;
     if (target.source === "claude") {
       // A hook settles a message only by claiming a row for it: rows all claimed by earlier messages is a
@@ -274,6 +288,40 @@ export class PromptDeliveries {
     }
     this.settle(record, entry, target.session, entry !== undefined ? true : undefined);
     this.save();
+  }
+  /** Claude submits the messages it held while busy as one turn, joined by newlines, so no single message's
+   * hash matches the prompt. Each open message in the pane whose words are a run of whole lines of it settles,
+   * the longest run first at each line and the oldest of identical messages first, so "yes" never settles
+   * inside "yes, but later". Only hashes of the line runs are compared, never stored. Only messages still held
+   * (typed or queued) are matched: a failed one could take the lines of messages that are held, and a late
+   * take of a failed message stays its own hook's to report. */
+  private settleJoined(target: Target, prompt: string): boolean {
+    const candidates = this.records.filter(record => this.samePane(record, target) && PromptDeliveries.open(record))
+      .sort((a, b) => a.at - b.at).slice(0, JOINED_MAX_OPEN);
+    if (!candidates.length) return false;
+    const lines = unwrapPastedContent(prompt).split("\n").filter(line => !PICTURE_PATH_LINE.test(line));
+    if (lines.length < 2 || lines.length > JOINED_MAX_LINES) return false;
+    const matched: Record[] = [];
+    let budget = JOINED_MAX_CHARS;
+    for (let start = 0; start < lines.length;) {
+      let next = start + 1;
+      for (let end = lines.length; end > start; end--) {
+        const run = lines.slice(start, end).join("\n");
+        if ((budget -= run.length) < 0) break;
+        if (!promptKey(run)) continue;
+        const hash = promptHash(run), same = candidates.filter(record => record.hash === hash && !matched.includes(record));
+        const record = same.find(entry => entry.session === target.session) ?? same[0];
+        if (record) { matched.push(record); next = end; break; }
+      }
+      start = next;
+    }
+    if (!matched.length) return false;
+    for (const record of matched) { record.joined = "part"; this.settle(record, undefined, target.session); }
+    // The turn's row carries the joined words: a hook-settled record of them (no phone id) claims it as
+    // `taken` lets any hook-settled message, so a later message with the same words cannot take it.
+    this.records.push({ hash: promptHash(prompt), server: target.server, pane: target.pane, source: target.source, session: target.session,
+      state: "delivered", at: this.now(), settledAt: this.now(), joined: "turn" });
+    return true;
   }
   /** Marks `record` delivered, with the transcript entry that settled it when known. */
   private settle(record: Record, entry?: number, session?: string, hook?: boolean) {
@@ -302,7 +350,8 @@ export class PromptDeliveries {
       // A message the agent's hook settled before its row was written took that row without recording it: the
       // scan reaches back to it, and it claims (and keeps) the earliest unclaimed user row stamped after it was
       // typed and soon after its hook, oldest first, before any open message is offered a row.
-      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined)
+      // One settled inside a joined prompt took that prompt's row, which carries other words: it has none to claim.
+      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && other.joined !== "part")
         .sort((a, b) => (a.settledAt ?? a.at) - (b.settledAt ?? b.at));
       const from = Math.min(record.at, ...hooked.map(other => other.at));
       const found = (await this.landed({ ...record, at: from }).catch(() => [] as TranscriptEntry[])).sort((a, b) => a.offset - b.offset);

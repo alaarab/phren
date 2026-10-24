@@ -48,6 +48,14 @@ function firstLine(text) {
   const line = String(text || "").split("\n")[0];
   return line.length > 80 ? `${line.slice(0, 79)}\u2026` : line;
 }
+/** Copy the agent's own session id and say so; the chat menu and the tab menu share it. */
+export async function copySessionIdToClipboard(id) {
+  try {
+    await navigator.clipboard.writeText(id);
+    toast("Copied session id");
+  } catch { toast("Could not copy to the clipboard", { tone: "danger" }); }
+}
+
 function ensureStyle() {
   if (document.getElementById("chat-style")) return;
   const link = document.createElement("link");
@@ -928,12 +936,7 @@ export function openChat(el, computerName, child, opts = {}) {
       toast(failNote(out) || `Copied ${plural(out.messages)}`, out.failed ? { tone: "danger" } : {});
     } catch { toast("Could not copy to the clipboard", { tone: "danger" }); }
   }
-  async function copySessionId() {
-    try {
-      await navigator.clipboard.writeText(agentSessionId);
-      toast("Copied session id");
-    } catch { toast("Could not copy to the clipboard", { tone: "danger" }); }
-  }
+  const copySessionId = () => copySessionIdToClipboard(agentSessionId);
   async function saveMarkdown() {
     const out = await exportMarkdown();
     if (!out || closed) return;

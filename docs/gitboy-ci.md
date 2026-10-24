@@ -24,7 +24,7 @@ The gitboy jobs run the same commands as the GitHub jobs. Differences: the macOS
 ## How a run starts
 
 1. You dispatch CI on GitHub with `release_candidate=true` on the default branch, as for any RC.
-2. That starts `.github/workflows/gitboy-rc.yml` through `workflow_run` on CI's `requested` event, so both RCs run side by side and CI never waits for it. It runs only when the CI run is an `RC validation` dispatch started by the repository owner on the default branch, and uses that run's `head_sha`. Its `trigger` job asks the gitboy pull mirror to sync (best effort), then calls `POST /api/v1/repos/:owner/:repo/pipelines` with `ref` set to the commit's SHA and the variables `PHREN_RC=true`, `PHREN_RC_SHA`, `GITHUB_REPOSITORY` and `GITHUB_RUN_URL`. While the mirror doesn't have the commit yet, gitboy answers `400 Ref does not resolve to a commit` and the job retries for about four minutes.
+2. That starts `.github/workflows/gitboy-rc.yml` through `workflow_run` on CI's `requested` event, so both RCs run side by side and CI never waits for it. It runs only when the CI run is an `RC validation` dispatch started by the repository owner on the default branch, and uses that run's `head_sha`. Its `trigger` job asks the gitboy pull mirror to sync (best effort), then calls `POST /api/v1/repos/:owner/:repo/pipelines` with `ref` set to the commit's SHA and the variables `PHREN_RC=true` and `GITHUB_REPOSITORY`, then checks that the pipeline gitboy started is at that SHA. No per-run values go into the variables, because gitboy's content-hash reuse includes them in its key (see below). While the mirror doesn't have the commit yet, gitboy answers `400 Ref does not resolve to a commit` and the job retries for about four minutes.
 3. `.gitboy.yml`'s `workflow.rules` admits only manual (API or Console) pipelines with `PHREN_RC=true`, so mirror syncs and pushes never start it.
 4. `github-status-pending` posts `pending` for `gitboy/rc` on the commit and checks that gitboy resolved the SHA it was asked for. The test jobs run in parallel.
 5. When they finish, `github-status-success` or `github-status-failure` posts the result. The status links to the gitboy pipeline page.
@@ -56,6 +56,18 @@ Add two repository secrets (**Settings → Secrets and variables → Actions**):
 
 If the gitboy repository's path differs from `alaarab/phren`, also add the Actions variable `GITBOY_REPO` (for example `phren/phren`). Remove either secret to turn the gitboy RC off.
 
+## Fast checks (`fast-check`)
+
+Any gitboy pipeline that isn't the RC runs one job, `fast-check`: a push or pull request made on gitboy itself, or a pipeline started through the API or the Console without `PHREN_RC`. It runs the development build's checks, the same set GitHub runs on a feature PR (build, lint, private strings, typecheck, the agent build and validate-docs). Tests stay deferred to the RC and are never reported as passed.
+
+It is built to be fast:
+
+- **One job.** One install and one build feed every check, instead of six jobs that each install and build. Lint and the build run together under turbo, alongside the private-strings and docs checks, and the typechecks then run side by side. Each check's output is printed only when it fails.
+- **Only what changed.** The job compares the commit with `PHREN_BASE_SHA`, or for a push with the previous branch head (`GITBOY_BEFORE_SHA`). It builds, lints and typechecks only the packages changed since then and the packages that depend on them (turbo `--affected`). It checks every package when files outside `packages/` and `docs/` changed (scripts, lockfile, root config), when the comparison commit isn't in the checkout (a new branch, or more than 50 commits back), or when the package list can't be read.
+- **Warm start.** The pnpm store and turbo's cache (`.turbo/cache`) are one gitboy cache, keyed by `pnpm-lock.yaml`. Every successful run refreshes it, so the next run installs from the local store and replays unchanged packages from turbo's cache. Root files the builds and lint read (`biome.json`, `scripts/build.mjs`, `scripts/build-code.mjs`) are `globalDependencies` in `turbo.json`, so changing one misses the cache rather than replaying an old result. Entries unused for 7 days are dropped.
+
+Pull mirror syncs start no CI, so on a mirrored repository start it through the API like the RC: `POST /api/v1/repos/:owner/:repo/pipelines` with `{"ref": "<sha>", "variables": {"PHREN_BASE_SHA": "<sha to compare with>"}}`. Without `PHREN_BASE_SHA` it checks everything.
+
 ## Reading results
 
 - On GitHub, the commit (and any pull request at that head) shows `gitboy/rc` next to the Actions checks. Its link opens the gitboy pipeline.
@@ -68,4 +80,10 @@ A pipeline whose jobs wait for a runner that is offline (the Mac asleep, for ins
 
 - Windows. gitboy has no Windows runner; the GitHub RC remains the only Windows gate.
 - Publishing. npm publish with provenance needs GitHub's OIDC, and desktop installers ship as GitHub releases for the auto-updater, so both stay on GitHub.
-- Feature pull requests. Only the RC runs on gitboy; pushes and pull requests build on GitHub only.
+- Feature pull requests' tests. Only the RC runs tests on gitboy; other gitboy pipelines run `fast-check`, which runs none.
+
+## Reusing earlier runs
+
+`agent-test`, `browser-test` and `validate-docs` declare `inputs:`, the repository paths their result depends on. gitboy reuses an earlier green run of such a job when those paths, the job's definition, its variables and the repository's CI variables are all unchanged, so a release candidate that changes only, say, the VS Code extension doesn't run the browser suite again. `build-and-test`, its macOS leg and `lint` depend on most of the repository and always run. The status jobs set `checkout: none`: they only call GitHub's API, and a gitboy server with `GITBOY_API_ONLY_JOBS` on starts them without a checkout.
+
+When a job's result starts depending on a new path, add it to that job's `inputs:`; a path left out can let a stale green result stand. A manual retry always runs.

@@ -6,12 +6,20 @@
 // The API mirrors shell/tabs.js (open, activate, close, step, setTitle, has,
 // active, activeHandle, list), so a section can switch from tabs to tiles.
 import { createTabs } from "./tabs.js";
+import { closeTargets, keptNotice, planClose, tabMenuItems } from "./tab-close.js";
+import { openTabMenu } from "./tab-menu.js";
 
 const LAYOUT_KEY = "phren.desktop.layout";
 const MIN_RATIO = 0.12;
 let nextLeaf = 1;
 
-export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = {}) {
+/**
+ * Tab menu hooks (all optional): `requestClose(docId)` closes one tab the way its owner wants
+ * (a file with unsaved changes asks first), `isDirty(docId)` says which tabs would ask,
+ * `menuExtras(doc)` returns more `{ id, label, run, enabled? }` entries for the tab's menu,
+ * and `onNotice(text)` shows a short message.
+ */
+export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose, requestClose, isDirty, menuExtras, onNotice } = {}) {
   rootEl.classList.add("tiles");
   let root = null;     // node: { kind: "leaf", id, el, bar, body, tabs } | { kind: "split", dir: "row"|"col", ratio, a, b, el, gutter }
   let focused = null;  // the leaf keyboard and new documents go to
@@ -48,7 +56,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
     leaf.tabs = createTabs(leaf.bar, leaf.body, {
       storageKey: null,
       // Where the tab was, read before it leaves (closing the last tab of a tile collapses it).
-      onClosing(doc, { index }) { closing = { tile: leaf.id, index }; },
+      onClosing(doc, { index, after }) { closing = { tile: leaf.id, index, after }; },
       onClose(doc) { const where = closing; closing = null; onClose?.(doc, where); },
       onActivate(doc, handle) {
         empty.hidden = true;
@@ -57,6 +65,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
       },
       onEmpty() { empty.hidden = false; tileEmptied(leaf); },
       onChange: () => save(),
+      onMenu: (doc, at) => showTabMenu(leaf, doc, at),
     });
     leaf.el.addEventListener("pointerdown", () => focus(leaf), true);
     installDrop(leaf);
@@ -160,7 +169,7 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
   // ------------------------------------------------------------ documents
   function find(docId) { return leaves().find((l) => l.tabs.has(docId)) ?? null; }
 
-  function open(doc, { background = false, split: side, tile, at } = {}) {
+  function open(doc, { background = false, split: side, tile, at, after } = {}) {
     const home = find(doc.id);
     if (home) {
       if (!background) { focus(home); home.tabs.activate(doc.id); }
@@ -171,7 +180,8 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
     let target = saved || focused;
     if (side) target = split(focused, side);
     // The position only means something in the tile it was in; elsewhere the tab goes last.
-    const handle = target.tabs.open(doc, { background, at: saved && target === saved ? at : undefined });
+    const here = saved && target === saved;
+    const handle = target.tabs.open(doc, { background, at: here ? at : undefined, after: here ? after : undefined });
     if (!background) focus(target);
     return handle;
   }
@@ -192,6 +202,49 @@ export function createTiles(rootEl, { onActivate, onBlank, onEmpty, onClose } = 
     if (from.tabs.size() === 0 && from !== target) tileEmptied(from);
     render();
     save();
+  }
+
+  // ------------------------------------------------------------ tab menu
+  /** Close one tab the way its owner wants. A tab that will ask first is brought forward, since its prompt lives in its own (hidden) document. */
+  function closeOne(leaf, id, opts) {
+    if (!requestClose) { leaf.tabs.close(id); return; }
+    if (isDirty?.(id) === true) { focus(leaf); leaf.tabs.activate(id); }
+    requestClose(id, opts);
+  }
+
+  /**
+   * Close others / Close to the right: the same close path as a single close (so chats land on
+   * the reopen stack), tab by tab. A tab with unsaved changes is asked about like a single close,
+   * one at a time; the others of them stay open.
+   */
+  function closeMany(leaf, id, mode) {
+    const targets = closeTargets(leaf.tabs.list().map((d) => d.id), id, mode);
+    if (!targets.length) return;
+    focus(leaf);
+    leaf.tabs.activate(id);
+    const plan = planClose(targets, (t) => isDirty?.(t) === true);
+    for (const t of plan.clean) leaf.tabs.close(t);
+    // Cancelling the ask leaves the tab the menu was opened on in front.
+    if (plan.ask) closeOne(leaf, plan.ask, { onCancel: () => { if (find(id) === leaf) { focus(leaf); leaf.tabs.activate(id); } } });
+    const note = keptNotice(plan.kept);
+    if (note) onNotice?.(note);
+  }
+
+  function showTabMenu(leaf, doc, { x, y, tab }) {
+    if (!doc) return;
+    const id = doc.id;
+    const order = leaf.tabs.list().map((d) => d.id);
+    // The tab may have closed or moved while the menu was open: act only if it is still here.
+    const here = (fn) => () => { if (find(id) === leaf) fn(); };
+    const run = {
+      close: here(() => closeOne(leaf, id)),
+      others: here(() => closeMany(leaf, id, "others")),
+      right: here(() => closeMany(leaf, id, "right")),
+      split: here(() => moveDoc(id, leaf, "right")),
+    };
+    const items = tabMenuItems(order, id).map((item) => ({ ...item, run: run[item.id] }));
+    for (const extra of menuExtras?.(doc) ?? []) items.push(extra);
+    openTabMenu({ items, x, y, label: `${doc.title || "Tab"} menu`, returnTo: tab });
   }
 
   // ------------------------------------------------------------ directions
