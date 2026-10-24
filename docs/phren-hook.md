@@ -33,7 +33,9 @@ Choose **Enter code** and type the address and six-character code the terminal
 shows. The phone then shows a check code (the first eight characters of the
 computer's host key fingerprint); confirm it matches the `Check:` line the
 terminal prints. A typed code alone could be guessed by someone on your network
-during pairing, so the phone saves the computer only once you confirm.
+during pairing, so the phone saves the computer only once you confirm, and the
+terminal asks you to allow the phone (its key check is on the phone's screen)
+before adding its key.
 
 The QR code carries the computer's Tailscale and LAN addresses, the SSH user,
 the SSH host key fingerprint (pinned by the phone) and a one-time code. The code

@@ -52,3 +52,21 @@ it("the typed-code check is the host key fingerprint's first eight characters", 
   expect(pairingCheckCode("MD5:ab:cd")).toBeNull();
   expect(pairingCheckCode("SHA256:abc")).toBeNull();
 });
+
+it("a phone that typed the code is authorized only once the computer allows it", async () => {
+  const sshDirectory = path.join(root, ".ssh");
+  const asked: unknown[] = [];
+  const denied = await startPairing({ code: "ABC234", user: "me", sshPort: 22, name: "box", port: 0, sshDirectory,
+    approve: async phone => { asked.push(phone); return false; } });
+  const refused = await post(denied.port, { v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), name: "Sam's iPhone", typed: true });
+  expect(refused.status).toBe(403);
+  expect(asked).toEqual([{ device: "ios", name: "Sam's iPhone", check: pairingCheckCode(keyFingerprint(publicKey)) }]);
+  await expect(readFile(path.join(sshDirectory, "authorized_keys"), "utf8")).rejects.toThrow();
+  denied.close();
+  const noTerminal = await startPairing({ code: "ABC234", user: "me", sshPort: 22, name: "box", port: 0, sshDirectory });
+  expect((await post(noTerminal.port, { v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), typed: true })).status).toBe(403);
+  noTerminal.close();
+  const allowed = await startPairing({ code: "ABC234", user: "me", sshPort: 22, name: "box", port: 0, sshDirectory, approve: async () => true });
+  expect((await post(allowed.port, { v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), typed: true })).status).toBe(200);
+  await expect(allowed.done).resolves.toMatchObject({ device: "ios" });
+});

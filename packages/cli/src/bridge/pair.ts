@@ -112,16 +112,27 @@ export function pairingURL(offer: PairingOffer): string {
 const request = z.object({
   v: z.literal(1), publicKey: z.string().max(512), proof: z.string().max(128),
   device: z.enum(["ios", "android"]).default("ios"), name: z.string().max(80).optional(),
+  typed: z.boolean().optional(),
 });
 
 export interface Paired { device: "ios" | "android"; name?: string; publicKey: string }
 
 export interface PairingSession { port: number; done: Promise<Paired>; close(): void }
 
+/** A phone that typed the code, waiting for the person at the computer to allow it. */
+export interface PairingApproval { device: "ios" | "android"; name?: string; check: string | null }
+
 /** Listen for one phone. Resolves once its key is authorized; rejects on timeout or too many bad proofs. */
 export async function startPairing(options: {
   code: string; user: string; sshPort: number; fingerprint?: string; name: string;
   port?: number; timeoutMs?: number; sshDirectory?: string;
+  /**
+   * Asked before a phone that typed the code is authorized: a typed code can
+   * be cracked from a captured request, so the person at the computer allows
+   * the phone whose key check matches the one it shows. Without it, typed
+   * pairing is refused.
+   */
+  approve?: (phone: PairingApproval) => Promise<boolean>;
 }): Promise<PairingSession> {
   let failures = 0, finished = false, timer: NodeJS.Timeout | undefined;
   let resolve!: (paired: Paired) => void, reject!: (error: Error) => void;
@@ -148,6 +159,13 @@ export async function startPairing(options: {
         failures++;
         if (failures >= MAX_FAILURES) setImmediate(() => finish(new Error("Too many wrong pairing codes; pairing closed. Run phren pair again.")));
         throw new BridgeError(403, "That pairing code doesn't match this computer.");
+      }
+      if (input.typed) {
+        const allowed = options.approve
+          ? await options.approve({ device: input.device, name: input.name, check: pairingCheckCode(keyFingerprint(publicKey)) })
+          : false;
+        if (finished) throw new BridgeError(410, "Pairing is closed. Run phren pair again.");
+        if (!allowed) throw new BridgeError(403, "The computer didn't allow this phone. Run phren pair again and allow it there.");
       }
       const comment = input.device === "android" ? "phren-android" : "phren-iphone";
       const encoded = publicKey.split(" ")[1];
@@ -241,6 +259,22 @@ async function runScopedPair(args: string[], version: string): Promise<number> {
   return 0;
 }
 
+/** The terminal's say on a phone that typed the code; no terminal, no typed pairing. */
+async function askToAllow(phone: PairingApproval): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    console.log("\n  A phone typed the code, but there's no terminal here to allow it. Scan the QR code instead.");
+    return false;
+  }
+  const { createInterface } = await import("node:readline/promises");
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const who = phone.name ? `"${phone.name}"` : "A phone";
+    console.log(`\n  ${who} typed the code. Its screen shows a key check${phone.check ? `; it should be:  ${phone.check}` : "."}`);
+    const answer = await prompt.question("  Allow this phone? [y/N] ");
+    return /^y(es)?$/i.test(answer.trim());
+  } finally { prompt.close(); }
+}
+
 export async function runPair(args: string[], version: string): Promise<number> {
   if (args.includes("--scope")) return runScopedPair(args, version);
   let minutes = 5, port: number | undefined, installHook = true;
@@ -264,7 +298,7 @@ export async function runPair(args: string[], version: string): Promise<number> 
   const name = await computerDisplayName(), user = userInfo().username, fingerprint = await hostFingerprint();
   const hosts = await pairingHosts();
   if (!hosts.length) { console.error("No network address found. Connect to Wi-Fi or Tailscale and try again."); return 1; }
-  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000 });
+  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000, approve: askToAllow });
   const url = pairingURL({ hosts, port: session.port, user, sshPort, fingerprint, code, name });
   const { renderUnicodeCompact } = await import("uqr");
   console.log(`\nConnect your phone to ${name}`);
