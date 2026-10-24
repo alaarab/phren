@@ -84,6 +84,7 @@ async function forwardHook(source: Provider, target: Target, event: string, valu
     ...(source === "claude" && typeof value.transcript_path === "string" ? { transcript: value.transcript_path.slice(0, 4096) } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
+    ...(event === "SessionStart" && typeof value.source === "string" ? { startSource: value.source.slice(0, 32) } : {}),
     ...(event === "Stop" ? stopFacts(value) : {}) });
   await new Promise<void>(resolve => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? Math.max(1, left()) : 12_000,

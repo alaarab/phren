@@ -52,6 +52,8 @@ export interface TurnEvent {
   event: string; terminal: string; source: Provider; session: string;
   /** SessionStart / UserPromptSubmit: the dispatch id the worker's hook named. */
   dispatch?: string;
+  /** SessionStart only: how the session started, as the harness names it (Claude: startup, resume, clear, compact). */
+  start?: string;
   /** Stop only: the harness's count of in-flight background tasks, when it reports one. */
   background?: number;
   /** Stop only: the harness's last assistant message, when it reports one. */
@@ -82,7 +84,12 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
   const record: TurnRecord = same ? structuredClone(previous) : { terminal: event.terminal, source: event.source, session: event.session, seq: 0, at };
   record.seq++; record.at = at;
   if (event.dispatch && briefId.safeParse(event.dispatch).success) record.dispatch ??= event.dispatch;
-  if (event.event === "SessionStart") record.startedAt ??= at;
+  if (event.event === "SessionStart") {
+    record.startedAt ??= at;
+    // A resumed or cleared conversation in the same terminal no longer runs the background agents its
+    // last Stop counted; a compaction keeps them.
+    if ((event.start === "resume" || event.start === "clear") && record.stop?.background !== undefined) delete record.stop.background;
+  }
   else if (event.event === "UserPromptSubmit") record.prompt = { seq: record.seq, at };
   else {
     const reply = event.reply?.trim() ? truncateUtf8(event.reply.trim()) : undefined;
