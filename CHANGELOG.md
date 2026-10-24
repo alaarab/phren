@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Phone messages sent while Claude Code is busy are each confirmed when Claude takes them together. Claude submits the messages it held as one turn, joined by newlines, and the Hook matched only the whole prompt, so every one of them stayed "Queued in the agent" and could later be reported as not taken. Each held message whose words are whole lines of the submitted prompt now settles delivered; a short reply never settles inside a longer line ("yes" inside "yes, but later").
+- A message from the phone's Agent Chat to a dispatched worker no longer fails with "is not an active named agent (HTTP 409)". Herdr's `agent.prompt` takes only agents it holds as named and ready, and a worker that went straight to work on its brief, or an agent restarted in its pane, can stay outside that list. When Herdr refuses such a pane and the harness it detects there is the pane's foreground program, idle or working, the Hook now types the message into the pane and submits it, as the terminal view does, and tracks it by its delivery id like any other message.
 
 ## [0.3.56] - 2026-10-17
 
