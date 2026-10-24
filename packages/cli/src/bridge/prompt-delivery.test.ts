@@ -207,6 +207,14 @@ describe("a hand-off that repeats a Claude pane's own prompt suggestion", () => 
     expect(expectDelivery).not.toHaveBeenCalled();
   });
 
+  it("is refused for a narrow pane's cut suggestion, as a screen read shows it", async () => {
+    readScreen.mockResolvedValue(readFileSync(new URL("./fixtures/claude/2.1.284/narrow-truncated-tmux.ansi", import.meta.url), "utf8"));
+    await expect(send("no, skip …")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    await expect(send("no, skip")).rejects.toMatchObject({ details: { code: "prompt-suggestion" } });
+    // Longer words that only start the same way are the sender's own.
+    expect(await send("no, skip the release")).toMatchObject({ delivered: true });
+  });
+
   it("does not stop other words, a phone message, or a pane whose screen cannot be read", async () => {
     expect(await send("check the release notes")).toMatchObject({ delivered: true });
     // Case can tell file and branch names apart, so other casing is other words.

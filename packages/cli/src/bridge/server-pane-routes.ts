@@ -33,7 +33,7 @@ import { fileSearchSchema, listRepositoryFiles, searchRepository } from "./file-
 import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
 import { promptWithStartupRetry } from "./prompt-startup.js";
 import { sendServedPrompt, servedPane } from "./opencode-panes.js";
-import { claudeSuggestion } from "./claude-suggestion.js";
+import { claudeSuggestionShown } from "./claude-suggestion.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
  * secrets, uploads, diffs, git, approvals and questions. A starting pane (no
@@ -156,10 +156,13 @@ export function promptGuards(agentHooks: Pick<AgentHooks, "approval" | "terminal
 async function relaysSuggestion(target: Target, text: string): Promise<boolean> {
   let screen = "";
   try { screen = await terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }); } catch { return false; }
-  const suggestion = claudeSuggestion(screen);
+  const shown = claudeSuggestionShown(screen);
   // Case is kept (file and branch names differ by it); a leading voice marker says nothing about who wrote the words.
   const plain = (value: string) => value.replace(/\s+/g, " ").trim().replace(/^\[voice\]\s*/i, "");
-  return suggestion !== undefined && plain(suggestion) === plain(text);
+  if (shown === undefined) return false;
+  // A narrow pane cuts a long suggestion with "…": its visible part, with or without the mark, is all a screen read shows.
+  const words = plain(text), cut = shown.endsWith("…") ? plain(shown.slice(0, -1)) : undefined;
+  return words === plain(shown) || (cut !== undefined && (words === cut || words === `${cut}…` || words === `${cut} …`));
 }
 
 /** Herdr answered the request with a refusal (a 409 carrying its own error code): it performed nothing. */
