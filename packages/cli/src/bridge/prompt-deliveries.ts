@@ -62,6 +62,8 @@ const recordSchema = z.object({
   entry: z.number().optional(),
   /** Whether that entry is a user row (one its agent's UserPromptSubmit fired for), not a mid-turn queue removal. */
   entryHook: z.boolean().optional(),
+  /** Settled as part of a joined prompt (`settleJoined`): its turn's row carries other words, so it claims no row of its own. */
+  joined: z.literal(true).optional(),
 }).strict();
 /** In memory only: `hookClaim`, a UserPromptSubmit came for these words before any row was readable, so the
  * row (in the callback's conversation, now the record's) may settle it when it appears, even once failed; `seenRow`, a user row a working check saw in a pane that has sent no
@@ -254,7 +256,11 @@ export class PromptDeliveries {
       return open.find(entry => entry.session === target.session) ?? open[0];
     };
     let record = pick();
-    if (!record) { if (this.settleJoined(target, prompt, stop)) this.save(); return; }
+    if (!record) {
+      // A prompt that is one known message's own words (a late hook for a message already settled) is not a join.
+      if (!this.records.some(other => other.hash === hash && this.samePane(other, target)) && this.settleJoined(target, prompt)) this.save();
+      return;
+    }
     let entry: number | undefined;
     if (target.source === "claude") {
       // A hook settles a message only by claiming a row for it: rows all claimed by earlier messages is a
@@ -284,10 +290,12 @@ export class PromptDeliveries {
   /** Claude submits the messages it held while busy as one turn, joined by newlines, so no single message's
    * hash matches the prompt. Each open message in the pane whose words are a run of whole lines of it settles,
    * the longest run first at each line and the oldest of identical messages first, so "yes" never settles
-   * inside "yes, but later". Only hashes of the line runs are compared, never stored. */
-  private settleJoined(target: Target, prompt: string, stop: number): boolean {
-    const candidates = this.records.filter(record => this.samePane(record, target) && record.state !== "delivered"
-      && (record.state !== "failed" || (record.settledAt ?? record.at) >= stop)).sort((a, b) => a.at - b.at).slice(0, JOINED_MAX_OPEN);
+   * inside "yes, but later". Only hashes of the line runs are compared, never stored. Only messages still held
+   * (typed or queued) are matched: a failed one could take the lines of messages that are held, and a late
+   * take of a failed message stays its own hook's to report. */
+  private settleJoined(target: Target, prompt: string): boolean {
+    const candidates = this.records.filter(record => this.samePane(record, target) && PromptDeliveries.open(record))
+      .sort((a, b) => a.at - b.at).slice(0, JOINED_MAX_OPEN);
     if (!candidates.length) return false;
     const lines = unwrapPastedContent(prompt).split("\n").filter(line => !PICTURE_PATH_LINE.test(line));
     if (lines.length < 2 || lines.length > JOINED_MAX_LINES) return false;
@@ -305,7 +313,7 @@ export class PromptDeliveries {
       }
       start = next;
     }
-    for (const record of matched) this.settle(record, undefined, target.session);
+    for (const record of matched) { record.joined = true; this.settle(record, undefined, target.session); }
     return matched.length > 0;
   }
   /** Marks `record` delivered, with the transcript entry that settled it when known. */
@@ -335,7 +343,8 @@ export class PromptDeliveries {
       // A message the agent's hook settled before its row was written took that row without recording it: the
       // scan reaches back to it, and it claims (and keeps) the earliest unclaimed user row stamped after it was
       // typed and soon after its hook, oldest first, before any open message is offered a row.
-      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined)
+      // One settled inside a joined prompt took that prompt's row, which carries other words: it has none to claim.
+      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && !other.joined)
         .sort((a, b) => (a.settledAt ?? a.at) - (b.settledAt ?? b.at));
       const from = Math.min(record.at, ...hooked.map(other => other.at));
       const found = (await this.landed({ ...record, at: from }).catch(() => [] as TranscriptEntry[])).sort((a, b) => a.offset - b.offset);

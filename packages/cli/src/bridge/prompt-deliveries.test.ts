@@ -116,6 +116,42 @@ describe("held messages Claude submits as one turn", () => {
     await store.submitted({ ...claudeTarget, pane: "w6:p2" }, "Run the suite\nThen open the PR");
     expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["queued", "queued"]);
   });
+
+  it("do not let a joined message claim a later message's row", async () => {
+    const store = deliveries();
+    await send(store, "rowj-0001", "A", claudeTarget);
+    await send(store, "rowj-0002", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    clock += 1_000; await send(store, "rowj-0003", "A", claudeTarget);
+    // The new message's row is in the transcript, and its hook never came.
+    clock += 1; store.stopped(claudeTarget);
+    landed = true; matches = 1; hookRows = true;
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("rowj-0003", claudeTarget).state).toBe("delivered");
+  });
+
+  it("match only held messages, never a failed one", async () => {
+    const store = deliveries();
+    await send(store, "fail-0001", "A\nB", claudeTarget);
+    store.fail("fail-0001", claudeTarget, "gone");
+    await send(store, "fail-0002", "A", claudeTarget);
+    await send(store, "fail-0003", "B", claudeTarget);
+    await send(store, "fail-0004", "C", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB\nC");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["failed", "delivered", "delivered", "delivered"]);
+  });
+
+  it("do not split a late hook for a message already delivered whole", async () => {
+    const store = deliveries();
+    store.delivered("whole-0001", claudeTarget, "A\nB");
+    await send(store, "whole-0002", "A", claudeTarget);
+    await send(store, "whole-0003", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    expect(store.status("whole-0002", claudeTarget).state).toBe("queued");
+    expect(store.status("whole-0003", claudeTarget).state).toBe("queued");
+  });
 });
 
 describe("a message the agent never takes fails loudly", () => {
