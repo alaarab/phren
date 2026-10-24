@@ -73,15 +73,28 @@ export function failRelay(client: RelaySocket): void {
 
 export function relayTranscription(client: RelaySocket, query: URLSearchParams, options: TranscribeOptions = {}): Promise<void> {
   const connect = options.connect ?? ((url, key) => new WebSocket(url, { headers: { "xi-api-key": key } }) as unknown as RelaySocket);
+  // The phone sends the audio it held while connecting as soon as the
+  // socket opens, before the key and region below are read: listen now and
+  // replay those frames once the relay is set up, so no opening word is lost.
+  let receive: ((data: Buffer, isBinary: boolean) => void) | undefined;
+  let early: Array<[Buffer, boolean]> | undefined = [], earlyBytes = 0, hungUp = false;
+  client.on("message", (data, isBinary) => {
+    if (receive) { receive(data, isBinary); return; }
+    // Past the relay's own limit the replay ends the session anyway.
+    if (early && (earlyBytes += data.length) <= MAX_PENDING_BYTES) early.push([data, isBinary]);
+  });
+  client.on("close", () => { hungUp = true; });
   return (async () => {
     const key = await (options.key ?? readSpeechKey)();
     const tell = (frame: Record<string, unknown>) => { if (client.readyState === OPEN) client.send(JSON.stringify(frame)); };
+    if (hungUp) return;
     if (!key) {
       tell({ type: "error", code: "transcribe-unconfigured", error: "This computer has no ElevenLabs key." });
       client.close(1008, "No ElevenLabs key");
       return;
     }
     const origin = options.origin ?? (await resolveSpeechRegion()).origin;
+    if (hungUp) return;
     const upstream = connect(transcribeURL(query, origin), key);
     let pending: Buffer[] = [], pendingBytes = 0, closed = false;
     const finish = (code = 1000, reason = "") => {
@@ -97,7 +110,7 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
     const chunk = (audio: Buffer, commit = false) => JSON.stringify({
       message_type: "input_audio_chunk", audio_base_64: audio.toString("base64"), commit, sample_rate: TRANSCRIBE_RATE });
 
-    client.on("message", (data, isBinary) => {
+    receive = (data, isBinary) => {
       if (closed) return;
       if (!isBinary) {
         // The phone's only text frame: the person stopped, commit what's left.
@@ -108,7 +121,9 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
       pendingBytes += data.length;
       if (pendingBytes > MAX_PENDING_BYTES) { tell({ type: "error", code: "transcribe-failed", error: "ElevenLabs didn't answer." }); finish(1011); return; }
       pending.push(data);
-    });
+    };
+    for (const [data, isBinary] of early ?? []) receive(data, isBinary);
+    early = undefined;
     client.on("close", () => finish());
     client.on("error", () => finish());
 
