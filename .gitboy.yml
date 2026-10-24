@@ -9,8 +9,17 @@
 # It is started only through the API (or the Console's Run pipeline), never by
 # a push: .github/workflows/gitboy-rc.yml, started alongside GitHub's RC, posts
 #   POST /api/v1/repos/:owner/:repo/pipelines
-#   {"ref": "<sha>", "variables": {"PHREN_RC": "true", "PHREN_RC_SHA": "<sha>", ...}}
-# so the pipeline runs at exactly the commit GitHub's RC runs.
+#   {"ref": "<sha>", "variables": {"PHREN_RC": "true", "GITHUB_REPOSITORY": "alaarab/phren"}}
+# so the pipeline runs at exactly the commit GitHub's RC runs (the trigger checks
+# the SHA gitboy answers with). Nothing per-run goes into `variables`: gitboy's
+# reuse key includes pipeline variables, and a per-run value would make every
+# job run again even when its inputs are unchanged.
+#
+# Jobs that declare `inputs:` reuse an earlier green run when those paths, the
+# job itself and its variables are unchanged (gitboy content-hash reuse), so a
+# candidate that only touches, say, the VS Code extension skips the browser
+# suite. Jobs whose result depends on most of the repository declare none and
+# always run.
 #
 # Everything else (a push or PR made on gitboy itself, or a pipeline started
 # without PHREN_RC) runs `fast-check` instead: the development build's checks
@@ -30,7 +39,6 @@ stages: [report-start, test, report]
 
 variables:
   # Overridden by the trigger; the defaults keep a Console-started run useful.
-  PHREN_RC_SHA: ""
   GITHUB_REPOSITORY: alaarab/phren
   GITHUB_STATUS_CONTEXT: gitboy/rc
   CI: "true"
@@ -118,6 +126,28 @@ agent-test:
   stage: test
   needs: []
   timeout: 15 minutes
+  # The agent, the CLI it builds on (and the CLI's own workspace dependency),
+  # and everything the workspace build reads.
+  inputs:
+    - packages/agent
+    - packages/cli
+    - packages/code
+    - global
+    - hooks
+    - scripts
+    - package.json
+    - pnpm-lock.yaml
+    - pnpm-workspace.yaml
+    - turbo.json
+    - vitest.config.ts
+    - docs/agent-stream-json.schema.json
+    # Every workspace manifest: the job's install reads them all.
+    - packages/desktop/package.json
+    - packages/desktop-editor/package.json
+    - packages/desktop-kit/package.json
+    - packages/push-relay/package.json
+    - packages/vscode/package.json
+    - .gitboy.yml
   script:
     - pnpm exec turbo run build --filter=@phren/agent
     - pnpm --filter @phren/agent test
@@ -127,6 +157,28 @@ validate-docs:
   stage: test
   needs: []
   timeout: 10 minutes
+  # scripts/validate-docs.sh checks the docs against the CLI's tools, the
+  # plugin manifests, the hook and the release workflow.
+  inputs:
+    - docs
+    - README.md
+    - scripts
+    - hooks
+    - .claude-plugin
+    - .github/workflows
+    - packages/cli
+    - packages/agent/package.json
+    - package.json
+    - pnpm-lock.yaml
+    - pnpm-workspace.yaml
+    # Every workspace manifest: the job's install reads them all.
+    - packages/code/package.json
+    - packages/desktop/package.json
+    - packages/desktop-editor/package.json
+    - packages/desktop-kit/package.json
+    - packages/push-relay/package.json
+    - packages/vscode/package.json
+    - .gitboy.yml
   script:
     - pnpm run validate-docs
 
@@ -137,6 +189,27 @@ browser-test:
   stage: test
   needs: []
   timeout: 45 minutes
+  # The CLI's web UI e2e and the desktop app: the agent, VS Code extension,
+  # push relay and docs can change without running these again.
+  inputs:
+    - packages/cli
+    - packages/code
+    - packages/desktop
+    - packages/desktop-kit
+    - packages/desktop-editor
+    - global
+    - hooks
+    - scripts
+    - playwright.config.ts
+    - package.json
+    - pnpm-lock.yaml
+    - pnpm-workspace.yaml
+    - turbo.json
+    # Every workspace manifest: the job's install reads them all.
+    - packages/agent/package.json
+    - packages/push-relay/package.json
+    - packages/vscode/package.json
+    - .gitboy.yml
   script:
     - pnpm exec playwright install --with-deps chromium
     - pnpm test:e2e
@@ -240,6 +313,10 @@ fast-check:
   image: node:26
   tags: [docker, linux]
   timeout: 5 minutes
+  # It only calls GitHub's API: no repository needed. A gitboy server with
+  # GITBOY_API_ONLY_JOBS on starts it in an empty workspace; elsewhere it gets
+  # the usual checkout, so this is safe on any gitboy.
+  checkout: none
   variables:
     STATE: pending
     DESCRIPTION: ""
@@ -267,17 +344,11 @@ github-status-pending:
   extends: .github-status
   stage: report-start
   needs: []
-  # Fails the pipeline when the trigger asked for one commit and gitboy
-  # resolved another.
+  # The trigger checks that gitboy started the commit it asked for (it no
+  # longer passes the SHA as a variable, which would defeat reuse).
   variables:
     STATE: pending
     DESCRIPTION: Release candidate running on gitboy
-  before_script:
-    - |
-      if [ -n "$PHREN_RC_SHA" ] && [ "$PHREN_RC_SHA" != "$GITBOY_SHA" ]; then
-        echo "Asked for $PHREN_RC_SHA but the pipeline runs $GITBOY_SHA."
-        exit 1
-      fi
 
 github-status-success:
   extends: .github-status

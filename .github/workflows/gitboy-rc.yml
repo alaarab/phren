@@ -42,7 +42,6 @@ jobs:
       GITBOY_TRIGGER_TOKEN: ${{ secrets.GITBOY_TRIGGER_TOKEN }}
       GITBOY_REPO: ${{ vars.GITBOY_REPO || github.repository }}
       RC_SHA: ${{ github.event.workflow_run.head_sha || inputs.sha || github.sha }}
-      RC_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
     steps:
       - name: Start the gitboy release candidate
         run: |
@@ -61,9 +60,10 @@ jobs:
           # Ask the pull mirror to fetch this commit now. Best effort: it needs
           # an account admin token, and instant sync usually got there first.
           printf '%s\n' "$auth" | curl -s -o /dev/null -m 15 -X POST -H @- "$api/mirror/sync" >/dev/null 2>&1 || true
+          # No per-run variables: gitboy's reuse key includes them, so a SHA or
+          # run URL here would make every job run again (see .gitboy.yml).
           body="$(jq -nc --arg sha "$RC_SHA" --arg repo "$GITHUB_REPOSITORY" \
-            --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RC_RUN_ID" \
-            '{ref: $sha, variables: {PHREN_RC: "true", PHREN_RC_SHA: $sha, GITHUB_REPOSITORY: $repo, GITHUB_RUN_URL: $run}}')"
+            '{ref: $sha, variables: {PHREN_RC: "true", GITHUB_REPOSITORY: $repo}}')"
           # Until the mirror has the commit gitboy answers 400 "Ref does not
           # resolve to a commit"; keep asking for about four minutes.
           for attempt in $(seq 1 16); do
@@ -72,6 +72,11 @@ jobs:
             code="${code:-000}"
             if [ "$code" = 201 ]; then
               iid="$(jq -r '.iid // empty | tostring | select(test("^[0-9]+$"))' response.json 2>/dev/null || true)"
+              started="$(jq -r '.sha // empty' response.json 2>/dev/null || true)"
+              if [ "$started" != "$RC_SHA" ]; then
+                echo "::warning::gitboy started pipeline #${iid:-?} at ${started:-an unknown commit}, not $RC_SHA"
+                exit 0
+              fi
               echo "Started gitboy pipeline #${iid:-?} at $RC_SHA."
               echo "Started gitboy release candidate pipeline #${iid:-?} at \`$RC_SHA\`; it reports as the \`gitboy/rc\` commit status." >> "$GITHUB_STEP_SUMMARY"
               exit 0
