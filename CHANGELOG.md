@@ -5,15 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.57] - 2026-10-24
+
 ### Added
 
 - Switch a Claude chat to another Claude account on the same computer without a hand-off (`phren move <pane> --to claude --account <id> --resume`, `move_session` `resume: true`, `continuation: "resume"` on the Hook's move route): the old agent exits, its transcript is copied into the other account's home and the same conversation resumes there, so an account that is out of usage can still switch. Not for the conductor yet.
+- `phren pair` asks before allowing a typed pairing. A phone that pairs by typing the code has no QR code to prove which computer it reached, so the terminal now prints a check code under the pairing code. The phone shows the same code and asks the person to compare them, and the terminal asks once more before allowing the phone's key. Without a terminal to ask, a typed pairing is refused. A phone's name is shown without control characters.
 
 ### Fixed
 
 - Phone messages sent while Claude Code is busy are each confirmed when Claude takes them together. Claude submits the messages it held as one turn, joined by newlines, and the Hook matched only the whole prompt, so every one of them stayed "Queued in the agent" and could later be reported as not taken. Each held message whose words are whole lines of the submitted prompt now settles delivered; a short reply never settles inside a longer line ("yes" inside "yes, but later").
 - A `hand_off` can no longer pass Claude Code's own prompt suggestion off as the owner's message. After a turn Claude draws a dim guess at the owner's next message in its empty input box. A plain screen read shows it like typed text, and Enter doesn't send it. A conductor took three of these for unsent phone messages and handed them to their panes, one of them a merge instruction the owner never gave. The receiving Hook now refuses a hand-off that repeats the pane's current suggestion (`409 prompt-suggestion`) before typing anything, and the conductor skill says not to relay input-box text. A message sent from the phone is never refused this way.
 - A message from the phone's Agent Chat to a dispatched worker no longer fails with "is not an active named agent (HTTP 409)". Herdr's `agent.prompt` takes only agents it holds as named and ready, and a worker that went straight to work on its brief, or an agent restarted in its pane, can stay outside that list. When Herdr refuses such a pane and the harness it detects there is the pane's foreground program, idle or working, the Hook now types the message into the pane and submits it, as the terminal view does, and tracks it by its delivery id like any other message.
+- A phone message reaches Claude's conversation when the pane shows a subagent's view. Text typed there went to the subagent, and the phone reported "The agent finished its turn without taking the message." The Hook now presses Escape to leave that view (only there, at most twice) before typing, and retypes once if the view opened after the message was sent.
+- Dictation keeps its opening words. The phone sends the audio it held while connecting the moment the socket opens, and the Hook dropped it while reading the ElevenLabs key. It now holds those frames and sends them in order. A phone that hangs up during that wait no longer opens an ElevenLabs session.
+- A short spoken reply that ends before ElevenLabs answers is still transcribed: the phone's stop is held in its place behind the waiting audio instead of being dropped.
 
 ## [0.3.56] - 2026-10-17
 
