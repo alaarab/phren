@@ -44,6 +44,18 @@ function sameProof(expected: string, received: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * The short check a phone that typed the code shows to confirm: the first
+ * eight characters of the host key fingerprint, as "abcd efgh". A typed code
+ * alone could be guessed by someone on the network during pairing; matching
+ * this shows the phone reached this computer. Same as the app's `checkCode`.
+ */
+export function pairingCheckCode(fingerprint: string | undefined | null): string | null {
+  if (!fingerprint?.startsWith("SHA256:")) return null;
+  const body = fingerprint.slice("SHA256:".length);
+  return body.length >= 8 ? `${body.slice(0, 4)} ${body.slice(4, 8)}` : null;
+}
+
 /** OpenSSH's SHA256 fingerprint of a public key line, as the phone computes it. */
 export function keyFingerprint(publicKeyLine: string): string | undefined {
   const blob = publicKeyLine.trim().split(/\s+/)[1];
@@ -260,6 +272,8 @@ export async function runPair(args: string[], version: string): Promise<number> 
   console.log(renderUnicodeCompact(url, { border: 2 }));
   const typed = `${code.slice(0, 3)}-${code.slice(3)}`;
   console.log(`\n  Can't scan? Choose "Enter code" and type:  ${hosts[0]}${session.port === PAIR_PORT ? "" : `:${session.port}`}   ${typed}`);
+  const check = pairingCheckCode(fingerprint);
+  if (check) console.log(`  The phone then asks you to match:  Check: ${check}`);
   if (process.env.WSL_DISTRO_NAME) {
     console.log(`\n  This is WSL: Windows may block inbound port ${session.port} (and SSH) from the phone. If it cannot connect, run once in an admin PowerShell:`);
     console.log(`    New-NetFirewallHyperVRule -Name phren-pair -DisplayName "Phren pairing" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts ${session.port},22`);

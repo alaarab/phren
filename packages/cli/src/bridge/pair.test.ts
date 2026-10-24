@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { keyFingerprint, newPairingCode, normalizeCode, pairingProof, pairingURL, startPairing } from "./pair.js";
+import { keyFingerprint, newPairingCode, normalizeCode, pairingCheckCode, pairingProof, pairingURL, startPairing } from "./pair.js";
 
 let root: string, publicKey: string;
 beforeEach(async () => {
@@ -44,4 +44,11 @@ it("makes unambiguous codes and a phren:// link with everything the phone needs"
   const url = new URL(pairingURL({ hosts: ["box.tail.ts.net", "100.64.0.1"], port: 47291, user: "me", sshPort: 22, fingerprint: "SHA256:x", code: "ABC234", name: "box" }));
   expect(url.protocol).toBe("phren:");
   expect(Object.fromEntries(url.searchParams)).toEqual({ v: "1", h: "box.tail.ts.net,100.64.0.1", p: "47291", u: "me", s: "22", c: "ABC234", n: "box", fp: "SHA256:x" });
+});
+
+it("the typed-code check is the host key fingerprint's first eight characters", () => {
+  expect(pairingCheckCode("SHA256:AbCdEfGh1234567890abcdefghijklmnopqrstuvw")).toBe("AbCd EfGh");
+  expect(pairingCheckCode(undefined)).toBeNull();
+  expect(pairingCheckCode("MD5:ab:cd")).toBeNull();
+  expect(pairingCheckCode("SHA256:abc")).toBeNull();
 });
