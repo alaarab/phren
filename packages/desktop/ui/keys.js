@@ -10,7 +10,7 @@ import { closePalette, isPaletteOpen, openPalette, registerCommand } from "./she
 
 import { openUsage } from "./shell/usage-rings.js";
 import { ownsCtrlTab } from "./shell/recent-mru.js";
-import { widgetKeepsTabKey } from "./shell/tab-step.js";
+import { recentOwnsKey, typedKeyStaysText, widgetKeepsTabKey } from "./shell/tab-step.js";
 
 let config = null; // { bindings, sources, files, errors, actions }
 let app = null; // actions supplied by app.js
@@ -121,6 +121,12 @@ function keycaps(binding) {
 function inTerminal(target) {
   return target instanceof Element && !!target.closest(".xterm, .bench-terminal");
 }
+// Settings › Keys' "Ctrl+Tab switches recent chats" (prefs.js RECENT_KEY, default on). Read here,
+// not imported: prefs.js styles the document when it loads.
+function recentSwitchEnabled() {
+  try { return localStorage.getItem("phren.desktop.recent-switch") !== "0"; } catch { return true; }
+}
+
 function typing(target) {
   return target instanceof Element && !!target.closest("input, textarea, [contenteditable='true'], .monaco-editor");
 }
@@ -198,12 +204,15 @@ function onKeyDown(ev) {
     return;
   }
   // Direct Cmd/Ctrl shortcuts come next, so they work even inside a terminal.
-  const appHit = findAppAction(ev);
+  // A direct binding without Ctrl, Alt or Cmd never fires while the user is typing.
+  const appHit = typedKeyStaysText(ev, typing(ev.target)) ? null : findAppAction(ev);
   // Terminals, editors and iframes keep their own keys, as they keep Ctrl+Tab.
   if (appHit?.action === "reopen_chat" && ownsCtrlTab(ev.target)) return;
   if (appHit?.action === "tab_next" || appHit?.action === "tab_previous") {
     // A terminal, editor or iframe keeps the key; so does anything else when no tab stepped.
     if (widgetKeepsTabKey(ownsCtrlTab(ev.target) || inTerminal(ev.target))) return;
+    // Ctrl+Tab rebound here belongs to the recent-chat switcher while it is on.
+    if (recentOwnsKey(ev, recentSwitchEnabled())) return;
     if (run(appHit.action) === true) { ev.preventDefault(); ev.stopPropagation(); }
     return;
   }

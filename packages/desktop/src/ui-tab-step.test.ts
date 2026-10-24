@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULTS_APP } from "./keys-config.js";
 // @ts-expect-error plain browser module without types
 import { matches, parseBinding } from "../ui/keys.js";
-import { stepTarget, widgetKeepsTabKey } from "../ui/shell/tab-step.js";
+import { recentOwnsKey, stepTarget, typedKeyStaysText, widgetKeepsTabKey } from "../ui/shell/tab-step.js";
 
 const order = ["a", "b", "c"];
 
@@ -33,6 +33,32 @@ describe("widgetKeepsTabKey", () => {
   it("nothing else does", () => {
     expect(widgetKeepsTabKey(false)).toBe(false);
     expect(widgetKeepsTabKey(null)).toBe(false);
+  });
+});
+
+describe("recentOwnsKey", () => {
+  const press = (fields: object) => ({ key: "Tab", ctrlKey: true, altKey: false, metaKey: false, ...fields });
+  it("Ctrl+Tab and Ctrl+Shift+Tab stay the recent-chat switcher's while it is on", () => {
+    expect(recentOwnsKey(press({}), true)).toBe(true);
+    expect(recentOwnsKey(press({ shiftKey: true }), true)).toBe(true);
+  });
+  it("tab stepping may take Ctrl+Tab when the switcher is off, and other keys always", () => {
+    expect(recentOwnsKey(press({}), false)).toBe(false);
+    expect(recentOwnsKey(press({ key: "PageDown" }), true)).toBe(false);
+    expect(recentOwnsKey(press({ metaKey: true }), true)).toBe(false);
+  });
+});
+
+describe("typedKeyStaysText", () => {
+  const press = (fields: object) => ({ key: "n", ctrlKey: false, altKey: false, metaKey: false, ...fields });
+  it("a bare key typed into a field stays text", () => {
+    expect(typedKeyStaysText(press({}), true)).toBe(true);
+    expect(typedKeyStaysText(press({ key: "PageDown" }), true)).toBe(true);
+  });
+  it("a modified key, or any key outside a field, is a shortcut", () => {
+    expect(typedKeyStaysText(press({ ctrlKey: true }), true)).toBe(false);
+    expect(typedKeyStaysText(press({ metaKey: true }), true)).toBe(false);
+    expect(typedKeyStaysText(press({}), false)).toBe(false);
   });
 });
 

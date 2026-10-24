@@ -15,3 +15,13 @@ export function stepTarget(order, activeId, delta) {
 export function widgetKeepsTabKey(owned) {
   return !!owned;
 }
+
+/** Whether tab stepping leaves a Ctrl+Tab press (a rebinding) to the recent-chat switcher, which owns it while on. */
+export function recentOwnsKey(ev, recentOn) {
+  return !!recentOn && ev.key === "Tab" && !!ev.ctrlKey && !ev.altKey && !ev.metaKey;
+}
+
+/** Whether a direct binding without Ctrl, Alt or Cmd stays text: it never fires while the user is typing. */
+export function typedKeyStaysText(ev, typingNow) {
+  return !!typingNow && !(ev.ctrlKey || ev.altKey || ev.metaKey);
+}
