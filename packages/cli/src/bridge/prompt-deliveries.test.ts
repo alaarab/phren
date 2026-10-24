@@ -147,6 +147,27 @@ describe("held messages Claude submits as one turn", () => {
     expect(store.status("rowc-0003", claudeTarget).state).toBe("failed");
   });
 
+  it("settle a later identical batch, and keep the joined turn's row across a restart", async () => {
+    const store = deliveries();
+    await send(store, "again-j001", "A", claudeTarget);
+    await send(store, "again-j002", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    await send(store, "again-j003", "A", claudeTarget);
+    await send(store, "again-j004", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "delivered", "delivered", "delivered"]);
+    await store.flush();
+    const restarted = deliveries();
+    clock += 1_000; await send(restarted, "again-j005", "A\nB", claudeTarget);
+    clock += 1; restarted.stopped(claudeTarget);
+    landed = true; matches = 2; hookRows = true;
+    await restarted.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await restarted.observe("default", [claudePane("idle")]);
+    // Two joined turns, two rows: neither is the new message's.
+    expect(restarted.status("again-j005", claudeTarget).state).toBe("failed");
+  });
+
   it("match only held messages, never a failed one", async () => {
     const store = deliveries();
     await send(store, "fail-0001", "A\nB", claudeTarget);

@@ -62,8 +62,9 @@ const recordSchema = z.object({
   entry: z.number().optional(),
   /** Whether that entry is a user row (one its agent's UserPromptSubmit fired for), not a mid-turn queue removal. */
   entryHook: z.boolean().optional(),
-  /** Settled as part of a joined prompt (`settleJoined`): its turn's row carries other words, so it claims no row of its own. */
-  joined: z.literal(true).optional(),
+  /** From a joined prompt (`settleJoined`): "part", a message settled inside it, claims no row of its own (the turn's
+   * row carries other words); "turn", the joined words themselves, no message of anyone's, claims that row. */
+  joined: z.enum(["part", "turn"]).optional(),
 }).strict();
 /** In memory only: `hookClaim`, a UserPromptSubmit came for these words before any row was readable, so the
  * row (in the callback's conversation, now the record's) may settle it when it appears, even once failed; `seenRow`, a user row a working check saw in a pane that has sent no
@@ -116,7 +117,7 @@ export class PromptDeliveries {
   private save() {
     if (!this.file) return;
     // A record without a phone id is kept once it claimed a transcript row, so after a restart that row is not offered to another message.
-    const rows = this.records.filter(record => record.id || record.entry !== undefined).map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, ...row }) => row);
+    const rows = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn").map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, ...row }) => row);
     const file = this.file;
     this.writing = this.writing.then(() => atomicInPrivateDir(file, { records: rows })).catch(() => undefined);
   }
@@ -258,7 +259,7 @@ export class PromptDeliveries {
     let record = pick();
     if (!record) {
       // A prompt that is one known message's own words (a late hook for a message already settled) is not a join.
-      if (!this.records.some(other => other.hash === hash && this.samePane(other, target)) && this.settleJoined(target, prompt)) this.save();
+      if (!this.records.some(other => other.hash === hash && this.samePane(other, target) && other.joined !== "turn") && this.settleJoined(target, prompt)) this.save();
       return;
     }
     let entry: number | undefined;
@@ -314,11 +315,11 @@ export class PromptDeliveries {
       start = next;
     }
     if (!matched.length) return false;
-    for (const record of matched) { record.joined = true; this.settle(record, undefined, target.session); }
+    for (const record of matched) { record.joined = "part"; this.settle(record, undefined, target.session); }
     // The turn's row carries the joined words: a hook-settled record of them (no phone id) claims it as
     // `taken` lets any hook-settled message, so a later message with the same words cannot take it.
     this.records.push({ hash: promptHash(prompt), server: target.server, pane: target.pane, source: target.source, session: target.session,
-      state: "delivered", at: this.now(), settledAt: this.now() });
+      state: "delivered", at: this.now(), settledAt: this.now(), joined: "turn" });
     return true;
   }
   /** Marks `record` delivered, with the transcript entry that settled it when known. */
@@ -349,7 +350,7 @@ export class PromptDeliveries {
       // scan reaches back to it, and it claims (and keeps) the earliest unclaimed user row stamped after it was
       // typed and soon after its hook, oldest first, before any open message is offered a row.
       // One settled inside a joined prompt took that prompt's row, which carries other words: it has none to claim.
-      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && !other.joined)
+      const hooked = this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && other.joined !== "part")
         .sort((a, b) => (a.settledAt ?? a.at) - (b.settledAt ?? b.at));
       const from = Math.min(record.at, ...hooked.map(other => other.at));
       const found = (await this.landed({ ...record, at: from }).catch(() => [] as TranscriptEntry[])).sort((a, b) => a.offset - b.offset);
