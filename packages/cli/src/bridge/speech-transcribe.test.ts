@@ -58,6 +58,29 @@ describe("Scribe transcription relay", () => {
     expect(frames(client).at(-1)).toEqual({ type: "committed", text: "Rebase onto main." });
   });
 
+  // phren-apps #522: the phone sends the audio it held while connecting the
+  // moment the socket opens, while the key is still being read.
+  it("keeps the audio that arrives before the key is read, in order", async () => {
+    const client = new FakeSocket(), upstream = new FakeSocket();
+    let release!: (key: string) => void;
+    const relay = relayTranscription(client, new URLSearchParams(), { key: () => new Promise(resolve => { release = resolve; }), origin: "wss://api.elevenlabs.io", connect: () => upstream });
+    client.emit("message", Buffer.from([1, 2]), true);
+    client.emit("message", Buffer.from([3]), true);
+    release("sk-test");
+    await relay;
+    client.emit("message", Buffer.from([4]), true);
+    expect(frames(upstream).map(frame => frame.audio_base_64)).toEqual([[1, 2], [3], [4]].map(bytes => Buffer.from(bytes).toString("base64")));
+
+    // A phone that hung up while the key was read never opens ElevenLabs.
+    const gone = new FakeSocket();
+    let opened = false, answer!: (key: string) => void;
+    const late = relayTranscription(gone, new URLSearchParams(), { key: () => new Promise(resolve => { answer = resolve; }), origin: "wss://api.elevenlabs.io", connect: () => { opened = true; return new FakeSocket(); } });
+    gone.close();
+    answer("sk-test");
+    await late;
+    expect(opened).toBe(false);
+  });
+
   // phren-apps #237: dictation stopped on quiet closes the phone had to guess about.
   it("says why before every close the phone did not ask for", async () => {
     vi.useFakeTimers();
