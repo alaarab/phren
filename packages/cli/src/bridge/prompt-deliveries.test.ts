@@ -82,6 +82,122 @@ describe("phone messages bound to their pane", () => {
   });
 });
 
+describe("held messages Claude submits as one turn", () => {
+  it("settle each of two short messages joined by a newline", async () => {
+    const store = deliveries();
+    await send(store, "join-0001", "Run the suite", claudeTarget);
+    await send(store, "join-0002", "Then open the PR", claudeTarget);
+    await store.submitted(claudeTarget, "Run the suite\nThen open the PR");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "delivered"]);
+  });
+
+  it("settle only whole lines: a short reply does not settle inside a longer line", async () => {
+    const store = deliveries();
+    await send(store, "part-0001", "yes", claudeTarget);
+    await send(store, "part-0002", "Check the logs", claudeTarget);
+    await store.submitted(claudeTarget, "yes, but later\nCheck the logs");
+    expect(store.status("part-0001", claudeTarget).state).toBe("queued");
+    expect(store.status("part-0002", claudeTarget).state).toBe("delivered");
+  });
+
+  it("settle three messages, one of them several lines long", async () => {
+    const store = deliveries();
+    await send(store, "three-0001", "First step", claudeTarget);
+    await send(store, "three-0002", "Second step\nwith a detail", claudeTarget);
+    await send(store, "three-0003", "yes", claudeTarget);
+    await store.submitted(claudeTarget, "First step\nSecond step\nwith a detail\nyes");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "delivered", "delivered"]);
+  });
+
+  it("leave messages held in another pane alone", async () => {
+    const store = deliveries();
+    await send(store, "other-0001", "Run the suite", claudeTarget);
+    await send(store, "other-0002", "Then open the PR", claudeTarget);
+    await store.submitted({ ...claudeTarget, pane: "w6:p2" }, "Run the suite\nThen open the PR");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["queued", "queued"]);
+  });
+
+  it("do not let a joined message claim a later message's row", async () => {
+    const store = deliveries();
+    await send(store, "rowj-0001", "A", claudeTarget);
+    await send(store, "rowj-0002", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    clock += 1_000; await send(store, "rowj-0003", "A", claudeTarget);
+    // The new message's row is in the transcript, and its hook never came.
+    clock += 1; store.stopped(claudeTarget);
+    landed = true; matches = 1; hookRows = true;
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("rowj-0003", claudeTarget).state).toBe("delivered");
+  });
+
+  it("leave the joined turn's own row to it, not to a later message with the same words", async () => {
+    const store = deliveries();
+    await send(store, "rowc-0001", "A", claudeTarget);
+    await send(store, "rowc-0002", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    // Only the joined turn's row is in the transcript; the new message was never taken.
+    clock += 1_000; await send(store, "rowc-0003", "A\nB", claudeTarget);
+    clock += 1; store.stopped(claudeTarget);
+    landed = true; matches = 1; hookRows = true;
+    await store.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await store.observe("default", [claudePane("idle")]);
+    expect(store.status("rowc-0003", claudeTarget).state).toBe("failed");
+  });
+
+  it("settle a later identical batch, and keep the joined turn's row across a restart", async () => {
+    const store = deliveries();
+    await send(store, "again-j001", "A", claudeTarget);
+    await send(store, "again-j002", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    await send(store, "again-j003", "A", claudeTarget);
+    await send(store, "again-j004", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "delivered", "delivered", "delivered"]);
+    // A message settled inside an earlier join does not stop a later prompt with its words from being split.
+    await send(store, "again-j006", "A\nB", claudeTarget);
+    await send(store, "again-j007", "C", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB\nC");
+    await send(store, "again-j008", "A", claudeTarget);
+    await send(store, "again-j009", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    expect(["again-j008", "again-j009"].map(id => store.status(id, claudeTarget).state)).toEqual(["delivered", "delivered"]);
+    await store.flush();
+    const restarted = deliveries();
+    clock += 1_000; await send(restarted, "again-j005", "A\nB", claudeTarget);
+    clock += 1; restarted.stopped(claudeTarget);
+    landed = true; matches = 2; hookRows = true;
+    await restarted.observe("default", [claudePane("idle")]);
+    clock += DELIVERY_GIVE_UP_MS;
+    await restarted.observe("default", [claudePane("idle")]);
+    // Two joined turns, two rows: neither is the new message's.
+    expect(restarted.status("again-j005", claudeTarget).state).toBe("failed");
+  });
+
+  it("match only held messages, never a failed one", async () => {
+    const store = deliveries();
+    await send(store, "fail-0001", "A\nB", claudeTarget);
+    store.fail("fail-0001", claudeTarget, "gone");
+    await send(store, "fail-0002", "A", claudeTarget);
+    await send(store, "fail-0003", "B", claudeTarget);
+    await send(store, "fail-0004", "C", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB\nC");
+    expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["failed", "delivered", "delivered", "delivered"]);
+  });
+
+  it("do not split a late hook for a message already delivered whole", async () => {
+    const store = deliveries();
+    store.delivered("whole-0001", claudeTarget, "A\nB");
+    await send(store, "whole-0002", "A", claudeTarget);
+    await send(store, "whole-0003", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    expect(store.status("whole-0002", claudeTarget).state).toBe("queued");
+    expect(store.status("whole-0003", claudeTarget).state).toBe("queued");
+  });
+});
+
 describe("a message the agent never takes fails loudly", () => {
   it("when its pane closes or its agent restarts", async () => {
     const store = deliveries();
