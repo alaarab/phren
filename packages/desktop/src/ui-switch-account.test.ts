@@ -41,6 +41,12 @@ describe("switch account rows", () => {
     expect(loginCommand("default")).toBe("claude /login");
   });
 
+  it("keeps an account selectable when its sign-in check could not finish", () => {
+    const unsure = [{ source: "claude", accounts: [{ id: "default", signedIn: true, usable: true }, { id: "slow", label: "Slow", signedIn: false, usable: true, reason: "Could not check sign-in" }] }];
+    const slow = switchAccountRows(session(), unsure, [], NOW).find((r: { id: string }) => r.id === "slow");
+    expect(slow).toMatchObject({ reason: "", login: "", detail: "Usage unknown · Sign-in not checked" });
+  });
+
   it("matches usage to the account on this computer only", () => {
     const other = { ...usage("max", 100), computers: [{ name: "Laptop", account: "max" }] };
     expect(switchAccountRows(session(), inventory, [other], NOW).find((r: { id: string }) => r.id === "max")).toMatchObject({ reason: "", detail: "Usage unknown" });

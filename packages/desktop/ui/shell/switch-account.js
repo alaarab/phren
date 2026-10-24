@@ -31,7 +31,9 @@ export function loginCommand(account) {
  * One row per Claude account on the chat's computer (`GET /v1/harnesses`),
  * the chat's own first: signed-in accounts with room can be picked, exhausted
  * ones are disabled with their reset time, and a slot that is not signed in
- * offers the /login step instead.
+ * offers the /login step instead. A sign-in check that could not finish
+ * (`signedIn: false` but `usable: true`) is not a sign-out: the account stays
+ * selectable, as a launch would use it.
  */
 export function switchAccountRows(session, inventory, usage, now = Date.now()) {
   const claude = Array.isArray(inventory) ? inventory.find((h) => h.source === "claude") : null;
@@ -42,15 +44,16 @@ export function switchAccountRows(session, inventory, usage, now = Date.now()) {
     const left = leftPercent(limiting);
     const out = exhausted(row && { ...row, windows: row.windows?.filter((w) => activeWindow(w, now)) });
     const isCurrent = account.id === current;
+    const signedOut = !account.signedIn && !account.usable;
     const reason = isCurrent ? "This chat's account"
-      : !account.signedIn ? "Not signed in"
+      : signedOut ? "Not signed in"
       : out ? "Out of usage"
       : !account.usable ? account.reason || "Not available" : "";
     const room = out ? "Out of usage" : left === null ? "Usage unknown" : `${Math.round(left)}% left${limiting ? ` of ${windowNames[limiting.id] || limiting.name || "limit"}` : ""}`;
     const reset = out ? (Date.parse(limiting?.resetsAt) > now ? resetLabel(limiting, now, { clock: true }) : row?.availableIn ? `back in ${row.availableIn}` : "") : "";
-    const detail = !account.signedIn ? "Not signed in" : [room, reset].filter(Boolean).join(" · ");
+    const detail = signedOut ? "Not signed in" : [room, reset, account.signedIn ? "" : "Sign-in not checked"].filter(Boolean).join(" · ");
     return { id: account.id, label: account.label || account.id, current: isCurrent, signedIn: account.signedIn === true, exhausted: out, left, reason, detail,
-      login: account.signedIn ? "" : loginCommand(account.id) };
+      login: signedOut ? loginCommand(account.id) : "" };
   }).sort((a, b) => Number(b.current) - Number(a.current) || Number(Boolean(a.reason)) - Number(Boolean(b.reason)) || (b.left ?? -1) - (a.left ?? -1) || a.label.localeCompare(b.label));
 }
 
@@ -144,6 +147,9 @@ export async function openSwitchAccountSheet({ computer, child, returnFocus }) {
   function render() {
     if (!state.inventory) return;
     const hadFocus = sheet.contains(document.activeElement);
+    // Usage refreshes re-render every row: keep focus on the same account or copy button.
+    const focused = hadFocus ? document.activeElement : null;
+    const focusKey = focused?.dataset?.account ? `account:${focused.dataset.account}` : focused?.dataset?.loginFor ? `login:${focused.dataset.loginFor}` : null;
     state.rows = switchAccountRows({ computer, child }, state.inventory, state.usage?.accounts);
     if (!state.rows.length) { rows.replaceChildren(el("div", "launch-note", `No Claude accounts on ${computer}.`)); return; }
     rows.replaceChildren(...state.rows.map((row) => {
@@ -164,6 +170,7 @@ export async function openSwitchAccountSheet({ computer, child, returnFocus }) {
       const copy = el("button", "move-copy-command", row.login);
       copy.type = "button";
       copy.title = "Copy command";
+      copy.dataset.loginFor = row.id;
       copy.addEventListener("click", async () => {
         try { await navigator.clipboard.writeText(row.login); copy.title = "Copied"; } catch { copy.title = "Select the command to copy it"; }
       });
@@ -173,6 +180,12 @@ export async function openSwitchAccountSheet({ computer, child, returnFocus }) {
       return wrap;
     }));
     other.disabled = state.busy;
+    if (focusKey) {
+      const [kind, id] = focusKey.split(/:(.*)/s);
+      const again = [...rows.querySelectorAll(kind === "account" ? "[data-account]" : "[data-login-for]")]
+        .find((node) => (kind === "account" ? node.dataset.account : node.dataset.loginFor) === id);
+      if (again && !again.disabled) again.focus();
+    }
     if (hadFocus && (!sheet.contains(document.activeElement) || document.activeElement.disabled)) focusFirst();
   }
 

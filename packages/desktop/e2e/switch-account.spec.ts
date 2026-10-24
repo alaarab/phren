@@ -16,7 +16,7 @@ const accounts = [
   { id: "spare", label: "Spare", signedIn: false, usable: false, reason: "Not signed in" },
 ];
 
-async function start(page: Page, capabilities: Record<string, unknown>) {
+async function start(page: Page, capabilities: Record<string, unknown>, onUsage = () => {}) {
   const frame = overviewFrame([fix, codex]);
   frame.phren.capabilities = { ...frame.phren.capabilities, moveNewChat: true, ...capabilities };
   let polls = 0;
@@ -32,8 +32,8 @@ async function start(page: Page, capabilities: Record<string, unknown>) {
   const reset = new Date(Date.now() + 3 * 3_600_000).toISOString();
   const row = (account: string, used: number) => ({ id: `claude-${account}`, harness: "claude", name: "Claude", account,
     computers: [{ name: "This computer", account }], windows: [{ id: "five_hour", name: "5-hour", usedPercent: used, resetsAt: reset, exhausted: used >= 100 }] });
-  await page.route("**/api/usage", (route) => route.fulfill({ json: { accounts: [row("default", 100), row("gmail", 30), row("max", 100)],
-    computers: ["This computer"], noData: [], unreachable: [], at: new Date().toISOString() } }));
+  await page.route("**/api/usage", (route) => { onUsage(); return route.fulfill({ json: { accounts: [row("default", 100), row("gmail", 30), row("max", 100)],
+    computers: ["This computer"], noData: [], unreachable: [], at: new Date().toISOString() } }); });
   await page.goto(h.url, { waitUntil: "domcontentloaded" });
   await page.locator('.section-pill[data-section="agents"]').click();
 }
@@ -98,4 +98,22 @@ test("a chat in another harness keeps Continue in…", async ({ page }) => {
   await page.locator(".sb-row", { hasText: "Codex chat" }).click();
   await page.locator(".chat-more").click();
   await expect(page.locator(".chat-menu button", { hasText: "Switch account…" })).toHaveCount(0);
+});
+
+test("a usage refresh keeps focus on the account it was on", async ({ page }) => {
+  let usageCalls = 0;
+  await page.clock.install();
+  await start(page, { moveResume: true }, () => { usageCalls += 1; });
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await page.locator(".chat-more").click();
+  await page.locator(".chat-menu button").first().click();
+  const sheet = page.getByRole("dialog", { name: "Switch account" });
+  const gmail = sheet.locator('.switch-account-row[data-account="gmail"]');
+  await expect(gmail).toBeEnabled();
+  await gmail.focus();
+  const before = usageCalls;
+  await page.clock.runFor(61_000);
+  await expect.poll(() => usageCalls).toBeGreaterThan(before);
+  await page.waitForTimeout(200);
+  await expect(sheet.locator('.switch-account-row[data-account="gmail"]')).toBeFocused();
 });
