@@ -156,6 +156,14 @@ describe("held messages Claude submits as one turn", () => {
     await send(store, "again-j004", "B", claudeTarget);
     await store.submitted(claudeTarget, "A\nB");
     expect(store.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "delivered", "delivered", "delivered"]);
+    // A message settled inside an earlier join does not stop a later prompt with its words from being split.
+    await send(store, "again-j006", "A\nB", claudeTarget);
+    await send(store, "again-j007", "C", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB\nC");
+    await send(store, "again-j008", "A", claudeTarget);
+    await send(store, "again-j009", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB");
+    expect(["again-j008", "again-j009"].map(id => store.status(id, claudeTarget).state)).toEqual(["delivered", "delivered"]);
     await store.flush();
     const restarted = deliveries();
     clock += 1_000; await send(restarted, "again-j005", "A\nB", claudeTarget);

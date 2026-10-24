@@ -259,7 +259,8 @@ export class PromptDeliveries {
     let record = pick();
     if (!record) {
       // A prompt that is one known message's own words (a late hook for a message already settled) is not a join.
-      if (!this.records.some(other => other.hash === hash && this.samePane(other, target) && other.joined !== "turn") && this.settleJoined(target, prompt)) this.save();
+      // Records from an earlier join never get a hook of their own, so they do not count.
+      if (!this.records.some(other => other.hash === hash && this.samePane(other, target) && other.joined === undefined) && this.settleJoined(target, prompt)) this.save();
       return;
     }
     let entry: number | undefined;
