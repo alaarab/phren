@@ -70,3 +70,23 @@ it("a phone that typed the code is authorized only once the computer allows it",
   expect((await post(allowed.port, { v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), typed: true })).status).toBe(200);
   await expect(allowed.done).resolves.toMatchObject({ device: "ios" });
 });
+
+it("asks about typed phones one at a time, each answer for its own phone", async () => {
+  const sshDirectory = path.join(root, ".ssh");
+  let open = 0, most = 0;
+  const answers = [true, false];
+  const asked: (string | undefined)[] = [];
+  const session = await startPairing({ code: "ABC234", user: "me", sshPort: 22, name: "box", port: 0, sshDirectory,
+    approve: async phone => {
+      open++; most = Math.max(most, open); asked.push(phone.name);
+      await new Promise(done => setTimeout(done, 20));
+      open--; return answers.shift() ?? false;
+    } });
+  const body = (name: string) => ({ v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), name, typed: true });
+  const [first, second] = await Promise.all([post(session.port, body("A")), post(session.port, body("B"))]);
+  expect(most).toBe(1);
+  // The first answer allows one phone and pairing ends; the other gets nothing.
+  expect([first.status, second.status].sort()).toEqual([200, 410]);
+  const keys = await readFile(path.join(sshDirectory, "authorized_keys"), "utf8");
+  expect(keys.trim().split("\n")).toHaveLength(1);
+});

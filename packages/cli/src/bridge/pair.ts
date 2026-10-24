@@ -135,6 +135,7 @@ export async function startPairing(options: {
   approve?: (phone: PairingApproval) => Promise<boolean>;
 }): Promise<PairingSession> {
   let failures = 0, finished = false, timer: NodeJS.Timeout | undefined;
+  let approvals: Promise<unknown> = Promise.resolve();
   let resolve!: (paired: Paired) => void, reject!: (error: Error) => void;
   const done = new Promise<Paired>((yes, no) => { resolve = yes; reject = no; });
   const server = createServer((incoming, response) => { void handle(incoming, response); });
@@ -161,10 +162,15 @@ export async function startPairing(options: {
         throw new BridgeError(403, "That pairing code doesn't match this computer.");
       }
       if (input.typed) {
-        const allowed = options.approve
-          ? await options.approve({ device: input.device, name: input.name, check: pairingCheckCode(keyFingerprint(publicKey)) })
-          : false;
+        // One question at a time, each bound to its own phone: a single answer
+        // never allows two keys.
+        const ask = approvals.then(() => finished || incoming.socket.destroyed ? false
+          : options.approve ? options.approve({ device: input.device, name: input.name, check: pairingCheckCode(keyFingerprint(publicKey)) }) : false);
+        approvals = ask.catch(() => false);
+        const allowed = await ask;
         if (finished) throw new BridgeError(410, "Pairing is closed. Run phren pair again.");
+        // A phone that gave up while the question waited gets nothing written.
+        if (incoming.socket.destroyed) return;
         if (!allowed) throw new BridgeError(403, "The computer didn't allow this phone. Run phren pair again and allow it there.");
       }
       const comment = input.device === "android" ? "phren-android" : "phren-iphone";
@@ -259,20 +265,32 @@ async function runScopedPair(args: string[], version: string): Promise<number> {
   return 0;
 }
 
-/** The terminal's say on a phone that typed the code; no terminal, no typed pairing. */
-async function askToAllow(phone: PairingApproval): Promise<boolean> {
+/** How long the terminal waits for an answer: less than the phone waits, so a late yes never authorizes a phone that gave up. */
+const APPROVAL_WAIT_MS = 100_000;
+
+/**
+ * The terminal's say on a phone that typed the code; no terminal, no typed
+ * pairing. No answer in time is no, and Ctrl-C at the question cancels pairing.
+ */
+async function askToAllow(phone: PairingApproval, cancel: () => void): Promise<boolean> {
   if (!process.stdin.isTTY) {
     console.log("\n  A phone typed the code, but there's no terminal here to allow it. Scan the QR code instead.");
     return false;
   }
   const { createInterface } = await import("node:readline/promises");
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), APPROVAL_WAIT_MS);
+  prompt.on("SIGINT", () => { abort.abort(); cancel(); });
   try {
     const who = phone.name ? `"${phone.name}"` : "A phone";
     console.log(`\n  ${who} typed the code. Its screen shows a key check${phone.check ? `; it should be:  ${phone.check}` : "."}`);
-    const answer = await prompt.question("  Allow this phone? [y/N] ");
+    const answer = await prompt.question("  Allow this phone? [y/N] ", { signal: abort.signal });
     return /^y(es)?$/i.test(answer.trim());
-  } finally { prompt.close(); }
+  } catch {
+    console.log("\n  Not allowed.");
+    return false;
+  } finally { clearTimeout(timer); prompt.close(); }
 }
 
 export async function runPair(args: string[], version: string): Promise<number> {
@@ -298,7 +316,10 @@ export async function runPair(args: string[], version: string): Promise<number> 
   const name = await computerDisplayName(), user = userInfo().username, fingerprint = await hostFingerprint();
   const hosts = await pairingHosts();
   if (!hosts.length) { console.error("No network address found. Connect to Wi-Fi or Tailscale and try again."); return 1; }
-  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000, approve: askToAllow });
+  let cancelPairing = () => {};
+  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000,
+    approve: phone => askToAllow(phone, () => cancelPairing()) });
+  cancelPairing = () => session.close();
   const url = pairingURL({ hosts, port: session.port, user, sshPort, fingerprint, code, name });
   const { renderUnicodeCompact } = await import("uqr");
   console.log(`\nConnect your phone to ${name}`);
