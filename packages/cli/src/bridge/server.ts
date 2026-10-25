@@ -24,6 +24,7 @@ import { cpus, hostname, loadavg } from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { relayLiveSpeech } from "./speech-live.js";
+import { streamSimulator } from "./simulator-stream.js";
 import { failRelay, relayTranscription } from "./speech-transcribe.js";
 import { ActivityJournal } from "./activity.js";
 import { countTick } from "./metrics.js";
@@ -263,7 +264,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   http.on("upgrade", (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
-      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
+      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
       requireRoute(modules, "WS", url.pathname);
       // Parsed before the upgrade: an invalid server name is refused as the other routes refuse it.
       const overviewServer = url.pathname === "/v1/overview" ? selectedServer(url) : undefined;
@@ -278,6 +279,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
         }
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1"); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => failRelay(client)); return; }
+        if (url.pathname === "/v1/simulators/stream") { void streamSimulator(client, url.searchParams).catch(() => client.close(1011, "Simulator stream unavailable")); return; }
         if (url.pathname === "/v1/speech/live") { void relayLiveSpeech(client, url.searchParams).catch(() => client.close(1011, "Spoken replies unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });

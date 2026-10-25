@@ -861,6 +861,10 @@ socket.on('close', () => process.exit(0));
       expect((await api("/v1/simulators/screenshot?udid=nope")).status).toBe(400);
       expect((await api("/v1/simulators/action", { udid: "nope", action: "tap", x: 0.5, y: 0.5 })).status).toBe(400);
       expect((await api("/v1/simulators/apps?udid=nope")).status).toBe(400);
+      // The stream socket is allow-listed and refuses a bad identifier before running anything.
+      const stream = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/simulators/stream?udid=nope`);
+      const [streamClose, streamReason] = await once(stream, "close") as [number, Buffer];
+      expect([streamClose, streamReason.toString()]).toEqual([1008, "Invalid simulator identifier."]);
       const simulators = await api("/v1/simulators");
       expect(simulators.status).toBe(200); expect(Array.isArray(simulators.data.simulators)).toBe(true);
       if (process.platform !== "darwin") expect(simulators.data.simulators).toEqual([]);

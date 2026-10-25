@@ -562,7 +562,9 @@ overview again) and its panes (3 s), web servers (15 s), a simulator screen
    streams are both live (they carry activity, prompts and a closed pane),
    3 s otherwise and 2 s while a session starts.
 3. `LiveRefresh`: one timer that sleeps until the next job is due, for what
-   the Hook does not push: account usage, web servers, a simulator screen,
+   the Hook does not push: account usage, web servers, a simulator screen
+   (the opened one streams over `/v1/simulators/stream` instead when the Hook
+   offers it),
    sub-agent trees (one read per session for its card, drawer row and
    details, every 10 s while it has running children or conducts, else 30 s),
    a worker's messages and scheduled-prompt reminders. Jobs with one key

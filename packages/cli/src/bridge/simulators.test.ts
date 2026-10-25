@@ -8,7 +8,7 @@ vi.mock("node:child_process", () => {
   const execFile = Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: mocks.execute });
   return { execFile };
 });
-import { simulatorAct, type SimulatorAction } from "./simulators.js";
+import { simulatorAct, type SimulatorAction, verifiedHelper } from "./simulators.js";
 const udid = "AAAAAAAA-1111-4111-8111-111111111111";
 let root: string, calls: { file: string; args: string[] }[];
 beforeEach(async () => {
@@ -46,6 +46,17 @@ describe.skipIf(process.platform === "win32")("simulator input hardening", () =>
       ["iPhone", "type", "a".repeat(500)], ["iPhone", "type", "one\ntwo", "submit"],
     ]);
     expect(calls.every(c => path.isAbsolute(c.file))).toBe(true);
+  });
+  it("builds the stream helper beside simtap from its own source, once", async () => {
+    await simulatorAct(udid, { action: "home" });
+    const binary = await verifiedHelper("simcast");
+    expect(binary).toBe(path.join(root, "native/simcast"));
+    await verifiedHelper("simcast");
+    const compiles = calls.filter(c => c.file === "/usr/bin/swiftc").map(c => c.args[2]);
+    expect(compiles).toEqual([expect.stringMatching(/simtap\.[a-f0-9-]{36}$/), expect.stringMatching(/simcast\.[a-f0-9-]{36}$/)]);
+    expect((await readdir(path.dirname(binary))).sort()).toEqual(["simcast", "simcast.sha256", "simtap", "simtap.sha256"]);
+    await writeFile(binary, "TAMPERED");
+    await expect(verifiedHelper("simcast")).rejects.toMatchObject({ status: 409, message: "Simulator stream helper integrity check failed." });
   });
   it("verifies the binary again before every exec and rejects tampering without executing it", async () => {
     await simulatorAct(udid, { action: "home" });
