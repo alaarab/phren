@@ -41,10 +41,10 @@ export type PeerAnswer = { peer: HookPeer } & ({
   disabled?: boolean;
 });
 
-export async function askPeers(peers: readonly HookPeer[], caller: Caller, ask: Ask = peerRequest): Promise<PeerAnswer[]> {
+export async function askPeers(peers: readonly HookPeer[], caller: Caller, ask: Ask = peerRequest, timeout = 8_000): Promise<PeerAnswer[]> {
   return Promise.all(peers.map(async (peer): Promise<PeerAnswer> => {
     try {
-      const answer = await ask(peer, `/v1/conductor?${callerQuery(caller)}`, undefined, 8_000);
+      const answer = await ask(peer, `/v1/conductor?${callerQuery(caller)}`, undefined, timeout);
       const computer = object(answer.computer);
       const conductor = answer.conductor && typeof answer.conductor === "object" ? object(answer.conductor) : undefined;
       const set = object(answer.set);

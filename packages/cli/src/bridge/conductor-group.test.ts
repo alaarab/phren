@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { disabledHint } from "../modules/registry.js";
 import { askPeers, buildSets, groupConductor, setConductor } from "./conductor-group.js";
+import { SETS_PEER_TIMEOUT_MS } from "./conductor-sets.js";
 import type { Computer } from "./computer-identity.js";
 import type { HookPeer } from "./peers.js";
 import { BridgeError, type Json } from "./protocol.js";
@@ -32,6 +33,14 @@ describe("one conductor per set", () => {
         { computer: "Laptop", error: "Its Hook is too old to report a conductor." },
       ],
     });
+  });
+
+  it("waits 8 s per peer for conductor checks, and only as long as asked for the sets view", async () => {
+    const waited: (number | undefined)[] = [];
+    const ask = async (_: unknown, __: string, ___?: unknown, timeout?: number) => { waited.push(timeout); return { computer: { id: id(1), name: "Mini" }, conductor: null }; };
+    await askPeers([peer("Mini")], caller, ask);
+    await askPeers([peer("Mini")], caller, ask, SETS_PEER_TIMEOUT_MS);
+    expect(waited).toEqual([8_000, 4_000]);
   });
 
   it("lets a computer outside the set keep its own conductor, and names members this computer cannot ask", async () => {

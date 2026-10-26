@@ -26,10 +26,17 @@ export async function conductorAnswer(info: LocalInfo, url: URL): Promise<Json> 
 }
 
 /** `GET /v1/sets`: this computer's set and every set its one-way peers are in, plus unlinked computers. */
+/** How long the sets view waits for each peer. A live peer answers in a
+ * second or two; an unreachable one held every reading of the view for the
+ * full 8 s, and the phone, which reads every computer's sets, gave up on
+ * the slow ones and showed linked computers as unlinked. A peer past this
+ * shows as unreachable in this reading only; conductor checks keep 8 s. */
+export const SETS_PEER_TIMEOUT_MS = 4_000;
+
 export async function readSets(info: LocalInfo): Promise<Json> {
   const [{ peers, peerError }, conductor, set, { computers }] = await Promise.all([optionalHookPeers(), localConductor(), readSetName(),
     readComputers({ local: { id: info.computer.id } })]);
-  const answers = await askPeers(peers, await localCaller());
+  const answers = await askPeers(peers, await localCaller(), undefined, SETS_PEER_TIMEOUT_MS);
   // Old /v1/conductor replies list peer names without ids. Resolve unknown
   // names through the existing identity directory, also on older Hooks.
   // Skip this extra round when names already identify every member.
@@ -37,7 +44,7 @@ export async function readSets(info: LocalInfo): Promise<Json> {
   const reportedComputers = (await Promise.all(answers.map(async answer => {
     if (!answer.ok || answer.knowsCaller === false || !answer.peers?.some(name => indirect.has(computerLabel(name)))) return [];
     try {
-      const directory = await peerRequest(answer.peer, "/v1/computers", undefined, 12_000);
+      const directory = await peerRequest(answer.peer, "/v1/computers", undefined, 2 * SETS_PEER_TIMEOUT_MS);
       return (Array.isArray(directory.computers) ? directory.computers.slice(0, 64) : []).flatMap(value => {
         const row = object(value);
         return typeof row.id === "string" && typeof row.name === "string" ? [{ id: row.id, name: row.name,
