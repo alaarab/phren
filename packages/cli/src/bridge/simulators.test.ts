@@ -10,14 +10,18 @@ vi.mock("node:child_process", () => {
 });
 import { simulatorAct, type SimulatorAction, verifiedHelper } from "./simulators.js";
 const udid = "AAAAAAAA-1111-4111-8111-111111111111";
-let root: string, calls: { file: string; args: string[] }[];
+let root: string, calls: { file: string; args: string[] }[], compiled: { output: string; source: string }[];
 beforeEach(async () => {
   root = await mkdtemp("/tmp/phren-simulator-"); vi.stubEnv("PHREN_BRIDGE_HOME", root);
   vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-  calls = [];
+  calls = []; compiled = [];
   mocks.execute.mockImplementation(async (file: string, args: string[]) => {
     calls.push({ file, args });
-    if (file === "/usr/bin/swiftc") await writeFile(args[args.indexOf("-o") + 1], "compiled binary");
+    if (file === "/usr/bin/swiftc") {
+      // What the compiler was given, read before the build deletes it.
+      compiled.push({ output: args[args.indexOf("-o") + 1], source: await readFile(args.at(-1)!, "utf8") });
+      await writeFile(args[args.indexOf("-o") + 1], "compiled binary");
+    }
     return { stdout: file === "/usr/bin/xcrun" ? JSON.stringify({ devices: { "iOS-26-1": [{ udid, name: "iPhone", state: "Booted" }] } }) : "", stderr: "" };
   });
 });
@@ -52,8 +56,12 @@ describe.skipIf(process.platform === "win32")("simulator input hardening", () =>
     const binary = await verifiedHelper("simcast");
     expect(binary).toBe(path.join(root, "native/simcast"));
     await verifiedHelper("simcast");
-    const compiles = calls.filter(c => c.file === "/usr/bin/swiftc").map(c => c.args[2]);
-    expect(compiles).toEqual([expect.stringMatching(/simtap\.[a-f0-9-]{36}$/), expect.stringMatching(/simcast\.[a-f0-9-]{36}$/)]);
+    const source = (name: string) => readFile(new URL(`./native/${name}.swift`, import.meta.url), "utf8");
+    expect(compiled).toEqual([
+      { output: expect.stringMatching(/simtap\.[a-f0-9-]{36}$/), source: await source("simtap") },
+      { output: expect.stringMatching(/simcast\.[a-f0-9-]{36}$/), source: await source("simcast") },
+    ]);
+    expect(await source("simcast")).not.toBe(await source("simtap"));
     expect((await readdir(path.dirname(binary))).sort()).toEqual(["simcast", "simcast.sha256", "simtap", "simtap.sha256"]);
     await writeFile(binary, "TAMPERED");
     await expect(verifiedHelper("simcast")).rejects.toMatchObject({ status: 409, message: "Simulator stream helper integrity check failed." });

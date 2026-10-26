@@ -186,7 +186,13 @@ export async function streamSimulator(client: StreamClient, query: URLSearchPara
   try { options = streamOptions(query); } catch (error) { client.close(1008, reason((error as Error).message)); return; }
   if (deps.platform() !== "darwin") { client.close(1008, "Simulators run on macOS only."); return; }
   if (active >= MAX_STREAMS) { client.close(1013, "Too many simulator streams; try again."); return; }
+  // The slot is held until the work it pays for is over: discovery and the
+  // build still running after the socket closed, and a helper that takes up
+  // to 2 s to exit. Releasing it on close would let connect-close cycles pile
+  // up simctl and helper processes past MAX_STREAMS.
   active++;
+  let released = false;
+  const release = () => { if (!released) { released = true; active--; } };
   let ended = false, child: CaptureProcess | undefined, killer: ReturnType<typeof setTimeout> | undefined;
   const latest = new LatestFrame((frame, done) => {
     if (client.readyState !== OPEN) { done(new Error("closed")); return; }
@@ -198,7 +204,7 @@ export async function streamSimulator(client: StreamClient, query: URLSearchPara
   });
   const end = (code?: number, why?: string) => {
     if (ended) return;
-    ended = true; active--; latest.close();
+    ended = true; latest.close();
     if (child) {
       const running = child;
       running.kill("SIGTERM");
@@ -212,13 +218,16 @@ export async function streamSimulator(client: StreamClient, query: URLSearchPara
   client.once("error", () => end());
   try {
     if (!(await deps.booted()).some(device => device.udid === options.udid)) { end(1008, "That simulator is not booted."); return; }
+    // A socket that closed during discovery doesn't go on to build the helper.
+    if (ended || client.readyState !== OPEN) { end(); return; }
     const binary = await deps.helper();
     if (ended || client.readyState !== OPEN) { end(); return; }
     child = deps.spawn(binary, [options.udid, String(options.fps), String(options.size), (options.quality / 100).toFixed(2)]);
+    child.once("exit", release); child.once("error", release);
   } catch (error) {
     end(1011, error instanceof BridgeError ? error.message : "Couldn't start the simulator stream.");
     return;
-  }
+  } finally { if (!child) release(); }
   const reader = new FrameReader();
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(-400); });

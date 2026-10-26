@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Json } from "./protocol.js";
 import { activeSimulatorStreams, FrameReader, LatestFrame, MAX_FRAME_BYTES, MAX_STREAMS, type StreamDeps, streamOptions, streamSimulator } from "./simulator-stream.js";
 
 const udid = "AAAAAAAA-1111-4111-8111-111111111111";
@@ -25,8 +26,15 @@ class FakeClient extends EventEmitter {
 class FakeChild extends EventEmitter {
   stdout = new PassThrough(); stderr = new PassThrough();
   signals: string[] = [];
-  kill(signal?: NodeJS.Signals) { this.signals.push(signal ?? "SIGTERM"); return true; }
-  exit(code = 0) { this.emit("exit", code, null); }
+  /** A helper that ignores SIGTERM, until it is killed. */
+  lingers = false;
+  kill(signal?: NodeJS.Signals) {
+    this.signals.push(signal ?? "SIGTERM");
+    if (!this.lingers || signal === "SIGKILL") setImmediate(() => this.exit(null));
+    return true;
+  }
+  exited = false;
+  exit(code: number | null = 0) { if (this.exited) return; this.exited = true; this.emit("exit", code, null); }
 }
 function harness(booted = [udid]) {
   const children: { binary: string; args: string[]; child: FakeChild }[] = [];
@@ -45,7 +53,7 @@ async function start(query: string, deps: StreamDeps) {
   await streamSimulator(client, new URLSearchParams(query), deps);
   return client;
 }
-afterEach(() => { for (const client of open.splice(0)) client.close(); vi.useRealTimers(); });
+afterEach(async () => { for (const client of open.splice(0)) client.close(); vi.useRealTimers(); await flush(); expect(activeSimulatorStreams()).toBe(0); });
 
 describe("simulator stream request", () => {
   it.each([
@@ -174,14 +182,19 @@ describe("simulator stream lifecycle", () => {
     const { deps, children } = harness();
     const client = await start(`udid=${udid}`, deps);
     expect(activeSimulatorStreams()).toBe(1);
-    client.close(1000);
     const { child } = children[0];
-    expect(child.signals).toEqual(["SIGTERM"]); expect(activeSimulatorStreams()).toBe(0);
+    child.lingers = true;
+    client.close(1000);
+    expect(child.signals).toEqual(["SIGTERM"]);
+    child.stdout.write(framed(jpeg(9)));
+    await flush();
+    expect(client.frames()).toEqual([]);
+    // The slot stays taken while the helper is still running.
+    expect(activeSimulatorStreams()).toBe(1);
     vi.advanceTimersByTime(2_000);
     expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
-    child.stdout.write(framed(jpeg(9)));
-    await Promise.resolve();
-    expect(client.frames()).toEqual([]);
+    await flush();
+    expect(activeSimulatorStreams()).toBe(0);
   });
   it("closes the socket with the helper's reason when capture ends", async () => {
     const { deps, children } = harness();
@@ -198,6 +211,25 @@ describe("simulator stream lifecycle", () => {
     children[0].child.stdout.write(Buffer.from([0, 0, 0, 0]));
     await flush();
     expect(client.closed?.code).toBe(1011); expect(children[0].child.signals).toEqual(["SIGTERM"]);
+  });
+  it("holds the slot through discovery, and doesn't build the helper for a socket closed meanwhile", async () => {
+    const { deps } = harness();
+    const pending: (() => void)[] = [];
+    deps.booted = vi.fn(() => new Promise<Json[]>(resolve => pending.push(() => resolve([{ udid }]))));
+    // Connect-close cycles while discovery hangs: each still holds its slot.
+    const runs: Promise<void>[] = [];
+    for (let i = 0; i < MAX_STREAMS; i++) {
+      const client = new FakeClient();
+      runs.push(streamSimulator(client, new URLSearchParams(`udid=${udid}`), deps));
+      client.close(1000);
+    }
+    expect(activeSimulatorStreams()).toBe(MAX_STREAMS);
+    const refused = await start(`udid=${udid}`, deps);
+    expect(refused.closed?.code).toBe(1013); expect(deps.booted).toHaveBeenCalledTimes(MAX_STREAMS);
+    for (const resolve of pending) resolve();
+    await Promise.all(runs);
+    expect(deps.helper).not.toHaveBeenCalled(); expect(deps.spawn).not.toHaveBeenCalled();
+    expect(activeSimulatorStreams()).toBe(0);
   });
   it("does not start the helper for a socket that closed while it was being built", async () => {
     const { deps } = harness();
