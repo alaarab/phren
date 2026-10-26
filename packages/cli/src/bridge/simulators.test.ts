@@ -11,12 +11,14 @@ vi.mock("node:child_process", () => {
 import { simulatorAct, type SimulatorAction, verifiedHelper } from "./simulators.js";
 const udid = "AAAAAAAA-1111-4111-8111-111111111111";
 let root: string, calls: { file: string; args: string[] }[], compiled: { output: string; source: string }[];
+let options: { timeout?: number; killSignal?: string }[];
 beforeEach(async () => {
   root = await mkdtemp("/tmp/phren-simulator-"); vi.stubEnv("PHREN_BRIDGE_HOME", root);
   vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-  calls = []; compiled = [];
-  mocks.execute.mockImplementation(async (file: string, args: string[]) => {
+  calls = []; compiled = []; options = [];
+  mocks.execute.mockImplementation(async (file: string, args: string[], given?: { timeout?: number; killSignal?: string }) => {
     calls.push({ file, args });
+    if (given) options.push(given);
     if (file === "/usr/bin/swiftc") {
       // What the compiler was given, read before the build deletes it.
       compiled.push({ output: args[args.indexOf("-o") + 1], source: await readFile(args.at(-1)!, "utf8") });
@@ -74,6 +76,13 @@ describe.skipIf(process.platform === "win32")("simulator input hardening", () =>
     expect(calls.filter(c => c.file === binary)).toHaveLength(1);
     expect(calls.filter(c => c.file === "/usr/bin/swiftc")).toHaveLength(1);
   });
+  it("kills every simulator child outright at its timeout", async () => {
+    // SIGTERM, the default, could be ignored and leave a stream's slot taken for good.
+    await simulatorAct(udid, { action: "home" });
+    expect(options.length).toBeGreaterThan(1);
+    for (const given of options) expect(given).toMatchObject({ timeout: expect.any(Number), killSignal: "SIGKILL" });
+  });
+
   it("serializes both builds and input invocations and recovers after focus loss", async () => {
     const impl = mocks.execute.getMockImplementation()!;
     let active = 0, peak = 0;
