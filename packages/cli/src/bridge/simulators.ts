@@ -6,7 +6,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { BridgeError, bridgeRoot, type Json } from "./protocol.js";
 
-const exec = promisify(execFile);
+const execFileAsync = promisify(execFile);
+/** Every simulator child is killed outright at its timeout. SIGTERM, the
+ * default, let one that ignored it hold its promise, and with it a stream's
+ * slot, for good. */
+const exec = (file: string, args: readonly string[], options: { timeout: number; maxBuffer?: number }) =>
+  execFileAsync(file, args, { ...options, killSignal: "SIGKILL", encoding: "utf8" });
 export const SIMULATOR_UDID = /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i;
 
 /** The iOS simulators booted on this Mac, from `simctl`; none elsewhere. */
