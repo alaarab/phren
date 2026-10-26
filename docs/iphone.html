@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phren for iPhone</title>
+<meta name="description" content="The phren iPhone app: chat and talk with the coding agents on your own computers, approve what they ask, send them work and see what they remember. Straight to your computers over SSH, with no phren server in between.">
+<meta property="og:title" content="phren for iPhone: your agents, in your pocket">
+<meta property="og:description" content="Chat and talk with the coding agents on your own computers, approve what they ask and send them work. Straight to your computers over SSH.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="apps/iphone/sessions.webp">
+<meta name="theme-color" content="#12122a">
+<link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+<link rel="stylesheet" href="iphone.css">
+<script>
+  // Scroll reveals only run with JS and when motion is allowed.
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) document.documentElement.classList.add('js');
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="phren-hero.svg" alt="" width="26" height="30">phren <small>for iPhone</small></a>
+    <nav class="nav-links" aria-label="Page">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#privacy">Privacy</a>
+      <a class="keep" href="get-started.html">Get started</a>
+      <a class="nav-cta" href="#get">Get the app</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero">
+  <div class="wrap">
+    <div class="copy">
+      <p class="eyebrow">phren for iPhone</p>
+      <h1>Your agents.<br><span class="soft">In your pocket.</span></h1>
+      <p class="lead">Chat and talk with the coding agents running on your own computers. Approve what they ask, send them work and see what they remember. The phone connects straight to your computers over SSH, with no phren server in between.</p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="support.html#contact">Ask for a TestFlight invite</a>
+        <a class="btn btn-ghost" href="get-started.html">Set up a computer</a>
+      </div>
+      <p class="status"><span class="dot" aria-hidden="true"></span>In TestFlight testing · iOS 17 or later · free</p>
+      <div class="works" aria-label="Works with">
+        <span class="label">Works with</span>
+        <span>Claude Code</span><span>Codex</span><span>GitHub Copilot</span><span>OpenCode</span><span>Phren agent</span>
+      </div>
+    </div>
+    <div class="hero-phones">
+      <div class="phone front"><div class="screen"><img src="apps/iphone/sessions.webp" width="1080" height="2349" alt="The Agents tab: live sessions on two computers, grouped by what needs you, with usage rings for each account" fetchpriority="high"></div></div>
+      <div class="phone back" aria-hidden="true"><div class="screen"><img src="apps/iphone/chat.webp" width="1080" height="2349" alt=""></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="feature" id="features" aria-labelledby="f-sessions">
+  <div class="wrap">
+    <div class="copy reveal">
+      <p class="eyebrow">Agents</p>
+      <h2 id="f-sessions">Every session, on every computer.</h2>
+      <p>Pair your computers once. Agents lists the live sessions on each of them, sorted by what needs you first: waiting on you, working, then idle. You see at a glance which agent is stuck and which one is done.</p>
+      <ul class="points">
+        <li><strong>Start an agent</strong> in any project folder on any computer, in a new worktree if you like.</li>
+        <li><strong>Account usage</strong> for Claude, Codex, Copilot and OpenCode, with each limit and when it resets.</li>
+        <li><strong>Pin the sessions</strong> you care about and fold the rest away.</li>
+      </ul>
+    </div>
+    <div class="art reveal">
+      <div class="pair">
+        <div class="phone"><div class="screen"><img src="apps/iphone/sessions.webp" width="1080" height="2349" loading="lazy" alt="Live sessions grouped into Needs input and Working, and the two paired computers, devbox and Studio"></div></div>
+        <div class="phone"><div class="screen"><img src="apps/iphone/usage.webp" width="1080" height="2349" loading="lazy" alt="Account usage: five-hour and seven-day limits for Claude and Codex, and OpenCode Go spending, with reset times"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature flip" aria-labelledby="f-chat" style="--glow:rgba(0,229,255,.16)">
+  <div class="wrap">
+    <div class="copy reveal">
+      <p class="eyebrow">Chat</p>
+      <h2 id="f-chat">A real conversation with each agent.</h2>
+      <p>Open a session and pick up where the agent is. Replies stream in as it writes them. Commands, file edits and diffs arrive as cards you can open, so you can follow the work, not just the summary.</p>
+      <ul class="points">
+        <li><strong>Send messages, photos and files</strong>, or open the session&rsquo;s terminal when you need it.</li>
+        <li><strong>File paths are links.</strong> Tap one to read the file with syntax colors and line numbers.</li>
+        <li><strong>One settings sheet</strong> for the model, its effort and, for Claude Code, the permission mode.</li>
+      </ul>
+    </div>
+    <div class="art reveal">
+      <div class="pair">
+        <div class="phone"><div class="screen"><img src="apps/iphone/chat.webp" width="1080" height="2349" loading="lazy" alt="A chat with a Claude Code session: a shell command card and a diff adding a purple accent color"></div></div>
+        <div class="phone"><div class="screen"><img src="apps/iphone/settings.webp" width="1080" height="2349" loading="lazy" alt="The chat settings sheet with the model, effort and permission mode"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="feature talk" aria-labelledby="f-talk">
+  <div class="wrap">
+    <div class="copy reveal">
+      <p class="eyebrow">Talk mode</p>
+      <h2 id="f-talk">Talk to your agents. Hear them back.</h2>
+      <p>Talk mode is a hands-free conversation. Speak, and your words are sent when you pause. The reply is read back to you, with each word lit up as it plays.</p>
+      <ul class="points">
+        <li><strong>Steer while it works.</strong> Keep talking during a turn and the agent hears you.</li>
+        <li><strong>Phone in your pocket.</strong> Talk keeps going with the phone locked and on AirPods.</li>
+        <li><strong>Leave the chat and keep talking.</strong> A small pill holds the conversation while you look at something else.</li>
+      </ul>
+    </div>
+    <div class="art reveal">
+      <figure style="margin:0">
+        <div class="pair">
+          <div class="phone"><div class="screen"><img src="apps/iphone/talk.webp" width="1080" height="2349" loading="lazy" alt="Talk mode listening: the words heard so far, &ldquo;What changed in atlas today&rdquo;, above a large pause button and the note &ldquo;Sending when you pause&rdquo;"></div></div>
+          <div class="phone"><div class="screen"><img src="apps/iphone/talk-pill.webp" width="1080" height="2349" loading="lazy" alt="The sessions list with the talk pill at the bottom: Talking with Codex, Polish the phone app"></div></div>
+        </div>
+        <figcaption class="caption">Talk mode listening, and the talk pill once you leave the chat.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="feature flip" aria-labelledby="f-approve" style="--glow:rgba(143,209,158,.16)">
+  <div class="wrap">
+    <div class="copy reveal">
+      <p class="eyebrow">Approvals</p>
+      <h2 id="f-approve">Approve from anywhere.</h2>
+      <p>When an agent asks for permission, it waits for you, not for you to get back to your desk. Answer in the chat, from a notification, or from the Live Activity on the Lock Screen.</p>
+      <ul class="points">
+        <li><strong>Face ID first.</strong> Answers from the Lock Screen need Face ID or your passcode.</li>
+        <li><strong>Approve all</strong> answers every waiting request at once.</li>
+        <li><strong>Approval rules</strong> pick commands that always ask or are always denied, per project or agent.</li>
+      </ul>
+    </div>
+    <div class="art reveal">
+      <div class="phone"><div class="screen"><img src="apps/iphone/approval.webp" width="1080" height="2349" loading="lazy" alt="A permission request inside a chat, with Deny and Approve buttons"></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="feature" aria-labelledby="f-conductor">
+  <div class="wrap">
+    <div class="copy reveal">
+      <p class="eyebrow">Conductor</p>
+      <h2 id="f-conductor">One conductor for all your computers.</h2>
+      <p>Tell a conductor what you want done. It sees the live sessions on every linked computer, hands work to one of them or starts a new worker, and tells you when a worker finishes, needs you or stops.</p>
+      <ul class="points">
+        <li><strong>Every hand-off is a card</strong> you can open: who got the work, where, and how it went.</li>
+        <li><strong>&ldquo;Talk to my conductor&rdquo;</strong> from Siri, the Action button or Control Center.</li>
+        <li><strong>Computers</strong> shows each machine&rsquo;s load, memory and disk, so you know which one has room.</li>
+      </ul>
+    </div>
+    <div class="art reveal">
+      <div class="phone"><div class="screen"><img src="apps/iphone/conductor.webp" width="1080" height="2349" loading="lazy" alt="A conductor chat with cards for live sessions, a hand-off and an accepted dispatch"></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="more">
+  <div class="wrap">
+    <div class="band-head reveal">
+      <p class="eyebrow">The rest of the work</p>
+      <h2 id="more">Review it, schedule it, remember it.</h2>
+      <p>The things you would walk back to your desk for, on the phone.</p>
+    </div>
+    <div class="gallery">
+      <figure class="reveal">
+        <div class="phone"><div class="screen"><img src="apps/iphone/changes.webp" width="1080" height="2349" loading="lazy" alt="Uncommitted changes: one staged file, three changed files, and a commit box"></div></div>
+        <figcaption><strong>Changes</strong><span>Staged and unstaged files, history, branches and pull requests, with side-by-side or inline diffs.</span></figcaption>
+      </figure>
+      <figure class="reveal">
+        <div class="phone"><div class="screen"><img src="apps/iphone/schedules.webp" width="1080" height="2349" loading="lazy" alt="Schedules: prompts with their computer, next run and last run"></div></div>
+        <figcaption><strong>Schedules</strong><span>Run a prompt on a timetable, on the computer you choose. Get told when it finishes or needs you.</span></figcaption>
+      </figure>
+      <figure class="reveal">
+        <div class="phone"><div class="screen"><img src="apps/iphone/memory.webp" width="1080" height="2349" loading="lazy" alt="The Memory map: one cluster of findings per project"></div></div>
+        <figcaption><strong>Memory</strong><span>The findings, notes and tasks your agents saved, on a map of how they connect or as a list.</span></figcaption>
+      </figure>
+      <figure class="reveal">
+        <div class="phone"><div class="screen"><img src="apps/iphone/continue-in.webp" width="1080" height="2349" loading="lazy" alt="The Continue in sheet: accounts on each computer, with their plan and usage"></div></div>
+        <figcaption><strong>Continue in</strong><span>Near a limit? Carry the chat to another account or computer, with a written hand-off.</span></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="feature" aria-labelledby="only" style="padding-top:96px">
+  <div class="wrap" style="display:block">
+    <div class="band-head reveal" style="margin-bottom:44px">
+      <p class="eyebrow">Built for iPhone</p>
+      <h2 id="only">It works where the phone works.</h2>
+    </div>
+    <div class="cards">
+      <div class="card reveal"><div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 15h8"/></svg></div><h3>Live Activities</h3><p>One activity for all your agents on the Lock Screen and in the Dynamic Island, with Deny and Approve when one asks.</p></div>
+      <div class="card reveal"><div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg></div><h3>Siri and Shortcuts</h3><p>&ldquo;Add a phren task&rdquo; works from a locked phone. Add Task and Add Note can sit on the Action button.</p></div>
+      <div class="card reveal"><div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></div><h3>Widgets</h3><p>Your agents, top task, memory and usage on the Home Screen and the Lock Screen.</p></div>
+      <div class="card reveal"><div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg></div><h3>Controls</h3><p>Talk to Conductor and Pause All Agents, from Control Center and the Lock Screen.</p></div>
+      <div class="card reveal"><div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg></div><h3>Terminal</h3><p>Open the exact pane an agent runs in, with a key bar, shortcut panels, pinch to resize and image uploads.</p></div>
+      <div class="card reveal"><div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg></div><h3>On-device summaries</h3><p>On iPhones with Apple Intelligence, long replies are summarized on the phone before they are read aloud.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="how band" id="how" aria-labelledby="h-how">
+  <div class="wrap">
+    <div class="band-head reveal">
+      <p class="eyebrow">How it works</p>
+      <h2 id="h-how">Your phone, your computers, your agents.</h2>
+      <p>The agents keep running where they are, with your files and your accounts. The phone reaches them through a small helper on each computer.</p>
+    </div>
+    <div class="flowline reveal">
+      <div class="node">
+        <span class="num">1</span>
+        <h3>Your iPhone</h3>
+        <p>Pairs with a computer by scanning a code. Keeps one SSH key per computer, made on the phone.</p>
+      </div>
+      <div class="link" aria-hidden="true"><div class="wire"></div><span>SSH</span></div>
+      <div class="node">
+        <span class="num">2</span>
+        <h3>Phren Hook</h3>
+        <p>A small open-source helper on each computer. It finds the sessions running in Herdr or tmux and carries your messages, approvals and keystrokes to them.</p>
+        <ul><li>macOS</li><li>Linux</li><li>Tailscale when away</li></ul>
+      </div>
+      <div class="link" aria-hidden="true"><div class="wire"></div><span>On the computer</span></div>
+      <div class="node">
+        <span class="num">3</span>
+        <h3>Your agents</h3>
+        <p>Run as they always do, in your terminal, signed in to your own accounts. Their memory lives in a phren store you own.</p>
+        <ul><li>Claude Code</li><li>Codex</li><li>Copilot</li><li>OpenCode</li><li>Phren</li></ul>
+      </div>
+    </div>
+    <p class="how-note reveal">One command on each computer installs Phren Hook and shows the code to scan: <code>npx --yes @phren/cli@latest pair</code>. The <a href="get-started.html">setup guide</a> walks through it.</p>
+  </div>
+</section>
+
+<section class="privacy" id="privacy" aria-labelledby="h-privacy">
+  <div class="wrap">
+    <div class="copy reveal">
+      <p class="eyebrow">Privacy and security</p>
+      <h2 id="h-privacy">Nothing in between.</h2>
+      <p>There is no phren server for your sessions to pass through, because there isn&rsquo;t one. The phone talks to your computers, and to GitHub if you sync your memory there. We receive nothing.</p>
+      <a href="privacy.html">Read the privacy policy, item by item</a>
+    </div>
+    <div class="facts">
+      <div class="fact reveal"><h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Straight to your computers</h3><p>Every connection is SSH to a computer you paired, checked against its pinned host key. No public port, relay or Funnel.</p></div>
+      <div class="fact reveal"><h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/></svg>Keys stay on the phone</h3><p>Each SSH key is made on the phone and kept in its Keychain, on this device only. Only the public half goes to your computer. Never in backups.</p></div>
+      <div class="fact reveal"><h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>A key that can do one thing</h3><p>Your computer adds the phone&rsquo;s key with SSH&rsquo;s <code>restrict</code> option, so it can only talk to Phren Hook. Remove one line to revoke it.</p></div>
+      <div class="fact reveal"><h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>No analytics</h3><p>No analytics, no crash reports, no telemetry. Phren Hook and the CLI are <a href="https://github.com/alaarab/phren">open source</a>, so you can read what runs on your computers.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="closing" id="get" aria-labelledby="h-get">
+  <div class="wrap">
+    <div class="closing-panel reveal">
+      <div>
+        <p class="eyebrow">Get the app</p>
+        <h2 id="h-get">Try it with your own agents.</h2>
+        <p>phren for iPhone is in testing through Apple&rsquo;s TestFlight, and we are preparing the App Store release. Ask for an invite, install <a href="https://apps.apple.com/app/testflight/id899247664">TestFlight</a>, then pair your first computer.</p>
+        <div class="ctas">
+          <a class="btn btn-primary" href="support.html#contact">Ask for a TestFlight invite</a>
+          <a class="btn btn-ghost" href="get-started.html">Read the setup guide</a>
+        </div>
+        <p class="fine">Screenshots show sample projects and sample computers. Also on <a href="android.html">Android</a>.</p>
+      </div>
+      <div class="art" aria-hidden="true">
+        <div class="phone"><div class="screen"><img src="apps/iphone/talk-pill.webp" width="1080" height="2349" loading="lazy" alt=""></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><span class="word">phren</span> · made by <a href="https://github.com/alaarab">@alaarab</a> &amp; claude</span>
+    <nav aria-label="Footer">
+      <a href="index.html">Home</a>
+      <a href="get-started.html">Get started</a>
+      <a href="apps.html">Apps</a>
+      <a href="android.html">Android</a>
+      <a href="phren-hook.html">Phren Hook</a>
+      <a href="docs.html">Docs</a>
+      <a href="support.html">Support</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="https://github.com/alaarab/phren">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var els = document.querySelectorAll('.reveal');
+    if (!document.documentElement.classList.contains('js') || !('IntersectionObserver' in window)) {
+      els.forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { rootMargin: '0px 0px -8% 0px' });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+</script>
+</body>
+</html>
