@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The phone's Computers screen could show linked computers as unlinked. Each Hook's sets view waited up to 8 s for every peer, so one unreachable peer slowed every reading, and the phone gave up on the slow ones. The view now waits at most 4 s per peer; conductor checks keep their 8 s.
+
 ## [0.3.57] - 2026-10-24
 
 ### Added
