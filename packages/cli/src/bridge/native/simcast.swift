@@ -24,10 +24,14 @@ func call(_ target: AnyObject?, _ name: String, _ argument: Any? = nil) -> AnyOb
     guard let object = target as? NSObjectProtocol, object.responds(to: selector) else { return nil }
     return object.perform(selector, with: argument, with: nil)?.takeUnretainedValue()
 }
-/// A scalar property, boxed by key-value coding.
-func number(_ target: AnyObject?, _ name: String) -> Int? {
-    guard let object = target as? NSObject, object.responds(to: NSSelectorFromString(name)) else { return nil }
-    return object.value(forKey: name) as? Int
+/// An unsigned scalar getter by name. Sent with objc_msgSend rather than key-value
+/// coding, which CoreSimulator's proxies (ROCKImmutableProxy) refuse.
+let send = unsafeBitCast(dlsym(UnsafeMutableRawPointer(bitPattern: -2), "objc_msgSend"), to: (@convention(c) (AnyObject, Selector) -> UInt).self)
+func number(_ target: AnyObject?, _ name: String, bits: UInt = 64) -> Int? {
+    let selector = NSSelectorFromString(name)
+    guard let object = target as? NSObjectProtocol, object.responds(to: selector) else { return nil }
+    let value = send(object, selector)
+    return Int(bits >= 64 ? value : value & ((1 << bits) - 1))
 }
 
 let developerDir: String = {
@@ -48,16 +52,25 @@ guard number(device, "state") == 3 else { fail(5, "not booted") }
 
 /// The device's main display: the IO port whose descriptor renders to an
 /// IOSurface and whose display class is 0 (not CarPlay or an external one).
-/// Asked again each tick, since rotation or a respring swaps the surface.
-func framebuffer() -> IOSurface? {
+/// Each of these is a round trip to CoreSimulatorService, so the surface is
+/// looked up again only every `relookEvery` ticks (rotation or a respring swaps
+/// it) or when it went missing; between lookups a tick reads only its seed.
+func lookUpFramebuffer() -> IOSurface? {
     guard let ports = call(call(device, "io"), "ioPorts") as? [AnyObject] else { return nil }
     for port in ports {
         guard let descriptor = call(port, "descriptor") else { continue }
-        if let display = number(call(descriptor, "state"), "displayClass"), display != 0 { continue }
+        if let display = number(call(descriptor, "state"), "displayClass", bits: 16), display != 0 { continue }
         // framebufferSurface since Xcode 13, ioSurface before it.
         if let surface = (call(descriptor, "framebufferSurface") ?? call(descriptor, "ioSurface")) as? IOSurface { return surface }
     }
     return nil
+}
+let relookEvery = fps
+var cached: IOSurface?, ticks = 0
+func framebuffer() -> IOSurface? {
+    ticks += 1
+    if cached == nil || ticks % relookEvery == 0 { cached = lookUpFramebuffer() }
+    return cached
 }
 
 let renderer = CIContext(options: [.cacheIntermediates: false, .name: "simcast"])
@@ -68,8 +81,11 @@ var lastSurface: IOSurface?, lastSeed: UInt32 = 0, missing = 0
 let stats = ProcessInfo.processInfo.environment["PHREN_SIMCAST_STATS"] == "1"
 var statFrames = 0, statBytes = 0, statEncode = 0.0, statSince = DispatchTime.now()
 
-let queue = DispatchQueue(label: "simcast")
-let timer = DispatchSource.makeTimerSource(queue: queue)
+// Without these macOS treats a helper with no window as background work:
+// App Nap and timer coalescing held it to about 6 fps of a 24 fps timer.
+let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical, .idleSystemSleepDisabled], reason: "Streaming a simulator's screen")
+let queue = DispatchQueue(label: "simcast", qos: .userInteractive)
+let timer = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
 timer.schedule(deadline: .now(), repeating: .nanoseconds(1_000_000_000 / fps), leeway: .milliseconds(2))
 timer.setEventHandler {
     // The Hook went away without closing the pipe: stop rather than linger.

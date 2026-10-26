@@ -10,6 +10,8 @@ import { bootedSimulators, SIMULATOR_UDID, verifiedHelper } from "./simulators.j
  * each changed frame as a length-prefixed JPEG; this side forwards them.
  *
  * Why JPEG frames from the framebuffer, not the alternatives:
+ * - `simctl io screenshot` took about 1.1 s a shot (Xcode 27.1, M1 Max),
+ *   which is today's 1 fps poll and no more.
  * - `simctl io recordVideo` writes a QuickTime movie that is only readable
  *   once finalized, so it cannot feed a live socket.
  * - ScreenCaptureKit on the Simulator window needs a Screen Recording grant
