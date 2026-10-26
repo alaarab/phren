@@ -52,6 +52,11 @@ describe("foldComputers", () => {
     expect(rows[0].aliases).toEqual([]);
   });
 
+  it("never makes another machine sharing this computer's profile one of its names", () => {
+    const rows = foldComputers({ local: { names: ["omarchy"] }, peers: [], machines: { air: "omarchy", omarchy: "omarchy" } });
+    expect(rows.map(row => [row.name, row.aliases, row.local])).toEqual([["omarchy", [], true], ["air", [], false]]);
+  });
+
   it("groups unlinked names by label, then by profile, shortest name leading", () => {
     const rows = foldComputers({ local: { names: ["Desk"] }, peers: [], machines: {
       "Box.example.net": "lab", box: "lab", "box.local": "lab", "Other.lan": "lab", Elsewhere: "x" } });
