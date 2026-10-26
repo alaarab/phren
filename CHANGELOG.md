@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A computer could take another machine's name in its own linked set: a machines.yaml name that shares this computer's profile but none of its names (a MacBook Air set up with a Linux box's profile) became one of its names, and the Linux box listed itself as "air". Such a name is now another computer.
+
 - The phone's Computers screen could show linked computers as unlinked. Each Hook's sets view waited up to 8 s for every peer, so one unreachable peer slowed every reading, and the phone gave up on the slow ones. The view now waits at most 4 s per peer; conductor checks keep their 8 s.
 
 ## [0.3.57] - 2026-10-24

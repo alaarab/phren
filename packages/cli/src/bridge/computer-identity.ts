@@ -57,8 +57,10 @@ function addAlias(row: Computer, name: string, rows: readonly Computer[] = [row]
 /** Folds what this Hook knows into one row per real computer. A machines.yaml
  * name joins a computer when its first label matches any name that computer
  * has, or when it shares a profile with names already folded into exactly one
- * computer (a profile two computers claim folds nothing). The rest become
- * unlinked rows: names sharing a label or a profile are one computer. */
+ * peer (a profile two computers claim folds nothing). This computer knows its
+ * own names, so a name matching none of them is another machine even when it
+ * shares this computer's profile. The rest become unlinked rows: names
+ * sharing a label or a profile are one computer. */
 export function foldComputers(facts: IdentityFacts, options: { trusted?: boolean } = {}): Computer[] {
   const localName = facts.local.names.find(name => !name.includes(".")) ?? facts.local.names[0] ?? "local";
   const linked: Computer[] = [{ ...(facts.local.id ? { id: facts.local.id } : {}), name: localName, aliases: [], local: true, linked: true, reachable: true }];
@@ -92,7 +94,9 @@ export function foldComputers(facts: IdentityFacts, options: { trusted?: boolean
   const unfolded: [string, string][] = [];
   for (const [name, profile] of rest) {
     const claimed = claims.get(profile);
-    if (claimed?.size === 1) fold([...claimed][0], name, profile, false); else unfolded.push([name, profile]);
+    // A MacBook Air set up with this Linux box's profile is not this box: it
+    // became an alias here and the box called itself "air" in its own set.
+    if (claimed?.size === 1 && ![...claimed][0].local) fold([...claimed][0], name, profile, false); else unfolded.push([name, profile]);
   }
   for (const [row, counts] of votes) row.profile = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
 
