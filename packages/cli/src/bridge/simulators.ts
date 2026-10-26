@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { BridgeError, bridgeRoot, type Json } from "./protocol.js";
 
 const exec = promisify(execFile);
-const UDID = /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i;
+export const SIMULATOR_UDID = /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i;
 
 /** The iOS simulators booted on this Mac, from `simctl`; none elsewhere. */
 export async function bootedSimulators(): Promise<Json[]> {
@@ -20,7 +20,7 @@ export async function bootedSimulators(): Promise<Json[]> {
     // com.apple.CoreSimulator.SimRuntime.iOS-26-1 → iOS 26.1
     const runtime = runtimeID.replace(/^.*SimRuntime\./, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/-/g, " ");
     for (const device of devices ?? []) {
-      if (device.state !== "Booted" || !device.udid || !UDID.test(device.udid)) continue;
+      if (device.state !== "Booted" || !device.udid || !SIMULATOR_UDID.test(device.udid)) continue;
       list.push({ udid: device.udid.toUpperCase(), name: String(device.name ?? "Simulator").slice(0, 120), runtime });
       if (list.length >= 16) return list;
     }
@@ -30,7 +30,7 @@ export async function bootedSimulators(): Promise<Json[]> {
 
 /** A PNG of one booted simulator's screen. */
 export async function simulatorScreenshot(udid: string): Promise<Buffer> {
-  if (!UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
+  if (!SIMULATOR_UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
   if (process.platform !== "darwin") throw new BridgeError(404, "Simulators run on macOS only.");
   const file = path.join(tmpdir(), `phren-sim-${randomUUID()}.png`);
   try {
@@ -52,34 +52,42 @@ export type SimulatorAction =
   | { action: "tap"; x: number; y: number }
   | { action: "type"; text: string; submit?: boolean };
 
-/** The native helper (native/simtap.swift) that finds the Simulator window
- * through the Accessibility API and posts touches and keys with CGEvent.
- * AppleScript would need Automation consent, which a launchd agent can never
- * be prompted for; the helper needs one Accessibility grant. Its `prompt`
- * command puts it in the Accessibility list and shows the system dialog.
- * Compiled once per Hook version with swiftc, which any Mac with the
- * simulators has. */
-let building: Promise<string> | undefined;
-function helper(): Promise<string> {
-  building ??= buildHelper().finally(() => { building = undefined; });
-  return building;
+/** The native helpers, compiled once per Hook version with swiftc, which any
+ * Mac with the simulators has. simtap (native/simtap.swift) finds the
+ * Simulator window through the Accessibility API and posts touches and keys
+ * with CGEvent. AppleScript would need Automation consent, which a launchd
+ * agent can never be prompted for; the helper needs one Accessibility grant.
+ * Its `prompt` command puts it in the Accessibility list and shows the system
+ * dialog. simcast (native/simcast.swift) streams a simulator's framebuffer
+ * for simulator-stream.ts and needs no grant. */
+export type NativeHelper = "simtap" | "simcast";
+const HELPER_LABEL: Record<NativeHelper, string> = { simtap: "simulator input helper", simcast: "simulator stream helper" };
+const building = new Map<NativeHelper, Promise<string>>();
+function helper(name: NativeHelper): Promise<string> {
+  let build = building.get(name);
+  if (!build) { build = buildHelper(name).finally(() => building.delete(name)); building.set(name, build); }
+  return build;
 }
-async function buildHelper(): Promise<string> {
+async function helperSource(name: NativeHelper): Promise<string> {
+  const bundled = name === "simtap" ? (typeof SIMTAP_SOURCE === "string" ? SIMTAP_SOURCE : undefined) : (typeof SIMCAST_SOURCE === "string" ? SIMCAST_SOURCE : undefined);
+  return bundled ?? await readFile(new URL(`./native/${name}.swift`, import.meta.url), "utf8");
+}
+async function buildHelper(name: NativeHelper): Promise<string> {
   const dir = path.join(bridgeRoot(), "native");
-  const binary = path.join(dir, "simtap");
-  const code = typeof SIMTAP_SOURCE === "string" ? SIMTAP_SOURCE : await readFile(new URL("./native/simtap.swift", import.meta.url), "utf8");
+  const binary = path.join(dir, name);
+  const code = await helperSource(name);
   const digest = createHash("sha256").update(code).digest("hex");
   // Rebuilt only when the source changes: the Accessibility grant is tied
   // to this binary, and a needless rebuild would make macOS ask again.
   const saved = await readFile(binary + ".sha256", "utf8").then(JSON.parse).catch(() => undefined);
   if (await stat(binary).catch(() => undefined) && saved?.sourceSha === digest) return binary;
   await mkdir(dir, { recursive: true, mode: 0o700 });
-  const temporary = path.join(dir, `simtap.${randomUUID()}`), source = temporary + ".swift";
+  const temporary = path.join(dir, `${name}.${randomUUID()}`), source = temporary + ".swift";
   const sidecar = temporary + ".sha256";
   try {
     await writeFile(source, code, { mode: 0o600, flag: "wx" });
     await exec("/usr/bin/swiftc", ["-O", "-o", temporary, source], { timeout: 180_000 }).catch(() => {
-      throw new BridgeError(409, "Couldn't build the simulator input helper (needs Xcode's swiftc).");
+      throw new BridgeError(409, `Couldn't build the ${HELPER_LABEL[name]} (needs Xcode's swiftc).`);
     });
     await chmod(temporary, 0o700);
     const binarySha = createHash("sha256").update(await readFile(temporary)).digest("hex");
@@ -90,6 +98,7 @@ async function buildHelper(): Promise<string> {
   return binary;
 }
 declare const SIMTAP_SOURCE: string | undefined;
+declare const SIMCAST_SOURCE: string | undefined;
 
 let inputQueue: Promise<void> = Promise.resolve();
 function simtap(name: string, ...args: string[]): Promise<void> {
@@ -97,12 +106,12 @@ function simtap(name: string, ...args: string[]): Promise<void> {
   inputQueue = task;
   return task;
 }
-/** The helper, hashed again right before it runs. */
-async function verifiedHelper(): Promise<string> {
-  const binary = await helper();
+/** A helper, hashed again right before it runs. */
+export async function verifiedHelper(name: NativeHelper = "simtap"): Promise<string> {
+  const binary = await helper(name);
   const saved = await readFile(binary + ".sha256", "utf8").then(JSON.parse).catch(() => undefined);
   const binarySha = createHash("sha256").update(await readFile(binary)).digest("hex");
-  if (!saved || saved.binarySha !== binarySha) throw new BridgeError(409, "Simulator input helper integrity check failed.");
+  if (!saved || saved.binarySha !== binarySha) throw new BridgeError(409, `${HELPER_LABEL[name][0].toUpperCase()}${HELPER_LABEL[name].slice(1)} integrity check failed.`);
   return binary;
 }
 async function executeSimtap(name: string, ...args: string[]): Promise<void> {
@@ -143,7 +152,7 @@ const ACCESSIBILITY_PANE = "x-apple.systempreferences:com.apple.preference.secur
 const KEY_H = "4", KEY_L = "37";
 
 export async function simulatorAct(udid: string, request: SimulatorAction): Promise<Json> {
-  if (!UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
+  if (!SIMULATOR_UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
   if (!["boot", "shutdown", "launch", "openurl", "home", "lock", "type", "tap", "screenshot-ready", "accessibility-settings"].includes(request.action)) throw new BridgeError(400, "Unknown simulator action.");
   if (process.platform !== "darwin") throw new BridgeError(404, "Simulators run on macOS only.");
   const simctl = (...args: string[]) => exec("/usr/bin/xcrun", ["simctl", ...args], { timeout: 30_000 }).catch(() => { throw new BridgeError(409, `simctl ${args[0]} failed for that simulator.`); });
@@ -192,7 +201,7 @@ async function deviceName(udid: string): Promise<string> {
 }
 /** The apps a simulator has, for the launcher. */
 export async function simulatorApps(udid: string): Promise<Json[]> {
-  if (!UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
+  if (!SIMULATOR_UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
   if (process.platform !== "darwin") return [];
   const { stdout } = await exec("/usr/bin/xcrun", ["simctl", "listapps", udid], { timeout: 15_000, maxBuffer: 4_194_304 }).catch(() => ({ stdout: "" }));
   const apps: Json[] = [];

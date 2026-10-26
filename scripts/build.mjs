@@ -122,9 +122,10 @@ try {
     external: ["bufferutil", "utf-8-validate", "@phren/code"],
     define: {
       PHREN_HOOK_VERSION: JSON.stringify(JSON.parse(fs.readFileSync(path.join(cliRoot, "package.json"), "utf8")).version),
-      // The simulator input helper's Swift source rides inside the bundle
-      // and is compiled on the Mac that needs it.
+      // The simulator helpers' Swift sources ride inside the bundle
+      // and are compiled on the Mac that needs them.
       SIMTAP_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simtap.swift"), "utf8")),
+      SIMCAST_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simcast.swift"), "utf8")),
       // The OpenCode transcript plugin rides inside the bundle too, so a copied
       // or relocated bundle still installs and updates it.
       OPENCODE_PLUGIN_SOURCE: JSON.stringify(fs.readFileSync(path.join(cliRoot, "plugins/opencode/phren-transcript.js"), "utf8")),

@@ -291,7 +291,7 @@ to booleans or claim every declaration is operational.
 | --- | --- | --- |
 | memory | New `memory`; also available from synced store config without Hook | Projects, findings, notes, review, search and memory graph |
 | tasks | New `tasks`, from the selected store/profile | Tasks tab, project task section and task actions |
-| hook | New `hook`; existing `transcript`, `progress`, `images`, `prompt`, `stop`, `terminal`, `shell`, `herdr`, `webServers`, `webPreview`, `activity`, `approvals`, `accountUsage`, `providers`, `files`, `repositoryFiles`, `subagents`, `approvalPush`; `simulators` only where supported | Agents, chat, terminal, files, previews and supported host extras |
+| hook | New `hook`; existing `transcript`, `progress`, `images`, `prompt`, `stop`, `terminal`, `shell`, `herdr`, `webServers`, `webPreview`, `activity`, `approvals`, `accountUsage`, `providers`, `files`, `repositoryFiles`, `subagents`, `approvalPush`; `simulators` and `simulatorStream` only where supported | Agents, chat, terminal, files, previews and supported host extras |
 | git | New `git`, existing `diff`, when Git and Hook routes are active | Changes, History, Branches, PRs, Working tree and transcript diff actions |
 | code | New `code`, when Code and Hook routes are active; each project needs its own index | Code cell on the project page: what changed, search and a function's or type's details |
 | schedules | New `schedules`; host execution additionally needs Hook | Project and all-project Schedules; run/history actions require the selected host's capability |
