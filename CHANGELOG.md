@@ -5,7 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.58] - 2026-10-26
+
+### Added
+
+- Phren Hook streams a booted iOS simulator's screen to the phone live (`WS /v1/simulators/stream`), at about 24 frames a second, with no Screen Recording permission. The phone falls back to screenshots when a Hook doesn't offer it.
+
 ### Fixed
+
+- Simulator commands the Hook runs (listing, screenshots, building its helpers) are killed outright when they time out, so one that hangs can't hold a simulator stream's slot.
 
 - A computer could take another machine's name in its own linked set: a machines.yaml name that shares this computer's profile but none of its names (a MacBook Air set up with a Linux box's profile) became one of its names, and the Linux box listed itself as "air". Such a name is now another computer.
 
