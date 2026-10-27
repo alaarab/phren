@@ -145,6 +145,15 @@ function nonSpace(text: string): number {
   return text.replace(/\s+/g, "").length;
 }
 
+/** `text` after its first `count` characters that are not whitespace, from the start of the word they end
+ * in when they end inside one. */
+function after(text: string, count: number): string {
+  let at = 0;
+  for (let seen = 0; at < text.length && seen < count; at++) if (!/\s/.test(text[at])) seen++;
+  if (at < text.length && !/\s/.test(text[at])) while (at > 0 && !/\s/.test(text[at - 1])) at--;
+  return text.slice(at).trim();
+}
+
 /** Seconds of audio in a chunk of the given format. */
 function seconds(format: SpeechFormat, bytes: number): number {
   const mp3 = /^mp3_\d+_(\d+)$/.exec(format);
@@ -279,15 +288,19 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       put = words => { if (current()) carry(words); };
       /** What this socket was sent and never voiced, by the characters its alignment covered, spaces left out
        * on both sides (ElevenLabs may or may not time the spaces); a chunk short of at most two of its own
-       * characters counts as voiced. Without alignment: what came after its first audio, or nothing once the
-       * reply is done (its close was sent with it). */
+       * characters counts as voiced, and one voiced in part is replayed from the word its voicing stopped in
+       * (a phone frame of several paragraphs is one chunk). Without alignment: what came after its first
+       * audio, or nothing once the reply is done (its close was sent with it). */
       const unvoiced = (): string[] => {
         if (!voicedChars) return done ? [] : sent.slice(Math.max(0, sentAtFirstAudio));
         let covered = 0;
         for (const [index, words] of sent.entries()) {
-          const length = nonSpace(words);
+          const length = nonSpace(words), before = covered;
           covered += length;
-          if (voicedChars < covered - Math.min(2, Math.floor(length / 2))) return sent.slice(index);
+          if (voicedChars < covered - Math.min(2, Math.floor(length / 2))) {
+            const rest = voicedChars > before ? after(words, voicedChars - before) : words;
+            return rest ? [rest, ...sent.slice(index + 1)] : sent.slice(index + 1);
+          }
         }
         return [];
       };
