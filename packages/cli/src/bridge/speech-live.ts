@@ -353,8 +353,10 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
         if (message.isFinal === true || message.is_final === true) {
           // Text-to-dialogue (v4) ends a socket after the text it had, though the reply goes on: what it never
           // voiced, and the reply's next text, go to a fresh socket, timed on from this one's audio.
+          // A socket given words that voiced none of them falls back, the phone's done or not: a fresh socket
+          // ending just after that done would otherwise end the reply with its words never spoken.
           if (!voiced) {
-            if (done) { tell({ type: "done" }); finish(); } else fallBack({ code: "speech-failed", error: "ElevenLabs ended without voicing the reply." });
+            if (done && !sent.length) { tell({ type: "done" }); finish(); } else fallBack({ code: "speech-failed", error: "ElevenLabs ended without voicing the reply." });
             return;
           }
           // Stream-input ends only after the close sent with the phone's done; text-to-dialogue may end after

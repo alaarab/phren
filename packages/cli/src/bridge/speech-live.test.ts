@@ -387,6 +387,26 @@ describe("live spoken replies", () => {
       expect(client.closed).toEqual({ code: 1000, reason: "" });
     });
 
+    it("falls back to Flash for a fresh socket that ends without audio after the phone's done, and errors when Flash does too", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "First paragraph.\n" });
+      upstreams[0].reply(voiced("First paragraph."));
+      upstreams[0].reply({ isFinal: true });
+      say(client, { text: "Second paragraph.\n" });
+      upstreams[1].open();
+      say(client, { done: true });
+      // The phone's done reached the relay just before the fresh socket's end, with nothing voiced.
+      upstreams[1].reply({ isFinal: true });
+      expect(frames(client).map(frame => frame.type)).toEqual(["start", "audio"]);
+      expect(new URL(upstreams[2].url).searchParams.get("model_id")).toBe(FALLBACK_SPEECH_MODEL);
+      upstreams[2].open();
+      expect(frames(upstreams[2]).slice(1)).toEqual([{ text: "Second paragraph. " }, { text: "" }]);
+      upstreams[2].reply({ isFinal: true });
+      expect(frames(client).at(-1)).toEqual({ type: "error", code: "speech-failed", error: "ElevenLabs ended without voicing the reply." });
+      expect(client.closed?.code).toBe(1011);
+    });
+
     it("falls back to Flash with the text when a socket ends before any audio", async () => {
       const { client, upstreams } = await live();
       upstreams[0].open();
