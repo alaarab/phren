@@ -112,7 +112,9 @@ example `Return: Devbox parser checks done, tests passed (dispatch <id>).
 Call dispatch_returns.` It never types into a working agent; a return waiting
 on a working agent is tried again every 5 seconds, under the same `deliveryId`.
 
-CLI equivalent: `phren dispatch returns`. `phren dispatch returns --watch` prints them as they land, one line each, until Ctrl-C (`--json`: one JSON object per line); it marks them read as it prints, so an agent conductor on the same Hook no longer gets them.
+CLI equivalent: `phren dispatch returns`. `phren dispatch returns --watch` prints them as they land, one line each, until Ctrl-C (`--json`: one JSON object per line), without marking them read, so an agent conductor on the same Hook still gets them; `--consume` takes them as it prints.
+
+The Hook route behind it, `POST /v1/dispatch/returns`, takes the unread returns (marks them read). With `?peek=1` it lists the same rows and leaves them unread; a peek is answered by this Hook itself, never forwarded to a conductor's successor, and refused from a peer.
 
 A `blocked` row with an `approval` object is a permission request the worker is
 waiting on, forwarded by its Hook: `actionId`, `tool`, and, when known,

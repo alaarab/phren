@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `phren dispatch returns --watch` no longer takes returns away from an agent conductor on the same Hook: it reads them with the returns route's new `?peek=1`, which leaves them unread, and prints each once (again only when the worker returns anew). `--consume` keeps the old behaviour of marking them read.
 - `phren dispatch returns --watch` prints worker returns as they land, one line each (time, label, computer, state and the end of the final reply), until Ctrl-C, for a conductor in a plain terminal; `--json` prints one JSON object per line. It reads the returns the Hook already collects, so no second poller runs.
 
 ### Fixed

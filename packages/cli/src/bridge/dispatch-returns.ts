@@ -593,19 +593,25 @@ export function formatReturnLine(row: Json, timeZone?: string): string {
 
 /**
  * `phren dispatch returns --watch`: the returns this Hook's DispatchReturns has collected, printed as they
- * land, until `signal` aborts. It reads them as `returns` does, so it takes them (marks them read): an agent
- * conductor on this Hook no longer gets those. Peers are polled by the Hook alone. `json` prints each return
- * as one JSON object per line. A read that fails is said on `warn` once, until a read works again.
+ * land, until `signal` aborts. `read` peeks by default (the unread returns, left unread for an agent
+ * conductor), so each return is printed once by its id and version (a worker that returns again after
+ * more work is printed again); with `--consume` it takes them as `returns` does. Peers are polled by the
+ * Hook alone. `json` prints each return as one JSON object per line. A read that fails is said on `warn`
+ * once, until a read works again.
  */
 export async function watchReturns(read: () => Promise<Json[]>, print: (line: string) => void,
   options: { signal: AbortSignal; json?: boolean; intervalMs?: number; timeZone?: string; warn?: (line: string) => void }): Promise<void> {
   const interval = options.intervalMs ?? 5_000;
   let failing: string | undefined;
+  // The returns already printed that are still unread; one taken by the conductor drops out with its read.
+  let printed = new Set<string>();
+  const key = (row: Json) => `${String(row.id)}@${String(row.at)}`;
   while (!options.signal.aborted) {
     try {
       const rows = await read();
       if (failing !== undefined) { options.warn?.("Phren Hook answers again."); failing = undefined; }
-      for (const row of rows) print(options.json ? JSON.stringify(row) : formatReturnLine(row, options.timeZone));
+      for (const row of rows) if (!printed.has(key(row))) print(options.json ? JSON.stringify(row) : formatReturnLine(row, options.timeZone));
+      printed = new Set(rows.map(key));
     } catch (error) {
       // A Hook that is restarting answers again on a later read; its first sentence is enough.
       const why = (error instanceof Error ? error.message : String(error)).split(/(?<=\.)\s/)[0];
