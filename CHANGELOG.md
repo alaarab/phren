@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `phren dispatch returns --watch` prints worker returns as they land, one line each (time, label, computer, state and the end of the final reply), until Ctrl-C, for a conductor in a plain terminal; `--json` prints one JSON object per line. It reads the returns the Hook already collects, so no second poller runs.
+
 ### Fixed
 
 - A Claude permission the owner answered in the pane's own terminal stayed on the phone as a waiting card with Approve and Deny, often under "Approved. Claude asked again.": Claude moves on without ending the Hook's hold, so the card lasted until the hold timed out, then as a remembered terminal prompt while the pane still read as waiting. The Hook now drops the held or remembered request once the conversation's next callback shows it was answered: the held call's own PostToolUse, the turn's Stop or a new prompt, or a different permission request.

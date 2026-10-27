@@ -4,6 +4,7 @@ import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { logger } from "../logger.js";
@@ -566,6 +567,53 @@ export function returnRow(receipt: Receipt): Json {
     ...(receipt.account ? { account: receipt.account } : {}), ...(receipt.accountChoice ? { accountChoice: receipt.accountChoice } : {}),
     ...(receipt.continued ? { continued: receipt.continued } : {}), ...(receipt.continues ? { continues: receipt.continues } : {}),
     ...(receipt.moves ? { moves: receipt.moves } : {}), ...(receipt.target ? { target: receipt.target } : {}) };
+}
+
+/** How much of a worker's final reply a watched return line shows. */
+export const RETURN_LINE_TAIL = 120;
+
+/**
+ * One return as a terminal line for `phren dispatch returns --watch`: when it landed (local time), the
+ * dispatch label, the computer, the state, and a short tail of what it ended with (the final reply, the
+ * question it asks, or why it failed or is blocked), on one line.
+ */
+export function formatReturnLine(row: Json, timeZone?: string): string {
+  const at = typeof row.at === "string" && Number.isFinite(Date.parse(row.at))
+    ? new Date(row.at).toLocaleTimeString("en-GB", { hour12: false, ...(timeZone ? { timeZone } : {}) }) : "--:--:--";
+  const approval = row.approval && typeof row.approval === "object" ? row.approval as Json : undefined;
+  const said = [row.question, row.error, approval ? `waiting on ${String(approval.title ?? approval.tool ?? "an approval")}` : undefined, row.reply]
+    .find((value): value is string => typeof value === "string" && value.trim() !== "");
+  // A worker's words reach the owner's terminal: no escape sequences (a title, the clipboard, the cursor).
+  const flat = (said ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
+  // Whole characters, so a cut never splits one.
+  const chars = Array.from(flat);
+  const tail = chars.length > RETURN_LINE_TAIL ? `…${chars.slice(-(RETURN_LINE_TAIL - 1)).join("")}` : flat;
+  return [at, String(row.label ?? row.id ?? "worker"), String(row.computer ?? "?"), String(row.state ?? "?")].join("  ") + (tail ? `  ${tail}` : "");
+}
+
+/**
+ * `phren dispatch returns --watch`: the returns this Hook's DispatchReturns has collected, printed as they
+ * land, until `signal` aborts. It reads them as `returns` does, so it takes them (marks them read): an agent
+ * conductor on this Hook no longer gets those. Peers are polled by the Hook alone. `json` prints each return
+ * as one JSON object per line. A read that fails is said on `warn` once, until a read works again.
+ */
+export async function watchReturns(read: () => Promise<Json[]>, print: (line: string) => void,
+  options: { signal: AbortSignal; json?: boolean; intervalMs?: number; timeZone?: string; warn?: (line: string) => void }): Promise<void> {
+  const interval = options.intervalMs ?? 5_000;
+  let failing: string | undefined;
+  while (!options.signal.aborted) {
+    try {
+      const rows = await read();
+      if (failing !== undefined) { options.warn?.("Phren Hook answers again."); failing = undefined; }
+      for (const row of rows) print(options.json ? JSON.stringify(row) : formatReturnLine(row, options.timeZone));
+    } catch (error) {
+      // A Hook that is restarting answers again on a later read; its first sentence is enough.
+      const why = (error instanceof Error ? error.message : String(error)).split(/(?<=\.)\s/)[0];
+      if (why !== failing) options.warn?.(`Phren Hook did not answer: ${why}`);
+      failing = why;
+    }
+    await sleep(interval, undefined, { signal: options.signal }).catch(() => undefined);
+  }
 }
 
 export interface DispatchReturnsOptions {
