@@ -41,16 +41,18 @@ export interface CommandSpec {
 }
 
 export interface ParsedOption { name: string; value?: string }
-export interface ParsedArgs { options: ParsedOption[]; operands: string[] }
+/** `dashdash`: how many operands came before a `--` (undefined when there was none). */
+export interface ParsedArgs { options: ParsedOption[]; operands: string[]; dashdash?: number }
 
 /** `args` read as `spec`'s command reads them, or null when any option is not on its list. */
 export function parseOptions(args: string[], spec: CommandSpec): ParsedArgs | null {
   if (spec.anyArgs) return { options: [], operands: [...args] };
   const options: ParsedOption[] = [], operands: string[] = [];
+  let dashdash: number | undefined;
   const has = (set: string | undefined, c: string) => !!set && set.includes(c);
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--") { operands.push(...args.slice(i + 1)); break; }
+    if (arg === "--") { dashdash = operands.length; operands.push(...args.slice(i + 1)); break; }
     if (arg.startsWith("--")) {
       const eq = arg.indexOf("=");
       const name = eq === -1 ? arg.slice(2) : arg.slice(2, eq);
@@ -84,7 +86,14 @@ export function parseOptions(args: string[], spec: CommandSpec): ParsedArgs | nu
     operands.push(arg);
   }
   if (spec.maxOperands !== undefined && operands.length > spec.maxOperands) return null;
-  return { options, operands };
+  return { options, operands, ...(dashdash !== undefined ? { dashdash } : {}) };
+}
+
+/** A parsed option written back as one argument (`--name=value`, `-xVALUE`, `-NUM`). */
+export function optionArg(o: ParsedOption): string {
+  if (o.name === "-NUM") return `-${o.value}`;
+  if (o.value === undefined) return o.name;
+  return o.name.startsWith("--") ? `${o.name}=${o.value}` : `${o.name}${o.value}`;
 }
 
 /** The arguments of a parsed command that name files it reads. */
@@ -234,7 +243,8 @@ export const GIT_SPECS: Record<string, CommandSpec> = {
     longOptional: ["porcelain", "ignored", "untracked-files", "ignore-submodules", "find-renames", "column"] },
   diff: { flags: "pusRawbBzW", valued: "SGlO", attached: "UMCBX", long: [...GIT_DIFF_LONG, "cached", "staged", "no-index", "merge-base"],
     longOptional: GIT_DIFF_OPTIONAL, longValued: GIT_DIFF_VALUED, pathOptions: ["-O"] },
-  log: { flags: "pqsuzw", valued: "nSGL", attached: "UMC", numeric: true, long: [...GIT_LOG_LONG, ...GIT_DIFF_LONG],
+  // No -L: its `START,END:FILE` prints a file's lines, and the file is inside the value.
+  log: { flags: "pqsuzw", valued: "nSG", attached: "UMC", numeric: true, long: [...GIT_LOG_LONG, ...GIT_DIFF_LONG],
     longOptional: [...GIT_LOG_OPTIONAL, ...GIT_DIFF_OPTIONAL], longValued: [...GIT_LOG_VALUED, ...GIT_DIFF_VALUED] },
   show: { flags: "pqsuzw", valued: "nSG", attached: "UMC", numeric: true, long: [...GIT_LOG_LONG, ...GIT_DIFF_LONG],
     longOptional: [...GIT_LOG_OPTIONAL, ...GIT_DIFF_OPTIONAL], longValued: [...GIT_LOG_VALUED, ...GIT_DIFF_VALUED] },

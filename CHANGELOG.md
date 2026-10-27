@@ -13,6 +13,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- phren agent's `auto-confirm` has a second set of fixes.
+  - It now asks for:
+    - a read of a path outside the project (`cat /tmp/x`, or a link that points out);
+    - a `git diff`, `git log -p` or `git show` that would print a changed secret file's patch (git lists those paths for the same revisions and pathspecs);
+    - `git log -L`, `$[…]` arithmetic, and a printf `%n` format, which assigns a variable;
+    - a `cd -P` through a link, now followed to where it really leads;
+    - a quoted `'~/x'`, now checked as the file it names rather than one in the home directory;
+    - `git status -v`, `git log --binary` and `-C -C` copy detection, which print patches;
+    - a pickaxe `git log -S` with a textconv configured;
+    - a `REV:PATH` outside the project (read from the repository's top);
+    - a known git read with an option the checker can't read, even after the session approved that git subcommand.
+  - It no longer asks for:
+    - `git grep TOKEN -- src` when the secret is elsewhere;
+    - `grep -r --exclude=…` when the exclusion skips the secret (grep lists its own selection);
+    - jq programs that only mention `.import` or `"include"`;
+    - a plain `git log -5` in a repository with a textconv or clean filter configured.
 - phren agent's `auto-confirm` ran some read-only commands unprompted with options that write or run programs, because it kept a list of the bad options and every review found another (`git grep -O`, `sort -ro`, `rg --pre`, `rg -e -- --pre=x`, `uniq IN OUT`). Each read-only command now takes only its listed safe options, read by a real option parser. A command approved for the session still asks before it reads a secret file or runs outside the project, a word the shell expands into file names (`cat config/*`) asks, and paths through a symlink and `..` are checked where they really lead.
 - phren agent's `auto-confirm` closes ten more ways to run a command unprompted that it should have asked about. It no longer takes an inherited name like `git constructor` for a known subcommand. It asks for `jq -f`, whose first operand is then an input file. It sees `--fix` after `--` (`npm run lint -- --fix`). It requires a redirection to be exactly `>&1`, `>&2` or `/dev/null` (`>&1name` writes a file). It treats a backslash-newline as something to ask about. It checks the paths after a `cd` from where the `cd` went. It looks below a recursive read (`grep -r`, `rg`, `diff -r`, `git grep`) for secret files. It asks for options that take filenames from a list (`--files0-from`, `sha256sum -c`, `file -f`) and for `printf -v`. Agent shells now run git with fsmonitor, the pager and signature checks off, and a git read asks when git's config sets an external diff, a textconv or a filter other than git-lfs's and git-crypt's. A review of these fixes closed more: a `\"` inside double quotes no longer ends the quote, which had let a second command on the line run unprompted. A `cd` in a pipeline, before `||` or to a missing directory asks, as do `~name` words, `git diff --no-index`, `%G` formats, jq `import`, `lint:fix`-style scripts and `grep -d` values other than `read`/`skip`. A second review closed further gaps:
 - A `#` comment asks, since a quote inside it could hide a command on the next line.
