@@ -1,9 +1,9 @@
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { badAccountSlug, suggestAccountSlug } from "./claude-account-setup.js";
-import { claudeAuthStatus, claudeHome, claudeHomes, DEFAULT_ACCOUNT, isAccountSlug, type AuthStatus, type ClaudeHome } from "./claude-accounts.js";
+import { claudeAuthStatus, claudeHome, claudeHomes, clearAccountCaches, DEFAULT_ACCOUNT, isAccountSlug, type AuthStatus, type ClaudeHome } from "./claude-accounts.js";
 import { BridgeError, bridgeRoot, type Json } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
 
@@ -19,11 +19,27 @@ function existingSlot(slug: string): ClaudeHome {
   return home;
 }
 
-/** `claude /login` under the slot's own home: CLAUDE_CONFIG_DIR for an added account, and for the default one
- * when the Hook's is not ~/.claude (set where the Hook started, not in the pane's shell). */
-function loginCommand(home: ClaudeHome): string {
-  if (home.isDefault && home.dir === path.join(homeDir(), ".claude")) return "claude /login";
-  return `CLAUDE_CONFIG_DIR='${home.dir.replace(/'/g, "'\\''")}' claude /login`;
+/**
+ * `claude /login` under the slot's own home, never the pane shell's: a shell that exports CLAUDE_CONFIG_DIR
+ * (`~/.claude-work` from the owner's profile) would otherwise sign in that account while the Hook checks this
+ * one. The default home the Hook found without CLAUDE_CONFIG_DIR runs with it removed (Claude's own default,
+ * where its keychain item lives); every home the Hook found through it, the default one included and even when
+ * that is ~/.claude, runs with it set to the home, as the Hook's own status check does. `env` runs a program,
+ * not the shell's alias for `claude` (an old local install's `alias claude=~/.claude/local/claude`), so the
+ * command names the `claude` the Hook finds on its PATH, when it finds one.
+ */
+export function loginCommand(home: ClaudeHome, claude = claudeBinary()): string {
+  const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+  const configured = !home.isDefault || home.configFile === path.join(home.dir, ".claude.json");
+  const program = claude ? quote(claude) : "claude";
+  return configured ? `env CLAUDE_CONFIG_DIR=${quote(home.dir)} ${program} /login` : `env -u CLAUDE_CONFIG_DIR ${program} /login`;
+}
+
+/** The `claude` executable on the Hook's PATH, else Claude's own local install, else undefined. */
+function claudeBinary(): string | undefined {
+  const candidates = [...(process.env.PATH ?? "").split(path.delimiter).filter(Boolean).map(directory => path.join(directory, "claude")),
+    path.join(homeDir(), ".claude", "local", "claude")];
+  return candidates.find(file => { try { accessSync(file, constants.X_OK); return statSync(file).isFile(); } catch { return false; } });
 }
 
 /** A sign-in pane blocks another for its slot this long: it stays open as a Claude session once signed in. */
@@ -33,13 +49,16 @@ const SIGN_IN_PANE_MS = 10 * 60_000;
  * Sign in an account slot that exists but is signed out, from the phone: opens a pane running `claude /login`
  * for it, as adding an account does, for the owner to finish. A slot already signed in is refused; one whose
  * state Claude did not report opens anyway (logging in again is harmless). `sign-in-status` answers whether
- * it is signed in now (a signed-out answer is at most half a minute old).
+ * it is signed in now: asked afresh while a sign-in pane for the slot is open (the owner is finishing the
+ * login there, so a cached answer would lag it), else at most half a minute old when signed out.
  */
-export async function signInClaudeAccount(input: unknown, server: string, auth: (home: ClaudeHome) => Promise<AuthStatus> = home => claudeAuthStatus(home)): Promise<Json> {
+export async function signInClaudeAccount(input: unknown, server: string,
+  auth: (home: ClaudeHome, options: { fresh: boolean }) => Promise<AuthStatus> = (home, { fresh }) => { if (fresh) clearAccountCaches(); return claudeAuthStatus(home); }): Promise<Json> {
   const { slug, mode } = accountSignInSchema.parse(input);
   const home = existingSlot(slug);
-  const status = await auth(home);
   const key = `${bridgeRoot()}\0sign-in\0${home.id}`;
+  const pending = pendingPanes.get(key);
+  const status = await auth(home, { fresh: mode === "sign-in-status" && !!pending && Date.now() - (pending.at ?? 0) < SIGN_IN_PANE_MS });
   // Signed in: the pane that did it is a Claude session now, not a sign-in under way.
   if (status.signedIn) pendingPanes.delete(key);
   if (mode === "sign-in-status") return { slug: home.id, signedIn: status.signedIn, ...(status.unknown ? { unknown: true } : {}), ...(status.plan ? { plan: status.plan } : {}) };
@@ -47,7 +66,6 @@ export async function signInClaudeAccount(input: unknown, server: string, auth: 
   if (adding.has(key)) throw new BridgeError(409, "That Claude account is already being signed in.");
   adding.add(key);
   try {
-    const pending = pendingPanes.get(key);
     if (pending && Date.now() - (pending.at ?? 0) >= SIGN_IN_PANE_MS) pendingPanes.delete(key);
     const pane = await openPane(server, key, `Sign in to Claude account ${home.id}`, "That Claude account is already being signed in in an open pane.");
     await terminalProvider().shellCommand!(server, pane.pane, loginCommand(home));

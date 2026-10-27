@@ -1493,20 +1493,38 @@ its id. The record's fields and the steps are in docs/conductor.md.
 While a move is `handing-off`, its hand-off request waits for the agent's step
 to end. The phone's "Stop <agent> and hand off now" sends the owner-only
 `POST /v1/sessions/move` with `{id, interrupt: true}` (not a plain Escape on
-`/v1/keys`): the Hook sends Escape to the old agent only if that request is
-still held, not yet typed, checked under the same lock that types it, so the
-Escape stops the step and never the hand-off the agent then writes. It answers
+`/v1/keys`). The Hook sends Escape to the old agent only while that request is
+still held, not yet typed. The check runs under the same lock that types the
+request, and under the move's own lock, which also ends its hand-off wait. So
+the Escape stops the step, never the hand-off the agent then writes, and never
+the exit or launch the move goes on to once the wait is over. It goes only for
+a move this Hook is waiting on: one whose request reached the queue and is
+still held there, so not after a restart, not before the request is queued,
+not for a summary-by-target move, and not once the owner aborted. It goes only
+to the agent the request is for: the same harness and terminal, and the
+conversation the queued request follows. An agent whose conversation can't be
+read is not taken for it. When the move then exits the old agent soon after
+the interrupt, it waits a few seconds and looks again before sending its own
+Escape. It answers
 `{ok: true, interrupted: true}`, or `{ok: true, interrupted: false, state}` with
-`state` `idle` (the agent is on no step; its request goes in without one),
-`typed` (the request is being or was typed), `writing` (the agent took it and
-is writing its hand-off) or `finished` (the move is past its hand-off, or its
-request can no longer be delivered and the move builds a hand-off itself).
+one of these `state` values:
+- `idle`: the agent is on no step, so its request goes in without one.
+- `typed`: the request is being or was typed.
+- `writing`: the agent took it and is writing its hand-off.
+- `finished`: the move is past its hand-off, or its request can no longer be
+  delivered and the move builds a hand-off itself.
+- `replaced`: the pane now runs another agent or conversation, which is left
+  alone.
+
 The Escape goes the way `/v1/keys` sends one: over a served OpenCode pane's
 API, as a turn interrupt on a Codex pane the Hook runs on its own app-server,
-else as the key (a question the Hook holds is declined first). One Escape per move:
-a second interrupt (a double tap, two at once) answers `interrupted: true`
-without another, which Claude and Codex would take as "go back to an earlier
-message". An older message for the same pane is still typed first. A Hook
+else as the key. A question the Hook holds is declined first, and the turn is
+still stopped: on a served OpenCode pane the decline is followed by an abort.
+There is one Escape per move. A marker beside the move's record is written
+before the key goes, so a crash in between counts as sent. A second interrupt (a double tap, two at once)
+answers `interrupted: true` without another Escape, which Claude and Codex
+would take as "go back to an earlier message". An older message for the same
+pane is still typed first. A Hook
 without this answers 400 to `{id, interrupt: true}`; the phone then falls back
 to a plain Escape.
 

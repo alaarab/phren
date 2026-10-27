@@ -751,11 +751,12 @@ describe("stopping the agent so a held hand-off goes in", () => {
     await new Promise(resolve => setImmediate(resolve));
     return { ...w, mover, record, release };
   }
-  const answering = (state: "queued" | "attempting" | "uncertain" | "delivered" | "failed") => {
+  /** A queue whose row for the move's request is in `state` (queued for the pane's terminal and conversation). */
+  const answering = (state: "queued" | "attempting" | "uncertain" | "delivered" | "failed", row: { terminal: string; session?: string } = { terminal: "term-1", session: SESSION }) => {
     const asked: string[] = [];
-    return { asked, whileQueued: async (id: string, _target: Target, action: () => Promise<void>) => {
+    return { asked, whileQueued: async (id: string, _target: Target, action: (row?: { terminal: string; session?: string }) => Promise<void>) => {
       asked.push(id);
-      if (state === "queued") { await action(); return { ran: true as const }; }
+      if (state === "queued") { await action(row); return { ran: true as const }; }
       return { ran: false as const, state };
     } };
   };
@@ -830,6 +831,96 @@ describe("stopping the agent so a held hand-off goes in", () => {
     f.release();
   });
 
+  it.each([
+    ["another conversation", (f: Awaited<ReturnType<typeof held>>) => { f.deps.identity = async () => NEXT; }],
+    ["an agent whose conversation it can't read", (f: Awaited<ReturnType<typeof held>>) => { f.deps.identity = async () => undefined; }],
+    ["another harness", (f: Awaited<ReturnType<typeof held>>) => { f.pane.agent = "codex"; }],
+    ["another terminal", (f: Awaited<ReturnType<typeof held>>) => { f.pane.terminal_id = "term-9"; }],
+  ])("never interrupts %s the owner started in the pane since", async (_label, replace) => {
+    const f = await held();
+    replace(f);
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "replaced" });
+    expect(f.keys).toEqual([]);
+    f.release();
+  });
+
+  it("goes by the terminal and conversation the queued request is for", async () => {
+    const f = await held();
+    expect(await f.mover.interrupt(f.record.id, answering("queued", { terminal: "term-other", session: SESSION }))).toEqual({ interrupted: false, state: "replaced" });
+    expect(f.keys).toEqual([]);
+    // The pane's conversation changed in the same terminal and the request followed it: it is the one stopped.
+    f.deps.identity = async () => NEXT;
+    expect(await f.mover.interrupt(f.record.id, answering("queued", { terminal: "term-1", session: NEXT }))).toEqual({ interrupted: true });
+    expect(f.keys).toEqual([["esc"]]);
+    f.release();
+  });
+
+  it("sends nothing before the request is queued, or for a move this Hook no longer runs", async () => {
+    // The request is still on its way to the queue.
+    let queued!: () => void;
+    const f = await held(() => new Promise(resolve => { queued = () => resolve({ ok: true, queued: true }); }));
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
+    queued();
+    await new Promise(resolve => setImmediate(resolve));
+    // No row made yet: nothing an Escape would let in.
+    const empty = { whileQueued: async (_id: string, _target: Target, action: (row?: { terminal: string }) => Promise<void>) => { await action(); return { ran: true as const }; } };
+    expect(await f.mover.interrupt(f.record.id, empty)).toEqual({ interrupted: false, state: "idle" });
+    // The Hook restarted: the move and its queued request are on disk, but nothing waits on them here.
+    expect(await new SessionMover(f.deps).interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
+    expect(f.keys).toEqual([]);
+    f.release();
+  });
+
+  it("keeps the one Escape per move when the mover sees the move again", async () => {
+    const f = await held();
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: true });
+    // The mark is on disk, not only in this process.
+    expect((await readdir(path.join(root, "moves"))).some(name => name === `${f.record.id}.interrupted`)).toBe(true);
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: true });
+    expect(f.keys).toEqual([["esc"]]);
+    f.release();
+  });
+
+  it("sends no Escape once the owner aborted the move", async () => {
+    const f = await held();
+    await f.mover.abort(f.record.id);
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
+    expect(f.keys).toEqual([]);
+    f.release();
+  });
+
+  it("never lets the move's takeover overtake an interrupt that is checking", async () => {
+    const f = await held();
+    const order: string[] = [];
+    const { sendKeys, prompt } = f.deps.terminal;
+    f.deps.terminal.sendKeys = async (server, pane, keys) => { order.push(keys.join("+")); await sendKeys(server, pane, keys); };
+    f.deps.terminal.prompt = async (server, pane, text) => { order.push(text); await prompt(server, pane, text); };
+    // The interrupt's look at the pane takes a while.
+    let showPane!: () => void;
+    const slow = new Promise<void>(resolve => { showPane = resolve; });
+    const snapshot = f.deps.snapshot;
+    let hold = false, holding = false;
+    f.deps.snapshot = async server => { if (hold) { hold = false; holding = true; await slow; } return snapshot(server); };
+    const queue = { whileQueued: async (_id: string, _target: Target, action: (row?: { terminal: string; session?: string }) => Promise<void>) => {
+      hold = true; await action({ terminal: "term-1", session: SESSION }); return { ran: true as const }; } };
+    const interrupting = f.mover.interrupt(f.record.id, queue);
+    for (let i = 0; i < 200 && !holding; i++) await new Promise(resolve => setTimeout(resolve, 1));
+    expect(holding).toBe(true);
+    // Meanwhile the hand-off wait runs out and the move goes on to exit the old agent.
+    f.release();
+    // Without the lock the move types its exit here; with it, it waits for the interrupt.
+    for (let i = 0; i < 300 && !order.includes("/exit"); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    showPane();
+    expect(await interrupting).toEqual({ interrupted: true });
+    await f.mover.settled(from.server, from.pane);
+    // The interrupt's Escape went before the move's own exit (its Escape, then /exit), never after /exit.
+    expect(order.indexOf("/exit")).toBeGreaterThan(0);
+    expect(order.lastIndexOf("esc")).toBeLessThan(order.indexOf("/exit"));
+    expect(order.filter(item => item === "esc")).toHaveLength(2);
+    // Past the wait, no interrupt goes.
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
+  });
+
   it("is the owner's, on the move route, and stops a served pane's turn over its own API", async () => {
     const f = await held();
     // A served OpenCode pane: Esc goes over its API, as /v1/keys sends it, not into the terminal.
@@ -847,7 +938,8 @@ describe("stopping the agent so a held hand-off goes in", () => {
       return { status: res.statusCode, body: JSON.parse(payload) as Json };
     };
     expect(await post({})).toEqual({ status: 200, body: { ok: true, interrupted: true } });
-    expect(servedKeys).toHaveBeenCalledWith(from, ["Escape"], "working");
+    // A question it holds is declined and the turn aborted too.
+    expect(servedKeys).toHaveBeenCalledWith(from, ["Escape"], "working", { abortTurn: true });
     expect(f.keys).toEqual([]);
     expect((await post({ "x-phren-origin": "peer" })).status).toBe(403);
     f.release();

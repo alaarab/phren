@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,12 +20,16 @@ it("refuses a bad slug with a suggested one the phone can offer", async () => {
 });
 
 describe("signing in an existing account slot", () => {
-  let home = "", restore: () => void = () => {};
+  let home = "", bin = "", claude = "", restore: () => void = () => {};
   const panes: Json[] = [], commands: string[] = [];
   const signedOut = async (): Promise<AuthStatus> => ({ signedIn: false, reason: "Not signed in" });
   beforeEach(() => {
     home = mkdtempSync(path.join(tmpdir(), "phren-sign-in-"));
+    // The `claude` the Hook finds on its PATH: it says which home it was run under.
+    bin = path.join(home, "bin"); mkdirSync(bin); claude = path.join(bin, "claude");
+    writeFileSync(claude, "#!/bin/sh\nprintf '%s' \"${CLAUDE_CONFIG_DIR-unset}\"\n", { mode: 0o755 });
     vi.stubEnv("HOME", home); vi.stubEnv("CLAUDE_CONFIG_DIR", ""); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
+    vi.stubEnv("PATH", `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`);
     clearAccountCaches();
     mkdirSync(path.join(home, ".claude"), { recursive: true });
     mkdirSync(path.join(home, ".claude-work"), { recursive: true });
@@ -41,15 +46,15 @@ describe("signing in an existing account slot", () => {
   it("opens claude /login under a signed-out slot's own home", async () => {
     const answer = await signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", signedOut);
     expect(answer).toMatchObject({ target: { server: "default", pane: "w9:p1", source: "claude" }, terminalOnly: true, slug: "work" });
-    expect(commands).toEqual([`CLAUDE_CONFIG_DIR='${path.join(home, ".claude-work")}' claude /login`]);
+    expect(commands).toEqual([`env CLAUDE_CONFIG_DIR='${path.join(home, ".claude-work")}' '${claude}' /login`]);
     // While that pane is open, another sign-in for the slot is refused.
     await expect(signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", signedOut)).rejects.toMatchObject({ status: 409 });
     expect(commands).toHaveLength(1);
   });
 
-  it("signs in the default slot with no CLAUDE_CONFIG_DIR", async () => {
+  it("signs in the default slot with CLAUDE_CONFIG_DIR removed", async () => {
     await signInClaudeAccount({ slug: "default", mode: "sign-in" }, "default", signedOut);
-    expect(commands).toEqual(["claude /login"]);
+    expect(commands).toEqual([`env -u CLAUDE_CONFIG_DIR '${claude}' /login`]);
   });
 
   it("names the default slot's home when the Hook's is not ~/.claude", async () => {
@@ -58,7 +63,37 @@ describe("signing in an existing account slot", () => {
     mkdirSync(elsewhere);
     vi.stubEnv("CLAUDE_CONFIG_DIR", elsewhere);
     await signInClaudeAccount({ slug: "default", mode: "sign-in" }, "default", signedOut);
-    expect(commands).toEqual([`CLAUDE_CONFIG_DIR='${path.join(home, "it'\\''s elsewhere")}' claude /login`]);
+    expect(commands).toEqual([`env CLAUDE_CONFIG_DIR='${path.join(home, "it'\\''s elsewhere")}' '${claude}' /login`]);
+  });
+
+  it("names ~/.claude when the Hook found the default slot through CLAUDE_CONFIG_DIR set to it", async () => {
+    vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(home, ".claude"));
+    await signInClaudeAccount({ slug: "default", mode: "sign-in" }, "default", signedOut);
+    expect(commands).toEqual([`env CLAUDE_CONFIG_DIR='${path.join(home, ".claude")}' '${claude}' /login`]);
+  });
+
+  it("falls back to the bare command when the Hook finds no claude", async () => {
+    vi.stubEnv("PATH", "/usr/bin");
+    await signInClaudeAccount({ slug: "default", mode: "sign-in" }, "default", signedOut);
+    expect(commands).toEqual(["env -u CLAUDE_CONFIG_DIR claude /login"]);
+  });
+
+  // A pane shell that exports another account's home (the owner's profile) must not decide which one signs in.
+  it.skipIf(process.platform === "win32")("runs claude under the slot's home whatever the pane's shell exports", async () => {
+    const run = (command: string) => execFileSync("/bin/sh", ["-c", command], { encoding: "utf8",
+      env: { PATH: "/usr/bin:/bin", CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") } });
+    await signInClaudeAccount({ slug: "default", mode: "sign-in" }, "default", signedOut);
+    await signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", signedOut);
+    expect(commands.map(run)).toEqual(["unset", path.join(home, ".claude-work")]);
+  });
+
+  it("asks afresh whether the slot is signed in while its sign-in pane is open", async () => {
+    const asked: boolean[] = [];
+    const auth = async (_home: unknown, options: { fresh: boolean }): Promise<AuthStatus> => { asked.push(options.fresh); return { signedIn: false }; };
+    await signInClaudeAccount({ slug: "work", mode: "sign-in-status" }, "default", auth);
+    await signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", auth);
+    await signInClaudeAccount({ slug: "work", mode: "sign-in-status" }, "default", auth);
+    expect(asked).toEqual([false, false, true]);
   });
 
   it("lets a slot that signed in, then out again, be signed in again while the old pane is still open", async () => {

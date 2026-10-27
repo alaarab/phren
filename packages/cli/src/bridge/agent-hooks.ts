@@ -396,8 +396,10 @@ export class AgentHooks {
   /** Keys the phone sends to a served OpenCode pane that its API answers
    * better than the terminal: Esc declines a pending question or stops a
    * working turn (`session.abort`), and a digit answers a pending
-   * single-question, single-choice set. False leaves the keys to the pane. */
-  async servedKeys(target: Target, keys: readonly string[], status: string): Promise<boolean> {
+   * single-question, single-choice set. False leaves the keys to the pane.
+   * With `abortTurn` (a move's "stop and hand off now"), Esc on a pending question declines it and then
+   * stops the turn too: a declined question alone lets the turn carry on. True only once the abort went. */
+  async servedKeys(target: Target, keys: readonly string[], status: string, options: { abortTurn?: boolean } = {}): Promise<boolean> {
     if (target.source !== "opencode") return false;
     const entry = servedPane(target.server, target.pane);
     if (!entry) return false;
@@ -407,7 +409,9 @@ export class AgentHooks {
     if (question && escape) {
       await client.rejectQuestion(question[0]).catch(() => { throw new BridgeError(409, "This question is no longer pending."); });
       this.servedQuestions.delete(question[0]);
-      return true;
+      if (!options.abortTurn) return true;
+      // A failed abort leaves Esc to the terminal, as below.
+      return client.abort(target.session).then(done => done === true, () => false);
     }
     if (question && keys.length === 1 && /^[1-9]$/.test(keys[0]) && question[1].questions.length === 1 && !question[1].questions[0].multiSelect) {
       const option = question[1].questions[0].options[Number(keys[0]) - 1];

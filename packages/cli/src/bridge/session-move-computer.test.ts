@@ -15,7 +15,7 @@ import * as peers from "./peers.js";
 import * as harnesses from "./harnesses.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
-import { SessionMover, readMove, targetSummaryBody, type MoverDeps } from "./session-move.js";
+import { SessionMover, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { admitScopedRequest } from "./scoped-gateway.js";
@@ -174,6 +174,28 @@ describe.skipIf(process.platform === "win32")("continue on another computer", ()
     expect(withBrief).toContain("Build the tokenizer.");
     expect(withBrief).not.toContain("was cut to fit");
     expect(targetSummaryBody({ from: "Claude", exhausted: false, entries, room: 5_000 })).toContain("without asking it for a hand-off");
+  });
+
+  it("caps the original brief at 8000 characters, cut after it is redacted", () => {
+    const entries = [{ role: "owner" as const, text: "Build the tokenizer." }];
+    const original = `${"a".repeat(7_950)} SECRETTOKEN ${"b".repeat(4_000)}`;
+    const body = targetSummaryBody({ from: "Claude", exhausted: true, entries, room: 100_000, original,
+      prepare: text => text.replaceAll("SECRETTOKEN", "[redacted]") });
+    const brief = body.slice(body.indexOf("The original brief follows.\n---\n") + "The original brief follows.\n---\n".length);
+    expect(brief.length).toBeLessThanOrEqual(8_000);
+    expect(brief).toContain("cut to 8000 characters");
+    expect(body).not.toContain("SECRET");
+    expect(body).not.toContain("b".repeat(10));
+  });
+
+  it("counts a newer owner message with blocks (text and a screenshot) as the chat going on past a usage limit", () => {
+    const limit = JSON.stringify({ type: "assistant", isApiErrorMessage: true, error: "rate_limit", message: { role: "assistant", content: [{ type: "text", text: "You've hit your session limit · resets 3pm" }] } });
+    const blocks = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "Try again now" }, { type: "image", source: { type: "base64", data: "AA==" } }] } });
+    const toolResult = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } });
+    expect(sourceOutOfUsage([limit], "claude")).toBe(true);
+    expect(sourceOutOfUsage([limit, blocks], "claude")).toBe(false);
+    // A tool's result is not the owner moving on.
+    expect(sourceOutOfUsage([limit, toolResult], "claude")).toBe(true);
   });
 
   it("honours an explicit summary-by-target request and refuses it on this computer", async () => {

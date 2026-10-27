@@ -334,6 +334,21 @@ describe("asks", () => {
     expect(await hooks.servedKeys({ ...target, pane: "w1:p9" }, ["Escape"], "working")).toBe(false);
   });
 
+  // A move's "stop and hand off now" on a pane asking a question: declining it alone lets the turn go on.
+  it("declines a question and then aborts the turn for a move's interrupt, true only once the abort went", async () => {
+    registerPaneServer(paneServersDir(), entry());
+    const hooks = new AgentHooks();
+    await hooks.servedAsks(entry(), server.client, asks({ questions: [question] }));
+    expect(await hooks.servedKeys(target, ["Escape"], "working", { abortTurn: true })).toBe(true);
+    expect(server.state.rejected).toEqual(["que_1"]);
+    expect(server.state.aborted).toEqual(["ses_root"]);
+    // An abort that fails leaves the Escape to the terminal.
+    await hooks.servedAsks(entry(), server.client, asks({ questions: [{ ...question, id: "que_4" }] }));
+    vi.spyOn(server.client, "abort").mockRejectedValueOnce(new Error("gone"));
+    expect(await hooks.servedKeys(target, ["Escape"], "working", { abortTurn: true })).toBe(false);
+    expect(server.state.rejected).toEqual(["que_1", "que_4"]);
+  });
+
   it("stops a working served pane from the phone's Esc without typing it", async () => {
     registerPaneServer(paneServersDir(), entry());
     vi.mocked(validateTarget).mockResolvedValueOnce({ agent_status: "working" });

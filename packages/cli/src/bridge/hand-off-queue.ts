@@ -157,14 +157,16 @@ export class HandOffQueue {
    * Runs `action` only while the message `id` for `target` has not been typed: its row is still queued,
    * or not made yet. Under the queue's lock, so a sweep cannot type it between the check and the action
    * (a move's "stop and hand off now" sends Escape this way: before the request is typed, never into the
-   * hand-off it asked for). Otherwise answers the row's state.
+   * hand-off it asked for). Otherwise answers the row's state. `action` gets the row (when made): the
+   * terminal it was queued for, and the conversation it is for now (it follows one that replaced the first
+   * in the same terminal).
    */
-  whileQueued(id: string, target: Target, action: () => Promise<void>): Promise<{ ran: true } | { ran: false; state: Row["state"] }> {
+  whileQueued(id: string, target: Target, action: (row?: { terminal: string; session?: string }) => Promise<void>): Promise<{ ran: true } | { ran: false; state: Row["state"] }> {
     return this.serial(async () => {
       const row = await this.read(id);
       if (row && !samePane(row.target, target)) throw new BridgeError(404, "No hand-off with this id and target.");
       if (row && row.state !== "queued") return { ran: false as const, state: row.state };
-      await action();
+      await action(row ? { terminal: row.terminal, ...(row.target.session ? { session: row.target.session } : {}) } : undefined);
       return { ran: true as const };
     });
   }
