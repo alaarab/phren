@@ -346,6 +346,34 @@ describe("live spoken replies", () => {
       expect(frames(client).map(frame => frame.type)).toEqual(["start", "audio", "audio", "done"]);
     });
 
+    it("replays only the unvoiced rest of text sent as one piece", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      // One phone frame, sent to ElevenLabs as one piece; only its first paragraph was voiced.
+      say(client, { text: "First paragraph.\nSecond paragraph.\n" });
+      expect(inputs(upstreams[0])).toEqual(["First paragraph. Second paragraph. "]);
+      upstreams[0].reply(voiced("First paragraph."));
+      upstreams[0].reply({ isFinal: true });
+      expect(upstreams).toHaveLength(2);
+      upstreams[1].open();
+      expect(inputs(upstreams[1])).toEqual(["Second paragraph. "]);
+      // Its one retry: cut off again inside the sentence, it is taken as voiced rather than sent round.
+      upstreams[1].reply(voiced("Second para"));
+      upstreams[1].reply({ isFinal: true });
+      expect(upstreams).toHaveLength(2);
+    });
+
+    it("says a sentence cut off again whole, and takes one the alignment falls a little short of as voiced", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "Okay. Sure thing.\nNext part here, and more.\n" });
+      // Voiced into the third sentence, the alignment leaving the periods out.
+      upstreams[0].reply(voiced("OkaySure thingNext part"));
+      upstreams[0].reply({ isFinal: true });
+      upstreams[1].open();
+      expect(inputs(upstreams[1])).toEqual(["Next part here, and more. "]);
+    });
+
     it("keeps a short last line, whether or not ElevenLabs times the spaces", async () => {
       for (const spaces of [false, true]) {
         const { upstreams, client } = await live();
