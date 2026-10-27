@@ -212,7 +212,8 @@ export const gitlab: GitHostProvider = {
       // GitLab merges, or rebases, by the project's own merge method; squash is per request.
       const { json } = await call<Json>(ctx, `/merge_requests/${request.number}/merge`, { method: "PUT", body: {
         squash: request.method === "squash", ...(request.expectedHeadSha ? { sha: request.expectedHeadSha } : {}),
-        ...(request.deleteBranch ? { should_remove_source_branch: true } : {}) } });
+        // Sent either way when asked: the merge request was opened with remove_source_branch, so false must be said.
+        ...(request.deleteBranch !== undefined ? { should_remove_source_branch: request.deleteBranch } : {}) } });
       const mr = obj(json);
       return { ok: true, number: request.number, method: request.method, state: upper(mr.state), ...(safeLink(mr.web_url) ? { url: safeLink(mr.web_url) } : {}) };
     } catch (error) {

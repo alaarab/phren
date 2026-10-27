@@ -139,6 +139,11 @@ describe("GitLab and gitboy providers", () => {
 
       expect(await gitMergeRequest(repo, { number: 12, method: "squash", expectedHeadSha: "abc1234" })).toMatchObject({ ok: true, state: "MERGED" });
       expect(host.seen[0].body).toEqual({ squash: true, sha: "abc1234" });
+      // An explicit choice either way is sent, so false overrides the merge request's remove_source_branch.
+      await gitMergeRequest(repo, { number: 12, method: "merge", deleteBranch: false });
+      expect(host.seen[1].body).toEqual({ squash: false, should_remove_source_branch: false });
+      await gitMergeRequest(repo, { number: 12, method: "merge", deleteBranch: true });
+      expect(host.seen[2].body).toEqual({ squash: false, should_remove_source_branch: true });
       refuse = true;
       expect(await gitMergeRequest(repo, { number: 12 })).toMatchObject({ ok: false, reason: "blocked", message: "Branch cannot be merged" });
     });

@@ -8,6 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - `phren bridge accounts add` with a name that isn't a valid account name (`Buildbox`) now suggests one that is (`buildbox`, or from the account's email when `--label` is one), and the phone's add-account request gets the suggestion as `suggestedSlug` in place of a generic error. Run over ssh on a Mac whose login keychain the session can't use, it now says so plainly and gives the command to run on the Mac itself, before creating a home whose login could never be saved.
+- Typed findings that are meant to last were dropped as stale at the global 120-day TTL: a `[pattern]` or `[pitfall]` (365 days) or a `[decision]` (no limit) never got past day 120, because the TTL was checked before the type's own age limit. A finding's leading type tag now sets its age limit in place of the TTL, and a type named inside a finding's text no longer counts as its tag.
+- Merging a GitLab merge request with "delete branch" turned off still deleted the source branch: the Hook sent the choice only when it was on, so GitLab kept the merge request's own remove-source-branch setting, which the Hook turns on when it opens one. The choice is now sent either way.
+- A phone message to a Codex pane could be reported delivered when it was not: the transcript check counted any row with the same words in the five seconds before the send, so a "yes" sent moments after another "yes" took the first one's row. Now only a row written after the message was typed, and not claimed by another message with the same words, confirms it, and a Codex turn's two copies of the prompt count as one row.
 
 ## [0.3.58] - 2026-10-26
 
