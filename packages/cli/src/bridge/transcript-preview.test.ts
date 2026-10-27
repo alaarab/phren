@@ -68,6 +68,70 @@ describe("live reply previews", () => {
     expect(stream.verb).toBeUndefined();
   });
 
+  it("previews the reply written after a tool and after thinking, never one that already landed", async () => {
+    let screen = "❯ Explain this\n⏺ Let me check the parser first.\n✻ Working… (3s · esc to interrupt)\n❯";
+    const stream = new TranscriptPreviewStream(target, async () => screen);
+    const row = (line: number, raw: Record<string, unknown>) => ({ line, raw: { timestamp: "2026-09-22T10:00:01Z", ...raw } });
+    stream.observe([user]);
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "Let me check the parser first." } });
+    // The text lands, then the tool call and its result.
+    stream.observe([
+      row(1, { type: "assistant", message: { content: [{ type: "text", text: "Let me check the parser first." }] } }),
+      row(2, { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls src" } }], stop_reason: "tool_use" } }),
+      row(3, { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "parser.ts" }] } }),
+    ]);
+    screen = "❯ Explain this\n⏺ Let me check the parser first.\n⏺ Bash(ls src)\n  ⎿  parser.ts\n✻ Working… (6s · esc to interrupt)\n❯";
+    expect(await stream.update("working", undefined, 600)).toEqual({ preview: null });
+    // The answer written after the tool previews as it grows, still at most twice a second.
+    screen = "❯ Explain this\n⏺ Let me check the parser first.\n⏺ Bash(ls src)\n  ⎿  parser.ts\n⏺ The parser is\n❯";
+    expect(await stream.update("working", undefined, 1200)).toEqual({ preview: { turnStartedAt: start, text: "The parser is" } });
+    screen = screen.replace("The parser is", "The parser is fine: one file");
+    expect(await stream.update("working", undefined, 1400)).toBeUndefined();
+    expect(await stream.update("working", undefined, 1800)).toEqual({ preview: { turnStartedAt: start, text: "The parser is fine: one file" } });
+    // A long turn scrolls its prompt off the screen; tool output at the top is never a reply.
+    stream.observe([row(4, { type: "assistant", message: { content: [{ type: "text", text: "The parser is fine: one file" }] } }),
+      row(5, { type: "assistant", message: { content: [{ type: "thinking", thinking: "private" }] } })]);
+    screen = "     parser.ts\n     lexer.ts\n⏺ Bash(wc -l src/*)\n  ⎿  40 total\n✻ Thinking… (9s · esc to interrupt)\n❯";
+    expect(await stream.update("working", undefined, 2400)).toEqual({ preview: null });
+    screen = "  ⎿  40 total\n⏺ So the whole parser is 40 lines.\n❯";
+    expect(await stream.update("working", undefined, 3000)).toEqual({ preview: { turnStartedAt: start, text: "So the whole parser is 40 lines." } });
+    // The final entry clears it.
+    stream.observe([row(6, { type: "assistant", message: { content: [{ type: "text", text: "So the whole parser is 40 lines." }], stop_reason: "end_turn" } })]);
+    expect(await stream.update("working", undefined, 3600)).toEqual({ preview: null });
+  });
+
+  it("never previews an older turn's reply when this turn's prompt is drawn otherwise than written", async () => {
+    // A slash command's entry holds its command tags; the pane shows "❯ /code-review".
+    let screen = "⏺ Yes, the parser handles that.\n❯ /code-review\n⏺ Skill(code-review)\n  ⎿  Loaded\n✻ Working… (4s · esc to interrupt)\n❯";
+    const stream = new TranscriptPreviewStream(target, async () => screen);
+    stream.observe([{ line: 0, raw: { type: "user", timestamp: start, message: { content: "<command-message>code-review is running…</command-message>\n<command-name>/code-review</command-name>" } } },
+      { line: 1, raw: { type: "assistant", timestamp: start, message: { content: [{ type: "tool_use", id: "s1", name: "Skill", input: {} }] } } }]);
+    // A frame for the spinner, with no reply text.
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: null });
+    screen = screen.replace("✻ Working…", "⏺ No findings in this diff.\n✻ Working…");
+    expect(await stream.update("working", undefined, 600)).toEqual({ preview: { turnStartedAt: start, text: "No findings in this diff." } });
+    // Thinking before this turn draws any block: the older turn's prompt has one under it, this one only the spinner.
+    const thinking = new TranscriptPreviewStream(target, async () => "❯ fix the tests\n⏺ All 12 tests pass now.\n❯ /code-review\n∴ Thinking…\n✻ Cogitating… (2s · esc to interrupt)\n❯");
+    thinking.observe([{ line: 0, raw: { type: "user", timestamp: start, message: { content: "<command-name>/code-review</command-name>" } } },
+      { line: 1, raw: { type: "assistant", timestamp: start, message: { content: [{ type: "thinking", thinking: "private" }] } } }]);
+    expect((await thinking.update("working", undefined, 0))?.preview ?? null).toBeNull();
+  });
+
+  it("previews a new block that starts with a short landed one's words", async () => {
+    const stream = new TranscriptPreviewStream(target, async () => "❯ Explain this\n⏺ Let me check.\n⏺ Bash(ls)\n  ⎿  a\n⏺ Let me check the failing tests next.\n❯");
+    stream.observe([user, { line: 1, raw: { type: "assistant", timestamp: start, message: { content: [{ type: "text", text: "Let me check." }] } } }]);
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "Let me check the failing tests next." } });
+  });
+
+  it("knows a landed block again though the pane draws its code fence, list and link otherwise", async () => {
+    const landed = "Run:\n```bash\nnpm test\n```\n1. then [the docs](https://example.com/docs)\n1. and the lint";
+    const screen = "❯ Explain this\n⏺ Run:\n\n  npm test\n\n  1. then the docs\n  2. and the lint\n⏺ Bash(npm test)\n  ⎿  ok\n✻ Working… (8s · esc to interrupt)\n❯";
+    const stream = new TranscriptPreviewStream(target, async () => screen);
+    stream.observe([user, { line: 1, raw: { type: "assistant", timestamp: start, message: { content: [{ type: "text", text: landed }] } } }]);
+    // A frame for the spinner, with no reply text.
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: null });
+  });
+
   it("stops reading the pane when the transcript ends the turn, though the snapshot still says working", async () => {
     const pane = vi.fn(async () => "❯ Explain this\n⏺ Partial reply\n✻ Working… (esc to interrupt)\n❯");
     for (const end of [
