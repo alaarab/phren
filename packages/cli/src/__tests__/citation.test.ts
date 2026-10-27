@@ -261,4 +261,31 @@ describe("filterTrustedFindingsDetailed", () => {
     });
     expect(filtered).toContain("chose PostgreSQL");
   });
+
+  it("keeps a long-lived type past the global TTL, and still expires it past its own max age", () => {
+    // pattern and pitfall live 365 days and a decision forever; the default TTL is 120.
+    const daysAgo = (days: number) => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); };
+    const content = (days: number) => [
+      "# Findings",
+      "",
+      `## ${daysAgo(days)}`,
+      "- [pattern] Batch the index writes in one transaction",
+      "- [decision] We chose PostgreSQL over MySQL",
+      "- Untyped note about the build",
+      "- Never strip [decision] markers from the export",
+      "",
+    ].join("\n");
+
+    // Staleness alone: confidence is not what this checks.
+    const kept = filterTrustedFindingsDetailed(content(200), { ttlDays: 120, minConfidence: 0 });
+    expect(kept.content).toContain("Batch the index writes");
+    expect(kept.content).toContain("chose PostgreSQL");
+    expect(kept.content).not.toContain("Untyped note");
+    // A type named inside the text is not the finding's type.
+    expect(kept.content).not.toContain("Never strip");
+
+    const expired = filterTrustedFindingsDetailed(content(400), { ttlDays: 120, minConfidence: 0 });
+    expect(expired.content).not.toContain("Batch the index writes");
+    expect(expired.content).toContain("chose PostgreSQL");
+  });
 });

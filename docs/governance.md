@@ -131,7 +131,7 @@ Both verbs write to the audit log (`review_approve` / `review_reject`, with the 
 
 ### TTL and retention policy
 
-- `ttlDays=120`: findings older than 120 days are flagged for review
+- `ttlDays=120`: untyped findings older than 120 days are flagged for review. A finding tagged with a type lives as long as its type allows instead (`[bug]` and `[context]` 30 days, `[workaround]` 60, `[pattern]` and `[pitfall]` 365, `[decision]` with no limit), whatever `ttlDays` is set to. Injection and the nightly TTL review use the same limit.
 - `retentionDays=365`: findings are retained for 365 days before eligible for permanent deletion
 
 Configure via `phren config policy`.
