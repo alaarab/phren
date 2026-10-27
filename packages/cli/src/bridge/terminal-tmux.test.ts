@@ -185,16 +185,25 @@ describe("the tmux provider", () => {
     expect(await tmuxTerminal.listPanes("tmux")).toMatchObject([{ pane: "p1", label: "Tide charts" }]);
   });
 
-  it("opens a session or a window for a launch", async () => {
+  it("opens a session or a window for a launch, and says which pane it opened", async () => {
     const listed: string[][] = [];
-    restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async (_s, args) => { listed.push(args); return args[0] === "list-sessions" ? "phren: fix\nphren: fix-2\n" : ""; } });
-    await tmuxTerminal.create("tmux-phren", { label: "phren: fix", cwd: "/repo" });
-    await tmuxTerminal.create("tmux-phren", { workspace: "s4", label: "second", cwd: "/repo" });
+    restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async (_s, args) => {
+      listed.push(args);
+      return args[0] === "list-sessions" ? "phren: fix\nphren: fix-2\n" : args[0] === "new-session" ? "$5 @9 %21\n" : "$4 @7 %22\n";
+    } });
+    expect(await tmuxTerminal.create("tmux-phren", { label: "phren: fix", cwd: "/repo" })).toEqual({ workspace: "s5", tab: "w9", pane: "p21" });
+    expect(await tmuxTerminal.create("tmux-phren", { workspace: "s4", label: "second", cwd: "/repo" })).toEqual({ workspace: "s4", tab: "w7", pane: "p22" });
+    const printed = ["-P", "-F", "#{session_id} #{window_id} #{pane_id}"];
     expect(listed).toEqual([
       ["list-sessions", "-F", "#{session_name}"],
-      ["new-session", "-d", "-s", "phren_ fix", "-x", "200", "-y", "50", "-c", "/repo", "-n", "phren: fix"],
-      ["new-window", "-d", "-t", "$4:", "-c", "/repo", "-n", "second"],
+      ["new-session", "-d", ...printed, "-s", "phren_ fix", "-x", "200", "-y", "50", "-c", "/repo", "-n", "phren: fix"],
+      ["new-window", "-d", ...printed, "-t", "$4:", "-c", "/repo", "-n", "second"],
     ]);
+    // A tmux that printed nothing usable, or something before the ids: the caller finds the pane itself.
+    restore(); restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async () => "" });
+    expect(await tmuxTerminal.create("tmux-phren", { workspace: "s4", label: "third" })).toBeUndefined();
+    restore(); restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async () => "warning: config\n$4 @7 %23\n" });
+    expect(await tmuxTerminal.create("tmux-phren", { workspace: "s4", label: "fourth" })).toBeUndefined();
   });
 
   it("starts an agent as the pane's program under a login shell, arguments never in script text", async () => {

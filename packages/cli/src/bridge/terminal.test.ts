@@ -60,7 +60,9 @@ describe("the Herdr provider", () => {
 
   it("sends exactly the Herdr requests the Hook sent before the provider existed", async () => {
     vi.mocked(rpc).mockImplementation(async (_server, method) => method === "agent.read" ? { read: { text: "screen" } }
-      : method === "pane.process_info" ? { process_info: { shell_pid: 10, foreground_processes: [{ pid: 12 }, { pid: "x" }, { pid: 11 }] } } : {});
+      : method === "pane.process_info" ? { process_info: { shell_pid: 10, foreground_processes: [{ pid: 12 }, { pid: "x" }, { pid: 11 }] } }
+      : method === "tab.create" ? { type: "tab_created", tab: { tab_id: "w:t2", workspace_id: "w" }, root_pane: { pane_id: "w:p3", tab_id: "w:t2", workspace_id: "w" } }
+      : method === "workspace.create" ? { type: "workspace_created", workspace: { workspace_id: "w4" }, root_pane: { pane_id: "w4:p1", tab_id: "w4:t1", workspace_id: "w4" } } : {});
     const signal = new AbortController().signal;
     expect(await herdrTerminal.readScreen("s", "p", { scope: "agent", source: "visible", lines: 40, timeoutMs: 2_000 })).toBe("screen");
     await herdrTerminal.readScreen("s", "p", { scope: "pane", source: "recent", lines: 40, stripAnsi: false, format: "ansi" });
@@ -68,8 +70,9 @@ describe("the Herdr provider", () => {
     await herdrTerminal.prompt("s", "p", "hi");
     await herdrTerminal.prompt("s", "p", "hi", signal);
     expect(await herdrTerminal.processes("s", "p")).toEqual({ shellPid: 10, foregroundPids: [12, 11] });
-    await herdrTerminal.create("s", { workspace: "w", label: "L", cwd: "/tmp" });
-    await herdrTerminal.create("s", { label: "L", cwd: "/tmp", env: { PHREN_DISPATCH_ID: "dispatch-1" } });
+    // The new tab's (or workspace's) first pane, as Herdr names it.
+    expect(await herdrTerminal.create("s", { workspace: "w", label: "L", cwd: "/tmp" })).toEqual({ workspace: "w", tab: "w:t2", pane: "w:p3" });
+    expect(await herdrTerminal.create("s", { label: "L", cwd: "/tmp", env: { PHREN_DISPATCH_ID: "dispatch-1" } })).toEqual({ workspace: "w4", tab: "w4:t1", pane: "w4:p1" });
     await herdrTerminal.startAgent("s", "p", { name: "n", kind: "claude", args: [], timeoutMs: 1_000 });
     await herdrTerminal.focusPane("s", "p");
     await herdrTerminal.renamePane("s", "p", "Named");
