@@ -75,7 +75,10 @@ async function forward(place) {
   const dispatchId = (event === "SessionStart" || event === "UserPromptSubmit") && /^[A-Za-z0-9_-]{8,64}$/.test(env.PHREN_DISPATCH_ID ?? "") ? env.PHREN_DISPATCH_ID : undefined;
   const tasks = Array.isArray(value.background_tasks)
     ? value.background_tasks.filter(task => !["completed", "failed", "killed", "stopped"].includes(String(plain(task).status))) : undefined;
-  const stop = event !== "Stop" ? {} : { ...(tasks ? { background: tasks.length } : {}),
+  const listed = Array.isArray(value.background_tasks) ? value.background_tasks.map(plain)
+    .filter(task => typeof task.id === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(task.id)).slice(0, 64)
+    .map(task => ({ id: task.id, running: !["completed", "failed", "killed", "stopped"].includes(String(task.status)) })) : undefined;
+  const stop = event !== "Stop" ? {} : { ...(tasks ? { background: tasks.length } : {}), ...(listed ? { backgroundTasks: listed } : {}),
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
   const data = JSON.stringify({ target, event, ...(dispatchId ? { dispatchId } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,

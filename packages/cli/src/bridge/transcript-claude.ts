@@ -5,11 +5,13 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { object, objects, type Json } from "./protocol.js";
 import type { ChildAgentRelation } from "./transcripts.js";
+import { latestStopTasks, type StopTasks } from "./turn-records.js";
 
 /** Claude Code's transcript reader: Task sidechains and named teammates as
  * child agents, and the public rows of a conversation. */
 
-type ClaudeLaunch = { path: string; callId: string; state: "running" | "completed" };
+/** `resumedAt`: when SendMessage last resumed it, as the parent's row is stamped. */
+type ClaudeLaunch = { path: string; callId: string; state: "running" | "completed"; resumedAt?: string };
 type ClaudeWorkflow = { runId: string; name: string; callId: string; state: "running" | "completed" };
 /** What the parent transcript says of its children, kept so a timed recheck
  * of an unchanged parent reads only the children, never the parent again. */
@@ -92,17 +94,25 @@ async function withClaudeChildModels(relations: ChildAgentRelation[]): Promise<C
   }));
 }
 
+/** How long after a Stop its list of running background agents is believed: a session that exits leaves its
+ * last Stop behind, and an agent of it that never finished must not run forever. */
+export const CLAUDE_STOP_TRUST_MS = 4 * 60 * 60 * 1000;
+
 export async function claudeChildAgents(file: string, session: string): Promise<ChildAgentRelation[]> {
-  const metadata = await stat(file), signature = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
+  const metadata = await stat(file), parent = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
+  // The parent's latest Stop lists its background tasks as Claude itself counts them.
+  const listed = await latestStopTasks("claude", session).catch(() => undefined);
+  const stop = listed && Date.now() - Date.parse(listed.at) < CLAUDE_STOP_TRUST_MS ? listed : undefined;
+  const signature = `${parent}:${stop ? `${stop.seq}@${stop.at}` : "-"}`;
   const cached = claudeRelationCache.get(file);
   if (cached?.signature === signature && !(cached.recheckAt !== undefined && Date.now() >= cached.recheckAt)) {
     cached.relations = await withClaudeChildModels(cached.relations);
     return cached.relations;
   }
   // A recheck of an unchanged parent (a launch whose transcript was not there
-  // yet, a background skill or workflow still running) reads only the children.
-  const rows = cached?.signature === signature && cached.rows ? cached.rows : await claudeParentRows(file);
-  return claudeChildRelations(file, session, signature, rows);
+  // yet, a background skill or workflow still running, a new Stop) reads only the children.
+  const rows = cached?.signature.startsWith(`${parent}:`) && cached.rows ? cached.rows : await claudeParentRows(file);
+  return claudeChildRelations(file, session, signature, rows, stop);
 }
 
 async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
@@ -131,7 +141,10 @@ async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
       }
       // SendMessage to a finished agent resumes it until its next final notification.
       const resumed = typeof result.resumedAgentId === "string" ? launches.get(result.resumedAgentId) : undefined;
-      if (resumed && typeof result.message === "string" && /^Resuming agent\b/i.test(result.message)) resumed.state = "running";
+      if (resumed && typeof result.message === "string" && /^Resuming agent\b/i.test(result.message)) {
+        resumed.state = "running";
+        if (typeof raw.timestamp === "string") resumed.resumedAt = raw.timestamp;
+      }
       if (result.taskType === "local_workflow" && status === "async_launched" && typeof result.taskId === "string"
           && typeof result.runId === "string" && /^wf_[A-Za-z0-9-]{1,64}$/.test(result.runId)) {
         const callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
@@ -198,10 +211,19 @@ async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
   return { launches, skills, workflows, teammates };
 }
 
-async function claudeChildRelations(file: string, session: string, signature: string, rows: ClaudeParentRows): Promise<ChildAgentRelation[]> {
+async function claudeChildRelations(file: string, session: string, signature: string, rows: ClaudeParentRows, stop?: StopTasks): Promise<ChildAgentRelation[]> {
   // Kept as the parent wrote them: what follows marks finished children.
   const kept = copyRows(rows);
   const { launches, workflows, teammates } = copyRows(rows);
+  /** Whether a child the parent recorded no end for has ended: the latest Stop's word when it lists the
+   * child (running, or finished unless SendMessage resumed it since), else its own transcript (a finished
+   * reply, or quiet past the limit). */
+  const ended = async (agentId: string, childFile: string, launch: ClaudeLaunch) => {
+    if (stop?.running.includes(agentId)) return false;
+    const resumedSince = launch.resumedAt !== undefined && Date.parse(launch.resumedAt) > Date.parse(stop?.at ?? "");
+    if (stop?.finished.includes(agentId) && !resumedSince) return true;
+    return claudeSkillFinished(childFile).catch(() => false);
+  };
   const relations: ChildAgentRelation[] = [];
   // Claude Code records the launch in the parent before the child's own
   // file exists. A launch without a transcript yet is looked for again
@@ -217,9 +239,9 @@ async function claudeChildRelations(file: string, session: string, signature: st
       continue;
     }
     // A skill never gets a notification, and any child loses its own when the
-    // session that ran it was restarted or continued: its transcript decides.
+    // session that ran it was restarted or continued: the Stop, else its transcript, decides.
     if (launch.state === "running") {
-      if (await claudeSkillFinished(childFile).catch(() => false)) launch.state = "completed"; else live = true;
+      if (await ended(agentId, childFile, launch)) launch.state = "completed"; else live = true;
     }
     const model = await claudeChildModel(childFile).catch(() => undefined);
     const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
@@ -252,7 +274,7 @@ async function claudeChildRelations(file: string, session: string, signature: st
       // A teammate that never said it was idle or shut down (its session was
       // restarted or continued) ends the same way: a finished reply, or quiet.
       if (launch.state === "running") {
-        if (await claudeSkillFinished(childFile).catch(() => false)) launch.state = "completed"; else live = true;
+        if (await ended(agentId, childFile, launch)) launch.state = "completed"; else live = true;
       }
       const meta = await readFile(childFile.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
       const model = await claudeChildModel(childFile).catch(() => undefined) ?? (typeof meta.model === "string" && meta.model ? meta.model.slice(0, 200) : undefined);

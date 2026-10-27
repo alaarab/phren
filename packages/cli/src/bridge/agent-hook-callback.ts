@@ -14,14 +14,21 @@ import { localSocket } from "./agent-hook-stores.js";
 /** The agent side of the Hook's callbacks: `hook <source>` reads the agent's
  * payload and posts it to the daemon's local socket (agent-hooks.ts). */
 
+/** A background task id as Claude Code writes them (an agent id, a shell id). */
+export const BACKGROUND_TASK_ID = /^[A-Za-z0-9._-]{1,128}$/;
+
 /** What a Stop payload says about the turn it ends: the harness's last
  * assistant message (Claude, Codex) and, from Claude Code, the background
  * tasks still in flight, which will wake the conversation again when they
  * finish. Absent fields are left out, so the Hook falls back to the transcript. */
-export function stopFacts(value: Json): { background?: number; reply?: string } {
+export function stopFacts(value: Json): { background?: number; backgroundTasks?: { id: string; running: boolean }[]; reply?: string } {
   const tasks = Array.isArray(value.background_tasks)
     ? value.background_tasks.filter(task => !["completed", "failed", "killed", "stopped"].includes(String(object(task).status))) : undefined;
-  return { ...(tasks ? { background: tasks.length } : {}),
+  // Each task by id, running or not: a sub-agent's task id is its agent id, which the Hook's child tree keys on.
+  const listed = Array.isArray(value.background_tasks) ? value.background_tasks.map(object)
+    .filter(task => typeof task.id === "string" && BACKGROUND_TASK_ID.test(task.id)).slice(0, 64)
+    .map(task => ({ id: String(task.id), running: !["completed", "failed", "killed", "stopped"].includes(String(task.status)) })) : undefined;
+  return { ...(tasks ? { background: tasks.length } : {}), ...(listed ? { backgroundTasks: listed } : {}),
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
 }
 

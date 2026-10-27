@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CLAUDE_SKILL_QUIET_MS, claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
-import { TranscriptReader } from "./transcripts.js";
+import { stopFacts } from "./agent-hook-callback.js";
+import { CLAUDE_SKILL_QUIET_MS, CLAUDE_STOP_TRUST_MS, claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
+import { runningChildAgents, TranscriptReader } from "./transcripts.js";
+import { noteTurn } from "./turn-records.js";
 import type { Json } from "./protocol.js";
 
 describe("Claude child completion", () => {
@@ -233,6 +235,84 @@ describe("Claude children the parent records without a task launch", () => {
     await writeFile(path.join(f.directory, "agent-abuilder1.jsonl"), sidechain("abuilder1"));
     await writeFile(path.join(f.directory, "agent-abuilder1.meta.json"), JSON.stringify({ agentType: "general-purpose", name: "builder" }));
     expect(await f.states()).toEqual([{ id: "abuilder1", label: "Build it", state: "running" }, { id: "amate01", label: "Review the diff", state: "running" }]);
+  });
+});
+
+describe("Claude background agents the parent's Stop lists", () => {
+  const roots: string[] = [];
+  const session = "eeeeeeee-5555-4555-8555-555555555555";
+  afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+  const ids = Array.from({ length: 9 }, (_, i) => `agent${i + 1}`);
+
+  /** A lead that launched nine background agents; seven sit quiet past the limit (a long build, the
+   * machine's build gate), two keep writing. Seen 2026-10-17: the phone showed 2, Claude said 9. */
+  async function lead() {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-child-stop-")); roots.push(root);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+    const directory = path.join(root, session, "subagents"); await mkdir(directory, { recursive: true });
+    const file = path.join(root, `${session}.jsonl`), rows: Json[] = [];
+    const old = new Date(Date.now() - CLAUDE_SKILL_QUIET_MS - 60_000);
+    for (const [index, agentId] of ids.entries()) {
+      rows.push({ type: "user", toolUseResult: { status: "async_launched", isAsync: true, agentId, description: `Worker ${index + 1}` },
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: `call-${agentId}`, content: "launched" }] } });
+      const child = path.join(directory, `agent-${agentId}.jsonl`);
+      await writeFile(child, [{ type: "user", isSidechain: true, sessionId: session, agentId, message: { role: "user", content: "Build" } },
+        { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [] } }].map(row => JSON.stringify(row)).join("\n") + "\n");
+      if (index < 7) await utimes(child, old, old);
+    }
+    await writeFile(file, rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+    return { file, append: (row: Json) => appendFile(file, JSON.stringify(row) + "\n"),
+      running: async () => (await claudeChildAgents(file, session)).filter(child => child.state === "running").map(child => child.session) };
+  }
+  /** The lead's Stop, as Claude Code sends it, through the Hook's turn record. */
+  const stopped = (tasks: { id: string; status: string }[]) => noteTurn("default", "w1:p1", { event: "Stop", terminal: "term-1", source: "claude", session,
+    ...stopFacts({ background_tasks: tasks.map(task => ({ ...task, type: "subagent" })) }) });
+
+  it("counts every agent the Stop lists as running, though most have gone quiet", async () => {
+    const f = await lead();
+    await stopped(ids.map(id => ({ id, status: "running" })));
+    expect(await f.running()).toEqual(ids);
+    // The overview's count is the tree's.
+    expect(runningChildAgents(await claudeChildAgents(f.file, session))).toHaveLength(9);
+  });
+
+  it("ends an agent the Stop lists as finished, even one still writing", async () => {
+    const f = await lead();
+    await stopped([...ids.slice(0, 8).map(id => ({ id, status: "running" })), { id: "agent9", status: "completed" }]);
+    expect(await f.running()).toEqual(ids.slice(0, 8));
+  });
+
+  it("goes by the agents' own transcripts when no Stop listed them", async () => {
+    const f = await lead();
+    expect(await f.running()).toEqual(["agent8", "agent9"]);
+    // A Stop that lists only shells says nothing of the agents.
+    await stopped([{ id: "bshell1", status: "running" }]);
+    vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
+    try { expect(await f.running()).toEqual(["agent8", "agent9"]); } finally { vi.useRealTimers(); }
+  });
+
+  it("runs an agent SendMessage resumed after the Stop that listed it finished", async () => {
+    const f = await lead();
+    await stopped([...ids.slice(0, 8).map(id => ({ id, status: "running" })), { id: "agent9", status: "completed" }]);
+    await f.append({ type: "user", timestamp: new Date(Date.now() + 1_000).toISOString(), toolUseResult: { success: true, message: "Resuming agent agent9", resumedAgentId: "agent9" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call-resume", content: "ok" }] } });
+    expect(await f.running()).toEqual(ids);
+  });
+
+  it("forgets a closed pane's Stop once the conversation is resumed in another pane", async () => {
+    const f = await lead();
+    await stopped(ids.map(id => ({ id, status: "running" })));
+    // Quitting Claude ended its agents; `claude --resume` in another pane starts the conversation again.
+    await noteTurn("default", "w1:p2", { event: "SessionStart", start: "resume", terminal: "term-2", source: "claude", session, at: Date.now() + 1_000 });
+    vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
+    try { expect(await f.running()).toEqual(["agent8", "agent9"]); } finally { vi.useRealTimers(); }
+  });
+
+  it("stops believing a Stop hours old, from a session that may have exited", async () => {
+    const f = await lead();
+    await noteTurn("default", "w1:p1", { event: "Stop", terminal: "term-1", source: "claude", session, at: Date.now() - CLAUDE_STOP_TRUST_MS - 1_000,
+      ...stopFacts({ background_tasks: ids.map(id => ({ id, status: "running", type: "subagent" })) }) });
+    expect(await f.running()).toEqual(["agent8", "agent9"]);
   });
 });
 
