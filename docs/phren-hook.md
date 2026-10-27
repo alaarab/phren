@@ -1277,6 +1277,12 @@ Pass `session=<current-session-id>` (and `server` when needed) to mark its
 account `current: true`; other accounts have `current: false`. Percentages are
 remaining usage from the hand-off overview's Claude usage. Offline peers stay
 in the list, disabled; a missing checkout also disables a destination.
+Each computer's own Claude usage read gets at most 5 s, and this computer's read
+runs beside its peers' (each peer has 10 s), so one slow computer never holds the
+list. A computer whose read had not answered carries `usagePending: true`, and one
+whose read failed carries `usageError`; its accounts are listed without room.
+A Claude move to a peer whose usage is still pending is refused with 409 (try
+again): without its room an exhausted login would look usable.
 
 `POST /v1/sessions/move` accepts `to.computer`, an exact verified hooks.yaml
 peer name. Omitted or self uses the local move. A peer forces `mode: "new-chat"`:
