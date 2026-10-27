@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { z } from "zod";
-import { atomicInPrivateDir, object, objects, provider, type Json, type Provider, type Target } from "./protocol.js";
+import { materializedPath } from "./codex-threads.js";
+import { atomicInPrivateDir, BridgeError, object, objects, provider, sessionId, type Json, type Provider, type Target } from "./protocol.js";
 import { transcriptPath, unwrapPastedContent } from "./transcripts.js";
 
 /** A delivery the agent's turn ended without: the reason the phone shows. */
@@ -29,6 +30,8 @@ const MAX_RECORDS = 512;
 const LANDED_CHECK_MS = 3_000;
 /** The transcript scan starts this long before a message was typed (clock skew), so entries up to this far back may belong to an earlier message. */
 const ENTRY_SLACK_MS = 5_000;
+/** A transcript is read from its last this many bytes: older rows are out of sight. */
+const TRANSCRIPT_TAIL_BYTES = 524_288;
 /** Claude writes a submitted row after its hooks return; a message its hook settled claims only a row stamped within this long of that. */
 const HOOK_ROW_MS = 30_000;
 /** Typed text holds its pane (nothing more is typed there) at most this long when the pane sends no
@@ -65,11 +68,15 @@ const recordSchema = z.object({
   /** From a joined prompt (`settleJoined`): "part", a message settled inside it, claims no row of its own (the turn's
    * row carries other words); "turn", the joined words themselves, no message of anyone's, claims that row. */
   joined: z.enum(["part", "turn"]).optional(),
+  /** Codex: the transcript's size in bytes when the message was registered. Only a row at or past it is
+   * the message's own: position, not the clock, orders rows, and a row without a timestamp too. */
+  cursor: z.number().int().nonnegative().optional(),
 }).strict();
 /** In memory only: `hookClaim`, a UserPromptSubmit came for these words before any row was readable, so the
  * row (in the callback's conversation, now the record's) may settle it when it appears, even once failed; `seenRow`, a user row a working check saw in a pane that has sent no
- * callbacks, settled at the next check if no hook claimed it meanwhile. */
-type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number; hookClaim?: boolean; seenRow?: number };
+ * callbacks, settled at the next check if no hook claimed it meanwhile; `awaitingRow`, a Codex message its hook settled
+ * before its row was written, which claims that row when it appears (for `HOOK_ROW_MS`). */
+type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number; hookClaim?: boolean; seenRow?: number; awaitingRow?: boolean };
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
 
 /** One message per record, bound to the pane it was typed into (server, pane,
@@ -91,8 +98,16 @@ export class PromptDeliveries {
   /** Open, or failed with its own hook's claim still waiting for its row (a late delivery). */
   private static claimable(record: Record) { return PromptDeliveries.open(record) || (record.state === "failed" && !!record.hookClaim); }
 
+  /** Codex messages whose `cursor` is still being read. */
+  private cursors = new Map<Record, Promise<void>>();
+  /** The size of a conversation's transcript: 0 before it has one, undefined when it cannot be read. */
+  private size: (record: { source: Provider; session: string }) => Promise<number | undefined>;
+
   constructor(private file?: string, private now: () => number = Date.now,
-    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<TranscriptEntry[]> = transcriptEntries) {
+    private landed: (record: { source: Provider; session: string; hash: string; at: number }) => Promise<TranscriptEntry[]> = transcriptEntries,
+    size?: (record: { source: Provider; session: string }) => Promise<number | undefined>) {
+    // A store reading other transcripts than the agents' own has no sizes for them.
+    this.size = size ?? (landed === transcriptEntries ? transcriptSize : async () => undefined);
     if (!file) return;
     try {
       for (const row of objects(object(JSON.parse(readFileSync(file, "utf8"))).records)) {
@@ -117,7 +132,7 @@ export class PromptDeliveries {
   private save() {
     if (!this.file) return;
     // A record without a phone id is kept once it claimed a transcript row, so after a restart that row is not offered to another message.
-    const rows = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn").map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, ...row }) => row);
+    const rows = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn").map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, awaitingRow: _____, ...row }) => row);
     const file = this.file;
     this.writing = this.writing.then(() => atomicInPrivateDir(file, { records: rows })).catch(() => undefined);
   }
@@ -137,6 +152,13 @@ export class PromptDeliveries {
       session: target.session, ...(typeof terminal === "string" ? { terminal } : {}), state: "typed", at: this.now() };
     this.records.push(record);
     this.save();
+    // Started before the caller types the message (a stat, against typing, then the agent's own write), so
+    // the row it makes lands past the cursor; a row stamped after registration counts too (`codexRowIsOwn`).
+    if (record.source === "codex") {
+      const session = record.session;
+      this.cursors.set(record, this.size(record).then(size => { if (size !== undefined && record.session === session) { record.cursor = size; this.save(); } }, () => undefined)
+        .finally(() => this.cursors.delete(record)));
+    }
     return new Promise<DeliveryOutcome>(resolve => {
       const timer = setTimeout(() => this.release(record, "pending"), waitMs);
       timer.unref?.();
@@ -288,6 +310,13 @@ export class PromptDeliveries {
     }
     this.settle(record, entry, target.session, entry !== undefined ? true : undefined);
     this.save();
+    if (target.source === "codex") {
+      // Its row is its own from now on, so a later message with these words never takes it, even once the
+      // row has left the scanned tail. Codex writes the row after its hooks return, and this callback is one
+      // of them: not awaited (the agent waits on its answer), and claimed by the next ticks when the row appears.
+      record.awaitingRow = true;
+      void this.claimCodexRow(record).catch(() => undefined);
+    }
   }
   /** Claude submits the messages it held while busy as one turn, joined by newlines, so no single message's
    * hash matches the prompt. Each open message in the pane whose words are a run of whole lines of it settles,
@@ -326,6 +355,8 @@ export class PromptDeliveries {
   /** Marks `record` delivered, with the transcript entry that settled it when known. */
   private settle(record: Record, entry?: number, session?: string, hook?: boolean) {
     record.state = "delivered"; record.settledAt = this.now(); delete record.reason; delete record.hookClaim; delete record.seenRow;
+    // A cursor is a position in one conversation's transcript.
+    if (session && session !== record.session) delete record.cursor;
     if (session) record.session = session;
     if (entry !== undefined) record.entry = entry;
     if (hook !== undefined) record.entryHook = hook;
@@ -383,23 +414,56 @@ export class PromptDeliveries {
     record.entry = entry.offset; record.entryHook = entry.hook;
     return true;
   }
-  /** Codex writes a message's row after it was typed, on this machine's clock: only a row stamped at or
-   * after `record` was typed, and not claimed by another message with these words, is its own. The scan
-   * reaches back `ENTRY_SLACK_MS`, where an identical message sent a moment before has its row. An earlier
-   * message its hook settled recorded no row: it holds the first free row stamped after it was typed. */
+  /** Whether a Codex transcript row can be `record`'s own: written after it was registered. A row at or past
+   * its cursor was; one before it only if stamped after registration (written while the cursor was read),
+   * which a row without a timestamp, such as a materialized Codex 0.155 thread's, never is. The scan itself
+   * drops rows stamped more than `ENTRY_SLACK_MS` before registration. */
+  private static codexRowIsOwn(record: Record, row: TranscriptEntry): boolean {
+    return (record.cursor !== undefined && row.offset >= record.cursor) || (row.at !== undefined && row.at >= record.at);
+  }
+  /** Rows of `record`'s words in its conversation, oldest first, and where the scan of them began: rows
+   * before `start` are out of sight, so whether they exist cannot be told. */
+  private async codexRows(record: Record): Promise<{ rows: TranscriptEntry[]; start?: number }> {
+    await this.cursors.get(record);
+    const rows = [...await this.landed(record).catch(() => [] as TranscriptEntry[])].sort((a, b) => a.offset - b.offset);
+    // Read after the scan: a transcript that grew meanwhile puts `start` later than the scan's, never earlier.
+    const size = await this.size(record).catch(() => undefined);
+    return { rows, ...(size !== undefined ? { start: Math.max(0, size - TRANSCRIPT_TAIL_BYTES) } : {}) };
+  }
+  /** Rows with `record`'s words in its conversation claimed by other messages. */
+  private codexClaimed(record: Record): Set<number> {
+    return new Set(this.records.filter(other => other !== record && other.hash === record.hash && this.samePane(other, record)
+      && other.session === record.session && other.entry !== undefined).map(other => other.entry!));
+  }
+  /** A Codex message its hook settled takes the first free row written after it was registered. */
+  private async claimCodexRow(record: Record): Promise<void> {
+    const { rows, start } = await this.codexRows(record);
+    if (!record.awaitingRow || record.entry !== undefined) return;
+    // Rows written after it have left the scanned tail: its own may be one of them, so it takes none of those left.
+    if (record.cursor !== undefined && start !== undefined && record.cursor < start) { delete record.awaitingRow; return; }
+    const used = this.codexClaimed(record);
+    const row = rows.find(row => !used.has(row.offset) && PromptDeliveries.codexRowIsOwn(record, row));
+    if (!row) return;
+    record.entry = row.offset; record.entryHook = row.hook; delete record.awaitingRow;
+    this.save();
+  }
+  /** Whether Codex took `record`'s message: a row written after it was registered (`codexRowIsOwn`) that no
+   * other message with these words claimed. An earlier message its hook settled whose row was not yet
+   * claimed holds the first such row of its own first, but only when everything written after it is still
+   * in the scanned tail: otherwise its row may be gone, and the row that is left is this message's. */
   private async takenCodex(record: Record): Promise<boolean> {
-    const same = (other: Record) => other !== record && other.hash === record.hash && this.samePane(other, record) && other.session === record.session;
-    const found = [...await this.landed(record).catch(() => [] as TranscriptEntry[])].sort((a, b) => a.offset - b.offset);
-    const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
-    const after = (row: TranscriptEntry, at: number) => row.at === undefined || row.at >= at;
-    for (const other of this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && other.joined !== "part"
-      // Settled earlier, its row is older than the scan, which must not hand it this message's row.
-      && other.at < record.at && (other.settledAt ?? other.at) >= record.at - ENTRY_SLACK_MS)
-      .sort((a, b) => a.at - b.at)) {
-      const row = found.find(row => !used.has(row.offset) && after(row, other.at));
-      if (row) used.add(row.offset);
+    const { rows, start } = await this.codexRows(record);
+    const used = this.codexClaimed(record);
+    let claimed = false;
+    for (const other of this.records.filter(other => other !== record && other.hash === record.hash && this.samePane(other, record) && other.session === record.session
+      && other.awaitingRow && other.entry === undefined && other.at < record.at).sort((a, b) => a.at - b.at)) {
+      if (other.cursor === undefined || start === undefined || other.cursor < start) continue;
+      const row = rows.find(row => !used.has(row.offset) && PromptDeliveries.codexRowIsOwn(other, row));
+      if (!row) continue;
+      other.entry = row.offset; other.entryHook = row.hook; delete other.awaitingRow; used.add(row.offset); claimed = true;
     }
-    const entry = found.find(row => !used.has(row.offset) && after(row, record.at));
+    if (claimed) this.save();
+    const entry = rows.find(row => !used.has(row.offset) && PromptDeliveries.codexRowIsOwn(record, row));
     // The record may have settled (its hook came) while the transcript was read.
     if (!entry || !PromptDeliveries.claimable(record)) return false;
     record.entry = entry.offset; record.entryHook = entry.hook;
@@ -426,6 +490,12 @@ export class PromptDeliveries {
     const pass = new Map<string, TranscriptEntry[]>();
     for (const record of this.records) {
       if (record.server !== server) continue;
+      // A Codex message its hook settled claims its row once written, before a later identical one is checked.
+      if (record.awaitingRow) {
+        if (now - (record.settledAt ?? record.at) > HOOK_ROW_MS) delete record.awaitingRow;
+        else if (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS) { record.checkedAt = now; await this.claimCodexRow(record); }
+        continue;
+      }
       // A failed message whose own hook came late, before its row: settled when the row appears.
       if (record.state === "failed" && record.hookClaim) {
         if (record.source === "claude" && (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS)) {
@@ -497,10 +567,27 @@ export function matchingOffsets(buffer: Buffer, start: number, record: { hash: s
   return events ? entries : [...entries, ...items].sort((a, b) => b.offset - a.offset);
 }
 
+export async function transcriptSize(record: { source: Provider; session: string }): Promise<number | undefined> {
+  // A Codex 0.155 thread's copy is read as it stands: finding the transcript first appends what the thread store
+  // holds now, which may already be this message, and a failed append must not read as an empty conversation.
+  const copy = record.source === "codex" && sessionId.safeParse(record.session).success
+    ? await stat(materializedPath(record.session)).catch(() => undefined) : undefined;
+  if (copy) return copy.size;
+  try {
+    const file = await transcriptPath(record.source, record.session);
+    // Its copy made just now holds both older messages and maybe this one: no position tells them apart,
+    // and only a timestamped row (none in a copy) can confirm it.
+    return file === materializedPath(record.session) ? undefined : (await stat(file)).size;
+  } catch (error) {
+    // A conversation not written yet (a new Codex thread) has nothing before its first row.
+    return error instanceof BridgeError && object(error.details).code === "transcript-unavailable" ? 0 : undefined;
+  }
+}
+
 async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<TranscriptEntry[]> {
   const file = await open(await transcriptPath(record.source, record.session), "r");
   try {
-    const size = (await file.stat()).size, start = Math.max(0, size - 524_288), buffer = Buffer.alloc(size - start);
+    const size = (await file.stat()).size, start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES), buffer = Buffer.alloc(size - start);
     await file.read(buffer, 0, buffer.length, start);
     return matchingOffsets(buffer, start, record);
   } finally { await file.close(); }

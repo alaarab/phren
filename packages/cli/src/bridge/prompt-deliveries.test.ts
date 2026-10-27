@@ -1,14 +1,15 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, IN_FLIGHT_MS, matchingOffsets, promptHash, PromptDeliveries, userTexts } from "./prompt-deliveries.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, IN_FLIGHT_MS, matchingOffsets, promptHash, PromptDeliveries, transcriptSize, userTexts } from "./prompt-deliveries.js";
 import type { Json, Target } from "./protocol.js";
 
 const target: Target = { server: "default", workspace: "w6", tab: "w6:t1", pane: "w6:p1", source: "codex", session: "01a10831-4b62-7000-8000-000000000001" };
 const rotated: Target = { ...target, session: "01a10985-bf36-7000-8000-000000000002" };
 let root: string, file: string, clock: number, landed: boolean, matches = 1, hookRows = false, stores: PromptDeliveries[] = [];
-const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed ? Array.from({ length: matches }, (_, i) => ({ offset: i * 100, hook: hookRows })) : []); stores.push(store); return store; };
+/** The transcript is empty when each message is registered, so every fixture row was written after it. */
+const deliveries = () => { const store = new PromptDeliveries(file, () => clock, async () => landed ? Array.from({ length: matches }, (_, i) => ({ offset: i * 100, hook: hookRows })) : [], async () => 0); stores.push(store); return store; };
 const claudeTarget: Target = { ...target, source: "claude" };
 const pane = (status: string, terminal = "term-1", agent = "codex"): Json => ({ pane_id: target.pane, agent, terminal_id: terminal, agent_status: status });
 const claudePane = (status: string): Json => pane(status, "term-1", "claude");
@@ -242,8 +243,16 @@ describe("a message the agent never takes fails loudly", () => {
   });
 
   describe("in a Codex transcript", () => {
-    let rows: { offset: number; hook: boolean; at: number }[];
-    const codex = () => { const store = new PromptDeliveries(file, () => clock, async () => rows); stores.push(store); return store; };
+    /** A transcript of rows with these words, 100 bytes each, of which the last 512 KiB are read. */
+    let rows: { offset: number; hook: boolean; at?: number }[], size: number;
+    const TAIL = 524_288;
+    const write = (row: { hook?: boolean; at?: number } = {}) => { rows.push({ offset: size, hook: row.hook ?? true, ...("at" in row ? { at: row.at } : { at: clock + 50 }) }); size += 100; };
+    /** Tool output pushes everything written so far out of the read tail. */
+    const evict = () => { size += TAIL + 1_000; };
+    const codex = () => {
+      const store = new PromptDeliveries(file, () => clock, async () => rows.filter(row => row.offset >= size - TAIL), async () => size);
+      stores.push(store); return store;
+    };
     /** The agent's turn ends and it stays idle until the message is checked against the transcript. */
     async function giveUp(store: PromptDeliveries) {
       clock += 1; store.stopped(target);
@@ -251,13 +260,12 @@ describe("a message the agent never takes fails loudly", () => {
       clock += DELIVERY_GIVE_UP_MS;
       await store.observe("default", [pane("idle")]);
     }
-    beforeEach(() => { rows = []; });
+    beforeEach(() => { rows = []; size = 4_096; });
 
     it("does not count the row of an identical message sent moments before", async () => {
       const store = codex();
       await send(store, "yes-first", "yes");
-      rows = [{ offset: 0, hook: true, at: clock + 100 }];
-      await store.submitted(target, "yes");
+      write(); await store.submitted(target, "yes");
       expect(store.status("yes-first", target).state).toBe("delivered");
       // Within the scan's lookback, so the first message's row is still read.
       clock += 2_000; await send(store, "yes-second", "yes");
@@ -268,7 +276,7 @@ describe("a message the agent never takes fails loudly", () => {
     it("counts a row written after the message was typed", async () => {
       const store = codex();
       await send(store, "yes-only", "yes");
-      rows = [{ offset: 0, hook: false, at: clock + 100 }];
+      write({ hook: false });
       await giveUp(store);
       expect(store.status("yes-only", target).state).toBe("delivered");
     });
@@ -277,7 +285,7 @@ describe("a message the agent never takes fails loudly", () => {
       const store = codex();
       await send(store, "yes-a", "yes");
       clock += 10; await send(store, "yes-b", "yes");
-      rows = [{ offset: 0, hook: false, at: clock + 100 }];
+      write({ hook: false });
       await giveUp(store);
       expect([store.status("yes-a", target).state, store.status("yes-b", target).state]).toEqual(["delivered", "failed"]);
     });
@@ -287,8 +295,8 @@ describe("a message the agent never takes fails loudly", () => {
       await send(store, "yes-hooked", "yes");
       await store.submitted(target, "yes");
       clock += 1_000; await send(store, "yes-later", "yes");
-      // The first message's row is written (and stamped) after the second was typed.
-      rows = [{ offset: 0, hook: true, at: clock + 50 }];
+      // The first message's row is written after the second was typed.
+      write();
       await giveUp(store);
       expect(store.status("yes-later", target).state).toBe("failed");
     });
@@ -298,9 +306,80 @@ describe("a message the agent never takes fails loudly", () => {
       await send(store, "yes-hooked", "yes");
       await store.submitted(target, "yes");
       clock += 1_000; await send(store, "yes-later", "yes");
-      rows = [{ offset: 0, hook: true, at: clock + 50 }, { offset: 100, hook: false, at: clock + 100 }];
+      write(); write({ hook: false });
       await giveUp(store);
       expect(store.status("yes-later", target).state).toBe("delivered");
+    });
+
+    it("keeps the only row of a later message whose earlier twin's row left the read tail", async () => {
+      // Codex review: "yes" A was hook-confirmed, tool output evicted its row, and B's own row was reserved for A.
+      const store = codex();
+      await send(store, "yes-early", "yes");
+      // Codex writes the row after its hooks return; the next tick claims it for its message.
+      await store.submitted(target, "yes");
+      write(); clock += 3_000; await store.observe("default", [pane("working")]);
+      evict();
+      clock += 1_000; await send(store, "yes-late", "yes");
+      write({ hook: false });
+      await giveUp(store);
+      expect(store.status("yes-late", target).state).toBe("delivered");
+    });
+
+    it("reserves no row for an earlier message whose own row may have left the read tail", async () => {
+      const store = codex();
+      await send(store, "yes-early", "yes");
+      // Its hook came before its row; the row was written, then pushed out of the tail before any check claimed it.
+      await store.submitted(target, "yes");
+      write(); evict();
+      clock += 1_000; await send(store, "yes-late", "yes");
+      write({ hook: false });
+      await giveUp(store);
+      expect(store.status("yes-late", target).state).toBe("delivered");
+    });
+
+    it("counts its own row after the Hook's clock moved back", async () => {
+      // Codex review: a row stamped a second before registration (an NTP step back) is still written after it.
+      const store = codex();
+      await send(store, "yes-skew", "yes");
+      write({ hook: false, at: clock - 1_000 });
+      await giveUp(store);
+      expect(store.status("yes-skew", target).state).toBe("delivered");
+    });
+
+    it("takes a 0.155 thread's cursor from its copy as it stands, and an empty one for a thread with none", async () => {
+      vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge")); vi.stubEnv("CODEX_HOME", path.join(root, "codex"));
+      try {
+        // No rollout, no copy, no thread store: a conversation not written yet.
+        expect(await transcriptSize(target)).toBe(0);
+        // A copy holding an old "yes": its size, even when appending to it fails, so the old row stays before the cursor.
+        const copy = path.join(root, "bridge", "codex-threads", `${target.session}.jsonl`);
+        await mkdir(path.dirname(copy), { recursive: true });
+        await writeFile(copy, JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "yes" }] } }) + "\n");
+        const before = await readFile(copy, "utf8");
+        expect(await transcriptSize(target)).toBe(Buffer.byteLength(before));
+        expect(await readFile(copy, "utf8")).toBe(before);
+      } finally { vi.unstubAllEnvs(); }
+    });
+
+    it("never confirms by a materialized Codex 0.155 row from before the message", async () => {
+      // Codex review: rows the Hook materializes from thread_history_1.sqlite carry no timestamp.
+      const lines = [
+        JSON.stringify({ type: "session_meta", payload: { id: target.session, source: "codex-thread-store" } }),
+        JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "yes" }] } }),
+        JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Done." }] } }),
+      ];
+      let transcript = Buffer.from(lines.join("\n") + "\n");
+      const store = new PromptDeliveries(file, () => clock, async record => matchingOffsets(transcript, 0, record), async () => transcript.length);
+      stores.push(store);
+      expect(matchingOffsets(transcript, 0, { hash: promptHash("yes"), at: clock })).toHaveLength(1);
+      await send(store, "yes-dropped", "yes");
+      await giveUp(store);
+      expect(store.status("yes-dropped", target).state).toBe("failed");
+
+      await send(store, "yes-taken", "yes");
+      transcript = Buffer.concat([transcript, Buffer.from(lines[1] + "\n")]);
+      await giveUp(store);
+      expect(store.status("yes-taken", target).state).toBe("delivered");
     });
   });
 });
