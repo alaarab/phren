@@ -871,10 +871,13 @@ describe("stopping the agent so a held hand-off goes in", () => {
     let showPane!: () => void;
     const slow = new Promise<void>(resolve => { showPane = resolve; });
     const snapshot = f.deps.snapshot;
-    let hold = true;
-    f.deps.snapshot = async server => { if (hold) { hold = false; await slow; } return snapshot(server); };
-    const interrupting = f.mover.interrupt(f.record.id, answering("queued"));
-    await new Promise(resolve => setImmediate(resolve));
+    let hold = false, holding = false;
+    f.deps.snapshot = async server => { if (hold) { hold = false; holding = true; await slow; } return snapshot(server); };
+    const queue = { whileQueued: async (_id: string, _target: Target, action: (row?: { terminal: string }) => Promise<void>) => {
+      hold = true; await action(); return { ran: true as const }; } };
+    const interrupting = f.mover.interrupt(f.record.id, queue);
+    for (let i = 0; i < 200 && !holding; i++) await new Promise(resolve => setTimeout(resolve, 1));
+    expect(holding).toBe(true);
     // Meanwhile the hand-off wait runs out and the move goes on to exit the old agent.
     f.release();
     // Without the lock the move types its exit here; with it, it waits for the interrupt.
@@ -882,8 +885,10 @@ describe("stopping the agent so a held hand-off goes in", () => {
     showPane();
     expect(await interrupting).toEqual({ interrupted: true });
     await f.mover.settled(from.server, from.pane);
-    expect(order.indexOf("esc")).toBeGreaterThanOrEqual(0);
-    expect(order.indexOf("esc")).toBeLessThan(order.indexOf("/exit"));
+    // The interrupt's Escape went before the move's own exit (its Escape, then /exit), never after /exit.
+    expect(order.indexOf("/exit")).toBeGreaterThan(0);
+    expect(order.lastIndexOf("esc")).toBeLessThan(order.indexOf("/exit"));
+    expect(order.filter(item => item === "esc")).toHaveLength(2);
     // Past the wait, no interrupt goes.
     expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
   });
