@@ -363,7 +363,7 @@ export async function readDeltaPreview(target: Target, file?: string, rollout?: 
   } catch { return null; }
 }
 
-/** A pane block is the landed block whose first this many letters and digits it shares. */
+/** A landed block shorter than this many letters and digits is not a longer pane block that starts with it. */
 const LANDED_MATCH_CHARS = 40;
 /** A reply's words alone, for comparing what the pane draws with what landed: the Markdown Claude draws
  * otherwise (code fences and their language, list markers and numbers, link targets) is left out. */
@@ -470,14 +470,14 @@ export class TranscriptPreviewStream {
     }
   }
 
-  /** Whether pane text is a reply block that already landed: the same opening words. Only the opening is
-   * compared, as the pane draws links, code and tables otherwise than the entry's Markdown. */
+  /** Whether pane text is a reply block that already landed: its words agree with the block's as far as
+   * both go, so a block still drawing the same opening as a landed one waits until the two part. */
   private hasLanded(text: string): boolean {
     const words = previewWords(text);
     return !words || [...this.landedTexts].some(landed => {
       // A short block ("Let me check.") is not a longer one that starts with its words.
       if (landed.length < LANDED_MATCH_CHARS && words.length > landed.length) return false;
-      const length = Math.min(LANDED_MATCH_CHARS, words.length, landed.length);
+      const length = Math.min(words.length, landed.length);
       return words.slice(0, length) === landed.slice(0, length);
     });
   }
