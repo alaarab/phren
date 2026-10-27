@@ -25,7 +25,7 @@ A Hook run with `CLAUDE_CONFIG_DIR` already set (tests, or an owner who moved th
 
 The login stays in the home, and so do `.claude.json`'s account and onboarding state, `projects/` and the model catalogue cache.
 
-A slug that isn't valid is refused with one that is: `Linuxbox` suggests `linuxbox`, and a `--label` that is the account's email suggests its user and domain (`ala@alaarab.com` → `ala-alaarab`). On a Mac, run over ssh for a new home, the command first checks that the session can use the login keychain (`security show-keychain-info`), because Claude saves a Mac's login there. When the keychain is locked to the session, the command says so and creates nothing: run it on the Mac itself, or unlock the keychain for the session first with `security unlock-keychain ~/Library/Keychains/login.keychain-db`.
+A slug that isn't valid is refused with one that is: `Buildbox` suggests `buildbox`, and a `--label` that is the account's email suggests its user and domain (`sam@example.com` → `sam-example`). On a Mac, run over ssh for a new home, the command first checks that the session can use the login keychain (`security show-keychain-info`), because Claude saves a Mac's login there. When the keychain is locked to the session, the command says so and creates nothing: run it on the Mac itself, or unlock the keychain for the session first with `security unlock-keychain ~/Library/Keychains/login.keychain-db`.
 
 `phren bridge accounts` lists the computer's harnesses and accounts, which is the same data as `GET /v1/harnesses`.
 

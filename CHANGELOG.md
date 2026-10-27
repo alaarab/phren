@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- `phren bridge accounts add` with a name that isn't a valid account name (`Linuxbox`) now suggests one that is (`linuxbox`, or from the account's email when `--label` is one), and the phone's add-account request gets the suggestion as `suggestedSlug` in place of a generic error. Run over ssh on a Mac whose login keychain the session can't use, it now says so plainly and gives the command to run on the Mac itself, before creating a home whose login could never be saved.
+- `phren bridge accounts add` with a name that isn't a valid account name (`Buildbox`) now suggests one that is (`buildbox`, or from the account's email when `--label` is one), and the phone's add-account request gets the suggestion as `suggestedSlug` in place of a generic error. Run over ssh on a Mac whose login keychain the session can't use, it now says so plainly and gives the command to run on the Mac itself, before creating a home whose login could never be saved.
 
 ## [0.3.58] - 2026-10-26
 

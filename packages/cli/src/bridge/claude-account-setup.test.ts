@@ -54,15 +54,15 @@ it("rejects bad slugs and syncs extra homes only", async () => {
 });
 
 it("answers a bad slug with one that works, from the account's email when known", async () => {
-  // 2026-10-27: `phren bridge accounts add Linuxbox` only said the name was bad.
-  await expect(addClaudeAccount("Linuxbox")).rejects.toThrow(/Try "linuxbox"\./);
-  await expect(addClaudeAccount("Linuxbox", { label: "Ala.Arab@AlaArab.com" })).rejects.toThrow(/Try "ala-arab-alaarab"\./);
+  // 2026-10-27: `phren bridge accounts add Buildbox` only said the name was bad.
+  await expect(addClaudeAccount("Buildbox")).rejects.toThrow(/Try "buildbox"\./);
+  await expect(addClaudeAccount("Buildbox", { label: "Sam.Lee@Example.com" })).rejects.toThrow(/Try "sam-lee-example"\./);
   expect(suggestAccountSlug("My Work Box")).toBe("my-work-box");
-  expect(suggestAccountSlug("x", "ala@gmail.com")).toBe("ala-gmail");
+  expect(suggestAccountSlug("x", "sam@mail.com")).toBe("sam-mail");
   expect(suggestAccountSlug("--")).toBe("account");
   expect(suggestAccountSlug("Default")).toBe("default-2");
   expect(suggestAccountSlug("a".repeat(31) + " b")).toBe("a".repeat(31));
-  for (const name of ["Linuxbox", "My Work Box", "--", "Default", "a".repeat(40)]) expect(/^[a-z0-9][a-z0-9-]{0,31}$/.test(suggestAccountSlug(name))).toBe(true);
+  for (const name of ["Buildbox", "My Work Box", "--", "Default", "a".repeat(40)]) expect(/^[a-z0-9][a-z0-9-]{0,31}$/.test(suggestAccountSlug(name))).toBe(true);
 });
 
 it("says plainly when an ssh session can't use the Mac's keychain, and makes nothing", async () => {

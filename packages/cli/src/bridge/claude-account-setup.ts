@@ -48,7 +48,7 @@ export async function syncAccountMcpServers(env: NodeJS.ProcessEnv = process.env
 export interface AddedAccount { id: string; dir: string; linked: string[]; created: boolean }
 
 /** A valid account name for `name`, or for the account's email when one is known: its user and the
- * first part of its domain (`ala@alaarab.com` is `ala-alaarab`), lowercase, runs of anything else as one dash. */
+ * first part of its domain (`sam@example.com` is `sam-example`), lowercase, runs of anything else as one dash. */
 export function suggestAccountSlug(name: string, email?: string): string {
   const [user, domain = ""] = email?.includes("@") ? email.trim().split("@") : [name];
   const from = domain ? `${user}-${domain.split(".")[0]}` : user;
