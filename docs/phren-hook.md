@@ -1490,6 +1490,26 @@ a pane already moving with 409 `move_in_progress`. The phone and desktop offer
 only harnesses `/v1/harnesses` reports as usable, and follow a move by polling
 its id. The record's fields and the steps are in docs/conductor.md.
 
+While a move is `handing-off`, its hand-off request waits for the agent's step
+to end. The phone's "Stop <agent> and hand off now" sends the owner-only
+`POST /v1/sessions/move` with `{id, interrupt: true}` (not a plain Escape on
+`/v1/keys`): the Hook sends Escape to the old agent only if that request is
+still held, not yet typed, checked under the same lock that types it, so the
+Escape stops the step and never the hand-off the agent then writes. It answers
+`{ok: true, interrupted: true}`, or `{ok: true, interrupted: false, state}` with
+`state` `idle` (the agent is on no step; its request goes in without one),
+`typed` (the request is being or was typed), `writing` (the agent took it and
+is writing its hand-off) or `finished` (the move is past its hand-off, or its
+request can no longer be delivered and the move builds a hand-off itself).
+The Escape goes the way `/v1/keys` sends one: over a served OpenCode pane's
+API, as a turn interrupt on a Codex pane the Hook runs on its own app-server,
+else as the key (a question the Hook holds is declined first). One Escape per move:
+a second interrupt (a double tap, two at once) answers `interrupted: true`
+without another, which Claude and Codex would take as "go back to an earlier
+message". An older message for the same pane is still typed first. A Hook
+without this answers 400 to `{id, interrupt: true}`; the phone then falls back
+to a plain Escape.
+
 `capabilities.moveConductor: true` advertises conductor moves alongside
 `sessionMove` and `moveNewChat` in `/v1/health`. The old pane retains its role
 until the new agent lands. Conductor moves always use `mode: "new-chat"` and

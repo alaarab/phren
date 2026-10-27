@@ -46,6 +46,29 @@ describe("durable Hook hand-off queue", () => {
     expect(await incoming).toMatchObject({ status: 409 });
   });
 
+  it("runs an action only while a message is still queued, never between the check and its typing", async () => {
+    const q = queue(), order: string[] = [];
+    // Not made yet: nothing can be typed, so the action runs.
+    expect(await q.whileQueued("handoff-0001", target, async () => { order.push("before"); })).toEqual({ ran: true });
+    await q.enqueue(message());
+    send.mockImplementation(async (_t, _s, _i, typing) => { order.push("typed"); await typing(); return { delivered: true }; });
+    // A sweep that would type it waits for the action under way; the action sees it queued.
+    pane.agent_status = "idle";
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const interrupt = q.whileQueued("handoff-0001", target, async () => { order.push("escape"); await held; });
+    const sweep = q.tick();
+    release();
+    expect(await interrupt).toEqual({ ran: true });
+    await sweep;
+    expect(order).toEqual(["before", "escape", "typed"]);
+    // Typed: the action does not run, and says why.
+    const after = vi.fn(async () => {});
+    expect(await q.whileQueued("handoff-0001", target, after)).toEqual({ ran: false, state: "delivered" });
+    expect(after).not.toHaveBeenCalled();
+    await expect(q.whileQueued("handoff-0001", { ...target, pane: "p9" }, after)).rejects.toMatchObject({ status: 404 });
+  });
+
   it("retains FIFO order across busy turns and rejects message id reuse", async () => {
     const q = queue(); await q.enqueue(message()); await q.enqueue(message("handoff-0002", "Next change"));
     await expect(q.enqueue(message("handoff-0001", "Changed text"))).rejects.toThrow("different message");

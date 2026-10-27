@@ -735,6 +735,125 @@ describe("switching a Claude conversation to another account (resume)", () => {
   });
 });
 
+describe("stopping the agent so a held hand-off goes in", () => {
+  /** A move whose hand-off request waits on the agent's step: it stays handing-off until `release`. */
+  async function held(deliver?: MoverDeps["deliver"]) {
+    const w = world({ reply: writes });
+    // The agent is on a step; the request waits behind it.
+    w.pane.agent_status = "working";
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    w.deps.sleep = () => gate;
+    if (deliver) w.deps.deliver = deliver;
+    else w.deps.deliver = async () => ({ ok: true, queued: true });
+    const mover = new SessionMover(w.deps);
+    const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
+    await new Promise(resolve => setImmediate(resolve));
+    return { ...w, mover, record, release };
+  }
+  const answering = (state: "queued" | "attempting" | "uncertain" | "delivered" | "failed") => {
+    const asked: string[] = [];
+    return { asked, whileQueued: async (id: string, _target: Target, action: () => Promise<void>) => {
+      asked.push(id);
+      if (state === "queued") { await action(); return { ran: true as const }; }
+      return { ran: false as const, state };
+    } };
+  };
+
+  it("sends Escape while the request is held, and only then", async () => {
+    const f = await held();
+    const queue = answering("queued");
+    expect(await f.mover.interrupt(f.record.id, queue)).toEqual({ interrupted: true });
+    expect(queue.asked).toEqual([`move-${f.record.id}`]);
+    expect(f.keys).toEqual([["esc"]]);
+    for (const [state, answer] of [["attempting", "typed"], ["uncertain", "typed"], ["delivered", "writing"], ["failed", "finished"]] as const) {
+      expect(await f.mover.interrupt(f.record.id, answering(state))).toEqual({ interrupted: false, state: answer });
+    }
+    // A second tap while still held: already interrupted, and no second Escape onto the stopped agent.
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: true });
+    expect(f.keys).toEqual([["esc"]]);
+    f.release();
+  });
+
+  it("lets a tap after a failed Escape try again", async () => {
+    const f = await held();
+    let fail = true;
+    const escape = vi.fn(async () => { if (fail) throw new Error("Herdr is not reachable"); });
+    await expect(f.mover.interrupt(f.record.id, answering("queued"), escape)).rejects.toThrow("not reachable");
+    fail = false;
+    expect(await f.mover.interrupt(f.record.id, answering("queued"), escape)).toEqual({ interrupted: true });
+    expect(escape).toHaveBeenCalledTimes(2);
+    f.release();
+  });
+
+  it("sends nothing to an agent on no step, whose request goes in without one", async () => {
+    const f = await held();
+    f.pane.agent_status = "idle";
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "idle" });
+    expect(f.keys).toEqual([]);
+    f.release();
+  });
+
+  it("does not interrupt a move past its hand-off, or one whose request is typed straight away", async () => {
+    const f = await held();
+    // Without a queue the request was typed when sent.
+    expect(await f.mover.interrupt(f.record.id)).toEqual({ interrupted: false, state: "typed" });
+    f.release();
+    await f.mover.settled(from.server, from.pane);
+    const queue = answering("queued");
+    expect(await f.mover.interrupt(f.record.id, queue)).toEqual({ interrupted: false, state: "finished" });
+    expect(queue.asked).toEqual([]);
+    await expect(f.mover.interrupt("00000000-0000-4000-8000-000000000000", queue)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("answers two racing interrupts from one check each, through the real hand-off queue", async () => {
+    const { HandOffQueue } = await import("./hand-off-queue.js");
+    const pane: Json = { terminal_id: "term-1", agent_status: "working" };
+    const sent: string[] = [];
+    const queue = new HandOffQueue({ root: path.join(root, "hand-offs"), validate: async () => pane,
+      send: async (_target, text, _id, typing) => { await typing(); sent.push(text); return { delivered: true }; } });
+    const f = await held((target, text, deliveryId) => queue.enqueue({ target, text, deliveryId }));
+    // The request is on the queue, held behind the agent's step.
+    for (let i = 0; i < 50 && !await queue.status(`move-${f.record.id}`, from).then(() => true, () => false); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    expect(await queue.status(`move-${f.record.id}`, from)).toMatchObject({ queued: true });
+    // Both arrive while it waits: one Escape lands, before any typing, and both say so.
+    const both = await Promise.all([f.mover.interrupt(f.record.id, queue), f.mover.interrupt(f.record.id, queue)]);
+    expect(both).toEqual([{ interrupted: true }, { interrupted: true }]);
+    expect(sent).toEqual([]);
+    expect(f.keys).toEqual([["esc"]]);
+    // The step stopped; the request is typed, and a late interrupt leaves the hand-off alone.
+    pane.agent_status = "idle";
+    await queue.tick();
+    expect(sent).toHaveLength(1);
+    expect(await f.mover.interrupt(f.record.id, queue)).toEqual({ interrupted: false, state: "writing" });
+    expect(f.keys).toEqual([["esc"]]);
+    f.release();
+  });
+
+  it("is the owner's, on the move route, and stops a served pane's turn over its own API", async () => {
+    const f = await held();
+    // A served OpenCode pane: Esc goes over its API, as /v1/keys sends it, not into the terminal.
+    const servedKeys = vi.fn(async () => true);
+    const agentHooks = { servedKeys, cancelHeldQuestion: () => false, clearTerminalPrompt: () => {} };
+    const post = async (headers: Record<string, string>) => {
+      const modules = { has: () => true, modules: BUILTIN_MODULES };
+      const handler = createRouteHandler({ mover: f.mover, modules, info: { computer: { id: "00000000-0000-4000-8000-0000000000aa", name: "self" }, capabilities: capabilitiesForModules(modules as never) },
+        accountUsage: { read: async () => ({ accounts: [] }) }, streams: {}, handOffs: answering("queued"), agentHooks } as unknown as RouteContext);
+      const req = Readable.from([Buffer.from(JSON.stringify({ id: f.record.id, interrupt: true }))]) as IncomingMessage;
+      req.method = "POST"; req.url = "/v1/sessions/move"; req.headers = headers;
+      let payload = "";
+      const res = { statusCode: 200, setHeader() {}, end(value: string) { payload = value; } };
+      await handler(req, res as unknown as ServerResponse);
+      return { status: res.statusCode, body: JSON.parse(payload) as Json };
+    };
+    expect(await post({})).toEqual({ status: 200, body: { ok: true, interrupted: true } });
+    expect(servedKeys).toHaveBeenCalledWith(from, ["Escape"], "working");
+    expect(f.keys).toEqual([]);
+    expect((await post({ "x-phren-origin": "peer" })).status).toBe(403);
+    f.release();
+  });
+});
+
 describe("copyClaudeConversation", () => {
   it("copies the transcript and its session folder to the same projects path in the other home, replacing an older copy", async () => {
     vi.stubEnv("HOME", root);
