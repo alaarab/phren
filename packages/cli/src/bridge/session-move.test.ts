@@ -994,16 +994,23 @@ describe("stopping the agent so a held hand-off goes in", () => {
     const enqueue = w.deps.deliver;
     let reached = false;
     w.deps.deliver = async (target, text, deliveryId) => { reached = true; await sending; return enqueue(target, text, deliveryId); };
+    // The wait would run its full length: the request must not sit queued through it.
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    w.deps.sleep = () => gate;
     const mover = new SessionMover(w.deps);
     const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
     for (let i = 0; i < 50 && !reached; i++) await new Promise(resolve => setTimeout(resolve, 5));
     await mover.abort(record.id);
     sendNow();
-    await mover.settled(from.server, from.pane);
+    for (let i = 0; i < 50 && (await queue.status(`move-${record.id}`, from).catch(() => undefined))?.state !== "failed"; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    // The agent's step ends while the move would still be waiting.
     w.pane.agent_status = "idle";
     await queue.tick();
     expect(sent).toEqual([]);
     expect(await queue.status(`move-${record.id}`, from)).toMatchObject({ state: "failed" });
+    release();
+    await mover.settled(from.server, from.pane);
   });
 
   it("takes the request back after an interrupt that is checking, without either waiting on the other", async () => {
