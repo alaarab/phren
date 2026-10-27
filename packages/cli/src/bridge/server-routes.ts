@@ -888,6 +888,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await conductorCall("dispatch", brief, origin, () => dispatches!.dispatch(brief, origin));
         } else if (url.pathname === "/v1/dispatch/workers") {
           result = await hookWorkers(agentHooks)(data);
+        } else if (url.pathname === "/v1/dispatch/returns" && url.searchParams.get("peek") === "1") {
+          // The unread returns, left unread: a watcher (`phren dispatch returns --watch`) beside an agent
+          // conductor, which still takes them. Read here, never forwarded to a successor, which would take them.
+          if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
+          result = { returns: await ctx.returns!.take(false) };
         } else if (url.pathname === "/v1/dispatch/returns") {
           result = await conductorCall("returns", {}, data.origin, async () => ({ returns: await ctx.returns!.take() }));
         } else if (url.pathname === "/v1/dispatch/approve") {

@@ -490,6 +490,7 @@ See [authority.md](authority.md).
 phren dispatch returns
 phren dispatch returns --watch
 phren dispatch returns --watch --json
+phren dispatch returns --watch --consume
 ```
 
 After placement the dispatching Hook follows each worker and records what
@@ -500,9 +501,12 @@ time, label, computer, state, and the last 120 characters of the final reply,
 the question asked, or why it failed or is blocked), until Ctrl-C; with
 `--json` each return is one JSON object per line, the same object
 `phren dispatch returns` lists. The watch reads the Hook's collected returns
-every 5 seconds and marks them read as it prints them, so it takes them over:
-an agent conductor on the same Hook is no longer told of them. Run it where
-you are the conductor, not beside an agent that is. Peers are polled by the
+every 5 seconds without marking them read (the route's `?peek=1`), so an agent
+conductor on the same Hook is still told of them and still takes them; each
+return is printed once, and again only when the worker returns anew. One the
+agent takes within those 5 seconds, before the watch read it, is not printed. With
+`--consume` the watch takes them as it prints, for a terminal that is the
+conductor itself. Peers are polled by the
 Hook alone, as always. A Hook that doesn't answer is said once on stderr; the
 first Ctrl-C ends the watch after the read in flight, a second at once (exit
 code 130). A return is one of:
