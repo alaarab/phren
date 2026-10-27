@@ -289,7 +289,9 @@ async function claudeChildRelations(file: string, session: string, signature: st
     for (const [taskId, workflow] of workflows) {
       // A finished run whose notification never reached the parent: the Stop's word ends its agents.
       if (workflow.state === "running" && stop?.finished.includes(taskId)) workflow.state = "completed";
-      for (const child of await claudeWorkflowAgents(root, session, workflow)) {
+      // Once that Stop is gone (four hours on, or a newer Stop leaves the run out) a quiet agent ends,
+      // as a launched one does; a run the Stop lists as running keeps its quiet agents.
+      for (const child of await claudeWorkflowAgents(root, session, workflow, !stop?.running.includes(taskId))) {
         if (seen.has(child.session!)) continue;
         seen.add(child.session!); relations.push(child);
         if (child.state === "running") live = true;
@@ -336,8 +338,10 @@ async function claudeChildNames(root: string, entries: string[]): Promise<Map<st
 }
 
 /** A Workflow run's agents from its journal: each `started` agent runs until
- * the journal records another row for it or the run itself finishes. */
-async function claudeWorkflowAgents(root: string, session: string, workflow: { runId: string; name: string; callId: string; state: "running" | "completed" }): Promise<ChildAgentRelation[]> {
+ * the journal records another row for it or the run itself finishes, or, with
+ * `quietEnds`, its transcript sits unchanged for CLAUDE_SKILL_QUIET_MS. */
+async function claudeWorkflowAgents(root: string, session: string, workflow: { runId: string; name: string; callId: string; state: "running" | "completed" },
+  quietEnds = true, now = Date.now()): Promise<ChildAgentRelation[]> {
   const directory = await realpath(path.join(root, "workflows", workflow.runId)).catch(() => undefined);
   if (!directory || !directory.startsWith(root + path.sep)) return [];
   const journal = path.join(directory, "journal.jsonl");
@@ -358,10 +362,12 @@ async function claudeWorkflowAgents(root: string, session: string, workflow: { r
     const meta = await readFile(childFile.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
     const model = await claudeChildModel(childFile).catch(() => undefined);
     const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
+    const quiet = quietEnds && !done && workflow.state === "running"
+      && now - ((await stat(childFile).catch(() => undefined))?.mtimeMs ?? now) >= CLAUDE_SKILL_QUIET_MS;
     relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
       session: agentId, transcript: childFile, provider: "claude",
       path: String(meta.description || workflow.name).slice(0, 200), callId: workflow.callId || `workflow:${workflow.runId}`,
-      state: done || workflow.state === "completed" ? "completed" : "running",
+      state: done || quiet || workflow.state === "completed" ? "completed" : "running",
       ...(model !== undefined ? { model } : {}), ...checkout, children: [] });
   }
   return relations;

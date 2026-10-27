@@ -26,7 +26,7 @@ import { atomicInPrivateDir, bridgeRoot, provider, serverName, sessionId, type P
 export const TURN_REPLY_LIMIT = 4000;
 /** Most background tasks a record keeps from one Stop, running ones first. */
 export const STOP_TASKS_LIMIT = 256;
-// A full task list (256 ids of up to 128 characters) and a reply escaped in full still fit.
+// Room for a typical full task list beside the reply and cwd; a record still larger sheds tasks (`fitRecord`).
 const MAX_RECORD_BYTES = 65_536;
 
 // Not strict: a field a newer Hook adds (as `stop.cwd` was) is dropped on
@@ -124,6 +124,19 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
       ...(tasks ? { tasks } : {}),
       ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}),
       ...(event.cwd && path.isAbsolute(event.cwd) && event.cwd.length <= 4096 ? { cwd: event.cwd } : {}) };
+  }
+  return fitRecord(record);
+}
+
+/** `record` within MAX_RECORD_BYTES, which readRecord would otherwise throw away whole: its Stop's
+ * finished tasks go first, then running ones, and the list says it was cut. */
+function fitRecord(record: TurnRecord): TurnRecord {
+  const tasks = record.stop?.tasks;
+  while (tasks && Buffer.byteLength(JSON.stringify(record)) > MAX_RECORD_BYTES && (tasks.finished.length || tasks.running.length)) {
+    const over = Buffer.byteLength(JSON.stringify(record)) - MAX_RECORD_BYTES, drop = Math.max(1, Math.ceil(over / 64));
+    const list = tasks.finished.length ? tasks.finished : tasks.running;
+    list.splice(Math.max(0, list.length - drop));
+    tasks.truncated = true;
   }
   return record;
 }

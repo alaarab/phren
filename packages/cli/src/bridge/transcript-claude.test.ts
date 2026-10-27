@@ -332,6 +332,27 @@ describe("Claude background agents the parent's Stop lists", () => {
     await stopped([{ id: "wtask01", status: "completed" }]);
     vi.useFakeTimers({ now: Date.now() + 3_000, toFake: ["Date"] });
     try { expect(await states()).toEqual([["afirst", "completed"]]); } finally { vi.useRealTimers(); }
+    // Past the Stop's trust its quiet agent stays ended rather than running again.
+    vi.useFakeTimers({ now: Date.now() + CLAUDE_STOP_TRUST_MS + 60_000, toFake: ["Date"] });
+    try { expect(await states()).toEqual([["afirst", "completed"]]); } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps a quiet workflow agent running while the Stop lists its run as running", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-child-stop-")); roots.push(root);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+    const run = path.join(root, session, "subagents", "workflows", "wf_0f0ce397-bb2"); await mkdir(run, { recursive: true });
+    const file = path.join(root, `${session}.jsonl`), child = path.join(run, "agent-asecond.jsonl");
+    await writeFile(file, JSON.stringify({ type: "user", toolUseResult: { status: "async_launched", taskId: "wtask02", taskType: "local_workflow", workflowName: "sweep", runId: "wf_0f0ce397-bb2" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call-wf", content: "ok" }] } }) + "\n");
+    await writeFile(child, JSON.stringify({ type: "user", isSidechain: true, sessionId: session, agentId: "asecond", message: { role: "user", content: "Go" } }) + "\n");
+    await writeFile(path.join(run, "journal.jsonl"), JSON.stringify({ type: "started", key: "k1", agentId: "asecond" }) + "\n");
+    const old = new Date(Date.now() - CLAUDE_SKILL_QUIET_MS - 60_000);
+    await utimes(child, old, old);
+    const states = async () => (await claudeChildAgents(file, session)).map(entry => [entry.session, entry.state]);
+    expect(await states()).toEqual([["asecond", "completed"]]);
+    await stopped([{ id: "wtask02", status: "running" }]);
+    vi.useFakeTimers({ now: Date.now() + 3_000, toFake: ["Date"] });
+    try { expect(await states()).toEqual([["asecond", "running"]]); } finally { vi.useRealTimers(); }
   });
 
   it("forgets a closed pane's Stop once the conversation is resumed in another pane", async () => {

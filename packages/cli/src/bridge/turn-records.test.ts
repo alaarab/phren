@@ -33,6 +33,17 @@ describe("a Stop's background task list", () => {
     expect(tasks.finished).toHaveLength(STOP_TASKS_LIMIT - 3);
     expect(tasks.truncated).toBe(true);
   });
+
+  it("sheds tasks rather than write a record too large to read back", async () => {
+    const running = Array.from({ length: STOP_TASKS_LIMIT }, (_, i) => ({ id: `a${"y".repeat(120)}${i}`, status: "running" }));
+    await noteTurn("default", "w1:p1", turn("Stop", { ...stopFacts({ background_tasks: running }), reply: "\u0001".repeat(4000),
+      cwd: "/" + "目".repeat(4095), terminal: "\u0002".repeat(200) }));
+    const stop = (await readTurn("default", "w1:p1"))!.stop!;
+    expect(stop.cwd).toHaveLength(4096);
+    expect(stop.tasks!.running.length).toBeGreaterThan(100);
+    expect(stop.tasks!.running).toEqual(running.slice(0, stop.tasks!.running.length).map(task => task.id));
+    expect(stop.tasks!.truncated).toBe(true);
+  });
 });
 
 describe("the conversation's newest record", () => {
