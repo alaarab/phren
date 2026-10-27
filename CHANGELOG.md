@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Merging a GitLab merge request with "delete branch" turned off still deleted the source branch: the Hook sent the choice only when it was on, so GitLab kept the merge request's own remove-source-branch setting, which the Hook turns on when it opens one. The choice is now sent either way.
+- A phone message to a Codex pane could be reported delivered when it was not: the transcript check counted any row with the same words in the five seconds before the send, so a "yes" sent moments after another "yes" took the first one's row. Now only a row written after the message was typed, and not claimed by another message with the same words, confirms it, and a Codex turn's two copies of the prompt count as one row.
 
 ## [0.3.58] - 2026-10-26
 
