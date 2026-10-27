@@ -76,6 +76,7 @@ describe("live spoken replies", () => {
     upstream.reply({ audio: half, alignment: { chars: ["H", "i"], char_start_times_ms: [0, 100], char_durations_ms: [100, 200] } });
     upstream.reply({ audio: half, alignment: { chars: ["!"], char_start_times_ms: [0], char_durations_ms: [50] } });
     upstream.reply({ audio: half, alignment: null });
+    say(client, { done: true });
     upstream.reply({ is_final_audio_for_turn: true });
     upstream.reply({ is_final: true });
     expect(frames(client).slice(1)).toEqual([
@@ -279,6 +280,123 @@ describe("live spoken replies", () => {
     upstreams[0].open();
     client.close();
     expect(upstreams[0].readyState).toBe(3);
+  });
+
+  describe("when ElevenLabs ends a socket before the phone's done", () => {
+    /** Half a second of 24 kHz PCM with the given characters timed from the chunk. */
+    const half = Buffer.alloc(24_000).toString("base64");
+    const voiced = (words: string) => ({ audio: half, alignment: { chars: [...words], char_start_times_ms: [...words].map((_, i) => i * 10), char_durations_ms: [...words].map(() => 10) } });
+    const inputs = (socket: FakeSocket) => frames(socket).flatMap(frame => (frame.inputs as { text: string }[] | undefined)?.map(input => input.text) ?? []);
+
+    it("voices the following paragraphs on a fresh socket, timed on, and tells done only after the phone's", async () => {
+      // The default v4 voice (text-to-dialogue) ends its socket after a chunk.
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "First paragraph.\n" });
+      upstreams[0].reply(voiced("First paragraph."));
+      upstreams[0].reply({ isFinal: true });
+      expect(frames(client).map(frame => frame.type)).toEqual(["start", "audio"]);
+      expect(client.closed).toBeUndefined();
+      expect(upstreams[0].readyState).toBe(3);
+      // The next paragraph opens a fresh socket, carrying only itself.
+      say(client, { text: "Second paragraph.\n" });
+      expect(upstreams).toHaveLength(2);
+      expect(new URL(upstreams[1].url).pathname).toBe("/v1/text-to-dialogue/stream-input");
+      upstreams[1].open();
+      expect(inputs(upstreams[1])).toEqual(["Second paragraph. "]);
+      say(client, { done: true });
+      expect(frames(upstreams[1]).at(-1)).toEqual({ close_socket: true });
+      upstreams[1].reply(voiced("Second paragraph."));
+      upstreams[1].reply({ isFinal: true });
+      const sent = frames(client);
+      // One start; the second socket's audio is timed after the first's half second.
+      expect(sent.map(frame => frame.type)).toEqual(["start", "audio", "audio", "done"]);
+      expect((sent[2].alignment as { starts: number[] }).starts[0]).toBe(0.5);
+      expect(client.closed).toEqual({ code: 1000, reason: "" });
+    });
+
+    it("replays the text the ended socket never voiced", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "One thing.\n" });
+      say(client, { text: "Another thing.\n" });
+      // Only the first sentence was voiced before the socket ended.
+      upstreams[0].reply(voiced("One thing."));
+      upstreams[0].reply({ isFinal: true });
+      expect(upstreams).toHaveLength(2);
+      upstreams[1].open();
+      expect(inputs(upstreams[1])).toEqual(["Another thing. "]);
+    });
+
+    it("voices the tail the phone sent just before done, when the socket's end was already on its way", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "First paragraph.\n" });
+      upstreams[0].reply(voiced("First paragraph."));
+      // The socket had stopped taking text; the tail and the phone's done reach it anyway.
+      say(client, { text: "Second paragraph.\n" });
+      say(client, { done: true });
+      upstreams[0].reply({ isFinal: true });
+      expect(frames(client).map(frame => frame.type)).toEqual(["start", "audio"]);
+      expect(upstreams).toHaveLength(2);
+      upstreams[1].open();
+      expect(frames(upstreams[1]).slice(1)).toEqual([{ inputs: [{ text: "Second paragraph. ", voice_id: DEFAULT_SPEECH_VOICE }] }, { close_socket: true }]);
+      upstreams[1].reply(voiced("Second paragraph."));
+      upstreams[1].reply({ isFinal: true });
+      expect(frames(client).map(frame => frame.type)).toEqual(["start", "audio", "audio", "done"]);
+    });
+
+    it("keeps a short last line, whether or not ElevenLabs times the spaces", async () => {
+      for (const spaces of [false, true]) {
+        const { upstreams, client } = await live();
+        upstreams[0].open();
+        for (const line of ["A long first sentence.\n", "Second one.\n", "Ok.\n"]) say(client, { text: line });
+        upstreams[0].reply(voiced(spaces ? "A long first sentence. Second one. " : "A long first sentence.Second one."));
+        upstreams[0].reply({ isFinal: true });
+        expect(upstreams).toHaveLength(2);
+        upstreams[1].open();
+        expect(inputs(upstreams[1])).toEqual(["Ok. "]);
+      }
+    });
+
+    it("does not send the same words round forever when the alignment never covers them", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "First.\n" });
+      say(client, { text: "Twenty-two items.\n" });
+      upstreams[0].reply(voiced("First."));
+      upstreams[0].reply({ isFinal: true });
+      upstreams[1].open();
+      upstreams[1].reply(voiced("22 items"));
+      upstreams[1].reply({ isFinal: true });
+      // One retry, then taken as voiced: no third socket, and the reply ends with the phone's done.
+      expect(upstreams).toHaveLength(2);
+      say(client, { done: true });
+      expect(frames(client).at(-1)).toEqual({ type: "done" });
+    });
+
+    it("ends with done when the phone's done comes after the socket ended with everything voiced", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "All of it.\n" });
+      upstreams[0].reply(voiced("All of it."));
+      upstreams[0].reply({ isFinal: true });
+      say(client, { done: true });
+      expect(upstreams).toHaveLength(1);
+      expect(frames(client).at(-1)).toEqual({ type: "done" });
+      expect(client.closed).toEqual({ code: 1000, reason: "" });
+    });
+
+    it("falls back to Flash with the text when a socket ends before any audio", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "Hello there.\n" });
+      upstreams[0].reply({ isFinal: true });
+      expect(new URL(upstreams[1].url).searchParams.get("model_id")).toBe(FALLBACK_SPEECH_MODEL);
+      upstreams[1].open();
+      expect(frames(upstreams[1]).slice(1)).toEqual([{ text: "Hello there. " }]);
+      expect(client.sent).toEqual([]);
+    });
   });
 });
 

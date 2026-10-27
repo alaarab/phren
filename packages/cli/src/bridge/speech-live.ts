@@ -140,6 +140,11 @@ export class SpeakableStream {
   }
 }
 
+/** The characters of `text` that are not whitespace. */
+function nonSpace(text: string): number {
+  return text.replace(/\s+/g, "").length;
+}
+
 /** Seconds of audio in a chunk of the given format. */
 function seconds(format: SpeechFormat, bytes: number): number {
   const mp3 = /^mp3_\d+_(\d+)$/.exec(format);
@@ -197,12 +202,15 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
     let models = chosen === FALLBACK_SPEECH_MODEL || state.benchedReason(chosen) ? [FALLBACK_SPEECH_MODEL] : [chosen, FALLBACK_SPEECH_MODEL];
 
     const text = new SpeakableStream();
-    // Everything said so far, replayed into a fallback's socket.
-    const said: string[] = [];
     let saidLength = 0, done = false, closed = false, started = false;
     let upstream: LiveUpstream | undefined, endpoint: "dialogue" | "speech" = "speech", format: SpeechFormat = "pcm_24000", elapsed = 0;
     /** The current socket's handshake and first-audio timers. */
     let watch: { voicing(): void; stop(): void } | undefined;
+    /** Hands words to the current socket, which sends them once open. */
+    let put: ((words: string) => void) | undefined;
+    /** Set when a socket ended its audio before the reply was done: the words it never voiced, for the next
+     * socket, opened when they are there (at once, or with the reply's next text or its end). */
+    let resume: string[] | undefined;
     const finish = (code = 1000, reason = "") => {
       if (closed) return;
       closed = true;
@@ -223,17 +231,26 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       if (!words) return;
       saidLength += words.length;
       if (saidLength > MAX_TEXT) { fail({ code: "speech-invalid", error: "This reply is too long to voice." }); return; }
-      said.push(words);
-      if (upstream?.readyState === OPEN) {
-        upstream.send(textFrame(words));
-        if (saidLength >= FORCED_TEXT) watch?.voicing();
-      }
+      if (resume) { resume.push(words); reopen(); return; }
+      put?.(words);
+    };
+    /** The next socket for a reply whose last one ended early, with the words that one never voiced. */
+    const reopen = () => {
+      const words = resume ?? [];
+      resume = undefined;
+      open(words, true);
     };
 
-    const open = (): void => {
+    /** One ElevenLabs socket, given the words it is to voice first: every word so far for the reply's first
+     * socket, what a failed one carried for its fallback, what an ended one never voiced for its successor. */
+    const open = (replay: string[] = [], resumed = false): void => {
       const model = models[0];
       endpoint = liveEndpoint(model);
       format = formats[0];
+      // Stream-input times its alignment from its own stream's start; this socket's starts here.
+      const base = elapsed;
+      const sent: string[] = [];
+      let sentLength = 0, voicedChars = 0, sentAtFirstAudio = -1;
       const params = new URLSearchParams({ model_id: model, output_format: format, sync_alignment: "true" });
       if (endpoint === "speech") { params.set("auto_mode", "true"); params.set("inactivity_timeout", "180"); }
       const path = endpoint === "dialogue" ? "/v1/text-to-dialogue/stream-input" : `/v1/text-to-speech/${encodeURIComponent(voice)}/stream-input`;
@@ -251,6 +268,29 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
         },
         stop: () => { clearTimeout(handshake); clearTimeout(firstAudio); },
       };
+      const carry = (words: string) => {
+        sent.push(words); sentLength += words.length;
+        if (socket.readyState === OPEN) {
+          socket.send(textFrame(words));
+          if (sentLength >= FORCED_TEXT) watch?.voicing();
+        }
+      };
+      for (const words of replay) carry(words);
+      put = words => { if (current()) carry(words); };
+      /** What this socket was sent and never voiced, by the characters its alignment covered, spaces left out
+       * on both sides (ElevenLabs may or may not time the spaces); a chunk short of at most two of its own
+       * characters counts as voiced. Without alignment: what came after its first audio, or nothing once the
+       * reply is done (its close was sent with it). */
+      const unvoiced = (): string[] => {
+        if (!voicedChars) return done ? [] : sent.slice(Math.max(0, sentAtFirstAudio));
+        let covered = 0;
+        for (const [index, words] of sent.entries()) {
+          const length = nonSpace(words);
+          covered += length;
+          if (voicedChars < covered - Math.min(2, Math.floor(length / 2))) return sent.slice(index);
+        }
+        return [];
+      };
       const detach = () => {
         clearTimeout(handshake); clearTimeout(firstAudio);
         // Detached first, so its closing is not taken for a failure.
@@ -261,7 +301,7 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       // with none left, the phone gets `failure`.
       const fallBack = (failure: { code: string; error: string }) => {
         detach();
-        if (models.length > 1) { state.bench(model, "failed"); models = models.slice(1); open(); return; }
+        if (models.length > 1) { state.bench(model, "failed"); models = models.slice(1); open([...sent], resumed); return; }
         fail(failure);
       };
       // A refused format or model: ElevenLabs answers some in the handshake
@@ -269,7 +309,7 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       // stalled socket is refused here too, as a 504.
       const refused = (status: number, code: string) => {
         if (format !== "pcm_24000" && (status === 400 || status === 403 || status === 422) && /output_format/.test(code)) {
-          detach(); state.refuseFormat(format); formats.shift(); open(); return;
+          detach(); state.refuseFormat(format); formats.shift(); open([...sent], resumed); return;
         }
         if (!accountFailure(status, code) && (status >= 500 || /model/.test(code))) {
           fallBack(status === 504 ? { code: "speech-failed", error: "ElevenLabs didn't answer." } : liveError(`${status} ${code}`));
@@ -283,9 +323,9 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
         if (!current()) return;
         clearTimeout(handshake);
         socket.send(JSON.stringify(endpoint === "dialogue" ? { voices: [voice], voice_settings: VOICE_SETTINGS } : { text: " ", voice_settings: VOICE_SETTINGS }));
-        for (const words of said) socket.send(textFrame(words));
+        for (const words of sent) socket.send(textFrame(words));
         if (done) socket.send(closeFrame());
-        if (said.length && (done || saidLength >= FORCED_TEXT)) watch?.voicing();
+        if (sent.length && (done || sentLength >= FORCED_TEXT)) watch?.voicing();
       });
       socket.on("message", data => {
         if (!current()) return;
@@ -301,13 +341,34 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
             tell({ type: "start", model, format, audioFormat: info.audio, sampleRate: info.sampleRate });
             started = true;
           }
+          if (!voiced) sentAtFirstAudio = sent.length;
           voiced = true;
           clearTimeout(firstAudio);
           const audio = message.audio, length = Buffer.from(audio, "base64").length;
-          tell({ type: "audio", audio, alignment: alignment(message.alignment) });
+          const timed = alignment(message.alignment, endpoint === "dialogue" ? elapsed : base);
+          voicedChars += nonSpace(timed?.characters.join("") ?? "");
+          tell({ type: "audio", audio, alignment: timed });
           elapsed += seconds(format, length);
         }
-        if (message.isFinal === true || message.is_final === true) { tell({ type: "done" }); finish(); return; }
+        if (message.isFinal === true || message.is_final === true) {
+          // Text-to-dialogue (v4) ends a socket after the text it had, though the reply goes on: what it never
+          // voiced, and the reply's next text, go to a fresh socket, timed on from this one's audio.
+          if (!voiced) {
+            if (done) { tell({ type: "done" }); finish(); } else fallBack({ code: "speech-failed", error: "ElevenLabs ended without voicing the reply." });
+            return;
+          }
+          // Stream-input ends only after the close sent with the phone's done; text-to-dialogue may end after
+          // the text it had, done or not, with the reply's last words never voiced.
+          let left = done && endpoint === "speech" ? [] : unvoiced();
+          // The same words left again by a socket given only them (their one retry): its alignment and the
+          // text disagree, so they are taken as voiced rather than sent round again.
+          const again = resumed && left.length > 0 && left.length === replay.length && left.every((words, index) => words === replay[index]);
+          if (again) left = [];
+          if (done && !left.length) { tell({ type: "done" }); finish(); return; }
+          detach(); put = undefined; resume = left;
+          if (left.length) reopen();
+          return;
+        }
         if (message.error) fail(liveError(String(message.error)));
       });
       socket.on("error", () => { if (current()) { detach(); fail({ code: "speech-unreachable", error: "Couldn't reach ElevenLabs from this computer." }); } });
@@ -322,15 +383,14 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       });
     };
 
-    /** In seconds from the start of this socket's audio. Stream-input counts
-     * from the start of its stream; text-to-dialogue from each chunk. */
-    const alignment = (raw: unknown): { characters: string[]; starts: number[]; ends: number[] } | null => {
+    /** In seconds from the start of this socket's audio, `offset` on from where the reply's audio stood:
+     * stream-input counts from the start of its own stream, text-to-dialogue from each chunk. */
+    const alignment = (raw: unknown, offset: number): { characters: string[]; starts: number[]; ends: number[] } | null => {
       const value = raw as { chars?: unknown; charStartTimesMs?: unknown; charDurationsMs?: unknown; char_start_times_ms?: unknown; char_durations_ms?: unknown } | null;
       const characters = value?.chars, starts = value?.charStartTimesMs ?? value?.char_start_times_ms, durations = value?.charDurationsMs ?? value?.char_durations_ms;
       if (!Array.isArray(characters) || !Array.isArray(starts) || !Array.isArray(durations) || !characters.length) return null;
       if (characters.length !== starts.length || characters.length !== durations.length) return null;
       if (!characters.every(c => typeof c === "string") || ![...starts, ...durations].every(t => typeof t === "number" && Number.isFinite(t))) return null;
-      const offset = endpoint === "dialogue" ? elapsed : 0;
       const round = (t: number) => Math.round(t * 1_000) / 1_000;
       return { characters, starts: starts.map(t => round(offset + t / 1_000)), ends: starts.map((t, i) => round(offset + (t + durations[i]) / 1_000)) };
     };
@@ -346,14 +406,19 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
         if (closed) return;
         // Nothing speakable (a reply of only code, say): no audio is coming.
         if (!saidLength) { tell({ type: "done" }); finish(); return; }
+        // The last socket ended and nothing it left, or came since, is waiting to be voiced.
+        if (resume) { if (resume.length) reopen(); else { tell({ type: "done" }); finish(); } return; }
         if (upstream?.readyState === OPEN) { upstream.send(closeFrame()); watch?.voicing(); }
       }
     };
     receive = handle;
     gone = () => finish();
     if (overflow) { fail({ code: "speech-invalid", error: "This reply is too long to voice." }); return; }
+    // The words of the phone's early frames, for the first socket.
+    const before: string[] = [];
+    put = words => { before.push(words); };
     for (const data of early) handle(data);
     early = [];
-    if (!closed) open();
+    if (!closed) open(before);
   })();
 }

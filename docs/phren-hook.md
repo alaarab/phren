@@ -1173,7 +1173,12 @@ characters of it are in (a shorter piece can sit in ElevenLabs' buffer while
 the agent thinks). Text the phone sends while the Hook reads its settings is
 kept. A reply with nothing to say (only code, say) ends with `done`; one past
 ten minutes ends with the error `speech-limit`; a phone that stops reading the
-audio (4 MB queued) is closed with `speech-failed`.
+audio (4 MB queued) is closed with `speech-failed`. `done` comes only after the
+phone's own `done`: text-to-dialogue ends its socket after the text it had, so when
+ElevenLabs finishes a socket early the Hook voices the rest on a fresh one,
+replaying the words the ended socket never voiced (by its alignment), with the
+alignment timed on from the audio so far; the phone needs no socket per paragraph.
+A socket that ends before any audio falls back to Flash as above.
 
 The key is this computer's ElevenLabs key (see [the ElevenLabs key](#the-elevenlabs-key)),
 used only in the request to ElevenLabs and never returned, even in errors.
