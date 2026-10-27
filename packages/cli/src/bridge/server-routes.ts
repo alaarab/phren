@@ -815,9 +815,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           const { id } = z.object({ id: z.string().uuid(), interrupt: z.literal(true), origin: z.unknown().optional() }).strict().parse(data);
           // Esc as /v1/keys sends it: a served OpenCode pane or a Codex pane on the Hook's own app-server stops
           // its turn over its API; otherwise the key goes to the pane. A question the Hook holds is declined
-          // first, and the key still goes: a declined question alone lets the turn carry on.
+          // first, and the turn is still stopped: a declined question alone lets the turn carry on.
           const escape = async (target: Target) => {
-            if (await agentHooks.servedKeys(target, ["Escape"], "working")) return;
+            if (await agentHooks.servedKeys(target, ["Escape"], "working", { abortTurn: true })) return;
             agentHooks.cancelHeldQuestion(target);
             const { codexServers } = await import("./codex-servers.js");
             const owned = codexServers.forTarget(target);

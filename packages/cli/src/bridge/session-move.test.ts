@@ -830,6 +830,63 @@ describe("stopping the agent so a held hand-off goes in", () => {
     f.release();
   });
 
+  it.each([
+    ["another conversation", (f: Awaited<ReturnType<typeof held>>) => { f.deps.identity = async () => NEXT; }],
+    ["another harness", (f: Awaited<ReturnType<typeof held>>) => { f.pane.agent = "codex"; }],
+    ["another terminal", (f: Awaited<ReturnType<typeof held>>) => { f.pane.terminal_id = "term-9"; }],
+  ])("never interrupts %s the owner started in the pane since", async (_label, replace) => {
+    const f = await held();
+    replace(f);
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "replaced" });
+    expect(f.keys).toEqual([]);
+    f.release();
+  });
+
+  it("checks the terminal the request was queued for", async () => {
+    const f = await held();
+    const queue = { whileQueued: async (_id: string, _target: Target, action: (row?: { terminal: string }) => Promise<void>) => {
+      await action({ terminal: "term-other" }); return { ran: true as const }; } };
+    expect(await f.mover.interrupt(f.record.id, queue)).toEqual({ interrupted: false, state: "replaced" });
+    expect(f.keys).toEqual([]);
+    f.release();
+  });
+
+  it("keeps the one Escape per move across a Hook restart", async () => {
+    const f = await held();
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: true });
+    // The Hook restarts; the move and its queued request are still on disk.
+    const restarted = new SessionMover(f.deps);
+    expect(await restarted.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: true });
+    expect(f.keys).toEqual([["esc"]]);
+    f.release();
+  });
+
+  it("never lets the move's takeover overtake an interrupt that is checking", async () => {
+    const f = await held();
+    const order: string[] = [];
+    const { sendKeys, prompt } = f.deps.terminal;
+    f.deps.terminal.sendKeys = async (server, pane, keys) => { order.push(keys.join("+")); await sendKeys(server, pane, keys); };
+    f.deps.terminal.prompt = async (server, pane, text) => { order.push(text); await prompt(server, pane, text); };
+    // The interrupt's look at the pane takes a while.
+    let showPane!: () => void;
+    const slow = new Promise<void>(resolve => { showPane = resolve; });
+    const snapshot = f.deps.snapshot;
+    let hold = true;
+    f.deps.snapshot = async server => { if (hold) { hold = false; await slow; } return snapshot(server); };
+    const interrupting = f.mover.interrupt(f.record.id, answering("queued"));
+    await new Promise(resolve => setImmediate(resolve));
+    // Meanwhile the hand-off wait runs out and the move goes on to exit the old agent.
+    f.release();
+    for (let i = 0; i < 50 && !order.includes("/exit"); i++) await new Promise(resolve => setTimeout(resolve, 2));
+    showPane();
+    expect(await interrupting).toEqual({ interrupted: true });
+    await f.mover.settled(from.server, from.pane);
+    expect(order.indexOf("esc")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("esc")).toBeLessThan(order.indexOf("/exit"));
+    // Past the wait, no interrupt goes.
+    expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
+  });
+
   it("is the owner's, on the move route, and stops a served pane's turn over its own API", async () => {
     const f = await held();
     // A served OpenCode pane: Esc goes over its API, as /v1/keys sends it, not into the terminal.
@@ -847,7 +904,8 @@ describe("stopping the agent so a held hand-off goes in", () => {
       return { status: res.statusCode, body: JSON.parse(payload) as Json };
     };
     expect(await post({})).toEqual({ status: 200, body: { ok: true, interrupted: true } });
-    expect(servedKeys).toHaveBeenCalledWith(from, ["Escape"], "working");
+    // A question it holds is declined and the turn aborted too.
+    expect(servedKeys).toHaveBeenCalledWith(from, ["Escape"], "working", { abortTurn: true });
     expect(f.keys).toEqual([]);
     expect((await post({ "x-phren-origin": "peer" })).status).toBe(403);
     f.release();
