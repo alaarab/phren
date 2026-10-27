@@ -8,7 +8,7 @@ import { claudeAccountRef, claudeAuthStatus, claudeHomes, CODEX_ACCOUNT, type Ac
 import { toolVersion, type ToolVersion } from "./health.js";
 
 export type HarnessSource = "claude" | "codex" | "opencode" | "copilot" | "phren";
-export interface HarnessAccount extends AccountRef { signedIn: boolean; usable: boolean; plan?: string; reason?: string }
+export interface HarnessAccount extends AccountRef { signedIn: boolean; usable: boolean; plan?: string; reason?: string; signInAvailable?: boolean }
 export interface HarnessEntry {
   source: HarnessSource; installed: boolean; version?: string; usable: boolean; reason?: string; accounts?: HarnessAccount[];
 }
@@ -42,7 +42,9 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
         // An unanswered sign-in check stays usable: only Claude saying "logged out" hides an account.
         const usable = auth.signedIn || auth.unknown === true;
         return { ...claudeAccountRef(home), signedIn: auth.signedIn, usable,
-          ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }) };
+          ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }),
+          // Claude said it is signed out: the phone offers Sign in (POST /v1/accounts/claude/add {slug, mode: "sign-in"}).
+          ...(!auth.signedIn && !auth.unknown ? { signInAvailable: true } : {}) };
       }));
       const usable = accounts.some(account => account.usable);
       return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts };

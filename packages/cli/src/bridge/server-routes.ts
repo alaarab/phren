@@ -4,7 +4,7 @@ import { redactPeerHandoff } from "./peer-handoff.js";
 import type { ConductorSuccessionService, ConductorExecutor } from "./conductor-succession.js";
 import { relocationSupport } from "./worker-relocation.js";
 import { continuationIntent, continuationLaunchSchema, continuationPlacement, launchContinuation } from "./continuation-launch.js";
-import { addClaudeAccount } from "./account-add.js";
+import { addClaudeAccount, signInClaudeAccount } from "./account-add.js";
 import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
@@ -857,7 +857,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }), { caller, server: selectedServer(url) });
         } else if (url.pathname === "/v1/accounts/claude/add") {
           if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can add a Claude account.");
-          result = await launches.run(() => addClaudeAccount(data, selectedServer(url)));
+          // `mode`: sign in a slot that exists but is signed out, or ask whether it is signed in yet.
+          result = data.mode === undefined ? await launches.run(() => addClaudeAccount(data, selectedServer(url)))
+            : data.mode === "sign-in-status" ? await signInClaudeAccount(data, selectedServer(url))
+            : await launches.run(() => signInClaudeAccount(data, selectedServer(url)));
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/jobs/cleanup") {
