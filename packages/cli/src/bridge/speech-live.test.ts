@@ -357,11 +357,21 @@ describe("live spoken replies", () => {
       expect(upstreams).toHaveLength(2);
       upstreams[1].open();
       expect(inputs(upstreams[1])).toEqual(["Second paragraph. "]);
-      // Cut off inside a word: that word is said again whole.
+      // Its one retry: cut off again inside the sentence, it is taken as voiced rather than sent round.
       upstreams[1].reply(voiced("Second para"));
       upstreams[1].reply({ isFinal: true });
-      upstreams[2].open();
-      expect(inputs(upstreams[2])).toEqual(["paragraph. "]);
+      expect(upstreams).toHaveLength(2);
+    });
+
+    it("says a sentence cut off again whole, and takes one the alignment falls a little short of as voiced", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "Okay. Sure thing.\nNext part here, and more.\n" });
+      // Voiced into the third sentence, the alignment leaving the periods out.
+      upstreams[0].reply(voiced("OkaySure thingNext part"));
+      upstreams[0].reply({ isFinal: true });
+      upstreams[1].open();
+      expect(inputs(upstreams[1])).toEqual(["Next part here, and more. "]);
     });
 
     it("keeps a short last line, whether or not ElevenLabs times the spaces", async () => {

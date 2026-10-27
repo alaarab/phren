@@ -145,13 +145,15 @@ function nonSpace(text: string): number {
   return text.replace(/\s+/g, "").length;
 }
 
-/** `text` after its first `count` characters that are not whitespace, from the start of the word they end
- * in when they end inside one. */
+/** `text` after the last sentence its first `count` characters that are not whitespace end (within two of
+ * them, as a whole chunk is), so a sentence cut off is said again whole; all of it when they end none. */
 function after(text: string, count: number): string {
-  let at = 0;
-  for (let seen = 0; at < text.length && seen < count; at++) if (!/\s/.test(text[at])) seen++;
-  if (at < text.length && !/\s/.test(text[at])) while (at > 0 && !/\s/.test(text[at - 1])) at--;
-  return text.slice(at).trim();
+  let rest = text;
+  for (const match of text.matchAll(/[.!?:;](?=\s|$)/g)) {
+    if (nonSpace(text.slice(0, match.index + 1)) > count + 2) break;
+    rest = text.slice(match.index + 1).trim();
+  }
+  return rest;
 }
 
 /** Seconds of audio in a chunk of the given format. */
@@ -288,8 +290,8 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       put = words => { if (current()) carry(words); };
       /** What this socket was sent and never voiced, by the characters its alignment covered, spaces left out
        * on both sides (ElevenLabs may or may not time the spaces); a chunk short of at most two of its own
-       * characters counts as voiced, and one voiced in part is replayed from the word its voicing stopped in
-       * (a phone frame of several paragraphs is one chunk). Without alignment: what came after its first
+       * characters counts as voiced, and one voiced in part is replayed from the sentence its voicing stopped
+       * in (a phone frame of several paragraphs is one chunk). Without alignment: what came after its first
        * audio, or nothing once the reply is done (its close was sent with it). */
       const unvoiced = (): string[] => {
         if (!voicedChars) return done ? [] : sent.slice(Math.max(0, sentAtFirstAudio));
