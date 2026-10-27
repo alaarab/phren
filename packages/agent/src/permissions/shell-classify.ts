@@ -10,7 +10,7 @@
  * assignment, background `&`) is not auto-approvable.
  */
 
-import { GIT_GLOBAL_SAFE, GIT_SPECS, parseFind, parsedPaths, parseOptions, parseSed, READ_ONLY_SPECS, type CommandSpec } from "./shell-options.js";
+import { GIT_GLOBAL_SAFE, GIT_SPECS, own, parseFind, parsedPaths, parseOptions, parseSed, READ_ONLY_SPECS, type CommandSpec } from "./shell-options.js";
 
 /** Build, test and type-check tools, and the subcommands of multi-command tools that build or test. Their
  * options are not listed one by one (they run the project's own code anyway); the ones that rewrite sources
@@ -63,14 +63,53 @@ export function commandPaths(tokens: string[]): string[] | null {
   if (binary === "sed") return parseSed(args);
   if (binary === "git") {
     const git = gitSubcommand(args);
-    const spec = git && GIT_SPECS[git.sub];
-    const parsed = spec && parseOptions(git.rest, spec);
+    const spec = git ? own(GIT_SPECS, git.sub) : undefined;
+    const parsed = git && spec && parseOptions(git.rest, spec);
     // `git show HEAD:.env` reads the path after the colon.
-    return parsed ? parsedPaths(parsed, spec).flatMap((p) => (p.includes(":") ? [p, p.slice(p.indexOf(":") + 1)] : [p])) : null;
+    return parsed && spec ? parsedPaths(parsed, spec).flatMap((p) => (p.includes(":") ? [p, p.slice(p.indexOf(":") + 1)] : [p])) : null;
   }
-  const spec: CommandSpec | undefined = READ_ONLY_SPECS[binary];
+  const spec: CommandSpec | undefined = own(READ_ONLY_SPECS, binary);
   const parsed = spec && parseOptions(args, spec);
-  return parsed ? parsedPaths(parsed, spec) : null;
+  return parsed && spec ? parsedPaths(parsed, spec) : null;
+}
+
+/**
+ * Where a command reads every file below a directory (grep -r, rg, diff -r, git grep), as the operands it
+ * starts from (cwd when none), and whether it follows symlinks there; null when it reads only the files
+ * named. The caller looks below each directory for a secret file, since no operand names it.
+ */
+export function recursiveReads(tokens: string[]): { roots: string[]; follow: boolean } | null {
+  const [binary, ...args] = tokens;
+  if (!binary) return null;
+  const parse = (spec: CommandSpec | undefined, rest: string[]) => {
+    const parsed = spec && parseOptions(rest, spec);
+    return parsed && spec ? { parsed, paths: parsedPaths(parsed, spec) } : null;
+  };
+  const named = (options: { name: string; value?: string }[], ...names: string[]) => options.some((o) => names.includes(o.name));
+  if (binary === "grep" || binary === "egrep" || binary === "fgrep") {
+    const read = parse(own(READ_ONLY_SPECS, binary), args);
+    if (!read) return null;
+    const { options } = read.parsed;
+    const follow = named(options, "-R", "--dereference-recursive");
+    const recurse = follow || named(options, "-r", "--recursive")
+      || options.some((o) => (o.name === "-d" || o.name === "--directories") && o.value === "recurse");
+    return recurse ? { roots: read.paths.length ? read.paths : ["."], follow } : null;
+  }
+  if (binary === "rg") {
+    const read = parse(own(READ_ONLY_SPECS, "rg"), args);
+    if (!read) return null;
+    return { roots: read.paths.length ? read.paths : ["."], follow: named(read.parsed.options, "-L", "--follow") };
+  }
+  if (binary === "diff") {
+    const read = parse(own(READ_ONLY_SPECS, "diff"), args);
+    return read && named(read.parsed.options, "-r", "--recursive") ? { roots: read.paths, follow: true } : null;
+  }
+  if (binary === "git") {
+    // git grep's operands may be revisions; it searches the work tree below cwd either way.
+    const git = gitSubcommand(args);
+    return git?.sub === "grep" ? { roots: ["."], follow: false } : null;
+  }
+  return null;
 }
 
 /** Whether a read-only command or a git read takes only its listed options (and date only +FORMAT). */
@@ -79,11 +118,13 @@ function readOnlyIsSafe(name: string, args: string[]): boolean | undefined {
   if (name === "sed") return parseSed(args) !== null;
   if (name === "git") {
     const git = gitSubcommand(args);
-    const spec = git && GIT_SPECS[git.sub];
-    return !!spec && parseOptions(git.rest, spec) !== null;
+    const spec = git ? own(GIT_SPECS, git.sub) : undefined;
+    return !!git && !!spec && parseOptions(git.rest, spec) !== null;
   }
-  const spec = READ_ONLY_SPECS[name];
+  const spec = own(READ_ONLY_SPECS, name);
   if (!spec) return undefined;
+  // `printf -v NAME` assigns a variable (`printf -v PATH .` changes what the next command runs).
+  if (name === "printf" && args[0]?.startsWith("-v")) return false;
   const parsed = parseOptions(args, spec);
   if (!parsed) return false;
   // A bare date operand sets the clock.
@@ -144,6 +185,9 @@ export function splitCommandWords(command: string): CommandWords[] | null {
   };
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
+    // A line continuation: bash drops the backslash and newline and joins the word (`sec\⏎rets.json`), which this
+    // reader would keep as two characters, so it isn't vouched for (outside single quotes, where it is literal).
+    if (c === "\\" && command[i + 1] === "\n" && quote !== "'") return null;
     if (quote) {
       if (c === quote) quote = null;
       else if (quote === '"' && (c === "`" || (c === "$" && command[i + 1] === "("))) return null;
@@ -158,9 +202,10 @@ export function splitCommandWords(command: string): CommandWords[] | null {
     if (c === "|") { endSegment(); if (command[i + 1] === "|") i++; continue; }
     if (c === ";" || c === "\n") { endSegment(); continue; }
     if (c === "&" || c === ">" || c === "<") {
-      // Only the harmless redirections: stderr into stdout, output thrown away.
+      // Only the harmless redirections: stderr into stdout, output thrown away. The whole target must be that
+      // descriptor or /dev/null (`>&1pwned` writes the file 1pwned).
       const rest = command.slice(i);
-      const harmless = /^(?:>&[12]|>\s*\/dev\/null|&>\s*\/dev\/null)/.exec(rest);
+      const harmless = /^(?:>&[12]|>[ \t]*\/dev\/null|&>[ \t]*\/dev\/null)(?=$|[ \t\n;|&])/.exec(rest);
       const fd = current === "1" || current === "2" ? current : null;
       if (!harmless || (inToken && !fd)) return null;
       current = "";
@@ -188,12 +233,10 @@ function segmentIsSafe({ words: tokens, globbed }: CommandWords): boolean {
   const name = binary.includes("/") ? "" : binary;
   const readOnly = readOnlyIsSafe(name, args);
   if (readOnly !== undefined) return readOnly;
-  // After `--` every argument is an operand, never an option.
-  const end = args.indexOf("--");
-  const options = end === -1 ? args : args.slice(0, end);
-  if (options.some((a) => FIXING_ARG.test(a))) return false;
+  // Past `--` too: `npm run lint -- --fix` hands --fix on to the script's own tool.
+  if (args.some((a) => FIXING_ARG.test(a))) return false;
   if (RUNNERS.has(name)) return true;
-  const subs = SUBCOMMANDS[name];
+  const subs = own(SUBCOMMANDS, name);
   if (!subs) return false;
   if (subs.size === 0) return true;
   const positional = args.filter((a) => !a.startsWith("-"));

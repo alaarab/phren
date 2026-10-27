@@ -1,9 +1,10 @@
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { PermissionConfig, PermissionRule } from "./types.js";
-import { checkShellSafety } from "./shell-safety.js";
-import { commandPaths, isAutoApprovableCommand, splitCommandWords } from "./shell-classify.js";
+import { checkShellSafety, scrubEnv } from "./shell-safety.js";
+import { commandPaths, isAutoApprovableCommand, recursiveReads, splitCommandWords } from "./shell-classify.js";
 import { evaluateRules } from "./rules.js";
 import { validatePath, checkSensitivePath, checkSensitiveTarget } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
@@ -119,12 +120,84 @@ function namesSecretFile(tokens: string[], cwd: string): boolean {
   return false;
 }
 
-/** Whether a shell command may name a secret file: one of its arguments does, or a word the shell expands
- * into file names (`cat config/*`), whose names no check here can see. */
-function commandTouchesSecret(command: string, cwd: string): boolean {
+/** git config that makes even a read (`git diff`, `git status`) run a configured program, and that no
+ * override can switch off without knowing its driver's name: an external diff, a diff driver's command or
+ * textconv, a clean/smudge/process filter. The rest (fsmonitor, the pager, signature checks) every agent
+ * shell switches off itself (GIT_HARDENING, shell-safety.ts). */
+const GIT_HELPER_KEYS = "^(diff\\.external|diff\\..+\\.(command|textconv)|filter\\..+\\.(clean|smudge|process))$";
+
+/** Whether git, run in `cwd`, has config that runs a program on a read. A git that can't be asked says nothing. */
+export function gitRunsHelpers(cwd: string): boolean {
+  try {
+    const out = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
+      cwd, env: scrubEnv(), encoding: "utf-8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
+    return out.trim() !== "";
+  } catch (err: unknown) {
+    // Exit 1: no such key. Anything else (git missing, a timeout) can't vouch for the config.
+    return (err as { status?: number }).status !== 1 && (err as { code?: string }).code !== "ENOENT";
+  }
+}
+
+/** Most entries looked at below one directory a recursive read starts from; past it the command asks. */
+export const RECURSIVE_WALK_LIMIT = 20_000;
+
+/**
+ * Whether a recursive read from `root` could reach a secret file: one below it matches a sensitive name, a
+ * symlink it would follow is there (where it leads is not walked), or there are too many entries to look at.
+ * `.git` is skipped (git's objects, not files a search reads as text).
+ */
+function secretBelow(root: string, cwd: string, follow: boolean): boolean {
+  const expanded = root === "~" || root.startsWith("~/") ? path.join(os.homedir(), root.slice(1)) : root;
+  const start = path.resolve(cwd, expanded);
+  let info: fs.Stats;
+  try { info = fs.statSync(start); } catch { return false; }
+  if (!info.isDirectory()) return false;
+  const pending = [start];
+  let seen = 0;
+  while (pending.length) {
+    const dir = pending.pop()!;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (++seen > RECURSIVE_WALK_LIMIT) return true;
+      const full = path.join(dir, entry.name);
+      if (checkSensitivePath(full).sensitive || checkSensitivePath(full + path.sep).sensitive) return true;
+      if (entry.isSymbolicLink() && follow) return true;
+      if (entry.isDirectory() && entry.name !== ".git") pending.push(full);
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a shell command may reach a secret file or leave the sandbox: an argument names one, a word the
+ * shell expands into file names (`cat config/*`) hides the names, a recursive read has one below it, or a
+ * `cd` moves outside the sandbox. Each segment's paths resolve where the `cd`s before it left the shell
+ * (`cd ~/.aws && cat credentials`); a `cd` whose target this can't tell (none, `-`) counts too.
+ */
+function commandTouchesSecret(command: string, cwd: string, config: PermissionConfig): boolean {
   const segments = splitCommandWords(command);
   if (!segments) return false;
-  return segments.some(({ words, globbed }) => globbed.some(Boolean) || namesSecretFile(words, cwd));
+  let here = cwd;
+  for (const { words, globbed } of segments) {
+    if (globbed.some(Boolean)) return true;
+    if (words[0] === "cd") {
+      const target = commandPaths(words)?.[0];
+      if (target === undefined || target === "-") return true;
+      const expanded = target === "~" || target.startsWith("~/") ? path.join(os.homedir(), target.slice(1)) : target;
+      const next = path.resolve(here, expanded);
+      const real = realTarget(here, expanded) ?? next;
+      if (!validatePath(next, config.projectRoot, config.allowedPaths).ok || !validatePath(real, config.projectRoot, config.allowedPaths).ok) return true;
+      if (checkSensitiveTarget(next + path.sep, real + path.sep).sensitive) return true;
+      here = next;
+      continue;
+    }
+    if (namesSecretFile(words, here)) return true;
+    if (words[0] === "git" && gitRunsHelpers(here)) return true;
+    const recursive = recursiveReads(words);
+    if (recursive && recursive.roots.some((root) => secretBelow(root, here, recursive.follow))) return true;
+  }
+  return false;
 }
 
 /**
@@ -245,7 +318,7 @@ export function checkPermission(
   if (isAllowed(toolName, input)) {
     const shellOk = toolName !== "shell" || (() => {
       const cwd = (input.cwd as string) || config.projectRoot;
-      return validatePath(cwd, config.projectRoot, config.allowedPaths).ok && !commandTouchesSecret((input.command as string) || "", cwd);
+      return validatePath(cwd, config.projectRoot, config.allowedPaths).ok && !commandTouchesSecret((input.command as string) || "", cwd, config);
     })();
     if (shellOk) return { verdict: "allow", reason: "Session allowlist." };
   }
@@ -269,8 +342,8 @@ export function checkPermission(
         // A read-only command still asks before it touches a secret file
         // (`cat .env`), as read_file would be refused.
         const command = (input.command as string) || "";
-        const touchesSecret = commandTouchesSecret(command, cwd);
-        if (cwdResult.ok && !touchesSecret && isAutoApprovableCommand(command)) {
+        // The cheap checks first: the secret check may walk a directory or ask git for its config.
+        if (cwdResult.ok && isAutoApprovableCommand(command) && !commandTouchesSecret(command, cwd, config)) {
           return { verdict: "allow", reason: "Read, build or test command within sandbox." };
         }
       }

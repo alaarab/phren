@@ -30,8 +30,9 @@ export interface CommandSpec {
   maxOperands?: number;
   /** A search tool: unless one of these options gives the pattern, the first operand is the pattern. */
   patternOptions?: string[];
-  /** The first operand is not a path (jq's filter). */
+  /** The first operand is not a path (jq's filter), unless one of `filterOptions` gave it (`jq -f FILE IN`). */
   firstOperandNotPath?: boolean;
+  filterOptions?: string[];
   /** No operand is a path (echo's words, tr's sets). */
   noPaths?: boolean;
   /** Options whose value is a file the command reads. */
@@ -93,8 +94,15 @@ export function parsedPaths(parsed: ParsedArgs, spec: CommandSpec): string[] {
   if (spec.noPaths) return paths;
   let operands = parsed.operands;
   const patternGiven = spec.patternOptions && parsed.options.some((o) => spec.patternOptions!.includes(o.name));
-  if ((spec.patternOptions && !patternGiven) || spec.firstOperandNotPath) operands = operands.slice(1);
+  const filterGiven = spec.filterOptions && parsed.options.some((o) => spec.filterOptions!.includes(o.name));
+  if ((spec.patternOptions && !patternGiven) || (spec.firstOperandNotPath && !filterGiven)) operands = operands.slice(1);
   return [...paths, ...operands];
+}
+
+/** `table[key]` only when `key` is the table's own entry: a command or subcommand name is the model's text,
+ * and `constructor` or `__proto__` must not find Object's members. */
+export function own<T>(table: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
 }
 
 const GREP: CommandSpec = {
@@ -120,7 +128,8 @@ export const READ_ONLY_SPECS: Record<string, CommandSpec> = {
   head: { flags: "qvz", valued: "nc", numeric: true, long: ["quiet", "silent", "verbose", "zero-terminated"], longValued: ["lines", "bytes"] },
   // No -f / -F: following never ends.
   tail: { flags: "qvzr", valued: "ncb", numeric: true, long: ["quiet", "silent", "verbose", "zero-terminated"], longValued: ["lines", "bytes"] },
-  wc: { flags: "clmwL", long: ["bytes", "chars", "lines", "words", "max-line-length"], longValued: ["files0-from"], pathOptions: ["--files0-from"] },
+  // No --files0-from here or on sort: the files it names come from a list no check here reads.
+  wc: { flags: "clmwL", long: ["bytes", "chars", "lines", "words", "max-line-length"] },
   grep: GREP, egrep: GREP, fgrep: GREP,
   // No --pre (runs a program on every file) and no -z / --search-zip (runs decompressors).
   rg: { flags: "abcFHhiIlLnNopqsSuUvwx0.P", valued: "efgtTmABCMjrEd",
@@ -138,8 +147,8 @@ export const READ_ONLY_SPECS: Record<string, CommandSpec> = {
     long: ["ignore-leading-blanks", "dictionary-order", "ignore-case", "general-numeric-sort", "ignore-nonprinting", "month-sort",
       "human-numeric-sort", "numeric-sort", "random-sort", "reverse", "version-sort", "check", "merge", "stable", "unique",
       "zero-terminated", "debug"],
-    longValued: ["key", "field-separator", "buffer-size", "parallel", "random-source", "files0-from"],
-    pathOptions: ["--random-source", "--files0-from"] },
+    longValued: ["key", "field-separator", "buffer-size", "parallel", "random-source"],
+    pathOptions: ["--random-source"] },
   // `uniq IN OUT` writes OUT.
   uniq: { flags: "cdDiuz", valued: "fsw", maxOperands: 1, long: ["count", "repeated", "ignore-case", "unique", "zero-terminated"],
     longValued: ["skip-fields", "skip-chars", "check-chars"], longOptional: ["all-repeated", "group"] },
@@ -153,6 +162,7 @@ export const READ_ONLY_SPECS: Record<string, CommandSpec> = {
     pathOptions: ["-X", "--exclude-from"] },
   cmp: { flags: "blsv", valued: "in", long: ["print-bytes", "verbose", "quiet", "silent"], longValued: ["ignore-initial", "bytes"] },
   echo: { anyArgs: true, noPaths: true },
+  // printf -v assigns a variable (PATH among them): refused in shell-classify.ts.
   printf: { anyArgs: true, noPaths: true },
   test: { anyArgs: true, noPaths: true },
   "[": { anyArgs: true, noPaths: true },
@@ -161,9 +171,9 @@ export const READ_ONLY_SPECS: Record<string, CommandSpec> = {
   pwd: { flags: "LP", maxOperands: 0 },
   which: { flags: "as", noPaths: true },
   type: { flags: "afptP", noPaths: true },
-  // No -C (compiles a magic file).
-  file: { flags: "bcdhiLNnprsvzZk0", valued: "mfF", long: ["brief", "mime", "mime-type", "mime-encoding", "dereference",
-    "no-dereference", "keep-going", "raw", "special-files", "uncompress"], pathOptions: ["-f", "-m"] },
+  // No -C (compiles a magic file) and no -f (reads the names to test from a file).
+  file: { flags: "bcdhiLNnprsvzZk0", valued: "mF", long: ["brief", "mime", "mime-type", "mime-encoding", "dereference",
+    "no-dereference", "keep-going", "raw", "special-files", "uncompress"], pathOptions: ["-m"] },
   stat: { flags: "LtFlnqrsx", valued: "cf", long: ["dereference", "terse", "file-system"], longValued: ["format", "printf"] },
   du: { flags: "aAbcghHklLmPsSx0", valued: "dBtI", long: ["all", "apparent-size", "bytes", "total", "human-readable", "si",
     "dereference", "summarize", "one-file-system", "null", "count-links", "separate-dirs"],
@@ -184,14 +194,15 @@ export const READ_ONLY_SPECS: Record<string, CommandSpec> = {
   date: { flags: "uRjn", valued: "dr", noPaths: true, long: ["utc", "universal", "rfc-email"], longValued: ["date", "reference"],
     longOptional: ["iso-8601", "rfc-3339"], pathOptions: ["-r", "--reference"] },
   // No --arg / --argjson / --slurpfile: they take two values.
-  jq: { flags: "rjacnsSeCMR", valued: "f", firstOperandNotPath: true, long: ["raw-output", "join-output", "ascii-output",
+  jq: { flags: "rjacnsSeCMR", valued: "f", firstOperandNotPath: true, filterOptions: ["-f"], long: ["raw-output", "join-output", "ascii-output",
     "compact-output", "null-input", "slurp", "sort-keys", "exit-status", "color-output", "monochrome-output", "raw-input", "tab"],
     longValued: ["indent"], pathOptions: ["-f"] },
   nl: { flags: "p", valued: "bdfhilnsvw" },
   column: { flags: "txne", valued: "cso" },
-  sha256sum: { flags: "bctwz", long: ["binary", "check", "text", "tag", "quiet", "status", "strict", "warn", "zero", "ignore-missing"] },
-  md5sum: { flags: "bctwz", long: ["binary", "check", "text", "tag", "quiet", "status", "strict", "warn", "zero", "ignore-missing"] },
-  shasum: { flags: "bctUp0s", valued: "a", long: ["binary", "check", "text", "portable", "status", "warn", "strict", "tag"], longValued: ["algorithm"] },
+  // No -c / --check: the files checked are named inside the sum file.
+  sha256sum: { flags: "btz", long: ["binary", "text", "tag", "zero"] },
+  md5sum: { flags: "btz", long: ["binary", "text", "tag", "zero"] },
+  shasum: { flags: "btUp0", valued: "a", long: ["binary", "text", "portable", "tag"], longValued: ["algorithm"] },
   whoami: { maxOperands: 0 },
   uname: { flags: "amnrsvpio", maxOperands: 0 },
   // An operand would set the host name.
@@ -273,7 +284,7 @@ export function parseFind(args: string[]): string[] | null {
   const paths: string[] = [];
   while (i < args.length && !args[i].startsWith("-") && args[i] !== "(" && args[i] !== "!") paths.push(args[i++]);
   while (i < args.length) {
-    const arity = FIND_PRIMARIES[args[i]];
+    const arity = own(FIND_PRIMARIES, args[i]);
     if (arity === undefined || (arity > 0 && i + arity >= args.length)) return null;
     i += 1 + arity;
   }
