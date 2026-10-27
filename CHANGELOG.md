@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Merging a GitLab merge request with "delete branch" turned off still deleted the source branch: the Hook sent the choice only when it was on, so GitLab kept the merge request's own remove-source-branch setting, which the Hook turns on when it opens one. The choice is now sent either way.
+
 ## [0.3.58] - 2026-10-26
 
 ### Added
