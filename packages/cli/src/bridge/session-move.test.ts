@@ -964,6 +964,48 @@ describe("stopping the agent so a held hand-off goes in", () => {
     await mover.settled(from.server, from.pane);
   });
 
+  it("takes back the request when the wait fails, leaving the old agent running", async () => {
+    const w = world();
+    w.pane.agent_status = "working";
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    w.deps.sleep = () => gate;
+    const { queue, sent } = await realQueue(w);
+    const mover = new SessionMover(w.deps);
+    const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
+    for (let i = 0; i < 50 && !await queue.status(`move-${record.id}`, from).then(() => true, () => false); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    // Herdr stops answering mid-wait.
+    w.deps.snapshot = async () => { throw new Error("Herdr is not reachable"); };
+    release();
+    await mover.settled(from.server, from.pane);
+    expect(await readMove(record.id)).toMatchObject({ state: "failed" });
+    w.pane.agent_status = "idle";
+    await queue.tick();
+    expect(sent).toEqual([]);
+    expect(await queue.status(`move-${record.id}`, from)).toMatchObject({ state: "failed" });
+  });
+
+  it("never leaves the request queued for a move aborted while it was being sent", async () => {
+    const w = world();
+    w.pane.agent_status = "working";
+    const { queue, sent } = await realQueue(w);
+    let sendNow!: () => void;
+    const sending = new Promise<void>(resolve => { sendNow = resolve; });
+    const enqueue = w.deps.deliver;
+    let reached = false;
+    w.deps.deliver = async (target, text, deliveryId) => { reached = true; await sending; return enqueue(target, text, deliveryId); };
+    const mover = new SessionMover(w.deps);
+    const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
+    for (let i = 0; i < 50 && !reached; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    await mover.abort(record.id);
+    sendNow();
+    await mover.settled(from.server, from.pane);
+    w.pane.agent_status = "idle";
+    await queue.tick();
+    expect(sent).toEqual([]);
+    expect(await queue.status(`move-${record.id}`, from)).toMatchObject({ state: "failed" });
+  });
+
   it("takes the request back after an interrupt that is checking, without either waiting on the other", async () => {
     const w = world();
     w.pane.agent_status = "working";

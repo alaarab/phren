@@ -795,6 +795,12 @@ export class SessionMover {
       logger.info("move", `Moved ${from.source} in pane ${from.pane} to ${harnessName(record.to)} (${launched.placement}); hand-off ${record.handoff?.source}.`);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f\x7f]+/g, " ");
+      // A wait that failed (the pane went missing for a moment, Herdr did not answer) leaves the old agent running
+      // with the request still queued for it: taken back, as when the wait ends, and no interrupt after.
+      if (this.asking.has(record.id)) {
+        await this.withdrawRequest(record, "The move failed before the agent wrote its hand-off.");
+        await this.lifecycle(record.id, async () => { this.asking.delete(record.id); });
+      }
       if (roleTransferred) {
         // update() has already populated the complete moved record. The role
         // and worker routes committed; a later status save cannot undo them.
@@ -880,10 +886,12 @@ export class SessionMover {
       await this.deps.succession!.abort(id);
       if ((await this.deps.succession!.status(id)).phase === "committed") throw new BridgeError(409, "This ownership generation is committed; reconcile it instead of rolling back.");
     } else if (record.state !== "handing-off" && record.state !== "failed") throw new BridgeError(409, "This launch may already exist; reconcile it before aborting.");
-    // Its request, if still untyped, is taken back (even one a restarted Hook no longer waits on); then, after an
-    // interrupt already checking and before any other, no Escape goes for an aborted move.
+    // Marked first, so a move not yet at its request never sends it (askForHandoff checks). Its request, if
+    // already queued and still untyped, is taken back (even one a restarted Hook no longer waits on); then, after
+    // an interrupt already checking and before any other, no Escape goes for an aborted move.
+    this.cancelled.add(id);
     if (record.state === "handing-off") await this.withdrawRequest(record, "The owner aborted the move.");
-    await this.lifecycle(id, async () => { this.asking.delete(id); this.cancelled.add(id); });
+    await this.lifecycle(id, async () => { this.asking.delete(id); });
     await this.update(record, { state: "failed", error: "The owner aborted this uncommitted move; the original chat keeps its role." });
     return record;
   }
@@ -1029,6 +1037,9 @@ export class SessionMover {
   private async askForHandoff(record: MoveRecord, handoffMs: number): Promise<{ text: string } | { reason: string }> {
     const from = record.from.target;
     const deadline = this.now + handoffMs;
+    // An abort before, during or after the request was sent: it is not sent, or taken back (run's catch).
+    const aborted = () => { if (this.cancelled.has(record.id)) throw new BridgeError(409, "This uncommitted move was aborted; no conductor role was transferred."); };
+    aborted();
     try {
       const sent = await this.deps.deliver(from, handoffRequest(record.id, record.to, record.mode), `move-${record.id}`);
       // A lost delivery acknowledgement can still have reached the agent;
@@ -1039,7 +1050,9 @@ export class SessionMover {
       this.asking.add(record.id);
     } catch (error) { return { reason: `the request could not be delivered (${error instanceof Error ? error.message : String(error)}).` }; }
     while (this.now < deadline) {
+      aborted();
       await this.sleep(this.poll);
+      aborted();
       const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
       if (!pane || pane.agent !== from.source) throw new BridgeError(409, "The session ended before it wrote its hand-off; nothing was started.");
       const lines = await this.deps.transcript(from).catch(() => [] as string[]);
