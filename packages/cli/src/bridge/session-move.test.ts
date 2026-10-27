@@ -877,7 +877,8 @@ describe("stopping the agent so a held hand-off goes in", () => {
     await new Promise(resolve => setImmediate(resolve));
     // Meanwhile the hand-off wait runs out and the move goes on to exit the old agent.
     f.release();
-    for (let i = 0; i < 50 && !order.includes("/exit"); i++) await new Promise(resolve => setTimeout(resolve, 2));
+    // Without the lock the move types its exit here; with it, it waits for the interrupt.
+    for (let i = 0; i < 300 && !order.includes("/exit"); i++) await new Promise(resolve => setTimeout(resolve, 5));
     showPane();
     expect(await interrupting).toEqual({ interrupted: true });
     await f.mover.settled(from.server, from.pane);
