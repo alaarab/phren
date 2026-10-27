@@ -63,6 +63,23 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
     expect(bodies[1]).toMatchObject({ event: "PermissionRequest", tool: "Bash", input: { command: "ls" } });
   });
 
+  // A same-pane `claude --resume`: without the start source the record kept the dead agents of the last Stop.
+  it("names how the session started, so a resume clears the last Stop's running agents", async () => {
+    await run({ hook_event_name: "SessionStart", session_id: session, source: "resume" }, herdr());
+    expect(bodies[0]).toMatchObject({ event: "SessionStart", startSource: "resume" });
+    await run({ hook_event_name: "UserPromptSubmit", session_id: session, source: "resume", prompt: "hi" }, herdr());
+    expect(bodies[1].startSource).toBeUndefined();
+  });
+
+  it("keeps a running agent listed behind 64 finished tasks, as the bundle does", async () => {
+    const tasks = [...Array.from({ length: 64 }, (_, i) => ({ id: `bshell${i}`, status: "completed" })), { id: "a1", status: "running" }];
+    const stop = { hook_event_name: "Stop", session_id: session, background_tasks: tasks };
+    await run(stop, herdr());
+    expect(bodies[0]).toMatchObject({ event: "Stop", background: 1, backgroundTasks: stopFacts(stop).backgroundTasks });
+    expect((bodies[0].backgroundTasks as { id: string; running: boolean }[])[0]).toEqual({ id: "a1", running: true });
+    expect(bodies[0].backgroundTasks).toHaveLength(65);
+  });
+
   it("forwards matching turn context through both handlers without adding approval fields", async () => {
     for (const event of ["SessionStart", "UserPromptSubmit"]) {
       const context = { hookSpecificOutput: { hookEventName: event, additionalContext: "Current role: conductor." } };

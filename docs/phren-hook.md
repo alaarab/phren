@@ -375,12 +375,15 @@ A Claude session's running sub-agents (`GET /v1/subagents`, and `runningChildren
 on its row) count a background agent as running while the lead's latest Stop
 lists it so: Claude Code's Stop hook names each background task by id and status
 (an agent's task id is its agent id), and the Hook keeps that list in the pane's
-turn record. One that Stop lists as finished has ended, unless SendMessage resumed
-it since. One it does not list, a Stop more than four hours old, or a Stop outdated
-by a newer record of the conversation (a resume in another pane) goes by the
-agent's own transcript as before: finished once it ends on a finished reply or
-sits unchanged for 30 minutes. So an agent in a long build or a queue for a shared
-machine is still counted, as Claude counts it.
+turn record (up to 256 tasks, running ones first). One that Stop lists as finished
+has ended, unless SendMessage resumed it since; a Workflow run it lists as finished
+ends the run's agents. One it does not list, a Stop more than four hours old, a Stop
+before a resume or `/clear` in the same pane, or a Stop outdated by a newer record
+of the conversation (a resume in another pane) goes by the agent's own transcript
+as before: finished once it ends on a finished reply or sits unchanged for 30
+minutes. For an agent SendMessage resumed, only a reply written after the resume
+counts, and the quiet time starts at the resume. So an agent in a long build or a
+queue for a shared machine is still counted, as Claude counts it.
 
 - Codex, Claude Code, and Copilot conversations, with exact pane/session identity.
   phren's coding agent (`phren agent` or `phren-agent`) is wired the same way:

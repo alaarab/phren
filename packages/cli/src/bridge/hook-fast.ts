@@ -28,6 +28,10 @@ export const fastHookPath = (versionDir: string) => path.join(versionDir, FAST_H
  */
 export const TOOL_HOOK_BUDGET_MS = 5_000;
 
+/** Most background tasks a Stop's callback forwards, running ones first. Above the turn record's own
+ * limit (`STOP_TASKS_LIMIT`, turn-records.ts), so a list cut here is also marked cut there. */
+export const STOP_TASKS_SENT = 1024;
+
 /** Keep permission replies and turn context, without turning tool callbacks into approvals. */
 export function hookOutput(event: string, result: string): string {
   if (event === "PermissionRequest") return result;
@@ -76,13 +80,15 @@ async function forward(place) {
   const tasks = Array.isArray(value.background_tasks)
     ? value.background_tasks.filter(task => !["completed", "failed", "killed", "stopped"].includes(String(plain(task).status))) : undefined;
   const listed = Array.isArray(value.background_tasks) ? value.background_tasks.map(plain)
-    .filter(task => typeof task.id === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(task.id)).slice(0, 64)
-    .map(task => ({ id: task.id, running: !["completed", "failed", "killed", "stopped"].includes(String(task.status)) })) : undefined;
+    .filter(task => typeof task.id === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(task.id))
+    .map(task => ({ id: task.id, running: !["completed", "failed", "killed", "stopped"].includes(String(task.status)) }))
+    .sort((a, b) => Number(b.running) - Number(a.running)).slice(0, ${STOP_TASKS_SENT}) : undefined;
   const stop = event !== "Stop" ? {} : { ...(tasks ? { background: tasks.length } : {}), ...(listed ? { backgroundTasks: listed } : {}),
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
   const data = JSON.stringify({ target, event, ...(dispatchId ? { dispatchId } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
-    ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}), ...stop });
+    ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
+    ...(event === "SessionStart" && typeof value.source === "string" ? { startSource: value.source.slice(0, 32) } : {}), ...stop });
   const socketPath = path.join(env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"), "agent.sock");
   // A tool call's callback fits its budget from process start, or is skipped.
   const left = Math.floor(${toolBudgetMs} - performance.now());

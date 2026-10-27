@@ -217,12 +217,12 @@ async function claudeChildRelations(file: string, session: string, signature: st
   const { launches, workflows, teammates } = copyRows(rows);
   /** Whether a child the parent recorded no end for has ended: the latest Stop's word when it lists the
    * child (running, or finished unless SendMessage resumed it since), else its own transcript (a finished
-   * reply, or quiet past the limit). */
+   * reply, or quiet past the limit), counting only what it wrote after SendMessage last resumed it. */
   const ended = async (agentId: string, childFile: string, launch: ClaudeLaunch) => {
     if (stop?.running.includes(agentId)) return false;
     const resumedSince = launch.resumedAt !== undefined && Date.parse(launch.resumedAt) > Date.parse(stop?.at ?? "");
     if (stop?.finished.includes(agentId) && !resumedSince) return true;
-    return claudeSkillFinished(childFile).catch(() => false);
+    return claudeSkillFinished(childFile, launch.resumedAt).catch(() => false);
   };
   const relations: ChildAgentRelation[] = [];
   // Claude Code records the launch in the parent before the child's own
@@ -286,8 +286,12 @@ async function claudeChildRelations(file: string, session: string, signature: st
   }
   if (workflows.size && root) {
     const seen = new Set(relations.map(relation => relation.session));
-    for (const workflow of workflows.values()) {
-      for (const child of await claudeWorkflowAgents(root, session, workflow)) {
+    for (const [taskId, workflow] of workflows) {
+      // A finished run whose notification never reached the parent: the Stop's word ends its agents.
+      if (workflow.state === "running" && stop?.finished.includes(taskId)) workflow.state = "completed";
+      // Once that Stop is gone (four hours on, or a newer Stop leaves the run out) a quiet agent ends,
+      // as a launched one does; a run the Stop lists as running keeps its quiet agents.
+      for (const child of await claudeWorkflowAgents(root, session, workflow, !stop?.running.includes(taskId))) {
         if (seen.has(child.session!)) continue;
         seen.add(child.session!); relations.push(child);
         if (child.state === "running") live = true;
@@ -306,16 +310,19 @@ export const CLAUDE_SKILL_QUIET_MS = 30 * 60 * 1000;
 
 /** A background child (a skill, or a sub-agent or teammate whose end the
  * parent never recorded) is done once its transcript ends on a finished
- * reply, or has not changed for CLAUDE_SKILL_QUIET_MS. */
-async function claudeSkillFinished(file: string, now = Date.now()): Promise<boolean> {
-  const metadata = await stat(file);
-  if (now - metadata.mtimeMs >= CLAUDE_SKILL_QUIET_MS) return true;
+ * reply, or has not changed for CLAUDE_SKILL_QUIET_MS. For a child resumed at
+ * `since`, the reply must be written after it and the quiet counts from it:
+ * the end_turn it finished on before the resume says nothing yet. */
+async function claudeSkillFinished(file: string, since?: string, now = Date.now()): Promise<boolean> {
+  const metadata = await stat(file), resumed = since === undefined ? NaN : Date.parse(since);
+  if (now - Math.max(metadata.mtimeMs, Number.isFinite(resumed) ? resumed : -Infinity) >= CLAUDE_SKILL_QUIET_MS) return true;
   const start = Math.max(0, metadata.size - 65_536), chunks: Buffer[] = [];
   for await (const chunk of createReadStream(file, { start })) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const last = Buffer.concat(chunks).toString("utf8").split("\n").filter(line => line.trim()).at(-1);
   try {
     const raw = object(JSON.parse(last ?? ""));
-    return raw.type === "assistant" && object(raw.message).stop_reason === "end_turn";
+    if (raw.type !== "assistant" || object(raw.message).stop_reason !== "end_turn") return false;
+    return !Number.isFinite(resumed) || (typeof raw.timestamp === "string" && Date.parse(raw.timestamp) > resumed);
   } catch { return false; }
 }
 
@@ -331,8 +338,10 @@ async function claudeChildNames(root: string, entries: string[]): Promise<Map<st
 }
 
 /** A Workflow run's agents from its journal: each `started` agent runs until
- * the journal records another row for it or the run itself finishes. */
-async function claudeWorkflowAgents(root: string, session: string, workflow: { runId: string; name: string; callId: string; state: "running" | "completed" }): Promise<ChildAgentRelation[]> {
+ * the journal records another row for it or the run itself finishes, or, with
+ * `quietEnds`, its transcript sits unchanged for CLAUDE_SKILL_QUIET_MS. */
+async function claudeWorkflowAgents(root: string, session: string, workflow: { runId: string; name: string; callId: string; state: "running" | "completed" },
+  quietEnds = true, now = Date.now()): Promise<ChildAgentRelation[]> {
   const directory = await realpath(path.join(root, "workflows", workflow.runId)).catch(() => undefined);
   if (!directory || !directory.startsWith(root + path.sep)) return [];
   const journal = path.join(directory, "journal.jsonl");
@@ -353,10 +362,12 @@ async function claudeWorkflowAgents(root: string, session: string, workflow: { r
     const meta = await readFile(childFile.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
     const model = await claudeChildModel(childFile).catch(() => undefined);
     const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
+    const quiet = quietEnds && !done && workflow.state === "running"
+      && now - ((await stat(childFile).catch(() => undefined))?.mtimeMs ?? now) >= CLAUDE_SKILL_QUIET_MS;
     relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
       session: agentId, transcript: childFile, provider: "claude",
       path: String(meta.description || workflow.name).slice(0, 200), callId: workflow.callId || `workflow:${workflow.runId}`,
-      state: done || workflow.state === "completed" ? "completed" : "running",
+      state: done || quiet || workflow.state === "completed" ? "completed" : "running",
       ...(model !== undefined ? { model } : {}), ...checkout, children: [] });
   }
   return relations;
