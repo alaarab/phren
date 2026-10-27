@@ -1402,7 +1402,9 @@ stay visible with their reason. Without the conductor capability, peer conductor
 rows say “Update <computer>'s Hook to move the conductor”.
 
 `claudeAccountAdd: true` enables owner-only `POST /v1/accounts/claude/add`
-with `{slug}` (`^[a-z0-9][a-z0-9-]{0,31}$`, lowercase, not existing). It opens a new pane
+with `{slug, email?}` (`^[a-z0-9][a-z0-9-]{0,31}$`, lowercase, not `default`, not existing).
+A slug that isn't one is refused with 400 and `suggestedSlug`, a valid one derived from
+`email` when given (its user and the first part of its domain) or from the slug itself. It opens a new pane
 running `phren bridge accounts add -- <slug>` and returns `{target, terminalOnly:true}`.
 The target has server/workspace/tab/pane/source, with no invented conversation ID.
 Open that pane's terminal view so the owner can complete the interactive Claude
