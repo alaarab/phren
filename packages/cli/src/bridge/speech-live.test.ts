@@ -31,7 +31,7 @@ const frames = (socket: FakeSocket) => socket.sent.map(frame => JSON.parse(frame
 const say = (client: FakeSocket, frame: unknown) => client.emit("message", Buffer.from(JSON.stringify(frame)), false);
 
 /** The relay with ElevenLabs' sockets recorded, each still connecting. */
-async function live(query = "", options: { model?: string; handshakeMs?: number; firstAudioMs?: number; maxSessionMs?: number } = {}) {
+async function live(query = "", options: { model?: string; handshakeMs?: number; firstAudioMs?: number; maxSessionMs?: number; state?: SpeechState } = {}) {
   const client = new FakeSocket(), upstreams: FakeSocket[] = [];
   await relayLiveSpeech(client, new URLSearchParams(query), { key: async () => KEY, state: new SpeechState(), ...options,
     connect: (url, key) => { expect(key).toBe(KEY); const socket = new FakeSocket(url); socket.readyState = 0; upstreams.push(socket); return socket; } });
@@ -388,7 +388,8 @@ describe("live spoken replies", () => {
     });
 
     it("falls back to Flash for a fresh socket that ends without audio after the phone's done, and errors when Flash does too", async () => {
-      const { client, upstreams } = await live();
+      const state = new SpeechState();
+      const { client, upstreams } = await live("", { state });
       upstreams[0].open();
       say(client, { text: "First paragraph.\n" });
       upstreams[0].reply(voiced("First paragraph."));
@@ -400,11 +401,28 @@ describe("live spoken replies", () => {
       upstreams[1].reply({ isFinal: true });
       expect(frames(client).map(frame => frame.type)).toEqual(["start", "audio"]);
       expect(new URL(upstreams[2].url).searchParams.get("model_id")).toBe(FALLBACK_SPEECH_MODEL);
+      // v4 voiced this reply's first paragraph: it is not set aside for the next reply.
+      expect(state.benchedReason(DEFAULT_SPEECH_MODEL)).toBeUndefined();
       upstreams[2].open();
       expect(frames(upstreams[2]).slice(1)).toEqual([{ text: "Second paragraph. " }, { text: "" }]);
       upstreams[2].reply({ isFinal: true });
       expect(frames(client).at(-1)).toEqual({ type: "error", code: "speech-failed", error: "ElevenLabs ended without voicing the reply." });
       expect(client.closed?.code).toBe(1011);
+    });
+
+    it("ends with done when a fresh socket given only a sign or emoji ends without audio after the phone's done", async () => {
+      const { client, upstreams } = await live();
+      upstreams[0].open();
+      say(client, { text: "All of it.\n" });
+      upstreams[0].reply(voiced("All of it."));
+      upstreams[0].reply({ isFinal: true });
+      say(client, { text: "🎉\n" });
+      upstreams[1].open();
+      say(client, { done: true });
+      upstreams[1].reply({ isFinal: true });
+      expect(upstreams).toHaveLength(2);
+      expect(frames(client).at(-1)).toEqual({ type: "done" });
+      expect(client.closed).toEqual({ code: 1000, reason: "" });
     });
 
     it("falls back to Flash with the text when a socket ends before any audio", async () => {
