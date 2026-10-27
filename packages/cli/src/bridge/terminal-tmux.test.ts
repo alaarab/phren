@@ -199,9 +199,11 @@ describe("the tmux provider", () => {
       ["new-session", "-d", ...printed, "-s", "phren_ fix", "-x", "200", "-y", "50", "-c", "/repo", "-n", "phren: fix"],
       ["new-window", "-d", ...printed, "-t", "$4:", "-c", "/repo", "-n", "second"],
     ]);
-    // A tmux that printed nothing usable: the caller finds the pane itself.
+    // A tmux that printed nothing usable, or something before the ids: the caller finds the pane itself.
     restore(); restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async () => "" });
     expect(await tmuxTerminal.create("tmux-phren", { workspace: "s4", label: "third" })).toBeUndefined();
+    restore(); restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async () => "warning: config\n$4 @7 %23\n" });
+    expect(await tmuxTerminal.create("tmux-phren", { workspace: "s4", label: "fourth" })).toBeUndefined();
   });
 
   it("starts an agent as the pane's program under a login shell, arguments never in script text", async () => {

@@ -83,7 +83,8 @@ async function openPane(server: string, key: string, label: string, busy: string
   if (!terminal.shellCommand) throw new BridgeError(503, "This terminal cannot open an interactive account login.");
   return oneAtATime(server, async () => {
     const pending = pendingPanes.get(key);
-    if (pending && (await terminal.listPanes(pending.server)).some(pane => pane.pane === pending.pane)) throw new BridgeError(409, busy);
+    // A terminal server that no longer answers holds no open account pane.
+    if (pending && (await terminal.listPanes(pending.server).catch(() => [])).some(pane => pane.pane === pending.pane)) throw new BridgeError(409, busy);
     pendingPanes.delete(key);
     const before = new Set((await terminal.listPanes(server)).map(pane => pane.pane));
     const named = await terminal.create(server, { label, cwd: homeDir() });

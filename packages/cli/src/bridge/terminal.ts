@@ -19,12 +19,12 @@ export async function terminalPaneFromEnv(env: NodeJS.ProcessEnv = process.env):
   return tmuxPaneFromEnv(env);
 }
 
-/** A pane as the multiplexer lists it. `server` names the multiplexer instance
- * (a Herdr session, a tmux socket), `workspace` and `tab` its place in it
- * (a Herdr workspace and tab, a tmux session and window). */
 /** The pane `create` opened, in the Hook's ids. */
 export interface CreatedPane { workspace: string; tab: string; pane: string }
 
+/** A pane as the multiplexer lists it. `server` names the multiplexer instance
+ * (a Herdr session, a tmux socket), `workspace` and `tab` its place in it
+ * (a Herdr workspace and tab, a tmux session and window). */
 export interface TerminalPane {
   server: string;
   workspace: string;

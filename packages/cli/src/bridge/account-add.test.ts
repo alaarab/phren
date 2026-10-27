@@ -62,6 +62,26 @@ describe("signing in an existing account slot", () => {
     expect(commands.find(command => command.includes(".claude-spare"))).toMatch(new RegExp(`^${String(object(spare.target).pane)} `));
   });
 
+  it("lets the next sign-in through after one whose pane failed to open", async () => {
+    mkdirSync(path.join(home, ".claude-spare"), { recursive: true });
+    writeFileSync(path.join(home, ".claude-spare", ".claude.json"), "{}");
+    restore();
+    let fail = true;
+    restore = setTerminalProvider({
+      listPanes: async () => [...panes],
+      create: async () => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        if (fail) { fail = false; throw new Error("Herdr is not reachable"); }
+        panes.push({ server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1" });
+      },
+      shellCommand: async (_server: string, pane: string, command: string) => { commands.push(`${pane} ${command}`); },
+    } as never);
+    const [work, spare] = await Promise.allSettled([signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", signedOut),
+      signInClaudeAccount({ slug: "spare", mode: "sign-in" }, "default", signedOut)]);
+    expect(work).toMatchObject({ status: "rejected", reason: { message: "Herdr is not reachable" } });
+    expect(spare).toMatchObject({ status: "fulfilled", value: { target: { pane: "w9:p1" } } });
+  });
+
   it("takes the pane the terminal says it created, though another pane opened at the same moment", async () => {
     restore();
     restore = setTerminalProvider({

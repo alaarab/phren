@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Signing in two Claude account slots from the phone at the same moment no longer fails on both with "The new account pane could not be identified safely", leaving two unused panes. Herdr and tmux now say which pane they created. A terminal that doesn't say is checked one account pane at a time per terminal server.
 - A move that stops waiting for its hand-off (the wait ran out or failed, or the owner aborted it) now takes back its request while it is still queued. Before, the request stayed queued, and the old agent a new-chat move leaves running was asked for a hand-off later.
 - A move's "Stop <agent> and hand off now" is tighter:
   - It sends its Escape only to the agent the move asked: the same harness, conversation and terminal. When the owner has started another agent in the pane since, it answers `state: "replaced"`.
