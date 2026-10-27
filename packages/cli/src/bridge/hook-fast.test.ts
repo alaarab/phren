@@ -54,7 +54,7 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
   });
 
   it("carries Stop facts and prints permission answers", async () => {
-    const stop = { hook_event_name: "Stop", session_id: session, last_assistant_message: "Done.", background_tasks: [{ status: "running" }, { status: "completed" }] };
+    const stop = { hook_event_name: "Stop", session_id: session, last_assistant_message: "Done.", background_tasks: [{ id: "aworker1", status: "running" }, { id: "bshell2", status: "completed" }, { status: "running" }] };
     expect((await run(stop, { ...herdr(), PHREN_DISPATCH_ID: "brief-12345" })).stdout).toBe("");
     expect(bodies[0]).toMatchObject({ event: "Stop", ...stopFacts(stop) });
     expect(bodies[0].dispatchId).toBeUndefined();

@@ -501,6 +501,7 @@ export class AgentHooks {
       ...(dispatch ? { dispatch } : {}),
       ...(body.event === "SessionStart" && typeof body.startSource === "string" ? { start: body.startSource } : {}),
       ...(typeof body.background === "number" ? { background: body.background } : {}),
+      ...(body.event === "Stop" && Array.isArray(body.backgroundTasks) ? { backgroundTasks: body.backgroundTasks } : {}),
       ...(typeof body.reply === "string" ? { reply: body.reply } : {}),
       ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);
   }

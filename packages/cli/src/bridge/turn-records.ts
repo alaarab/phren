@@ -15,7 +15,7 @@
 // the dispatch id (PHREN_DISPATCH_ID) its SessionStart or first prompt named,
 // so a dispatch placed on this computer is matched by id as well as by pane
 // and conversation.
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { opencodeTurnStamps } from "./harness-status.js";
@@ -29,6 +29,7 @@ const MAX_RECORD_BYTES = 16_384;
 // Not strict: a field a newer Hook adds (as `stop.cwd` was) is dropped on
 // read here, never a reason to throw the pane's record away.
 const stamp = z.object({ seq: z.number().int().min(0), at: z.string().datetime() });
+const taskId = z.string().regex(/^[A-Za-z0-9._-]{1,128}$/);
 const turnRecordSchema = z.object({
   terminal: z.string().min(1).max(200), source: provider, session: sessionId,
   /** Climbs with every recorded event, so prompt and stop are ordered without trusting the clock. */
@@ -43,6 +44,9 @@ const turnRecordSchema = z.object({
     reply: z.string().max(TURN_REPLY_LIMIT).optional(), truncated: z.boolean().optional(),
     /** The agent's working directory when the turn stopped: where its uncommitted work would be. */
     cwd: z.string().max(4096).optional(),
+    /** Claude: the background tasks the Stop listed, by id (a sub-agent's is its agent id), still running
+     * or finished. The child tree trusts it over its quiet-transcript guess (transcript-claude.ts). */
+    tasks: z.object({ running: z.array(taskId).max(64), finished: z.array(taskId).max(64) }).optional(),
   }).optional(),
   at: z.string().datetime(),
 });
@@ -56,6 +60,8 @@ export interface TurnEvent {
   start?: string;
   /** Stop only: the harness's count of in-flight background tasks, when it reports one. */
   background?: number;
+  /** Stop only: the background tasks it listed, `{id, running}` each (validated here). */
+  backgroundTasks?: unknown;
   /** Stop only: the harness's last assistant message, when it reports one. */
   reply?: string;
   /** Stop only: the agent's working directory, as its hook payload names it. */
@@ -75,6 +81,18 @@ export function truncateUtf8(value: string, limit = TURN_REPLY_LIMIT): { text: s
   return { text: bytes.subarray(0, end).toString("utf8"), truncated: true };
 }
 
+/** A Stop's background task list as ids still running and ids finished; undefined when it sent none. */
+function stopTasks(value: unknown): { running: string[]; finished: string[] } | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const running: string[] = [], finished: string[] = [];
+  for (const task of value.slice(0, 64)) {
+    const { id, running: live } = (task ?? {}) as { id?: unknown; running?: unknown };
+    if (typeof id !== "string" || !taskId.safeParse(id).success || typeof live !== "boolean") continue;
+    (live ? running : finished).push(id);
+  }
+  return { running, finished };
+}
+
 /** The record after one lifecycle event; undefined for events that say nothing about turns.
  * Another conversation or terminal in the pane starts a fresh record. */
 export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): TurnRecord | undefined {
@@ -88,12 +106,14 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
     record.startedAt ??= at;
     // A resumed or cleared conversation in the same terminal no longer runs the background agents its
     // last Stop counted; a compaction keeps them.
-    if ((event.start === "resume" || event.start === "clear") && record.stop?.background !== undefined) delete record.stop.background;
+    if ((event.start === "resume" || event.start === "clear") && record.stop) { delete record.stop.background; delete record.stop.tasks; }
   }
   else if (event.event === "UserPromptSubmit") record.prompt = { seq: record.seq, at };
   else {
     const reply = event.reply?.trim() ? truncateUtf8(event.reply.trim()) : undefined;
+    const tasks = stopTasks(event.backgroundTasks);
     record.stop = { seq: record.seq, at, ...(event.background !== undefined ? { background: Math.min(999, Math.max(0, Math.floor(event.background))) } : {}),
+      ...(tasks ? { tasks } : {}),
       ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}),
       ...(event.cwd && path.isAbsolute(event.cwd) && event.cwd.length <= 4096 ? { cwd: event.cwd } : {}) };
   }
@@ -154,6 +174,35 @@ export function noteTurn(server: string, pane: string, event: TurnEvent): Promis
 /** The recorded turns of `pane`'s latest conversation, if its hooks reported any. */
 export function readTurn(server: string, pane: string): Promise<TurnRecord | undefined> {
   return readRecord(turnPath(server, pane));
+}
+
+export interface StopTasks { seq: number; at: string; running: string[]; finished: string[] }
+const STOP_TASKS_CACHE_MS = 2_000;
+let stopTasksCache: { at: number; root: string; bySession: Promise<Map<string, StopTasks>> } | undefined;
+
+/** The background tasks the latest Stop of conversation `session` listed, from whichever pane's record
+ * holds it (the child tree knows the conversation, not its pane); undefined when no Stop listed any. */
+export async function latestStopTasks(source: Provider, session: string): Promise<StopTasks | undefined> {
+  const root = path.join(bridgeRoot(), "turns"), now = Date.now();
+  if (!stopTasksCache || stopTasksCache.root !== root || now - stopTasksCache.at >= STOP_TASKS_CACHE_MS) {
+    stopTasksCache = { at: now, root, bySession: (async () => {
+      // The conversation's newest record decides, list or none: a resume in another pane (whose agents died
+      // with the old process) outdates the list a closed pane's record still holds.
+      const newest = new Map<string, TurnRecord>();
+      for (const server of await readdir(root).catch(() => [] as string[])) {
+        for (const name of (await readdir(path.join(root, server)).catch(() => [] as string[])).filter(name => name.endsWith(".json"))) {
+          const record = await readRecord(path.join(root, server, name));
+          if (!record) continue;
+          const key = `${record.source}\0${record.session}`, previous = newest.get(key);
+          if (!previous || Date.parse(record.at) > Date.parse(previous.at)) newest.set(key, record);
+        }
+      }
+      const found = new Map<string, StopTasks>();
+      for (const [key, record] of newest) if (record.stop?.tasks) found.set(key, { seq: record.stop.seq, at: record.stop.at, ...record.stop.tasks });
+      return found;
+    })() };
+  }
+  return (await stopTasksCache.bySession).get(`${source}\0${session}`);
 }
 
 /** OpenCode's turns for a pane running `pids`, from the stamps phren's OpenCode

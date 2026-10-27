@@ -14,7 +14,7 @@ import { BACKGROUND_WAIT_MS, DispatchReturns, INTERRUPTED, noticeDeliveryId, not
 import { rpc, snapshot } from "./herdr.js";
 import { atomicInPrivateDir, type Json, type Target } from "./protocol.js";
 import { ENDLESS_COMMAND, finalTurnFromLines, type FinalTurn } from "./schedule-watch.js";
-import { nextTurn, noteTurn, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
+import { latestStopTasks, nextTurn, noteTurn, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
 import { StallDetector } from "./stalls.js";
 
 vi.mock("./herdr.js", async importOriginal => ({
@@ -62,6 +62,22 @@ describe("the turn record", () => {
     expect(long.stop!.truncated).toBe(true);
   });
 
+  it("keeps the Stop's background tasks by id until a resume or /clear, and finds them by conversation", async () => {
+    const tasks = [{ id: "aworker1", running: true }, { id: "bshell2", running: false }, { id: "../bad", running: true }, { id: "x" }];
+    let record = nextTurn(nextTurn(undefined, event("UserPromptSubmit"))!, event("Stop", { background: 1, backgroundTasks: tasks }))!;
+    expect(record.stop!.tasks).toEqual({ running: ["aworker1"], finished: ["bshell2"] });
+    // A compaction keeps them; a resume does not.
+    expect(nextTurn(record, event("SessionStart", { start: "compact" }))!.stop!.tasks).toBeDefined();
+    record = nextTurn(record, event("SessionStart", { start: "resume" }))!;
+    expect(record.stop!.tasks).toBeUndefined();
+    // A Stop that lists none (Codex, older Claude Code) keeps no list.
+    expect(nextTurn(record, event("Stop"))!.stop!.tasks).toBeUndefined();
+
+    await noteTurn("default", "w1:p3", event("Stop", { backgroundTasks: tasks }));
+    expect(await latestStopTasks("claude", session)).toMatchObject({ running: ["aworker1"], finished: ["bshell2"] });
+    expect(await latestStopTasks("claude", "00000009-1111-4111-8111-111111111111")).toBeUndefined();
+  });
+
   it("persists per pane and keeps concurrent events in order", async () => {
     await Promise.all([noteTurn("default", "w1:p2", event("UserPromptSubmit")), noteTurn("default", "w1:p2", event("Stop", { background: 0 }))]);
     expect(turnPhase((await readTurn("default", "w1:p2"))!)).toMatchObject({ phase: "ended" });
@@ -72,8 +88,11 @@ describe("the turn record", () => {
 describe("what a Stop payload says", () => {
   it("counts Claude Code's in-flight background tasks and keeps the last message", () => {
     expect(stopFacts({ background_tasks: [{ id: "b1", type: "shell", status: "running" }, { id: "a2", type: "subagent", status: "pending" },
-      { id: "b3", type: "shell", status: "completed" }], last_assistant_message: "Tests pass." })).toEqual({ background: 2, reply: "Tests pass." });
-    expect(stopFacts({ background_tasks: [] })).toEqual({ background: 0 });
+      { id: "b3", type: "shell", status: "completed" }], last_assistant_message: "Tests pass." })).toEqual({ background: 2, reply: "Tests pass.",
+      // Each task by id, for the child tree; one without a usable id is counted but not listed.
+      backgroundTasks: [{ id: "b1", running: true }, { id: "a2", running: true }, { id: "b3", running: false }] });
+    expect(stopFacts({ background_tasks: [{ id: "../x", status: "running" }, { status: "running" }] })).toEqual({ background: 2, backgroundTasks: [] });
+    expect(stopFacts({ background_tasks: [] })).toEqual({ background: 0, backgroundTasks: [] });
     // Codex and older Claude Code say nothing about background work.
     expect(stopFacts({ last_assistant_message: "  " })).toEqual({});
   });
@@ -475,8 +494,10 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     expect(turnPhase((await readTurn("default", "w1:p2"))!)).toEqual({ phase: "unprompted" });
     expect(await post({ target, event: "UserPromptSubmit", prompt: "Run the parser checks" })).toBe("{}");
     expect(turnPhase((await readTurn("default", "w1:p2"))!).phase).toBe("working");
-    await post({ target, event: "Stop", background: 1, reply: "Started the suite." });
+    await post({ target, event: "Stop", background: 1, reply: "Started the suite.", backgroundTasks: [{ id: "aworker1", running: true }] });
     expect(turnPhase((await readTurn("default", "w1:p2"))!)).toMatchObject({ phase: "ended", background: 1, reply: "Started the suite." });
+    // The Stop's task list reaches the record, for the child tree.
+    expect((await readTurn("default", "w1:p2"))!.stop!.tasks).toEqual({ running: ["aworker1"], finished: [] });
   });
 
   it("drops the Stop's background count when the conversation is resumed, and keeps it across a compaction", async () => {
