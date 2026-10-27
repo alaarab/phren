@@ -19,7 +19,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
     - a `git diff`, `git log -p` or `git show` that would print a changed secret file's patch (git lists those paths for the same revisions and pathspecs);
     - `git log -L`, `$[…]` arithmetic, and a printf `%n` format, which assigns a variable;
     - a `cd -P` through a link, now followed to where it really leads;
-    - a quoted `'~/x'`, now checked as the file it names rather than one in the home directory.
+    - a quoted `'~/x'`, now checked as the file it names rather than one in the home directory;
+    - `git status -v`, `git log --binary` and `-C -C` copy detection, which print patches;
+    - a pickaxe `git log -S` with a textconv configured;
+    - a `REV:PATH` outside the project (read from the repository's top);
+    - a known git read with an option the checker can't read, even after the session approved that git subcommand.
   - It no longer asks for:
     - `git grep TOKEN -- src` when the secret is elsewhere;
     - `grep -r --exclude=…` when the exclusion skips the secret (grep lists its own selection);
