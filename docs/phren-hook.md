@@ -711,7 +711,10 @@ computer" with the computer's name.
 The transcript socket also carries live reply previews. Claude reads pane text
 after the current prompt, with its styles, and turns Claude's bold back into
 Markdown `**bold**`; Codex and OpenCode supply delta text. Updates are capped at
-twice a second, stay out of history, and give way to the completed entry. Chat
+twice a second, stay out of history, and give way to the completed entry. For
+Claude each reply block previews on its own: a block that landed as an entry stops,
+and the next one written after a tool call or thinking previews in turn, until the
+turn's final entry. Chat
 sends steering to working harnesses immediately and reads their queued state
 from transcripts. Local pending bubbles identify a connection, startup or held
 prompt that prevents delivery.

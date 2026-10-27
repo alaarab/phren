@@ -22,8 +22,10 @@ const MAX_TEXT = 32_768;
 const MAX_PREVIEW_BYTES = MAX_TEXT * 6 + 1_024;
 
 /** Only the last Claude reply after the current prompt is eligible. A missing
- * prompt anchor is deliberately silent: scrollback could belong to an old turn. */
-export function claudePanePreview(rendered: string, prompt: string, previous = ""): string {
+ * prompt anchor is deliberately silent: scrollback could belong to an old turn,
+ * unless `inTurn` (the turn already landed an entry, so the screen is its own
+ * output and the prompt scrolled off above it). */
+export function claudePanePreview(rendered: string, prompt: string, previous = "", inTurn = false): string {
   const screen = rendered.split("\n");
   const raw = screen.map(stripTerminal);
   // What the phone shows: the line with Claude's bold as Markdown. Detection
@@ -45,10 +47,25 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   }
   // Once anchored, a reply can scroll its prompt off screen. Extend only
   // through a matching text overlap; unrelated terminal lines cannot replace it.
+  // In the turn but not anchored (its prompt scrolled off, or drawn otherwise than written, as "/review" or a
+  // pasted-text placeholder): the newest prompt row with turn output under it (a block, the spinner, thinking)
+  // is this turn's, and everything above it is an older turn. The composer and a permission dialog's
+  // options have none under them.
+  if (start < 0 && inTurn && !previous) {
+    const output = (line: string) => /^\s*[⏺●✻✽✶✢✳✦·∴⠁-⣿]/u.test(line) || !!parseClaudeSpinnerLine(line);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!/^\s*[❯>]\s*\S/.test(lines[i]) || !lines.slice(i + 1).some(output)) continue;
+      // Nothing written under this turn's prompt yet: no reply to show.
+      if (!lines.slice(i + 1).some(line => /^\s*[⏺●]/.test(line))) return "";
+      start = i + 1; break;
+    }
+  }
   const scrolled = start < 0;
-  if (scrolled && !previous) return "";
+  if (scrolled && !previous && !inTurn) return "";
   const reply: string[] = [], shown: string[] = [];
-  let writing = scrolled;
+  // Scrolled past its ⏺, a reply already previewed continues from the top; without one, the top of the
+  // screen may be tool output, so only a ⏺ text block starts a reply.
+  let writing = scrolled && !!previous;
   const body = lines.slice(Math.max(0, start)), rawBody = raw.slice(Math.max(0, start)), markedBody = marked.slice(Math.max(0, start));
   // A "⏺" block whose next line is a "⎿" result is a tool call, collapsed
   // ("⏺ Running 1 shell command…") or not; it lands as its own entry.
@@ -346,12 +363,26 @@ export async function readDeltaPreview(target: Target, file?: string, rollout?: 
   } catch { return null; }
 }
 
+/** A pane block is the landed block whose first this many letters and digits it shares. */
+const LANDED_MATCH_CHARS = 40;
+/** A reply's words alone, for comparing what the pane draws with what landed: the Markdown Claude draws
+ * otherwise (code fences and their language, list markers and numbers, link targets) is left out. */
+function previewWords(text: string): string {
+  return text.split("\n").filter(line => !/^\s*(?:```|~~~)/.test(line))
+    .map(line => line.replace(/^\s*(?:\d+[.)]|[-*+•])\s+/, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")).join("\n")
+    .replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+}
+
 /** Socket-local, ephemeral state. It never writes transcript rows or advances
  * the history cursor. Final rows bypass the text throttle and clear atomically. */
 export class TranscriptPreviewStream {
   private startedAt?: string;
   private prompt = "";
+  /** Claude: the turn landed an entry (a reply block, a tool call or result). */
   private landed = false;
+  /** Claude: the turn's reply text blocks that landed as entries, compared by their words. The pane keeps
+   * showing a landed block until a newer one is drawn, so only a block not among these is previewed. */
+  private readonly landedTexts = new Set<string>();
   private ended = false;
   /** Claude's own spinner word for the running turn, sent beside frames as
    * `activityVerb` for older phones. */
@@ -374,7 +405,7 @@ export class TranscriptPreviewStream {
     private readonly delta: (file?: string) => Promise<TranscriptPreview | null> = file => readDeltaPreview(target, file, this.rollout)) {}
 
   observe(entries: Entry[], reset = false): void {
-    if (reset) { this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.ended = false; this.wasWorking = false; this.completed.clear(); }
+    if (reset) { this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.landedTexts.clear(); this.ended = false; this.wasWorking = false; this.completed.clear(); }
     for (const { raw, line } of entries) {
       if (line <= this.observedLine) continue;
       this.observedLine = line;
@@ -421,15 +452,34 @@ export class TranscriptPreviewStream {
       if (raw.type === "user" && !raw.phrenQueued && !raw.isMeta && !blocks.some(b => b.type === "tool_result")) {
         const prompt = typeof message.content === "string" ? message.content : blocks.filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
         if (prompt.trim() && typeof raw.timestamp === "string" && Number.isFinite(Date.parse(raw.timestamp))) {
-          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.ended = false; this.wasWorking = false; this.verb = undefined; this.activity = undefined;
+          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.landedTexts.clear(); this.ended = false; this.wasWorking = false; this.verb = undefined; this.activity = undefined;
         }
       } else if (this.startedAt && ((raw.type === "assistant" && message.stop_reason === "end_turn")
         || (raw.type === "system" && raw.subtype === "turn_duration"))) {
         // The transcript says the turn is over before the shared snapshot
         // (up to 2.5 s old) stops saying "working": stop reading the pane now.
         this.landed = true; this.ended = true; this.verb = undefined; this.activity = undefined;
-      } else if (this.startedAt && (raw.type === "assistant" || blocks.some(b => b.type === "tool_result"))) this.landed = true;
+      } else if (this.startedAt && (raw.type === "assistant" || blocks.some(b => b.type === "tool_result"))) {
+        this.landed = true;
+        if (raw.type === "assistant") {
+          const texts = typeof message.content === "string" ? [message.content] : blocks.filter(b => b.type === "text").map(b => String(b.text ?? ""));
+          for (const text of texts.map(previewWords).filter(Boolean)) this.landedTexts.add(text);
+          while (this.landedTexts.size > 64) this.landedTexts.delete(this.landedTexts.values().next().value!);
+        }
+      }
     }
+  }
+
+  /** Whether pane text is a reply block that already landed: the same opening words. Only the opening is
+   * compared, as the pane draws links, code and tables otherwise than the entry's Markdown. */
+  private hasLanded(text: string): boolean {
+    const words = previewWords(text);
+    return !words || [...this.landedTexts].some(landed => {
+      // A short block ("Let me check.") is not a longer one that starts with its words.
+      if (landed.length < LANDED_MATCH_CHARS && words.length > landed.length) return false;
+      const length = Math.min(LANDED_MATCH_CHARS, words.length, landed.length);
+      return words.slice(0, length) === landed.slice(0, length);
+    });
   }
 
   async update(status: unknown, file?: string, now?: number): Promise<{ preview: TranscriptPreview | null } | undefined> {
@@ -448,11 +498,11 @@ export class TranscriptPreviewStream {
       } else if (this.target.source === "claude" && this.startedAt && !this.ended) {
         if (readAt - this.lastRead < PREVIEW_INTERVAL_MS) return undefined;
         this.lastRead = readAt;
-        // The reply text stops once a real entry lands; Claude's spinner
-        // verb keeps naming the work until the turn ends.
+        // A reply block stops once it lands as an entry; the next one written after a tool or thinking
+        // previews in turn. Claude's spinner verb keeps naming the work until the turn ends.
         const pane = await this.pane();
-        const text = this.landed ? "" : claudePanePreview(pane, this.prompt,
-          this.current?.turnStartedAt === this.startedAt ? this.current.text : "");
+        let text = claudePanePreview(pane, this.prompt, this.current?.turnStartedAt === this.startedAt ? this.current.text : "", this.landed);
+        if (text && this.hasLanded(text)) text = "";
         const spinner = claudeSpinner(pane);
         if (spinner) { this.activity = spinner; this.verb = spinner.verb; }
         if (text) next = { turnStartedAt: this.startedAt, text };
