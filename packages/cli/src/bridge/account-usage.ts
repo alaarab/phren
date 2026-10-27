@@ -22,6 +22,12 @@ export { NEAR_LIMIT_LEFT };
  * one account. A window whose reset time has passed says `reset` and has no
  * percent, and a report older than STALE_AFTER_MS is flagged stale.
  *
+ * A Claude home with no readable login and nothing to show is a placeholder
+ * named only by its label ("work Team"). When that label names an account
+ * some computer reports (its own label, its email, or the email's name with
+ * its plan), the placeholder's computer joins that account's row instead of
+ * standing as a row of its own (`placeholderTarget`).
+ *
  * `nearLimit` is information: the owner often wants quota used before it
  * resets. Only `exhausted` (a window at 100% or refusing requests) rules an
  * account out.
@@ -143,12 +149,56 @@ function accountName(usage: AccountUsage): string | undefined {
     ?? (label && label.toLowerCase() !== (HARNESS_NAMES[usage.source] ?? usage.source).toLowerCase() ? label : undefined);
 }
 
+const words = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+/** A Claude home with no login Phren can read and no numbers: only its label names it. */
+const isPlaceholder = (usage: AccountUsage) => usage.source === "claude" && Boolean(usage.account?.key?.startsWith("claude:home:")) && !hasData(usage);
+
+export interface NamedAccount { labels: readonly string[]; email?: string; plan?: string }
+
+/**
+ * Which identified account a placeholder's label names, by index: one whose
+ * home carries the same label, else one whose email, email name, or email
+ * name and plan ("sam Team") the label spells. Two equally good matches name
+ * neither, and the provider's bare name ("Claude") names nothing.
+ */
+export function placeholderTarget(label: string | undefined, accounts: readonly NamedAccount[], provider = "Claude"): number | undefined {
+  const wanted = words(label ?? "");
+  if (!wanted || wanted === words(provider)) return undefined;
+  const unique = (found: number[]) => found.length === 1 ? found[0] : undefined;
+  const same = accounts.flatMap((account, index) => account.labels.some(item => words(item) === wanted) ? [index] : []);
+  if (same.length) return unique(same);
+  const spelled = accounts.flatMap((account, index) => {
+    const email = words(account.email ?? ""), name = email.split("@")[0], plan = words(account.plan ?? "");
+    if (!email) return [];
+    if (wanted === email || wanted === name) return [{ index, plan: false }];
+    if (!wanted.startsWith(`${name} `)) return [];
+    const rest = wanted.slice(name.length + 1);
+    // A login whose plan is unknown still answers to "name <plan>".
+    return !plan || rest === plan ? [{ index, plan: rest === plan }] : [];
+  });
+  const exact = spelled.filter(item => item.plan);
+  return unique((exact.length ? exact : spelled).map(item => item.index));
+}
+
 /** One row per account across every computer's report. */
 export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.now()): Pick<AccountUsageView, "accounts" | "noData"> {
   const groups = new Map<string, Array<{ computer: string; usage: AccountUsage }>>();
+  const placeholders: Array<{ computer: string; usage: AccountUsage }> = [];
   for (const report of reports) for (const usage of report.accounts) {
+    if (isPlaceholder(usage)) { placeholders.push({ computer: report.computer, usage }); continue; }
     const id = accountIdentity(usage, report.computer);
     groups.set(id, [...groups.get(id) ?? [], { computer: report.computer, usage }]);
+  }
+  // A placeholder joins the account its label names; one naming none keeps its own group.
+  const identified = [...groups].filter(([, group]) => group[0].usage.source === "claude" && group.some(item => hasData(item.usage)) && !group[0].usage.account?.key?.startsWith("claude:home:"));
+  const named = identified.map(([, group]) => ({ labels: group.map(item => item.usage.account?.label ?? "").filter(Boolean),
+    email: group.find(item => item.usage.account?.email)?.usage.account?.email, plan: group.find(item => item.usage.subscription)?.usage.subscription?.plan }));
+  const joined = new Map<string, Array<{ computer: string; usage: AccountUsage }>>();
+  for (const item of placeholders) {
+    const target = placeholderTarget(item.usage.account?.label, named);
+    const id = target === undefined ? accountIdentity(item.usage, item.computer) : identified[target][0];
+    if (target === undefined) groups.set(id, [...groups.get(id) ?? [], item]);
+    else joined.set(id, [...joined.get(id) ?? [], item]);
   }
   const accounts: AccountUsageRow[] = [];
   const empty = new Map<string, { computers: string[]; messages: string[] }>();
@@ -180,7 +230,7 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
     const availableAt = exhausted.filter(w => !w.id.startsWith("credit:")).map(w => w.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
     const availableIn = availableAt ? resetsIn(availableAt, now) : undefined;
     const name = accountName(standing.usage);
-    const computers = reporting.map(item => ({ name: item.computer, ...(source === "claude" && item.usage.account?.id ? { account: item.usage.account.id } : {}) }))
+    const computers = [...reporting, ...joined.get(id) ?? []].map(item => ({ name: item.computer, ...(source === "claude" && item.usage.account?.id ? { account: item.usage.account.id } : {}) }))
       .filter((item, index, list) => list.findIndex(other => other.name === item.name && other.account === item.account) === index);
     accounts.push({
       id, harness: source, name: HARNESS_NAMES[source] ?? source, ...(name ? { account: name } : {}), windows,
