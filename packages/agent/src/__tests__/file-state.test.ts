@@ -6,7 +6,7 @@ import { editFileTool, multiEditTool } from "../tools/edit-file.js";
 import { readFileTool } from "../tools/read-file.js";
 import { writeFileTool } from "../tools/write-file.js";
 import { applyPatchTool } from "../tools/apply-patch.js";
-import { resetFileState } from "../tools/file-state.js";
+import { recordFileState, resetFileState, staleFileError } from "../tools/file-state.js";
 
 /** Change a file the way the user or a formatter would, with a later mtime. */
 function changeOnDisk(file: string, content: string): void {
@@ -135,5 +135,16 @@ describe("stale-file and read-before-write guard", () => {
     fs.writeFileSync("a.txt", "keep me\n");
     const r = await writeFileTool.execute({ path: "a.txt", content: "clobbered\n" });
     expect(r.is_error).toBeFalsy();
+  });
+
+  it("knows a file named through a symlink and `..` as the kernel resolves it", () => {
+    // `link/../real.txt` is the real.txt beside link's target, not one in this folder.
+    fs.mkdirSync(path.join("store", "inner"), { recursive: true });
+    fs.writeFileSync(path.join("store", "real.txt"), "seen\n");
+    fs.symlinkSync(path.join(dir, "store", "inner"), "link");
+    recordFileState(path.join(dir, "store", "real.txt"));
+    expect(staleFileError(`${dir}/link/../real.txt`, { requireRead: true })).toBeNull();
+    fs.writeFileSync("real.txt", "a different file\n");
+    expect(staleFileError(path.join(dir, "real.txt"), { requireRead: true })).toMatch(/has not been read/);
   });
 });

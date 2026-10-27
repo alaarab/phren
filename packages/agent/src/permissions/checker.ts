@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
-import { isAutoApprovableCommand, splitCommandLine } from "./shell-classify.js";
+import { commandPaths, isAutoApprovableCommand, splitCommandWords } from "./shell-classify.js";
 import { evaluateRules } from "./rules.js";
 import { validatePath, checkSensitivePath, checkSensitiveTarget } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
@@ -70,9 +70,18 @@ function secretPath(value: string, cwd: string): boolean {
   const expanded = value === "~" || value.startsWith("~/") ? path.join(os.homedir(), value.slice(1)) : value;
   // Resolved against cwd, so `.aws/config` matches "/.aws/" like the absolute spelling.
   const abs = path.resolve(cwd, expanded);
-  let real: string | undefined;
-  try { real = fs.realpathSync(abs); } catch { /* not there (yet) */ }
-  return checkSensitivePath(value).sensitive || checkSensitiveTarget(abs, real).sensitive;
+  return checkSensitivePath(value).sensitive || checkSensitiveTarget(abs, realTarget(cwd, expanded)).sensitive;
+}
+
+/**
+ * Where a path argument leads, resolved as the kernel does: each symlink before the `..` after it, so
+ * `link/../public.txt` is the public.txt beside link's target, not the one in cwd (path.resolve, and
+ * fs.realpathSync, collapse the `..` first). A path that isn't there yet resolves through its folder.
+ */
+export function realTarget(cwd: string, value: string): string | undefined {
+  const raw = path.isAbsolute(value) ? value : `${cwd}${path.sep}${value}`;
+  try { return fs.realpathSync.native(raw); } catch { /* not there (yet) */ }
+  try { return path.join(fs.realpathSync.native(path.dirname(raw)), path.basename(raw)); } catch { return undefined; }
 }
 
 /**
@@ -82,6 +91,9 @@ function secretPath(value: string, cwd: string): boolean {
  * ask. After `--` every argument is an operand.
  */
 function namesSecretFile(tokens: string[], cwd: string): boolean {
+  // A command this reader knows: exactly the files its own options parser reads (`rg -neTOKEN x` searches x).
+  const known = commandPaths(tokens);
+  if (known) return known.some((p) => secretPath(p, cwd));
   const [binary, ...args] = tokens;
   const end = args.indexOf("--");
   const options = end === -1 ? args : args.slice(0, end);
@@ -105,6 +117,14 @@ function namesSecretFile(tokens: string[], cwd: string): boolean {
     if (secretPath(arg, cwd)) return true;
   }
   return false;
+}
+
+/** Whether a shell command may name a secret file: one of its arguments does, or a word the shell expands
+ * into file names (`cat config/*`), whose names no check here can see. */
+function commandTouchesSecret(command: string, cwd: string): boolean {
+  const segments = splitCommandWords(command);
+  if (!segments) return false;
+  return segments.some(({ words, globbed }) => globbed.some(Boolean) || namesSecretFile(words, cwd));
 }
 
 /**
@@ -220,8 +240,14 @@ export function checkPermission(
 
   // Session allowlist — user previously approved this tool+pattern via (a)llow-tool or (s)ession-allow.
   // Placed after deny-list, shell-safety blocks, and sensitive-path denials so those are never bypassed.
+  // An approved shell command still asks outside the sandbox or before it reads a secret file: approving
+  // `cat` once is not approving `cat .env`.
   if (isAllowed(toolName, input)) {
-    return { verdict: "allow", reason: "Session allowlist." };
+    const shellOk = toolName !== "shell" || (() => {
+      const cwd = (input.cwd as string) || config.projectRoot;
+      return validatePath(cwd, config.projectRoot, config.allowedPaths).ok && !commandTouchesSecret((input.command as string) || "", cwd);
+    })();
+    if (shellOk) return { verdict: "allow", reason: "Session allowlist." };
   }
 
   // Mode-specific logic
@@ -243,7 +269,7 @@ export function checkPermission(
         // A read-only command still asks before it touches a secret file
         // (`cat .env`), as read_file would be refused.
         const command = (input.command as string) || "";
-        const touchesSecret = (splitCommandLine(command) ?? []).some((tokens) => namesSecretFile(tokens, cwd));
+        const touchesSecret = commandTouchesSecret(command, cwd);
         if (cwdResult.ok && !touchesSecret && isAutoApprovableCommand(command)) {
           return { verdict: "allow", reason: "Read, build or test command within sandbox." };
         }
