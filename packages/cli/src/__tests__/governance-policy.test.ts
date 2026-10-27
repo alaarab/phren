@@ -512,6 +512,36 @@ describe("pruneDeadMemories TTL promotion", () => {
     expect(queue).not.toContain("Still current retry budget note");
   });
 
+  // Maintenance expired by the TTL alone while the trust filter kept typed findings past it,
+  // so a 200-day [decision] was injected yet queued as stale every night.
+  it("expires a finding by the same rule as the trust filter", async () => {
+    const { filterTrustedFindingsDetailed } = await import("../content/citation.js");
+    const created = new Date(Date.now() - 200 * 86_400_000).toISOString().slice(0, 10);
+    fs.mkdirSync(path.join(phrenPath, PROJECT), { recursive: true });
+    const findings = [
+      `# ${PROJECT} Findings`,
+      "",
+      "- [decision] Keep the store in plain markdown <!-- created: " + created + " -->",
+      "- [pattern] Batch the index writes in one transaction <!-- created: " + created + " -->",
+      "- Untyped deploy ordering rule <!-- created: " + created + " -->",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(phrenPath, PROJECT, "FINDINGS.md"), findings);
+
+    const trusted = filterTrustedFindingsDetailed(findings, { ttlDays: 120, minConfidence: 0 }).content;
+    const result = pruneDeadMemories(phrenPath, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const stale = fs.readFileSync(path.join(phrenPath, PROJECT, "review.md"), "utf8").split("## Stale")[1] ?? "";
+    for (const kept of ["Keep the store in plain markdown", "Batch the index writes"]) {
+      expect(trusted).toContain(kept);
+      expect(stale).not.toContain(kept);
+    }
+    expect(trusted).not.toContain("Untyped deploy ordering rule");
+    expect(stale).toContain(`[ttl-expired: ${created}] Untyped deploy ordering rule`);
+    expect(result.data.ttlExpired).toBe(1);
+  });
+
   // The prune resolved the policy once against the global config, so a project's
   // own retentionDays / ttlDays override was ignored by nightly maintenance.
   it("honors a per-project retention override instead of the global window", async () => {

@@ -320,6 +320,21 @@ function parseLearningDateHeading(line: string): string | null {
   return match ? match[1] : null;
 }
 
+/** The decay rule of a finding's leading type tag. Only the tag phren writes at the front counts, so a
+ * "[decision]" quoted in a finding's text does not keep it forever. */
+function leadingTypeConfig(line: string) {
+  const leadingTag = line.match(/^- (\[\w[\w-]*\])/);
+  const findingType = leadingTag ? extractFindingType(leadingTag[1]) : null;
+  return findingType ? FINDING_TYPE_DECAY[findingType] : undefined;
+}
+
+/** How many days a finding bullet lives before it expires: its type's limit in place of the TTL when it
+ * has a type (a decision never expires, a pattern lives a year), else `ttlDays`. The trust filter and
+ * maintenance's TTL review both expire findings by this. */
+export function findingAgeLimitDays(line: string, ttlDays: number): number {
+  return leadingTypeConfig(line)?.maxAgeDays ?? ttlDays;
+}
+
 function isDateStale(headingDate: string, ttlDays: number): boolean {
   const ts = Date.parse(`${headingDate}T00:00:00Z`);
   if (Number.isNaN(ts)) return false;
@@ -443,15 +458,9 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
       }
     }
 
-    // A typed finding lives as long as its type says (a decision never expires, a pattern a year), in place
-    // of the global TTL: checked first, a long-lived type would be cut off at the TTL. Only the leading tag
-    // phren writes counts, so "[decision]" quoted in a finding's text does not keep it forever.
-    const leadingTag = line.match(/^- (\[\w[\w-]*\])/);
-    const findingType = leadingTag ? extractFindingType(leadingTag[1]) : null;
-    const typeConfig = findingType ? FINDING_TYPE_DECAY[findingType] : undefined;
-    const stale = effectiveDate
-      ? (typeConfig ? isDateStale(effectiveDate, typeConfig.maxAgeDays) : isDateStale(effectiveDate, ttlDays))
-      : false;
+    // Checked first: a long-lived type would otherwise be cut off at the TTL.
+    const typeConfig = leadingTypeConfig(line);
+    const stale = effectiveDate ? isDateStale(effectiveDate, findingAgeLimitDays(line, ttlDays)) : false;
     if (stale) {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
       if (citation) i++;

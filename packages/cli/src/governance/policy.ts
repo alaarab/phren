@@ -15,6 +15,7 @@ import {
   isArchiveEnd as isArchiveEndMeta,
   stripLifecycleMetadata as stripLifecycleMetadataMeta,
 } from "../content/metadata.js";
+import { findingAgeLimitDays } from "../content/citation.js";
 import {
   VALID_FINDING_SENSITIVITY,
   VALID_PROACTIVITY_LEVELS,
@@ -1045,7 +1046,6 @@ function collectTtlExpiredEntries(
   ttlDays: number,
   lastRetrieval: Map<string, number>,
 ): string[] {
-  const retrievalGraceDays = Math.floor(ttlDays / 2);
   const now = Date.now();
   const expired: string[] = [];
   let content: string;
@@ -1063,7 +1063,10 @@ function collectTtlExpiredEntries(
     const createdDate = createdMatch[1];
     const createdMs = Date.parse(`${createdDate}T00:00:00Z`);
     if (Number.isNaN(createdMs)) continue;
-    if (Math.floor((now - createdMs) / 86_400_000) <= ttlDays) continue;
+    // The trust filter's expiry: a typed finding lives as long as its type allows, in place of the TTL.
+    const limitDays = findingAgeLimitDays(line, ttlDays);
+    if (Math.floor((now - createdMs) / 86_400_000) <= limitDays) continue;
+    const retrievalGraceDays = Math.floor(limitDays / 2);
 
     // Retrieval is logged at document level, so look up the document key rather than
     // the bullet.
