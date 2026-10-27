@@ -127,3 +127,26 @@ it("keeps the completed starting evidence when scheduling outlasts the cache win
     expect(await paneChatState("default", { ...pane, terminal_id: root + "-changed" })).not.toHaveProperty("starting");
   } finally { restore(); await rm(root, { recursive: true, force: true }); }
 });
+
+it("names a Claude pane by the Hook's binding when Herdr still reports a finished nested claude -p run", async () => {
+  const root = await mkdtemp(path.join((await import("node:os")).tmpdir(), "phren-nested-claude-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+  state.exec.mockResolvedValue({ stdout: "" });
+  const { setTerminalProvider } = await import("./terminal.js");
+  const restore = setTerminalProvider({ processes: async () => ({ foregroundPids: [4242] }) } as unknown as import("./terminal.js").TerminalProvider);
+  const own = "84bef99f-7ba9-42e9-9023-475a56d0b234", nested = "3d6267ab-1cf9-43cc-9173-7fb28a22a0fe";
+  const pane = { pane_id: "wFQ:p1", terminal_id: "term", agent: "claude",
+    agent_session: { kind: "id", agent: "claude", source: "herdr:claude", value: nested } };
+  const bind = (session: string) => writeFile(path.join(root, "bindings", "default", encodeURIComponent("wFQ:p1") + ".json"),
+    JSON.stringify({ terminal: "term", source: "claude", session, pids: [4242] }));
+  try {
+    await mkdir(path.join(root, "bindings", "default"), { recursive: true });
+    await bind(nested);
+    // While both agree, Herdr's report is taken as is.
+    expect(await paneIdentity("default", pane, true)).toBe(nested);
+    // The pane's own conversation kept running after the nested run exited.
+    await bind(own);
+    expect(await paneIdentity("default", pane, true)).toBe(own);
+  } finally { restore(); await rm(root, { recursive: true, force: true }); }
+});

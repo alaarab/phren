@@ -9,7 +9,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type OfflineCode, type Target, type StartingTarget } from "./protocol.js";
 import { logger } from "../logger.js";
-import { recordedSession } from "./agent-hook-stores.js";
+import { boundSession, recordedSession } from "./agent-hook-stores.js";
 import { paneRecord, recordTitle } from "./session-activity.js";
 import { tabActivityKey } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
@@ -293,7 +293,11 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
   // A Codex pane on the Hook's own app-server: the registry follows `/new`
   // and `/resume` as they happen, while Herdr's report waits for a hook.
   const owned = pane.agent === "codex" && !!codexServers.forPane(server, String(pane.pane_id))?.threadId;
-  if (pane.agent !== "copilot" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value, noTranscriptLogs: false }; }
+  // A `claude -p` run from the pane's shell inherits HERDR_*, and Herdr then
+  // reports that run's session for the pane long after it exits. When the
+  // Hook's own binding names another conversation, the processes decide.
+  if (pane.agent !== "copilot" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success
+    && (pane.agent !== "claude" || [undefined, reported.value].includes(await boundSession(server, pane)))) { countIdentity("reported"); return { sessionId: reported.value, noTranscriptLogs: false }; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
