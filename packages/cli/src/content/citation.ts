@@ -443,7 +443,15 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
       }
     }
 
-    const stale = effectiveDate ? isDateStale(effectiveDate, ttlDays) : false;
+    // A typed finding lives as long as its type says (a decision never expires, a pattern a year), in place
+    // of the global TTL: checked first, a long-lived type would be cut off at the TTL. Only the leading tag
+    // phren writes counts, so "[decision]" quoted in a finding's text does not keep it forever.
+    const leadingTag = line.match(/^- (\[\w[\w-]*\])/);
+    const findingType = leadingTag ? extractFindingType(leadingTag[1]) : null;
+    const typeConfig = findingType ? FINDING_TYPE_DECAY[findingType] : undefined;
+    const stale = effectiveDate
+      ? (typeConfig ? isDateStale(effectiveDate, typeConfig.maxAgeDays) : isDateStale(effectiveDate, ttlDays))
+      : false;
     if (stale) {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
       if (citation) i++;
@@ -459,25 +467,11 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
     }
 
     // Type-specific decay adjustment
-    const findingType = extractFindingType(line);
-    if (findingType) {
-      const typeConfig = FINDING_TYPE_DECAY[findingType];
-      if (typeConfig) {
-        // Override max age for this type
-        if (effectiveDate && typeConfig.maxAgeDays !== Infinity) {
-          const age = ageDaysForDate(effectiveDate);
-          if (age !== null && age > typeConfig.maxAgeDays) {
-            issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
-            if (citation) i++;
-            continue;
-          }
-        }
-        // Apply type-specific decay multiplier
-        confidence *= typeConfig.decayMultiplier;
-        // Decisions and anti-patterns get a floor boost (never drop below 0.6)
-        if (typeConfig.maxAgeDays === Infinity) {
-          confidence = Math.max(confidence, 0.6);
-        }
+    if (typeConfig) {
+      confidence *= typeConfig.decayMultiplier;
+      // Decisions get a floor boost (never drop below 0.6)
+      if (typeConfig.maxAgeDays === Infinity) {
+        confidence = Math.max(confidence, 0.6);
       }
     }
 

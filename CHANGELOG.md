@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Typed findings that are meant to last were dropped as stale at the global 120-day TTL: a `[pattern]` or `[pitfall]` (365 days) or a `[decision]` (no limit) never got past day 120, because the TTL was checked before the type's own age limit. A finding's leading type tag now sets its age limit in place of the TTL, and a type named inside a finding's text no longer counts as its tag.
+
 ## [0.3.58] - 2026-10-26
 
 ### Added
