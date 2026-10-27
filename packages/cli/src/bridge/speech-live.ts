@@ -314,9 +314,10 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       };
       // Before the first audio, the next model (Flash) takes the reply over;
       // with none left, the phone gets `failure`.
-      const fallBack = (failure: { code: string; error: string }) => {
+      // `bench` false: the model voiced this reply already, so it is not set aside for the next.
+      const fallBack = (failure: { code: string; error: string }, bench = true) => {
         detach();
-        if (models.length > 1) { state.bench(model, "failed"); models = models.slice(1); open([...sent], resumed); return; }
+        if (models.length > 1) { if (bench) state.bench(model, "failed"); models = models.slice(1); open([...sent], resumed); return; }
         fail(failure);
       };
       // A refused format or model: ElevenLabs answers some in the handshake
@@ -368,8 +369,12 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
         if (message.isFinal === true || message.is_final === true) {
           // Text-to-dialogue (v4) ends a socket after the text it had, though the reply goes on: what it never
           // voiced, and the reply's next text, go to a fresh socket, timed on from this one's audio.
+          // A socket given words (letters or digits: a lone emoji or rule has no sound) that voiced none of
+          // them falls back, the phone's done or not: a fresh socket ending just after that done would
+          // otherwise end the reply with its words never spoken.
           if (!voiced) {
-            if (done) { tell({ type: "done" }); finish(); } else fallBack({ code: "speech-failed", error: "ElevenLabs ended without voicing the reply." });
+            if (done && !sent.some(words => /[\p{L}\p{N}]/u.test(words))) { tell({ type: "done" }); finish(); }
+            else fallBack({ code: "speech-failed", error: "ElevenLabs ended without voicing the reply." }, !resumed);
             return;
           }
           // Stream-input ends only after the close sent with the phone's done; text-to-dialogue may end after
