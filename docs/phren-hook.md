@@ -1521,7 +1521,15 @@ API, as a turn interrupt on a Codex pane the Hook runs on its own app-server,
 else as the key. A question the Hook holds is declined first, and the turn is
 still stopped: on a served OpenCode pane the decline is followed by an abort.
 There is one Escape per move. A marker beside the move's record is written
-before the key goes, so a crash in between counts as sent. A second interrupt (a double tap, two at once)
+before the key goes, so a crash in between counts as sent.
+
+When the move stops waiting for the hand-off (the wait ran out, the wait
+failed, or the owner aborted the move), it takes its request back while the
+request is still queued. So the old agent, which a new-chat move leaves
+running, is never later asked for a hand-off nobody reads; the row fails with
+the reason. A request already typed is left alone. An interrupt that was
+checking when the wait ran out still sends its Escape, though the move has
+already gone on to build the hand-off itself. A second interrupt (a double tap, two at once)
 answers `interrupted: true` without another Escape, which Claude and Codex
 would take as "go back to an earlier message". An older message for the same
 pane is still typed first. A Hook

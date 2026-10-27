@@ -16,6 +16,7 @@ import * as harnesses from "./harnesses.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
 import { SessionMover, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
+import { finalTurnFromLines } from "./schedule-watch.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { admitScopedRequest } from "./scoped-gateway.js";
@@ -196,6 +197,17 @@ describe.skipIf(process.platform === "win32")("continue on another computer", ()
     expect(sourceOutOfUsage([limit, blocks], "claude")).toBe(false);
     // A tool's result is not the owner moving on.
     expect(sourceOutOfUsage([limit, toolResult], "claude")).toBe(true);
+  });
+
+  it("keeps a background shell awaited across an interrupt, and leaves it behind once the owner moves on", () => {
+    const launch = JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "pnpm test", run_in_background: true } }] } });
+    const started = JSON.stringify({ type: "user", toolUseResult: { backgroundTaskId: "b1" }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "started" }] } });
+    // Claude files an Escape as a user row of text blocks; it stops the turn but is not the owner moving on.
+    const interrupt = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } });
+    const prompt = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "Now look at the docs" }] } });
+    expect(finalTurnFromLines([launch, started], "claude").awaited).toBe(1);
+    expect(finalTurnFromLines([launch, started, interrupt], "claude").awaited).toBe(1);
+    expect(finalTurnFromLines([launch, started, prompt], "claude").awaited).toBeUndefined();
   });
 
   it("honours an explicit summary-by-target request and refuses it on this computer", async () => {

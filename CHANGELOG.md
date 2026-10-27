@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A move that stops waiting for its hand-off (the wait ran out or failed, or the owner aborted it) now takes back its request while it is still queued. Before, the request stayed queued, and the old agent a new-chat move leaves running was asked for a hand-off later.
 - A move's "Stop <agent> and hand off now" is tighter:
   - It sends its Escape only to the agent the move asked: the same harness, conversation and terminal. When the owner has started another agent in the pane since, it answers `state: "replaced"`.
   - It can no longer land after the move's hand-off wait ran out and the move went on to exit the old agent.

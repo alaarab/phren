@@ -170,6 +170,20 @@ export class HandOffQueue {
       return { ran: true as const };
     });
   }
+  /**
+   * Takes back the message `id` for `target` while it is still queued, never typed: its row fails with
+   * `reason`, and no sweep types it later (a move whose hand-off wait ended no longer wants its request in the
+   * old agent). Answers the row's state after: `failed` once withdrawn, else what it already came to
+   * (`delivered`: the agent took it), or undefined when there is no such row.
+   */
+  withdraw(id: string, target: Target, reason: string): Promise<Row["state"] | undefined> {
+    return this.serial(async () => {
+      const row = await this.read(id);
+      if (!row || !samePane(row.target, target)) return undefined;
+      if (row.state === "queued") { row.state = "failed"; row.error = reason.slice(0, 500); await this.save(row); }
+      return row.state;
+    });
+  }
   status(id: string, target: Target): Promise<Json> {
     return this.serial(async () => { const row = await this.read(id); if (!row || !samePane(row.target, target)) throw new BridgeError(404, "No hand-off with this id and target."); return this.reply(row); });
   }
