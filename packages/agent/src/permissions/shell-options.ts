@@ -30,9 +30,8 @@ export interface CommandSpec {
   maxOperands?: number;
   /** A search tool: unless one of these options gives the pattern, the first operand is the pattern. */
   patternOptions?: string[];
-  /** The first operand is not a path (jq's filter), unless one of `filterOptions` gave it (`jq -f FILE IN`). */
+  /** The first operand is not a path (jq's filter). */
   firstOperandNotPath?: boolean;
-  filterOptions?: string[];
   /** No operand is a path (echo's words, tr's sets). */
   noPaths?: boolean;
   /** Options whose value is a file the command reads. */
@@ -94,8 +93,7 @@ export function parsedPaths(parsed: ParsedArgs, spec: CommandSpec): string[] {
   if (spec.noPaths) return paths;
   let operands = parsed.operands;
   const patternGiven = spec.patternOptions && parsed.options.some((o) => spec.patternOptions!.includes(o.name));
-  const filterGiven = spec.filterOptions && parsed.options.some((o) => spec.filterOptions!.includes(o.name));
-  if ((spec.patternOptions && !patternGiven) || (spec.firstOperandNotPath && !filterGiven)) operands = operands.slice(1);
+  if ((spec.patternOptions && !patternGiven) || spec.firstOperandNotPath) operands = operands.slice(1);
   return [...paths, ...operands];
 }
 
@@ -194,9 +192,11 @@ export const READ_ONLY_SPECS: Record<string, CommandSpec> = {
   date: { flags: "uRjn", valued: "dr", noPaths: true, long: ["utc", "universal", "rfc-email"], longValued: ["date", "reference"],
     longOptional: ["iso-8601", "rfc-3339"], pathOptions: ["-r", "--reference"] },
   // No --arg / --argjson / --slurpfile: they take two values.
-  jq: { flags: "rjacnsSeCMR", valued: "f", firstOperandNotPath: true, filterOptions: ["-f"], long: ["raw-output", "join-output", "ascii-output",
+  // No -f: a filter file can `import` data files no check here reads (the filter given inline is checked
+  // for import and include in shell-classify.ts).
+  jq: { flags: "rjacnsSeCMR", firstOperandNotPath: true, long: ["raw-output", "join-output", "ascii-output",
     "compact-output", "null-input", "slurp", "sort-keys", "exit-status", "color-output", "monochrome-output", "raw-input", "tab"],
-    longValued: ["indent"], pathOptions: ["-f"] },
+    longValued: ["indent"] },
   nl: { flags: "p", valued: "bdfhilnsvw" },
   column: { flags: "txne", valued: "cso" },
   // No -c / --check: the files checked are named inside the sum file.

@@ -308,7 +308,44 @@ known-safe ones. Options that write or run programs are not on any list
 (`sort -o`, `rg --pre`, `rg -z`, `git grep -O`, `git diff --output`,
 `find -exec`, `sed -i`, `tail -f`), so an option the agent doesn't know asks
 instead of running. Build and test tools (`npm test`, `cargo test`, `tsc`)
-take any options except the ones that rewrite sources (`--fix`, `--write`).
+take any options except the ones that rewrite sources (`--fix`, `--write`),
+also after `--` (`npm run lint -- --fix` asks).
+
+Some command lines ask because the shell or the command does more than its
+words show:
+
+- `cd` moves where later commands' paths resolve, so each command after a `cd`
+  is checked from there. Some `cd`s ask:
+  - one outside the project, to `-`, or with no target (home);
+  - one in a pipeline, or followed by `||`;
+  - one to a directory that isn't there, unless only `&&` follows it.
+- A recursive read (`grep -r`, `rg`, `diff -r`, `git grep`,
+  `git diff --no-index`) asks when a secret file is among the files it would
+  read below where it starts. It also asks when it follows symlinks and one
+  is there, or when there are too many files to look through. `rg` is taken
+  to skip what git ignores and hidden files, as it does, unless `-u`,
+  `--no-ignore`, `--hidden` or a `--glob` says otherwise. `git grep` reads
+  only tracked files unless told to read others. A directory that is a
+  symlink is looked at where it leads.
+- Options that read the names of files from a list (`--files0-from`,
+  `sha256sum -c`, `file -f`) ask, since the names are not on the line. So
+  do `jq -f` and a jq filter that uses `import` or `include`.
+- These ask too:
+  - a backslash at the end of a line;
+  - a redirection to anything other than `>&1`, `>&2` or `/dev/null`;
+  - `printf -v` (it sets a variable, `PATH` among them);
+  - a `~name`, `~+` or `~-` word;
+  - a `git log` format with `%G` (it runs gpg);
+  - pathspec magic or `..` in `git grep`;
+  - package scripts like `lint:fix` or `test:update`.
+- Every agent shell runs git with `core.fsmonitor=false`, `core.pager=cat`
+  and `log.showSignature=false`, passed through `GIT_CONFIG_COUNT`, and with
+  `GIT_OPTIONAL_LOCKS=0` and no `CDPATH`. So a read never starts the
+  fsmonitor hook, a pager, gpg or an index hook. An external diff, a diff
+  driver's command or textconv, and clean/smudge filters can't be switched
+  off that way. An auto-approved git command asks when git's config sets any
+  of them, except the exact ones git-lfs and git-crypt install.
+
 A word the shell would expand into file names (`cat config/*`,
 `ls *.ts`, `{a,b}`) asks, since no check can see which files it names; quote
 a search pattern to keep it a pattern. A command you approved for the

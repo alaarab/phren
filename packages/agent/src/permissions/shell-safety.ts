@@ -139,9 +139,13 @@ export const GIT_HARDENING: [string, string][] = [
   ["log.showSignature", "false"],
 ];
 
-/** scrubEnv, plus GIT_HARDENING after any GIT_CONFIG_* entries already set. */
+/** scrubEnv, plus GIT_HARDENING after any GIT_CONFIG_* entries already set. git takes no optional locks (a
+ * `git status` doesn't rewrite the index, so no index hook runs), and there is no CDPATH: `cd name` goes
+ * where the permission check resolved it. */
 export function shellEnv(): Record<string, string | undefined> {
   const env = scrubEnv();
+  env.GIT_OPTIONAL_LOCKS = "0";
+  delete env.CDPATH;
   const given = Number(env.GIT_CONFIG_COUNT);
   let count = Number.isInteger(given) && given > 0 ? given : 0;
   for (const [key, value] of GIT_HARDENING) {

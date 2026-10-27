@@ -4,9 +4,9 @@ import * as os from "os";
 import * as path from "path";
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety, scrubEnv } from "./shell-safety.js";
-import { commandPaths, isAutoApprovableCommand, recursiveReads, splitCommandWords } from "./shell-classify.js";
+import { commandPaths, isAutoApprovableCommand, recursiveReads, splitCommandWords, type RecursiveRead } from "./shell-classify.js";
 import { evaluateRules } from "./rules.js";
-import { validatePath, checkSensitivePath, checkSensitiveTarget } from "./sandbox.js";
+import { validatePath, checkSensitivePath, checkSensitiveTarget, isPathInSandbox } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 import { parsePatch, patchPaths } from "../tools/apply-patch.js";
 
@@ -126,32 +126,73 @@ function namesSecretFile(tokens: string[], cwd: string): boolean {
  * shell switches off itself (GIT_HARDENING, shell-safety.ts). */
 const GIT_HELPER_KEYS = "^(diff\\.external|diff\\..+\\.(command|textconv)|filter\\..+\\.(clean|smudge|process))$";
 
-/** Whether git, run in `cwd`, has config that runs a program on a read. A git that can't be asked says nothing. */
-export function gitRunsHelpers(cwd: string): boolean {
+/** The helper config git-lfs and git-crypt install, by key and exact value: the same program each time,
+ * never a shell line someone wrote into the repository's config. */
+const KNOWN_HELPERS: [RegExp, RegExp][] = [
+  [/^filter\.lfs\.clean$/, /^git-lfs clean -- %f$/],
+  [/^filter\.lfs\.smudge$/, /^git-lfs smudge( --skip)? -- %f$/],
+  [/^filter\.lfs\.process$/, /^git-lfs filter-process( --skip)?$/],
+  [/^filter\.git-crypt(-[\w-]+)?\.(clean|smudge)$/, /^"?(git-crypt|\/[\w./-]+\/git-crypt)"? (clean|smudge)( --key-name=[\w-]+)?$/],
+  [/^diff\.git-crypt(-[\w-]+)?\.textconv$/, /^"?(git-crypt|\/[\w./-]+\/git-crypt)"? diff( --key-name=[\w-]+)?$/],
+];
+
+/** Whether git, run in `cwd`, has config that runs a program on a read, other than git-lfs's and git-crypt's
+ * own (installed from outside the project). A git that can't be asked can't vouch; with no cwd there (the
+ * command can't start) nothing runs. */
+export function gitRunsHelpers(cwd: string, projectRoot: string): boolean {
+  let out: string;
   try {
-    const out = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
+    out = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
       cwd, env: scrubEnv(), encoding: "utf-8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
-    return out.trim() !== "";
   } catch (err: unknown) {
-    // Exit 1: no such key. Anything else (git missing, a timeout) can't vouch for the config.
+    // Exit 1: no such key; ENOENT: no git, so nothing runs. Anything else (a timeout) can't vouch for the config.
     return (err as { status?: number }).status !== 1 && (err as { code?: string }).code !== "ENOENT";
   }
+  const inProject = (bin: string) => isPathInSandbox(path.resolve(bin), projectRoot, []);
+  return out.split("\n").filter(Boolean).some((line) => {
+    const at = line.indexOf(" ");
+    const key = at === -1 ? line : line.slice(0, at), value = at === -1 ? "" : line.slice(at + 1);
+    const known = KNOWN_HELPERS.some(([k, v]) => k.test(key) && v.test(value));
+    const bin = /^"?(\/[^"\s]+)/.exec(value)?.[1];
+    return !known || (bin !== undefined && inProject(bin));
+  });
 }
 
-/** Most entries looked at below one directory a recursive read starts from; past it the command asks. */
+/** Most files looked at below one directory a recursive read starts from; past it the command asks. */
 export const RECURSIVE_WALK_LIMIT = 20_000;
+/** As RECURSIVE_WALK_LIMIT, for a list git gives (cheap to check: no directory reads). */
+const GIT_LIST_LIMIT = 200_000;
+
+/** The files git lists below `dir` (relative to it): tracked, or everything it doesn't ignore. Undefined
+ * outside a repository or when git can't say. */
+function gitFiles(dir: string, scope: "tracked" | "unignored"): string[] | undefined {
+  try {
+    const out = execFileSync("git", ["ls-files", "-z", "--cached", ...(scope === "unignored" ? ["--others", "--exclude-standard"] : [])], {
+      cwd: dir, env: scrubEnv(), encoding: "utf-8", timeout: 10_000, maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+    return out.split("\0").filter(Boolean);
+  } catch { return undefined; }
+}
 
 /**
- * Whether a recursive read from `root` could reach a secret file: one below it matches a sensitive name, a
- * symlink it would follow is there (where it leads is not walked), or there are too many entries to look at.
- * `.git` is skipped (git's objects, not files a search reads as text).
+ * Whether a recursive read from `root` could reach a secret file: the files it reads there (every one, or
+ * what git doesn't ignore, or git's tracked files; hidden ones only when it reads them) include one with a
+ * sensitive name, a symlink is there and it follows symlinks, or there are too many to look at. A root that
+ * is a symlink is walked where it leads.
  */
-function secretBelow(root: string, cwd: string, follow: boolean): boolean {
+function secretBelow(read: RecursiveRead, root: string, cwd: string): boolean {
   const expanded = root === "~" || root.startsWith("~/") ? path.join(os.homedir(), root.slice(1)) : root;
-  const start = path.resolve(cwd, expanded);
-  let info: fs.Stats;
-  try { info = fs.statSync(start); } catch { return false; }
-  if (!info.isDirectory()) return false;
+  let start: string;
+  try {
+    start = fs.realpathSync.native(path.resolve(cwd, expanded));
+    if (!fs.statSync(start).isDirectory()) return false;
+  } catch { return false; }
+  if (checkSensitivePath(start + path.sep).sensitive) return true;
+  const hiddenSkipped = (rel: string) => !read.hidden && rel.split(/[\\/]/).some((part) => part.startsWith("."));
+  const listed = read.scope !== "all" && !read.follow ? gitFiles(start, read.scope) : undefined;
+  if (listed) {
+    if (listed.length > GIT_LIST_LIMIT) return true;
+    return listed.some((rel) => !hiddenSkipped(rel) && checkSensitivePath(path.join(start, rel)).sensitive);
+  }
   const pending = [start];
   let seen = 0;
   while (pending.length) {
@@ -159,11 +200,12 @@ function secretBelow(root: string, cwd: string, follow: boolean): boolean {
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const entry of entries) {
+      if (entry.name === ".git" || (!read.hidden && entry.name.startsWith("."))) continue;
       if (++seen > RECURSIVE_WALK_LIMIT) return true;
       const full = path.join(dir, entry.name);
       if (checkSensitivePath(full).sensitive || checkSensitivePath(full + path.sep).sensitive) return true;
-      if (entry.isSymbolicLink() && follow) return true;
-      if (entry.isDirectory() && entry.name !== ".git") pending.push(full);
+      if (entry.isSymbolicLink() && read.follow) return true;
+      if (entry.isDirectory()) pending.push(full);
     }
   }
   return false;
@@ -171,31 +213,42 @@ function secretBelow(root: string, cwd: string, follow: boolean): boolean {
 
 /**
  * Whether a shell command may reach a secret file or leave the sandbox: an argument names one, a word the
- * shell expands into file names (`cat config/*`) hides the names, a recursive read has one below it, or a
- * `cd` moves outside the sandbox. Each segment's paths resolve where the `cd`s before it left the shell
- * (`cd ~/.aws && cat credentials`); a `cd` whose target this can't tell (none, `-`) counts too.
+ * shell expands into file names (`cat config/*`) hides the names, a recursive read has one below it, git's
+ * config runs a program on a read, or a `cd` goes outside the sandbox. Each segment's paths resolve where the
+ * `cd`s before it left the shell (`cd ~/.aws && cat credentials`). A `cd` whose effect this can't tell asks:
+ * no target or `-`, one inside a pipeline (a subshell), one followed by `||` (what comes after may run where
+ * the shell started), and one to a target that isn't a directory unless only `&&` and `|` follow it (when
+ * it fails, nothing after it runs; after `;` the rest runs where the shell was).
  */
 function commandTouchesSecret(command: string, cwd: string, config: PermissionConfig): boolean {
   const segments = splitCommandWords(command);
   if (!segments) return false;
   let here = cwd;
-  for (const { words, globbed } of segments) {
+  let moved = false;
+  for (const [index, { words, globbed, before, after }] of segments.entries()) {
     if (globbed.some(Boolean)) return true;
+    if (moved && before === "||") return true;
     if (words[0] === "cd") {
+      if (before === "|" || after === "|" || after === "||") return true;
       const target = commandPaths(words)?.[0];
       if (target === undefined || target === "-") return true;
       const expanded = target === "~" || target.startsWith("~/") ? path.join(os.homedir(), target.slice(1)) : target;
       const next = path.resolve(here, expanded);
       const real = realTarget(here, expanded) ?? next;
+      let directory = false;
+      try { directory = fs.statSync(real).isDirectory(); } catch { /* not there */ }
+      const stopsOnFailure = segments.slice(index + 1).every((s) => s.before === "&&" || s.before === "|");
+      if (!directory && !stopsOnFailure) return true;
       if (!validatePath(next, config.projectRoot, config.allowedPaths).ok || !validatePath(real, config.projectRoot, config.allowedPaths).ok) return true;
       if (checkSensitiveTarget(next + path.sep, real + path.sep).sensitive) return true;
       here = next;
+      moved = true;
       continue;
     }
     if (namesSecretFile(words, here)) return true;
-    if (words[0] === "git" && gitRunsHelpers(here)) return true;
+    if (words[0] === "git" && gitRunsHelpers(here, config.projectRoot)) return true;
     const recursive = recursiveReads(words);
-    if (recursive && recursive.roots.some((root) => secretBelow(root, here, recursive.follow))) return true;
+    if (recursive && recursive.roots.some((root) => secretBelow(recursive, root, here))) return true;
   }
   return false;
 }

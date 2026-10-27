@@ -74,11 +74,17 @@ export function commandPaths(tokens: string[]): string[] | null {
 }
 
 /**
- * Where a command reads every file below a directory (grep -r, rg, diff -r, git grep), as the operands it
- * starts from (cwd when none), and whether it follows symlinks there; null when it reads only the files
- * named. The caller looks below each directory for a secret file, since no operand names it.
+ * A command that reads the files below a directory, not only the files it names: where it starts (cwd when
+ * nothing is named), whether it follows symlinks, and which files it reads there. `all`: every file (grep -r,
+ * diff -r, rg told to ignore no ignore file). `unignored`: what git doesn't ignore, and hidden files only with
+ * `hidden` (rg's default). `tracked`: git's tracked files (git grep).
  */
-export function recursiveReads(tokens: string[]): { roots: string[]; follow: boolean } | null {
+export interface RecursiveRead { roots: string[]; follow: boolean; scope: "all" | "unignored" | "tracked"; hidden: boolean }
+
+/** Where a command reads every file below a directory (grep -r, rg, diff -r, git grep, git diff --no-index),
+ * or null when it reads only the files named. The caller looks below each for a secret file, since no
+ * operand names it. */
+export function recursiveReads(tokens: string[]): RecursiveRead | null {
   const [binary, ...args] = tokens;
   if (!binary) return null;
   const parse = (spec: CommandSpec | undefined, rest: string[]) => {
@@ -91,23 +97,37 @@ export function recursiveReads(tokens: string[]): { roots: string[]; follow: boo
     if (!read) return null;
     const { options } = read.parsed;
     const follow = named(options, "-R", "--dereference-recursive");
+    // Any -d value but an exact `read` or `skip` may recurse (GNU takes `rec`, BSD `RECURSE`).
     const recurse = follow || named(options, "-r", "--recursive")
-      || options.some((o) => (o.name === "-d" || o.name === "--directories") && o.value === "recurse");
-    return recurse ? { roots: read.paths.length ? read.paths : ["."], follow } : null;
+      || options.some((o) => (o.name === "-d" || o.name === "--directories") && o.value !== "read" && o.value !== "skip");
+    return recurse ? { roots: read.paths.length ? read.paths : ["."], follow, scope: "all", hidden: true } : null;
   }
   if (binary === "rg") {
     const read = parse(own(READ_ONLY_SPECS, "rg"), args);
     if (!read) return null;
-    return { roots: read.paths.length ? read.paths : ["."], follow: named(read.parsed.options, "-L", "--follow") };
+    const { options } = read.parsed;
+    const u = options.filter((o) => o.name === "-u").length + (named(options, "--unrestricted") ? 1 : 0);
+    // A --glob overrides rg's ignore rules, as -u and --no-ignore do.
+    const all = u > 0 || named(options, "--no-ignore", "--no-ignore-vcs", "-g", "--glob", "--iglob");
+    return { roots: read.paths.length ? read.paths : ["."], follow: named(options, "-L", "--follow"),
+      scope: all ? "all" : "unignored", hidden: u > 1 || named(options, "-.", "--hidden") };
   }
   if (binary === "diff") {
     const read = parse(own(READ_ONLY_SPECS, "diff"), args);
-    return read && named(read.parsed.options, "-r", "--recursive") ? { roots: read.paths, follow: true } : null;
+    return read && named(read.parsed.options, "-r", "--recursive") ? { roots: read.paths, follow: true, scope: "all", hidden: true } : null;
   }
   if (binary === "git") {
-    // git grep's operands may be revisions; it searches the work tree below cwd either way.
     const git = gitSubcommand(args);
-    return git?.sub === "grep" ? { roots: ["."], follow: false } : null;
+    const spec = git ? own(GIT_SPECS, git.sub) : undefined;
+    const read = git && spec ? parse(spec, git.rest) : null;
+    if (!git || !read) return null;
+    const { options } = read.parsed;
+    // Two directories compared, the files on one side only printed whole.
+    if (git.sub === "diff" && named(options, "--no-index")) return { roots: read.paths, follow: true, scope: "all", hidden: true };
+    if (git.sub !== "grep") return null;
+    // Its operands are revisions or pathspecs; each that is a directory is searched too.
+    const untracked = named(options, "--untracked", "--no-index", "--no-exclude-standard");
+    return { roots: [".", ...read.paths], follow: false, scope: untracked ? "all" : "tracked", hidden: true };
   }
   return null;
 }
@@ -119,7 +139,13 @@ function readOnlyIsSafe(name: string, args: string[]): boolean | undefined {
   if (name === "git") {
     const git = gitSubcommand(args);
     const spec = git ? own(GIT_SPECS, git.sub) : undefined;
-    return !!git && !!spec && parseOptions(git.rest, spec) !== null;
+    const parsed = git && spec ? parseOptions(git.rest, spec) : null;
+    if (!parsed) return false;
+    // `%G…` placeholders verify signatures, which runs gpg.program.
+    if (parsed.options.some((o) => (o.name === "--format" || o.name === "--pretty") && o.value?.includes("%G"))) return false;
+    // Pathspec magic (`:/`, `:(top)`) and `..` reach past where the search below cwd was looked at.
+    if (git!.sub === "grep" && parsed.operands.some((o) => o.startsWith(":") || o.split("/").includes(".."))) return false;
+    return true;
   }
   const spec = own(READ_ONLY_SPECS, name);
   if (!spec) return undefined;
@@ -129,11 +155,15 @@ function readOnlyIsSafe(name: string, args: string[]): boolean | undefined {
   if (!parsed) return false;
   // A bare date operand sets the clock.
   if (name === "date" && parsed.operands.some((o) => !o.startsWith("+"))) return false;
+  // A jq filter's `import "x" as $d` and `include` read files (searching paths it names) no check here sees.
+  if (name === "jq" && /\b(import|include)\b/.test(parsed.operands[0] ?? "")) return false;
   return true;
 }
 
 /** Package scripts that `npm run` and friends may run unprompted. */
 const SAFE_SCRIPT = /^(test|build|lint|check|typecheck|type-check|tsc|compile)(:[\w:-]+)?$/;
+/** A script variant that rewrites sources or snapshots (`lint:fix`, `test:update`). */
+const REWRITING_SCRIPT = /fix|write|format|apply|update|snapshot/i;
 const SCRIPT_RUNNERS = new Set(["npm", "pnpm", "yarn", "bun"]);
 
 /** Multi-command tools whose allowlist entries are scoped to the subcommand. */
@@ -145,7 +175,11 @@ export const MULTI_COMMAND_TOOLS = new Set([
 /** A simple command's words, and for each whether the shell would expand it into something unseen: file
  * names (an unquoted `*`, `?`, `[…]` or `{a,b}`) or a variable (`$NAME`, `${…}`, not in single quotes).
  * Such a word is not what the command sees, so no check can read it. */
-export interface CommandWords { words: string[]; globbed: boolean[] }
+export interface CommandWords {
+  words: string[]; globbed: boolean[];
+  /** The operators around it (`&&`, `||`, `|`, `;`, "" at either end): a `cd` in a pipeline moves no later command. */
+  before?: string; after?: string;
+}
 
 const GLOB = /[*?]|\[[^\]]*\]|\{[^{}]*(,|\.\.)[^{}]*\}/;
 
@@ -168,7 +202,10 @@ export function splitCommandWords(command: string): CommandWords[] | null {
   let inToken = false;
   let quote: "'" | '"' | null = null;
   const endToken = () => {
-    if (inToken) { tokens.push(current); globbed.push(expands || GLOB.test(bare)); }
+    // An unquoted `~name`, `~+` or `~-` (also after `=` or `:`) is a home directory or $PWD/$OLDPWD, never what
+    // the word says; `~` and `~/…` are expanded where paths are checked.
+    const tilde = bare.includes("~") && /(?:^|[=:])~[^/]/.test(current);
+    if (inToken) { tokens.push(current); globbed.push(expands || tilde || GLOB.test(bare)); }
     current = "";
     bare = "";
     expands = false;
@@ -177,9 +214,17 @@ export function splitCommandWords(command: string): CommandWords[] | null {
   // Inside double quotes `$"` is a `$` before the closing quote, and `$'` a `$` before a quote character.
   const variable = (i: number, quoted = false) => command[i] === "$"
     && (quoted ? /[A-Za-z_{0-9@*#?$!-]/ : /[A-Za-z_{0-9@*#?$!'"-]/).test(command[i + 1] ?? "");
-  const endSegment = () => {
+  // The operator before the segment being read, and the one that ends it.
+  let before = "";
+  const endSegment = (after = "") => {
     endToken();
-    if (tokens.length > 0) segments.push({ words: tokens, globbed });
+    if (tokens.length === 0) {
+      // An empty segment (`a &&⏎ b`) keeps the operator before it, unless this one is a pipe.
+      if (after === "|" || after === "||") before = after;
+      return;
+    }
+    segments.push({ words: tokens, globbed, before, after });
+    before = after;
     tokens = [];
     globbed = [];
   };
@@ -189,6 +234,9 @@ export function splitCommandWords(command: string): CommandWords[] | null {
     // reader would keep as two characters, so it isn't vouched for (outside single quotes, where it is literal).
     if (c === "\\" && command[i + 1] === "\n" && quote !== "'") return null;
     if (quote) {
+      // Inside double quotes a backslash escapes `"`, `\`, `$` and a backquote: `"a\" b"` is one word, and
+      // reading `\"` as the closing quote would put the rest of the line outside it.
+      if (quote === '"' && c === "\\" && /["\\$`]/.test(command[i + 1] ?? "")) { current += command[++i]; continue; }
       if (c === quote) quote = null;
       else if (quote === '"' && (c === "`" || (c === "$" && command[i + 1] === "("))) return null;
       else { if (quote === '"' && variable(i, true)) expands = true; current += c; }
@@ -198,9 +246,9 @@ export function splitCommandWords(command: string): CommandWords[] | null {
     if (c === "'" || c === '"') { quote = c; inToken = true; continue; }
     if (c === "\\") { current += command[i + 1] ?? ""; inToken = true; i++; continue; }
     if (c === "`" || (c === "$" && command[i + 1] === "(") || c === "<" && command[i + 1] === "(") return null;
-    if (c === "&" && command[i + 1] === "&") { endSegment(); i++; continue; }
-    if (c === "|") { endSegment(); if (command[i + 1] === "|") i++; continue; }
-    if (c === ";" || c === "\n") { endSegment(); continue; }
+    if (c === "&" && command[i + 1] === "&") { endSegment("&&"); i++; continue; }
+    if (c === "|") { if (command[i + 1] === "|") { endSegment("||"); i++; } else endSegment("|"); continue; }
+    if (c === ";" || c === "\n") { endSegment(";"); continue; }
     if (c === "&" || c === ">" || c === "<") {
       // Only the harmless redirections: stderr into stdout, output thrown away. The whole target must be that
       // descriptor or /dev/null (`>&1pwned` writes the file 1pwned).
@@ -243,7 +291,9 @@ function segmentIsSafe({ words: tokens, globbed }: CommandWords): boolean {
   const sub = positional[0];
   if (sub === undefined || !subs.has(sub)) return false;
   // `npm run deploy` runs whatever the package says; only the usual check scripts pass.
-  if (sub === "run" && SCRIPT_RUNNERS.has(name)) return positional[1] !== undefined && SAFE_SCRIPT.test(positional[1]);
+  if (sub === "run" && SCRIPT_RUNNERS.has(name)) {
+    return positional[1] !== undefined && SAFE_SCRIPT.test(positional[1]) && !REWRITING_SCRIPT.test(positional[1]);
+  }
   return true;
 }
 
