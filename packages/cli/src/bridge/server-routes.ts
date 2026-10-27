@@ -54,7 +54,7 @@ import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitStatus } from "./git.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDeadline } from "./projects.js";
-import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, targetFromURL, targetSchema } from "./protocol.js";
+import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
@@ -808,6 +808,23 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             return dispatches.dispatch({ computer: "anywhere", project: note.project,
               harness: note.target && "harness" in note.target ? note.target.harness : "codex", prompt, label: `Code note: ${note.symbol}`.slice(0, 200) });
           } : undefined);
+        } else if (url.pathname === "/v1/sessions/move" && data.interrupt === true) {
+          // "Stop <agent> and hand off now": Escape only while the move's hand-off request is still held.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can interrupt a move's agent.");
+          if (!ctx.mover) throw new BridgeError(503, "Session moves are unavailable.");
+          const { id } = z.object({ id: z.string().uuid(), interrupt: z.literal(true), origin: z.unknown().optional() }).strict().parse(data);
+          // Esc as /v1/keys sends it: a served OpenCode pane or a Codex pane on the Hook's own app-server stops
+          // its turn over its API; otherwise the key goes to the pane. A question the Hook holds is declined
+          // first, and the key still goes: a declined question alone lets the turn carry on.
+          const escape = async (target: Target) => {
+            if (await agentHooks.servedKeys(target, ["Escape"], "working")) return;
+            agentHooks.cancelHeldQuestion(target);
+            const { codexServers } = await import("./codex-servers.js");
+            const owned = codexServers.forTarget(target);
+            if (owned && await codexServers.interrupt(owned).catch(() => false)) { agentHooks.clearTerminalPrompt(target); return; }
+            await terminalProvider().sendKeys(target.server, target.pane, ["esc"]);
+          };
+          result = { ok: true, ...await ctx.mover.interrupt(id, ctx.handOffs, escape) };
         } else if (url.pathname === "/v1/sessions/move") {
           // Answers once the move is checked and recorded; the hand-off and relaunch run on, and GET says where it is.
           if (!ctx.mover) throw new BridgeError(503, "This Hook cannot move sessions.");

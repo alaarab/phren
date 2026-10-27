@@ -39,6 +39,7 @@ import { briefArrival, briefId, briefRoot, assertUnusedLaunchId, writeLaunchBrie
 import { atomic, BridgeError, bridgeRoot, object, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
 import { publicAssistant } from "./schedule-watch.js";
 import type { TerminalProvider } from "./terminal.js";
+import type { HandOffQueue } from "./hand-off-queue.js";
 
 const run = promisify(execFile);
 
@@ -102,6 +103,12 @@ export interface MovedWorker {
   to: MoveTo;
   target: Target | StartingTarget;
 }
+
+/** What "stop and hand off now" did: interrupted the step, or why not. `idle`: the agent is on no step,
+ * so its request goes in without one; `typed`: the request is being or was typed; `writing`: the agent took
+ * it and writes its hand-off; `finished`: the move is past its hand-off, or its request can no longer be
+ * delivered (the move then builds a hand-off itself). */
+export type MoveInterrupt = { interrupted: true } | { interrupted: false; state: "idle" | "typed" | "writing" | "finished" };
 
 /** The slash command each harness ends its interactive session with. */
 const EXIT_COMMANDS: Record<string, string> = { claude: "/exit", codex: "/quit", copilot: "/exit", opencode: "/exit", phren: "/exit" };
@@ -443,6 +450,8 @@ const DEFAULT_HANDOFF_MS = 240_000;
  * request that started it (the Hook answers in seconds); its record says where it is. */
 export class SessionMover {
   private readonly cancelled = new Set<string>();
+  /** Moves whose held hand-off request was interrupted (one Escape per move). */
+  private readonly interrupted = new Set<string>();
   private readonly admissions = new Set<string>();
   private readonly running = new Map<string, Promise<void>>();
   constructor(private readonly deps: MoverDeps) {}
@@ -682,6 +691,38 @@ export class SessionMover {
       await this.update(record, { state: record.state === "uncertain" ? "uncertain" : "failed", error: `${message}${hint}`.slice(0, 500) }).catch(() => undefined);
       logger.warn("move", `Moving pane ${from.pane} to ${record.to.harness} failed: ${message}`);
     }
+  }
+
+  /**
+   * "Stop <agent> and hand off now": Escape to the old agent only while the move's hand-off request is
+   * still held for it (queued behind the step it is on, not yet typed), so the step stops and the request
+   * goes in, and never into the hand-off the agent is writing. Checked and sent under the hand-off queue's
+   * lock (`whileQueued`), which is what types the request. `state` says why it did not: the request is
+   * being or was typed (`typed`), the agent is writing its hand-off (`writing`), or the move is past it.
+   */
+  async interrupt(id: string, queue?: Pick<HandOffQueue, "whileQueued">, escape?: (target: Target) => Promise<void>): Promise<MoveInterrupt> {
+    const record = await readMove(id);
+    if (!record) throw new BridgeError(404, "No move with that id is recorded.");
+    if (record.state !== "handing-off") { this.interrupted.delete(id); return { interrupted: false, state: "finished" }; }
+    // Without the queue the request was typed the moment it was sent: it is never held.
+    if (!queue) return { interrupted: false, state: "typed" };
+    const from = record.from.target;
+    let answer: MoveInterrupt = { interrupted: true };
+    const result = await queue.whileQueued(`move-${id}`, from, async () => {
+      // A move that left the hand-off (it timed out and is exiting) needs no Escape from here.
+      if ((await readMove(id))?.state !== "handing-off") { answer = { interrupted: false, state: "finished" }; return; }
+      // One Escape per move: a second (a double tap, a retry) would land on the stopped agent's empty
+      // input, where Claude and Codex take Esc Esc as "go back to an earlier message".
+      if (this.interrupted.has(id)) return;
+      // An agent not on a step has nothing to stop: its request goes in at the queue's next look.
+      const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
+      if (!pane || !["working", "blocked", "waiting", "unknown"].includes(String(pane.agent_status))) { answer = { interrupted: false, state: "idle" }; return; }
+      // Marked once it went: an Escape that failed leaves the next tap free to try again.
+      await (escape ?? (target => this.deps.terminal.sendKeys(target.server, target.pane, ["esc"])))(from);
+      this.interrupted.add(id);
+    });
+    if (!result.ran) return { interrupted: false, state: result.state === "delivered" ? "writing" : result.state === "failed" ? "finished" : "typed" };
+    return answer;
   }
 
   async abort(id: string): Promise<MoveRecord> {
