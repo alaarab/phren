@@ -137,7 +137,12 @@ export const herdrTerminal: TerminalProvider = {
     }
   },
   async create(server, { workspace, label, cwd, env }) {
-    await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: env ?? {} });
+    const created = await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: env ?? {} });
+    // Both answers name the new tab's first pane.
+    const root = object(object(created).root_pane);
+    if (typeof root.pane_id === "string" && typeof root.tab_id === "string" && typeof root.workspace_id === "string") {
+      return { workspace: root.workspace_id, tab: root.tab_id, pane: root.pane_id };
+    }
   },
   // `agent.start` takes no environment; the pane's shell got it at `create`.
   async startAgent(server, pane, agent) {

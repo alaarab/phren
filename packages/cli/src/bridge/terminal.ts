@@ -22,6 +22,9 @@ export async function terminalPaneFromEnv(env: NodeJS.ProcessEnv = process.env):
 /** A pane as the multiplexer lists it. `server` names the multiplexer instance
  * (a Herdr session, a tmux socket), `workspace` and `tab` its place in it
  * (a Herdr workspace and tab, a tmux session and window). */
+/** The pane `create` opened, in the Hook's ids. */
+export interface CreatedPane { workspace: string; tab: string; pane: string }
+
 export interface TerminalPane {
   server: string;
   workspace: string;
@@ -106,8 +109,9 @@ export interface TerminalProvider {
   prompt(server: string, pane: string, text: string, signal?: AbortSignal): Promise<void>;
   /** Run an owner-selected command at an empty pane's shell prompt. */
   shellCommand?(server: string, pane: string, command: string): Promise<void>;
-  /** Opens a pane; the caller finds it in the next `listPanes`. */
-  create(server: string, placement: PanePlacement): Promise<void>;
+  /** Opens a pane, answering which one when the multiplexer says (Herdr's `root_pane`, tmux's `-P`); else the
+   * caller finds it in the next `listPanes`, which another pane opened at the same time can confuse. */
+  create(server: string, placement: PanePlacement): Promise<CreatedPane | void>;
   startAgent(server: string, pane: string, agent: AgentStart): Promise<void>;
   /** The variables a process started for `pane` outside it needs to be
    * recognized as running there (a Codex app-server whose hooks report the

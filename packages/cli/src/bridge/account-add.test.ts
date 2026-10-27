@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addClaudeAccount, signInClaudeAccount } from "./account-add.js";
 import { clearAccountCaches, type AuthStatus } from "./claude-accounts.js";
-import { BridgeError, type Json } from "./protocol.js";
+import { BridgeError, object, type Json } from "./protocol.js";
 import { setTerminalProvider } from "./terminal.js";
 
 it("refuses a bad slug with a suggested one the phone can offer", async () => {
@@ -42,6 +42,42 @@ describe("signing in an existing account slot", () => {
     } as never);
   });
   afterEach(() => { restore(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
+
+  // Codex review of #667: both snapshotted, both created, both saw two new panes and refused, leaving two panes.
+  it("opens one pane each for two slots signed in at once, on a terminal that doesn't name its new pane", async () => {
+    mkdirSync(path.join(home, ".claude-spare"), { recursive: true });
+    writeFileSync(path.join(home, ".claude-spare", ".claude.json"), "{}");
+    // Creating takes a moment, so the two requests overlap.
+    restore();
+    restore = setTerminalProvider({
+      listPanes: async () => [...panes],
+      create: async () => { await new Promise(resolve => setTimeout(resolve, 10)); panes.push({ server: "default", workspace: "w9", tab: "w9:t1", pane: `w9:p${panes.length + 1}` }); },
+      shellCommand: async (_server: string, pane: string, command: string) => { commands.push(`${pane} ${command}`); },
+    } as never);
+    const [work, spare] = await Promise.all([signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", signedOut),
+      signInClaudeAccount({ slug: "spare", mode: "sign-in" }, "default", signedOut)]);
+    expect(panes).toHaveLength(2);
+    expect(new Set([object(work.target).pane, object(spare.target).pane])).toEqual(new Set(["w9:p1", "w9:p2"]));
+    expect(commands).toHaveLength(2);
+    expect(commands.find(command => command.includes(".claude-spare"))).toMatch(new RegExp(`^${String(object(spare.target).pane)} `));
+  });
+
+  it("takes the pane the terminal says it created, though another pane opened at the same moment", async () => {
+    restore();
+    restore = setTerminalProvider({
+      listPanes: async () => [...panes],
+      // A launch opens a pane on the same computer while this one is created.
+      create: async () => {
+        panes.push({ server: "default", workspace: "w8", tab: "w8:t1", pane: "w8:p1" }, { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p7" });
+        return { workspace: "w9", tab: "w9:t1", pane: "w9:p7" };
+      },
+      shellCommand: async (_server: string, pane: string, command: string) => { commands.push(`${pane} ${command}`); },
+    } as never);
+    expect(await signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", signedOut))
+      .toMatchObject({ target: { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p7" } });
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(/^w9:p7 /);
+  });
 
   it("opens claude /login under a signed-out slot's own home", async () => {
     const answer = await signInClaudeAccount({ slug: "work", mode: "sign-in" }, "default", signedOut);

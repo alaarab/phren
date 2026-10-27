@@ -73,19 +73,40 @@ export async function signInClaudeAccount(input: unknown, server: string,
   } finally { adding.delete(key); }
 }
 
-/** A new pane for an interactive account step, refused while the last one for `key` is still open. */
+/**
+ * A new pane for an interactive account step, refused while the last one for `key` is still open. The pane is
+ * the one the terminal says it created; a terminal that doesn't say is diffed before and after, one account
+ * pane at a time per terminal server, so two sign-ins at once (different slots) never see each other's pane.
+ */
 async function openPane(server: string, key: string, label: string, busy: string) {
   const terminal = terminalProvider();
   if (!terminal.shellCommand) throw new BridgeError(503, "This terminal cannot open an interactive account login.");
-  const pending = pendingPanes.get(key);
-  if (pending && (await terminal.listPanes(pending.server)).some(pane => pane.pane === pending.pane)) throw new BridgeError(409, busy);
-  pendingPanes.delete(key);
-  const before = new Set((await terminal.listPanes(server)).map(pane => pane.pane));
-  await terminal.create(server, { label, cwd: homeDir() });
-  const created = (await terminal.listPanes(server)).filter(pane => !before.has(pane.pane));
-  if (created.length !== 1) throw new BridgeError(409, "The new account pane could not be identified safely.");
-  pendingPanes.set(key, { server, pane: created[0].pane, at: Date.now() });
-  return created[0];
+  return oneAtATime(server, async () => {
+    const pending = pendingPanes.get(key);
+    if (pending && (await terminal.listPanes(pending.server)).some(pane => pane.pane === pending.pane)) throw new BridgeError(409, busy);
+    pendingPanes.delete(key);
+    const before = new Set((await terminal.listPanes(server)).map(pane => pane.pane));
+    const named = await terminal.create(server, { label, cwd: homeDir() });
+    let created: { workspace: string; tab: string; pane: string };
+    if (named) created = named;
+    else {
+      const found = (await terminal.listPanes(server)).filter(pane => !before.has(pane.pane));
+      if (found.length !== 1) throw new BridgeError(409, "The new account pane could not be identified safely.");
+      created = found[0];
+    }
+    pendingPanes.set(key, { server, pane: created.pane, at: Date.now() });
+    return { server, workspace: created.workspace, tab: created.tab, pane: created.pane };
+  });
+}
+
+/** Account panes being opened, by terminal server: the next waits for the last. */
+const opening = new Map<string, Promise<unknown>>();
+function oneAtATime<T>(server: string, work: () => Promise<T>): Promise<T> {
+  const result = (opening.get(server) ?? Promise.resolve()).then(work);
+  const tail = result.catch(() => undefined);
+  opening.set(server, tail);
+  void tail.then(() => { if (opening.get(server) === tail) opening.delete(server); });
+  return result;
 }
 const adding = new Set<string>();
 const pendingPanes = new Map<string, { server: string; pane: string; at?: number }>();
