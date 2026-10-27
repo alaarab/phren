@@ -33,8 +33,10 @@ it("reports install state, Claude accounts and Codex sign-in", async () => {
   expect(by.claude).toMatchObject({ installed: true, version: "2.1.284", usable: true });
   expect(by.claude.accounts).toMatchObject([
     { id: "default", label: "Claude", signedIn: true, usable: true, plan: "max" },
-    { id: "work", label: "Work", signedIn: false, usable: false, reason: "Not signed in", key: "claude:home:work" },
+    { id: "work", label: "Work", signedIn: false, usable: false, reason: "Not signed in", key: "claude:home:work", signInAvailable: true },
   ]);
+  // Only a slot Claude says is signed out offers Sign in.
+  expect(by.claude.accounts[0]).not.toHaveProperty("signInAvailable");
   expect(by.codex).toMatchObject({ usable: true, accounts: [{ id: "default", label: "Codex", key: "codex", signedIn: true, usable: true }] });
   expect(by.opencode).toEqual({ source: "opencode", installed: false, usable: false, reason: "Not installed" });
   // A slow --version is not "missing": the harness stays offered.
@@ -64,6 +66,7 @@ it("keeps an account usable when Claude does not answer its sign-in check", asyn
   const inv = await harnessInventory({ toolVersion: async t => versions[t], authRunner: async () => "" });
   const claude = inv.harnesses.find(h => h.source === "claude")!;
   expect(claude.accounts![0]).toMatchObject({ id: "default", signedIn: false, usable: true });
+  expect(claude.accounts![0]).not.toHaveProperty("signInAvailable");
   expect(hasUsable(inv, "claude")).toEqual({ ok: true });
 });
 
