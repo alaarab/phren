@@ -2,7 +2,7 @@ import { request } from "node:http";
 import { defaultPhrenPath } from "../shared.js";
 import { activateModules as moduleSnapshot } from "../modules/runtime.js";
 import { object, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { hookOutput, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
+import { hookOutput, STOP_TASKS_SENT, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
 import { claudeHeadlessThread, codexForeignThread } from "./thread-origin.js";
@@ -25,9 +25,11 @@ export function stopFacts(value: Json): { background?: number; backgroundTasks?:
   const tasks = Array.isArray(value.background_tasks)
     ? value.background_tasks.filter(task => !["completed", "failed", "killed", "stopped"].includes(String(object(task).status))) : undefined;
   // Each task by id, running or not: a sub-agent's task id is its agent id, which the Hook's child tree keys on.
+  // Running ones first, so a cut list loses finished tasks before running ones.
   const listed = Array.isArray(value.background_tasks) ? value.background_tasks.map(object)
-    .filter(task => typeof task.id === "string" && BACKGROUND_TASK_ID.test(task.id)).slice(0, 64)
-    .map(task => ({ id: String(task.id), running: !["completed", "failed", "killed", "stopped"].includes(String(task.status)) })) : undefined;
+    .filter(task => typeof task.id === "string" && BACKGROUND_TASK_ID.test(task.id))
+    .map(task => ({ id: String(task.id), running: !["completed", "failed", "killed", "stopped"].includes(String(task.status)) }))
+    .sort((a, b) => Number(b.running) - Number(a.running)).slice(0, STOP_TASKS_SENT) : undefined;
   return { ...(tasks ? { background: tasks.length } : {}), ...(listed ? { backgroundTasks: listed } : {}),
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
 }

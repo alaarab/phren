@@ -217,12 +217,12 @@ async function claudeChildRelations(file: string, session: string, signature: st
   const { launches, workflows, teammates } = copyRows(rows);
   /** Whether a child the parent recorded no end for has ended: the latest Stop's word when it lists the
    * child (running, or finished unless SendMessage resumed it since), else its own transcript (a finished
-   * reply, or quiet past the limit). */
+   * reply, or quiet past the limit), counting only what it wrote after SendMessage last resumed it. */
   const ended = async (agentId: string, childFile: string, launch: ClaudeLaunch) => {
     if (stop?.running.includes(agentId)) return false;
     const resumedSince = launch.resumedAt !== undefined && Date.parse(launch.resumedAt) > Date.parse(stop?.at ?? "");
     if (stop?.finished.includes(agentId) && !resumedSince) return true;
-    return claudeSkillFinished(childFile).catch(() => false);
+    return claudeSkillFinished(childFile, launch.resumedAt).catch(() => false);
   };
   const relations: ChildAgentRelation[] = [];
   // Claude Code records the launch in the parent before the child's own
@@ -286,7 +286,9 @@ async function claudeChildRelations(file: string, session: string, signature: st
   }
   if (workflows.size && root) {
     const seen = new Set(relations.map(relation => relation.session));
-    for (const workflow of workflows.values()) {
+    for (const [taskId, workflow] of workflows) {
+      // A finished run whose notification never reached the parent: the Stop's word ends its agents.
+      if (workflow.state === "running" && stop?.finished.includes(taskId)) workflow.state = "completed";
       for (const child of await claudeWorkflowAgents(root, session, workflow)) {
         if (seen.has(child.session!)) continue;
         seen.add(child.session!); relations.push(child);
@@ -306,16 +308,19 @@ export const CLAUDE_SKILL_QUIET_MS = 30 * 60 * 1000;
 
 /** A background child (a skill, or a sub-agent or teammate whose end the
  * parent never recorded) is done once its transcript ends on a finished
- * reply, or has not changed for CLAUDE_SKILL_QUIET_MS. */
-async function claudeSkillFinished(file: string, now = Date.now()): Promise<boolean> {
-  const metadata = await stat(file);
-  if (now - metadata.mtimeMs >= CLAUDE_SKILL_QUIET_MS) return true;
+ * reply, or has not changed for CLAUDE_SKILL_QUIET_MS. For a child resumed at
+ * `since`, the reply must be written after it and the quiet counts from it:
+ * the end_turn it finished on before the resume says nothing yet. */
+async function claudeSkillFinished(file: string, since?: string, now = Date.now()): Promise<boolean> {
+  const metadata = await stat(file), resumed = since === undefined ? NaN : Date.parse(since);
+  if (now - Math.max(metadata.mtimeMs, Number.isFinite(resumed) ? resumed : -Infinity) >= CLAUDE_SKILL_QUIET_MS) return true;
   const start = Math.max(0, metadata.size - 65_536), chunks: Buffer[] = [];
   for await (const chunk of createReadStream(file, { start })) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const last = Buffer.concat(chunks).toString("utf8").split("\n").filter(line => line.trim()).at(-1);
   try {
     const raw = object(JSON.parse(last ?? ""));
-    return raw.type === "assistant" && object(raw.message).stop_reason === "end_turn";
+    if (raw.type !== "assistant" || object(raw.message).stop_reason !== "end_turn") return false;
+    return !Number.isFinite(resumed) || (typeof raw.timestamp === "string" && Date.parse(raw.timestamp) > resumed);
   } catch { return false; }
 }
 
