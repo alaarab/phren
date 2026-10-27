@@ -133,6 +133,71 @@ describe("the second pass's gaps ask", () => {
   });
 });
 
+// Found by the adversarial review of these fixes.
+describe("the review's gaps in the git reads ask", () => {
+  it("lists the patch git status -v prints", () => {
+    expect(verdict("git status -v")).toBe("allow");
+    write("config/secrets.json", '{"k":1}\n');
+    git("add", "config/secrets.json");
+    expect(verdict("git status -v")).toBe("ask");
+    expect(verdict("git status -vv")).toBe("ask");
+    expect(verdict("git status")).toBe("allow");
+  });
+
+  it("takes --binary as the patch it implies", () => {
+    expect(verdict("git log --binary -2")).toBe("ask");
+    expect(verdict("git log --binary -1")).toBe("allow");
+  });
+
+  it("checks textconv for a pickaxe log", () => {
+    git("config", "diff.x.textconv", "true");
+    expect(verdict("git log -S TOKEN -1")).toBe("ask");
+    expect(verdict("git log -G TOKEN -1")).toBe("ask");
+    expect(verdict("git log -1")).toBe("allow");
+  });
+
+  it("asks for a known git read whose options it can't read, even once the session approved it", async () => {
+    const { addAllow, clearAllowlist } = await import("../permissions/allowlist.js");
+    const config: PermissionConfig = { mode: "auto-confirm", projectRoot: root, allowedPaths: [] };
+    addAllow("shell", { command: "git log -1" }, "session");
+    try {
+      expect(checkPermission(config, "shell", { command: "git log -1", cwd: root }).verdict).toBe("allow");
+      expect(checkPermission(config, "shell", { command: "git log -p --ext-diff -1", cwd: root }).verdict).toBe("ask");
+      expect(checkPermission(config, "shell", { command: "git log -L1,9:config/secrets.json", cwd: root }).verdict).toBe("ask");
+    } finally { clearAllowlist(); }
+  });
+
+  it("reads REV:PATH from the repository's top, and a reflog date's colon as part of the revision", () => {
+    // The project is a folder of a bigger repository; its sibling holds the secret.
+    write("pkg/README.md", "x\n");
+    write("other/secrets.yaml", "x\n");
+    git("add", "-A");
+    git("commit", "-qm", "three");
+    const config: PermissionConfig = { mode: "auto-confirm", projectRoot: path.join(root, "pkg"), allowedPaths: [] };
+    const inPkg = (command: string) => checkPermission(config, "shell", { command, cwd: path.join(root, "pkg") }).verdict;
+    expect(inPkg("git show HEAD:pkg/README.md")).toBe("allow");
+    expect(inPkg("git show HEAD:other/secrets.yaml")).toBe("ask");
+    expect(inPkg("git show HEAD:README.md")).toBe("ask");
+    expect(inPkg("git show HEAD:./README.md")).toBe("allow");
+    // A blob outside the project, though not a secret.
+    expect(inPkg("git show HEAD:src/a.ts")).toBe("ask");
+    expect(verdict("git show 'HEAD@{2020-01-01 10:00}'")).toBe("ask");
+  });
+
+  it("asks for copy detection that takes unchanged files as sources", () => {
+    expect(verdict("git diff -C -C")).toBe("ask");
+    expect(verdict("git log -p -C -C -1")).toBe("ask");
+    expect(verdict("git diff -C")).toBe("allow");
+  });
+});
+
+describe("the everyday commands still run", () => {
+  it.each(["git status", "git log -5", "git diff", "grep -n TOKEN README.md", "ls -la", "cat README.md", "sort README.md",
+    "head -20 README.md", "jq . file.json", "npm test", "pnpm lint", "cd src && ls"])("%s", (command) => {
+    expect(verdict(command)).toBe("allow");
+  });
+});
+
 describe("the second pass's regressions run", () => {
   it("lists only the files a git grep's pathspec matches", () => {
     expect(verdict("git grep TOKEN -- src")).toBe("allow");

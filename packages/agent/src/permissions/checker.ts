@@ -5,7 +5,7 @@ import * as path from "path";
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety, shellEnv } from "./shell-safety.js";
 import { commandPaths, gitRead, isAutoApprovableCommand, recursiveReads, splitCommandWords, type RecursiveRead } from "./shell-classify.js";
-import { own, parseOptions, READ_ONLY_SPECS } from "./shell-options.js";
+import { GIT_SPECS, own, parseOptions, READ_ONLY_SPECS } from "./shell-options.js";
 import { evaluateRules } from "./rules.js";
 import { validatePath, checkSensitivePath, checkSensitiveTarget, isPathInSandbox } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
@@ -198,10 +198,11 @@ export const RECURSIVE_WALK_LIMIT = 20_000;
 const GIT_LIST_LIMIT = 200_000;
 
 /** A list a program prints, NUL- or newline-separated, or undefined when it fails. Exit 1 is an empty list,
- * and so is a program that isn't installed: the command can't run it either. */
+ * and so is a program that isn't installed: the command can't run it either. git never fetches a missing
+ * object for the check (a partial clone's lazy fetch would reach the network and its credential helper). */
 function listed(program: string, args: string[], cwd: string, separator: string): string[] | undefined {
   try {
-    const out = execFileSync(program, args, { cwd, env: shellEnv(), encoding: "utf-8", timeout: 10_000,
+    const out = execFileSync(program, args, { cwd, env: { ...shellEnv(), GIT_NO_LAZY_FETCH: "1" }, encoding: "utf-8", timeout: 10_000,
       maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
     return out.split(separator).filter(Boolean);
   } catch (err: unknown) {
@@ -275,16 +276,6 @@ function recursiveReachesSecret(read: RecursiveRead, cwd: string, config: Permis
 }
 
 /**
- * Whether a shell command may reach a secret file or leave the sandbox: an argument names one, a word the
- * shell expands into file names (`cat config/*`) hides the names, a recursive read has one below it, git's
- * config runs a program on a read, or a `cd` goes outside the sandbox. Each segment's paths resolve where the
- * `cd`s before it left the shell (`cd ~/.aws && cat credentials`). A `cd` whose effect this can't tell asks:
- * no target or `-`; one that may be skipped (after `&&` or `||`: `false && cd src; grep -r .`) or runs in a
- * subshell (a pipeline); one followed by `||`, or by a later `||` (what comes after may run where the shell
- * started); and one to a directory it may not enter (not there, not searchable) unless only `&&` and `|`
- * follow it (when it fails, nothing after it runs; after `;` the rest runs where the shell was).
- */
-/**
  * Whether a git read prints the contents of a secret file it doesn't name: the paths a `git diff`, `git log -p`
  * or `git show` would print a patch of, as git lists them for the same revisions, pathspecs and selecting
  * options (gitRead's `exposure`), relative to the repository's top. Outside a repository nothing is listed
@@ -295,6 +286,21 @@ function gitExposesSecret(args: string[], cwd: string, config: PermissionConfig)
   if (top === undefined) return false;
   const files = listed("git", args, cwd, "\0");
   return files === undefined || secretAmong(files, top, false, config);
+}
+
+/**
+ * Whether a `REV:PATH` a git read names (gitRead's `blobs`) is a secret file or outside the project. git reads
+ * such a path from the repository's top, not from cwd, unless it starts with `./` or `../`: in a project that
+ * is a folder of a bigger repository, `HEAD:other/secret.json` is that folder's sibling.
+ */
+function gitBlobsReachSecret(blobs: string[], cwd: string, config: PermissionConfig): boolean {
+  if (!blobs.length) return false;
+  const top = listed("git", ["rev-parse", "--show-toplevel"], cwd, "\n")?.[0];
+  return blobs.some((blob) => {
+    const from = blob.startsWith("./") || blob.startsWith("../") || top === undefined ? cwd : top;
+    const full = path.resolve(from, blob);
+    return checkSensitivePath(full).sensitive || checkSensitivePath(blob).sensitive || outsideProject(full, cwd, config);
+  });
 }
 
 /**
@@ -340,9 +346,13 @@ function commandTouchesSecret(command: string, cwd: string, config: PermissionCo
       continue;
     }
     if (namesSecretFile(words, here, config)) return true;
-    // Before git lists anything: the listing itself must not start a configured program.
+    // Before git lists anything: the listing itself must not start a configured program. A git read whose
+    // options this reader can't read (`--ext-diff`, run after the session approved `git log`) can't be vouched for.
     const git = gitRead(words);
+    if (words[0] === "git" && !git && own(GIT_SPECS, words.slice(1).find((w) => !w.startsWith("-")) ?? "")) return true;
+    if (git?.ask) return true;
     if (git && gitRunsHelpers(here, config.projectRoot, git.helpers)) return true;
+    if (git && gitBlobsReachSecret(git.blobs, here, config)) return true;
     if (git?.exposure && gitExposesSecret(git.exposure, here, config)) return true;
     const recursive = recursiveReads(words);
     if (recursive && recursiveReachesSecret(recursive, here, config)) return true;

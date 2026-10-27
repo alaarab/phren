@@ -66,8 +66,8 @@ export function commandPaths(tokens: string[]): string[] | null {
     const git = gitSubcommand(args);
     const spec = git ? own(GIT_SPECS, git.sub) : undefined;
     const parsed = git && spec && parseOptions(git.rest, spec);
-    // `git show HEAD:.env` reads the path after the colon.
-    return parsed && spec ? parsedPaths(parsed, spec).flatMap((p) => (p.includes(":") ? [p, p.slice(p.indexOf(":") + 1)] : [p])) : null;
+    // A `REV:PATH` operand's path is relative to the repository's top: gitRead's `blobs` has it.
+    return parsed && spec ? parsedPaths(parsed, spec).filter((p) => blobPath(p) === undefined) : null;
   }
   const spec: CommandSpec | undefined = own(READ_ONLY_SPECS, binary);
   const parsed = spec && parseOptions(args, spec);
@@ -149,9 +149,21 @@ export function recursiveReads(tokens: string[]): RecursiveRead | null {
   return null;
 }
 
-/** git options that print file contents as a patch (a `git log` without them prints none). */
+/** The file a `REV:PATH` (or index `:PATH`, `:N:PATH`) operand names, or undefined for a plain revision. A
+ * colon inside a reflog date (`main@{2026-10-01 10:00}`) is part of the revision. */
+export function blobPath(operand: string): string | undefined {
+  const plain = operand.replace(/@\{[^}]*\}/g, "");
+  const at = plain.indexOf(":");
+  if (at === -1) return undefined;
+  const rest = plain.slice(at + 1);
+  return at === 0 && /^[0-3]:/.test(rest) ? rest.slice(2) : rest;
+}
+
+/** git options that print file contents as a patch (a `git log` without them prints none). `--binary` implies a patch. */
 const GIT_PATCH_OPTIONS = new Set(["-p", "-u", "-U", "-W", "--patch", "--patch-with-stat", "--word-diff", "--color-words",
-  "--function-context", "--unified"]);
+  "--function-context", "--unified", "--binary"]);
+/** The pickaxe: commits chosen by what their diffs contain, which textconv may compute. */
+const GIT_PICKAXE = new Set(["-S", "-G"]);
 /** git options whose output is computed from file contents (a diffstat), so textconv runs for them too. */
 const GIT_STAT_OPTIONS = new Set(["--stat", "--numstat", "--shortstat", "--dirstat", "--cumulative", "--check", "--summary"]);
 /** The options of a diff that choose what is compared (not how it prints). */
@@ -168,9 +180,11 @@ const GIT_LOG_SELECT = new Set(["-NUM", "-n", "--max-count", "--skip", "--since"
  * (`diff`: an external diff, a diff driver's command or textconv; `filter`: clean/smudge; `format`: a configured
  * pretty format) for the operation it does, and, when it prints file contents it doesn't name (`git diff`,
  * `git log -p`, `git show`), the git arguments that list those files' paths (relative to the repository's top),
- * so each can be checked. Null when it isn't a git read this reader knows.
+ * so each can be checked. `blobs`: the paths of its `REV:PATH` operands, relative to the repository's top.
+ * `ask`: a form whose exposure can't be listed (`-C -C` takes unchanged files as copy sources, whose lines a
+ * patch prints though no listing names them). Null when it isn't a git read this reader knows.
  */
-export interface GitRead { helpers: string[]; exposure?: string[] }
+export interface GitRead { helpers: string[]; exposure?: string[]; blobs: string[]; ask?: boolean }
 
 export function gitRead(tokens: string[]): GitRead | null {
   if (tokens[0] !== "git") return null;
@@ -180,32 +194,38 @@ export function gitRead(tokens: string[]): GitRead | null {
   if (!git || !parsed) return null;
   const has = (set: Set<string>) => parsed.options.some((o) => set.has(o.name));
   const names = ["--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"];
+  // Revisions and blobs come before a `--`; after it every operand is a pathspec.
+  const end = parsed.dashdash ?? parsed.operands.length;
+  const named = parsed.operands.slice(0, end), pathspecs = parsed.operands.slice(end);
+  const blobs = ["diff", "show"].includes(git.sub) ? named.flatMap((o) => blobPath(o) ?? []) : [];
+  const ask = parsed.options.filter((o) => o.name === "-C").length > 1;
   switch (git.sub) {
     case "diff":
       // --no-index compares directories, which the recursive-read walk covers.
-      if (has(new Set(["--no-index"]))) return { helpers: ["diff", "filter"] };
-      return { helpers: ["diff", "filter"], exposure: ["diff", ...names, ...listingOf(parsed, GIT_DIFF_SELECT)] };
+      if (has(new Set(["--no-index"]))) return { helpers: ["diff", "filter"], blobs, ask };
+      return { helpers: ["diff", "filter"], blobs, ask, exposure: ["diff", ...names, ...listingOf(parsed, GIT_DIFF_SELECT)] };
     case "log": {
       const patch = has(GIT_PATCH_OPTIONS);
-      return { helpers: ["format", ...(patch || has(GIT_STAT_OPTIONS) ? ["diff"] : [])],
+      return { helpers: ["format", ...(patch || has(GIT_STAT_OPTIONS) || has(GIT_PICKAXE) ? ["diff"] : [])], blobs, ask,
         ...(patch ? { exposure: ["log", ...names, "--format=", "-m", ...listingOf(parsed, GIT_LOG_SELECT)] } : {}) };
     }
     case "show": {
-      // A `REV:PATH` operand is a file the name check already read; the commits shown are the others (HEAD when
-      // nothing is named). Only blobs named: no commit's patch is shown.
-      const end = parsed.dashdash ?? parsed.operands.length;
-      const named = parsed.operands.slice(0, end), pathspecs = parsed.operands.slice(end);
-      const revs = named.filter((o) => !o.includes(":"));
-      if (named.length && !revs.length) return { helpers: ["diff", "format"] };
+      // A `REV:PATH` operand is a blob (`blobs`); the commits shown are the others (HEAD when nothing is named).
+      // Only blobs named: no commit's patch is shown.
+      const revs = named.filter((o) => blobPath(o) === undefined);
+      if (named.length && !revs.length) return { helpers: ["diff", "format"], blobs, ask };
       const shown: ParsedArgs = { options: parsed.options, operands: [...(revs.length ? revs : ["HEAD"]), ...pathspecs],
         ...(parsed.dashdash !== undefined ? { dashdash: revs.length || 1 } : {}) };
-      return { helpers: ["diff", "format"], exposure: ["log", "--no-walk", ...names, "--format=", "-m", ...listingOf(shown, GIT_LOG_SELECT)] };
+      return { helpers: ["diff", "format"], blobs, ask,
+        exposure: ["log", "--no-walk", ...names, "--format=", "-m", ...listingOf(shown, GIT_LOG_SELECT)] };
     }
-    case "blame": return { helpers: ["diff", "filter"] };
-    case "status": return { helpers: ["filter"] };
-    case "grep": return { helpers: ["filter"] };
-    case "shortlog": return { helpers: ["format"] };
-    default: return { helpers: [] };
+    case "blame": return { helpers: ["diff", "filter"], blobs };
+    // `-v` prints the staged patch, `-vv` the unstaged one too: every change against HEAD.
+    case "status":
+      return has(new Set(["-v", "--verbose"])) ? { helpers: ["diff", "filter"], blobs, exposure: ["diff", ...names, "HEAD"] } : { helpers: ["filter"], blobs };
+    case "grep": return { helpers: ["filter"], blobs };
+    case "shortlog": return { helpers: ["format"], blobs };
+    default: return { helpers: [], blobs };
   }
 }
 
@@ -247,7 +267,8 @@ export function jqHasModuleDirective(program: string): boolean {
   for (;;) {
     rest = rest.replace(/^\s+/, "");
     if (!rest.startsWith("#")) break;
-    const end = rest.indexOf("\n");
+    // Ended at either line break, so a comment jq ends sooner never hides a directive from this check.
+    const end = rest.search(/[\r\n]/);
     rest = end === -1 ? "" : rest.slice(end + 1);
   }
   return /^(import|include|module)(?![\w$])/.test(rest);
