@@ -373,6 +373,26 @@ function previewWords(text: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
 }
 
+/** The pane's words may miss a few stretches of a landed block's: a row taken for Claude's chrome ("Tip: …",
+ * a `ctrl+` key), or a number a wrap put at a row's start, taken for a list marker. */
+const LANDED_GAPS = 4, LANDED_GAP_CHARS = 200, LANDED_RESYNC_CHARS = 16;
+/** Whether pane words agree with a landed block's as far as both go, but for at most LANDED_GAPS stretches
+ * of the landed block's missing from the pane: a number, or up to LANDED_GAP_CHARS after which the pane's
+ * next LANDED_RESYNC_CHARS follow on. Fewer than those left on the pane is a block of its own. */
+function drawsLanded(words: string, landed: string): boolean {
+  let at = 0, from = 0, gaps = 0;
+  while (at < words.length && from < landed.length) {
+    if (words[at] === landed[from]) { at++; from++; continue; }
+    if (++gaps > LANDED_GAPS) return false;
+    if (/\d/.test(landed[from])) { while (/\d/.test(landed[from] ?? "")) from++; continue; }
+    const next = words.slice(at, at + LANDED_RESYNC_CHARS);
+    const skip = next.length < LANDED_RESYNC_CHARS ? -1 : landed.indexOf(next, from + 1);
+    if (skip < 0 || skip - from > LANDED_GAP_CHARS) return false;
+    from = skip;
+  }
+  return true;
+}
+
 /** Socket-local, ephemeral state. It never writes transcript rows or advances
  * the history cursor. Final rows bypass the text throttle and clear atomically. */
 export class TranscriptPreviewStream {
@@ -471,15 +491,12 @@ export class TranscriptPreviewStream {
   }
 
   /** Whether pane text is a reply block that already landed: its words agree with the block's as far as
-   * both go, so a block still drawing the same opening as a landed one waits until the two part. */
+   * both go (drawsLanded), so a block still drawing the same opening as a landed one waits until the two part. */
   private hasLanded(text: string): boolean {
     const words = previewWords(text);
-    return !words || [...this.landedTexts].some(landed => {
+    return !words || [...this.landedTexts].some(landed =>
       // A short block ("Let me check.") is not a longer one that starts with its words.
-      if (landed.length < LANDED_MATCH_CHARS && words.length > landed.length) return false;
-      const length = Math.min(words.length, landed.length);
-      return words.slice(0, length) === landed.slice(0, length);
-    });
+      !(landed.length < LANDED_MATCH_CHARS && words.length > landed.length) && drawsLanded(words, landed));
   }
 
   async update(status: unknown, file?: string, now?: number): Promise<{ preview: TranscriptPreview | null } | undefined> {

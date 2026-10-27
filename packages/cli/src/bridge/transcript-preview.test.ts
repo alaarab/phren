@@ -132,6 +132,19 @@ describe("live reply previews", () => {
     expect((await stream.update("working", undefined, 0))?.preview ?? null).toBeNull();
     block = "The configuration for the production deployment is now valid.";
     expect(await stream.update("working", undefined, 600)).toEqual({ preview: { turnStartedAt: start, text: block } });
+    // A short new ending still parts from the landed one, though the landed one ends with its words.
+    block = "The configuration for the production deployment is valid.";
+    expect(await stream.update("working", undefined, 1200)).toEqual({ preview: { turnStartedAt: start, text: block } });
+  });
+
+  it("knows a landed block again though the pane leaves out a row it takes for chrome and a wrapped number", async () => {
+    const landed = "The hook is registered but never fires on this machine.\n\nTip: run it with PHREN_DEBUG=1 to see why.\n\n"
+      + "After that, the lockfile pins version 3. Then restart the session and try the command again.";
+    const screen = "❯ Explain this\n⏺ The hook is registered but never fires on this machine.\n\n  Tip: run it with PHREN_DEBUG=1 to see why.\n\n"
+      + "  After that, the lockfile pins version\n  3. Then restart the session and try the command again.\n⏺ Bash(npm test)\n  ⎿  ok\n✻ Working… (8s · esc to interrupt)\n❯";
+    const stream = new TranscriptPreviewStream(target, async () => screen);
+    stream.observe([user, { line: 1, raw: { type: "assistant", timestamp: start, message: { content: [{ type: "text", text: landed }] } } }]);
+    expect((await stream.update("working", undefined, 0))?.preview ?? null).toBeNull();
   });
 
   it("knows a landed block again though the pane draws its code fence, list and link otherwise", async () => {
