@@ -921,6 +921,79 @@ describe("stopping the agent so a held hand-off goes in", () => {
     expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
   });
 
+  /** The real hand-off queue behind a world's deliver and withdraw; `sent` is what it typed. */
+  async function realQueue(w: ReturnType<typeof world>) {
+    const { HandOffQueue } = await import("./hand-off-queue.js");
+    const sent: string[] = [];
+    const queue = new HandOffQueue({ root: path.join(root, "hand-offs"), validate: async () => w.pane,
+      send: async (_target, text, _id, typing) => { await typing(); sent.push(text); return { delivered: true }; } });
+    w.deps.deliver = (target, text, deliveryId) => queue.enqueue({ target, text, deliveryId });
+    w.deps.withdraw = (target, deliveryId, reason) => queue.withdraw(deliveryId, target, reason);
+    return { queue, sent };
+  }
+
+  it("takes back the request of a new-chat move whose wait ran out, so the old agent never gets it", async () => {
+    const w = world();
+    w.pane.agent_status = "working";
+    const { queue, sent } = await realQueue(w);
+    const record = await move(w.deps, { harness: "codex" }, { mode: "new-chat", handoffTimeoutMs: 5_000 });
+    expect(record).toMatchObject({ state: "moved", handoff: { source: "fallback" } });
+    // The old agent keeps running in its pane; its step ends later.
+    w.pane.agent_status = "idle";
+    await queue.tick();
+    expect(sent).toEqual([]);
+    expect(await queue.status(`move-${record.id}`, from)).toMatchObject({ state: "failed", error: "The move stopped waiting for this hand-off." });
+  });
+
+  it("takes back the request when the owner aborts the move", async () => {
+    const w = world();
+    w.pane.agent_status = "working";
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    w.deps.sleep = () => gate;
+    const { queue, sent } = await realQueue(w);
+    const mover = new SessionMover(w.deps);
+    const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
+    for (let i = 0; i < 50 && !await queue.status(`move-${record.id}`, from).then(() => true, () => false); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    await mover.abort(record.id);
+    w.pane.agent_status = "idle";
+    await queue.tick();
+    expect(sent).toEqual([]);
+    expect(await queue.status(`move-${record.id}`, from)).toMatchObject({ state: "failed", error: "The owner aborted the move." });
+    release();
+    await mover.settled(from.server, from.pane);
+  });
+
+  it("takes the request back after an interrupt that is checking, without either waiting on the other", async () => {
+    const w = world();
+    w.pane.agent_status = "working";
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    w.deps.sleep = () => gate;
+    const { queue, sent } = await realQueue(w);
+    const mover = new SessionMover(w.deps);
+    const record = await mover.start({ target: from, to: { harness: "codex" }, handoffTimeoutMs: 5_000 }, { owner: true });
+    for (let i = 0; i < 50 && !await queue.status(`move-${record.id}`, from).then(() => true, () => false); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    // The interrupt holds the queue's lock while it looks at the pane, which takes a while.
+    let showPane!: () => void;
+    const slow = new Promise<void>(resolve => { showPane = resolve; });
+    const snapshot = w.deps.snapshot;
+    let hold = true, holding = false;
+    w.deps.snapshot = async server => { if (hold) { hold = false; holding = true; await slow; } return snapshot(server); };
+    const interrupting = mover.interrupt(record.id, queue);
+    for (let i = 0; i < 200 && !holding; i++) await new Promise(resolve => setTimeout(resolve, 1));
+    expect(holding).toBe(true);
+    // Meanwhile the wait runs out and the move takes its request back, which waits for the queue's lock.
+    release();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    showPane();
+    expect(await interrupting).toEqual({ interrupted: true });
+    await mover.settled(from.server, from.pane);
+    expect(await readMove(record.id)).toMatchObject({ state: "moved" });
+    expect(await queue.status(`move-${record.id}`, from)).toMatchObject({ state: "failed" });
+    expect(sent).toEqual([]);
+  });
+
   it("is the owner's, on the move route, and stops a served pane's turn over its own API", async () => {
     const f = await held();
     // A served OpenCode pane: Esc goes over its API, as /v1/keys sends it, not into the terminal.

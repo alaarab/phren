@@ -29,6 +29,21 @@ describe("durable Hook hand-off queue", () => {
     expect(await queue().enqueue(message())).toMatchObject({ delivered: true, replayed: true });
     expect(send).toHaveBeenCalledTimes(1);
   });
+  it("takes back a message still queued, so no later sweep types it, and leaves a typed one alone", async () => {
+    const q = queue();
+    await q.enqueue(message());
+    expect(await q.withdraw("handoff-0001", { ...target, pane: "p2" }, "gone")).toBeUndefined();
+    expect(await q.withdraw("handoff-0001", target, "The move stopped waiting for this hand-off.")).toBe("failed");
+    pane.agent_status = "idle";
+    await queue().tick();
+    expect(send).not.toHaveBeenCalled();
+    expect(await q.status("handoff-0001", target)).toMatchObject({ state: "failed", error: "The move stopped waiting for this hand-off." });
+    // Typed already: the agent has it, and withdrawing says so.
+    await q.enqueue(message("handoff-0002"));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await q.withdraw("handoff-0002", target, "late")).toBe("delivered");
+    expect(await q.withdraw("handoff-0009", target, "none")).toBeUndefined();
+  });
   it("holds concurrent enqueues until closure finishes and refuses closing with queued work", async () => {
     const q = queue(), closed = vi.fn(async () => ({ closed: true }));
     await q.enqueue(message()); expect(await q.whenNoPending(target, closed)).toMatchObject({ closed: false });

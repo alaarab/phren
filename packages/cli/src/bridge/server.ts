@@ -168,6 +168,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     identity: (server, pane) => paneIdentity(server, pane, true),
     terminal: terminalProvider(),
     deliver: (target, text, deliveryId) => handOffs ? handOffs.enqueue({ target, text, deliveryId }) : sendPrompt(target, text, deliveryId, async () => {}),
+    withdraw: async (target, deliveryId, reason) => handOffs?.withdraw(deliveryId, target, reason),
     // The new agent starts in the folder an agent already ran in, so it is trusted for the new harness too.
     launch: (server, data, options) => launches.run(() => launchSession(server, data, { trustFolder: true, ...options })),
     inventory: () => launchCheckOff() ? Promise.resolve(undefined) : harnessInventoryWithin(2_500),
