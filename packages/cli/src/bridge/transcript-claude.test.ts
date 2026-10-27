@@ -372,6 +372,109 @@ describe("Claude background agents the parent's Stop lists", () => {
   });
 });
 
+describe("Claude agents launched in the foreground, or reported oddly", () => {
+  const roots: string[] = [];
+  const session = "ffffffff-6666-4666-8666-666666666666";
+  afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+  const call = (id: string, input: Json, at = new Date().toISOString()) => ({ type: "assistant", timestamp: at,
+    message: { role: "assistant", content: [{ type: "tool_use", id, name: "Agent", input }] } });
+  const result = (id: string, toolUseResult: Json, extra: Json = {}) => ({ type: "user", timestamp: new Date().toISOString(), toolUseResult,
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok", ...extra }] } });
+
+  async function lead(...rows: Json[]) {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-child-fg-")); roots.push(root);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+    const directory = path.join(root, session, "subagents"); await mkdir(directory, { recursive: true });
+    const file = path.join(root, `${session}.jsonl`);
+    await writeFile(file, rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+    return { file, directory, append: (...more: Json[]) => appendFile(file, more.map(row => JSON.stringify(row)).join("\n") + "\n"),
+      children: () => claudeChildAgents(file, session),
+      sidechain: (agentId: string, prompt: string) => writeFile(path.join(directory, `agent-${agentId}.jsonl`),
+        JSON.stringify({ type: "user", isSidechain: true, sessionId: session, agentId, message: { role: "user", content: prompt } }) + "\n") };
+  }
+
+  it("lists a foreground Agent call without a name while it runs, by its own transcript, until its result", async () => {
+    const f = await lead(call("call-fg", { description: "Map the parser", prompt: "Read src/parser.ts and list its entry points." }));
+    await f.sidechain("a1b2c3", "Read src/parser.ts and list its entry points.");
+    expect((await f.children()).map(child => ({ label: child.path, state: child.state, session: child.session }))).toEqual([{ label: "Map the parser", state: "running", session: "a1b2c3" }]);
+    expect(runningChildAgents(await f.children())).toHaveLength(1);
+    await f.append(result("call-fg", { status: "completed", content: [] }));
+    expect(runningChildAgents(await f.children())).toEqual([]);
+  });
+
+  it("counts a foreground call whose own transcript isn't there yet", async () => {
+    const f = await lead(call("call-fg", { description: "Write the tests", prompt: "Add tests." }));
+    expect((await f.children()).map(child => ({ label: child.path, state: child.state }))).toEqual([{ label: "Write the tests", state: "running" }]);
+  });
+
+  it("ends a foreground call interrupted mid-run, or whose turn the parent's Stop ended", async () => {
+    const f = await lead(call("call-fg", { description: "Map", prompt: "Go." }), result("call-fg", {}, { is_error: true, content: "[Request interrupted by user for tool use]" }));
+    expect(runningChildAgents(await f.children())).toEqual([]);
+    const g = await lead(call("call-fg", { description: "Map", prompt: "Go." }, new Date(Date.now() - 60_000).toISOString()));
+    await noteTurn("default", "w1:p1", { event: "Stop", terminal: "term-1", source: "claude", session, ...stopFacts({ background_tasks: [] }) });
+    expect(runningChildAgents(await g.children())).toEqual([]);
+  });
+
+  it("does not list a background or named call twice: their launch and teammate paths own them", async () => {
+    const f = await lead(call("call-bg", { description: "Review", prompt: "Review.", run_in_background: true }),
+      result("call-bg", { status: "async_launched", isAsync: true, agentId: "abg1", description: "Review" }));
+    await f.sidechain("abg1", "Review.");
+    expect((await f.children()).map(child => child.session)).toEqual(["abg1"]);
+  });
+
+  it("counts an async launch reported with another status, or its id under another key", async () => {
+    const f = await lead(result("call-1", { status: "launched", isAsync: true, agentId: "aodd1", description: "Odd status" }),
+      result("call-2", { status: "async_launched", agent_id: "aodd2", description: "Other key" }));
+    await f.sidechain("aodd1", "x"); await f.sidechain("aodd2", "y");
+    expect(runningChildAgents(await f.children()).map(child => child.session).sort()).toEqual(["aodd1", "aodd2"]);
+  });
+
+  it("counts an async launch without an id by its own transcript, ending as any launch does", async () => {
+    const launchedAt = new Date(Date.now() - 60_000).toISOString();
+    const f = await lead(call("call-x", { description: "No id", prompt: "Profile the build.", run_in_background: true }, launchedAt),
+      { ...result("call-x", { status: "async_launched", isAsync: true, description: "No id" }), timestamp: launchedAt });
+    await f.sidechain("anoid1", "Profile the build.");
+    expect((await f.children()).map(child => ({ label: child.path, state: child.state, session: child.session }))).toEqual([{ label: "No id", state: "running", session: "anoid1" }]);
+    // The Stop names its agent finished; a background shell still running holds nothing open.
+    await noteTurn("default", "w1:p1", { event: "Stop", terminal: "term-1", source: "claude", session,
+      ...stopFacts({ background_tasks: [{ id: "anoid1", status: "completed" }, { id: "bshell1", status: "running", type: "shell" }] }) });
+    vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
+    try { expect(runningChildAgents(await f.children())).toEqual([]); } finally { vi.useRealTimers(); }
+  });
+
+  it("counts an id-less launch whose transcript can't be found for at most the quiet limit", async () => {
+    const recent = new Date(Date.now() - 60_000).toISOString(), old = new Date(Date.now() - CLAUDE_SKILL_QUIET_MS - 60_000).toISOString();
+    const launch = (id: string, at: string) => [call(id, { description: id, prompt: `Task ${id}.`, run_in_background: true }, at),
+      { ...result(id, { status: "async_launched", isAsync: true }), timestamp: at }];
+    const f = await lead(...launch("recent", recent), ...launch("old", old));
+    expect(runningChildAgents(await f.children()).map(child => child.path)).toEqual(["recent"]);
+  });
+
+  it("keeps an id-less launch on its own transcript when a later call with the same prompt finished", async () => {
+    const t0 = Date.now() - 120_000, t1 = Date.now() - 60_000;
+    const stamped = (agentId: string, at: number, ...rows: Json[]) => writeFile(path.join(f.directory, `agent-${agentId}.jsonl`),
+      [{ type: "user", isSidechain: true, sessionId: session, agentId, timestamp: new Date(at).toISOString(), message: { role: "user", content: "Run the suite." } }, ...rows]
+        .map(row => JSON.stringify(row)).join("\n") + "\n");
+    const f = await lead(call("call-bg", { description: "Background run", prompt: "Run the suite.", run_in_background: true }, new Date(t0).toISOString()),
+      { ...result("call-bg", { status: "async_launched", isAsync: true }), timestamp: new Date(t0 + 500).toISOString() },
+      call("call-fg", { description: "Foreground run", prompt: "Run the suite." }, new Date(t1).toISOString()), result("call-fg", { status: "completed" }));
+    // The background agent is in a long build; the foreground one finished, and wrote last.
+    await stamped("abg", t0 + 1_000, { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [] } });
+    await stamped("afg", t1 + 1_000, { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "All green." }] } });
+    expect(runningChildAgents(await f.children()).map(child => ({ label: child.path, session: child.session }))).toEqual([{ label: "Background run", session: "abg" }]);
+  });
+
+  it("never takes an earlier call's transcript, with the same prompt, for a new foreground call", async () => {
+    const f = await lead();
+    await f.sidechain("aold1", "Run the test suite.");
+    const earlier = new Date(Date.now() - CLAUDE_SKILL_QUIET_MS - 60_000);
+    await utimes(path.join(f.directory, "agent-aold1.jsonl"), earlier, earlier);
+    await f.append(call("call-new", { description: "Run the tests again", prompt: "Run the test suite." }));
+    // Its own file isn't written yet: listed running, awaiting it, never the old (quiet) one.
+    expect((await f.children()).map(child => ({ label: child.path, state: child.state, session: child.session }))).toEqual([{ label: "Run the tests again", state: "running", session: undefined }]);
+  });
+});
+
 describe("phren prompt-hook context", () => {
   const hook = (content: string, event = "UserPromptSubmit") => ({ type: "attachment", uuid: "u2", parentUuid: "u1", timestamp: "2026-09-23T12:00:00Z",
     attachment: { type: "hook_success", hookName: event, hookEvent: event, toolUseID: "t", content } });

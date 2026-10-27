@@ -13,13 +13,21 @@ import { latestStopTasks, type StopTasks } from "./turn-records.js";
 /** `resumedAt`: when SendMessage last resumed it, as the parent's row is stamped. */
 type ClaudeLaunch = { path: string; callId: string; state: "running" | "completed"; resumedAt?: string };
 type ClaudeWorkflow = { runId: string; name: string; callId: string; state: "running" | "completed" };
+/** An Agent call the parent waits on (no `run_in_background`, no `name`), from its tool_use to its tool_result,
+ * or a background launch whose result named no agent id. `at`: when the parent made it; `prompt`, to find
+ * its own transcript by its first message. */
+type ClaudeCall = { path: string; callId: string; prompt: string; at?: string };
 /** What the parent transcript says of its children, kept so a timed recheck
  * of an unchanged parent reads only the children, never the parent again. */
-interface ClaudeParentRows { launches: Map<string, ClaudeLaunch>; skills: Set<string>; workflows: Map<string, ClaudeWorkflow>; teammates: Map<string, ClaudeLaunch> }
+interface ClaudeParentRows {
+  launches: Map<string, ClaudeLaunch>; skills: Set<string>; workflows: Map<string, ClaudeWorkflow>; teammates: Map<string, ClaudeLaunch>;
+  foreground: Map<string, ClaudeCall>; unidentified: Map<string, ClaudeCall>;
+}
 const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[]; recheckAt?: number; rows?: ClaudeParentRows }>();
 const copyRows = (rows: ClaudeParentRows): ClaudeParentRows => ({ launches: new Map([...rows.launches].map(([id, launch]) => [id, { ...launch }])),
   skills: new Set(rows.skills), workflows: new Map([...rows.workflows].map(([id, workflow]) => [id, { ...workflow }])),
-  teammates: new Map([...rows.teammates].map(([name, launch]) => [name, { ...launch }])) });
+  teammates: new Map([...rows.teammates].map(([name, launch]) => [name, { ...launch }])),
+  foreground: new Map(rows.foreground), unidentified: new Map(rows.unidentified) });
 type ClaudeChildModelCache = { dev: number; ino: number; size: number; model?: string };
 const claudeChildModelCache = new Map<string, ClaudeChildModelCache>();
 
@@ -129,15 +137,29 @@ async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
   // teammate-message instead, and may be woken again later. Their file is
   // `agent-a<name>-<hex>.jsonl` beside the Task sidechains.
   const teammates = new Map<string, ClaudeLaunch>();
+  // Agent calls by tool_use id: the parent waits on a foreground one until its tool_result; a background one
+  // waits here for its launch result, which names its agent (or, when it names none, stays here).
+  const foreground = new Map<string, ClaudeCall>(), background = new Map<string, ClaudeCall>(), unidentified = new Map<string, ClaudeCall>();
   const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
     try {
       const raw = object(JSON.parse(line)), result = object(raw.toolUseResult);
       const blocks = objects(object(raw.message).content);
-      const agentId = String(result.agentId ?? ""), status = String(result.status ?? "");
-      if (/^[A-Za-z0-9._-]{1,128}$/.test(agentId) && ["async_launched", "running"].includes(status)) {
-        const callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
-        if (callId) launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId, state: "running" });
+      const status = String(result.status ?? "");
+      // The agent id under the key Claude Code uses, or the one an older or newer version does.
+      const agentId = String([result.agentId, result.agent_id, result.taskType === "local_workflow" ? undefined : result.taskId, result.task_id]
+        .find(value => typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value)) ?? "");
+      // A launch that runs on: async by its own word, or by any status that is not an end.
+      const launched = result.taskType !== "local_workflow" && !/^(completed|failed|error|killed|cancell?ed|stopped|done)$/.test(status)
+        && (result.isAsync === true || /^(async_)?(launched|running|started|queued|pending|spawned)$/.test(status));
+      const resultCall = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
+      if (launched && agentId && resultCall) {
+        launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId: resultCall, state: "running" });
+      } else if (launched && resultCall && !agentId && background.has(resultCall)) {
+        const call = background.get(resultCall);
+        // Timed from the call itself: its agent can start before the launch result is stamped.
+        unidentified.set(resultCall, { path: String(result.description || call?.path || "Agent").slice(0, 200), callId: resultCall, prompt: call?.prompt ?? "",
+          ...(call?.at ? { at: call.at } : typeof raw.timestamp === "string" ? { at: raw.timestamp } : {}) });
       }
       // SendMessage to a finished agent resumes it until its next final notification.
       const resumed = typeof result.resumedAgentId === "string" ? launches.get(result.resumedAgentId) : undefined;
@@ -164,11 +186,22 @@ async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
           if (block.name === "TaskStop" && typeof block.id === "string" && typeof object(block.input).task_id === "string") {
             stops.set(block.id, String(object(block.input).task_id));
           }
-          if (block.name !== "Agent") continue;
+          if (block.name !== "Agent" && block.name !== "Task") continue;
           const input = object(block.input), name = String(input.name ?? "");
-          if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name) || typeof block.id !== "string") continue;
-          teammates.set(name, { path: String(input.description || name).slice(0, 200), callId: block.id.slice(0, 200), state: "running" });
+          if (typeof block.id !== "string") continue;
+          if (block.name === "Agent" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) {
+            teammates.set(name, { path: String(input.description || name).slice(0, 200), callId: block.id.slice(0, 200), state: "running" });
+            continue;
+          }
+          const call: ClaudeCall = { path: String(input.description || input.subagent_type || "Agent").slice(0, 200), callId: block.id.slice(0, 200),
+            prompt: typeof input.prompt === "string" ? input.prompt : "", ...(typeof raw.timestamp === "string" ? { at: raw.timestamp } : {}) };
+          (input.run_in_background === true ? background : foreground).set(call.callId, call);
         }
+      }
+      // A call's result ends the parent's wait on it: the foreground agent finished, failed or was interrupted.
+      if (raw.type === "user") for (const block of blocks) {
+        if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+        foreground.delete(block.tool_use_id); background.delete(block.tool_use_id);
       }
       // A stop request alone proves nothing. Its successful, matching result
       // ends the child even when no later task notification is recorded.
@@ -208,7 +241,7 @@ async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
       }
     } catch { /* Ignore unrelated/malformed rows. */ }
   }
-  return { launches, skills, workflows, teammates };
+  return { launches, skills, workflows, teammates, foreground, unidentified };
 }
 
 async function claudeChildRelations(file: string, session: string, signature: string, rows: ClaudeParentRows, stop?: StopTasks): Promise<ChildAgentRelation[]> {
@@ -298,6 +331,45 @@ async function claudeChildRelations(file: string, session: string, signature: st
       }
     }
   }
+  // A foreground call runs until its tool_result, which the parent writes when it ends: while the parent
+  // waits on it. A Stop after the call means the turn ended without one (the session went down mid-call).
+  // A background launch whose result named no agent is found the same way, by the prompt it sent.
+  if (rows.foreground.size || rows.unidentified.size) {
+    const claimed = new Set(relations.map(relation => relation.session));
+    const candidates = root ? await claudeSidechains(root, session, claimed) : [];
+    const parentQuiet = Date.now() - (await stat(file)).mtimeMs >= CLAUDE_SKILL_QUIET_MS;
+    const pastLimit = (at?: string) => at !== undefined && Date.now() - Date.parse(at) >= CLAUDE_SKILL_QUIET_MS;
+    /** Its own transcript: of the unclaimed ones that began with its prompt, the first to start once it was
+     * made. An earlier call with the same prompt started before it; a later one, after its own. */
+    const ownOf = (call: ClaudeCall) => {
+      const since = call.at === undefined ? NaN : Date.parse(call.at) - CALL_START_SLACK_MS;
+      const own = call.prompt ? candidates.filter(candidate => candidate.prompt === call.prompt && !claimed.has(candidate.agentId)
+        && !(Number.isFinite(since) && candidate.startedMs < since)).sort((a, b) => a.startedMs - b.startedMs)[0] : undefined;
+      if (own) claimed.add(own.agentId);
+      return own;
+    };
+    const push = async (call: ClaudeCall, own: ReturnType<typeof ownOf>) => {
+      const model = own ? await claudeChildModel(own.file).catch(() => undefined) : undefined;
+      relations.push({ id: createHash("sha256").update(`claude\0${session}\0${own?.agentId ?? `call:${call.callId}`}`).digest("hex").slice(0, 32),
+        ...(own ? { session: own.agentId, transcript: own.file } : {}), provider: "claude", path: call.path, callId: call.callId, state: "running",
+        ...(model !== undefined ? { model } : {}), children: [] });
+      live = true;
+      if (!own) awaiting = true;
+    };
+    for (const call of rows.foreground.values()) {
+      if (stop && call.at !== undefined && Date.parse(stop.at) > Date.parse(call.at)) continue;
+      const own = ownOf(call);
+      // A session gone mid-call leaves the call without a result: quiet past the limit, it has ended.
+      if (own ? Date.now() - own.mtimeMs >= CLAUDE_SKILL_QUIET_MS : parentQuiet) continue;
+      await push(call, own);
+    }
+    for (const call of rows.unidentified.values()) {
+      const own = ownOf(call);
+      // With its transcript it ends as any launch does: the Stop's word, else a finished reply or quiet.
+      if (own ? await ended(own.agentId, own.file, { path: call.path, callId: call.callId, state: "running" }) : pastLimit(call.at)) continue;
+      await push(call, own);
+    }
+  }
   claudeRelationCache.set(file, { signature, relations, ...(awaiting || live ? { recheckAt: Date.now() + (awaiting ? 2_000 : 5_000), rows: kept } : {}) });
   while (claudeRelationCache.size > 64) claudeRelationCache.delete(claudeRelationCache.keys().next().value!);
   return relations;
@@ -324,6 +396,43 @@ async function claudeSkillFinished(file: string, since?: string, now = Date.now(
     if (raw.type !== "assistant" || object(raw.message).stop_reason !== "end_turn") return false;
     return !Number.isFinite(resumed) || (typeof raw.timestamp === "string" && Date.parse(raw.timestamp) > resumed);
   } catch { return false; }
+}
+
+/** At most this many of a session's newest sub-agent transcripts are read to place a foreground call. */
+const SIDECHAIN_SCAN = 64;
+/** A call's transcript may be stamped this much before the parent's row for the call. */
+const CALL_START_SLACK_MS = 2_000;
+
+/** The session's sub-agent transcripts no relation claims yet, newest first, with the first message each
+ * was given: a foreground Agent call is found by the prompt it sent. */
+async function claudeSidechains(root: string, session: string, claimed: Set<string | undefined>): Promise<{ agentId: string; file: string; prompt: string; mtimeMs: number; startedMs: number }[]> {
+  const entries = (await readdir(root).catch(() => [] as string[])).filter(name => /^agent-[A-Za-z0-9._-]{1,128}\.jsonl$/.test(name));
+  const files = await Promise.all(entries.map(async name => {
+    const agentId = name.slice("agent-".length, -".jsonl".length);
+    if (claimed.has(agentId)) return undefined;
+    const file = await realpath(path.join(root, name)).catch(() => undefined);
+    const info = file?.startsWith(root + path.sep) ? await stat(file).catch(() => undefined) : undefined;
+    return file && info?.isFile() ? { agentId, file, mtimeMs: info.mtimeMs } : undefined;
+  }));
+  const newest = files.filter((entry): entry is NonNullable<typeof entry> => !!entry).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, SIDECHAIN_SCAN);
+  const read: { agentId: string; file: string; prompt: string; mtimeMs: number; startedMs: number }[] = [];
+  for (const entry of newest) {
+    if (!await claudeChildBelongsTo(entry.file, session, entry.agentId)) continue;
+    const input = createInterface({ input: createReadStream(entry.file, { start: 0, end: 1_048_575 }), crlfDelay: Infinity });
+    let prompt = "", startedMs = NaN;
+    for await (const line of input) {
+      try {
+        const row = object(JSON.parse(line)), content = object(row.message).content;
+        prompt = typeof content === "string" ? content : objects(content).filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
+        if (typeof row.timestamp === "string") startedMs = Date.parse(row.timestamp);
+      } catch { /* not a message row */ }
+      break;
+    }
+    input.close();
+    // When it started: its first row's stamp, else (an older file with none) its last write.
+    read.push({ ...entry, prompt, startedMs: Number.isFinite(startedMs) ? startedMs : entry.mtimeMs });
+  }
+  return read;
 }
 
 /** Sub-agent files by the name their `.meta.json` gives them. */
