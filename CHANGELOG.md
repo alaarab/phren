@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `phren dispatch returns --watch` prints worker returns as they land, one line each (time, label, computer, state and the end of the final reply), until Ctrl-C, for a conductor in a plain terminal; `--json` prints one JSON object per line. It reads the returns the Hook already collects, so no second poller runs.
+
 ### Fixed
 
 - The phone showed fewer running sub-agents than Claude itself (2 against "Waiting for 9 background agents"): the Hook took a background agent whose transcript sat unchanged for 30 minutes, in a long build or waiting for a shared machine, as finished. The Hook now keeps the background tasks Claude's Stop hook lists, by id, and counts an agent running while the lead's latest Stop says it is, and finished once it says so; without such a Stop the transcript decides as before.

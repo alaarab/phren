@@ -237,7 +237,7 @@ export const REGISTRY: Command[] = [
     name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode|copilot] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
-      { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
+      { name: "returns", usage: "phren dispatch returns [--watch [--json]]", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read; --watch prints them as they land until Ctrl-C" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" },
       { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" },
       { name: "report", usage: "phren dispatch report --prs <JSON>", summary: "Record this worker turn's PR evidence for the integrator" },
