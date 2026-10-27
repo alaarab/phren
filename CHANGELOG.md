@@ -18,7 +18,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - A move's "Stop <agent> and hand off now" is tighter:
   - It sends its Escape only to the agent the move asked: the same harness, conversation and terminal. When the owner has started another agent in the pane since, it answers `state: "replaced"`.
   - It can no longer land after the move's hand-off wait ran out and the move went on to exit the old agent.
-  - It still sends at most one Escape per move across a Hook restart.
+  - It goes only while this Hook waits on the move's queued request: never after a restart, before the request is queued, for a summary-by-target move, or after an abort.
+  - It still sends at most one Escape per move, and the move's own exit waits a few seconds after it before sending another.
   - On a served OpenCode pane asking a question, it declines the question and also aborts the turn.
 - Signing in a Claude account slot from the phone now runs `claude /login` under that slot's home even when the pane's shell exports another account's `CLAUDE_CONFIG_DIR`. Its status is asked afresh while the sign-in pane is open.
 - Moving an out-of-usage chat to another computer:

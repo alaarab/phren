@@ -69,9 +69,7 @@ const moveRecordSchema = z.object({
   id: z.string().uuid(),
   state: z.enum(MOVE_STATES),
   createdAt: timestamp, updatedAt: timestamp,
-  from: z.object({ target: targetSchema, account: z.string().max(64).optional(), label: z.string().max(200).optional(),
-    /** The pane's terminal when the move started: an interrupt goes only to that agent. */
-    terminal: z.string().max(200).optional() }).strict(),
+  from: z.object({ target: targetSchema, account: z.string().max(64).optional(), label: z.string().max(200).optional() }).strict(),
   to: moveToSchema,
   computerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   computerId: z.string().uuid().optional(),
@@ -154,6 +152,8 @@ async function markInterrupted(id: string): Promise<void> {
   await atomic(interruptFile(id), { at: new Date().toISOString() });
 }
 const interruptMarked = (id: string) => lstat(interruptFile(id)).then(info => info.isFile(), () => false);
+/** How long after the interrupt's Escape the move's own exit waits before sending another. */
+const INTERRUPT_SETTLE_MS = 5_000;
 
 export async function readMove(id: string): Promise<MoveRecord | undefined> {
   const file = recordFile(id);
@@ -532,8 +532,11 @@ const DEFAULT_HANDOFF_MS = 240_000;
  * request that started it (the Hook answers in seconds); its record says where it is. */
 export class SessionMover {
   private readonly cancelled = new Set<string>();
-  /** Moves whose hand-off wait is over (the agent answered, or the wait ran out): no interrupt from here on. */
-  private readonly handoffClosed = new Set<string>();
+  /** Moves this process is waiting on: their hand-off request was handed to the queue, and the wait for the
+   * agent's answer is not over (it answered, the wait ran out, or the owner aborted). Only these are interrupted:
+   * a move whose request was never sent (summary-by-target, or not yet), or one this process no longer runs
+   * (the Hook restarted), has no request an Escape would let in. */
+  private readonly asking = new Set<string>();
   /** Per move, the hand-off's end and an interrupt's check-and-send, one at a time. */
   private readonly lifecycles = new Map<string, Promise<unknown>>();
   private readonly admissions = new Set<string>();
@@ -655,8 +658,7 @@ export class SessionMover {
     const at = new Date(this.now).toISOString();
     const resume = data.continuation === "resume";
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: resume ? "exiting" : "handing-off", createdAt: at, updatedAt: at,
-      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : data.continuation === "summary-by-target" ? { continuation: "summary-by-target" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}),
-        ...(typeof pane.terminal_id === "string" && pane.terminal_id ? { terminal: pane.terminal_id.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
+      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : data.continuation === "summary-by-target" ? { continuation: "summary-by-target" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}), ...(workerDispatch ? { workerDispatch } : {}) };
     await assertUnusedLaunchId(record.id);
     if (conductor && peer) {
@@ -699,7 +701,7 @@ export class SessionMover {
         : await this.askForHandoff(record, handoffMs);
       // The wait is over: an interrupt already checking finishes first, and none starts after (the move goes on
       // to exit or launch, where an Escape would hit the exit command or the agent's last turn).
-      await this.lifecycle(record.id, async () => { this.handoffClosed.add(record.id); });
+      await this.lifecycle(record.id, async () => { this.asking.delete(record.id); });
       const observed = observedState(git, processes, !peer), at = new Date(this.now).toISOString();
       let body: string;
       if (byTarget) {
@@ -832,26 +834,29 @@ export class SessionMover {
   async interrupt(id: string, queue?: Pick<HandOffQueue, "whileQueued">, escape?: (target: Target) => Promise<void>): Promise<MoveInterrupt> {
     const record = await readMove(id);
     if (!record) throw new BridgeError(404, "No move with that id is recorded.");
-    if (record.state !== "handing-off" || this.handoffClosed.has(id)) return { interrupted: false, state: "finished" };
+    if (record.state !== "handing-off" || !this.asking.has(id)) return { interrupted: false, state: "finished" };
     // Without the queue the request was typed the moment it was sent: it is never held.
     if (!queue) return { interrupted: false, state: "typed" };
     const from = record.from.target;
     let answer: MoveInterrupt = { interrupted: true };
     const result = await queue.whileQueued(`move-${id}`, from, row => this.lifecycle(id, async () => {
-      // A move that left the hand-off (it answered, or timed out and is exiting) needs no Escape from here.
-      if ((await readMove(id))?.state !== "handing-off" || this.handoffClosed.has(id)) { answer = { interrupted: false, state: "finished" }; return; }
+      // A move that left the hand-off (it answered, timed out and is exiting, or was aborted) needs no Escape.
+      if ((await readMove(id))?.state !== "handing-off" || !this.asking.has(id)) { answer = { interrupted: false, state: "finished" }; return; }
+      // No request waiting yet: there is nothing an Escape would let in.
+      if (!row) { answer = { interrupted: false, state: "idle" }; return; }
       // One Escape per move, across Hook restarts: a second (a double tap, a retry) would land on the stopped
       // agent's empty input, where Claude and Codex take Esc Esc as "go back to an earlier message".
       if (await interruptMarked(id)) return;
       // An agent not on a step has nothing to stop: its request goes in at the queue's next look.
       const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
       if (!pane || !["working", "blocked", "waiting", "unknown"].includes(String(pane.agent_status))) { answer = { interrupted: false, state: "idle" }; return; }
-      // Only the agent the move asked: the same harness, conversation and terminal. The owner may have
-      // started another in the pane since, which the move's request no longer concerns.
-      const terminal = row?.terminal ?? record.from.terminal;
+      // Only the agent the request is for: the same harness, terminal and conversation (the one the queued row
+      // followed to, when the pane's conversation changed in the same terminal). The owner may have started
+      // another in the pane since; one whose conversation can't be read is not taken for it.
       const session = await this.deps.identity(from.server, pane).catch(() => undefined);
-      if (pane.agent !== from.source || (from.session && session !== undefined && session !== from.session)
-        || (terminal && typeof pane.terminal_id === "string" && pane.terminal_id !== terminal)) { answer = { interrupted: false, state: "replaced" }; return; }
+      const wanted = row.session ?? from.session;
+      if (pane.agent !== from.source || (wanted && session !== wanted)
+        || (typeof pane.terminal_id === "string" && pane.terminal_id !== row.terminal)) { answer = { interrupted: false, state: "replaced" }; return; }
       // Marked before it goes, so a crash after the key counts as sent; an Escape known to have failed
       // clears the mark, leaving the next tap free to try again.
       await markInterrupted(id);
@@ -870,7 +875,8 @@ export class SessionMover {
       await this.deps.succession!.abort(id);
       if ((await this.deps.succession!.status(id)).phase === "committed") throw new BridgeError(409, "This ownership generation is committed; reconcile it instead of rolling back.");
     } else if (record.state !== "handing-off" && record.state !== "failed") throw new BridgeError(409, "This launch may already exist; reconcile it before aborting.");
-    this.cancelled.add(id);
+    // After an interrupt already checking, and before any other: no Escape goes for an aborted move.
+    await this.lifecycle(id, async () => { this.asking.delete(id); this.cancelled.add(id); });
     await this.update(record, { state: "failed", error: "The owner aborted this uncommitted move; the original chat keeps its role." });
     return record;
   }
@@ -1013,6 +1019,9 @@ export class SessionMover {
       // A lost delivery acknowledgement can still have reached the agent;
       // its marked transcript reply is authoritative for the normal window.
       if (sent.state !== "uncertain" && sent.ok !== true && sent.queued !== true) return { reason: `the request could not be delivered (${String(sent.error ?? sent.state ?? "not confirmed")}).` };
+      // From here the owner may stop the agent's step so the request goes in (`interrupt`, which the queue
+      // answers `typed` or `writing` once it went).
+      this.asking.add(record.id);
     } catch (error) { return { reason: `the request could not be delivered (${error instanceof Error ? error.message : String(error)}).` }; }
     while (this.now < deadline) {
       await this.sleep(this.poll);
@@ -1087,7 +1096,14 @@ export class SessionMover {
         await this.sleep(Math.min(this.poll, 500));
       }
     };
-    const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
+    let pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
+    // Just after the owner's interrupt sent its Escape, the pane can still read working: wait that out and look
+    // again, rather than a second Escape at once, which Claude and Codex take as "go back to an earlier message".
+    const since = await readFile(interruptFile(record.id), "utf8").then(text => Date.now() - Date.parse(String(JSON.parse(text).at)), () => Infinity);
+    if (pane?.agent_status === "working" && since < INTERRUPT_SETTLE_MS) {
+      await this.sleep(INTERRUPT_SETTLE_MS - since);
+      pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
+    }
     // A turn still running (a hand-off that ran late) is stopped first, as Esc in the terminal would.
     if (pane?.agent_status === "working") {
       await this.checkPromotion(record);

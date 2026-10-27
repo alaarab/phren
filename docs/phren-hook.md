@@ -1497,9 +1497,15 @@ to end. The phone's "Stop <agent> and hand off now" sends the owner-only
 still held, not yet typed. The check runs under the same lock that types the
 request, and under the move's own lock, which also ends its hand-off wait. So
 the Escape stops the step, never the hand-off the agent then writes, and never
-the exit or launch the move goes on to once the wait is over. It goes only to
-the agent the move asked: the same harness, conversation and terminal as when
-the move started or the request was queued. It answers
+the exit or launch the move goes on to once the wait is over. It goes only for
+a move this Hook is waiting on: one whose request reached the queue and is
+still held there, so not after a restart, not before the request is queued,
+not for a summary-by-target move, and not once the owner aborted. It goes only
+to the agent the request is for: the same harness and terminal, and the
+conversation the queued request follows. An agent whose conversation can't be
+read is not taken for it. When the move then exits the old agent soon after
+the interrupt, it waits a few seconds and looks again before sending its own
+Escape. It answers
 `{ok: true, interrupted: true}`, or `{ok: true, interrupted: false, state}` with
 one of these `state` values:
 - `idle`: the agent is on no step, so its request goes in without one.
@@ -1514,9 +1520,8 @@ The Escape goes the way `/v1/keys` sends one: over a served OpenCode pane's
 API, as a turn interrupt on a Codex pane the Hook runs on its own app-server,
 else as the key. A question the Hook holds is declined first, and the turn is
 still stopped: on a served OpenCode pane the decline is followed by an abort.
-There is one Escape per move, and that holds across a Hook restart: a marker
-beside the move's record is written before the key goes, so a crash in
-between counts as sent. A second interrupt (a double tap, two at once)
+There is one Escape per move. A marker beside the move's record is written
+before the key goes, so a crash in between counts as sent. A second interrupt (a double tap, two at once)
 answers `interrupted: true` without another Escape, which Claude and Codex
 would take as "go back to an earlier message". An older message for the same
 pane is still typed first. A Hook

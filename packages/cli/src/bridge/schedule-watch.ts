@@ -257,7 +257,8 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
 /** A prompt the owner (or a dispatcher) typed, not a task's notification or
  * a teammate's message waking the session. */
 function ownerPrompt(raw: Json): boolean {
-  const content = raw.type === "user" && !raw.isMeta ? claudeUserText(raw) : undefined;
+  // Claude files "[Request interrupted by user]" as a user row too: that is a stop, not the owner moving on.
+  const content = raw.type === "user" && !raw.isMeta && !turnInterrupted(raw, "claude") ? claudeUserText(raw) : undefined;
   if (content === undefined) return false;
   const text = content.trimStart();
   return !text.startsWith("<task-notification>") && !text.startsWith("<teammate-message");
