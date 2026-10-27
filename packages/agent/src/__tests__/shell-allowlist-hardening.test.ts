@@ -100,7 +100,9 @@ describe("the auto-approve bypasses ask", () => {
   it("asks for a recursive read that follows a symlink below it", () => {
     fs.symlinkSync(path.join(root, "config", "secrets.json"), path.join(root, "src", "link"));
     try {
-      expect(verdict("grep -R x src")).toBe("ask");
+      // GNU grep -R follows the link into the secret; BSD grep -R doesn't follow links found while recursing.
+      const follows = spawnSync("grep", ["-l", "-R", "-e", "", "src"], { cwd: root, encoding: "utf-8" }).stdout.includes("src/link");
+      expect(verdict("grep -R x src")).toBe(follows ? "ask" : "allow");
       if (hasRg) {
         expect(verdict("rg -L x src")).toBe("ask");
         expect(verdict("rg x src")).toBe("allow");
@@ -120,7 +122,9 @@ describe("the auto-approve bypasses ask", () => {
       expect(verdict("git diff -- README.md")).toBe("allow");
       git("config", key, value);
       expect(verdict("git diff -- README.md")).toBe("ask");
-      expect(verdict("cd src && git log -1")).toBe("ask");
+      // A log prints a patch, and so runs diff programs, only when asked to; a clean filter it never runs.
+      expect(verdict("cd src && git log -p -1")).toBe("ask");
+      expect(verdict("cd src && git log -1")).toBe("allow");
       // Status runs filters, never a diff program; rev-parse runs neither.
       expect(verdict("git status")).toBe(key.startsWith("filter.") ? "ask" : "allow");
       expect(verdict("git rev-parse HEAD")).toBe("allow");

@@ -4,8 +4,8 @@ import * as os from "os";
 import * as path from "path";
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety, shellEnv } from "./shell-safety.js";
-import { commandPaths, isAutoApprovableCommand, recursiveReads, splitCommandWords, type RecursiveRead } from "./shell-classify.js";
-import { own } from "./shell-options.js";
+import { commandPaths, gitRead, isAutoApprovableCommand, recursiveReads, splitCommandWords, type RecursiveRead } from "./shell-classify.js";
+import { own, parseOptions, READ_ONLY_SPECS } from "./shell-options.js";
 import { evaluateRules } from "./rules.js";
 import { validatePath, checkSensitivePath, checkSensitiveTarget, isPathInSandbox } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
@@ -64,17 +64,30 @@ const PATTERN_OPTION_JOINED = /^(-e.|--regexp=)/;
 /** Options whose value is a file of patterns: a path. */
 const PATTERN_FILE_OPTION = /^(-f|--file)$/;
 
-/** Is this path-like argument a secret file, under its own name or where it leads? */
+/** Is this path-like argument a secret file, under its own name or where it leads? A `~` in it is literal
+ * here: the words given are already as bash expands them (`commandWordsExpanded`). */
 function secretPath(value: string, cwd: string): boolean {
   const looksLikePath = /[/\\]/.test(value) || value.startsWith(".") || value.startsWith("~")
     || fs.existsSync(path.resolve(cwd, value));
   if (!looksLikePath) return false;
-  const expanded = value === "~" || value.startsWith("~/") ? path.join(os.homedir(), value.slice(1)) : value;
   // Resolved against cwd, so `.aws/config` matches "/.aws/" like the absolute spelling; with a separator after
   // it too, so the directory `~/.ssh` itself matches "/.ssh/" (`git diff /var/empty ~/.ssh` prints its files).
-  const abs = path.resolve(cwd, expanded), real = realTarget(cwd, expanded);
+  const abs = path.resolve(cwd, value), real = realTarget(cwd, value);
   return checkSensitivePath(value).sensitive || checkSensitiveTarget(abs, real).sensitive
     || checkSensitiveTarget(abs + path.sep, real === undefined ? undefined : real + path.sep).sensitive;
+}
+
+/** Device files a read may name anywhere: they hold nothing of the owner's. */
+const DEVICE_PATHS = new Set(["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/tty"]);
+
+/** Whether a path a command reads is outside the project (and every allowed path), as written or where it really
+ * leads: `cat /tmp/x`, and `cat link` whose link points out. `-` (stdin) and the device files are not. */
+function outsideProject(value: string, cwd: string, config: PermissionConfig): boolean {
+  if (value === "-" || DEVICE_PATHS.has(value)) return false;
+  const abs = path.resolve(cwd, value);
+  if (DEVICE_PATHS.has(abs)) return false;
+  const real = realTarget(cwd, value) ?? abs;
+  return !validatePath(abs, config.projectRoot, config.allowedPaths).ok || !validatePath(real, config.projectRoot, config.allowedPaths).ok;
 }
 
 /**
@@ -94,10 +107,11 @@ export function realTarget(cwd: string, value: string): string | undefined {
  * a search tool's pattern is skipped, so `rg 'credentials.json' src` doesn't
  * ask. After `--` every argument is an operand.
  */
-function namesSecretFile(tokens: string[], cwd: string): boolean {
-  // A command this reader knows: exactly the files its own options parser reads (`rg -neTOKEN x` searches x).
+function namesSecretFile(tokens: string[], cwd: string, config: PermissionConfig): boolean {
+  // A command this reader knows: exactly the files its own options parser reads (`rg -neTOKEN x` searches x),
+  // each inside the project. A git revision (`HEAD~1`) resolves inside it like a relative path.
   const known = commandPaths(tokens);
-  if (known) return known.some((p) => secretPath(p, cwd));
+  if (known) return known.some((p) => secretPath(p, cwd) || outsideProject(p, cwd, config));
   const [binary, ...args] = tokens;
   const end = args.indexOf("--");
   const options = end === -1 ? args : args.slice(0, end);
@@ -129,15 +143,6 @@ function namesSecretFile(tokens: string[], cwd: string): boolean {
  * shell switches off itself (GIT_HARDENING, shell-safety.ts). */
 const GIT_HELPER_KEYS = "^(diff\\.external|diff\\..+\\.(command|textconv)|filter\\..+\\.(clean|smudge|process)|format\\.pretty|pretty\\..+)$";
 
-/** Which git reads run which helpers: diff programs where a diff or blob is shown, filters where the work
- * tree is compared with the index, a configured format (`format.pretty`, `pretty.<name>`) where commits are
- * printed. `git rev-parse` or `git ls-files` run none, so a difftool in the owner's config doesn't make
- * them ask. */
-const HELPERS_RUN: Record<string, RegExp> = {
-  diff: /^(diff|filter)\./, show: /^(diff|filter|format|pretty)\./, log: /^(diff|filter|format|pretty)\./,
-  blame: /^(diff|filter)\./, grep: /^(diff|filter)\./, status: /^filter\./, shortlog: /^(format|pretty)\./,
-};
-
 /** The helper config git-lfs and git-crypt install, by key and exact value: the same program each time,
  * never a shell line someone wrote into the repository's config. */
 const KNOWN_HELPERS: [RegExp, RegExp][] = [
@@ -157,13 +162,17 @@ function realInside(bin: string, root: string): boolean {
   return isPathInSandbox(fold(target), fold(base), []);
 }
 
-/** Whether `git <sub>`, run in `cwd`, has config that makes it run a program: a helper that subcommand uses
- * (other than git-lfs's and git-crypt's own, installed outside the project), or a configured log format that
- * verifies signatures (`%G`). A git that can't be asked can't vouch; with no cwd there (the command can't
- * start) nothing runs. */
-export function gitRunsHelpers(cwd: string, projectRoot: string, sub: string): boolean {
-  const runs = own(HELPERS_RUN, sub);
-  if (!runs) return false;
+/** The config keys of each kind of helper (gitRead's `helpers`). */
+const HELPER_KINDS: Record<string, RegExp> = { diff: /^diff\./, filter: /^filter\./, format: /^(format|pretty)\./ };
+
+/** Whether a git read, run in `cwd`, has config that makes it run a program: a helper of a kind its operation
+ * uses (gitRead: `git log -5` prints no patch, so a textconv never runs for it), other than git-lfs's and
+ * git-crypt's own, installed outside the project; or a configured log format that verifies signatures (`%G`).
+ * A git that can't be asked can't vouch; with no cwd there (the command can't start) nothing runs. */
+export function gitRunsHelpers(cwd: string, projectRoot: string, kinds: string[]): boolean {
+  const patterns = kinds.flatMap((kind) => own(HELPER_KINDS, kind) ?? []);
+  if (!patterns.length) return false;
+  const runs = { test: (key: string) => patterns.some((p) => p.test(key)) };
   let out: string;
   try {
     out = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
@@ -201,47 +210,50 @@ function listed(program: string, args: string[], cwd: string, separator: string)
   }
 }
 
-/** Whether any of `files` (relative to `cwd`) is a secret file, by name or, when `follow`, where it leads;
- * too many to look at counts. */
-function secretAmong(files: string[], cwd: string, follow: boolean): boolean {
+/** Whether any of `files` (relative to `cwd`) is a secret file, by name or, when `follow`, where it leads (which
+ * must also be inside the project); too many to look at counts. */
+function secretAmong(files: string[], cwd: string, follow: boolean, config: PermissionConfig): boolean {
   if (files.length > GIT_LIST_LIMIT) return true;
   return files.some((file) => {
     const full = path.resolve(cwd, file);
     if (checkSensitivePath(full).sensitive) return true;
     if (!follow) return false;
-    try { return checkSensitivePath(fs.realpathSync.native(full)).sensitive; } catch { return false; }
+    let real: string;
+    try { real = fs.realpathSync.native(full); } catch { return false; }
+    return checkSensitivePath(real).sensitive || !validatePath(real, config.projectRoot, config.allowedPaths).ok;
   });
 }
 
 /**
- * Whether a recursive read could reach a secret file. rg says itself which files it reads (`rg --files` with
- * the run's own filtering options: its ignore files, hidden and glob rules are not modelled here). git grep
- * reads the tracked files below cwd, and asks for an operand that is not a path there (a revision's tree,
- * deleted secrets included). Anything else is walked: every entry below each root, where the root really
- * leads (a symlink before the `..` after it); a symlink there asks when it follows symlinks, and so do too
- * many entries. A program that can't list counts as reaching one.
+ * Whether a recursive read could reach a secret file. rg and grep say themselves which files they read
+ * (`rg --files` and `grep -l` with the run's own selecting options: ignore files, hidden files, globs,
+ * `--include` and `--exclude` are theirs to apply). git grep reads the tracked files matching its pathspecs
+ * (`git ls-files`), and asks for an operand that is not a path (a revision's tree, deleted secrets included).
+ * Anything else is walked: every entry below each root, where the root really leads (a symlink before the `..`
+ * after it); a symlink there asks when it follows symlinks, and so do too many entries. A program that can't
+ * list counts as reaching one.
  */
-function recursiveReachesSecret(read: RecursiveRead, cwd: string): boolean {
+function recursiveReachesSecret(read: RecursiveRead, cwd: string, config: PermissionConfig): boolean {
   // No cwd there: the command can't start.
   if (!fs.existsSync(cwd)) return false;
   if (read.scope === "rg") {
-    // The shell expands `~/` before rg sees it.
-    const roots = read.roots.map((r) => (r === "~" || r.startsWith("~/") ? path.join(os.homedir(), r.slice(1)) : r));
-    const files = listed("rg", ["--files", "--null", ...(read.rgArgs ?? []), "--", ...roots], cwd, "\0");
-    return files === undefined || secretAmong(files, cwd, read.follow);
+    const files = listed("rg", ["--files", "--null", ...(read.listArgs ?? []), "--", ...read.roots], cwd, "\0");
+    return files === undefined || secretAmong(files, cwd, read.follow, config);
+  }
+  if (read.scope === "grep") {
+    // Every file grep's selection reads matches an empty pattern (an empty file has nothing to show).
+    const files = listed("grep", ["-l", "--null", "-s", ...(read.listArgs ?? []), "-e", "", "--", ...read.roots], cwd, "\0");
+    return files === undefined || secretAmong(files, cwd, read.follow, config);
+  }
+  if (read.scope === "tracked") {
+    if (read.roots.some((root) => !fs.existsSync(path.resolve(cwd, root)))) return true;
+    const files = listed("git", ["ls-files", "-z", "--cached", "--", ...read.roots], cwd, "\0");
+    return files === undefined || secretAmong(files, cwd, false, config);
   }
   for (const root of read.roots) {
-    const expanded = root === "~" || root.startsWith("~/") ? path.join(os.homedir(), root.slice(1)) : root;
-    const start = realTarget(cwd, expanded);
+    const start = realTarget(cwd, root);
     let directory = false;
     try { directory = start !== undefined && fs.statSync(start).isDirectory(); } catch { /* not there */ }
-    if (read.scope === "tracked") {
-      if (!directory && !fs.existsSync(path.resolve(cwd, expanded))) return true;
-      if (!directory) continue;
-      const files = listed("git", ["ls-files", "-z", "--cached"], start!, "\0");
-      if (files === undefined || secretAmong(files, start!, false)) return true;
-      continue;
-    }
     if (!directory || start === undefined) continue;
     if (checkSensitivePath(start + path.sep).sensitive) return true;
     const pending = [start];
@@ -272,36 +284,68 @@ function recursiveReachesSecret(read: RecursiveRead, cwd: string): boolean {
  * started); and one to a directory it may not enter (not there, not searchable) unless only `&&` and `|`
  * follow it (when it fails, nothing after it runs; after `;` the rest runs where the shell was).
  */
+/**
+ * Whether a git read prints the contents of a secret file it doesn't name: the paths a `git diff`, `git log -p`
+ * or `git show` would print a patch of, as git lists them for the same revisions, pathspecs and selecting
+ * options (gitRead's `exposure`), relative to the repository's top. Outside a repository nothing is listed
+ * (a `git diff` there compares the paths it names, which are checked). A listing that fails counts.
+ */
+function gitExposesSecret(args: string[], cwd: string, config: PermissionConfig): boolean {
+  const top = listed("git", ["rev-parse", "--show-toplevel"], cwd, "\n")?.[0];
+  if (top === undefined) return false;
+  const files = listed("git", args, cwd, "\0");
+  return files === undefined || secretAmong(files, top, false, config);
+}
+
+/**
+ * Whether a shell command may reach a secret file or leave the sandbox: an argument names one or a path
+ * outside the project, a word the shell expands into file names (`cat config/*`) hides the names, a recursive
+ * read has one below it, git's config runs a program on a read, a git read prints a secret file's patch, or a
+ * `cd` goes outside the sandbox. Each segment's paths resolve where the `cd`s before it left the shell
+ * (`cd ~/.aws && cat credentials`): `cd -P` moves to where the path really leads, and a later `cd ..` from
+ * there. A `cd` whose effect this can't tell asks: no target or `-`; one that may be skipped (after `&&` or
+ * `||`: `false && cd src; grep -r .`) or runs in a subshell (a pipeline); one followed by `||`, or by a later
+ * `||` (what comes after may run where the shell started); and one to a directory it may not enter (not there,
+ * not searchable) unless only `&&` and `|` follow it (when it fails, nothing after it runs; after `;` the rest
+ * runs where the shell was).
+ */
 function commandTouchesSecret(command: string, cwd: string, config: PermissionConfig): boolean {
   const segments = splitCommandWords(command);
   if (!segments) return false;
   let here = cwd;
   let moved = false;
-  for (const [index, { words, globbed, before, after }] of segments.entries()) {
+  for (const [index, segment] of segments.entries()) {
+    const { globbed, before, after } = segment;
+    // A leading `~` only where bash expands it (`'~/x'` is a file named so in cwd).
+    const words = segment.words.map((w, i) => (segment.home?.[i] ? os.homedir() + w.slice(1) : w));
     if (globbed.some(Boolean)) return true;
     if (moved && before === "||") return true;
     if (words[0] === "cd") {
       if ((before !== "" && before !== ";") || after === "|" || after === "||") return true;
       const target = commandPaths(words)?.[0];
       if (target === undefined || target === "-") return true;
-      const expanded = target === "~" || target.startsWith("~/") ? path.join(os.homedir(), target.slice(1)) : target;
-      const next = path.resolve(here, expanded);
-      const real = realTarget(here, expanded) ?? next;
+      // The last of -L and -P decides; -L (the default) keeps the path as written.
+      const modes = parseOptions(words.slice(1), own(READ_ONLY_SPECS, "cd")!)?.options.filter((o) => o.name === "-P" || o.name === "-L") ?? [];
+      const physical = modes.at(-1)?.name === "-P";
+      const next = path.resolve(here, target);
+      const real = realTarget(here, target) ?? next;
       let enterable = false;
       try { enterable = fs.statSync(real).isDirectory(); fs.accessSync(real, fs.constants.X_OK); } catch { enterable = false; }
       const stopsOnFailure = segments.slice(index + 1).every((s) => s.before === "&&" || s.before === "|");
       if (!enterable && !stopsOnFailure) return true;
       if (!validatePath(next, config.projectRoot, config.allowedPaths).ok || !validatePath(real, config.projectRoot, config.allowedPaths).ok) return true;
       if (checkSensitiveTarget(next + path.sep, real + path.sep).sensitive) return true;
-      here = next;
+      here = physical ? real : next;
       moved = true;
       continue;
     }
-    if (namesSecretFile(words, here)) return true;
-    const sub = words[0] === "git" ? words.slice(1).find((w) => !w.startsWith("-")) : undefined;
-    if (sub !== undefined && gitRunsHelpers(here, config.projectRoot, sub)) return true;
+    if (namesSecretFile(words, here, config)) return true;
+    // Before git lists anything: the listing itself must not start a configured program.
+    const git = gitRead(words);
+    if (git && gitRunsHelpers(here, config.projectRoot, git.helpers)) return true;
+    if (git?.exposure && gitExposesSecret(git.exposure, here, config)) return true;
     const recursive = recursiveReads(words);
-    if (recursive && recursiveReachesSecret(recursive, here)) return true;
+    if (recursive && recursiveReachesSecret(recursive, here, config)) return true;
   }
   return false;
 }
