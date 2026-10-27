@@ -301,6 +301,21 @@ force pushes and hard resets always ask, even for a command you approved
 before. A subagent never runs with more than its parent's mode, whatever mode
 the model asks for.
 
+`auto-confirm` reads each read-only command's arguments the way the command
+does (short clusters like `-rn`, `-n5`, `--opt=value`, `--` ending the options)
+and runs it unprompted only when every option is on that command's list of
+known-safe ones. Options that write or run programs are not on any list
+(`sort -o`, `rg --pre`, `rg -z`, `git grep -O`, `git diff --output`,
+`find -exec`, `sed -i`, `tail -f`), so an option the agent doesn't know asks
+instead of running. Build and test tools (`npm test`, `cargo test`, `tsc`)
+take any options except the ones that rewrite sources (`--fix`, `--write`).
+A word the shell would expand into file names (`cat config/*`,
+`ls *.ts`, `{a,b}`) asks, since no check can see which files it names; quote
+a search pattern to keep it a pattern. A command you approved for the
+session still asks when it runs outside the project or reads a secret file
+(approving `cat` is not approving `cat .env`), and paths are checked where
+they lead, a symlink before the `..` after it.
+
 Shift+Tab cycles the mode in the terminal UI, and the choice is remembered in
 `~/.phren-agent/settings.json`. At a prompt, `y` allows the call once, `s` allows
 calls like it (the same file, or the same command) for the rest of the

@@ -29,9 +29,12 @@ interface FileRecord {
 
 const records = new Map<string, FileRecord>();
 
+/** The file a path leads to, resolved as the kernel does: each symlink before the `..` after it
+ * (path.resolve and fs.realpathSync collapse `link/..` first, naming another file). */
 function key(filePath: string): string {
-  const abs = path.resolve(filePath);
-  try { return fs.realpathSync(abs); } catch { return abs; }
+  const raw = path.isAbsolute(filePath) ? filePath : `${process.cwd()}${path.sep}${filePath}`;
+  try { return fs.realpathSync.native(raw); } catch { /* not there */ }
+  try { return path.join(fs.realpathSync.native(path.dirname(raw)), path.basename(raw)); } catch { return path.resolve(filePath); }
 }
 
 function hashOf(content: Buffer | string): string {
