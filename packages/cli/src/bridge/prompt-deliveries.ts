@@ -339,8 +339,7 @@ export class PromptDeliveries {
    * (`working` false) a user row settles too, for a hook that never came. Of several identical open
    * messages the oldest take the entries. `pass` carries the entries still unclaimed within one observe. */
   private async taken(record: Record, pass: Map<string, TranscriptEntry[]>, working = false): Promise<boolean> {
-    // Only Claude's transcript says which entry a message settled with; Codex keeps the any-match check.
-    if (record.source !== "claude") return (await this.landed(record).catch(() => [] as TranscriptEntry[])).length > 0;
+    if (record.source !== "claude") return this.takenCodex(record);
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
     const open = this.records.filter(other => same(other) && PromptDeliveries.claimable(other)).sort((a, b) => a.at - b.at);
     if (open[0] !== record) return false;
@@ -381,6 +380,28 @@ export class PromptDeliveries {
     const entry = free.shift();
     pass.set(key, free);
     if (entry === undefined) return false;
+    record.entry = entry.offset; record.entryHook = entry.hook;
+    return true;
+  }
+  /** Codex writes a message's row after it was typed, on this machine's clock: only a row stamped at or
+   * after `record` was typed, and not claimed by another message with these words, is its own. The scan
+   * reaches back `ENTRY_SLACK_MS`, where an identical message sent a moment before has its row. An earlier
+   * message its hook settled recorded no row: it holds the first free row stamped after it was typed. */
+  private async takenCodex(record: Record): Promise<boolean> {
+    const same = (other: Record) => other !== record && other.hash === record.hash && this.samePane(other, record) && other.session === record.session;
+    const found = [...await this.landed(record).catch(() => [] as TranscriptEntry[])].sort((a, b) => a.offset - b.offset);
+    const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
+    const after = (row: TranscriptEntry, at: number) => row.at === undefined || row.at >= at;
+    for (const other of this.records.filter(other => same(other) && other.state === "delivered" && other.entry === undefined && other.joined !== "part"
+      // Settled earlier, its row is older than the scan, which must not hand it this message's row.
+      && other.at < record.at && (other.settledAt ?? other.at) >= record.at - ENTRY_SLACK_MS)
+      .sort((a, b) => a.at - b.at)) {
+      const row = found.find(row => !used.has(row.offset) && after(row, other.at));
+      if (row) used.add(row.offset);
+    }
+    const entry = found.find(row => !used.has(row.offset) && after(row, record.at));
+    // The record may have settled (its hook came) while the transcript was read.
+    if (!entry || !PromptDeliveries.claimable(record)) return false;
     record.entry = entry.offset; record.entryHook = entry.hook;
     return true;
   }
@@ -450,7 +471,10 @@ export class PromptDeliveries {
 /** The byte offsets (in the file, `start` being the buffer's own offset) of the rows in `buffer`
  * whose user text has `record`'s words, newest first. One offset per row. */
 export function matchingOffsets(buffer: Buffer, start: number, record: { hash: string; at: number }): TranscriptEntry[] {
-  const entries: TranscriptEntry[] = [];
+  const entries: TranscriptEntry[] = [], items: TranscriptEntry[] = [];
+  // A Codex rollout writes each user turn twice, as a `user_message` event and a user `response_item`:
+  // the event alone is the turn. Only a thread materialized from Codex 0.155's history has items without events.
+  let events = false;
   const lines = buffer.toString("utf8").split("\n");
   let offset = start + buffer.length;
   for (let index = lines.length - 1; index >= 0; index--) {
@@ -463,12 +487,14 @@ export function matchingOffsets(buffer: Buffer, start: number, record: { hash: s
     // Rows are not in time order: Claude writes a queued message's attachment rows, stamped when it was
     // typed, after the queue removal that took it. An older row is skipped, never the end of the scan,
     // or a message typed after an earlier queued one is never found (seen 2026-10-17: taken, reported failed).
+    const payload = object(row.payload), item = row.type === "response_item" && payload.type === "message";
+    if (row.type === "event_msg" && payload.type === "user_message") events = true;
     const stamp = Date.parse(String(row.timestamp ?? ""));
     if (Number.isFinite(stamp) && stamp < record.at - 5_000) continue;
     // One entry per row, even when its content repeats the words.
-    if (userTexts(row).some(text => promptHash(text) === record.hash)) entries.push({ offset, hook: row.type === "user", ...(Number.isFinite(stamp) ? { at: stamp } : {}) });
+    if (userTexts(row).some(text => promptHash(text) === record.hash)) (item ? items : entries).push({ offset, hook: row.type === "user", ...(Number.isFinite(stamp) ? { at: stamp } : {}) });
   }
-  return entries;
+  return events ? entries : [...entries, ...items].sort((a, b) => b.offset - a.offset);
 }
 
 async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<TranscriptEntry[]> {

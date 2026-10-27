@@ -240,6 +240,69 @@ describe("a message the agent never takes fails loudly", () => {
     await store.observe("default", [pane("idle")]);
     expect(store.status("steer-0001", target).state).toBe("delivered");
   });
+
+  describe("in a Codex transcript", () => {
+    let rows: { offset: number; hook: boolean; at: number }[];
+    const codex = () => { const store = new PromptDeliveries(file, () => clock, async () => rows); stores.push(store); return store; };
+    /** The agent's turn ends and it stays idle until the message is checked against the transcript. */
+    async function giveUp(store: PromptDeliveries) {
+      clock += 1; store.stopped(target);
+      await store.observe("default", [pane("idle")]);
+      clock += DELIVERY_GIVE_UP_MS;
+      await store.observe("default", [pane("idle")]);
+    }
+    beforeEach(() => { rows = []; });
+
+    it("does not count the row of an identical message sent moments before", async () => {
+      const store = codex();
+      await send(store, "yes-first", "yes");
+      rows = [{ offset: 0, hook: true, at: clock + 100 }];
+      await store.submitted(target, "yes");
+      expect(store.status("yes-first", target).state).toBe("delivered");
+      // Within the scan's lookback, so the first message's row is still read.
+      clock += 2_000; await send(store, "yes-second", "yes");
+      await giveUp(store);
+      expect(store.status("yes-second", target).state).toBe("failed");
+    });
+
+    it("counts a row written after the message was typed", async () => {
+      const store = codex();
+      await send(store, "yes-only", "yes");
+      rows = [{ offset: 0, hook: false, at: clock + 100 }];
+      await giveUp(store);
+      expect(store.status("yes-only", target).state).toBe("delivered");
+    });
+
+    it("settles one of two identical messages per row", async () => {
+      const store = codex();
+      await send(store, "yes-a", "yes");
+      clock += 10; await send(store, "yes-b", "yes");
+      rows = [{ offset: 0, hook: false, at: clock + 100 }];
+      await giveUp(store);
+      expect([store.status("yes-a", target).state, store.status("yes-b", target).state]).toEqual(["delivered", "failed"]);
+    });
+
+    it("leaves a row to the earlier identical message its hook settled before the row was written", async () => {
+      const store = codex();
+      await send(store, "yes-hooked", "yes");
+      await store.submitted(target, "yes");
+      clock += 1_000; await send(store, "yes-later", "yes");
+      // The first message's row is written (and stamped) after the second was typed.
+      rows = [{ offset: 0, hook: true, at: clock + 50 }];
+      await giveUp(store);
+      expect(store.status("yes-later", target).state).toBe("failed");
+    });
+
+    it("takes its own row when an earlier identical message its hook settled has one too", async () => {
+      const store = codex();
+      await send(store, "yes-hooked", "yes");
+      await store.submitted(target, "yes");
+      clock += 1_000; await send(store, "yes-later", "yes");
+      rows = [{ offset: 0, hook: true, at: clock + 50 }, { offset: 100, hook: false, at: clock + 100 }];
+      await giveUp(store);
+      expect(store.status("yes-later", target).state).toBe("delivered");
+    });
+  });
 });
 
 describe("a message the agent took into its running turn", () => {
@@ -539,6 +602,15 @@ describe("a message the agent took into its running turn", () => {
     expect(offsets.map(entry => entry.offset)).toEqual([100 + Buffer.byteLength(lines[0] + "\n" + lines[1] + "\n"), 100 + Buffer.byteLength(lines[0] + "\n")]);
     expect(offsets.every(entry => entry.hook)).toBe(true);
     expect(matchingOffsets(Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content: "yes", timestamp: "2026-10-14T00:00:02.000Z" }) + "\n"), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false, at: Date.parse("2026-10-14T00:00:02.000Z") }]);
+  });
+  it("counts a Codex turn's user_message event and its response_item copy as one entry", () => {
+    const at = Date.parse("2026-10-14T00:00:00.000Z"), stamp = "2026-10-14T00:00:01.000Z";
+    const item = JSON.stringify({ type: "response_item", timestamp: stamp, payload: { type: "message", role: "user", content: [{ type: "input_text", text: "yes" }] } });
+    const event = JSON.stringify({ type: "event_msg", timestamp: stamp, payload: { type: "user_message", message: "yes" } });
+    const rollout = Buffer.from(`${item}\n${event}\n`);
+    expect(matchingOffsets(rollout, 0, { hash: promptHash("yes"), at })).toEqual([{ offset: Buffer.byteLength(item + "\n"), hook: false, at: Date.parse(stamp) }]);
+    // A thread materialized from Codex 0.155's history has only the items.
+    expect(matchingOffsets(Buffer.from(`${item}\n`), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false, at: Date.parse(stamp) }]);
   });
   it("finds a queued message taken mid-turn behind the older attachment rows Claude writes after it", () => {
     // 2026-10-17: two voice messages queued, both taken at :27; the attachment of the first,
