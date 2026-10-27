@@ -24,7 +24,10 @@ import { atomicInPrivateDir, bridgeRoot, provider, serverName, sessionId, type P
 
 /** Longest final reply kept from a Stop payload, in UTF-8 bytes (the receipt's limit). */
 export const TURN_REPLY_LIMIT = 4000;
-const MAX_RECORD_BYTES = 16_384;
+/** Most background tasks a record keeps from one Stop, running ones first. */
+export const STOP_TASKS_LIMIT = 256;
+// Room for a typical full task list beside the reply and cwd; a record still larger sheds tasks (`fitRecord`).
+const MAX_RECORD_BYTES = 65_536;
 
 // Not strict: a field a newer Hook adds (as `stop.cwd` was) is dropped on
 // read here, never a reason to throw the pane's record away.
@@ -45,8 +48,10 @@ const turnRecordSchema = z.object({
     /** The agent's working directory when the turn stopped: where its uncommitted work would be. */
     cwd: z.string().max(4096).optional(),
     /** Claude: the background tasks the Stop listed, by id (a sub-agent's is its agent id), still running
-     * or finished. The child tree trusts it over its quiet-transcript guess (transcript-claude.ts). */
-    tasks: z.object({ running: z.array(taskId).max(64), finished: z.array(taskId).max(64) }).optional(),
+     * or finished. The child tree trusts it over its quiet-transcript guess (transcript-claude.ts).
+     * `truncated`: the Stop listed more than STOP_TASKS_LIMIT; finished ones were dropped first. */
+    tasks: z.object({ running: z.array(taskId).max(STOP_TASKS_LIMIT), finished: z.array(taskId).max(STOP_TASKS_LIMIT),
+      truncated: z.boolean().optional() }).refine(tasks => tasks.running.length + tasks.finished.length <= STOP_TASKS_LIMIT).optional(),
   }).optional(),
   at: z.string().datetime(),
 });
@@ -81,16 +86,19 @@ export function truncateUtf8(value: string, limit = TURN_REPLY_LIMIT): { text: s
   return { text: bytes.subarray(0, end).toString("utf8"), truncated: true };
 }
 
-/** A Stop's background task list as ids still running and ids finished; undefined when it sent none. */
-function stopTasks(value: unknown): { running: string[]; finished: string[] } | undefined {
+/** A Stop's background task list as ids still running and ids finished; undefined when it sent none.
+ * Past STOP_TASKS_LIMIT, finished ids go before running ones and the list says it was cut. */
+function stopTasks(value: unknown): { running: string[]; finished: string[]; truncated?: true } | undefined {
   if (!Array.isArray(value)) return undefined;
   const running: string[] = [], finished: string[] = [];
-  for (const task of value.slice(0, 64)) {
+  for (const task of value) {
     const { id, running: live } = (task ?? {}) as { id?: unknown; running?: unknown };
     if (typeof id !== "string" || !taskId.safeParse(id).success || typeof live !== "boolean") continue;
     (live ? running : finished).push(id);
   }
-  return { running, finished };
+  if (running.length + finished.length <= STOP_TASKS_LIMIT) return { running, finished };
+  const kept = running.slice(0, STOP_TASKS_LIMIT);
+  return { running: kept, finished: finished.slice(0, STOP_TASKS_LIMIT - kept.length), truncated: true };
 }
 
 /** The record after one lifecycle event; undefined for events that say nothing about turns.
@@ -116,6 +124,19 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
       ...(tasks ? { tasks } : {}),
       ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}),
       ...(event.cwd && path.isAbsolute(event.cwd) && event.cwd.length <= 4096 ? { cwd: event.cwd } : {}) };
+  }
+  return fitRecord(record);
+}
+
+/** `record` within MAX_RECORD_BYTES, which readRecord would otherwise throw away whole: its Stop's
+ * finished tasks go first, then running ones, and the list says it was cut. */
+function fitRecord(record: TurnRecord): TurnRecord {
+  const tasks = record.stop?.tasks;
+  while (tasks && Buffer.byteLength(JSON.stringify(record)) > MAX_RECORD_BYTES && (tasks.finished.length || tasks.running.length)) {
+    const over = Buffer.byteLength(JSON.stringify(record)) - MAX_RECORD_BYTES, drop = Math.max(1, Math.ceil(over / 64));
+    const list = tasks.finished.length ? tasks.finished : tasks.running;
+    list.splice(Math.max(0, list.length - drop));
+    tasks.truncated = true;
   }
   return record;
 }
@@ -176,7 +197,7 @@ export function readTurn(server: string, pane: string): Promise<TurnRecord | und
   return readRecord(turnPath(server, pane));
 }
 
-export interface StopTasks { seq: number; at: string; running: string[]; finished: string[] }
+export interface StopTasks { seq: number; at: string; running: string[]; finished: string[]; truncated?: boolean }
 const STOP_TASKS_CACHE_MS = 2_000;
 let stopTasksCache: { at: number; root: string; bySession: Promise<Map<string, StopTasks>> } | undefined;
 
@@ -188,13 +209,16 @@ export async function latestStopTasks(source: Provider, session: string): Promis
     stopTasksCache = { at: now, root, bySession: (async () => {
       // The conversation's newest record decides, list or none: a resume in another pane (whose agents died
       // with the old process) outdates the list a closed pane's record still holds.
+      // Panes are read in name order, and a record written in the same millisecond as another wins only when
+      // its last event came after its own Stop (the pane that went on), so a tie never depends on directory order.
       const newest = new Map<string, TurnRecord>();
-      for (const server of await readdir(root).catch(() => [] as string[])) {
-        for (const name of (await readdir(path.join(root, server)).catch(() => [] as string[])).filter(name => name.endsWith(".json"))) {
+      for (const server of (await readdir(root).catch(() => [] as string[])).sort()) {
+        for (const name of (await readdir(path.join(root, server)).catch(() => [] as string[])).filter(name => name.endsWith(".json")).sort()) {
           const record = await readRecord(path.join(root, server, name));
           if (!record) continue;
           const key = `${record.source}\0${record.session}`, previous = newest.get(key);
-          if (!previous || Date.parse(record.at) > Date.parse(previous.at)) newest.set(key, record);
+          const at = Date.parse(record.at), before = previous ? Date.parse(previous.at) : -Infinity;
+          if (at > before || (at === before && record.stop?.seq !== record.seq && previous?.stop?.seq === previous?.seq)) newest.set(key, record);
         }
       }
       const found = new Map<string, StopTasks>();

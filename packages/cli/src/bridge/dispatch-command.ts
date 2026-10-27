@@ -29,6 +29,22 @@ export async function runDispatch(args: string[]): Promise<number> {
     const origin = await terminalPaneFromEnv();
     console.log(JSON.stringify(await hookRequest("/v1/dispatch/returns", { ...(origin ? { origin } : {}) }), null, 2)); return 0;
   }
+  if (args[0] === "returns" && args.length <= 3 && args.slice(1).every(arg => arg === "--watch" || arg === "--json")) {
+    const origin = await terminalPaneFromEnv();
+    const read = async () => {
+      const answer = await hookRequest("/v1/dispatch/returns", { ...(origin ? { origin } : {}) });
+      return Array.isArray(answer.returns) ? answer.returns as Json[] : [];
+    };
+    // `returns --json` is `returns`, whose answer is JSON already.
+    if (!args.includes("--watch")) { console.log(JSON.stringify({ returns: await read() }, null, 2)); return 0; }
+    const { watchReturns } = await import("./dispatch-returns.js");
+    const stop = new AbortController();
+    // The first Ctrl-C ends the watch after the read in flight (whose returns are already marked read and
+    // still print); a second one leaves at once.
+    process.on("SIGINT", () => { if (stop.signal.aborted) process.exit(130); stop.abort(); });
+    await watchReturns(read, line => console.log(line), { signal: stop.signal, json: args.includes("--json"), warn: line => console.error(line) });
+    return 130;
+  }
   if (args[0] === "usage" && args.slice(1).every(arg => arg === "--json")) {
     const { readAccountUsage, formatAccountUsage } = await import("./account-usage.js");
     const view = await readAccountUsage();

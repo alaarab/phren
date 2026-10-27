@@ -132,7 +132,7 @@ export class AgentHooks {
    * from the pane's own numbered lines, whose answers gain an Enter, and
    * `questions` carries a released AskUserQuestion's normalized question set
    * with the index currently being answered. */
-  private terminalPrompts = new Map<string, { tool: string; message: string; request?: string; requestKind?: RequestKind; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
+  private terminalPrompts = new Map<string, { tool: string; input?: unknown; message: string; request?: string; requestKind?: RequestKind; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
   /** The last time each pane's terminal lines were read for a dialog, so a
    * status tick reads them at most once per three seconds per pane. */
   private dialogReads = new Map<string, number>();
@@ -510,7 +510,7 @@ export class AgentHooks {
     const questions = tool === "AskUserQuestion" ? terminalQuestions(body.input) : undefined;
     const choice = questions ? questionChoice(questions, 0) : terminalChoice(body.input);
     const summary = approvalSummary({ tool, input: body.input, question: tool === "AskUserQuestion" });
-    this.terminalPrompts.set(JSON.stringify(target), { tool,
+    this.terminalPrompts.set(JSON.stringify(target), { tool, input: body.input,
       message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}),
       ...summary,
       ...(questions ? { questions, questionIndex: 0 } : {}), at: Date.now() });
@@ -1188,6 +1188,28 @@ export class AgentHooks {
     this.clearTerminalPrompt(dialog.target);
     this.dropDialogPush(key);
   }
+  /** A held request the owner answered in the pane's own terminal: Claude
+   * moves on without closing the hook, so the hold would show its card until
+   * it times out. A later callback from the same conversation proves the
+   * dialog is gone: the call it held ran (its PostToolUse), the turn ended or
+   * took a new prompt, or the agent asked something else. */
+  private settleTerminalAnswered(target: Target, body: Json) {
+    const event = String(body.event), key = JSON.stringify(target);
+    const asked = event === "PermissionRequest" ? JSON.stringify([body.tool, body.input]) : undefined;
+    const settled = (held: { tool: string; input: unknown }) => ["Stop", "UserPromptSubmit"].includes(event)
+      || (event === "PermissionRequest" && JSON.stringify([held.tool, held.input]) !== asked)
+      || (event === "PostToolUse" && held.tool === body.tool && JSON.stringify(held.input) === JSON.stringify(body.input));
+    for (const [action, held] of this.pending) {
+      if (held.appServer || JSON.stringify(held.target) !== key || !settled(held)) continue;
+      clearTimeout(held.timer); this.pending.delete(action); this.pushedHolds.delete(action); this.dropPushBindings(action);
+      if (!held.response.destroyed) held.response.end("{}");
+    }
+    const hold = this.releasedHolds.get(key), remembered = this.terminalPrompts.get(key);
+    if (remembered && !remembered.questions?.length && settled({ tool: remembered.tool, input: remembered.input })) {
+      this.terminalPrompts.delete(key);
+      if (hold) { this.dropPushBindings(hold.action); this.releasedHolds.delete(key); }
+    }
+  }
   private dropPushBindings(action: string) {
     this.pushBindings.dropAction(action);
   }
@@ -1321,6 +1343,7 @@ export class AgentHooks {
         // A prompt or a turn's end also moves a server a nested `codex exec`
         // had taken (before thread-origin.ts) back to the TUI's thread.
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event)) && target.source === "codex" && !daemon) codexServers.follow(target.server, target.pane, target.session);
+        this.settleTerminalAnswered(target, body);
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {

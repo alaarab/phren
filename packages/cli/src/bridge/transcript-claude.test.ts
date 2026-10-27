@@ -299,6 +299,62 @@ describe("Claude background agents the parent's Stop lists", () => {
     expect(await f.running()).toEqual(ids);
   });
 
+  it("keeps a resumed agent running until it finishes again, past the end_turn it ended on before", async () => {
+    const f = await lead();
+    const child = path.join(path.dirname(f.file), session, "subagents", "agent-agent9.jsonl"), now = Date.now();
+    const reply = (at: number) => appendFile(child, JSON.stringify({ type: "assistant", timestamp: new Date(at).toISOString(),
+      message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] } }) + "\n");
+    await reply(now - 1_000);
+    await stopped([...ids.slice(0, 8).map(id => ({ id, status: "running" })), { id: "agent9", status: "completed" }]);
+    // Resumed after the Stop; the tree is read before the child writes anything new.
+    await f.append({ type: "user", timestamp: new Date(now + 1_000).toISOString(), toolUseResult: { success: true, message: "Resuming agent agent9", resumedAgentId: "agent9" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call-resume", content: "ok" }] } });
+    vi.useFakeTimers({ now: now + 2_000, toFake: ["Date"] });
+    try { expect(await f.running()).toEqual(ids); } finally { vi.useRealTimers(); }
+    // Its unchanged parent is looked at again on a timer, and the next finished reply ends it.
+    await reply(now + 3_000);
+    vi.useFakeTimers({ now: now + 9_000, toFake: ["Date"] });
+    try { expect(await f.running()).toEqual(ids.slice(0, 8)); } finally { vi.useRealTimers(); }
+  });
+
+  it("ends a workflow's agents once the Stop lists the workflow finished", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-child-stop-")); roots.push(root);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+    const run = path.join(root, session, "subagents", "workflows", "wf_0f0ce397-aa1"); await mkdir(run, { recursive: true });
+    const file = path.join(root, `${session}.jsonl`);
+    await writeFile(file, JSON.stringify({ type: "user", toolUseResult: { status: "async_launched", taskId: "wtask01", taskType: "local_workflow", workflowName: "sweep", runId: "wf_0f0ce397-aa1" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call-wf", content: "ok" }] } }) + "\n");
+    await writeFile(path.join(run, "agent-afirst.jsonl"), JSON.stringify({ type: "user", isSidechain: true, sessionId: session, agentId: "afirst", message: { role: "user", content: "Go" } }) + "\n");
+    await writeFile(path.join(run, "journal.jsonl"), JSON.stringify({ type: "started", key: "k1", agentId: "afirst" }) + "\n");
+    const states = async () => (await claudeChildAgents(file, session)).map(child => [child.session, child.state]);
+    expect(await states()).toEqual([["afirst", "running"]]);
+    // No task-notification reached the parent; the Stop says the run is done.
+    await stopped([{ id: "wtask01", status: "completed" }]);
+    vi.useFakeTimers({ now: Date.now() + 3_000, toFake: ["Date"] });
+    try { expect(await states()).toEqual([["afirst", "completed"]]); } finally { vi.useRealTimers(); }
+    // Past the Stop's trust its quiet agent stays ended rather than running again.
+    vi.useFakeTimers({ now: Date.now() + CLAUDE_STOP_TRUST_MS + 60_000, toFake: ["Date"] });
+    try { expect(await states()).toEqual([["afirst", "completed"]]); } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps a quiet workflow agent running while the Stop lists its run as running", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-child-stop-")); roots.push(root);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+    const run = path.join(root, session, "subagents", "workflows", "wf_0f0ce397-bb2"); await mkdir(run, { recursive: true });
+    const file = path.join(root, `${session}.jsonl`), child = path.join(run, "agent-asecond.jsonl");
+    await writeFile(file, JSON.stringify({ type: "user", toolUseResult: { status: "async_launched", taskId: "wtask02", taskType: "local_workflow", workflowName: "sweep", runId: "wf_0f0ce397-bb2" },
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call-wf", content: "ok" }] } }) + "\n");
+    await writeFile(child, JSON.stringify({ type: "user", isSidechain: true, sessionId: session, agentId: "asecond", message: { role: "user", content: "Go" } }) + "\n");
+    await writeFile(path.join(run, "journal.jsonl"), JSON.stringify({ type: "started", key: "k1", agentId: "asecond" }) + "\n");
+    const old = new Date(Date.now() - CLAUDE_SKILL_QUIET_MS - 60_000);
+    await utimes(child, old, old);
+    const states = async () => (await claudeChildAgents(file, session)).map(entry => [entry.session, entry.state]);
+    expect(await states()).toEqual([["asecond", "completed"]]);
+    await stopped([{ id: "wtask02", status: "running" }]);
+    vi.useFakeTimers({ now: Date.now() + 3_000, toFake: ["Date"] });
+    try { expect(await states()).toEqual([["asecond", "running"]]); } finally { vi.useRealTimers(); }
+  });
+
   it("forgets a closed pane's Stop once the conversation is resumed in another pane", async () => {
     const f = await lead();
     await stopped(ids.map(id => ({ id, status: "running" })));

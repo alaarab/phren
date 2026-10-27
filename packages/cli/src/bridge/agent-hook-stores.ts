@@ -14,6 +14,15 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
     return sessionId.parse(value.session);
   } catch { return undefined; }
 }
+/** The conversation the last callback recorded for this pane's terminal and
+ * agent, without the process check: a cheap cross-check of Herdr's report. */
+export async function boundSession(server: string, pane: Json): Promise<string | undefined> {
+  try {
+    const value = object(JSON.parse(await readFile(bindingPath(server, String(pane.pane_id)), "utf8")));
+    if (value.terminal !== pane.terminal_id || value.source !== pane.agent) return undefined;
+    return sessionId.parse(value.session);
+  } catch { return undefined; }
+}
 
 export interface PushBinding { action: string; expiresAt: number }
 export class PushBindingStore {

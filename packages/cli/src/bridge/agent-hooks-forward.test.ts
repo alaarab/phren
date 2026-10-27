@@ -34,6 +34,17 @@ function ask(input: unknown = { command: "rm -rf build" }): Promise<string> {
   });
 }
 
+/** A later callback from the same conversation. */
+function event(body: Record<string, unknown>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST" }, res => {
+      let text = ""; res.on("data", chunk => { text += chunk; }); res.on("end", () => resolve(text));
+    });
+    req.on("error", reject);
+    req.end(JSON.stringify({ target, ...body }));
+  });
+}
+
 describe.skipIf(process.platform === "win32")("a dispatched worker's approval, forwarded to the dispatching Hook", () => {
   let bridge: string, previous: string | undefined, hooks: AgentHooks;
   const notify = vi.fn(async (_value: { binding: string; provider: string; computer?: string; request?: string; project?: string }) => true);
@@ -73,6 +84,27 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     await hooks.answer(target, card.actionId, "approve");
     expect(JSON.parse(await answer)).toMatchObject({ hookSpecificOutput: { decision: { behavior: "allow" } } });
     expect(hooks.workerApproval(target)).toBeUndefined();
+  });
+
+  it("drops a held ask the owner approved in the terminal once the call it held runs", async () => {
+    hooks.leaseDispatch([lease]);
+    const answer = ask();
+    await vi.waitFor(() => expect(hooks.approval(target)).toBeDefined());
+    await event({ event: "PostToolUse", tool: "Bash", input: { command: "ls" } });
+    expect(hooks.approval(target)).toBeDefined();
+    await event({ event: "PostToolUse", tool: "Bash", input: { command: "rm -rf build" } });
+    expect(await answer).toBe("{}");
+    expect(hooks.approval(target)).toBeUndefined();
+    expect(hooks.workerApproval(target)).toBeUndefined();
+    expect(hooks.terminalPrompt(target)).toBeUndefined();
+  });
+
+  it("forgets a released ask once the turn ends, though the dialog read never ran", async () => {
+    hooks.leaseDispatch([lease]);
+    expect(await ask()).toBe("{}");
+    expect(hooks.terminalPrompt(target)).toMatchObject({ toolName: "Bash" });
+    await event({ event: "Stop" });
+    expect(hooks.terminalPrompt(target)).toBeUndefined();
   });
 
   it("hands an unleased pane's ask straight to its terminal", async () => {
