@@ -311,11 +311,22 @@ instead of running. Build and test tools (`npm test`, `cargo test`, `tsc`)
 take any options except the ones that rewrite sources (`--fix`, `--write`),
 also after `--` (`npm run lint -- --fix` asks).
 
+These two sets of rules don't contradict each other. A build or test runs
+the project's own code, which can read or write anything the agent can, and
+`auto-confirm` runs it unprompted on purpose: that is what the mode is for.
+The read-only rules below check what a read-only command will show the
+agent. They don't sandbox a build.
+
 Some command lines ask because the shell or the command does more than its
 words show:
 
+- Every path a read-only command names must be inside the project (or an
+  allowed path), as written and where it really leads. So `cat /tmp/x`, and
+  `cat link` whose link points out of the project, ask. `/dev/null`,
+  `/dev/stdin` and the other device files don't.
 - `cd` moves where later commands' paths resolve, so each command after a `cd`
-  is checked from there. Some `cd`s ask:
+  is checked from there. `cd -P` moves to where the path really leads, as
+  bash does. Some `cd`s ask:
   - one outside the project, to `-`, or with no target (home);
   - one that may be skipped (after `&&` or `||`), one in a pipeline, or one
     with a `||` after it;
@@ -324,21 +335,31 @@ words show:
   directories) asks when a secret file is among the files it would read
   below where it starts. It also asks when it follows symlinks and one is
   there, or when there are too many files to look through.
-  - For `rg`, rg itself lists those files (`rg --files` with the run's own
-    filtering options), so its ignore files, hidden-file and glob rules
-    decide.
-  - `git grep` reads only tracked files unless told to read others, and asks
-    for a revision (its tree may hold deleted secrets).
+  - For `rg` and `grep -r`, the tool itself lists those files (`rg --files`,
+    or `grep -l` with the run's own `--include`, `--exclude` and
+    `--exclude-dir`). So its ignore files, hidden-file, glob and exclusion
+    rules decide.
+  - `git grep` reads the tracked files its pathspecs match (all of them below
+    cwd when it names none) unless told to read others. It asks for a
+    revision (its tree may hold deleted secrets).
+- `git diff`, `git log -p` and `git show` print the contents of files they
+  don't name. Git lists the paths they would print a patch of, for the same
+  revisions, pathspecs and commit filters, and the command asks when one is
+  a secret file. `git log -L` asks (its file is inside the value).
   - A root is looked at where it really leads, a symlink before the `..`
     after it.
 - Options that read the names of files from a list (`--files0-from`,
   `sha256sum -c`, `file -f`) ask, since the names are not on the line. So
-  do `jq -f` and a jq filter that uses `import` or `include`.
+  do `jq -f` and a jq program that starts with an `import`, `include` or
+  `module` directive (a field `.import` or a string `"include"` is fine).
 - These ask too:
   - a backslash at the end of a line, and a `#` comment;
   - a redirection to anything other than `>&1`, `>&2` or `/dev/null`;
-  - `printf -v` (it sets a variable, `PATH` among them);
-  - a `~name`, `~+` or `~-` word;
+  - `printf -v` and a printf format with `%n` (both set a variable, `PATH`
+    among them), or with an escape other than a plain one;
+  - bash's old arithmetic `$[…]`, quoted or not;
+  - a `~name`, `~+` or `~-` word (a quoted `'~/x'` is the file `~/x` in the
+    current directory, and is checked as that);
   - a `git log` format with `%G` (it runs gpg);
   - pathspec magic or `..` in `git grep`;
   - package scripts like `lint:fix` or `test:update`.
@@ -348,9 +369,13 @@ words show:
   fsmonitor hook, a pager, gpg or an index hook. An external diff, a diff
   driver's command or textconv, and clean/smudge filters can't be switched
   off that way. A git command that would run one asks when git's config sets
-  it, except the exact ones git-lfs and git-crypt install: diff programs for
-  `diff`, `show`, `log`, `blame` and `grep`, and filters for those and
-  `status`. A configured log format with `%G` also asks. In `auto-confirm`
+  it, except the exact ones git-lfs and git-crypt install:
+  - diff programs for `diff`, `show`, `blame`, and a `log` that prints a
+    patch or a diffstat;
+  - filters for `diff`, `blame`, `status` and `grep`.
+
+  A plain `git log -5` runs neither. A configured log format with `%G` also
+  asks. In `auto-confirm`
   an edit to a file under `.git` asks, since git's config and hooks are
   there.
 
