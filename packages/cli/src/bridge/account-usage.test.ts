@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { accountIdentity, formatAccountUsage, mergeAccountUsage, readAccountUsage, settleWindow, usageSummary, type ComputerUsage } from "./account-usage.js";
+import { accountIdentity, formatAccountUsage, mergeAccountUsage, placeholderTarget, readAccountUsage, settleWindow, usageSummary, type ComputerUsage } from "./account-usage.js";
 import { BridgeError } from "./protocol.js";
 import { capacityRoom, type AccountUsage } from "./usage.js";
 import { outOfQuota, roomFor } from "./dispatch.js";
@@ -71,6 +71,38 @@ describe("account usage merged by account", () => {
     expect(accounts.map(row => [row.id, row.from, row.leftPercent])).toEqual([
       ["claude|claude:home:default@Desk", "Desk", 80], ["claude|claude:home:default@Devbox", "Devbox", 30]]);
     expect(accountIdentity(codex(5), "Desk")).toBe("codex");
+  });
+
+  it("folds a Claude home that only has a label into the account that label names, and keeps one that names none out of the rows", () => {
+    const login = (key: string, label: string, email: string, plan: string): AccountUsage => ({ ...claude(key, "work", at(1), 30),
+      account: { id: "work", label, key, email }, subscription: { plan, checkedAt: at(1) } });
+    const empty = (home: string, label: string): AccountUsage => ({ source: "claude", windows: [], message: "Usage appears after Claude Code replies on this computer.",
+      account: { id: home, label, key: `claude:home:${home}` } });
+    const reports: ComputerUsage[] = [
+      { computer: "Desk", accounts: [login("claude:aaaaaaaaaaaa", "personal Max", "sam@example.com", "Max 20x"), empty("team", "sam Team"), empty("helpdesk", "help Team")] },
+      { computer: "Laptop", accounts: [login("claude:bbbbbbbbbbbb", "Claude", "sam@example.com", "Team"), empty("personal", "personal Max"), empty("max", "sam Max 20x")] },
+      { computer: "Server", accounts: [{ ...login("claude:cccccccccccc", "Claude", "help@example.com", "Team"), subscription: undefined }, empty("spare", "spare")] },
+    ];
+    const { accounts, noData } = mergeAccountUsage(reports, now);
+    expect(accounts.map(row => [row.id, row.computers])).toEqual([
+      ["claude|claude:cccccccccccc", [{ name: "Server", account: "work" }, { name: "Desk", account: "helpdesk" }]],
+      ["claude|claude:aaaaaaaaaaaa", [{ name: "Desk", account: "work" }, { name: "Laptop", account: "personal" }, { name: "Laptop", account: "max" }]],
+      ["claude|claude:bbbbbbbbbbbb", [{ name: "Laptop", account: "work" }, { name: "Desk", account: "team" }]],
+    ]);
+    expect(accounts.every(row => !row.message)).toBe(true);
+    // "spare" names no account: it is not a row, and Claude has numbers, so it is not listed as missing either.
+    expect(noData).toEqual([]);
+  });
+
+  it("matches a label to one account only when exactly one fits", () => {
+    const accounts = [{ labels: ["Claude"], email: "sam@example.com", plan: "Team" }, { labels: ["Claude"], email: "sam@example.com", plan: "Max 20x" },
+      { labels: ["Claude"], email: "sam@other.example" }];
+    expect(placeholderTarget("sam Team", accounts)).toBe(0);
+    expect(placeholderTarget("SAM  max 20x", accounts)).toBe(1);
+    expect(placeholderTarget("sam", accounts)).toBeUndefined();
+    expect(placeholderTarget("sam@other.example", accounts)).toBe(2);
+    expect(placeholderTarget("Claude", accounts)).toBeUndefined();
+    expect(placeholderTarget("sam Pro", accounts.slice(0, 2))).toBeUndefined();
   });
 
   it("says reset instead of an old percent once a window's reset passed, and flags the report stale", () => {
