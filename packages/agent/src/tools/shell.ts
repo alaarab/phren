@@ -4,7 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import type { AgentTool } from "./types.js";
 import type { PermissionConfig } from "../permissions/types.js";
-import { checkShellSafety, scrubEnv } from "../permissions/shell-safety.js";
+import { checkShellSafety, shellEnv } from "../permissions/shell-safety.js";
 import { wrapWithSandbox, classifySandboxDenial, classifyNetworkDenial, SandboxRequiredError } from "../permissions/kernel-sandbox.js";
 
 /** A positive whole number from the environment, else the fallback. */
@@ -230,7 +230,7 @@ function runForeground(
     try {
       child = spawn(exe, args, {
         cwd: opts.cwd,
-        env: scrubEnv(),
+        env: shellEnv(),
         stdio: ["ignore", "pipe", "pipe"],
         detached: posix,
       });
@@ -342,7 +342,7 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
         const child = spawn(exe, exeArgs, {
           cwd,
           stdio: ["ignore", fd, fd],
-          env: scrubEnv(),
+          env: shellEnv(),
           detached: true,
         });
 

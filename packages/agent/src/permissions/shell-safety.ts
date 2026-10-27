@@ -128,3 +128,31 @@ export function scrubEnv(): Record<string, string | undefined> {
 
   return env;
 }
+
+/** git config every agent shell command runs with, so a read never starts a program the repository's config
+ * names: no fsmonitor hook, no pager, no gpg for signatures. Passed as GIT_CONFIG_COUNT entries, which win
+ * over every config file. The helpers no override can switch off (external diff, diff drivers, textconv,
+ * filters) make an auto-approved git command ask instead (checker.ts `gitRunsHelpers`). */
+export const GIT_HARDENING: [string, string][] = [
+  ["core.fsmonitor", "false"],
+  ["core.pager", "cat"],
+  ["log.showSignature", "false"],
+];
+
+/** scrubEnv, plus GIT_HARDENING after any GIT_CONFIG_* entries already set. git takes no optional locks (a
+ * `git status` doesn't rewrite the index, so no index hook runs), and there is no CDPATH: `cd name` goes
+ * where the permission check resolved it. */
+export function shellEnv(): Record<string, string | undefined> {
+  const env = scrubEnv();
+  env.GIT_OPTIONAL_LOCKS = "0";
+  delete env.CDPATH;
+  const given = Number(env.GIT_CONFIG_COUNT);
+  let count = Number.isInteger(given) && given > 0 ? given : 0;
+  for (const [key, value] of GIT_HARDENING) {
+    env[`GIT_CONFIG_KEY_${count}`] = key;
+    env[`GIT_CONFIG_VALUE_${count}`] = value;
+    count++;
+  }
+  env.GIT_CONFIG_COUNT = String(count);
+  return env;
+}
