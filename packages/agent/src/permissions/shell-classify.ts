@@ -76,10 +76,15 @@ export function commandPaths(tokens: string[]): string[] | null {
 /**
  * A command that reads the files below a directory, not only the files it names: where it starts (cwd when
  * nothing is named), whether it follows symlinks, and which files it reads there. `all`: every file (grep -r,
- * diff -r, rg told to ignore no ignore file). `unignored`: what git doesn't ignore, and hidden files only with
- * `hidden` (rg's default). `tracked`: git's tracked files (git grep).
+ * diff -r). `rg`: what `rg --files` lists with `rgArgs`, the run's own filtering options (rg's ignore, hidden
+ * and glob rules are its own to apply). `tracked`: git's tracked files (git grep), each root an existing path.
  */
-export interface RecursiveRead { roots: string[]; follow: boolean; scope: "all" | "unignored" | "tracked"; hidden: boolean }
+export interface RecursiveRead { roots: string[]; follow: boolean; scope: "all" | "rg" | "tracked"; rgArgs?: string[] }
+
+/** rg's options that change which files it reads, short and long. */
+const RG_FILTERS = new Set(["-u", "-.", "-L", "-g", "-t", "-T", "-d", "--hidden", "--no-ignore", "--no-ignore-vcs", "--no-ignore-parent",
+  "--no-ignore-dot", "--unrestricted", "--follow", "--glob", "--iglob", "--glob-case-insensitive", "--type", "--type-not", "--type-add",
+  "--ignore-file", "--max-depth", "--no-config"]);
 
 /** Where a command reads every file below a directory (grep -r, rg, diff -r, git grep, git diff --no-index),
  * or null when it reads only the files named. The caller looks below each for a secret file, since no
@@ -100,21 +105,19 @@ export function recursiveReads(tokens: string[]): RecursiveRead | null {
     // Any -d value but an exact `read` or `skip` may recurse (GNU takes `rec`, BSD `RECURSE`).
     const recurse = follow || named(options, "-r", "--recursive")
       || options.some((o) => (o.name === "-d" || o.name === "--directories") && o.value !== "read" && o.value !== "skip");
-    return recurse ? { roots: read.paths.length ? read.paths : ["."], follow, scope: "all", hidden: true } : null;
+    return recurse ? { roots: read.paths.length ? read.paths : ["."], follow, scope: "all" } : null;
   }
   if (binary === "rg") {
     const read = parse(own(READ_ONLY_SPECS, "rg"), args);
     if (!read) return null;
     const { options } = read.parsed;
-    const u = options.filter((o) => o.name === "-u").length + (named(options, "--unrestricted") ? 1 : 0);
-    // A --glob overrides rg's ignore rules, as -u and --no-ignore do.
-    const all = u > 0 || named(options, "--no-ignore", "--no-ignore-vcs", "-g", "--glob", "--iglob");
-    return { roots: read.paths.length ? read.paths : ["."], follow: named(options, "-L", "--follow"),
-      scope: all ? "all" : "unignored", hidden: u > 1 || named(options, "-.", "--hidden") };
+    const rgArgs = options.filter((o) => RG_FILTERS.has(o.name))
+      .flatMap((o) => (o.value === undefined ? [o.name] : o.name.startsWith("--") ? [`${o.name}=${o.value}`] : [o.name, o.value]));
+    return { roots: read.paths, follow: named(options, "-L", "--follow"), scope: "rg", rgArgs };
   }
   if (binary === "diff") {
     const read = parse(own(READ_ONLY_SPECS, "diff"), args);
-    return read && named(read.parsed.options, "-r", "--recursive") ? { roots: read.paths, follow: true, scope: "all", hidden: true } : null;
+    return read && named(read.parsed.options, "-r", "--recursive") ? { roots: read.paths, follow: true, scope: "all" } : null;
   }
   if (binary === "git") {
     const git = gitSubcommand(args);
@@ -122,12 +125,12 @@ export function recursiveReads(tokens: string[]): RecursiveRead | null {
     const read = git && spec ? parse(spec, git.rest) : null;
     if (!git || !read) return null;
     const { options } = read.parsed;
-    // Two directories compared, the files on one side only printed whole.
-    if (git.sub === "diff" && named(options, "--no-index")) return { roots: read.paths, follow: true, scope: "all", hidden: true };
+    // Two directories compared (`--no-index`, or by git itself when a path is outside the work tree), the
+    // files on one side only printed whole: every directory operand is read through.
+    if (git.sub === "diff") return { roots: read.paths, follow: true, scope: "all" };
     if (git.sub !== "grep") return null;
-    // Its operands are revisions or pathspecs; each that is a directory is searched too.
-    const untracked = named(options, "--untracked", "--no-index", "--no-exclude-standard");
-    return { roots: [".", ...read.paths], follow: false, scope: untracked ? "all" : "tracked", hidden: true };
+    const everything = named(options, "--untracked", "--no-index", "--no-exclude-standard", "--recurse-submodules");
+    return { roots: [".", ...read.paths], follow: false, scope: everything ? "all" : "tracked" };
   }
   return null;
 }
@@ -243,6 +246,8 @@ export function splitCommandWords(command: string): CommandWords[] | null {
       continue;
     }
     if (variable(i)) expands = true;
+    // A comment: bash ignores the rest of the line, quotes in it included, which this reader would not.
+    if (c === "#" && !inToken) return null;
     if (c === "'" || c === '"') { quote = c; inToken = true; continue; }
     if (c === "\\") { current += command[i + 1] ?? ""; inToken = true; i++; continue; }
     if (c === "`" || (c === "$" && command[i + 1] === "(") || c === "<" && command[i + 1] === "(") return null;

@@ -1,6 +1,6 @@
 // Auto-confirm bypasses a Codex review of #660 found (2026-10-27). Each command line was auto-approved
 // in a project cwd; each must now ask, and the everyday reads and builds must still run unprompted.
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -11,6 +11,8 @@ import type { PermissionConfig } from "../permissions/types.js";
 
 let root = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+// rg's own listing decides what an rg run reads; without rg installed an rg command can't run at all.
+const hasRg = spawnSync("rg", ["--version"]).status === 0;
 const verdict = (command: string, cwd = root) => {
   const config: PermissionConfig = { mode: "auto-confirm", projectRoot: root, allowedPaths: [] };
   return checkPermission(config, "shell", { command, cwd }).verdict;
@@ -87,17 +89,22 @@ describe("the auto-approve bypasses ask", () => {
   });
 
   // 7. A recursive read reaches the files below its operand.
-  it.each(["grep -r . .", "grep -R x config", "grep -d recurse x .", "rg x", "rg x .", "diff -r src config",
-    "git grep x"])("%s", (command) => {
+  it.each(["grep -r . .", "grep -R x config", "grep -d recurse x .", "diff -r src config", "git grep x"])("%s", (command) => {
+    expect(verdict(command)).toBe("ask");
+  });
+
+  it.runIf(hasRg).each(["rg x", "rg x ."])("%s", (command) => {
     expect(verdict(command)).toBe("ask");
   });
 
   it("asks for a recursive read that follows a symlink below it", () => {
-    fs.symlinkSync(path.join(root, "README.md"), path.join(root, "src", "link"));
+    fs.symlinkSync(path.join(root, "config", "secrets.json"), path.join(root, "src", "link"));
     try {
-      expect(verdict("rg -L x src")).toBe("ask");
       expect(verdict("grep -R x src")).toBe("ask");
-      expect(verdict("rg x src")).toBe("allow");
+      if (hasRg) {
+        expect(verdict("rg -L x src")).toBe("ask");
+        expect(verdict("rg x src")).toBe("allow");
+      }
     } finally { fs.rmSync(path.join(root, "src", "link")); }
   });
 
@@ -113,8 +120,10 @@ describe("the auto-approve bypasses ask", () => {
       expect(verdict("git diff -- README.md")).toBe("allow");
       git("config", key, value);
       expect(verdict("git diff -- README.md")).toBe("ask");
-      expect(verdict("git status")).toBe("ask");
       expect(verdict("cd src && git log -1")).toBe("ask");
+      // Status runs filters, never a diff program; rev-parse runs neither.
+      expect(verdict("git status")).toBe(key.startsWith("filter.") ? "ask" : "allow");
+      expect(verdict("git rev-parse HEAD")).toBe("allow");
     });
 
   // 10. printf -v assigns a variable, PATH among them.
@@ -153,7 +162,7 @@ describe("the fixes' own gaps ask", () => {
     fs.writeFileSync(path.join(outside, ".aws", "credentials"), "x\n");
     fs.symlinkSync(path.join(outside, ".aws"), path.join(root, "awslink"));
     try {
-      for (const command of ["rg x awslink", "grep -r x awslink", "rg x awslink/"]) expect(verdict(command)).toBe("ask");
+      for (const command of ["grep -r x awslink", ...(hasRg ? ["rg x awslink", "rg x awslink/"] : [])]) expect(verdict(command)).toBe("ask");
     } finally { fs.unlinkSync(path.join(root, "awslink")); fs.rmSync(outside, { recursive: true, force: true }); }
   });
 
@@ -179,11 +188,86 @@ describe("the fixes' own gaps ask", () => {
   });
 });
 
+// Found by a second adversarial review.
+describe("the second review's gaps ask", () => {
+  it("asks for a comment, whose quotes bash ignores", () => {
+    expect(isAutoApprovableCommand("echo #'\nrm -rf src\n#'")).toBe(false);
+    expect(verdict("echo #'\nrm -rf src\n#'")).toBe("ask");
+    expect(verdict("ls # list")).toBe("ask");
+    expect(verdict("echo a#b")).toBe("allow");
+  });
+
+  it.each(["false && cd src; grep -r KEY .", "true || cd src && grep -r KEY .", "ls && cd src; cat ../secrets.json"])("a cd that may be skipped: %s", (command) => {
+    expect(verdict(command)).toBe("ask");
+  });
+
+  it("resolves a recursive root's `..` after the symlink before it", () => {
+    fs.mkdirSync(path.join(root, "ws", "packages", "app"), { recursive: true });
+    fs.mkdirSync(path.join(root, "ws", "node_modules", "@me"), { recursive: true });
+    fs.writeFileSync(path.join(root, "ws", "packages", "app", "secrets.json"), "x\n");
+    fs.symlinkSync(path.join(root, "ws", "packages", "app"), path.join(root, "ws", "node_modules", "@me", "app"));
+    try {
+      expect(verdict("grep -r KEY ws/node_modules/@me/app/..")).toBe("ask");
+      expect(verdict("diff -r src ws/node_modules/@me/app/..")).toBe("ask");
+    } finally { fs.rmSync(path.join(root, "ws"), { recursive: true, force: true }); }
+  });
+
+  it.each(["git diff /var/empty ~/.ssh", "diff ~/.aws credentials", "cat ~/.aws", "git grep KEY HEAD~5", "git grep --recurse-submodules KEY"])("%s", (command) => {
+    expect(verdict(command)).toBe("ask");
+  });
+
+  it("asks for a configured log format that verifies signatures", () => {
+    expect(verdict("git log -5")).toBe("allow");
+    git("config", "pretty.mine", "format:%h %G?");
+    expect(verdict("git log -5")).toBe("ask");
+    git("config", "--unset", "pretty.mine");
+    git("config", "format.pretty", "format:%G?");
+    expect(verdict("git log -5")).toBe("ask");
+    expect(verdict("git status")).toBe("allow");
+  });
+
+  it("asks before an edit under .git", () => {
+    const edit = (p: string) => checkPermission({ mode: "auto-confirm", projectRoot: root, allowedPaths: [] }, "edit_file", { path: p }).verdict;
+    expect(edit(path.join(root, ".git", "config"))).toBe("ask");
+    expect(edit(".git/hooks/post-index-change")).toBe("ask");
+    expect(edit(path.join(root, "src", "a.ts"))).toBe("allow");
+  });
+
+  it.runIf(process.platform === "darwin")("finds a project git-crypt behind a path in another case", () => {
+    fs.writeFileSync(path.join(root, "git-crypt"), "");
+    try {
+      git("config", "diff.git-crypt.textconv", `"${root.toUpperCase()}/git-crypt" diff`);
+      expect(verdict("git diff")).toBe("ask");
+    } finally { fs.rmSync(path.join(root, "git-crypt")); }
+  });
+});
+
+describe("an rg run is checked against rg's own file list", () => {
+  it("passes the run's filtering options and roots to `rg --files` and checks what it lists", () => {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "phren-fake-rg-"));
+    const log = path.join(bin, "args");
+    // Lists whatever LIST_FILE holds, after recording its arguments.
+    fs.writeFileSync(path.join(bin, "rg"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${log}"\ncat "$LIST_FILE"\n`, { mode: 0o755 });
+    const list = path.join(bin, "list");
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    vi.stubEnv("LIST_FILE", list);
+    try {
+      fs.writeFileSync(list, "src/a.ts\0");
+      expect(verdict("rg -n --hidden -g '*.ts' -u pattern src")).toBe("allow");
+      expect(fs.readFileSync(log, "utf-8").trim().split("\n")).toEqual(["--files", "--null", "--hidden", "-g", "*.ts", "-u", "--", "src"]);
+      fs.writeFileSync(list, "src/a.ts\0config/secrets.json\0");
+      expect(verdict("rg pattern")).toBe("ask");
+      expect(fs.readFileSync(log, "utf-8").trim().split("\n")).toEqual(["--files", "--null", "--"]);
+    } finally { fs.rmSync(bin, { recursive: true, force: true }); }
+  });
+});
+
 describe("recursive reads and git config the owner's tools set up", () => {
-  it("lets rg skip what git ignores and hidden files, as rg does", () => {
+  it.runIf(hasRg)("lets rg skip what it ignores and hidden files, as rg itself lists them", () => {
     expect(verdict("rg x pkg")).toBe("allow");
     expect(verdict("cd pkg && rg x")).toBe("allow");
-    for (const command of ["rg --hidden x pkg", "rg -. x pkg", "rg -u x pkg", "rg --no-ignore x pkg", "rg -g '*' x pkg", "grep -r x pkg"]) {
+    for (const command of ["rg --hidden x pkg", "rg -. x pkg", "rg -u x pkg", "rg --unrestricted --unrestricted x pkg", "rg --no-ignore x pkg",
+      "rg -g '*' x pkg", "grep -r x pkg"]) {
       expect(verdict(command)).toBe("ask");
     }
   });
