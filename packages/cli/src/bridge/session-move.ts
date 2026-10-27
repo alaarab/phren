@@ -37,7 +37,7 @@ import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { findPane } from "./herdr.js";
 import { briefArrival, briefId, briefRoot, assertUnusedLaunchId, writeLaunchBrief } from "./launch-brief.js";
 import { atomic, BridgeError, bridgeRoot, object, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
-import { publicAssistant } from "./schedule-watch.js";
+import { finalTurnFromLines, isClaudeUsageLimit, publicAssistant } from "./schedule-watch.js";
 import type { TerminalProvider } from "./terminal.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 
@@ -53,8 +53,10 @@ export const moveRequestSchema = z.object({
   /** `resume` switches a Claude conversation to another account on this
    * computer without a hand-off: the transcript is copied into the target
    * account's home and the same conversation resumes there (`claude --resume`),
-   * so an account at its usage limit can still switch. */
-  continuation: z.enum(["handoff", "resume"]).default("handoff"),
+   * so an account at its usage limit can still switch. `summary-by-target` (a move to another computer):
+   * the source is not asked for a hand-off; the new agent there builds one from the copied conversation.
+   * A source whose last turn ended on its usage limit is moved this way without asking. */
+  continuation: z.enum(["handoff", "resume", "summary-by-target"]).default("handoff"),
   /** Kept on a retry: the same id returns the move already under way. */
   id: z.string().uuid().optional(),
   /** How long the agent gets to write its hand-off before Phren builds one. */
@@ -74,7 +76,9 @@ const moveRecordSchema = z.object({
   accountChoice: z.string().max(400).optional(),
   project: projectName.optional(),
   mode: z.enum(["replace", "new-chat"]).optional(),
-  continuation: z.literal("resume").optional(),
+  /** `resume`: the same conversation under another account here. `summary-by-target`: the source was out of
+   * usage, so the agent on the other computer builds the hand-off from the copied conversation. */
+  continuation: z.enum(["resume", "summary-by-target"]).optional(),
   modeForced: z.literal("conductor").optional(),
   handedOffTo: z.object({ computer: z.string().optional(), target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
   handedOffFrom: z.object({ target: targetSchema, title: z.string().max(200) }).strict().optional(),
@@ -374,6 +378,66 @@ export function fallbackHandoff(input: { reason: string; from: string; entries: 
   return input.original ? withOriginalBrief(head, input.original, Number.MAX_SAFE_INTEGER, "the original brief file") : head;
 }
 
+/** Whether a Claude conversation's last turn ended on its subscription's usage limit (Claude's own
+ * rate-limit row): its agent cannot answer a hand-off request. */
+export function sourceOutOfUsage(lines: readonly string[], source: Provider): boolean {
+  return source === "claude" && isClaudeUsageLimit(finalTurnFromLines(lines, "claude").error);
+}
+
+/** Room left in a cross-computer brief for the copied conversation, once the rest of the hand-off is in. */
+const TRANSCRIPT_MARGIN = 2_000;
+/** What of the original dispatch brief is kept ahead of the conversation: the oldest turns, which state the task, go first. */
+const ORIGINAL_RESERVE = 8_000;
+
+/**
+ * The hand-off for a source that does not write one (its account is out of usage, or the owner asked), for a
+ * fresh agent on the target computer to build itself: what happened, then as much of the conversation as fits
+ * in `room` characters, newest messages kept, oldest first. The target agent writes its own summary from it first.
+ */
+export function targetSummaryBody(input: { from: string; exhausted: boolean; entries: readonly TailEntry[]; room: number; original?: string; dispatch?: string; label?: string;
+  /** Each message as it will be sent (paths replaced, credentials redacted), so it is measured at its sent size. */
+  prepare?: (text: string) => string }): string {
+  const head = [
+    input.exhausted
+      ? `The previous agent (${input.from}) is out of usage on its account, so it could not write a hand-off. Phren copied its conversation instead, below, for you to build one from.`
+      : `The owner moved the previous agent (${input.from}) here without asking it for a hand-off. Phren copied its conversation instead, below, for you to build one from.`,
+    "",
+    "First, from this conversation, write yourself a short hand-off: the owner's goal, what is done, what is half done, and the next steps. Then check this checkout against it and continue from there; do not start over.",
+    "",
+    ...(input.dispatch ? [`It was working on dispatch ${input.dispatch}${input.label ? ` ("${input.label}")` : ""}.`, ""] : []),
+  ];
+  const summary = (kept: number) => `The last ${kept} of its ${input.entries.length} messages, oldest first:`;
+  const kept: string[][] = [];
+  // The list's own heading, and room for the original brief and its cut note, are counted up front.
+  const reserve = input.original ? Math.min(input.original.length, ORIGINAL_RESERVE) + 200 : 0;
+  let used = head.join("\n").length + summary(input.entries.length).length + 2 + reserve;
+  for (const entry of [...input.entries].reverse()) {
+    // One long message never takes the whole room: its end is what was said last.
+    const sent = input.prepare ? input.prepare(entry.text) : entry.text;
+    const text = sent.length > 6_000 ? `…${sent.slice(-6_000)}` : sent;
+    const block = quoted(entry.role === "owner" ? "Prompt to it" : "Its reply", text);
+    const size = block.join("\n").length + 1;
+    if (used + size > input.room) break;
+    kept.unshift(block); used += size;
+  }
+  const lines = [...head];
+  if (!kept.length) lines.push(input.entries.length ? "Its conversation did not fit beside the rest of this hand-off; ask the owner where it stood." : "Its conversation could not be read; ask the owner where it stood.", "");
+  else lines.push(summary(kept.length), "", ...kept.flat());
+  const body = lines.join("\n");
+  // The original brief takes what room is left, cut with a note when it doesn't fit.
+  return input.original ? withOriginalBrief(body, input.original, input.room, "the dispatching computer's brief") : body;
+}
+
+/**
+ * The prompt another computer gets: full inline text only, since the peer cannot read this Hook's brief path.
+ * Commit ids and the complete hand-off are kept, credentials redacted in place rather than through the lossy
+ * approval/log summarizer.
+ */
+function peerPrompt(record: MoveRecord, document: string): string {
+  const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
+  return redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
+}
+
 /** The hand-off file: who moved where and when, the body, then what Phren saw. */
 export function handoffDocument(record: MoveRecord, body: string, observed: string, at: string, conductor = false): string {
   return [
@@ -489,6 +553,8 @@ export class SessionMover {
     const peer = data.to.computer ? await (await import("./move-computers.js")).movePeer(data.to.computer, stableComputerName()) : undefined;
     const to = { ...data.to };
     if (!peer) delete to.computer;
+    // Another computer's agent builds the hand-off; on this one, an exhausted account switches with `resume`.
+    if (data.continuation === "summary-by-target" && !peer) throw new BridgeError(409, "summary-by-target continues on another computer; on this one, switch accounts with continuation resume.");
     const active = (await listMoves(this.now)).find(record => record.from.target.server === target.server && record.from.target.pane === target.pane
       && record.state !== "moved" && record.state !== "failed");
     if (active || [...this.running.keys()].some(key => key === `${target.server}\0${target.pane}`)) throw new BridgeError(409, "This session is already being moved.", { code: "move_in_progress" });
@@ -561,7 +627,7 @@ export class SessionMover {
     const at = new Date(this.now).toISOString();
     const resume = data.continuation === "resume";
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: resume ? "exiting" : "handing-off", createdAt: at, updatedAt: at,
-      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
+      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : data.continuation === "summary-by-target" ? { continuation: "summary-by-target" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}), ...(workerDispatch ? { workerDispatch } : {}) };
     await assertUnusedLaunchId(record.id);
     if (conductor && peer) {
@@ -592,12 +658,41 @@ export class SessionMover {
       const pids = pane ? (await this.deps.terminal.processes(from.server, from.pane).catch(() => undefined))?.foregroundPids ?? [] : [];
       const [git, processes] = await Promise.all([(this.deps.git ?? readGitState)(record.cwd).catch(() => undefined),
         (this.deps.processesBelow ?? processesBelow)(pids).catch(() => [] as string[])]);
-      const written = await this.askForHandoff(record, handoffMs);
-      const fallback = "text" in written ? undefined : await this.fallback(record, written.reason);
-      const body = "text" in written ? written.text : record.mode === "new-chat"
-        ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
-        : fallback!;
-      const document = handoffDocument(record, body, observedState(git, processes, !peer), new Date(this.now).toISOString(), !!conductor);
+      // A source out of usage cannot answer a hand-off request: on another computer, the new agent builds it.
+      const requested = record.continuation === "summary-by-target";
+      const lines = peer ? await this.deps.transcript(from).catch(() => undefined) : [];
+      // Asked for by name, the move never launches an agent with no conversation to build from.
+      if (requested && !lines?.length) throw new BridgeError(409, "The conversation could not be read, so the agent on the other computer would have nothing to build a hand-off from; the old chat remains open.");
+      const exhausted = !!peer && sourceOutOfUsage(lines ?? [], from.source);
+      const byTarget = !!peer && (requested || exhausted);
+      if (byTarget && !requested) await this.update(record, { continuation: "summary-by-target" });
+      const written = byTarget ? { reason: `${exhausted ? "its account is out of usage" : "the owner asked"}, so the agent on ${peer!.name} builds the hand-off from the copied conversation.` }
+        : await this.askForHandoff(record, handoffMs);
+      const observed = observedState(git, processes, !peer), at = new Date(this.now).toISOString();
+      let body: string;
+      if (byTarget) {
+        const original = record.dispatch ? await this.deps.brief?.(record.dispatch).catch(() => undefined) : undefined;
+        const entries = conversationEntries(lines ?? [], from.source);
+        const fit = (room: number) => targetSummaryBody({ from: harnessName({ harness: from.source, account: record.from.account }), exhausted,
+          entries, room, prepare: text => redactPeerHandoff(text.replaceAll(record.cwd, "<source checkout>")), ...(original ? { original } : {}),
+          ...(record.dispatch ? { dispatch: record.dispatch } : {}), ...(record.from.label ? { label: record.from.label } : {}) });
+        // What fits beside the rest of the hand-off in the one brief the other computer gets, measured as sent:
+        // the checkout path replaced and credentials redacted, either of which can lengthen the text. Messages
+        // are prepared that way before they are counted; the refit only catches what the rest of the brief adds.
+        let room = PROMPT_LIMIT - peerPrompt(record, handoffDocument(record, "", observed, at, !!conductor)).length - TRANSCRIPT_MARGIN;
+        body = fit(room);
+        for (let tries = 0; tries < 4; tries++) {
+          const over = peerPrompt(record, handoffDocument(record, body, observed, at, !!conductor)).length - PROMPT_LIMIT;
+          if (over <= 0) break;
+          room -= over + 500; body = fit(room);
+        }
+      } else {
+        const fallback = "text" in written ? undefined : await this.fallback(record, written.reason);
+        body = "text" in written ? written.text : record.mode === "new-chat"
+          ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
+          : fallback!;
+      }
+      const document = handoffDocument(record, body, observed, at, !!conductor);
       await this.assertNotAborted(record);
       const file = handoffPath(record.id);
       const prompt = briefText(continuePrompt(document, file));
@@ -741,11 +836,7 @@ export class SessionMover {
     if (this.cancelled.has(record.id) || (await readMove(record.id))?.state === "failed" || record.modeForced === "conductor" && record.to.computer && (await this.deps.succession!.status(record.id)).phase === "aborted") throw new BridgeError(409, "This uncommitted move was aborted; no conductor role was transferred.");
   }
   private async continueOnPeer(record: MoveRecord, peer: DispatchHost, project: string, document: string): Promise<Target> {
-    // Full inline text only: the peer cannot read this Hook's brief path.
-    // Preserve commit ids and the complete hand-off, redacting credentials
-    // in place instead of applying the lossy approval/log summarizer to it.
-    const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
-    const remotePrompt = redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
+    const remotePrompt = peerPrompt(record, document);
     if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
     const checked = await (await import("./move-computers.js")).checkMovePeer(peer, project, record.to, record.modeForced === "conductor");
     if (record.computerId && checked.computerId !== record.computerId) throw new BridgeError(409, "The destination Hook identity changed during the move; nothing was launched.");

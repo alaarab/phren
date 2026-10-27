@@ -691,6 +691,27 @@ The old chat stays open, including on failure. The record has `to.computer`,
 404; offline peers, missing checkouts and unusable harnesses/accounts return
 409 before the hand-off request. Peer calls have bounded timeouts.
 
+A source agent whose Claude account is out of usage cannot write a hand-off.
+When the source transcript ends on Claude's usage-limit reply, or the request
+says `continuation: "summary-by-target"`, the Hook skips the hand-off request.
+Instead it sends the peer the newest turns of the conversation, along with the
+branch, HEAD and changes it saw. Up to 8000 characters of the original dispatch
+brief are kept first. Each long turn is cut to its end, and the excerpt is
+measured after redaction so the whole brief fits in 32768 characters.
+
+The new agent on the peer is told why the previous agent wrote no hand-off: it
+ran out of usage, or the owner asked. It writes its own short hand-off from
+the excerpt, checks the checkout and continues. The record has
+`continuation: "summary-by-target"` and a `handoff` with `source: "fallback"`
+and that reason.
+
+The transcript file is not copied to the peer; only the excerpt travels in the
+brief. The prompts and replies in it are redacted like any other peer hand-off,
+not withheld. An explicit request whose transcript cannot be read fails the
+move rather than launch an agent with nothing to go on. `summary-by-target` on
+a move within this computer is refused (409); switch accounts there with
+`continuation: "resume"`.
+
 Listing destinations and starting a cross-computer move require the owner.
 Scoped gitboy keys, MCP agents (including dispatched workers), and peer-originated
 requests cannot start one. `GET /v1/sessions/move/availability?project=<name>`
