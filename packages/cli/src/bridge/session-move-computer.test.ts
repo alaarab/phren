@@ -15,7 +15,7 @@ import * as peers from "./peers.js";
 import * as harnesses from "./harnesses.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
-import { SessionMover, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
+import { SessionMover, conversationCopy, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
 import { finalTurnFromLines } from "./schedule-watch.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
@@ -24,7 +24,8 @@ import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { peerFingerprint } from "./dispatch-hosts.js";
 import { setTerminalProvider } from "./terminal.js";
-import { continuationPlacement, launchContinuation } from "./continuation-launch.js";
+import { continuationPlacement, fetchContinuationConversation, launchContinuation } from "./continuation-launch.js";
+import { redactPeerHandoff } from "./peer-handoff.js";
 import { LaunchLimiter } from "./limits.js";
 import { BridgeError, objects, type Json, type Target } from "./protocol.js";
 
@@ -84,7 +85,7 @@ function fixture(options: { availability?: Json; offline?: boolean; confirmed?: 
   });
   const terminal = { prompt: vi.fn(), sendKeys: vi.fn(), processes: vi.fn(async () => ({ shellPid: 1, foregroundPids: [] })), closePane: vi.fn() };
   const deps: MoverDeps = { snapshot: async () => ({ panes: [pane] }), identity: async () => from.session, terminal, deliver,
-    launch: vi.fn(), inventory: vi.fn(async () => undefined), transcript: async () => lines, git: async () => undefined, processesBelow: async () => options.processes ?? [],
+    launch: vi.fn(), inventory: vi.fn(async () => undefined), transcript: async () => lines, conversation: async () => ({ lines, complete: true }), git: async () => undefined, processesBelow: async () => options.processes ?? [],
     isConductor: async () => (await recordedConductor())?.pane === from.pane, pollMs: 1 };
   return { mover: new SessionMover(deps), deps, pane, terminal, deliver, transport, sent, brief: () => brief };
 }
@@ -151,6 +152,56 @@ describe.skipIf(process.platform === "win32")("continue on another computer", ()
     expect(text).toContain("turn 59 ");
     expect(text).not.toContain("turn 0 ");
     expect(text).not.toContain("token=x");
+  });
+
+  it("copies the whole conversation for the destination to pull through the intent route, beside the excerpt", async () => {
+    const history = Array.from({ length: 60 }, (_, i) => `turn ${i} ${"y".repeat(2_000)}`);
+    const f = fixture({ exhausted: true, history });
+    // The copy reads the whole transcript, not the tail the hand-off reads: here an earlier turn only it has.
+    const tail = await f.deps.transcript(from);
+    f.deps.conversation = async () => ({ lines: [JSON.stringify({ type: "user", message: { role: "user", content: "The very first ask." } }), ...tail], complete: true });
+    expect((await request(f.mover, "GET", "/v1/health")).body.capabilities).toMatchObject({ moveSummaryByTarget: true, moveConversationCopy: true });
+    const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" } });
+    await f.mover.settled(from.server, from.pane);
+    const id = answer.body.move.id as string;
+    expect(await readMove(id)).toMatchObject({ state: "moved", continuation: "summary-by-target" });
+    // The brief keeps room for the line the destination adds about the copy.
+    const brief = String(f.brief()?.text);
+    expect(brief.length).toBeLessThanOrEqual(32_768 - 400);
+    expect(brief).not.toContain("turn 0 ");
+    // The destination, as the move's verified peer, pulls the copy page by page.
+    const peer = (await peers.hookPeers())[0];
+    const original = f.transport.getMockImplementation()!;
+    f.transport.mockImplementation(async (to, route, data, timeout) => route === "/v1/health" ? { computer: { id: B_ID } } : original(to, route, data, timeout));
+    const headers = { "x-phren-origin": "peer", "x-phren-peer": Buffer.from(JSON.stringify({ name: peer.name, fingerprint: peerFingerprint(peer) })).toString("base64url") };
+    const copy = await fetchContinuationConversation(async offset => {
+      const page = await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}&conversation=${offset}`, {}, headers);
+      expect(page.status).toBe(200);
+      return page.body;
+    }, redactPeerHandoff);
+    expect(copy).toContain("The very first ask.");
+    expect(copy).toContain("turn 0 ");
+    expect(copy).toContain("turn 59 ");
+    expect(copy).toContain("Finish the parser.");
+    expect(copy).not.toContain("earlier messages are missing");
+    expect(copy).not.toContain(path.join(root, "checkout"));
+    // The intent itself is unchanged, so an older destination still checks and launches it as before.
+    expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}`, {}, headers)).body.brief).toMatchObject({ id, text: brief });
+    // Another peer cannot read it.
+    const stranger = { ...headers, "x-phren-peer": Buffer.from(JSON.stringify({ name: "third-peer", fingerprint: peerFingerprint({ ...peer, username: "carol" }) })).toString("base64url") };
+    expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}&conversation=0`, {}, stranger)).status).toBe(403);
+  });
+
+  it("keeps the newest messages of a conversation too long to copy whole, and says what it left out", () => {
+    const entries = Array.from({ length: 30 }, (_, i) => ({ role: "agent" as const, text: `turn ${i} ${"z".repeat(1_000)}` }));
+    const copy = conversationCopy(entries, text => text.toUpperCase(), 10_000);
+    expect(copy.length).toBeLessThanOrEqual(10_000);
+    expect(copy).toContain("TURN 29 ");
+    expect(copy).not.toContain("TURN 0 ");
+    expect(copy).toMatch(/The first \d+ of its 30 messages did not fit/);
+    expect(conversationCopy(entries.slice(0, 2), text => text)).not.toContain("did not fit");
+    // Only a transcript's end could be read: the copy says earlier messages are missing.
+    expect(conversationCopy(entries.slice(0, 2), text => text, 10_000, false)).toContain("earlier messages are missing");
   });
 
   it("asks the source as usual once a usage limit has passed and the chat went on", async () => {

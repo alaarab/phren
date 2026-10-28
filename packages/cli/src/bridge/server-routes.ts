@@ -3,7 +3,7 @@ import { peerFingerprint } from "./dispatch-hosts.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import type { ConductorSuccessionService, ConductorExecutor } from "./conductor-succession.js";
 import { relocationSupport } from "./worker-relocation.js";
-import { continuationIntent, continuationLaunchSchema, continuationPlacement, launchContinuation } from "./continuation-launch.js";
+import { CONVERSATION_FILE, CONVERSATION_MARKER, continuationConversationPage, continuationIntent, continuationLaunchSchema, continuationPlacement, fetchContinuationConversation, launchContinuation, withConversationPointer } from "./continuation-launch.js";
 import { addClaudeAccount, signInClaudeAccount } from "./account-add.js";
 import { ACCOUNT_ROLES, isAccountRole, setAccountSettings, setComputerAllowedPools, type AccountRole } from "./account-pools.js";
 import { claudeHome } from "./claude-accounts.js";
@@ -22,6 +22,7 @@ import type { HandOffQueue } from "./hand-off-queue.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import path from "node:path";
+import { stat } from "node:fs/promises";
 import { z } from "zod";
 import { sudoAnswer } from "./sudo.js";
 import { saveCodeNote } from "./code-note.js";
@@ -37,7 +38,7 @@ import type { WorkspaceContextUsage } from "./context.js";
 import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema } from "./dispatch.js";
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
-import { briefArrival, briefId, readLaunchBrief } from "./launch-brief.js";
+import { briefArrival, briefId, briefRoot, launchesWithBrief, readLaunchBrief } from "./launch-brief.js";
 import { listApprovalRules, changeApprovalRule } from "./approval-rules.js";
 import { addGrant, listGrants, listNamedGrants, removeGrant } from "./grants.js";
 import { clearProjectAuthority, confirmAuthority, listConfirmations, projectAuthority, readAuthority, setProjectAuthority } from "./authority.js";
@@ -56,7 +57,7 @@ import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitStatus } from "./git.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDeadline } from "./projects.js";
-import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema } from "./protocol.js";
+import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
@@ -167,7 +168,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -378,10 +379,13 @@ async function moveDestination(move: MoveRecord, caller: PeerIdentity | undefine
   if (!peer || object((await peerRequest(peer, "/v1/health", undefined, 5_000)).computer).id !== move.computerId) throw new BridgeError(403, "The move destination's enrollment changed.");
 }
 
-async function peerContinuationIntent(caller: PeerIdentity, id: string): Promise<Json> {
+/** Destinations whose enrollment was checked for a move's conversation pages, until when. */
+const verifiedPages = new Map<string, number>();
+
+async function peerContinuationIntent(caller: PeerIdentity, id: string, conversation?: number): Promise<Json> {
   const candidates = (await hookPeers()).filter(peer => peerFingerprint(peer) === caller.fingerprint && (!caller.name || caller.name === peer.name));
   if (candidates.length !== 1) throw new BridgeError(403, "The launch origin is not uniquely verified.");
-  return peerRequest(candidates[0], `/v1/sessions/move/intent?id=${z.string().uuid().parse(id)}`, undefined, 5_000);
+  return peerRequest(candidates[0], `/v1/sessions/move/intent?id=${z.string().uuid().parse(id)}${conversation === undefined ? "" : `&conversation=${conversation}`}`, undefined, 5_000);
 }
 
 export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
@@ -470,8 +474,15 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const id = z.string().uuid().parse(url.searchParams.get("id"));
             const caller = requestPeer(request), move = await readMove(id);
             if (!move || move.state === "failed") throw new BridgeError(403, "This continuation intent is no longer authorized.");
-            await moveDestination(move, caller);
-            result = await continuationIntent(id); break;
+            // `conversation=<offset>`: a page of the conversation a summary-by-target move copies (continuation-launch.ts).
+            // The destination's enrollment is checked again (one SSH call back to it) at most once a minute while it pages.
+            const page = url.searchParams.get("conversation");
+            const verifiedKey = JSON.stringify([id, caller?.fingerprint, caller?.name, caller?.id]);
+            if (page === null || (verifiedPages.get(verifiedKey) ?? 0) <= Date.now()) {
+              await moveDestination(move, caller);
+              if (page !== null) { verifiedPages.set(verifiedKey, Date.now() + 60_000); if (verifiedPages.size > 64) verifiedPages.delete(verifiedPages.keys().next().value!); }
+            }
+            result = page === null ? await continuationIntent(id) : await continuationConversationPage(id, z.coerce.number().int().nonnegative().parse(page)); break;
           }
           case "/v1/sessions/move/launch": {
             const placement = await continuationPlacement(z.string().uuid().parse(url.searchParams.get("id")));
@@ -853,7 +864,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const role = await (await import("./conductor-role.js")).readRoleState();
             const prepared = role?.succession?.side === "successor" && role.succession.id === input.brief.id && role.succession.phase !== "aborted";
             const cwd = prepared ? defaultPhrenPath() : await dispatchProjectDirectory(input.project);
-            return launchSession(selectedServer(url), { cwd, kind: input.to.harness, account: input.to.account, model: input.to.model, effort: input.to.effort, label: `move-${input.brief.id}`, brief: input.brief }, { trustFolder: true, onPlaced: async target => {
+            // A summary-by-target move's whole conversation, from the source Hook that admitted it; none from an older one.
+            // Asked for only for those moves (the brief is the source's own, checked against its intent above), and only
+            // for a harness launched with a brief file: its folder is where the copy goes and the brief carries the line.
+            const wantsCopy = !!caller && input.brief.text.includes(CONVERSATION_MARKER) && launchesWithBrief(input.to.harness);
+            const conversation = wantsCopy ? await fetchContinuationConversation(offset => peerContinuationIntent(caller!, input.brief.id, offset), redactPeerHandoff) : undefined;
+            const copied = conversation ? path.join(briefRoot(), input.brief.id, CONVERSATION_FILE) : undefined;
+            const brief = copied ? { ...input.brief, text: withConversationPointer(input.brief.text, copied) } : input.brief;
+            return launchSession(selectedServer(url), { cwd, kind: input.to.harness, account: input.to.account, model: input.to.model, effort: input.to.effort, label: `move-${input.brief.id}`, brief }, { trustFolder: true, onPlaced: async target => {
+              // Into the brief folder, which the new agent may read (Claude's --add-dir), as soon as it exists.
+              if (copied && conversation && await stat(path.dirname(copied)).catch(() => undefined)) await atomicInPrivateDir(copied, conversation).catch(() => undefined);
               await onPlaced(target);
               await terminalProvider().renamePane(selectedServer(url), z.string().parse(target.pane), input.label).catch(() => undefined);
             } });
