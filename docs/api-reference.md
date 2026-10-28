@@ -1696,7 +1696,7 @@ host reports them: `reviewDecision` (`APPROVED`, `REVIEW_REQUIRED` or `CHANGES_R
 
 | Route | Body | Answer |
 | --- | --- | --- |
-| `POST /v1/git/pr/merge` | `number`, `method?` (`merge`, `squash` or `rebase`; default `merge`), `expectedHeadSha?`, `deleteBranch?`, `expectedRepository?` | `{ok: true, number, method, ...}`, or `{ok: false, reason, message}`. `reason: "blocked"` is the host's own refusal: failing checks, missing approvals, conflicts, or a head that moved past `expectedHeadSha`. GitHub merges with `gh pr merge --match-head-commit` and never deletes the local branch; GitLab merges by the project's own method (squash per request). |
+| `POST /v1/git/pr/merge` | `number`, `method?` (`merge`, `squash` or `rebase`; default `merge`), `expectedHeadSha?`, `deleteBranch?`, `expectedRepository?`, `expectedRemote?` | `{ok: true, number, method, ...}`, or `{ok: false, reason, message}`. `reason: "blocked"` is the host's own refusal: failing checks, missing approvals, conflicts, or a head that moved past `expectedHeadSha`. `expectedRemote` is the pulls listing's `remote` the card came from; when the checkout's remote now names another repository, the merge is refused with 409 `git-remote-changed` before the host is asked. GitHub merges with `gh pr merge --match-head-commit` and never deletes the local branch; GitLab merges by the project's own method (squash per request). |
 | `POST /v1/git/host-token` | `token` (empty disconnects), `expectedRepository?` | `{ok, kind, domain, user?}`. Connects this repository's GitLab or gitboy host: the token is checked against the host's current-user API, then stored with that account in the Hook's `git-hosts.json` (mode 600, never the store). A token the host refuses is `{ok: false, reason: "auth"}`; GitHub answers `reason: "unsupported"` (it uses `gh auth login`). |
 
 `phren bridge git-host [list | set <domain> gitlab|gitboy | remove <domain>]` does the same from a shell, reading the token from stdin.
@@ -1704,6 +1704,18 @@ host reports them: `reviewDecision` (`APPROVED`, `REVIEW_REQUIRED` or `CHANGES_R
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,
 state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
+It also names what it listed: `repository`, the checkout's root (what
+`expectedRepository` is checked against), and `remote`, the hosted repository
+the requests are listed from as `domain/owner/repo` in lower case (null with no
+parsable remote). On GitHub that is the repository `gh` resolves, which for a
+fork is usually its upstream or its `gh repo set-default`, read from the listed
+requests' URLs; elsewhere it is the remote's. On merge the Hook resolves it again,
+refuses a mismatch, and on GitHub names it to `gh pr merge --repo`, so `gh`
+cannot pick another repository in between. Send `remote` back as listed. A phone binds
+a reviewed card to both and sends them back on merge, so a remote retargeted
+since, or a pane moved to another checkout, cannot merge a request with the same
+number and head in a different repository. Hooks that check `expectedRemote`
+advertise `capabilities.gitRemoteIdentity: true`; older ones ignore the field.
 `POST /v1/git/status` returns `defaultBranch`, the branch a push asks to confirm.
 
 ### Terminal sources and independent overviews

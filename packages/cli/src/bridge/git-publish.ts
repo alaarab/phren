@@ -3,9 +3,9 @@ import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { BridgeError, type Json } from "./protocol.js";
 import { git, gitRoot } from "./projects.js";
 import { countGit } from "./metrics.js";
-import { defaultBranch, invalidatePulls, invalidateTree } from "./git.js";
+import { defaultBranch, invalidatePulls, invalidateTree, normalizeRemote, remoteIdentity } from "./git.js";
 import { z } from "zod";
-import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
+import { detectHost, providerFor, unknownHost, type MergeRequest } from "./git-hosts.js";
 import { writeHostToken } from "./git-host-auth.js";
 import { HostApiError, tokenDestination } from "./git-host-http.js";
 
@@ -177,6 +177,8 @@ const MergeBody = z.object({
   method: z.enum(["merge", "squash", "rebase"]).default("merge"),
   expectedHeadSha: z.string().regex(/^[0-9a-f]{7,64}$/i).optional(),
   deleteBranch: z.boolean().optional(),
+  /** The pulls listing's `remote` the reviewed card came from; a different remote now is refused. */
+  expectedRemote: z.string().trim().min(1).max(512).optional(),
 });
 
 /** Merge one pull or merge request on the remote's host. The host decides:
@@ -187,9 +189,17 @@ export async function gitMergeRequest(cwd: string, data: unknown): Promise<Json>
   const root = await repository(cwd);
   const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
   const host = await detectHost(root, branch);
+  const { expectedRemote, ...rest } = request;
+  const merge: MergeRequest = rest;
+  if (expectedRemote !== undefined) {
+    const current = await remoteIdentity(root, host);
+    if (!current || current !== normalizeRemote(expectedRemote))
+      throw new BridgeError(409, "This checkout's remote is not the repository this pull request was reviewed in. Refresh pull requests before merging.", { code: "git-remote-changed" });
+    merge.repository = current;
+  }
   const provider = providerFor(host);
   if (!provider) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
-  try { return { ...await provider.merge(root, request, host), host }; }
+  try { return { ...await provider.merge(root, merge, host), host }; }
   finally { invalidatePulls(root); }
 }
 
