@@ -556,14 +556,43 @@ A retry under the same `deliveryId` answers with the message's state now and
 after a Hook restart; only a `failed` message is typed again, under the same
 id. The same id with other words or another pane is 409. `POST
 /v1/prompt/status { target, deliveryId }` (capability `promptStatus`) returns
-`{ ok, state, reason?, session? }`, where `state` is `queued`, `delivered`,
+`{ ok, state, reason?, session?, landed? }`, where `state` is `queued`, `delivered`,
 `failed` or `unknown` (not tracked, another pane, or older than 24 hours) and
 `session` is the conversation that took or holds it. Older Hooks also answered
-`blocked`. A `/v1/transcripts` stream opened with `deliveries=1` (capability
+`blocked`.
+
+`landed: { line, uuid? }` names the transcript row a delivered message landed
+as, once the Hook has found it:
+
+- `line` is the row's 0-based line in the conversation's transcript, the `line`
+  the `/v1/transcripts` stream gives its entries;
+- `uuid` is the row's own id, where the harness writes one (Claude);
+- for a message Claude took into its running turn, the row is the queue
+  removal, which the stream shows as `phren_queue_consumed`;
+- a Codex rollout writes each turn twice, as a user item and then a
+  `user_message` event the stream doesn't show, so `line` is the user item's.
+
+A phone matches its pending send to that row rather than to the row's text.
+`landed` is absent:
+
+- until the row is found (a message its hook settled waits up to 30 seconds
+  for its row);
+- when its line can't be counted: the transcript was made again and the row no
+  longer starts where it was claimed, or a Claude row is over 2 MiB;
+- for a message settled inside a joined prompt, which has no row of its own;
+- for a Claude message whose hook settled it just before a Hook restart;
+- for messages delivered without a transcript row (app-server Codex, served
+  OpenCode).
+
+The Hook keeps these rows in `deliveries.json.landed.json` beside the delivery
+records, so an older Hook still reads every record.
+
+A `/v1/transcripts` stream opened with `deliveries=1` (capability
 `deliveryFrames`) pushes `{ type: "delivery", source, session, deliveryId,
-state, reason? }` for every message typed into that conversation's pane,
-including those sent while an earlier conversation showed there, whenever
-one's state changes.
+state, reason?, landed? }` for every message typed into that conversation's
+pane, including those sent while an earlier conversation showed there. A frame
+is sent whenever a message's state changes, and once more when a delivered
+message's `landed` row is found.
 
 A working pane returns 409 before any model command is typed. `/v1/prompt`
 also refuses every slash command while working, except Claude Code's
