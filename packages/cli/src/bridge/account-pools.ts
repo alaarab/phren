@@ -11,12 +11,10 @@
 //   slots: { <slug>: { pool: <tag>, role: helpers | last-resort | off } }
 //   allowedPools: [<tag>, …]
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { dump, load } from "js-yaml";
-import { readProjectConfig, setProjectConfigField } from "../project-config.js";
-import { accountsFile, isAccountSlug } from "./claude-accounts.js";
-import { atomic, bridgeRoot, object } from "./protocol.js";
+import { readProjectConfig, resolveProjectConfigPath, setProjectConfigField } from "../project-config.js";
+import { accountsFile, isAccountSlug, parseAccountsYaml, updateAccountsFile } from "./claude-accounts.js";
+import { object } from "./protocol.js";
 
 /** A project's name, as dispatch takes it (dispatch.ts `projectName`). */
 const PROJECT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
@@ -31,25 +29,10 @@ export const isPoolTag = (value: unknown): value is string => typeof value === "
 export const isAccountRole = (value: unknown): value is AccountRole => typeof value === "string" && (ACCOUNT_ROLES as readonly string[]).includes(value);
 const poolHelp = "A pool is 1 to 32 lowercase letters, digits and dashes, like personal or client-a.";
 
-/** `accounts.yaml` as an object: empty when there is none, an error when it is there but unreadable, so a
- * write never replaces what it couldn't read. */
-function parse(text: string | undefined): Record<string, unknown> {
-  if (text === undefined || !text.trim()) return {};
-  const parsed = load(text);
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-  throw new Error(`${accountsFile()} is not a mapping; fix or remove it first.`);
-}
 function readSync(): Record<string, unknown> {
-  try { return parse(readFileSync(accountsFile(), "utf8")); } catch { return {}; }
+  try { return parseAccountsYaml(readFileSync(accountsFile(), "utf8")); } catch { return {}; }
 }
-async function update(change: (parsed: Record<string, unknown>) => void): Promise<void> {
-  let text: string | undefined;
-  try { text = await readFile(accountsFile(), "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  const parsed = parse(text);
-  change(parsed);
-  await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
-  await atomic(accountsFile(), dump(parsed), 0o600);
-}
+const update = updateAccountsFile;
 
 const settingsOf = (raw: unknown): AccountSettings => {
   const item = object(raw);
@@ -133,7 +116,8 @@ export async function accountPoolsCommand(args: readonly string[], projectStore:
   if (command === "allowed-pools") {
     const at = rest.indexOf("--project"), project = at === -1 ? undefined : rest[at + 1];
     if (at !== -1 && (!project || project.startsWith("-"))) throw new Error(POOLS_USAGE);
-    if (project && (!PROJECT.test(project) || !existsSync(path.join(projectStore(), project)))) throw new Error(`There is no project "${project}" in the store.`);
+    const configPath = project && PROJECT.test(project) ? resolveProjectConfigPath(projectStore(), project) : null;
+    if (project && (!configPath || !existsSync(path.dirname(configPath)))) throw new Error(`There is no project "${project}" in the store.`);
     const tags = at === -1 ? rest : rest.filter((_, i) => i !== at && i !== at + 1);
     const where = project ? `Project ${project}` : "This computer";
     const show = (pools: string[] | undefined) => `${where}: ${pools ? `allowed pools ${pools.join(", ")}.` : "any pool."}`;

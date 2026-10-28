@@ -90,7 +90,8 @@ export function projectConfigPath(phrenPath: string, project: string): string {
   return path.join(phrenPath, project, "phren.project.yaml");
 }
 
-function resolveProjectConfigPath(phrenPath: string, project: string): string | null {
+/** A project's `phren.project.yaml`, in the primary store or the team store that holds it; null when it escapes. */
+export function resolveProjectConfigPath(phrenPath: string, project: string): string | null {
   return storeAwareProjectPath(phrenPath, project, "phren.project.yaml");
 }
 
@@ -159,14 +160,24 @@ export function writeProjectConfig(phrenPath: string, project: string, patch: Pa
   });
 }
 
-/** Sets one top-level field of a project's config, or removes it when `value` is undefined. */
+/**
+ * Sets one top-level field of a project's config, or removes it when `value` is undefined. Refuses a config file
+ * it can't parse rather than replacing it.
+ */
 export function setProjectConfigField<K extends keyof ProjectConfig>(phrenPath: string, project: string, key: K, value: ProjectConfig[K] | undefined): ProjectConfig {
   const configPath = resolveProjectConfigPath(phrenPath, project);
   if (!configPath) {
     throw new Error(`Project config path escapes phren store`);
   }
   return withFileLock(configPath, () => {
-    const next: ProjectConfig = { ...readProjectConfig(phrenPath, project) };
+    let text: string | undefined;
+    try { text = fs.readFileSync(configPath, "utf8"); } catch (err: unknown) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
+    let parsed: unknown = undefined;
+    if (text !== undefined && text.trim()) {
+      try { parsed = loadYamlDocument(text, (raw) => yaml.load(raw, { schema: yaml.CORE_SCHEMA })); } catch (err: unknown) { throw new Error(`${configPath} can't be read (${errorMessage(err)}); fix it first.`); }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${configPath} is not a mapping; fix it first.`);
+    }
+    const next: ProjectConfig = { ...(parsed as ProjectConfig | undefined) };
     if (value === undefined) delete next[key]; else next[key] = value;
     writeProjectConfigFile(configPath, next);
     return next;

@@ -56,6 +56,42 @@ describe("account pools and roles", () => {
     expect(readFileSync(path.join(home, "bridge/accounts.yaml"), "utf8")).toBe("- not\n- a mapping\n");
   });
 
+  it("loses no change when labels, credits and pools are written at once", async () => {
+    await Promise.all([
+      setAccountLabel("api200", "API $200"),
+      addClaudeCredit("api200", { amount: "200" }),
+      setAccountSettings("api200", { pool: "personal" }),
+      setAccountSettings("team", { role: "off" }),
+      setComputerAllowedPools(["personal"]),
+      setAccountLabel("team", "Team"),
+    ]);
+    expect(yaml()).toMatchObject({ claude: { api200: "API $200", team: "Team" }, credits: { api200: [expect.objectContaining({ amountUSD: 200 })] },
+      slots: { api200: { pool: "personal" }, team: { role: "off" } }, allowedPools: ["personal"] });
+  });
+
+  it("never lets a label or credit write replace a file it can't read, and reads nothing from one", async () => {
+    await setAccountSettings("api200", { pool: "personal" });
+    expect(yaml()).toHaveProperty("slots");
+    writeFileSync(path.join(home, "bridge/accounts.yaml"), "claude: [unclosed\n");
+    await expect(setAccountLabel("api200", "x")).rejects.toThrow();
+    await expect(addClaudeCredit("api200", { amount: "5" })).rejects.toThrow();
+    expect(readFileSync(path.join(home, "bridge/accounts.yaml"), "utf8")).toBe("claude: [unclosed\n");
+    expect(accountSettings()).toEqual({});
+    expect(computerAllowedPools()).toBeUndefined();
+    // A write after a refused one still runs.
+    rmSync(path.join(home, "bridge/accounts.yaml"));
+    await setAccountLabel("api200", "ok");
+    expect(yaml()).toEqual({ claude: { api200: "ok" } });
+  });
+
+  it("keeps a project's config it can't parse", () => {
+    writeFileSync(path.join(store, "qualus/phren.project.yaml"), "sourcePath: [unclosed\n");
+    expect(() => setProjectAllowedPools(store, "qualus", ["qualus"])).toThrow(/can't be read/);
+    writeFileSync(path.join(store, "qualus/phren.project.yaml"), "- a list\n");
+    expect(() => setProjectAllowedPools(store, "qualus", ["qualus"])).toThrow(/not a mapping/);
+    expect(readFileSync(path.join(store, "qualus/phren.project.yaml"), "utf8")).toBe("- a list\n");
+  });
+
   it("keeps this computer's and a project's allowed pools, none meaning any", async () => {
     expect(computerAllowedPools()).toBeUndefined();
     expect(await setComputerAllowedPools(["personal", "qualus", "personal"])).toEqual(["personal", "qualus"]);
@@ -101,6 +137,16 @@ describe("account pools and roles", () => {
     expect(claude.accounts!.find(account => account.id === "team")).not.toHaveProperty("pool");
     expect(inventory.allowedPools).toEqual(["personal"]);
   });
+
+  it("leaves the harness inventory as it was when nothing is set", async () => {
+    const inventory = await harnessInventory({ toolVersion: async () => ({ status: "ok", version: "1.0" }) as never,
+      authRunner: async () => JSON.stringify({ loggedIn: true }) });
+    expect(inventory).not.toHaveProperty("allowedPools");
+    for (const account of inventory.harnesses.find(entry => entry.source === "claude")!.accounts!) {
+      expect(account).not.toHaveProperty("pool");
+      expect(account).not.toHaveProperty("role");
+    }
+  });
 });
 
 describe("account pool routes", () => {
@@ -125,6 +171,7 @@ describe("account pool routes", () => {
     expect((await post("/v1/accounts/claude/settings", { slug: "api200", pool: "Bad Pool" })).status).toBe(400);
     expect((await post("/v1/accounts/claude/settings", { slug: "ghost", pool: "personal" })).status).toBe(404);
     expect((await post("/v1/accounts/claude/settings", { slug: "api200", pool: "x" }, { "x-phren-origin": "peer" })).status).toBe(403);
+    expect((await post("/v1/accounts/claude/settings", { slug: "api200", pool: "x", origin: "peer" })).status).toBe(403);
     expect(accountSettings()).toEqual({ api200: { pool: "personal" } });
   });
 

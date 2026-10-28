@@ -5,11 +5,10 @@
 // The estimate never reads billing; it can drift from the Console's balance.
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { dump, load } from "js-yaml";
-import { atomic, atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
-import { accountsFile, isAccountSlug, type ClaudeHome } from "./claude-accounts.js";
+import { load } from "js-yaml";
+import { atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
+import { accountsFile, isAccountSlug, updateAccountsFile, type ClaudeHome } from "./claude-accounts.js";
 import type { UsageWindow } from "./usage.js";
 
 export interface ClaudeCredit {
@@ -61,16 +60,14 @@ export function claudeCredits(home: string): ClaudeCredit[] {
 
 async function updateCredits(home: string, change: (list: ClaudeCredit[]) => ClaudeCredit[]): Promise<ClaudeCredit[]> {
   if (!isAccountSlug(home)) throw new Error(`"${home}" is not an account name: use lowercase letters, digits and dashes.`);
-  let text: string | undefined;
-  try { text = await readFile(accountsFile(), "utf8"); } catch { /* First entry. */ }
-  const parsed = readYaml(text);
-  const next = change(creditsOf(parsed, home));
-  const credits = { ...object(parsed.credits) } as Record<string, unknown>;
-  if (next.length) credits[home] = next; else delete credits[home];
-  parsed.credits = credits;
-  if (!Object.keys(credits).length) delete parsed.credits;
-  await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
-  await atomic(accountsFile(), dump(parsed), 0o600);
+  let next: ClaudeCredit[] = [];
+  await updateAccountsFile(parsed => {
+    next = change(creditsOf(parsed, home));
+    const credits = { ...object(parsed.credits) } as Record<string, unknown>;
+    if (next.length) credits[home] = next; else delete credits[home];
+    parsed.credits = credits;
+    if (!Object.keys(credits).length) delete parsed.credits;
+  });
   return next;
 }
 
