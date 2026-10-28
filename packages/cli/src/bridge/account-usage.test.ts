@@ -74,6 +74,29 @@ describe("account usage merged by account", () => {
     expect(mergeAccountUsage([{ computer: "Desk", accounts: [claude("claude:1", "work", at(1), 10)] }], now).accounts[0]).not.toHaveProperty("apiCredit");
   });
 
+  it("counts an account's API credits as one balance for its room, as dispatch does, and never names a spent credit's expiry", () => {
+    const credit = (id: string, usedUSD: number, limitUSD: number, expiresAt?: string) => ({ id: `credit:${id}`, name: `API credit · ${id}, estimate`,
+      usedUSD, limitUSD, usedPercent: Math.round(usedUSD / limitUSD * 100), ...(expiresAt ? { resetsAt: expiresAt } : {}) });
+    const api = (windows: AccountUsage["windows"]): AccountUsage => ({ ...claude("claude:0123456789ab", "api", at(1), 0), windows });
+    const view = (row: ReturnType<typeof mergeAccountUsage>["accounts"][number]) => ({ accounts: [row], noData: [], computers: ["Desk"], unreachable: [], notLinked: [], enrolled: 0 });
+    // A spent $20 promo beside $95 left of a $100 credit: $95 of $120, as dispatch counts it.
+    const spentPromo = api([credit("promo", 20, 20, later(48)), credit("paid", 5, 100)]);
+    const [usable] = mergeAccountUsage([{ computer: "Desk", accounts: [spentPromo] }], now).accounts;
+    expect(usable).toMatchObject({ leftPercent: capacityRoom([spentPromo], now)[0].leftPercent, nearLimit: false, exhausted: false });
+    expect(usable.leftPercent).toBe(79);
+    expect(usageSummary(view(usable))).not.toContain("Low but usable");
+    expect(formatAccountUsage(view(usable))).toContain("Claude · sam@example.com  on Desk (api)  (79% left;");
+    // Low on credit: the soonest expiry among credits with money left, never the spent promo's, and not as a reset.
+    const low = api([credit("promo", 20, 20, later(48)), credit("paid", 90, 100, later(100))]);
+    const [tight] = mergeAccountUsage([{ computer: "Desk", accounts: [low] }], now).accounts;
+    expect(tight).toMatchObject({ leftPercent: 8, nearLimit: true, exhausted: false });
+    expect(usageSummary(view(tight))).toContain("Low but usable: Claude · sam@example.com (8% left, credit expires in 4d 4h).");
+    // A 5-hour window tighter than the credit still names its reset.
+    const both = api([{ id: "five_hour", name: "5-hour limit", usedPercent: 95, resetsAt: later(2) }, credit("promo", 20, 20, later(48)), credit("paid", 5, 100)]);
+    const [window] = mergeAccountUsage([{ computer: "Desk", accounts: [both] }], now).accounts;
+    expect(usageSummary(view(window))).toContain("(5% left, resets in 2h 0m)");
+  });
+
   it("carries Codex credits from the newest report that has them, and prints them", () => {
     const older = { ...codex(30, at(20)), credits: { hasCredits: true, balance: 900 } };
     const newer = { ...codex(100, at(2)), credits: { hasCredits: true, balance: 1250.5, inUse: true as const } };

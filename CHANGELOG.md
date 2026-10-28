@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - API credit left and expiry in usage. Each entered credit's usage window now says `remainingUSD` and `expiresAt`, and a Claude row with credits carries `apiCredit` (dollars left, total, used, and the soonest expiry among credits with money left). `phren dispatch usage` adds a total line and `account_usage` names each account's credit left. A credit that expires after its report is dropped instead of shown as reset. Still the owner's entry and a local estimate: Claude Code exposes no Console balance.
 
+### Fixed
+
+- A spent API credit no longer marks its account out of quota, or near its limit, in `phren dispatch usage` and `account_usage` while another credit still has money. An account's credits are one balance there, as dispatch already counted them: a spent $20 promo beside $95 left of $100 reads 79% left, not "low, 0% left". When the credits are the tightest room, the summary names the soonest expiry among credits with money left, never a spent credit's, and never as a reset.
+
 ## [0.3.59] - 2026-10-28
 
 ### Added
