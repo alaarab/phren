@@ -119,6 +119,14 @@ export type MoveInterrupt = { interrupted: true } | { interrupted: false; state:
 const EXIT_COMMANDS: Record<string, string> = { claude: "/exit", codex: "/quit", copilot: "/exit", opencode: "/exit", phren: "/exit" };
 const HARNESS_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot", phren: "phren agent" };
 
+/** Refuses a Claude account on this computer that the pools of the pane's project or this computer rule out. */
+async function refuseOutsidePools(pane: Json, account: string): Promise<void> {
+  const cwd = String(pane.foreground_cwd || pane.cwd || "");
+  if (!path.isAbsolute(cwd)) return;
+  const refused = await (await import("./move-computers.js")).localPoolRefusal(cwd, account);
+  if (refused) throw new BridgeError(409, `Claude account ${account} may not take this session: ${refused}.`, { code: "account_pool" });
+}
+
 const MOVE_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_MOVES = 256;
 const MAX_RECORD_BYTES = 32_768;
@@ -617,6 +625,7 @@ export class SessionMover {
       if (conductor) throw new BridgeError(409, "Switching the conductor's account is not supported yet; use Continue in… for the conductor.");
       if (!to.account || to.account === account) throw new BridgeError(400, "Choose another Claude account to switch to.");
       if (!claudeHome(to.account)) throw new BridgeError(409, `No Claude account "${to.account}" on this computer.`, { code: "account_unavailable" });
+      await refuseOutsidePools(pane, to.account);
       if (!this.deps.copyConversation) throw new BridgeError(503, "This Hook cannot switch accounts.");
       await this.deps.copyConversation(target, claudeHome(to.account)!, true);
     }
@@ -632,6 +641,9 @@ export class SessionMover {
     }
     const cwd = String(pane.foreground_cwd || pane.cwd || "");
     if (!path.isAbsolute(cwd)) throw new BridgeError(409, "The pane's folder is unknown, so the new agent could not start there.");
+    // A Claude account named on this computer keeps to the pools too (a peer's is checked by checkMovePeer).
+    // Unnamed, the new Claude runs under the pane's own account (relaunch), else default: that one is checked.
+    if (!peer && data.continuation !== "resume" && to.harness === "claude") await refuseOutsidePools(pane, to.account ?? account ?? DEFAULT_ACCOUNT);
     let project: string | undefined;
     let accountChoice: string | undefined;
     let computerId: string | undefined;

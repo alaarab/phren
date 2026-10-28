@@ -9,6 +9,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - API credit left and expiry in usage. Each entered credit's usage window now says `remainingUSD` and `expiresAt`, and a Claude row with credits carries `apiCredit` (dollars left, total, used, and the soonest expiry among credits with money left). `phren dispatch usage` adds a total line and `account_usage` names each account's credit left. A credit that expires after its report is dropped instead of shown as reset. Still the owner's entry and a local estimate: Claude Code exposes no Console balance.
 
+## [0.3.59] - 2026-10-28
+
+### Added
+
+- Account pools and roles, opt-in, recorded and reported but not yet enforced. A Claude account slot can carry a `pool` tag and a `role` (`helpers`, `last-resort`, `off`), and a project or a computer can list its `allowedPools`. Set them with `phren bridge accounts pool|role|allowed-pools` or the owner-only `POST /v1/accounts/claude/settings` and `POST /v1/accounts/allowed-pools` (capability `accountPools`). `/v1/harnesses` reports them.
+
+- A `helper` MCP tool (conductor module; not a core tool, so `phren_admin(action: "helper")` in `core`) runs one small task as a headless `claude -p` under the project's helper account and model (`helper: { account, model }` in `phren.project.yaml`, haiku by default) in the lead's project folder, and returns the reply. It bills that account, not the lead's login, which Claude Code's own subagents can't: the lead's login, routing and pane variables are removed. Read-only unless `allowEdits`, no MCP servers, bounded by `timeoutSeconds` and cancellable. Refused outside a project's folder, without a helper, for a role `off` account, a pool the project or computer leaves out, or an unreadable `accounts.yaml`. Each run's cost counts against the account's entered API credits (the cost ledger is now written under a lock) and is logged to `<bridge>/usage/helper-runs.jsonl`.
+
+- Account pools and roles are enforced in dispatch placement, Continue in… and a stopped worker's continuation. An account outside the project's or computer's `allowedPools` is refused even when named (`code: "account_pool"`). An automatic choice never takes an `off` account or a Console (API) login with no role, and takes a `last-resort` account only when no other has room. With pools or roles in play, dispatch names the chosen account in the launch and says why in `accountChoice`. Continue in… availability lists each login's `pool`, `role`, `console` and `poolRefused`, and the sending computer checks the project's list again. Same-computer moves and `resume` account switches check a named account's pool. `/v1/harnesses` marks Console logins `console: true` and an unreadable `accounts.yaml` `poolsUnreadable: true`; a config that can't be read allows no pool. Nothing changes without pools, roles or Console logins; account failover stays off unless enabled. Launches from the phone and schedules don't apply pools yet.
+
 - The phone can pick and boot a Mac's iOS simulators, and swipe and scroll in them.
   - `GET /v1/simulators?all=1` (capability `simulatorDevices`) lists every available iOS device with its state, booted first.
   - `boot` and `shutdown` take any available device and treat one already in that state as done. `boot` opens the device's Simulator window, which taps need.

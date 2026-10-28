@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 77 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 78 MCP tools across 17 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -213,6 +213,41 @@ this one first), `unreachable: [{ computer, error, code? }]`,
 `phren_admin(action: "account_usage")`.
 
 CLI equivalent: `phren dispatch usage` (text; `--json` for the view).
+
+### `helper`
+
+Run one small, self-contained task as a headless Claude Code run and return its
+reply. The run is `claude -p --model <model> --output-format json
+--strict-mcp-config` with the prompt on stdin, under the project's helper
+account (its `CLAUDE_CONFIG_DIR`, none for `default`) in `cwd`. The lead's
+login and routing variables (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, the
+Bedrock/Vertex/Foundry switches) and its pane and dispatch variables are
+removed, so the run signs in and bills as that account only. Conductor module;
+not a core tool, so in `core` it is `phren_admin(action: "helper")`.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `prompt` | string | The whole task; the helper sees nothing else of the conversation. |
+| `project` | string? | Expected project; must be the one `cwd` belongs to. |
+| `cwd` | string? | Absolute folder to run in, a project checkout or worktree; default the MCP server's folder. |
+| `timeoutSeconds` | integer? | 1 to 600, default 120; the run and what it started are killed after it, or on cancel. |
+| `allowEdits` | boolean? | `--permission-mode acceptEdits`; otherwise `--permission-mode default` with Bash and the edit tools disallowed. |
+
+The project's `phren.project.yaml` names the account: `helper: { account: api,
+model: haiku }` (`model` defaults to `haiku`). Refused with the reason when
+`cwd` is not a project's folder or is another project's, the project has no
+helper, the account is not on this computer, its role is `off`, its pool is
+outside the project's or this computer's `allowedPools`, or `accounts.yaml`
+can't be read.
+`data` is `{ ok, output, project, account, model, durationMs, costUSD?,
+tokens?: { input?, output?, cacheRead?, cacheWrite? }, sessionId?, timedOut?,
+truncated? }`; `output` is Claude's reply (capped at 64 KB) or what went wrong,
+and `tokens` is what Claude printed in its `usage`. Each run's cost goes into
+the account's cost ledger, so it counts against the API credits entered for it,
+and one line per run (time, project, account, model, outcome, duration, cost,
+tokens, never the prompt) is appended to
+`<bridge>/usage/helper-runs.jsonl`.
 
 ### `authority`
 

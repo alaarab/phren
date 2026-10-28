@@ -5,6 +5,8 @@ import type { ConductorSuccessionService, ConductorExecutor } from "./conductor-
 import { relocationSupport } from "./worker-relocation.js";
 import { continuationIntent, continuationLaunchSchema, continuationPlacement, launchContinuation } from "./continuation-launch.js";
 import { addClaudeAccount, signInClaudeAccount } from "./account-add.js";
+import { ACCOUNT_ROLES, isAccountRole, setAccountSettings, setComputerAllowedPools, type AccountRole } from "./account-pools.js";
+import { claudeHome } from "./claude-accounts.js";
 import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
@@ -165,7 +167,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, claudeAccountAdd: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -862,6 +864,21 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = data.mode === undefined ? await launches.run(() => addClaudeAccount(data, selectedServer(url)))
             : data.mode === "sign-in-status" ? await signInClaudeAccount(data, selectedServer(url))
             : await launches.run(() => signInClaudeAccount(data, selectedServer(url)));
+        } else if (url.pathname === "/v1/accounts/claude/settings") {
+          // An account's pool and role (account-pools.ts): a field left out stays, null clears it.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change an account's pool or role.");
+          const input = z.object({ slug: z.string().max(64), pool: z.string().max(64).nullable().optional(), role: z.string().max(32).nullable().optional(), origin: z.unknown().optional() }).strict().parse(data);
+          if (!claudeHome(input.slug)) throw new BridgeError(404, `There is no Claude account "${input.slug}" on this computer.`);
+          if (input.role !== undefined && input.role !== null && !isAccountRole(input.role)) throw new BridgeError(400, `A role is ${ACCOUNT_ROLES.join(", ")}.`);
+          const settings = await setAccountSettings(input.slug, { pool: input.pool, role: input.role as AccountRole | null | undefined })
+            .catch((error: Error) => { throw new BridgeError(400, error.message); });
+          result = { ok: true, slug: input.slug, ...settings };
+        } else if (url.pathname === "/v1/accounts/allowed-pools") {
+          // The pools this computer's accounts may do work for; null clears the list (any pool).
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change this computer's allowed pools.");
+          const input = z.object({ allowedPools: z.array(z.string().max(64)).max(64).nullable(), origin: z.unknown().optional() }).strict().parse(data);
+          const allowedPools = await setComputerAllowedPools(input.allowedPools).catch((error: Error) => { throw new BridgeError(400, error.message); });
+          result = { ok: true, ...(allowedPools ? { allowedPools } : {}) };
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/jobs/cleanup") {
