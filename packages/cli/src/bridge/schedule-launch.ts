@@ -167,7 +167,7 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
   // The prompt goes with the launch where the harness takes one (Claude,
   // Codex); otherwise it is typed once the agent is ready.
   const brief = context.schedule.prompt.trim() ? { brief: { id: context.runId, text: context.schedule.prompt } } : {};
-  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model, ...(context.schedule.account ? { account: context.schedule.account } : {}), ...brief });
+  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model, project: context.project, ...(context.schedule.account ? { account: context.schedule.account } : {}), ...brief });
   const workspaceId = String(launched.workspaceId), tabId = String(launched.tabId), paneId = String(launched.paneId);
   if (launched.briefLaunched !== true) await promptWhenReady(server, paneId, context.schedule.prompt, signal);
   let sessionId = typeof launched.sessionId === "string" ? launched.sessionId : undefined;
@@ -210,7 +210,7 @@ export function headlessEnv(schedule: Schedule, env: NodeJS.ProcessEnv = process
 async function launchHeadless(context: ScheduleLaunchContext, store: string, started: (child: ChildProcess) => void): Promise<ScheduleLaunchResult> {
   // A Claude schedule that names no account runs under the one with the most room, as a Herdr launch does.
   const choice = context.schedule.harness === "claude" && !context.schedule.account
-    ? await pickClaudeAccount(`Schedule "${context.schedule.name}"`).catch(() => undefined) : undefined;
+    ? await pickClaudeAccount(`Schedule "${context.schedule.name}"`, { project: context.project, cwd: context.cwd }) : undefined;
   const env = headlessEnv(choice ? { ...context.schedule, account: choice.account } : context.schedule);
   const root = fanoutRoot({ ...process.env, PHREN_PATH: store }), jobDir = path.join(root, context.runId);
   await mkdir(jobDir, { recursive: true, mode: 0o700 });

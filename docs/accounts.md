@@ -103,7 +103,7 @@ Where they bind (`account-policy.ts`):
 
 A config that can't be read allows no pool rather than any. A `phren.project.yaml` that names `allowedPools` but can't be parsed refuses every Claude account for that project, named ones included (a broken file that never named a list still means any pool). An `accounts.yaml` that can't be read is flagged on the Claude listing entry (`poolsUnreadable: true`), and every Claude account on that computer is refused, named or not, until it is fixed. On the same computer, a move with no account named is checked against the account it will run under: the pane's own, else `default`.
 
-With no pools, no roles and no Console logins, every choice is the same as before. A launch from the phone or a schedule that names no account still picks on the receiving computer by room alone; pools and roles don't reach that choice yet.
+With no pools, no roles and no Console logins, every choice is the same as before. A launch from the phone or a schedule that names no account picks on the receiving computer the same way as dispatch once a pool, a role or a Console login is in play there: the project's (`project` in the launch, else the one whose checkout holds the folder) and this computer's `allowedPools`, never `off` or a Console login with no role, `last-resort` only when no other account has room. When none fits the launch is refused with 409 `account_pool` before a pane is created, and a scheduled run fails with that reason.
 
 ```bash
 phren bridge accounts pool api200 personal        # or --clear
@@ -127,7 +127,7 @@ Opt in per project, in its `phren.project.yaml`:
 
 ```yaml
 helper:
-  account: api      # a Claude account on this computer (phren bridge accounts); default is ~/.claude
+  account: api      # a Claude account on this computer with role helpers (phren bridge accounts role api helpers); default is ~/.claude
   model: haiku      # optional, haiku by default
 ```
 
@@ -137,7 +137,7 @@ The lead's own login and routing are removed first (`CLAUDE_CONFIG_DIR`, `ANTHRO
 
 Without `allowEdits` the run is read-only: `--permission-mode default` with Bash and the edit tools refused (`--disallowedTools`), whatever a settings file allows. With it, `--permission-mode acceptEdits`. No MCP servers load; the folder's Claude hooks still run, under the helper account. A run stops after `timeoutSeconds` (120 by default, at most 600) or when the lead cancels the call, with everything it started, and returns Claude's reply.
 
-The tool refuses, saying why, when the folder is not a project's, the project has no `helper`, the account isn't on this computer, its role is `off`, its pool is outside the project's or this computer's `allowedPools` (a list leaves out an account with no pool), or `accounts.yaml` can't be read.
+The tool refuses, saying why, when the folder is not a project's, the project has no `helper`, the account isn't on this computer, its role is not `helpers` (a team store's `phren.project.yaml` can name any of your local accounts, so only one you marked for helpers runs), its pool is outside the project's or this computer's `allowedPools` (a list leaves out an account with no pool), or `accounts.yaml` can't be read.
 
 Each run's cost goes into the account's cost ledger, so it counts against the [API credits](#api-credits-estimate) entered for it, and one line per run (time, project, account, model, outcome, duration, cost and the token counts Claude printed; never the prompt) goes to `<bridge>/usage/helper-runs.jsonl`, trimmed to its last 1000 lines past 512 KB.
 

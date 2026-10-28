@@ -34,8 +34,9 @@ const WRITE_TOOLS = "Bash,Edit,MultiEdit,Write,NotebookEdit";
 export interface HelperChoice { project: string; account: string; model: string; home: ClaudeHome; pool?: string }
 
 /**
- * The project's helper account and model, checked: configured, an account on this computer, not `off`, and in
- * the project's and this computer's allowed pools. Throws with what to change otherwise.
+ * The project's helper account and model, checked: configured, an account on this computer with role `helpers`
+ * (a team store's phren.project.yaml can name any of the owner's local accounts), and in the project's and this
+ * computer's allowed pools. Throws with what to change otherwise.
  */
 export function helperFor(phrenPath: string, project: string, env: NodeJS.ProcessEnv = process.env): HelperChoice {
   const raw = readProjectConfig(phrenPath, project).helper;
@@ -53,7 +54,7 @@ export function helperFor(phrenPath: string, project: string, env: NodeJS.Proces
   // Read strictly: an accounts.yaml that can't be read must not turn the refusals off.
   const policy = accountPolicy();
   const { pool, role } = policy.settings[account] ?? {};
-  if (role === "off") throw new Error(`Claude account ${account}'s role is off: it is never used automatically.`);
+  if (role !== "helpers") throw new Error(`Claude account ${account}'s role is ${role ?? "not set"}: a helper runs only under an account with role helpers (phren bridge accounts role ${account} helpers).`);
   const where = pool ? `pool ${pool}` : "no pool";
   const forProject = projectAllowedPools(phrenPath, project);
   if (!poolAllowed(forProject, pool)) throw new Error(`Claude account ${account} (${where}) is not in project ${project}'s allowed pools: ${forProject!.join(", ")}.`);

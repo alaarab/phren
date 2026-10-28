@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { setComputerAllowedPools } from "./account-pools.js";
+import { clearProjectConfigCache } from "../project-config.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { accountWindows, chooseAccount, claudeRooms, limitedBy, noteAccountLimit, readAccountLimits, resolveAccountFailover, UNKNOWN_RESET_MS, type AccountRoom } from "./account-choice.js";
+import { accountWindows, chooseAccount, claudeRooms, limitedBy, noteAccountLimit, pickClaudeAccount, setChoiceReaders, readAccountLimits, resolveAccountFailover, UNKNOWN_RESET_MS, type AccountRoom } from "./account-choice.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { AccountUsage } from "./usage.js";
 
@@ -64,6 +66,42 @@ describe("the ledger of accounts that hit their limit", () => {
     expect(held({ account: "personal", key: "claude:a" })).toContain("held until");
     expect(held({ account: "work" })).toBeUndefined();
     expect(await readAccountLimits(now + 4 * 3_600_000)).toEqual([{ key: "Mini/work", account: "work", until: new Date(now + UNKNOWN_RESET_MS).toISOString(), at: new Date(now).toISOString() }]);
+  });
+});
+
+describe("a launch that names no account, under pools and roles", () => {
+  let root: string, store: string;
+  const usage = (id: string, used: number): AccountUsage => ({ source: "claude", account: { id, label: id, key: id }, windows: [{ id: "five_hour", name: "5-hour", usedPercent: used, resetsAt: at(2) }] });
+  const inventory = (): HarnessInventory => ({ harnesses: [{ source: "claude", installed: true, usable: true, accounts: [
+    { id: "default", label: "Claude", key: "k1", signedIn: true, usable: true, pool: "personal" },
+    { id: "client", label: "Client", key: "k2", signedIn: true, usable: true, pool: "client-a" },
+    { id: "api", label: "API", key: "k3", signedIn: true, usable: true, pool: "client-a", role: "last-resort" },
+    { id: "spare", label: "Spare", key: "k4", signedIn: true, usable: true, role: "off" }] }] });
+  const pools = (project: string, list: string[]) => { mkdirSync(path.join(store, project), { recursive: true }); writeFileSync(path.join(store, project, "phren.project.yaml"), `allowedPools: [${list.join(", ")}]\n`); clearProjectConfigCache(); };
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), "phren-pick-")); store = path.join(root, "store"); mkdirSync(store);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+    setChoiceReaders({ usage: async () => [usage("default", 0), usage("client", 70), usage("api", 0), usage("spare", 0)], inventory: async () => inventory() });
+  });
+  afterEach(() => { setChoiceReaders({}); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+  it("keeps to the project's pools, never picks off, and takes a last-resort account only when nothing else has room", async () => {
+    pools("client-a", ["client-a"]);
+    expect(await pickClaudeAccount("Launch", { project: "client-a", phrenPath: store }, "Mini", now)).toMatchObject({ account: "client" });
+    setChoiceReaders({ usage: async () => [usage("default", 0), usage("client", 100), usage("api", 50)], inventory: async () => inventory() });
+    expect(await pickClaudeAccount("Launch", { project: "client-a", phrenPath: store }, "Mini", now)).toMatchObject({ account: "api", reason: expect.stringContaining("last resort") });
+    // No project rule: most room among the automatic accounts, `spare` (off) never.
+    const free = await pickClaudeAccount("Launch", { phrenPath: store }, "Mini", now);
+    expect(free).toMatchObject({ account: "default", reason: expect.stringContaining("spare: role off") });
+  });
+
+  it("answers 409 account_pool when no account may do the project's work, the computer's pools included", async () => {
+    pools("client-b", ["client-b"]);
+    await expect(pickClaudeAccount("Launch", { project: "client-b", phrenPath: store }, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+    await setComputerAllowedPools(["personal"]);
+    pools("client-a", ["client-a"]);
+    setChoiceReaders({ usage: async () => [], inventory: async () => ({ harnesses: [{ ...inventory().harnesses[0], allowedPools: ["personal"] }] }) });
+    await expect(pickClaudeAccount("Launch", { project: "client-a", phrenPath: store }, "Mini", now)).rejects.toThrow(/No Claude account on Mini may do this work/);
   });
 });
 
