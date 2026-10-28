@@ -11,6 +11,11 @@ on:
 jobs:
   verify-and-publish:
     runs-on: ubuntu-latest
+    # Two dispatches of one version run one after the other, so the second sees
+    # what the first published and tagged.
+    concurrency:
+      group: release-${{ github.event.inputs.version }}
+      cancel-in-progress: false
     permissions:
       contents: write
       actions: read
@@ -115,8 +120,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="$INPUT_VERSION"
-          # The checkout fetched every tag (fetch-depth: 0), so an existing tag is here.
-          TAGGED=$(git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" || true)
+          git remote set-url origin "https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
+          # Asked of the remote, not this checkout: a run that checked out before
+          # another pushed the tag would not have it. An annotated tag lists its
+          # commit as the peeled `^{}` line.
+          REMOTE=$(git ls-remote origin "refs/tags/v$VERSION" "refs/tags/v$VERSION^{}")
+          TAGGED=$(printf '%s\n' "$REMOTE" | awk -v ref="refs/tags/v$VERSION^{}" '$2 == ref { print $1 }')
+          if [ -z "$TAGGED" ]; then TAGGED=$(printf '%s\n' "$REMOTE" | awk -v ref="refs/tags/v$VERSION" '$2 == ref { print $1 }'); fi
           if [ "$TAGGED" = "$GITHUB_SHA" ]; then
             echo "::notice::v$VERSION is already tagged at this commit; nothing to push."
             echo "v$VERSION was already tagged at $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
@@ -129,5 +139,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Release v$VERSION"
-          git remote set-url origin "https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
           git push origin "v$VERSION"
