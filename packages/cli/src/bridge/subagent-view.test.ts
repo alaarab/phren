@@ -74,14 +74,16 @@ describe("a phone message the turn ended without, with a subagent's view on scre
     return { paneAnsi: screen === undefined ? paneAnsi : async () => screen,
       deliveries: { status: vi.fn(status), expect, awaitLate: vi.fn(async () => "pending") } };
   };
-  const settle = () => new Promise(resolve => setTimeout(resolve, 30));
+  // Long enough for the two or three timer hops a wrongful retype takes on Windows, whose timers tick about every 16 ms.
+  const settle = () => new Promise(resolve => setTimeout(resolve, 100));
 
   it("leaves the view and types it again, once, under the same id", async () => {
     vi.mocked(validateTarget).mockResolvedValue({ ...pane } as never);
     screens = [subagentView, mainView];
     const agentHooks = hooks(() => ({ state: "failed", reason: TURN_ENDED_WITHOUT_IT }));
     retryAfterSubagentView(agentHooks as never, target, "terminal-1", "Go for it", "delivery-1", 1, 600_000, 0);
-    await settle();
+    // Waited for, not a fixed pause: on a slow runner the looks take longer than one.
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1), { timeout: 5_000 });
     expect(sendKeys).toHaveBeenCalledWith("default", "w1:p1", ["esc"]);
     expect(agentHooks.deliveries.expect).toHaveBeenCalledWith(target, "Go for it", 1_500, undefined, "delivery-1", "terminal-1");
     expect(prompt).toHaveBeenCalledTimes(1);
@@ -126,6 +128,8 @@ describe("a phone message the turn ended without, with a subagent's view on scre
     screens = [subagentView, mainView];
     const agentHooks = hooks(() => ({ state: "failed", reason: TURN_ENDED_WITHOUT_IT }));
     retryAfterSubagentView(agentHooks as never, target, "terminal-1", "Go", "d-8", 1, 600_000, 0);
+    // Two looks, the first failing: waited for rather than a fixed 30 ms, which a slow Windows runner overran.
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1), { timeout: 5_000 });
     await settle();
     expect(prompt).toHaveBeenCalledTimes(1);
   });

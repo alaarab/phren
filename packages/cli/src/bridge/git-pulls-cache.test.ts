@@ -70,7 +70,10 @@ describe("Hook pull lookup cache", () => {
     expect(merge.mock.calls[1][1]).not.toHaveProperty("repository");
   });
 
-  it("reads the repository from gh's own pull request URLs and merges there with --repo", async () => {
+  // The fake gh is a POSIX shell script on PATH. Windows cannot run it: execFile finds only an executable, and
+  // a .cmd shim needs a shell the Hook deliberately does not use. The same rules run on every platform through
+  // the mocked provider above; this one checks the real provider's gh arguments and output parsing.
+  it.skipIf(process.platform === "win32")("reads the repository from gh's own pull request URLs and merges there with --repo", async () => {
     const bin = path.join(root, "bin"), log = path.join(root, "gh.log");
     await mkdir(bin);
     const pull = { number: 42, title: "Fix", headRefName: "topic", baseRefName: "main", author: { login: "sam" }, url: "https://github.com/org/app/pull/42", isDraft: false, state: "OPEN", updatedAt: "2026-10-27T00:00:00Z" };
