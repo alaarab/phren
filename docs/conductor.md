@@ -720,7 +720,9 @@ note that earlier messages are missing. It saves every prompt and reply, oldest
 first, redacted like any other peer hand-off and with its checkout path
 replaced, as `<bridge>/move-intents/<move-id>.conversation.md`. That file is
 written once per move. At most 2,000,000 characters are kept, the newest
-messages first, with a note saying how many were left out.
+messages first, with a note saying how many were left out. The file is
+removed once the move has moved or failed, by then the destination has read
+it, and after seven days in any case (`docs/footprint.md`).
 
 For a summary-by-target brief to a harness launched with a brief file (Claude
 or Codex), the destination's launch pulls the copy through

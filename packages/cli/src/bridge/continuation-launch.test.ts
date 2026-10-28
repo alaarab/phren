@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { continuationConversationPage, fetchContinuationConversation, saveContinuationConversation, withConversationPointer } from "./continuation-launch.js";
+import { continuationConversationPage, fetchContinuationConversation, pruneContinuationConversations, saveContinuationConversation, withConversationPointer } from "./continuation-launch.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import type { Json } from "./protocol.js";
 
@@ -25,6 +25,34 @@ it("serves a saved conversation in pages that each fit one peer answer, and reas
   expect(Math.max(...pages.map(page => page.bytes))).toBeLessThan(900_000 + 1_000);
   expect(pages[0].chars).toBeLessThan(262_144);
   expect(pages.length).toBeGreaterThan(Math.ceil(text.length / 262_144));
+});
+
+it("prunes a copy its move is done with, and any older than seven days, and leaves a crash's half-written copy an hour", async () => {
+  const running = "a0000000-0000-4000-8000-0000000000d1", done = "a0000000-0000-4000-8000-0000000000d2", old = "a0000000-0000-4000-8000-0000000000d3";
+  for (const id of [running, done, old]) await saveContinuationConversation(id, `conversation of ${id}`);
+  const intents = path.join(root, "move-intents");
+  // An intent beside the copies is not a copy and is never touched.
+  await writeFile(path.join(intents, `${running}.json`), "{}");
+  const week = 7 * 24 * 60 * 60 * 1000, now = Date.now();
+  const aged = new Date(now - week - 60_000);
+  await utimes(path.join(intents, `${old}.conversation.md`), aged, aged);
+  // Writes a crash left: one fresh, one two hours old.
+  const fresh = `${running}.conversation.md.b0000000-0000-4000-8000-000000000001.tmp`, stale = `${running}.conversation.md.b0000000-0000-4000-8000-000000000002.tmp`;
+  await writeFile(path.join(intents, fresh), "partial"); await writeFile(path.join(intents, stale), "partial");
+  const twoHours = new Date(now - 2 * 60 * 60 * 1000);
+  await utimes(path.join(intents, stale), twoHours, twoHours);
+  // `done` is the only one its move is done with; `old` is still running but past the backstop.
+  const asked: string[] = [];
+  const removed = await pruneContinuationConversations(id => { asked.push(id); return id === done; }, now);
+  expect(removed.sort()).toEqual([done, old].sort());
+  expect(asked.sort()).toEqual([done, running].sort());
+  expect((await readdir(intents)).sort()).toEqual([`${running}.conversation.md`, fresh, `${running}.json`].sort());
+  expect(await fetchContinuationConversation(offset => continuationConversationPage(running, offset), value => value)).toBe(`conversation of ${running}`);
+  await expect(continuationConversationPage(done, 0)).rejects.toMatchObject({ status: 404 });
+  // Nothing to prune, or no folder at all: no error.
+  expect(await pruneContinuationConversations(() => false, now)).toEqual([]);
+  await rm(intents, { recursive: true });
+  expect(await pruneContinuationConversations(() => true, now)).toEqual([]);
 });
 
 it("keeps the first copy of a move when its run starts again, so a reader part way through is not cut off", async () => {
