@@ -193,8 +193,13 @@ export async function gitMergeRequest(cwd: string, data: unknown): Promise<Json>
   const merge: MergeRequest = rest;
   if (expectedRemote !== undefined) {
     const current = await remoteIdentity(root, host);
-    if (!current || current !== normalizeRemote(expectedRemote))
+    // Not merged unchecked: the host's tool could not say (gh signed out, offline), which is not a moved remote.
+    if (!current) return { ok: false, reason: "failed", message: `Phren could not tell which repository ${host.name} merges in from this checkout, so nothing was merged. Check that its sign-in works, then try again.`, host };
+    if (current !== normalizeRemote(expectedRemote)) {
+      // The refresh the error asks for must read again: gh's choice of repository is not part of the cached listing's key.
+      invalidatePulls(root);
       throw new BridgeError(409, "This checkout's remote is not the repository this pull request was reviewed in. Refresh pull requests before merging.", { code: "git-remote-changed" });
+    }
     merge.repository = current;
   }
   const provider = providerFor(host);

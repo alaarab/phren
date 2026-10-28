@@ -55,10 +55,15 @@ describe("Hook pull lookup cache", () => {
     expect(merge.mock.calls[0][1]).not.toHaveProperty("expectedRemote");
     // `gh repo set-default` (or a new upstream remote) since the review: same number, another repository.
     resolved.mockResolvedValue("https://github.com/other/app");
+    const list = vi.mocked(PROVIDERS.github.list);
+    const listed = list.mock.calls.length;
     await expect(gitMergeRequest(root, { number: 42, expectedRemote: "github.com/org/app" })).rejects.toMatchObject({ status: 409, details: { code: "git-remote-changed" } });
-    // gh cannot say: refused rather than merged unchecked.
+    // The refresh the refusal asks for reads the host again rather than the cached listing.
+    await gitPulls(root);
+    expect(list.mock.calls.length).toBe(listed + 1);
+    // gh cannot say (signed out, offline): not merged unchecked, and not called a moved remote either.
     resolved.mockResolvedValue(null);
-    await expect(gitMergeRequest(root, { number: 42, expectedRemote: "github.com/org/app" })).rejects.toMatchObject({ status: 409 });
+    expect(await gitMergeRequest(root, { number: 42, expectedRemote: "github.com/org/app" })).toMatchObject({ ok: false, reason: "failed" });
     expect(merge).toHaveBeenCalledTimes(1);
     // Without the field a merge is as before: no repository named.
     await gitMergeRequest(root, { number: 42 });
