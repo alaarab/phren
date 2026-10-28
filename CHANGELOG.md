@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.60] - 2026-10-28
+
 ### Fixed
 
 - A summary-by-target move's saved conversation (`<bridge>/move-intents/<id>.conversation.md`, up to 2,000,000 characters) no longer stays on the source computer for good. It is removed on the next pass over the moves once the move has moved or failed, or when its move record is gone, and after seven days in any case. It is now listed in the Hook module's local files and in `docs/footprint.md`.
