@@ -110,7 +110,8 @@ async function materializeThread(session: string): Promise<string | undefined> {
     if (!fresh && state.count === Number(summary.n) && state.lastOrdinal === Number(summary.last) && state.maxUpdated === Number(summary.updated)
         && state.turnSignature === turnSignature) return file;
     const pending = pendingMessage(history, session);
-    const rows = objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
+    const rows = itemRows(history, session);
+    const stamps = turnStarts(history, session);
     const lines: string[] = [];
     if (fresh) {
       const meta = await threadMeta(session);
@@ -143,7 +144,8 @@ async function materializeThread(session: string): Promise<string | undefined> {
           state.done[id] = "done"; continue;
         }
         else if (messageRow(item)) {
-          const message = messageRow(item)!;
+          const at = rowTime(row, item, stamps);
+          const message = { ...messageRow(item)!, ...(at ? { timestamp: at } : {}) };
           const queued = item.type === "userMessage" && item.status === "queued";
           lines.push(JSON.stringify(queued ? { ...message, phrenQueued: true, phrenQueueKey: queueKey(session, id) } : message));
           // A question the agent asked (delivered async) rides along as the
@@ -172,6 +174,51 @@ async function materializeThread(session: string): Promise<string | undefined> {
     await atomic(stateFile, JSON.stringify(state));
     return file;
   } catch { return undefined; } finally { history.close(); }
+}
+
+/** The thread's items in order, with when each was created where the store records it (`created_at_ms`, absent
+ * from some stores) and its turn. */
+function itemRows(history: Db, session: string): Json[] {
+  try {
+    return objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal, turn_id, created_at_ms from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
+  } catch {
+    try {
+      return objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal, turn_id from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
+    } catch {
+      return objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
+    }
+  }
+}
+
+/** When each of the thread's turns started, in milliseconds; empty when the store cannot say. */
+function turnStarts(history: Db, session: string): Map<string, number> {
+  const starts = new Map<string, number>();
+  try {
+    for (const turn of objects(history.prepare("select turn_id, started_at from thread_turns where thread_id = ?").all(session))) {
+      const started = epochMs(turn.started_at);
+      if (started) starts.set(String(turn.turn_id), started);
+    }
+  } catch { /* no turns table */ }
+  return starts;
+}
+
+/** Seconds or milliseconds since the epoch, as milliseconds; undefined for anything else. */
+function epochMs(value: unknown): number | undefined {
+  const number = Number(value);
+  if (value === null || value === undefined || !Number.isFinite(number) || number <= 0) return undefined;
+  return number > 1e12 ? number : number * 1000;
+}
+
+/**
+ * A materialized row's `timestamp`, as a rollout row carries one: when its item was created. The Hook settles a
+ * phone message only from rows stamped after it was typed, so an older identical message (an earlier "yes") is
+ * never taken for a new one. A user row the store keeps no creation time for has no stamp: its turn's start
+ * would be older than a steer typed during the turn, which the scan would then drop; unstamped, its position
+ * after the message's cursor decides, as before. An assistant row falls back to its turn's start.
+ */
+function rowTime(row: Json, item: Json, turns: Map<string, number>): string | undefined {
+  const at = epochMs(row.created_at_ms) ?? (item.type === "userMessage" || row.turn_id === undefined ? undefined : turns.get(String(row.turn_id)));
+  return at ? new Date(at).toISOString() : undefined;
 }
 
 /** Codex 0.155 stores a child agent's lifecycle as `subAgentActivity` items

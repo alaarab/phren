@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A phone message to a Codex 0.155 session (whose history the Hook copies out of Codex's thread store) can now be confirmed from that copy, without an earlier identical message standing in for it. Each copied message row is stamped with when Codex created it (or when its turn started), so an earlier "yes" is never taken for a new one. A message waiting in Codex's queue counts as taken only once its consumption marker is written, matched by key as the chat timeline already does.
+
 ## [0.3.59] - 2026-10-28
 
 ### Added
