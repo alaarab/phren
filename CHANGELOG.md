@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `POST /v1/git/pulls` now names the checkout (`repository`) and the hosted repository (`remote`, as `domain/owner/repo`) it listed, and `POST /v1/git/pr/merge` takes `expectedRemote`. A merge whose checkout's remote has since been pointed at another repository is refused with 409 `git-remote-changed`, so a phone cannot merge a same-number, same-head pull request in a different repository after a remote retarget or a pane move. On GitHub the repository is the one `gh` resolves, and the merge names it with `--repo`. Advertised as `capabilities.gitRemoteIdentity`.
 - API credit left and expiry in usage. Each entered credit's usage window now says `remainingUSD` and `expiresAt`, and a Claude row with credits carries `apiCredit` (dollars left, total, used, and the soonest expiry among credits with money left). `phren dispatch usage` adds a total line and `account_usage` names each account's credit left. A credit that expires after its report is dropped instead of shown as reset. Still the owner's entry and a local estimate: Claude Code exposes no Console balance.
 
 ### Fixed
