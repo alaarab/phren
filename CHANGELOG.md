@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.59] - 2026-10-28
+
 ### Added
 
 - Account pools and roles, opt-in, recorded and reported but not yet enforced. A Claude account slot can carry a `pool` tag and a `role` (`helpers`, `last-resort`, `off`), and a project or a computer can list its `allowedPools`. Set them with `phren bridge accounts pool|role|allowed-pools` or the owner-only `POST /v1/accounts/claude/settings` and `POST /v1/accounts/allowed-pools` (capability `accountPools`). `/v1/harnesses` reports them.
