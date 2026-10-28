@@ -8,9 +8,10 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { readProjectConfig } from "../project-config.js";
-import { accountSettings, computerAllowedPools, poolAllowed, projectAllowedPools } from "./account-pools.js";
+import { accountPolicy, poolAllowed, projectAllowedPools } from "./account-pools.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, type ClaudeHome } from "./claude-accounts.js";
 import { recordSessionCost } from "./claude-credits.js";
+import { DISPATCH_ID_ENV } from "./launch-brief.js";
 import { bridgeRoot, object } from "./protocol.js";
 
 export const DEFAULT_HELPER_MODEL = "haiku";
@@ -18,10 +19,17 @@ export const HELPER_TIMEOUT_DEFAULT_S = 120;
 export const HELPER_TIMEOUT_MAX_S = 600;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9.:_[\]-]{0,63}$/;
 const OUTPUT_MAX = 64 * 1024;
+/** Claude's JSON answer is kept whole up to this, so a long reply is cut after parsing, not mid-JSON. */
+const STDOUT_MAX = 4 * 1024 * 1024;
 const LOG_MAX_BYTES = 512 * 1024;
 const LOG_KEEP_LINES = 1000;
-/** Variables that would make the helper bill or sign in as someone other than its account. */
-const ACCOUNT_ENV = ["CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
+/** Variables that would make the helper sign in, bill or route as something other than its account's own login. */
+const ACCOUNT_ENV = ["CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"];
+/** Variables that tie a process to the lead's pane or dispatch, so the helper's own hooks would report as the lead. */
+const PANE_ENV = (name: string) => name.startsWith("HERDR_") || name === "TMUX" || name === "TMUX_PANE" || name === DISPATCH_ID_ENV;
+/** Without allowEdits: tools that change files or run commands, refused even if a settings file allows them. */
+const WRITE_TOOLS = "Bash,Edit,MultiEdit,Write,NotebookEdit";
 
 export interface HelperChoice { project: string; account: string; model: string; home: ClaudeHome; pool?: string }
 
@@ -42,20 +50,21 @@ export function helperFor(phrenPath: string, project: string, env: NodeJS.Proces
   // Homes as this computer has them, not as the lead's own CLAUDE_CONFIG_DIR would make "default".
   const home = claudeHome(account, { ...env, CLAUDE_CONFIG_DIR: "" });
   if (!home) throw new Error(`There is no Claude account "${account}" on this computer (phren bridge accounts lists them).`);
-  const { pool, role } = accountSettings()[account] ?? {};
+  // Read strictly: an accounts.yaml that can't be read must not turn the refusals off.
+  const policy = accountPolicy();
+  const { pool, role } = policy.settings[account] ?? {};
   if (role === "off") throw new Error(`Claude account ${account}'s role is off: it is never used automatically.`);
   const where = pool ? `pool ${pool}` : "no pool";
   const forProject = projectAllowedPools(phrenPath, project);
   if (!poolAllowed(forProject, pool)) throw new Error(`Claude account ${account} (${where}) is not in project ${project}'s allowed pools: ${forProject!.join(", ")}.`);
-  const forComputer = computerAllowedPools();
+  const forComputer = policy.allowedPools;
   if (!poolAllowed(forComputer, pool)) throw new Error(`Claude account ${account} (${where}) is not in this computer's allowed pools: ${forComputer!.join(", ")}.`);
   return { project, account, model, home, ...(pool ? { pool } : {}) };
 }
 
 /** The helper's environment: the lead's, without anything naming another login, plus the account's home. */
 export function helperEnv(home: ClaudeHome, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const next: NodeJS.ProcessEnv = { ...env };
-  for (const name of ACCOUNT_ENV) delete next[name];
+  const next = Object.fromEntries(Object.entries(env).filter(([name]) => !ACCOUNT_ENV.includes(name) && !PANE_ENV(name)));
   return { ...next, ...claudeLaunchEnv(home), NO_COLOR: "1" };
 }
 
@@ -80,27 +89,35 @@ export interface HelperRunOptions {
   /** Let the helper edit files (`--permission-mode acceptEdits`); otherwise tools that need a grant are refused. */
   allowEdits?: boolean;
   env?: NodeJS.ProcessEnv;
+  /** The MCP call's cancel: stops the run. */
+  signal?: AbortSignal;
   now?: () => number;
 }
 
 interface Exit { stdout: string; stderr: string; code: number | null; timedOut: boolean; spawnError?: string }
 
-function runClaude(args: string[], input: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number): Promise<Exit> {
+function runClaude(args: string[], input: string, cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, signal?: AbortSignal): Promise<Exit> {
   return new Promise(resolve => {
     let stdout = "", stderr = "", timedOut = false, settled = false;
-    const finish = (exit: Omit<Exit, "stdout" | "stderr" | "timedOut">) => {
-      if (settled) return;
-      settled = true; clearTimeout(timer);
-      resolve({ stdout, stderr, timedOut, ...exit });
-    };
-    const detached = process.platform !== "win32";
-    const child = spawn("claude", args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached });
+    const windows = process.platform === "win32";
+    // Its own process group, so a timeout or cancel also stops what it started.
+    const detached = !windows;
+    // An npm install on Windows is claude.cmd, which only a shell starts; the arguments are fixed flags and a checked model name.
+    const child = spawn("claude", args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached, shell: windows });
     const kill = () => {
       try { if (detached && child.pid) process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); } catch { /* Already gone. */ }
     };
+    const onAbort = () => kill();
+    const finish = (exit: Omit<Exit, "stdout" | "stderr" | "timedOut">) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); signal?.removeEventListener("abort", onAbort);
+      resolve({ stdout, stderr, timedOut, ...exit });
+    };
     const timer = setTimeout(() => { timedOut = true; kill(); }, timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => { if (stdout.length < 4 * OUTPUT_MAX) stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < OUTPUT_MAX) stderr += chunk.toString(); });
+    if (signal?.aborted) kill(); else signal?.addEventListener("abort", onAbort, { once: true });
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { if (stdout.length < STDOUT_MAX) stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { if (stderr.length < OUTPUT_MAX) stderr += chunk; });
     child.on("error", error => finish({ code: null, spawnError: (error as NodeJS.ErrnoException).code === "ENOENT" ? "claude is not on this computer's PATH." : error.message }));
     child.on("close", code => finish({ code }));
     child.stdin.on("error", () => { /* The child exited before reading its prompt. */ });
@@ -115,9 +132,12 @@ const cap = (text: string): { text: string; truncated?: true } =>
 export async function runHelper(choice: HelperChoice, options: HelperRunOptions): Promise<HelperResult> {
   const now = options.now ?? Date.now;
   const seconds = Math.min(HELPER_TIMEOUT_MAX_S, Math.max(1, Math.round(options.timeoutSeconds ?? HELPER_TIMEOUT_DEFAULT_S)));
-  const args = ["-p", "--model", choice.model, "--output-format", "json", ...(options.allowEdits ? ["--permission-mode", "acceptEdits"] : [])];
+  // No MCP servers from the account or the folder; read-only means the write tools are refused outright, whatever
+  // a settings file allows.
+  const args = ["-p", "--model", choice.model, "--output-format", "json", "--strict-mcp-config",
+    ...(options.allowEdits ? ["--permission-mode", "acceptEdits"] : ["--permission-mode", "default", "--disallowedTools", WRITE_TOOLS])];
   const started = now();
-  const exit = await runClaude(args, options.prompt, options.cwd, helperEnv(choice.home, options.env), seconds * 1000);
+  const exit = await runClaude(args, options.prompt, options.cwd, helperEnv(choice.home, options.env), seconds * 1000, options.signal);
   const durationMs = Math.max(0, now() - started);
   const base = { project: choice.project, account: choice.account, model: choice.model, durationMs };
   let result: HelperResult;
@@ -129,8 +149,9 @@ export async function runHelper(choice: HelperChoice, options: HelperRunOptions)
     const reply = typeof parsed?.result === "string" ? parsed.result : undefined;
     const cost = typeof parsed?.total_cost_usd === "number" && Number.isFinite(parsed.total_cost_usd) && parsed.total_cost_usd >= 0 ? parsed.total_cost_usd : undefined;
     const sessionId = typeof parsed?.session_id === "string" && /^[A-Za-z0-9-]{1,64}$/.test(parsed.session_id) ? parsed.session_id : undefined;
-    const failed = exit.timedOut || exit.code !== 0 || parsed?.is_error === true || reply === undefined;
-    const text = exit.timedOut ? `The helper ran past ${seconds}s and was stopped.${reply ? `\n${reply}` : ""}`
+    const cancelled = options.signal?.aborted === true;
+    const failed = cancelled || exit.timedOut || exit.code !== 0 || parsed?.is_error === true || reply === undefined;
+    const text = cancelled ? "The helper was cancelled." : exit.timedOut ? `The helper ran past ${seconds}s and was stopped.${reply ? `\n${reply}` : ""}`
       : reply ?? (exit.stderr.trim() || exit.stdout.trim() || `claude exited with ${exit.code ?? "a signal"} and no reply.`);
     const output = cap(text);
     result = { ...base, ok: !failed, output: output.text, ...(output.truncated ? { truncated: true as const } : {}),

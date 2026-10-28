@@ -114,7 +114,7 @@ The phone sets them through two owner-only routes, advertised as `capabilities.a
 
 ### Helper runs
 
-A lead agent can hand a small, self-contained task to a cheaper model billed to another account with the `helper` MCP tool (conductor module, `full` profile). Claude Code's own subagents can't do this: a subagent always runs under the lead's login and its usage. A helper is a separate headless `claude -p` under the account you choose.
+A lead agent can hand a small, self-contained task to a cheaper model billed to another account with the `helper` MCP tool (conductor module; not one of the core tools, so in the `core` profile it is `phren_admin(action: "helper")`). Claude Code's own subagents can't do this: a subagent always runs under the lead's login and its usage. A helper is a separate headless `claude -p` under the account you choose.
 
 Opt in per project, in its `phren.project.yaml`:
 
@@ -124,7 +124,13 @@ helper:
   model: haiku      # optional, haiku by default
 ```
 
-Each call runs `claude -p --model <model> --output-format json` in the lead's folder (or the `cwd` it passes) with the account's `CLAUDE_CONFIG_DIR`. The lead's own `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed first, so the helper signs in and bills as that account only: sign the account in with a Console login to bill an API credit. It is read-only unless the lead passes `allowEdits`, stops after `timeoutSeconds` (120 by default, at most 600), and returns Claude's reply. The tool refuses, saying why, when the project has no `helper`, the account isn't on this computer, its role is `off`, or its pool is outside the project's or this computer's `allowedPools` (a list leaves out an account with no pool).
+Each call runs `claude -p --model <model> --output-format json --strict-mcp-config` with the prompt on stdin, in the lead's folder (or the `cwd` it passes), with the account's `CLAUDE_CONFIG_DIR`. The folder decides the project: it must be a project's checkout or worktree, and a `project` the lead names must be that one, so one project's helper account never runs in another project's folder.
+
+The lead's own login and routing are removed first (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK|VERTEX|FOUNDRY`), so the helper signs in and bills as that account only: sign the account in with a Console login to bill an API credit. So are the lead's pane and dispatch (`HERDR_*`, `TMUX`, `TMUX_PANE`, `PHREN_DISPATCH_ID`), so the helper's own hooks never report as the lead.
+
+Without `allowEdits` the run is read-only: `--permission-mode default` with Bash and the edit tools refused (`--disallowedTools`), whatever a settings file allows. With it, `--permission-mode acceptEdits`. No MCP servers load; the folder's Claude hooks still run, under the helper account. A run stops after `timeoutSeconds` (120 by default, at most 600) or when the lead cancels the call, with everything it started, and returns Claude's reply.
+
+The tool refuses, saying why, when the folder is not a project's, the project has no `helper`, the account isn't on this computer, its role is `off`, its pool is outside the project's or this computer's `allowedPools` (a list leaves out an account with no pool), or `accounts.yaml` can't be read.
 
 Each run's cost goes into the account's cost ledger, so it counts against the [API credits](#api-credits-estimate) entered for it, and one line per run (time, project, account, model, outcome, cost; never the prompt) goes to `<bridge>/usage/helper-runs.jsonl`, trimmed to its last 1000 lines past 512 KB.
 
