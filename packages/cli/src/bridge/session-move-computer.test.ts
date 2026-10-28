@@ -7,7 +7,8 @@ import { herdrTerminal } from "./terminal-herdr.js";
 import { ConductorSuccessionService } from "./conductor-succession.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +16,7 @@ import * as peers from "./peers.js";
 import * as harnesses from "./harnesses.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
-import { SessionMover, conversationCopy, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
+import { SessionMover, conversationCopy, listMoves, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
 import { finalTurnFromLines } from "./schedule-watch.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
@@ -24,7 +25,7 @@ import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { peerFingerprint } from "./dispatch-hosts.js";
 import { setTerminalProvider } from "./terminal.js";
-import { continuationPlacement, fetchContinuationConversation, launchContinuation } from "./continuation-launch.js";
+import { continuationPlacement, fetchContinuationConversation, launchContinuation, saveContinuationConversation } from "./continuation-launch.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { LaunchLimiter } from "./limits.js";
 import { BridgeError, objects, type Json, type Target } from "./protocol.js";
@@ -190,6 +191,50 @@ describe.skipIf(process.platform === "win32")("continue on another computer", ()
     // Another peer cannot read it.
     const stranger = { ...headers, "x-phren-peer": Buffer.from(JSON.stringify({ name: "third-peer", fingerprint: peerFingerprint({ ...peer, username: "carol" }) })).toString("base64url") };
     expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}&conversation=0`, {}, stranger)).status).toBe(403);
+    // The move is done, so the next pass over the moves removes its copy; the intent itself stays.
+    await listMoves();
+    expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}&conversation=0`, {}, headers)).status).toBe(404);
+    expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}`, {}, headers)).body.brief).toMatchObject({ id });
+  });
+
+  it("judges a copy with no readable record by whether its record file exists", async () => {
+    const intents = path.join(root, "bridge", "move-intents");
+    // Copies with no record: one just written (a move in another process records itself first), one two hours old;
+    // and one whose record is there but cannot be read (it may be a running move's).
+    const fresh = "b0000000-0000-4000-8000-00000000e001", orphan = "b0000000-0000-4000-8000-00000000e002", unreadable = "b0000000-0000-4000-8000-00000000e003";
+    for (const other of [fresh, orphan, unreadable]) await saveContinuationConversation(other, "conversation");
+    const twoHours = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    for (const other of [orphan, unreadable]) await utimes(path.join(intents, `${other}.conversation.md`), twoHours, twoHours);
+    await mkdir(path.join(root, "bridge", "moves"), { recursive: true });
+    await writeFile(path.join(root, "bridge", "moves", `${unreadable}.json`), "not a move record");
+    await listMoves();
+    expect(existsSync(path.join(intents, `${fresh}.conversation.md`))).toBe(true);
+    expect(existsSync(path.join(intents, `${orphan}.conversation.md`))).toBe(false);
+    expect(existsSync(path.join(intents, `${unreadable}.conversation.md`))).toBe(true);
+  });
+
+  it("keeps a running move's copy through a pass over the moves", async () => {
+    const f = fixture({ exhausted: true });
+    // The destination never confirms the launch: the move stays running.
+    const original = f.transport.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.transport.mockImplementation(async (to, route, data, timeout) => {
+      if (route.startsWith("/v1/sessions/move/launch?server=")) await held;
+      return original(to, route, data, timeout);
+    });
+    const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" } });
+    const id = answer.body.move.id as string;
+    const copy = path.join(root, "bridge", "move-intents", `${id}.conversation.md`);
+    await vi.waitFor(async () => expect((await readMove(id))?.state).toBe("uncertain"));
+    expect(existsSync(copy)).toBe(true);
+    await listMoves();
+    expect(existsSync(copy)).toBe(true);
+    release();
+    await f.mover.settled(from.server, from.pane);
+    expect((await readMove(id))?.state).toBe("moved");
+    await listMoves();
+    expect(existsSync(copy)).toBe(false);
   });
 
   it("keeps the newest messages of a conversation too long to copy whole, and says what it left out", () => {

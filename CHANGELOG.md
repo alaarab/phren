@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A summary-by-target move's saved conversation (`<bridge>/move-intents/<id>.conversation.md`, up to 2,000,000 characters) no longer stays on the source computer for good. It is removed on the next pass over the moves once the move has moved or failed, or when its move record is gone, and after seven days in any case. It is now listed in the Hook module's local files and in `docs/footprint.md`.
 - A phone message to a Codex 0.155 session (whose history the Hook copies out of Codex's thread store) can now be confirmed from that copy, without an earlier identical message standing in for it. Each copied message row is stamped with when Codex created it (or when its turn started), so an earlier "yes" is never taken for a new one. A message waiting in Codex's queue counts as taken only once its consumption marker is written, matched by key as the chat timeline already does.
 ### Added
 

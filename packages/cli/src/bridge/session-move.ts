@@ -1,5 +1,5 @@
 import { targetTranscriptPath } from "./transcripts.js";
-import { CONVERSATION_LIMIT, CONVERSATION_MARKER, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
+import { CONVERSATION_LIMIT, CONVERSATION_MARKER, ORPHAN_GRACE_MS, pruneContinuationConversations, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
 import type { ConductorSuccessionService } from "./conductor-succession.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 // Moving a live session to another agent: the agent in the pane writes a
@@ -180,6 +180,12 @@ export async function listMoves(now = Date.now()): Promise<MoveRecord[]> {
   const settled = (record: MoveRecord) => record.state === "moved" || record.state === "failed";
   const stale = records.filter((record, index) => settled(record) && (index >= MAX_MOVES || now - Date.parse(record.updatedAt) > MOVE_KEEP_MS));
   await Promise.all(stale.flatMap(record => [recordFile(record.id), interruptFile(record.id)].map(file => rm(file, { force: true }).catch(() => undefined))));
+  // A summary-by-target move's saved conversation is read by its destination only while the move runs: removed
+  // once its record says it moved or failed, an hour after it if it has no record file at all, and after seven
+  // days in any case. A record that exists but could not be read keeps its copy: it may be a running move's.
+  const finished = new Set(records.filter(settled).map(record => record.id));
+  await pruneContinuationConversations(async (id, age) => finished.has(id)
+    || (age > ORPHAN_GRACE_MS && !await Promise.resolve().then(() => lstat(recordFile(id))).then(() => true, () => false)), now, MOVE_KEEP_MS).catch(() => undefined);
   return records.filter(record => !stale.includes(record));
 }
 

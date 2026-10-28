@@ -247,7 +247,15 @@ nothing to that checkout.
   moved to another agent gets a brief folder of its own, named by the move id,
   which also holds the full hand-off (`handoff.md`); the move's record
   (`<bridge>/moves/<id>.json`: the old and new targets, harnesses, hand-off
-  path and outcome, no prompt text) is kept seven days and at most 256;
+  path and outcome, no prompt text) is kept seven days and at most 256.
+  A summary-by-target move to another computer also saves the whole
+  conversation, redacted, as `<bridge>/move-intents/<id>.conversation.md`
+  (0600, at most 2,000,000 characters) for the destination to pull. The next
+  pass over the moves removes it once the move has moved or failed, an hour
+  after it was written if the move has no record file at all, and after seven
+  days in any case. The destination puts its copy in the new
+  agent's brief folder (`<bridge>/briefs/<id>/conversation.md`), which goes with
+  that folder;
   `<bridge>/codex-servers/<id>/` (0700) holds one Codex pane's Phren-owned
   app-server: its socket (`app.sock`), its registry record (`server.json`: the
   pane, process id, thread id, folder and last turn state, no prompt text) and
