@@ -46,8 +46,14 @@ func raise() {
     AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     usleep(120_000)
 }
+// Where a drag's button is held down, so focus lost mid-drag still releases it.
+var held: CGPoint?
 func post(_ event: CGEvent?, pause: useconds_t = 40_000) {
-    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else { fail(6, "focus lost") }
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+        // The release goes to the Simulator alone, like every event here, so its touch isn't left pressed.
+        if let point = held { CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.postToPid(app.processIdentifier) }
+        fail(6, "focus lost")
+    }
     event?.postToPid(app.processIdentifier)
     usleep(pause)
 }
@@ -76,14 +82,17 @@ case "drag":
     let f = frame(window), start = screenPoint(f, fx1, fy1), end = screenPoint(f, fx2, fy2)
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left))
-    // Each move goes through post's own foreground check (focus lost mid-drag stops it there), paced to the duration.
+    held = start
+    // Each move goes through post's own foreground check (focus lost mid-drag releases and stops there), paced to the duration.
     let steps = max(2, min(300, ms / 16)), pause = useconds_t(ms * 1_000 / steps)
     for step in 1...steps {
         let t = CGFloat(step) / CGFloat(steps)
         let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
         post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left), pause: pause)
+        held = point
     }
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left))
+    held = nil
 case "key":
     guard args.count >= 4, let code = UInt16(args[3]) else { fail(2, "key needs a keycode") }
     raise()

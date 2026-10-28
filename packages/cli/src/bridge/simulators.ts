@@ -16,10 +16,12 @@ export const SIMULATOR_UDID = /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-
 
 type SimctlDevices = { devices?: Record<string, { udid?: string; name?: string; state?: string; isAvailable?: boolean }[]> };
 
-/** `simctl list devices <filter> -j`, parsed; empty when simctl is missing or answers nonsense. */
-async function listDevices(filter: "booted" | "available"): Promise<SimctlDevices> {
-  const { stdout } = await exec("/usr/bin/xcrun", ["simctl", "list", "devices", filter, "-j"], { timeout: 8_000, maxBuffer: 8_388_608 }).catch(() => ({ stdout: "{}" }));
-  try { return JSON.parse(stdout) as SimctlDevices; } catch { return {}; }
+/** `simctl list devices [filter] -j`, parsed (every device without a filter); undefined when simctl failed, timed
+ * out or answered nonsense. */
+async function listDevices(filter?: "booted" | "available"): Promise<SimctlDevices | undefined> {
+  const listed = await exec("/usr/bin/xcrun", ["simctl", "list", "devices", ...(filter ? [filter] : []), "-j"], { timeout: 8_000, maxBuffer: 8_388_608 }).catch(() => undefined);
+  if (!listed) return undefined;
+  try { return JSON.parse(listed.stdout) as SimctlDevices; } catch { return undefined; }
 }
 
 /** com.apple.CoreSimulator.SimRuntime.iOS-26-1 → iOS 26.1 */
@@ -28,7 +30,7 @@ const runtimeName = (runtimeID: string) => runtimeID.replace(/^.*SimRuntime\./, 
 /** The iOS simulators booted on this Mac, from `simctl`; none elsewhere. */
 export async function bootedSimulators(): Promise<Json[]> {
   if (process.platform !== "darwin") return [];
-  const parsed = await listDevices("booted");
+  const parsed = await listDevices("booted") ?? {};
   const list: Json[] = [];
   for (const [runtimeID, devices] of Object.entries(parsed.devices ?? {})) {
     const runtime = runtimeName(runtimeID);
@@ -51,7 +53,7 @@ export const SIMULATOR_DEVICE_LIMIT = 64;
  */
 export async function simulatorDevices(): Promise<Json[]> {
   if (process.platform !== "darwin") return [];
-  const parsed = await listDevices("available");
+  const parsed = await listDevices("available") ?? {};
   const list: { udid: string; name: string; runtime: string; state: string; version: number[] }[] = [];
   for (const [runtimeID, devices] of Object.entries(parsed.devices ?? {})) {
     if (!/SimRuntime\.iOS-/.test(runtimeID)) continue;
@@ -67,13 +69,16 @@ export async function simulatorDevices(): Promise<Json[]> {
     .slice(0, SIMULATOR_DEVICE_LIMIT).map(({ version: _version, ...device }) => device);
 }
 
-/** A simulator's state as `simctl` reports it now, or undefined when it has no such device. */
+/** A simulator's state as `simctl` reports it now, from every device it has (a booted device whose runtime is no
+ * longer available still shuts down): `missing` when simctl lists no such device, undefined when it couldn't say. */
 async function deviceState(udid: string): Promise<string | undefined> {
-  for (const devices of Object.values((await listDevices("available")).devices ?? {})) {
+  const listed = await listDevices();
+  if (!listed) return undefined;
+  for (const devices of Object.values(listed.devices ?? {})) {
     const device = devices?.find(d => d.udid?.toUpperCase() === udid.toUpperCase());
     if (device) return String(device.state ?? "");
   }
-  return undefined;
+  return "missing";
 }
 
 /** A PNG of one booted simulator's screen. */
@@ -209,21 +214,22 @@ export async function simulatorAct(udid: string, request: SimulatorAction): Prom
   if (!["boot", "shutdown", "launch", "openurl", "home", "lock", "type", "tap", "drag", "screenshot-ready", "accessibility-settings"].includes(request.action)) throw new BridgeError(400, "Unknown simulator action.");
   if (process.platform !== "darwin") throw new BridgeError(404, "Simulators run on macOS only.");
   const simctl = (...args: string[]) => exec("/usr/bin/xcrun", ["simctl", ...args], { timeout: 30_000 }).catch(() => { throw new BridgeError(409, `simctl ${args[0]} failed for that simulator.`); });
-  // Boot and shutdown take any available device, booted or not, and a device already in the asked-for state
-  // is not a failure (the phone's picker may be a moment behind).
-  const settle = async (verb: "boot" | "shutdown", wanted: string) => {
+  // Boot and shutdown take any device, booted or not, and a device already in (or on its way to) the asked-for
+  // state is not a failure: the phone's picker may be a moment behind. A list that failed (simctl slow to start)
+  // is no reason to refuse; simctl itself then says.
+  const settle = async (verb: "boot" | "shutdown", done: readonly string[]) => {
     const state = await deviceState(udid);
-    if (state === undefined) throw new BridgeError(404, "No such simulator on this Mac.");
-    if (state === wanted) return;
-    try { await simctl(verb, udid); } catch (error) { if (await deviceState(udid) !== wanted) throw error; }
+    if (state === "missing") throw new BridgeError(404, "No such simulator on this Mac.");
+    if (state !== undefined && done.includes(state)) return;
+    try { await simctl(verb, udid); } catch (error) { const now = await deviceState(udid); if (now === undefined || !done.includes(now)) throw error; }
   };
   switch (request.action) {
     case "boot":
-      await settle("boot", "Booted");
+      await settle("boot", ["Booted", "Booting"]);
       // Taps, drags and keys go to the device's window in the Simulator app, which booting alone doesn't open.
       await exec("/usr/bin/open", ["-a", "Simulator", "--args", "-CurrentDeviceUDID", udid.toUpperCase()], { timeout: 15_000 }).catch(() => undefined);
       break;
-    case "shutdown": await settle("shutdown", "Shutdown"); break;
+    case "shutdown": await settle("shutdown", ["Shutdown", "Shutting Down"]); break;
     case "launch":
       if (typeof request.bundleId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9.-]{2,199}$/.test(request.bundleId)) throw new BridgeError(400, "Invalid bundle identifier.");
       await simctl("launch", udid, request.bundleId); break;

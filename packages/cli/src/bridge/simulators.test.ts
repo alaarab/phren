@@ -148,8 +148,10 @@ describe.skipIf(process.platform === "win32")("simulator input hardening", () =>
   it("keeps all native event posts behind Simulator PID and foreground checks", async () => {
     const source = await readFile(new URL("./native/simtap.swift", import.meta.url), "utf8");
     expect(source).not.toContain("cghidEventTap");
-    expect(source.match(/\.postToPid\(/g)).toHaveLength(1);
-    expect(source).toMatch(/frontmostApplication\?\.processIdentifier == app\.processIdentifier else \{ fail\(6, "focus lost"\) \}\s*event\?\.postToPid\(app\.processIdentifier\)/);
+    // Every event goes to the Simulator's PID after the foreground check; the one other post is a held drag's
+    // release when that check fails, to the same PID, just before the helper exits.
+    expect(source.match(/\.postToPid\(/g)).toHaveLength(2);
+    expect(source).toMatch(/frontmostApplication\?\.processIdentifier == app\.processIdentifier else \{\s*\/\/[^\n]*\n\s*if let point = held \{ CGEvent\(mouseEventSource: nil, mouseType: \.leftMouseUp, mouseCursorPosition: point, mouseButton: \.left\)\?\.postToPid\(app\.processIdentifier\) \}\s*fail\(6, "focus lost"\)\s*\}\s*event\?\.postToPid\(app\.processIdentifier\)/);
     expect(source).toContain("args[3].utf16.count <= 500");
     expect(source).toContain("scalar.value == 10 && submit");
   });
@@ -215,6 +217,29 @@ describe.skipIf(process.platform === "win32")("simulator devices, booted or not"
     // simctl gave up waiting, but the device came up.
     failBoot = true;
     expect(await simulatorAct(third, { action: "boot" })).toEqual({ ok: true });
+  });
+
+  it("doesn't refuse a boot when simctl can't list its devices yet, and takes a device on its way up as booting", async () => {
+    let listFails = true;
+    const impl = mocks.execute.getMockImplementation()!;
+    mocks.execute.mockImplementation(async (file: string, args: string[]) => {
+      if (file === "/usr/bin/xcrun" && args[1] === "list" && listFails) { calls.push({ file, args }); throw new Error("timed out"); }
+      return impl(file, args);
+    });
+    // CoreSimulatorService still starting: simctl boot itself decides.
+    expect(await simulatorAct(other, { action: "boot" })).toEqual({ ok: true });
+    expect(calls.filter(c => c.args[1] === "boot").map(c => c.args)).toEqual([["simctl", "boot", other]]);
+    listFails = false;
+    calls.length = 0;
+    table["com.apple.CoreSimulator.SimRuntime.iOS-26-1"][1].state = "Booting";
+    expect(await simulatorAct(third, { action: "boot" })).toEqual({ ok: true });
+    expect(calls.some(c => c.args[1] === "boot")).toBe(false);
+  });
+
+  it("shuts down a booted device whose runtime is no longer available", async () => {
+    table["com.apple.CoreSimulator.SimRuntime.iOS-17-0"] = [{ udid: "99999999-9999-4999-8999-999999999999", name: "Old iPhone", state: "Booted", isAvailable: false }];
+    expect(await simulatorAct("99999999-9999-4999-8999-999999999999", { action: "shutdown" })).toEqual({ ok: true });
+    expect(calls.filter(c => c.args[1] === "shutdown").map(c => c.args)).toEqual([["simctl", "shutdown", "99999999-9999-4999-8999-999999999999"]]);
   });
 
   it("shuts a booted device down, takes one already shut down as done, and refuses a device it doesn't have", async () => {
