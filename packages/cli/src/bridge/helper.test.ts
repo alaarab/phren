@@ -29,7 +29,8 @@ process.stdin.on("end", () => {
     oauth: env("CLAUDE_CODE_OAUTH_TOKEN"), pane: env("HERDR_PANE_ID"), tmux: env("TMUX"), dispatch: env("PHREN_DISPATCH_ID"), input };
   const result = mode === "big" ? "é".repeat(70_000) : JSON.stringify(seen);
   process.stdout.write(JSON.stringify({ type: "result", is_error: mode === "error", result,
-    session_id: "0f8a2b6c-1d3e-4f5a-9b7c-8d6e5f4a3b2c", total_cost_usd: 0.0125 }));
+    session_id: "0f8a2b6c-1d3e-4f5a-9b7c-8d6e5f4a3b2c", total_cost_usd: 0.0125,
+    usage: { input_tokens: 1200, output_tokens: 340, cache_read_input_tokens: 5000, cache_creation_input_tokens: 0 } }));
 });
 `;
 
@@ -87,7 +88,9 @@ describe.skipIf(process.platform === "win32")("helper runs", () => {
     expect(realpathSync(run.cwd)).toBe(realpathSync(work));
     expect(homeSessionCosts(choice.home)["0f8a2b6c-1d3e-4f5a-9b7c-8d6e5f4a3b2c"]?.costUSD).toBe(0.0125);
     const lines = readFileSync(helperRunsFile(), "utf8").trim().split("\n").map(line => JSON.parse(line));
-    expect(lines).toEqual([expect.objectContaining({ project: "client-a", account: "api", model: "claude-haiku-5-5", ok: true, costUSD: 0.0125 })]);
+    const tokens = { input: 1200, output: 340, cacheRead: 5000, cacheWrite: 0 };
+    expect(result.tokens).toEqual(tokens);
+    expect(lines).toEqual([expect.objectContaining({ project: "client-a", account: "api", model: "claude-haiku-5-5", ok: true, costUSD: 0.0125, tokens })]);
     expect(readFileSync(helperRunsFile(), "utf8")).not.toContain("README");
   });
 

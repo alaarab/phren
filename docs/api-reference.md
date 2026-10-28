@@ -236,10 +236,12 @@ helper, the account is not on this computer, its role is `off`, its pool is
 outside the project's or this computer's `allowedPools`, or `accounts.yaml`
 can't be read.
 `data` is `{ ok, output, project, account, model, durationMs, costUSD?,
-sessionId?, timedOut?, truncated? }`; `output` is Claude's reply (capped at
-64 KB) or what went wrong. Each run's cost goes into the account's cost ledger,
-so it counts against the API credits entered for it, and one line per run
-(time, project, account, model, outcome, cost, never the prompt) is appended to
+tokens?: { input?, output?, cacheRead?, cacheWrite? }, sessionId?, timedOut?,
+truncated? }`; `output` is Claude's reply (capped at 64 KB) or what went wrong,
+and `tokens` is what Claude printed in its `usage`. Each run's cost goes into
+the account's cost ledger, so it counts against the API credits entered for it,
+and one line per run (time, project, account, model, outcome, duration, cost,
+tokens, never the prompt) is appended to
 `<bridge>/usage/helper-runs.jsonl`.
 
 ### `authority`

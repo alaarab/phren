@@ -132,7 +132,7 @@ Without `allowEdits` the run is read-only: `--permission-mode default` with Bash
 
 The tool refuses, saying why, when the folder is not a project's, the project has no `helper`, the account isn't on this computer, its role is `off`, its pool is outside the project's or this computer's `allowedPools` (a list leaves out an account with no pool), or `accounts.yaml` can't be read.
 
-Each run's cost goes into the account's cost ledger, so it counts against the [API credits](#api-credits-estimate) entered for it, and one line per run (time, project, account, model, outcome, cost; never the prompt) goes to `<bridge>/usage/helper-runs.jsonl`, trimmed to its last 1000 lines past 512 KB.
+Each run's cost goes into the account's cost ledger, so it counts against the [API credits](#api-credits-estimate) entered for it, and one line per run (time, project, account, model, outcome, duration, cost and the token counts Claude printed; never the prompt) goes to `<bridge>/usage/helper-runs.jsonl`, trimmed to its last 1000 lines past 512 KB.
 
 ### Session rows
 

@@ -68,6 +68,19 @@ export function helperEnv(home: ClaudeHome, env: NodeJS.ProcessEnv = process.env
   return { ...next, ...claudeLaunchEnv(home), NO_COLOR: "1" };
 }
 
+export interface HelperTokens { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+
+/** `usage` from Claude's JSON answer as counts, or undefined when it printed none. */
+function tokensOf(raw: unknown): HelperTokens | undefined {
+  const usage = object(raw);
+  const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  const tokens: HelperTokens = {};
+  const set = (key: keyof HelperTokens, value: unknown) => { const n = count(value); if (n !== undefined) tokens[key] = n; };
+  set("input", usage.input_tokens); set("output", usage.output_tokens);
+  set("cacheRead", usage.cache_read_input_tokens); set("cacheWrite", usage.cache_creation_input_tokens);
+  return Object.keys(tokens).length ? tokens : undefined;
+}
+
 export interface HelperResult {
   ok: boolean;
   /** Claude's final reply, or what went wrong; capped at 64 KB. */
@@ -77,6 +90,8 @@ export interface HelperResult {
   model: string;
   durationMs: number;
   costUSD?: number;
+  /** Token counts, when Claude printed them (`usage` in its JSON answer). */
+  tokens?: HelperTokens;
   sessionId?: string;
   timedOut?: true;
   truncated?: true;
@@ -155,7 +170,8 @@ export async function runHelper(choice: HelperChoice, options: HelperRunOptions)
       : reply ?? (exit.stderr.trim() || exit.stdout.trim() || `claude exited with ${exit.code ?? "a signal"} and no reply.`);
     const output = cap(text);
     result = { ...base, ok: !failed, output: output.text, ...(output.truncated ? { truncated: true as const } : {}),
-      ...(cost !== undefined ? { costUSD: cost } : {}), ...(sessionId ? { sessionId } : {}), ...(exit.timedOut ? { timedOut: true as const } : {}) };
+      ...(cost !== undefined ? { costUSD: cost } : {}), ...(tokensOf(parsed?.usage) ? { tokens: tokensOf(parsed?.usage) } : {}),
+      ...(sessionId ? { sessionId } : {}), ...(exit.timedOut ? { timedOut: true as const } : {}) };
     // The spend counts against the account's entered API credits, like its interactive sessions.
     if (sessionId && cost !== undefined) await recordSessionCost(choice.home, { session_id: sessionId, cost: { total_cost_usd: cost } }, new Date(now())).catch(() => undefined);
   }
@@ -169,7 +185,8 @@ export const helperRunsFile = () => path.join(bridgeRoot(), "usage", "helper-run
 function recordHelperRun(result: HelperResult, at: Date): void {
   const file = helperRunsFile();
   const line = JSON.stringify({ at: at.toISOString(), project: result.project, account: result.account, model: result.model, ok: result.ok,
-    durationMs: result.durationMs, ...(result.costUSD !== undefined ? { costUSD: result.costUSD } : {}), ...(result.timedOut ? { timedOut: true } : {}) });
+    durationMs: result.durationMs, ...(result.costUSD !== undefined ? { costUSD: result.costUSD } : {}), ...(result.tokens ? { tokens: result.tokens } : {}),
+    ...(result.timedOut ? { timedOut: true } : {}) });
   try {
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     appendFileSync(file, `${line}\n`, { mode: 0o600 });
