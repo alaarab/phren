@@ -11,6 +11,11 @@ on:
 jobs:
   verify-and-publish:
     runs-on: ubuntu-latest
+    # Two dispatches of one version run one after the other, so the second sees
+    # what the first published and tagged.
+    concurrency:
+      group: release-${{ github.event.inputs.version }}
+      cancel-in-progress: false
     permissions:
       contents: write
       actions: read
@@ -90,6 +95,11 @@ jobs:
           tar -xzOf "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz" package/package.json \
             | node -e 'const m = JSON.parse(require("fs").readFileSync(0, "utf8")); if (m.dependencies["@phren/cli"] !== process.env.INPUT_VERSION) { console.error("@phren/agent does not pin @phren/cli " + process.env.INPUT_VERSION); process.exit(1); }'
 
+      # A second dispatch of a version that already shipped (0.3.59 was dispatched
+      # twice on 2026-10-28) must not fail on npm's "cannot publish over" refusal
+      # or tag the release twice. Each publish step asks npm first: the version
+      # published from this commit is skipped with a notice, one published from
+      # another commit fails, and anything else is published as before.
       - name: Publish CLI package
         working-directory: packages/cli
         # The publish token is scoped to this step only. At job level it was
@@ -97,19 +107,36 @@ jobs:
         # have used it to publish.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: bash ../../scripts/release-publish.sh "@phren/cli" .
 
       - name: Publish agent package
         # After @phren/cli, whose exact version it depends on.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz" --access public --provenance
+        run: bash scripts/release-publish.sh "@phren/agent" "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz"
 
       - name: Create git tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="$INPUT_VERSION"
+          git remote set-url origin "https://x-access-token:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY"
+          # Asked of the remote, not this checkout: a run that checked out before
+          # another pushed the tag would not have it. An annotated tag lists its
+          # commit as the peeled `^{}` line.
+          REMOTE=$(git ls-remote origin "refs/tags/v$VERSION" "refs/tags/v$VERSION^{}")
+          TAGGED=$(printf '%s\n' "$REMOTE" | awk -v ref="refs/tags/v$VERSION^{}" '$2 == ref { print $1 }')
+          if [ -z "$TAGGED" ]; then TAGGED=$(printf '%s\n' "$REMOTE" | awk -v ref="refs/tags/v$VERSION" '$2 == ref { print $1 }'); fi
+          if [ "$TAGGED" = "$GITHUB_SHA" ]; then
+            echo "::notice::v$VERSION is already tagged at this commit; nothing to push."
+            echo "v$VERSION was already tagged at $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ -n "$TAGGED" ]; then
+            echo "::error::v$VERSION already exists at $TAGGED, not this commit ($GITHUB_SHA)."
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Release v$VERSION"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git push origin "v$VERSION"
