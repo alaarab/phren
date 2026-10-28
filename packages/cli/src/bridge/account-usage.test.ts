@@ -63,6 +63,13 @@ describe("account usage merged by account", () => {
     const view = { accounts: [row], noData: [], computers: ["Desk"], unreachable: [], notLinked: [], enrolled: 0 };
     expect(formatAccountUsage(view)).toContain("  API credit, all                about $250.00 left of $300.00, the soonest expires 2026-10-01");
     expect(usageSummary(view)).toContain("API credit: Claude · sam@example.com about $250.00 left of $300.00, the soonest expires 2026-10-01.");
+    // Credits are one balance: a spent one leaves the account usable while another has money; all spent, it is out.
+    const spentPromo = { ...usage, windows: [{ ...credit("promo", 20, 20, later(48)) }, credit("paid", 5, 100)] };
+    const [usable] = mergeAccountUsage([{ computer: "Desk", accounts: [spentPromo] }], now).accounts;
+    expect(usable.exhausted).toBe(false);
+    expect(usageSummary({ ...view, accounts: [usable] })).not.toContain("Out of quota");
+    const allSpent = { ...usage, windows: [credit("promo", 20, 20, later(48)), credit("paid", 100, 100)] };
+    expect(mergeAccountUsage([{ computer: "Desk", accounts: [allSpent] }], now).accounts[0].exhausted).toBe(true);
     // An account with no credit carries none.
     expect(mergeAccountUsage([{ computer: "Desk", accounts: [claude("claude:1", "work", at(1), 10)] }], now).accounts[0]).not.toHaveProperty("apiCredit");
   });

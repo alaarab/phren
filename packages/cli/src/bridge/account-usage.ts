@@ -241,7 +241,10 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
     const credits = withCredits.length ? withCredits.reduce(newer).usage.credits : undefined;
     const updated = date(standing.usage.updatedAt);
     const leftPercent = roomLeft(windows);
-    const exhausted = windows.filter(w => w.exhausted);
+    // An account's API credits are one balance, as capacityRoom counts them: a spent credit exhausts the
+    // account only when every credit is spent.
+    const creditSpent = windows.filter(w => w.id.startsWith("credit:")).every(w => w.exhausted);
+    const exhausted = windows.filter(w => w.exhausted && (!w.id.startsWith("credit:") || creditSpent));
     // A credit's date is when it expires, not when it comes back.
     const availableAt = exhausted.filter(w => !w.id.startsWith("credit:")).map(w => w.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
     const availableIn = availableAt ? resetsIn(availableAt, now) : undefined;
