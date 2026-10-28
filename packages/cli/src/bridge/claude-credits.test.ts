@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { claudeHome, clearAccountCaches } from "./claude-accounts.js";
-import { addClaudeCredit, claudeCredits, creditWindows, homeSessionCosts, recordSessionCost, removeClaudeCredit } from "./claude-credits.js";
+import { addClaudeCredit, claudeCredits, creditSummary, creditWindows, homeSessionCosts, recordSessionCost, removeClaudeCredit } from "./claude-credits.js";
 import { AccountUsageReader } from "./usage.js";
 
 let home = "";
@@ -45,10 +45,17 @@ it("draws spend from the credit that expires first, overflows, and leaves expire
     a: { costUSD: 15, startedAt: "2026-10-06T00:00:00.000Z" },
     b: { costUSD: 10.005, startedAt: "2026-10-07T00:00:00.000Z" },
   };
-  expect(creditWindows(credits, sessions, now)).toEqual([
-    { id: "credit:soon", name: "API credit · Promo, estimate", usedUSD: 20, limitUSD: 20, usedPercent: 100, resetsAt: "2026-11-01T00:00:00.000Z", asOf: now.toISOString() },
-    { id: "credit:late", name: "API credit, estimate", usedUSD: 5.01, limitUSD: 100, usedPercent: 5, asOf: now.toISOString() },
+  const windows = creditWindows(credits, sessions, now);
+  expect(windows).toEqual([
+    { id: "credit:soon", name: "API credit · Promo, estimate", usedUSD: 20, limitUSD: 20, remainingUSD: 0, usedPercent: 100,
+      resetsAt: "2026-11-01T00:00:00.000Z", expiresAt: "2026-11-01T00:00:00.000Z", asOf: now.toISOString() },
+    { id: "credit:late", name: "API credit, estimate", usedUSD: 5.01, limitUSD: 100, remainingUSD: 94.99, usedPercent: 5, asOf: now.toISOString() },
   ]);
+  // The spent promo's expiry is not the one to watch: only credits with money left name the soonest expiry.
+  expect(creditSummary(windows)).toEqual({ remainingUSD: 94.99, limitUSD: 120, usedUSD: 25.01, estimate: true });
+  expect(creditSummary([{ ...windows[0], usedUSD: 5, remainingUSD: 15 }, windows[1]]))
+    .toEqual({ remainingUSD: 109.99, limitUSD: 120, usedUSD: 10.01, expiresAt: "2026-11-01T00:00:00.000Z", estimate: true });
+  expect(creditSummary([{ id: "five_hour", usedPercent: 10 } as never])).toBeUndefined();
 });
 
 it("records status-line costs only for a home with a credit and adds Claude Code's lastCost per project", async () => {
@@ -78,8 +85,10 @@ it("puts the estimate on the home's usage row and names a Console login's plan f
   const rows = await reader.limits();
   const api = rows.find(row => row.account?.id === "api")!;
   expect(api.subscription?.plan).toBe("Console");
-  expect(api.windows).toEqual([expect.objectContaining({ id: expect.stringMatching(/^credit:/), name: "API credit · Promo, estimate", usedUSD: 0, limitUSD: 50 })]);
+  expect(api.windows).toEqual([expect.objectContaining({ id: expect.stringMatching(/^credit:/), name: "API credit · Promo, estimate", usedUSD: 0, limitUSD: 50, remainingUSD: 50 })]);
+  expect(api.apiCredit).toEqual({ remainingUSD: 50, limitUSD: 50, usedUSD: 0, estimate: true });
   expect(api.message).toBeUndefined();
   expect(rows.find(row => row.account?.id === "default")?.windows).toEqual([]);
+  expect(rows.find(row => row.account?.id === "default")).not.toHaveProperty("apiCredit");
   expect(asked).toBe(1);
 });
