@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearProjectConfigCache } from "../project-config.js";
-import { automaticRooms, choosePolicyAccount, computerRule, policyApplies, poolRefusal, projectRule, type PolicyRoom } from "./account-policy.js";
+import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplies, poolRefusal, projectRule, type PolicyRoom } from "./account-policy.js";
 import { chooseAccount } from "./account-choice.js";
 import { policyAccount } from "./dispatch.js";
 import * as harnesses from "./harnesses.js";
@@ -50,12 +50,11 @@ describe("account choice with pools and roles", () => {
     expect(choosePolicyAccount([spare, room("default", 50)], [], target => target.account === "default" ? "hit its limit" : undefined).choice?.account).toBe("spare");
   });
 
-  it("leaves a stopped worker's continuation only the accounts it may take automatically", () => {
+  it("keeps only the accounts an automatic choice may take, and says which have room", () => {
     const rooms = [room("default", 0), room("spare", 80, { role: "last-resort" }), room("team", 90, { role: "off" }), room("api", 50, { pool: "personal" })];
-    // default has no pool for Desk's list, team is off, and api has room, so the last-resort spare sits out.
-    expect(automaticRooms(rooms, [computerRule("Desk", ["personal"])]).map(item => item.account)).toEqual(["api"]);
-    // Nothing else with room: the last-resort account stays in.
-    expect(automaticRooms([room("default", 0), room("spare", 80, { role: "last-resort" })], []).map(item => item.account)).toEqual(["default", "spare"]);
+    // default has no pool for Desk's list and team is off.
+    expect(allowedRooms(rooms, [computerRule("Desk", ["personal"])]).map(item => item.account)).toEqual(["api"]);
+    expect(rooms.filter(item => openRoom(item, held => held.account === "api")).map(item => item.account)).toEqual(["spare", "team"]);
     expect(computerRule("Desk", ["ok", "Not OK"])).toEqual({ owner: "computer Desk", pools: ["ok"] });
     expect(computerRule("Desk", undefined)).toEqual({ owner: "computer Desk" });
   });
@@ -93,6 +92,33 @@ describe("pools and roles at dispatch and Continue in…", () => {
       .toEqual({ refused: expect.stringMatching(/^No Claude account there may do this work: api: its pool client-a is not in computer Desk's allowed pools \(personal\)/) });
     // An older Hook reports no pools: with a project list nothing it has can be shown to fit.
     expect(policyAccount({ harness: "claude" }, listing([{ id: "default" }]), usage, "Old", pooled)).toMatchObject({ refused: expect.stringContaining("has no pool") });
+    // Accounts not reported at all: refused under a project list, left alone without one.
+    expect(policyAccount({ harness: "claude" }, undefined, usage, "Slow", pooled)).toEqual({ refused: expect.stringMatching(/did not report its Claude accounts, so project client-a's allowed pools can't be checked/) });
+    expect(policyAccount({ harness: "claude" }, undefined, usage, "Slow", project)).toBeUndefined();
+    // A computer whose accounts.yaml can't be read lets no account be chosen there.
+    const unreadable = [{ ...(listing([{ id: "default" }]) as unknown as Array<Record<string, unknown>>)[0], poolsUnreadable: true }] as never;
+    expect(policyAccount({ harness: "claude" }, unreadable, usage, "Desk", project)).toMatchObject({ refused: expect.stringContaining("computer Desk (its accounts.yaml can't be read)") });
+    // A project config that can't be read allows no pool rather than any.
+    writeFileSync(path.join(store, "client-a/phren.project.yaml"), "allowedPools: [unclosed\n");
+    expect(projectRule(store, "client-a")).toEqual({ owner: "project client-a (its phren.project.yaml can't be read)", pools: [] });
+    // Long lists are cut so the refusal always fits where it is carried.
+    expect(poolRefusal({ account: "a", pool: "x" }, [{ owner: "project p", pools: Array.from({ length: 32 }, (_, index) => `pool-number-${index}-with-a-long-name`) }])!.length).toBeLessThanOrEqual(280);
+  });
+
+  it("checks a same-computer move's named account against the project's and this computer's pools", async () => {
+    const { localPoolRefusal } = await import("./move-computers.js");
+    const { setAccountSettings } = await import("./account-pools.js");
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
+    const checkout = path.join(home, "checkout");
+    mkdirSync(path.join(checkout, "src"), { recursive: true });
+    writeFileSync(path.join(store, "client-a/phren.project.yaml"), `sourcePath: ${checkout}\nallowedPools: [client-a]\n`);
+    clearProjectConfigCache();
+    await setAccountSettings("big", { pool: "personal" });
+    await setAccountSettings("small", { pool: "client-a" });
+    expect(await localPoolRefusal(path.join(checkout, "src"), "big")).toMatch(/its pool personal is not in project client-a's allowed pools/);
+    expect(await localPoolRefusal(path.join(checkout, "src"), "small")).toBeUndefined();
+    // Outside any project only this computer's own list applies, and it has none.
+    expect(await localPoolRefusal(home, "big")).toBeUndefined();
   });
 
   it("reports each login's pool refusal in Continue in… availability and keeps the choice to logins it allows", async () => {
@@ -109,6 +135,9 @@ describe("pools and roles at dispatch and Continue in…", () => {
     expect(await checkMovePeer(peer(facts), "client-a", { harness: "claude" } as never)).toMatchObject({ account: "api" });
     await expect(checkMovePeer(peer(facts), "client-a", { harness: "claude", account: "default" } as never)).rejects.toThrow(/default on Desk may not do this work: its pool personal/);
     const allOut = { ...facts, harnesses: facts.harnesses.map(row => row.source === "claude" ? { ...row, accounts: row.accounts!.map(login => ({ ...login, poolRefused: "not allowed" })) } : row) };
-    await expect(checkMovePeer(peer(allOut), "client-a", { harness: "claude" } as never)).rejects.toThrow(/No Claude account on Desk may continue this/);
+    await expect(checkMovePeer(peer(allOut), "client-a", { harness: "claude" } as never)).rejects.toThrow(/No Claude account on Desk may continue this: default: not allowed; api: not allowed/);
+    // A peer on an older Hook reports no pools: this side still checks the project's list.
+    const older = { ...facts, harnesses: facts.harnesses.map(row => row.source === "claude" ? { ...row, accounts: row.accounts!.map(({ pool: _pool, role: _role, poolRefused: _refused, ...login }) => login) } : row) };
+    await expect(checkMovePeer(peer(older), "client-a", { harness: "claude", account: "api" } as never)).rejects.toThrow(/api on Desk may not do this work: it has no pool/);
   });
 });

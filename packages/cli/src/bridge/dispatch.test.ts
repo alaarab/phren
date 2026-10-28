@@ -130,6 +130,31 @@ describe("dispatch receipts and selection", () => {
     expect(launch?.[2]).toMatchObject({ kind: "claude", account: "work" });
     // Named on a computer where it may not run: refused before anything starts.
     await expect(new DispatchService().dispatch({ ...brief, computer: "Devbox", harness: "claude" })).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+    // A computer that could only use a last-resort account waits behind a busier one with another account that fits.
+    listed.Devbox = claude([{ id: "spare", role: "last-resort" }]);
+    expect(await new DispatchService().dispatch({ ...brief, harness: "claude" })).toMatchObject({ computer: "Desk", account: "work" });
+    // Nothing anywhere fits: refused as a pool matter, with each computer's reason.
+    listed.Desk = claude([{ id: "default", role: "off" }]); listed.Devbox = claude([{ id: "default", role: "off" }]);
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 9, harnesses: claude([{ id: "default", role: "off" }]) } : { ok: true });
+    await expect(new DispatchService().dispatch({ ...brief, harness: "claude" })).rejects.toMatchObject({ status: 409, details: { code: "account_pool", skipped: expect.arrayContaining([expect.objectContaining({ computer: "Desk" })]) } });
+  });
+
+  it("offers a stopped worker only accounts it may continue on, last-resort ones only when nothing else anywhere has room", async () => {
+    const claude = (accounts: Array<Record<string, unknown>>) => [{ source: "claude", installed: true, usable: true, accounts: accounts.map(item => ({ usable: true, ...item })) }];
+    const listed: Record<string, ReturnType<typeof claude>> = {
+      Desk: claude([{ id: "default" }, { id: "spare", role: "last-resort" }, { id: "team", role: "off" }]),
+      Devbox: claude([{ id: "api", console: true }]),
+    };
+    vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 1, harnesses: listed[peer.name] } : { ok: true });
+    const rooms = async () => Object.fromEntries((await new DispatchService().claudeRooms({ project: "phren", stopped: { computer: "Desk", account: "default" } }))
+      .map(item => [item.computer, item.rooms.map(room => room.account)]));
+    // The stopped login stays listed (the ledger holds it); nothing else has room, so the last-resort one is offered.
+    expect(await rooms()).toMatchObject({ Desk: ["default", "spare"], Devbox: [] });
+    // Another computer with an ordinary account that has room: last-resort accounts sit out everywhere.
+    listed.Devbox = claude([{ id: "work" }]);
+    expect(await rooms()).toMatchObject({ Desk: ["default"], Devbox: ["work"] });
   });
 
   it("keeps anywhere on the least busy computer whatever its quota, skipping only an account with none left", async () => {

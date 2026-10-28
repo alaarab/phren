@@ -6,7 +6,7 @@ import path from "node:path";
 import { codexHome } from "../home-paths.js";
 import { claudeAccountRef, claudeAuthStatus, claudeHomes, CODEX_ACCOUNT, type AccountRef, type AuthRunner } from "./claude-accounts.js";
 import { toolVersion, type ToolVersion } from "./health.js";
-import { accountSettings, computerAllowedPools, type AccountRole } from "./account-pools.js";
+import { accountPolicy, accountSettings, computerAllowedPools, type AccountRole } from "./account-pools.js";
 
 export type HarnessSource = "claude" | "codex" | "opencode" | "copilot" | "phren";
 export interface HarnessAccount extends AccountRef {
@@ -18,8 +18,9 @@ export interface HarnessAccount extends AccountRef {
 }
 export interface HarnessEntry {
   source: HarnessSource; installed: boolean; version?: string; usable: boolean; reason?: string; accounts?: HarnessAccount[];
-  /** Claude's entry: this computer's allowed pools, as on the inventory. */
+  /** Claude's entry: this computer's allowed pools, as on the inventory, or that accounts.yaml can't be read. */
   allowedPools?: string[];
+  poolsUnreadable?: true;
 }
 /** `allowedPools`: the pools this computer's accounts may do work for, when the owner set them; none means any. */
 export interface HarnessInventory { harnesses: HarnessEntry[]; allowedPools?: string[] }
@@ -58,9 +59,13 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
           ...(!auth.signedIn && !auth.unknown ? { signInAvailable: true } : {}) };
       }));
       const usable = accounts.some(account => account.usable);
-      // On the entry too, so a dispatch's capacity probe (which carries only the entries) knows this computer's pools.
+      // On the entry too, so a dispatch's capacity probe (which carries only the entries) knows this computer's pools,
+      // and that they can't be known when accounts.yaml can't be read (an automatic choice then takes no account here).
       const allowedPools = computerAllowedPools();
-      return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts, ...(allowedPools ? { allowedPools } : {}) };
+      let poolsUnreadable = false;
+      try { accountPolicy(); } catch { poolsUnreadable = true; }
+      return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts, ...(allowedPools ? { allowedPools } : {}),
+        ...(poolsUnreadable ? { poolsUnreadable: true as const } : {}) };
     }
     if (source === "codex") {
       const signedIn = existsSync(path.join(codexHome(env), "auth.json"));

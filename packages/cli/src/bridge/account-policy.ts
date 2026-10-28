@@ -5,20 +5,41 @@
 // - `off` is never chosen automatically, and neither is a Console (API-billed) login with no role: API accounts
 //   are off for automatic use until the owner gives them a role. Both can still be named by hand.
 // - `last-resort` accounts are offered only when no other account (ordinary or `helpers`) fits.
-// With no pools, no roles and no Console logins nothing here changes a choice.
+// With no pools, no roles and no Console logins nothing here changes a choice. A config that can't be read
+// allows no pool rather than any.
+import { readFileSync } from "node:fs";
+import { load } from "js-yaml";
+import { resolveProjectConfigPath } from "../project-config.js";
 import { chooseAccount, type AccountChoice, type AccountRoom } from "./account-choice.js";
-import { isAccountRole, isPoolTag, poolAllowed, projectAllowedPools, type AccountRole } from "./account-pools.js";
+import { isAccountRole, isPoolTag, poolAllowed, type AccountRole } from "./account-pools.js";
 
 /** An account room with what the harness listing says about its pool, role and login. */
 export interface PolicyRoom extends AccountRoom { pool?: string; role?: AccountRole; console?: boolean }
 /** Whose `allowedPools` a choice must keep to: "project client-a", "computer Desk". No `pools`: any pool. */
 export interface PoolRule { owner: string; pools?: readonly string[] }
 
-/** A project's rule, from its `phren.project.yaml` in the store. */
-export const projectRule = (phrenPath: string, project: string): PoolRule => ({ owner: `project ${project}`, pools: projectAllowedPools(phrenPath, project) });
+const REFUSAL_MAX = 280;
 
-/** A computer's rule from what its harness listing reports (its Claude entry's `allowedPools`). */
-export function computerRule(computer: string, pools: unknown): PoolRule {
+/** A project's rule, from its `phren.project.yaml` in the store (or the team store holding it). */
+export function projectRule(phrenPath: string, project: string): PoolRule {
+  const owner = `project ${project}`;
+  const file = resolveProjectConfigPath(phrenPath, project);
+  if (!file) return { owner };
+  let text: string | undefined;
+  try { text = readFileSync(file, "utf8"); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { owner };
+    return { owner: `${owner} (its phren.project.yaml can't be read)`, pools: [] };
+  }
+  let parsed: unknown;
+  try { parsed = text.trim() ? load(text) : {}; } catch { return { owner: `${owner} (its phren.project.yaml can't be read)`, pools: [] }; }
+  const pools = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as { allowedPools?: unknown }).allowedPools : undefined;
+  return { owner, ...(Array.isArray(pools) ? { pools: pools.filter(isPoolTag) } : {}) };
+}
+
+/** A computer's rule from what its harness listing reports (its Claude entry's `allowedPools`, or that its
+ * accounts.yaml can't be read). */
+export function computerRule(computer: string, pools: unknown, unreadable = false): PoolRule {
+  if (unreadable) return { owner: `computer ${computer} (its accounts.yaml can't be read)`, pools: [] };
   return { owner: `computer ${computer}`, ...(Array.isArray(pools) ? { pools: pools.filter(isPoolTag) } : {}) };
 }
 
@@ -32,7 +53,8 @@ export function withPolicy<T extends AccountRoom>(room: T, listed: { pool?: unkn
 export function poolRefusal(room: Pick<PolicyRoom, "account" | "pool">, rules: readonly PoolRule[]): string | undefined {
   const rule = rules.find(item => !poolAllowed(item.pools, room.pool));
   if (!rule) return undefined;
-  return `${room.pool ? `its pool ${room.pool}` : "it has no pool, and"} is not in ${rule.owner}'s allowed pools (${rule.pools!.join(", ")})`;
+  const listed = rule.pools!.length ? `'s allowed pools (${rule.pools!.join(", ")})` : "'s allowed pools";
+  return `${room.pool ? `its pool ${room.pool}` : "it has no pool, and"} is not in ${rule.owner}${listed}`.slice(0, REFUSAL_MAX);
 }
 
 /** Why `room` is never chosen automatically, or undefined. */
@@ -47,23 +69,21 @@ export function policyApplies(rooms: readonly PolicyRoom[], rules: readonly Pool
   return rules.some(rule => rule.pools) || rooms.some(room => room.role || room.pool || room.console);
 }
 
-/**
- * The rooms an automatic choice may pick from, for a caller that ranks them itself (a stopped worker's
- * continuation, account-failover.ts): no refused or non-automatic account, and `last-resort` ones only when no
- * other account is signed in with quota left.
- */
-export function automaticRooms<T extends PolicyRoom>(rooms: readonly T[], rules: readonly PoolRule[]): T[] {
-  const allowed = rooms.filter(room => !poolRefusal(room, rules) && !notAutomatic(room));
-  const open = (room: T) => room.usable !== false && !room.exhausted;
-  return allowed.some(room => room.role !== "last-resort" && open(room)) ? allowed.filter(room => room.role !== "last-resort") : allowed;
+/** The rooms a rule and the roles allow an automatic choice to take. */
+export function allowedRooms<T extends PolicyRoom>(rooms: readonly T[], rules: readonly PoolRule[]): T[] {
+  return rooms.filter(room => !poolRefusal(room, rules) && !notAutomatic(room));
 }
+
+/** Whether an allowed room has room to take work: signed in, not out of quota, not `held` (the limits ledger, a
+ * worker that just stopped there). */
+export const openRoom = (room: PolicyRoom, held: (room: PolicyRoom) => boolean = () => false) => room.usable !== false && !room.exhausted && !held(room);
 
 /**
  * `chooseAccount` with pools and roles: rooms a rule refuses or that are not automatic are skipped, with why;
  * the rest are ranked by headroom as before, `last-resort` ones only when no other account has room.
  */
 export function choosePolicyAccount(rooms: readonly PolicyRoom[], rules: readonly PoolRule[] = [],
-  blocked: (room: AccountRoom) => string | undefined = () => undefined): { choice?: AccountChoice; skipped: string[] } {
+  blocked: (room: AccountRoom) => string | undefined = () => undefined): { choice?: AccountChoice; skipped: string[]; lastResort?: true } {
   const skipped: string[] = [];
   const allowed = rooms.filter(room => {
     const why = poolRefusal(room, rules) ?? notAutomatic(room);
@@ -77,5 +97,5 @@ export function choosePolicyAccount(rooms: readonly PolicyRoom[], rules: readonl
   const all = [...skipped, ...first.skipped, ...last.skipped];
   if (!last.choice) return { skipped: all };
   const without = first.skipped.length ? ` (${first.skipped.join(", ")})` : "";
-  return { choice: { account: last.choice.account, reason: `last resort, no other account has room${without}; ${last.choice.reason}${ruledOut}`.slice(0, 400) }, skipped: all };
+  return { choice: { account: last.choice.account, reason: `last resort, no other account has room${without}; ${last.choice.reason}${ruledOut}`.slice(0, 400) }, skipped: all, lastResort: true };
 }

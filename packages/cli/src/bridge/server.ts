@@ -108,7 +108,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     localComputer: { id: computerID, name: hostname() },
     forward: (origin, text, deliveryId) => succession?.forward(origin, text, deliveryId) ?? Promise.resolve(undefined),
     // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
-    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => succession ? succession.automatic("dispatch", { ...input, continues }, origin, () => dispatches.dispatch(input, origin, continues)) : dispatches.dispatch(input, origin, continues) }),
+    failover: new AccountFailover({ rooms: context => dispatches.claudeRooms(context), dispatch: (input, origin, continues) => succession ? succession.automatic("dispatch", { ...input, continues }, origin, () => dispatches.dispatch(input, origin, continues)) : dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
     close: async (receipt, verifiedPeer) => {
       const data = { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn };
