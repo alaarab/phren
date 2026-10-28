@@ -237,6 +237,14 @@ choice of harness or account always wins. `anywhere` follows the same rule: it
 skips a computer whose account for the dispatch is exhausted, and otherwise
 ignores quota.
 
+Pools and roles bind dispatch too ([accounts](accounts.md#account-pools-and-roles)).
+A Claude account outside the project's or the computer's `allowedPools` is
+refused even when named (`code: "account_pool"`). With none named, the
+dispatching Hook picks the account itself once pools or roles apply there,
+never an `off` account or a Console login with no role, and a `last-resort` one
+only when nothing else has room. `anywhere` skips a computer with no account
+that fits, and the receipt's `skipped` says why.
+
 ## Dispatch new work
 
 ```sh
@@ -734,6 +742,11 @@ An omitted Claude account selects any usable login with room, preferring the
 most five-hour headroom and then weekly room, as the launcher does. The Hook
 pins that choice in `to.account`, records `accountChoice`, and advertises the
 listing's `selectedAccount`, so the receiving launcher uses the reported login.
+With [account pools and roles](accounts.md#account-pools-and-roles) set, the
+choice skips logins the project's or that computer's `allowedPools` rule out
+(each listed login carries `poolRefused` with the reason), `off` logins and
+Console logins with no role, and takes a `last-resort` login only when no other
+has room. A named login with `poolRefused` is refused.
 
 Moved-worker observations carry `computerFingerprint`, derived from the
 verified SSH host key and enrolled SSH username, and `computerId`, advertised by

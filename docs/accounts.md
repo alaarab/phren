@@ -93,10 +93,17 @@ All of this is opt-in. A store that sets none of it behaves exactly as before.
   - `last-resort`: offered only when no `helpers` account fits;
   - `off`: never chosen automatically, though still by hand on the phone.
 
-  An account with no role is an ordinary account, as every account was before.
-- **Allowed pools:** a project and a computer may each list `allowedPools`, the pools whose accounts may do its work. No list means any pool.
+  An account with no role is an ordinary account, as every account was before, except a Console (API-billed) login: with no role it is off for automatic use, so API credit is only spent once you give the account a role.
+- **Allowed pools:** a project and a computer may each list `allowedPools`, the pools whose accounts may do its work. No list means any pool; a list leaves out an account with no pool.
 
-For now these are recorded and reported only; nothing enforces them yet.
+Where they bind (`account-policy.ts`):
+- **Dispatch placement.** For a Claude worker, each candidate computer's accounts are checked against the project's and that computer's `allowedPools`. A named account outside them is refused (409, `code: "account_pool"`). With no account named, and once a pool, a role or a Console login is in play there, the dispatching Hook chooses the account itself and names it in the launch: most room among the accounts the pools allow, never `off` or a Console login with no role, `last-resort` only when no other account has room, and none the limits ledger holds back. The receipt's `accountChoice` says why, including what was ruled out. `anywhere` skips a computer where no account fits and lists it under `skipped`, and puts a computer that could only use a `last-resort` account after every computer with another account that fits. When nothing fits anywhere it answers 409 `account_pool`. A named computer is refused. A computer that doesn't report its accounts (a slow read, launch checks off) is refused when the project has a list, since its accounts can't be checked.
+- **Continue in…** The receiving computer's availability marks each login with its `pool`, `role`, `console` and, when the project's or its own pools rule it out, `poolRefused` (the reason). The sending computer checks the project's list again against what the peer reports, so a peer on an older Hook can't let a login through. An unnamed Claude continuation picks the same way as dispatch, and a named login with `poolRefused` is refused. On the same computer, a named account (a move or a `resume` account switch) is checked against the pools of the project whose checkout holds the pane's folder, and this computer's.
+- **A stopped worker's continuation** (account failover, still off unless `phren config account-failover on`) is offered only the accounts the project's and each computer's pools and the roles allow. `last-resort` accounts count only when no other allowed account on any computer has room; the stopped login and any the limits ledger holds back have none.
+
+A config that can't be read allows no pool rather than any. A `phren.project.yaml` that names `allowedPools` but can't be parsed refuses every Claude account for that project, named ones included (a broken file that never named a list still means any pool). An `accounts.yaml` that can't be read is flagged on the Claude listing entry (`poolsUnreadable: true`), and every Claude account on that computer is refused, named or not, until it is fixed. On the same computer, a move with no account named is checked against the account it will run under: the pane's own, else `default`.
+
+With no pools, no roles and no Console logins, every choice is the same as before. A launch from the phone or a schedule that names no account still picks on the receiving computer by room alone; pools and roles don't reach that choice yet.
 
 ```bash
 phren bridge accounts pool api200 personal        # or --clear
