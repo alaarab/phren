@@ -2,14 +2,15 @@
 // ~/.claude is the "default" account and is launched without CLAUDE_CONFIG_DIR,
 // so its keychain item and ~/.claude.json stay where Claude Code put them.
 // Every ~/.claude-<slug> holding a .claude.json is another account. See docs/accounts.md.
-import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { dump, load } from "js-yaml";
+import { withFileLock } from "../governance/locks.js";
 import { claudeConfigDir, homeDir } from "../home-paths.js";
-import { atomic, bridgeRoot } from "./protocol.js";
+import { bridgeRoot } from "./protocol.js";
 
 import { claudePlan, monthlyAnniversary, subscriptionDate, type Subscription } from "./subscription.js";
 
@@ -87,6 +88,39 @@ export function claudeHomeOfEnv(value: string | undefined, env: NodeJS.ProcessEn
 
 export const accountsFile = () => path.join(bridgeRoot(), "accounts.yaml");
 
+/** `accounts.yaml` as an object: empty when there is none (or it is blank), an error when it is there but is
+ * not a mapping, so a write never replaces what it couldn't read. */
+export function parseAccountsYaml(text: string | undefined): Record<string, unknown> {
+  if (text === undefined || !text.trim()) return {};
+  const parsed = load(text);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  throw new Error(`${accountsFile()} is not a mapping; fix or remove it first.`);
+}
+
+let accountsWrites: Promise<unknown> = Promise.resolve();
+/**
+ * The one way `accounts.yaml` is changed (labels, credits, pools): reads it, applies `change`, and writes it back
+ * atomically. Writes in this process run one at a time, and each holds the file's lock against other processes
+ * (the CLI beside the Hook), so no write drops another's change. A file that can't be read is never replaced.
+ */
+export function updateAccountsFile(change: (parsed: Record<string, unknown>) => void): Promise<void> {
+  const run = accountsWrites.then(async () => {
+    await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
+    const file = accountsFile();
+    withFileLock(file, () => {
+      let text: string | undefined;
+      try { text = readFileSync(file, "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      const parsed = parseAccountsYaml(text);
+      change(parsed);
+      const temporary = `${file}.${randomUUID()}.tmp`;
+      try { writeFileSync(temporary, dump(parsed), { mode: 0o600, flag: "wx" }); renameSync(temporary, file); }
+      finally { rmSync(temporary, { force: true }); }
+    });
+  });
+  accountsWrites = run.catch(() => undefined);
+  return run;
+}
+
 function readLabels(): Record<string, string> {
   try {
     const parsed = load(readFileSync(accountsFile(), "utf8"));
@@ -108,15 +142,10 @@ export async function setAccountLabel(id: string, label: string): Promise<void> 
   if (!isAccountSlug(id)) throw new Error(`"${id}" is not an account name: use lowercase letters, digits and dashes.`);
   const clean = label.trim();
   if (!clean || clean.length > 40 || /[\u0000-\u001f]/.test(clean)) throw new Error("A label is 1 to 40 printable characters.");
-  let parsed: Record<string, unknown> = {};
-  try {
-    const raw = load(await readFile(accountsFile(), "utf8"));
-    if (raw && typeof raw === "object") parsed = raw as Record<string, unknown>;
-  } catch { /* First label. */ }
-  const claude = parsed.claude && typeof parsed.claude === "object" ? parsed.claude as Record<string, unknown> : {};
-  parsed.claude = { ...claude, [id]: clean };
-  await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
-  await atomic(accountsFile(), dump(parsed), 0o600);
+  await updateAccountsFile(parsed => {
+    const claude = parsed.claude && typeof parsed.claude === "object" ? parsed.claude as Record<string, unknown> : {};
+    parsed.claude = { ...claude, [id]: clean };
+  });
 }
 
 // ── identity (.claude.json oauthAccount, no tokens) ─────────────────────────

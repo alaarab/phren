@@ -81,6 +81,36 @@ The computer's inventory. The same object also rides on `GET /v1/dispatch/capaci
 - `key` is `claude:` followed by the first 12 hex characters of SHA-256 of the account's `oauthAccount.accountUuid` in that home's `.claude.json`. It is the same on every computer. When it is unknown, `key` is `claude:home:<id>` and the account is not deduplicated.
 - Codex has exactly one account on every computer, keyed `codex` (owner decision). OpenCode, Copilot and phren report no `accounts`; phren's provider credentials are not checked.
 - `usable` means that a launch should work now. A harness is usable when it is installed and at least one account is usable. `reason` explains a `false`, and also says why a usable account is not confirmed signed in. An account whose sign-in check did not answer stays usable, with `signedIn: false` and a `reason`. Only a missing binary or Claude reporting logged out makes something unusable.
+- A Claude account carries `pool` and `role` when the owner set them, and the inventory carries this computer's `allowedPools` when set (see [Account pools and roles](#account-pools-and-roles)).
+
+### Account pools and roles
+
+All of this is opt-in. A store that sets none of it behaves exactly as before.
+
+- **Pool:** a Claude account slot may have a `pool`, a short tag (`personal`, `client-a`) for whose work it may do.
+- **Role:** a slot may have a `role`, which says how it is used without being named:
+  - `helpers`: for helper runs;
+  - `last-resort`: offered only when no `helpers` account fits;
+  - `off`: never chosen automatically, though still by hand on the phone.
+
+  An account with no role is an ordinary account, as every account was before.
+- **Allowed pools:** a project and a computer may each list `allowedPools`, the pools whose accounts may do its work. No list means any pool.
+
+For now these are recorded and reported only; nothing enforces them yet.
+
+```bash
+phren bridge accounts pool api200 personal        # or --clear
+phren bridge accounts role api200 helpers         # helpers | last-resort | off | --clear
+phren bridge accounts allowed-pools personal client-a           # this computer; no tags: show; --clear: any pool
+phren bridge accounts allowed-pools --project client-a client-a    # the project's phren.project.yaml
+phren bridge accounts                             # lists each account's pool and role
+```
+
+A slot's pool and role live in `<bridge>/accounts.yaml` under `slots.<id>` (`{ pool, role }`). This computer's list is the same file's `allowedPools`, and a project's list is `allowedPools` in its `phren.project.yaml`. A pool is 1 to 32 lowercase letters, digits and dashes, and a list holds at most 32.
+
+The phone sets them through two owner-only routes, advertised as `capabilities.accountPools`:
+- `POST /v1/accounts/claude/settings` takes `{ slug, pool?, role? }`. A field left out stays as it is, and `null` clears it. It answers `{ ok, slug, pool?, role? }`: 404 for an unknown slot, 400 for a bad pool or role.
+- `POST /v1/accounts/allowed-pools` takes `{ allowedPools: [tags] | null }` for this computer and answers `{ ok, allowedPools? }`.
 
 ### Session rows
 
