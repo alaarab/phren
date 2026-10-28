@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A phone message to a Codex 0.155 session (whose history the Hook copies out of Codex's thread store) can now be confirmed from that copy, without an earlier identical message standing in for it. Each copied message row is stamped with when Codex created it (or when its turn started), so an earlier "yes" is never taken for a new one. A message waiting in Codex's queue counts as taken only once its consumption marker is written, matched by key as the chat timeline already does.
 ### Added
 
 - `POST /v1/git/pulls` now names the checkout (`repository`) and the hosted repository (`remote`, as `domain/owner/repo`) it listed, and `POST /v1/git/pr/merge` takes `expectedRemote`. A merge whose checkout's remote has since been pointed at another repository is refused with 409 `git-remote-changed`, so a phone cannot merge a same-number, same-head pull request in a different repository after a remote retarget or a pane move. On GitHub the repository is the one `gh` resolves, and the merge names it with `--repo`. Advertised as `capabilities.gitRemoteIdentity`.
