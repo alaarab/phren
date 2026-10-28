@@ -3,8 +3,9 @@ import { creditsText, HARNESS_NAMES, resetsIn, USAGE_SOURCES } from "../computer
 import { hookRequest } from "./client.js";
 import { notLinkedFrom, type NotLinkedComputer } from "./hand-off.js";
 import { optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
+import { creditSummary } from "./claude-credits.js";
 import { errorCode, object, type Json } from "./protocol.js";
-import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type Subscription, type UsageCredits, type UsageWindow } from "./usage.js";
+import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type ApiCredit, type Subscription, type UsageCredits, type UsageWindow } from "./usage.js";
 
 export { NEAR_LIMIT_LEFT };
 
@@ -54,6 +55,9 @@ export interface AccountWindow {
   exhausted?: true;
   usedUSD?: number;
   limitUSD?: number;
+  /** An API credit window: dollars left and its expiry. */
+  remainingUSD?: number;
+  expiresAt?: string;
 }
 
 export interface AccountUsageRow {
@@ -64,9 +68,9 @@ export interface AccountUsageRow {
   /** The login's email, else the account's label, when the Hook names one. */
   account?: string;
   windows: AccountWindow[];
-  /** Least room on any window with a percent; `limited` counts as 0. */
+  /** Least room on any window with a percent, the API credits counted as one balance; `limited` counts as 0. */
   leftPercent?: number;
-  /** Under 20% left on some window. Information, not a reason to avoid the account. */
+  /** Under 20% left on some window or the credits together. Information, not a reason to avoid the account. */
   nearLimit: boolean;
   /** A window is at 100% or refusing requests: never dispatch to it until `availableIn`. */
   exhausted: boolean;
@@ -76,6 +80,8 @@ export interface AccountUsageRow {
   subscription?: Subscription;
   /** Codex's credit balance from the newest report that has one. */
   credits?: UsageCredits;
+  /** A Claude account's entered API credits added up over its unexpired credit windows (an estimate). */
+  apiCredit?: ApiCredit;
   updatedAt?: string;
   /** How old the standing report is, as "4m" or "2d 3h". */
   age?: string;
@@ -133,12 +139,38 @@ export function settleWindow(window: UsageWindow, now: number): AccountWindow {
   if (windowExhausted(window, now)) out.exhausted = true;
   if (window.usedUSD !== undefined) out.usedUSD = window.usedUSD;
   if (window.limitUSD !== undefined) out.limitUSD = window.limitUSD;
+  // A credit's expiry is its `resetsAt`; an older Hook sends only that.
+  const credit = window.id.startsWith("credit:");
+  const remaining = window.remainingUSD ?? (credit && window.usedUSD !== undefined && window.limitUSD !== undefined
+    ? Math.round(Math.max(0, window.limitUSD - window.usedUSD) * 100) / 100 : undefined);
+  const expiresAt = window.expiresAt ?? (credit ? window.resetsAt : undefined);
+  if (remaining !== undefined) out.remainingUSD = remaining;
+  if (expiresAt !== undefined) out.expiresAt = expiresAt;
   return out;
 }
 
-/** Least room across an account's windows, undefined when none has a percent. */
+const isCredit = (window: AccountWindow) => window.id.startsWith("credit:");
+
+const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+/** The room in an account's API credits, one balance as capacityRoom counts them: the credits with a percent
+ * pool, their limits and spend summed. */
+function creditRoom(windows: readonly AccountWindow[]): number | undefined {
+  const credit = windows.filter(w => isCredit(w) && w.leftPercent !== undefined);
+  if (!credit.length) return undefined;
+  if (credit.every(w => finite(w.usedUSD) && finite(w.limitUSD))) {
+    const limit = credit.reduce((sum, w) => sum + w.limitUSD!, 0), used = credit.reduce((sum, w) => sum + w.usedUSD!, 0);
+    return limit > 0 ? Math.max(0, Math.min(100, Math.round((limit - used) / limit * 100))) : 0;
+  }
+  const lefts = credit.map(w => w.leftPercent).filter((value): value is number => value !== undefined);
+  return lefts.length ? Math.max(...lefts) : undefined;
+}
+
+/** Least room across an account's windows, its API credits counted as one; undefined when none has a percent. */
 export function roomLeft(windows: readonly AccountWindow[]): number | undefined {
-  const known = windows.map(w => w.leftPercent).filter((value): value is number => value !== undefined);
+  const known = windows.filter(w => !isCredit(w)).map(w => w.leftPercent).filter((value): value is number => value !== undefined);
+  const credit = creditRoom(windows);
+  if (credit !== undefined) known.push(credit);
   return known.length ? Math.min(...known) : undefined;
 }
 
@@ -219,13 +251,19 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       (date(b.usage.subscription?.checkedAt) || date(b.usage.updatedAt) || 0) - (date(a.usage.subscription?.checkedAt) || date(a.usage.updatedAt) || 0))[0]?.usage.subscription;
     const withWindows = reporting.filter(item => item.usage.windows.length);
     const standing = (withWindows.length ? withWindows : reporting).reduce(newer);
-    const windows = mergedWindows(withWindows).map(window => settleWindow(window, now));
+    // A credit that expired since its report is gone, not reset.
+    const windows = mergedWindows(withWindows).filter(window => !(window.id.startsWith("credit:") && date(window.expiresAt ?? window.resetsAt) <= now))
+      .map(window => settleWindow(window, now));
+    const apiCredit = creditSummary(windows);
     const spend = mergedSpend(source, reporting);
     const withCredits = reporting.filter(item => item.usage.credits);
     const credits = withCredits.length ? withCredits.reduce(newer).usage.credits : undefined;
     const updated = date(standing.usage.updatedAt);
     const leftPercent = roomLeft(windows);
-    const exhausted = windows.filter(w => w.exhausted);
+    // An account's API credits are one balance, as capacityRoom counts them: a spent credit exhausts the
+    // account only when every credit is spent.
+    const creditSpent = windows.filter(w => w.id.startsWith("credit:")).every(w => w.exhausted);
+    const exhausted = windows.filter(w => w.exhausted && (!w.id.startsWith("credit:") || creditSpent));
     // A credit's date is when it expires, not when it comes back.
     const availableAt = exhausted.filter(w => !w.id.startsWith("credit:")).map(w => w.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
     const availableIn = availableAt ? resetsIn(availableAt, now) : undefined;
@@ -240,6 +278,7 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       ...(spend ? { spend } : {}),
       ...(subscription ? { subscription } : {}),
       ...(credits ? { credits } : {}),
+      ...(apiCredit ? { apiCredit } : {}),
       ...(standing.usage.updatedAt ? { updatedAt: standing.usage.updatedAt } : {}),
       ...(Number.isFinite(updated) ? { age: ageText(now - updated) } : {}),
       stale: !Number.isFinite(updated) || now - updated > STALE_AFTER_MS || windows.some(w => w.reset),
@@ -345,11 +384,13 @@ export function usageSummary(view: AccountUsageView): string {
   const out = view.accounts.filter(row => row.exhausted);
   if (out.length) parts.push(`Out of quota, do not dispatch to: ${out.map(row => `${title(row)}${row.availableIn ? ` (back in ${row.availableIn})` : ""}`).join("; ")}.`);
   const near = view.accounts.filter(row => row.nearLimit && !row.exhausted);
-  if (near.length) parts.push(`Low but usable: ${near.map(row => `${title(row)} (${row.leftPercent ?? 0}% left${tightest(row)?.resetsIn ? `, resets in ${tightest(row)!.resetsIn}` : ""})`).join("; ")}.`);
+  if (near.length) parts.push(`Low but usable: ${near.map(row => `${title(row)} (${row.leftPercent ?? 0}% left${tightestChange(row) ? `, ${tightestChange(row)}` : ""})`).join("; ")}.`);
   const limitedRows = view.accounts.filter(row => row.leftPercent !== undefined || row.exhausted);
   if (limitedRows.length && limitedRows.every(row => row.exhausted)) parts.push("Every account with limits is out of quota: tell the owner before dispatching.");
   const claude = view.accounts.filter(row => row.harness === "claude" && claudeRoom(row));
   if (claude.length) parts.push(`Claude room: ${claude.map(row => `${title(row)} ${claudeRoom(row)}`).join("; ")}.`);
+  const credit = view.accounts.filter(row => row.apiCredit);
+  if (credit.length) parts.push(`API credit: ${credit.map(row => `${title(row)} ${apiCreditText(row.apiCredit!)}`).join("; ")}.`);
   const stale = view.accounts.filter(row => row.stale);
   if (stale.length) parts.push(`Stale: ${stale.map(row => `${title(row)} (${row.windows.some(w => w.reset) ? "a window reset since its report" : `reported ${row.age ? ago(row.age) : "at an unknown time"}`})`).join("; ")}.`);
   if (view.unreachable.length) parts.push(`Unreachable: ${view.unreachable.map(item => item.computer).join(", ")}.`);
@@ -368,8 +409,22 @@ export function claudeRoom(row: Pick<AccountUsageRow, "windows">): string {
   return [part("five_hour", "5-hour"), part("seven_day", "weekly")].filter(Boolean).join(", ");
 }
 
-function tightest(row: AccountUsageRow): AccountWindow | undefined {
-  return row.windows.filter(w => w.leftPercent !== undefined).sort((a, b) => a.leftPercent! - b.leftPercent!)[0];
+/** "about $142.50 left of $200.00, the soonest expires 2026-12-31". */
+export function apiCreditText(credit: ApiCredit): string {
+  return `about $${credit.remainingUSD.toFixed(2)} left of $${credit.limitUSD.toFixed(2)}${credit.expiresAt ? `, the soonest expires ${credit.expiresAt.slice(0, 10)}` : ""}`;
+}
+
+/** When the tightest room changes: a window's reset, or, when the API credits are tightest, the soonest expiry
+ * among credits with money left (a credit's expiry is not a reset, and a spent one's says nothing). */
+function tightestChange(row: AccountUsageRow): string | undefined {
+  const window = row.windows.filter(w => !isCredit(w) && w.leftPercent !== undefined).sort((a, b) => a.leftPercent! - b.leftPercent!)[0];
+  const credit = creditRoom(row.windows);
+  if (credit !== undefined && (window === undefined || credit < window.leftPercent!)) {
+    const soonest = row.windows.filter(w => isCredit(w) && w.resetsIn && (w.remainingUSD ?? 0) > 0)
+      .sort((a, b) => (a.expiresAt ?? a.resetsAt ?? "").localeCompare(b.expiresAt ?? b.resetsAt ?? ""))[0];
+    return soonest ? `credit expires in ${soonest.resetsIn}` : undefined;
+  }
+  return window?.resetsIn ? `resets in ${window.resetsIn}` : undefined;
 }
 
 /** `phren dispatch usage` without --json. */
@@ -392,6 +447,7 @@ export function formatAccountUsage(view: AccountUsageView): string {
       const used = w.reset ? "reset, no new report" : w.usedPercent !== undefined ? `${w.usedPercent}% used${w.leftPercent !== undefined ? `, ${w.leftPercent}% left` : ""}` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
       lines.push(`  ${w.name.padEnd(30)} ${used.padEnd(22)}${w.limited ? "limited now  " : ""}${w.resetsIn ? `resets in ${w.resetsIn}${w.resetsAt ? ` (${w.resetsAt.slice(0, 16).replace("T", " ")} UTC)` : ""}` : ""}`.trimEnd());
     }
+    if (row.apiCredit && row.windows.filter(w => w.id.startsWith("credit:")).length > 1) lines.push(`  ${"API credit, all".padEnd(30)} ${apiCreditText(row.apiCredit)}`);
     if (row.credits?.hasCredits) lines.push(`  credits${" ".repeat(24)}${creditsText(row.credits)}`);
     if (row.spend) lines.push(`  spend ${row.spend.period.replace(/_/g, " ").padEnd(24)} $${row.spend.amountUSD.toFixed(2)}`);
     if (row.message) lines.push(`  ${row.message}`);

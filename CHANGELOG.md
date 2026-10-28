@@ -8,6 +8,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - A summary-by-target move now copies the whole conversation, not just the excerpt that fits in the brief. The source reads the whole transcript (up to 64 MiB), not the 512 KiB tail the hand-off reads. For a Claude or Codex destination, the receiving launch pulls the copy page by page from the source's intent route (`?conversation=<offset>`), checks its length and hash, redacts it again and puts it in the new agent's brief folder as `conversation.md`, and the brief says where it is. Either Hook being older leaves the excerpt alone. `capabilities.moveSummaryByTarget` and `capabilities.moveConversationCopy` tell clients which Hooks take the explicit continuation and the copy.
+- API credit left and expiry in usage. Each entered credit's usage window now says `remainingUSD` and `expiresAt`, and a Claude row with credits carries `apiCredit` (dollars left, total, used, and the soonest expiry among credits with money left). `phren dispatch usage` adds a total line and `account_usage` names each account's credit left. A credit that expires after its report is dropped instead of shown as reset. Still the owner's entry and a local estimate: Claude Code exposes no Console balance.
+
+### Fixed
+
+- A spent API credit no longer marks its account out of quota, or near its limit, in `phren dispatch usage` and `account_usage` while another credit still has money. An account's credits are one balance there, as dispatch already counted them: a spent $20 promo beside $95 left of $100 reads 79% left, not "low, 0% left". When the credits are the tightest room, the summary names the soonest expiry among credits with money left, never a spent credit's, and never as a reset.
 
 ## [0.3.59] - 2026-10-28
 
