@@ -14,16 +14,26 @@ const exec = (file: string, args: readonly string[], options: { timeout: number;
   execFileAsync(file, args, { ...options, killSignal: "SIGKILL", encoding: "utf8" });
 export const SIMULATOR_UDID = /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i;
 
+type SimctlDevices = { devices?: Record<string, { udid?: string; name?: string; state?: string; isAvailable?: boolean }[]> };
+
+/** `simctl list devices [filter] -j`, parsed (every device without a filter); undefined when simctl failed, timed
+ * out or answered nonsense. */
+async function listDevices(filter?: "booted" | "available"): Promise<SimctlDevices | undefined> {
+  const listed = await exec("/usr/bin/xcrun", ["simctl", "list", "devices", ...(filter ? [filter] : []), "-j"], { timeout: 8_000, maxBuffer: 8_388_608 }).catch(() => undefined);
+  if (!listed) return undefined;
+  try { return JSON.parse(listed.stdout) as SimctlDevices; } catch { return undefined; }
+}
+
+/** com.apple.CoreSimulator.SimRuntime.iOS-26-1 → iOS 26.1 */
+const runtimeName = (runtimeID: string) => runtimeID.replace(/^.*SimRuntime\./, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/-/g, " ");
+
 /** The iOS simulators booted on this Mac, from `simctl`; none elsewhere. */
 export async function bootedSimulators(): Promise<Json[]> {
   if (process.platform !== "darwin") return [];
-  const { stdout } = await exec("/usr/bin/xcrun", ["simctl", "list", "devices", "booted", "-j"], { timeout: 8_000, maxBuffer: 4_194_304 }).catch(() => ({ stdout: "{}" }));
-  let parsed: { devices?: Record<string, { udid?: string; name?: string; state?: string }[]> } = {};
-  try { parsed = JSON.parse(stdout); } catch { return []; }
+  const parsed = await listDevices("booted") ?? {};
   const list: Json[] = [];
   for (const [runtimeID, devices] of Object.entries(parsed.devices ?? {})) {
-    // com.apple.CoreSimulator.SimRuntime.iOS-26-1 → iOS 26.1
-    const runtime = runtimeID.replace(/^.*SimRuntime\./, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/-/g, " ");
+    const runtime = runtimeName(runtimeID);
     for (const device of devices ?? []) {
       if (device.state !== "Booted" || !device.udid || !SIMULATOR_UDID.test(device.udid)) continue;
       list.push({ udid: device.udid.toUpperCase(), name: String(device.name ?? "Simulator").slice(0, 120), runtime });
@@ -31,6 +41,44 @@ export async function bootedSimulators(): Promise<Json[]> {
     }
   }
   return list;
+}
+
+/** Most devices `GET /v1/simulators?all=1` lists. */
+export const SIMULATOR_DEVICE_LIMIT = 64;
+
+/**
+ * Every iOS simulator this Mac can run (`simctl list devices available`), booted or not, with its `state`
+ * (`Booted`, `Shutdown`, `Booting`, `Shutting Down`): booted ones first, then the newest runtime, then by
+ * name, at most SIMULATOR_DEVICE_LIMIT. For the phone's device picker, which boots one from here.
+ */
+export async function simulatorDevices(): Promise<Json[]> {
+  if (process.platform !== "darwin") return [];
+  const parsed = await listDevices("available") ?? {};
+  const list: { udid: string; name: string; runtime: string; state: string; version: number[] }[] = [];
+  for (const [runtimeID, devices] of Object.entries(parsed.devices ?? {})) {
+    if (!/SimRuntime\.iOS-/.test(runtimeID)) continue;
+    const version = (/iOS-(\d+)-(\d+)/.exec(runtimeID) ?? []).slice(1).map(Number);
+    for (const device of devices ?? []) {
+      if (device.isAvailable === false || !device.udid || !SIMULATOR_UDID.test(device.udid)) continue;
+      const state = typeof device.state === "string" && /^[A-Za-z ]{1,32}$/.test(device.state) ? device.state : "Unknown";
+      list.push({ udid: device.udid.toUpperCase(), name: String(device.name ?? "Simulator").slice(0, 120), runtime: runtimeName(runtimeID), state, version });
+    }
+  }
+  const newer = (a: number[], b: number[]) => (b[0] ?? 0) - (a[0] ?? 0) || (b[1] ?? 0) - (a[1] ?? 0);
+  return list.sort((a, b) => Number(b.state === "Booted") - Number(a.state === "Booted") || newer(a.version, b.version) || a.name.localeCompare(b.name))
+    .slice(0, SIMULATOR_DEVICE_LIMIT).map(({ version: _version, ...device }) => device);
+}
+
+/** A simulator's state as `simctl` reports it now, from every device it has (a booted device whose runtime is no
+ * longer available still shuts down): `missing` when simctl lists no such device, undefined when it couldn't say. */
+async function deviceState(udid: string): Promise<string | undefined> {
+  const listed = await listDevices();
+  if (!listed) return undefined;
+  for (const devices of Object.values(listed.devices ?? {})) {
+    const device = devices?.find(d => d.udid?.toUpperCase() === udid.toUpperCase());
+    if (device) return String(device.state ?? "");
+  }
+  return "missing";
 }
 
 /** A PNG of one booted simulator's screen. */
@@ -55,7 +103,12 @@ export type SimulatorAction =
   | { action: "launch"; bundleId: string }
   | { action: "openurl"; url: string }
   | { action: "tap"; x: number; y: number }
+  /** A swipe or scroll: press at (x1, y1), move to (x2, y2) over `durationMs` (default 300), release. */
+  | { action: "drag"; x1: number; y1: number; x2: number; y2: number; durationMs?: number }
   | { action: "type"; text: string; submit?: boolean };
+
+/** A drag's duration bounds, in ms. */
+export const DRAG_DEFAULT_MS = 300, DRAG_MIN_MS = 50, DRAG_MAX_MS = 5_000;
 
 /** The native helpers, compiled once per Hook version with swiftc, which any
  * Mac with the simulators has. simtap (native/simtap.swift) finds the
@@ -158,12 +211,25 @@ const KEY_H = "4", KEY_L = "37";
 
 export async function simulatorAct(udid: string, request: SimulatorAction): Promise<Json> {
   if (!SIMULATOR_UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
-  if (!["boot", "shutdown", "launch", "openurl", "home", "lock", "type", "tap", "screenshot-ready", "accessibility-settings"].includes(request.action)) throw new BridgeError(400, "Unknown simulator action.");
+  if (!["boot", "shutdown", "launch", "openurl", "home", "lock", "type", "tap", "drag", "screenshot-ready", "accessibility-settings"].includes(request.action)) throw new BridgeError(400, "Unknown simulator action.");
   if (process.platform !== "darwin") throw new BridgeError(404, "Simulators run on macOS only.");
   const simctl = (...args: string[]) => exec("/usr/bin/xcrun", ["simctl", ...args], { timeout: 30_000 }).catch(() => { throw new BridgeError(409, `simctl ${args[0]} failed for that simulator.`); });
+  // Boot and shutdown take any device, booted or not, and a device already in (or on its way to) the asked-for
+  // state is not a failure: the phone's picker may be a moment behind. A list that failed (simctl slow to start)
+  // is no reason to refuse; simctl itself then says.
+  const settle = async (verb: "boot" | "shutdown", done: readonly string[]) => {
+    const state = await deviceState(udid);
+    if (state === "missing") throw new BridgeError(404, "No such simulator on this Mac.");
+    if (state !== undefined && done.includes(state)) return;
+    try { await simctl(verb, udid); } catch (error) { const now = await deviceState(udid); if (now === undefined || !done.includes(now)) throw error; }
+  };
   switch (request.action) {
-    case "boot": await simctl("boot", udid); break;
-    case "shutdown": await simctl("shutdown", udid); break;
+    case "boot":
+      await settle("boot", ["Booted", "Booting"]);
+      // Taps, drags and keys go to the device's window in the Simulator app, which booting alone doesn't open.
+      await exec("/usr/bin/open", ["-a", "Simulator", "--args", "-CurrentDeviceUDID", udid.toUpperCase()], { timeout: 15_000 }).catch(() => undefined);
+      break;
+    case "shutdown": await settle("shutdown", ["Shutdown", "Shutting Down"]); break;
     case "launch":
       if (typeof request.bundleId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9.-]{2,199}$/.test(request.bundleId)) throw new BridgeError(400, "Invalid bundle identifier.");
       await simctl("launch", udid, request.bundleId); break;
@@ -182,6 +248,15 @@ export async function simulatorAct(udid: string, request: SimulatorAction): Prom
       const { x, y } = request;
       if (![x, y].every(v => typeof v === "number" && v >= 0 && v <= 1)) throw new BridgeError(400, "Tap outside the screen.");
       await simtap(await deviceName(udid), "tap", String(x), String(y)); break;
+    }
+    case "drag": {
+      // From and to are fractions of the screenshot, as a tap's are.
+      const { x1, y1, x2, y2 } = request, durationMs = request.durationMs ?? DRAG_DEFAULT_MS;
+      if (![x1, y1, x2, y2].every(v => typeof v === "number" && v >= 0 && v <= 1)) throw new BridgeError(400, "Drag outside the screen.");
+      if (typeof durationMs !== "number" || !Number.isInteger(durationMs) || durationMs < DRAG_MIN_MS || durationMs > DRAG_MAX_MS) {
+        throw new BridgeError(400, `A drag takes ${DRAG_MIN_MS} to ${DRAG_MAX_MS} ms.`);
+      }
+      await simtap(await deviceName(udid), "drag", String(x1), String(y1), String(x2), String(y2), String(durationMs)); break;
     }
     case "screenshot-ready": break;
     case "accessibility-settings": {
