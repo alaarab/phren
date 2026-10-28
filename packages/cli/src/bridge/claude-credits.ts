@@ -11,7 +11,7 @@ import { load } from "js-yaml";
 import { withFileLock } from "../governance/locks.js";
 import { atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
 import { accountsFile, isAccountSlug, updateAccountsFile, type ClaudeHome } from "./claude-accounts.js";
-import type { UsageWindow } from "./usage.js";
+import type { ApiCredit, UsageWindow } from "./usage.js";
 
 export interface ClaudeCredit {
   /** Short id derived from the entry, for `--remove`. */
@@ -220,8 +220,21 @@ export function creditWindows(credits: readonly ClaudeCredit[], sessions: Record
     const usedUSD = round(used.get(credit.id)!);
     return {
       id: `credit:${credit.id}`, name: `API credit${credit.label ? ` · ${credit.label}` : ""}, estimate`,
-      usedUSD, limitUSD: credit.amountUSD, usedPercent: Math.min(100, Math.round(usedUSD / credit.amountUSD * 100)),
-      ...(credit.expiresAt ? { resetsAt: credit.expiresAt } : {}), asOf: now.toISOString(),
+      usedUSD, limitUSD: credit.amountUSD, remainingUSD: round(Math.max(0, credit.amountUSD - usedUSD)),
+      usedPercent: Math.min(100, Math.round(usedUSD / credit.amountUSD * 100)),
+      ...(credit.expiresAt ? { resetsAt: credit.expiresAt, expiresAt: credit.expiresAt } : {}), asOf: now.toISOString(),
     };
   });
+}
+
+/** The credit windows added up: dollars left and the soonest expiry among those with money left. None: undefined. */
+export function creditSummary(windows: ReadonlyArray<Pick<UsageWindow, "id" | "usedUSD" | "limitUSD" | "remainingUSD" | "expiresAt">>): ApiCredit | undefined {
+  const credit = windows.filter(window => window.id.startsWith("credit:") && typeof window.limitUSD === "number" && typeof window.usedUSD === "number");
+  if (!credit.length) return undefined;
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const sum = (pick: (window: typeof credit[number]) => number) => round(credit.reduce((total, window) => total + pick(window), 0));
+  const expiresAt = credit.filter(window => window.expiresAt && (window.remainingUSD ?? window.limitUSD! - window.usedUSD!) > 0)
+    .map(window => window.expiresAt!).sort()[0];
+  return { remainingUSD: sum(window => Math.max(0, window.remainingUSD ?? window.limitUSD! - window.usedUSD!)), limitUSD: sum(window => window.limitUSD!),
+    usedUSD: sum(window => window.usedUSD!), ...(expiresAt ? { expiresAt } : {}), estimate: true };
 }

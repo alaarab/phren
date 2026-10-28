@@ -91,7 +91,8 @@ describe("GitLab and gitboy providers", () => {
       process.env.GITLAB_HOST = "gitlab.example.com"; process.env.GITLAB_TOKEN = "glpat-test";
 
       const list = await gitPulls(repo);
-      expect(list).toMatchObject({ available: true, branch: "feature", account: { source: "environment" }, host: { kind: "gitlab", terms: { short: "MR", ref: "!" } } });
+      expect(list).toMatchObject({ available: true, branch: "feature", account: { source: "environment" }, host: { kind: "gitlab", terms: { short: "MR", ref: "!" } },
+        repository: repo, remote: "gitlab.example.com/team/app" });
       expect(list.pulls).toEqual([
         { number: 12, title: "Cache the stats run", head: "feature", base: "main", author: "sam", url: mr.web_url, draft: false, state: "OPEN", updated: mr.updated_at },
         expect.objectContaining({ number: 9, head: "other", draft: true }),
@@ -146,6 +147,21 @@ describe("GitLab and gitboy providers", () => {
       expect(host.seen[2].body).toEqual({ squash: false, should_remove_source_branch: true });
       refuse = true;
       expect(await gitMergeRequest(repo, { number: 12 })).toMatchObject({ ok: false, reason: "blocked", message: "Branch cannot be merged" });
+    });
+
+    it("merges only in the repository the card was reviewed in", async () => {
+      host = await fakeHost(({ method, path: p }) => method === "PUT" && p.endsWith("/merge_requests/12/merge") ? { json: { ...mr, state: "merged" } } : undefined);
+      const repo = await repository("git@gitlab.example.com:team/app.git", "gitlab.example.com", `${host.origin}/api/v4`);
+      process.env.GITLAB_HOST = "gitlab.example.com"; process.env.GITLAB_TOKEN = "glpat-test";
+      // The pulls listing's `remote`, in any of the forms a client might keep it.
+      for (const expectedRemote of ["gitlab.example.com/team/app", "https://GitLab.example.com/team/app/"])
+        expect(await gitMergeRequest(repo, { number: 12, expectedRemote })).toMatchObject({ ok: true, state: "MERGED" });
+      expect(host.seen.at(-1)?.body).not.toHaveProperty("expectedRemote");
+      // The remote was pointed at another repository after the card was reviewed: same number, refused before the host is asked.
+      await execFileAsync("git", ["-C", repo, "remote", "set-url", "origin", "git@gitlab.example.com:team/other.git"]);
+      const before = host.seen.length;
+      await expect(gitMergeRequest(repo, { number: 12, expectedRemote: "gitlab.example.com/team/app" })).rejects.toMatchObject({ status: 409, details: { code: "git-remote-changed" } });
+      expect(host.seen).toHaveLength(before);
     });
   });
 

@@ -13,7 +13,7 @@ import { readSpeechKey } from "./speech-key.js";
 import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
 import { accountWindows } from "./account-choice.js";
 import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeAuthStatus, claudeHomeOfEnv, claudeHomes, claudePlanUnknown, type AccountRef, type AuthStatus, type ClaudeHome } from "./claude-accounts.js";
-import { claudeCredits, creditWindows, homeSessionCosts, recordSessionCost } from "./claude-credits.js";
+import { claudeCredits, creditSummary, creditWindows, homeSessionCosts, recordSessionCost } from "./claude-credits.js";
 
 import { claudePlan, planName, subscriptionDate, type Subscription } from "./subscription.js";
 export type { Subscription } from "./subscription.js";
@@ -33,6 +33,9 @@ export interface UsageWindow {
   usedCharacters?: number;
   limitCharacters?: number;
   resetsAt?: string;
+  /** An API credit window (`credit:<id>`): what is left of it, and when it expires (also its `resetsAt`). */
+  remainingUSD?: number;
+  expiresAt?: string;
   /** The service says this window is refusing requests now (OpenCode Go's `rate-limited`). */
   limited?: boolean;
   asOf?: string;
@@ -47,6 +50,12 @@ export interface UsageWindow {
  * further work draws on the balance.
  */
 export interface UsageCredits { hasCredits: boolean; unlimited?: true; balance?: number; inUse?: true }
+/**
+ * A Claude home's API credits entered by the owner (claude-credits.ts), added up over the unexpired ones: dollars
+ * left, and the soonest expiry among credits with money left (spend it first). Always an estimate: Claude Code
+ * reports no Console balance.
+ */
+export interface ApiCredit { remainingUSD: number; limitUSD: number; usedUSD: number; expiresAt?: string; estimate: true }
 export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
 export interface AccountUsage {
   source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter" | "copilot" | "elevenlabs";
@@ -57,6 +66,8 @@ export interface AccountUsage {
   subscription?: Subscription;
   /** Codex's credit balance, when Codex reports one. */
   credits?: UsageCredits;
+  /** A Claude home's API credits, when the owner entered any. */
+  apiCredit?: ApiCredit;
   /** Opaque key identity used only to avoid counting one OpenRouter key twice. */
   accountId?: string;
   /** Which Claude report fed this account: the status-line rate_limits payload
@@ -792,7 +803,8 @@ export class AccountUsageReader {
       const subscription = claudeAccountSubscription(home, now, fallback);
       const usage = settleClaudeUsage(await this.claude(home), this.now());
       const credit = credits.length ? creditWindows(credits, homeSessionCosts(home), now) : [];
-      const withCredit = credit.length ? { ...usage, windows: [...usage.windows, ...credit], message: undefined, updatedAt: usage.updatedAt ?? now.toISOString() } : usage;
+      const apiCredit = creditSummary(credit);
+      const withCredit = credit.length ? { ...usage, windows: [...usage.windows, ...credit], ...(apiCredit ? { apiCredit } : {}), message: undefined, updatedAt: usage.updatedAt ?? now.toISOString() } : usage;
       return { ...withCredit, ...(subscription ? { subscription } : {}), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
     };
     const [codexValue, claude, subscription] = await Promise.all([codex, Promise.all(homes.map(claudeRow)), readCodexSubscription(undefined, new Date(this.now()))]);

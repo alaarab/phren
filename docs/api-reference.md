@@ -187,7 +187,9 @@ OpenCode and OpenCode Go spend is summed across computers; OpenRouter spend is
 counted once per key.
 
 Each row carries `id`, `harness`, `name`, `account` (the login's email, else its
-label), `windows`, `leftPercent` (the least room on any window), `nearLimit`
+label), `windows`, `leftPercent` (the least room on any window, the account's
+API credits counted as one balance with their limits and spend summed, as
+dispatch counts them), `nearLimit`
 (under 20% left: information, not a reason to avoid the account), `exhausted`
 (a window at 100% or refusing requests: never dispatch to it) with
 `availableIn` (when its last spent window resets), `spend`, `subscription`, `updatedAt`, `age`, `stale`,
@@ -196,7 +198,12 @@ computer is the Claude account id `dispatch`'s `account` takes there. Each
 window carries `usedPercent`, `leftPercent`, `resetsAt` and `resetsIn`; once
 its reset time has passed it says `reset: true` and has no percent, and while
 the service refuses requests it says `limited: true` with `leftPercent` 0. A
-window at 100% or limited also says `exhausted: true`. A
+window at 100% or limited also says `exhausted: true`. An API credit window
+(`credit:<id>`) also carries `usedUSD`, `limitUSD`, `remainingUSD` and
+`expiresAt`, is dropped once it expires, and a Claude row with any carries
+`apiCredit: { remainingUSD, limitUSD, usedUSD, expiresAt?, estimate: true }`
+(the soonest expiry among credits with money left); `message` names each
+account's credit left. A
 row is `stale` when its report is over 15 minutes old, has no timestamp, or has
 a window that reset since the report.
 
@@ -1731,7 +1738,7 @@ host reports them: `reviewDecision` (`APPROVED`, `REVIEW_REQUIRED` or `CHANGES_R
 
 | Route | Body | Answer |
 | --- | --- | --- |
-| `POST /v1/git/pr/merge` | `number`, `method?` (`merge`, `squash` or `rebase`; default `merge`), `expectedHeadSha?`, `deleteBranch?`, `expectedRepository?` | `{ok: true, number, method, ...}`, or `{ok: false, reason, message}`. `reason: "blocked"` is the host's own refusal: failing checks, missing approvals, conflicts, or a head that moved past `expectedHeadSha`. GitHub merges with `gh pr merge --match-head-commit` and never deletes the local branch; GitLab merges by the project's own method (squash per request). |
+| `POST /v1/git/pr/merge` | `number`, `method?` (`merge`, `squash` or `rebase`; default `merge`), `expectedHeadSha?`, `deleteBranch?`, `expectedRepository?`, `expectedRemote?` | `{ok: true, number, method, ...}`, or `{ok: false, reason, message}`. `reason: "blocked"` is the host's own refusal: failing checks, missing approvals, conflicts, or a head that moved past `expectedHeadSha`. `expectedRemote` is the pulls listing's `remote` the card came from; when the checkout's remote now names another repository, the merge is refused with 409 `git-remote-changed` before the host is asked (and the cached listing dropped, so a refresh reads it again); when the host's tool cannot say which repository it would merge in (gh signed out or offline), the answer is `{ok: false, reason: "failed"}` and nothing is merged. GitHub merges with `gh pr merge --match-head-commit` and never deletes the local branch; GitLab merges by the project's own method (squash per request). |
 | `POST /v1/git/host-token` | `token` (empty disconnects), `expectedRepository?` | `{ok, kind, domain, user?}`. Connects this repository's GitLab or gitboy host: the token is checked against the host's current-user API, then stored with that account in the Hook's `git-hosts.json` (mode 600, never the store). A token the host refuses is `{ok: false, reason: "auth"}`; GitHub answers `reason: "unsupported"` (it uses `gh auth login`). |
 
 `phren bridge git-host [list | set <domain> gitlab|gitboy | remove <domain>]` does the same from a shell, reading the token from stdin.
@@ -1739,6 +1746,18 @@ host reports them: `reviewDecision` (`APPROVED`, `REVIEW_REQUIRED` or `CHANGES_R
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,
 state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
+It also names what it listed: `repository`, the checkout's root (what
+`expectedRepository` is checked against), and `remote`, the hosted repository
+the requests are listed from as `domain/owner/repo` in lower case (null with no
+parsable remote). On GitHub that is the repository `gh` resolves, which for a
+fork is usually its upstream or its `gh repo set-default`, read from the listed
+requests' URLs; elsewhere it is the remote's. On merge the Hook resolves it again,
+refuses a mismatch, and on GitHub names it to `gh pr merge --repo`, so `gh`
+cannot pick another repository in between. Send `remote` back as listed. A phone binds
+a reviewed card to both and sends them back on merge, so a remote retargeted
+since, or a pane moved to another checkout, cannot merge a request with the same
+number and head in a different repository. Hooks that check `expectedRemote`
+advertise `capabilities.gitRemoteIdentity: true`; older ones ignore the field.
 `POST /v1/git/status` returns `defaultBranch`, the branch a push asks to confirm.
 
 ### Terminal sources and independent overviews
@@ -1861,7 +1880,7 @@ request per blob.
 
 ### `GET /v1/usage`
 
-Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`, `elevenlabs`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId`, for Claude `origin`, and `account: {id, label, key}` on Claude and Codex rows (Claude rows add `email` when the login names one). A Codex row carries `credits: {hasCredits, unlimited?, balance?, inUse?}` when Codex reports its credit balance: `balance` in Codex's credit unit (not dollars), and `inUse` when credits are enabled and a plan window is spent, so work draws on the balance. A Claude window whose reset passed after its report is sent as `reset: true` without `usedPercent`, and Claude windows reported over three days ago are dropped. By default there is one `claude` row, the default home; `?accounts=all` adds one row per extra Claude home (`~/.claude-<id>`), default first, since a phone built before accounts refuses two rows of one source. Extra homes have no live read on macOS and use the status-line snapshot (`usage/claude-<id>.json`) plus their own `.claude.json`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `elevenlabs` appears only on a computer with the ElevenLabs key spoken replies use (`phren bridge speech-key set`): the Hook reads `GET /v1/user/subscription` on the `speech-region` endpoint (`api.elevenlabs.io` by default) with that key, sent only there, and reports one `elevenlabs:characters` window with `usedPercent`, `usedCharacters`, `limitCharacters` and `resetsAt`; the key never reaches the phone. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
+Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`, `elevenlabs`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId`, for Claude `origin`, and `account: {id, label, key}` on Claude and Codex rows (Claude rows add `email` when the login names one). A Codex row carries `credits: {hasCredits, unlimited?, balance?, inUse?}` when Codex reports its credit balance: `balance` in Codex's credit unit (not dollars), and `inUse` when credits are enabled and a plan window is spent, so work draws on the balance. A Claude home with API credits the owner entered (`phren bridge accounts credit`) carries one `credit:<id>` window per unexpired credit with `usedUSD`, `limitUSD`, `remainingUSD` and `expiresAt` (also as `resetsAt`), and `apiCredit: {remainingUSD, limitUSD, usedUSD, expiresAt?, estimate: true}`, the credits added up with the soonest expiry among those with money left; both are estimates from the entered amount and Claude Code's own session costs (docs/accounts.md). A Claude window whose reset passed after its report is sent as `reset: true` without `usedPercent`, and Claude windows reported over three days ago are dropped. By default there is one `claude` row, the default home; `?accounts=all` adds one row per extra Claude home (`~/.claude-<id>`), default first, since a phone built before accounts refuses two rows of one source. Extra homes have no live read on macOS and use the status-line snapshot (`usage/claude-<id>.json`) plus their own `.claude.json`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `elevenlabs` appears only on a computer with the ElevenLabs key spoken replies use (`phren bridge speech-key set`): the Hook reads `GET /v1/user/subscription` on the `speech-region` endpoint (`api.elevenlabs.io` by default) with that key, sent only there, and reports one `elevenlabs:characters` window with `usedPercent`, `usedCharacters`, `limitCharacters` and `resetsAt`; the key never reaches the phone. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
 
 Usage rows may also carry `subscription: { plan, startedAt?, renewsAt?, renewsEstimated?, checkedAt? }`. Dates are ISO 8601 UTC; missing metadata is omitted. Subscription freshness is independent of quota freshness and is preserved by `account_usage` when merging each account. See [subscription metadata](accounts.md#subscription-metadata) for provider fields and estimated renewals.
 

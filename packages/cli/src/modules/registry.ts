@@ -120,7 +120,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "/v1/git/tree", "/v1/git/worktrees", "/v1/git/stage", "/v1/git/unstage", "/v1/git/discard",
       "/v1/git/commit", "/v1/git/push", "/v1/git/pr", "/v1/git/pr/merge", "/v1/git/host-token", "/v1/git/show", "/v1/git/checkout", "/v1/git/fetch", "/v1/git/pull", "/v1/git/file", "/v1/git/apply", "/v1/git/session-changes", "/v1/files/write", "/v1/files/search", "/v1/files/list",
     ])],
-    capabilities: ["git", "diff", "fileWrite", "fileSearch", "gitReview", "gitHosts", "projectHostToken"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
+    capabilities: ["git", "diff", "fileWrite", "fileSearch", "gitReview", "gitHosts", "projectHostToken", "gitRemoteIdentity"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
     phoneScreens: [{ screen: "AgentChangesView", capability: "git" }], skills: [],
   },
   {

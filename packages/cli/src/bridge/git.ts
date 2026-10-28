@@ -362,6 +362,23 @@ async function pullsTarget(cwd: string): Promise<PullsTarget> {
   catch (error) { if (pullsTargets.get(cwd) === entry) pullsTargets.delete(cwd); throw error; }
 }
 
+/** Which hosted repository the host's requests are listed and merged in, as `domain/owner/repo` in lower
+ * case: what a reviewed pull request card binds to, so a retargeted remote or a pane moved to another
+ * checkout cannot merge a same-number request in a different repository. It is the one the host's own tool
+ * resolves when it picks (gh: an `upstream`, or `gh repo set-default`), else the remote's. Null with no
+ * parsable remote, or when the tool cannot say. */
+export async function remoteIdentity(root: string, host: Awaited<ReturnType<typeof detectHost>>): Promise<string | null> {
+  if (!host.domain) return null;
+  const provider = providerFor(host);
+  const named = provider?.repository ? await provider.repository(root, host).catch(() => null) : host.webUrl;
+  return named ? normalizeRemote(named) : null;
+}
+
+/** `https://GitHub.com/Owner/Repo/`, `github.com/owner/repo` → `github.com/owner/repo`. */
+export function normalizeRemote(value: string): string {
+  return value.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/\/+$/, "");
+}
+
 /** Open pull or merge requests and the checked-out branch's own (any state)
  * with its checks, from whichever host the remote is on (git-hosts.ts). A
  * host that cannot answer (a missing CLI, a stubbed provider, an unknown
@@ -379,7 +396,14 @@ export async function gitPulls(cwd: string, retried = false): Promise<Json> {
         pullsCache.invalidate(candidate => candidate === key);
         throw new CredentialsChanged();
       }
-      return { ...list, branch: branch || null, host };
+      // `remote` is what `expectedRemote` is checked against on merge: the repository the requests came from
+      // when the host's tool picked it, else the remote's. With no requests listed there is no card to bind.
+      const { repository: listed, ...rest } = list;
+      const remote = host.domain ? listed ?? host.webUrl : null;
+      return { ...rest, branch: branch || null, host, remote: remote ? normalizeRemote(remote) : null };
+    })).then(list => ({
+      // Outside the cache, which worktrees of one repository share: this checkout, what `expectedRepository` is checked against.
+      ...list, repository: root,
     }));
   } catch (error) {
     if (!(error instanceof CredentialsChanged)) throw error;

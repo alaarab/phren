@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -32,6 +32,63 @@ describe("Hook pull lookup cache", () => {
     vi.spyOn(Date, "now").mockImplementation(() => now);
   });
   afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+
+  it("names each checkout's own repository and remote even when worktrees share the cached list", async () => {
+    vi.spyOn(PROVIDERS.github, "list").mockResolvedValue(result(1));
+    await exec("git", ["-C", root, "-c", "user.email=sam@example.com", "-c", "user.name=Sam", "commit", "-q", "--allow-empty", "-m", "Start"]);
+    await exec("git", ["-C", root, "checkout", "-q", "--detach"]);
+    const worktree = path.join(root, "linked");
+    await exec("git", ["-C", root, "worktree", "add", "-q", "--detach", worktree]);
+    expect(await gitPulls(root)).toMatchObject({ repository: root, remote: "github.com/sam/app" });
+    expect(await gitPulls(worktree)).toMatchObject({ repository: worktree, remote: "github.com/sam/app" });
+  });
+
+  it("binds GitHub cards to the repository gh lists and merges in, which for a fork is its upstream", async () => {
+    // origin is the fork; gh resolves the upstream, and its pull request URLs say so.
+    vi.spyOn(PROVIDERS.github, "list").mockResolvedValue({ available: true, pulls: [{ number: 42, url: "https://github.com/Org/app/pull/42" }], current: null, repository: "https://github.com/Org/app" });
+    expect(await gitPulls(root)).toMatchObject({ remote: "github.com/org/app" });
+    const resolved = vi.spyOn(PROVIDERS.github, "repository").mockResolvedValue("https://github.com/org/app");
+    const merge = vi.spyOn(PROVIDERS.github, "merge").mockResolvedValue({ ok: true });
+    expect(await gitMergeRequest(root, { number: 42, expectedRemote: "github.com/org/app" })).toMatchObject({ ok: true });
+    // The checked repository is the one merged in, whatever gh would resolve a moment later.
+    expect(merge.mock.calls[0][1]).toMatchObject({ number: 42, repository: "github.com/org/app" });
+    expect(merge.mock.calls[0][1]).not.toHaveProperty("expectedRemote");
+    // `gh repo set-default` (or a new upstream remote) since the review: same number, another repository.
+    resolved.mockResolvedValue("https://github.com/other/app");
+    const list = vi.mocked(PROVIDERS.github.list);
+    const listed = list.mock.calls.length;
+    await expect(gitMergeRequest(root, { number: 42, expectedRemote: "github.com/org/app" })).rejects.toMatchObject({ status: 409, details: { code: "git-remote-changed" } });
+    // The refresh the refusal asks for reads the host again rather than the cached listing.
+    await gitPulls(root);
+    expect(list.mock.calls.length).toBe(listed + 1);
+    // gh cannot say (signed out, offline): not merged unchecked, and not called a moved remote either.
+    resolved.mockResolvedValue(null);
+    expect(await gitMergeRequest(root, { number: 42, expectedRemote: "github.com/org/app" })).toMatchObject({ ok: false, reason: "failed" });
+    expect(merge).toHaveBeenCalledTimes(1);
+    // Without the field a merge is as before: no repository named.
+    await gitMergeRequest(root, { number: 42 });
+    expect(merge.mock.calls[1][1]).not.toHaveProperty("repository");
+  });
+
+  it("reads the repository from gh's own pull request URLs and merges there with --repo", async () => {
+    const bin = path.join(root, "bin"), log = path.join(root, "gh.log");
+    await mkdir(bin);
+    const pull = { number: 42, title: "Fix", headRefName: "topic", baseRefName: "main", author: { login: "sam" }, url: "https://github.com/org/app/pull/42", isDraft: false, state: "OPEN", updatedAt: "2026-10-27T00:00:00Z" };
+    await writeFile(path.join(bin, "gh"), [
+      "#!/bin/sh", `echo "$*" >> '${log}'`,
+      'case "$1 $2" in',
+      `  "pr list") echo '${JSON.stringify([pull])}' ;;`,
+      '  "repo view") echo "https://github.com/org/app" ;;',
+      '  "pr merge") exit 0 ;;',
+      "  *) echo null ;;",
+      "esac", "",
+    ].join("\n"), { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH ?? ""}`);
+    vi.stubEnv("GH_CONFIG_DIR", path.join(root, "gh"));
+    expect(await gitPulls(root)).toMatchObject({ available: true, pulls: [{ number: 42 }], remote: "github.com/org/app" });
+    expect(await gitMergeRequest(root, { number: 42, method: "squash", expectedRemote: "github.com/org/app" })).toMatchObject({ ok: true, number: 42 });
+    expect((await readFile(log, "utf8")).split("\n")).toContain("pr merge 42 --squash --repo github.com/org/app");
+  });
 
   it("shares cold reads, serves within TTL, and returns stale during one refresh with its own Git deadline", async () => {
     const initial = deferred<RequestList>();

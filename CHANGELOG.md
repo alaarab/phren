@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - A phone message to a Codex 0.155 session (whose history the Hook copies out of Codex's thread store) can now be confirmed from that copy, without an earlier identical message standing in for it. Each copied message row is stamped with when Codex created it (or when its turn started), so an earlier "yes" is never taken for a new one. A message waiting in Codex's queue counts as taken only once its consumption marker is written, matched by key as the chat timeline already does.
+### Added
+
+- `POST /v1/git/pulls` now names the checkout (`repository`) and the hosted repository (`remote`, as `domain/owner/repo`) it listed, and `POST /v1/git/pr/merge` takes `expectedRemote`. A merge whose checkout's remote has since been pointed at another repository is refused with 409 `git-remote-changed`, so a phone cannot merge a same-number, same-head pull request in a different repository after a remote retarget or a pane move. On GitHub the repository is the one `gh` resolves, and the merge names it with `--repo`. Advertised as `capabilities.gitRemoteIdentity`.
+- API credit left and expiry in usage. Each entered credit's usage window now says `remainingUSD` and `expiresAt`, and a Claude row with credits carries `apiCredit` (dollars left, total, used, and the soonest expiry among credits with money left). `phren dispatch usage` adds a total line and `account_usage` names each account's credit left. A credit that expires after its report is dropped instead of shown as reset. Still the owner's entry and a local estimate: Claude Code exposes no Console balance.
+
+### Fixed
+
+- A spent API credit no longer marks its account out of quota, or near its limit, in `phren dispatch usage` and `account_usage` while another credit still has money. An account's credits are one balance there, as dispatch already counted them: a spent $20 promo beside $95 left of $100 reads 79% left, not "low, 0% left". When the credits are the tightest room, the summary names the soonest expiry among credits with money left, never a spent credit's, and never as a reset.
 
 ## [0.3.59] - 2026-10-28
 
