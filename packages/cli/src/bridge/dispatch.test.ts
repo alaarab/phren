@@ -155,6 +155,10 @@ describe("dispatch receipts and selection", () => {
     // Another computer with an ordinary account that has room: last-resort accounts sit out everywhere.
     listed.Devbox = claude([{ id: "work" }]);
     expect(await rooms()).toMatchObject({ Desk: ["default"], Devbox: ["work"] });
+    // The stopped login itself signed in on Devbox has no room there either: the last-resort account stays offered.
+    listed.Desk = claude([{ id: "default", key: "claude:same" }, { id: "spare", role: "last-resort" }]);
+    listed.Devbox = claude([{ id: "work", key: "claude:same" }]);
+    expect(await rooms()).toMatchObject({ Desk: ["default", "spare"], Devbox: ["work"] });
   });
 
   it("keeps anywhere on the least busy computer whatever its quota, skipping only an account with none left", async () => {

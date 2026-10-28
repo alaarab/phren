@@ -22,7 +22,7 @@ import { object, atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
-import { limitedBy, readAccountLimits, type AccountRoom, type WindowRoom } from "./account-choice.js";
+import { limitedBy, limitKey, readAccountLimits, type AccountRoom, type WindowRoom } from "./account-choice.js";
 import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplies, poolRefusal, projectRule, withPolicy, type PolicyRoom, type PoolRule } from "./account-policy.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
@@ -609,7 +609,8 @@ export class DispatchService {
       let peer: DispatchHost | undefined;
       let remoteComputerID: string | undefined;
       const skipped: Skipped[] = [];
-      let incapable = false, spentSeen = false, pooledOut = false;
+      let incapable = false, spentSeen = false;
+      const pooledOut: string[] = [];
       // Pools and roles (account-policy.ts): which Claude account may run this on each computer.
       const projectPools = projectRule(phrenStoreRoot(), data.project);
       const limits = data.harness === "claude" ? await readAccountLimits() : [];
@@ -638,7 +639,7 @@ export class DispatchService {
           const spent = outOfQuota(data, item.usage);
           if (spent) { spentSeen = true; skipped.push({ computer: item.peer.name, reason: spent }); return false; }
           const refused = poolCheck(item.peer, item);
-          if (refused) { pooledOut = true; skipped.push({ computer: item.peer.name, reason: refused.slice(0, 200) }); }
+          if (refused) { pooledOut.push(item.peer.name); skipped.push({ computer: item.peer.name, reason: refused.slice(0, 200) }); }
           return !refused;
         });
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
@@ -649,7 +650,8 @@ export class DispatchService {
             || a.working + this.inFlight(a.peer.name) - b.working - this.inFlight(b.peer.name) || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
-        if (!peer && pooledOut && !incapable && !spentSeen) throw new BridgeError(409, "No connected computer has a Claude account that may do this work: its pools and roles rule every one out.", { code: "account_pool", skipped });
+        // Pools ruled some computers out: say so whatever ruled out the rest, with each computer's reason in `skipped`.
+        if (!peer && pooledOut.length) throw new BridgeError(409, `No connected computer has a Claude account that may do this work: pools and roles rule out ${pooledOut.join(", ")}${spentSeen || incapable ? ", and the others are out of quota or can't run it" : ""}.`.slice(0, 500), { code: "account_pool", skipped });
         if (!peer && spentSeen) throw new BridgeError(503, `No connected computer has ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} quota left right now.`, { code: "out_of_quota", skipped });
         if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
@@ -894,8 +896,11 @@ export class DispatchService {
     // Last-resort accounts only when no other allowed account anywhere has room: the stopped login and any the
     // limits ledger holds back have none.
     const limits = await readAccountLimits();
+    // The stopped login by its key, so the same login signed in on another computer has no room either.
+    const stoppedRoom = context ? listed.find(item => item.computer === context.stopped.computer)?.all.find(room => room.account === context.stopped.account) : undefined;
+    const stoppedKey = context ? limitKey(stoppedRoom ?? { account: context.stopped.account }, context.stopped.computer) : undefined;
     const held = (computer: string) => { const blocked = limitedBy(limits, computer);
-      return (room: PolicyRoom) => !!blocked(room) || (context?.stopped.computer === computer && context.stopped.account === room.account); };
+      return (room: PolicyRoom) => !!blocked(room) || limitKey(room, computer) === stoppedKey; };
     const other = listed.some(item => item.rooms.some(room => room.role !== "last-resort" && openRoom(room, held(item.computer))));
     // The stopped login stays listed (unchosen, it is held back) so the failover can find its room and reset time.
     return listed.map(({ all, ...item }) => {

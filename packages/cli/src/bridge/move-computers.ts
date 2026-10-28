@@ -177,11 +177,10 @@ export async function localPoolRefusal(cwd: string, account: string): Promise<st
     const directory = await dispatchProjectDirectory(name).catch(() => undefined);
     if (directory && directory.length > longest && (source === directory || source.startsWith(directory + path.sep))) { project = name; longest = directory.length; }
   }
-  // Named by hand: an accounts.yaml that can't be read leaves the account with no known pool, which only a
-  // project with its own list refuses.
+  // An accounts.yaml that can't be read allows no pool here, as a dispatch to this computer would find.
   let policy: ReturnType<typeof accountPolicy> | undefined;
-  try { policy = accountPolicy(); } catch { /* No pool known. */ }
-  const rules = [...(project ? [projectRule(phrenStoreRoot(), project)] : []), computerRule("this computer", policy?.allowedPools)];
+  try { policy = accountPolicy(); } catch { /* Refused below. */ }
+  const rules = [...(project ? [projectRule(phrenStoreRoot(), project)] : []), computerRule("this computer", policy?.allowedPools, !policy)];
   return poolRefusal({ account, pool: policy?.settings[account]?.pool }, rules);
 }
 

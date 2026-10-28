@@ -642,7 +642,8 @@ export class SessionMover {
     const cwd = String(pane.foreground_cwd || pane.cwd || "");
     if (!path.isAbsolute(cwd)) throw new BridgeError(409, "The pane's folder is unknown, so the new agent could not start there.");
     // A Claude account named on this computer keeps to the pools too (a peer's is checked by checkMovePeer).
-    if (!peer && data.continuation !== "resume" && to.harness === "claude" && to.account) await refuseOutsidePools(pane, to.account);
+    // Unnamed, the new Claude runs under the pane's own account (relaunch), else default: that one is checked.
+    if (!peer && data.continuation !== "resume" && to.harness === "claude") await refuseOutsidePools(pane, to.account ?? account ?? DEFAULT_ACCOUNT);
     let project: string | undefined;
     let accountChoice: string | undefined;
     let computerId: string | undefined;

@@ -101,6 +101,9 @@ describe("pools and roles at dispatch and Continue in…", () => {
     // A project config that can't be read allows no pool rather than any.
     writeFileSync(path.join(store, "client-a/phren.project.yaml"), "allowedPools: [unclosed\n");
     expect(projectRule(store, "client-a")).toEqual({ owner: "project client-a (its phren.project.yaml can't be read)", pools: [] });
+    // A broken file that never named a list had none: nothing changes for it.
+    writeFileSync(path.join(store, "client-a/phren.project.yaml"), "sourcePath: [unclosed\n");
+    expect(projectRule(store, "client-a")).toEqual({ owner: "project client-a" });
     // Long lists are cut so the refusal always fits where it is carried.
     expect(poolRefusal({ account: "a", pool: "x" }, [{ owner: "project p", pools: Array.from({ length: 32 }, (_, index) => `pool-number-${index}-with-a-long-name`) }])!.length).toBeLessThanOrEqual(280);
   });

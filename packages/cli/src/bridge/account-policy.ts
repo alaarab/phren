@@ -27,11 +27,12 @@ export function projectRule(phrenPath: string, project: string): PoolRule {
   if (!file) return { owner };
   let text: string | undefined;
   try { text = readFileSync(file, "utf8"); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { owner };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "EISDIR") return { owner };
     return { owner: `${owner} (its phren.project.yaml can't be read)`, pools: [] };
   }
   let parsed: unknown;
-  try { parsed = text.trim() ? load(text) : {}; } catch { return { owner: `${owner} (its phren.project.yaml can't be read)`, pools: [] }; }
+  // A broken file that never named allowedPools had no list: it stays "any pool", as before pools existed.
+  try { parsed = text.trim() ? load(text) : {}; } catch { return text.includes("allowedPools") ? { owner: `${owner} (its phren.project.yaml can't be read)`, pools: [] } : { owner }; }
   const pools = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as { allowedPools?: unknown }).allowedPools : undefined;
   return { owner, ...(Array.isArray(pools) ? { pools: pools.filter(isPoolTag) } : {}) };
 }
