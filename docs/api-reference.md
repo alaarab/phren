@@ -187,7 +187,9 @@ OpenCode and OpenCode Go spend is summed across computers; OpenRouter spend is
 counted once per key.
 
 Each row carries `id`, `harness`, `name`, `account` (the login's email, else its
-label), `windows`, `leftPercent` (the least room on any window), `nearLimit`
+label), `windows`, `leftPercent` (the least room on any window, the account's
+API credits counted as one balance with their limits and spend summed, as
+dispatch counts them), `nearLimit`
 (under 20% left: information, not a reason to avoid the account), `exhausted`
 (a window at 100% or refusing requests: never dispatch to it) with
 `availableIn` (when its last spent window resets), `spend`, `subscription`, `updatedAt`, `age`, `stale`,
