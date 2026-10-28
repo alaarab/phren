@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json } from "./protocol.js";
@@ -84,4 +84,77 @@ export async function saveContinuationIntent(input: Json): Promise<void> {
 export async function continuationIntent(id: string): Promise<Json> {
   try { return JSON.parse(await readFile(intentFile(id), "utf8")); }
   catch { throw new BridgeError(404, "No owner-admitted continuation intent is recorded."); }
+}
+
+/**
+ * The whole conversation a summary-by-target move copies to the receiving Hook, beside its intent: the source's
+ * prompts and replies, already redacted the way a peer hand-off is. The brief only has room for its newest turns;
+ * the receiving launch pulls this through the same intent route, in pages, and puts it in the new agent's brief
+ * folder. A Hook that predates it ignores the page parameter and answers with the intent, which has no
+ * `conversation`, so either side being older leaves the excerpt alone.
+ */
+export const CONVERSATION_LIMIT = 2_000_000;
+const CONVERSATION_PAGE = 262_144;
+/** Under the 1 MiB a Hook reads of one peer answer (client.ts), escaped as JSON. */
+const PAGE_BYTES = 900_000;
+const conversationFile = (id: string) => path.join(bridgeRoot(), "move-intents", `${z.string().uuid().parse(id)}.conversation.md`);
+export const CONVERSATION_FILE = "conversation.md";
+
+/** In a summary-by-target brief's opening line, so the receiving launch asks for a copy only for those moves. */
+export const CONVERSATION_MARKER = "Phren copied its conversation instead";
+
+/** Saved once per move: a run of the move that starts again keeps the first copy, which a destination may be part way through reading. */
+export async function saveContinuationConversation(id: string, text: string): Promise<void> {
+  if (text.length > CONVERSATION_LIMIT) throw new BridgeError(413, "The conversation is too long to copy.");
+  if (await stat(conversationFile(id)).catch(() => undefined)) return;
+  await atomicInPrivateDir(conversationFile(id), text);
+}
+
+/** One page of the saved conversation from character `offset`, with its whole length and hash to check against. */
+export async function continuationConversationPage(id: string, offset: number): Promise<Json> {
+  let text: string;
+  try { text = await readFile(conversationFile(id), "utf8"); }
+  catch { throw new BridgeError(404, "No conversation is recorded for this move."); }
+  if (!Number.isInteger(offset) || offset < 0 || offset > text.length) throw new BridgeError(400, "Invalid conversation offset.");
+  let size = Math.min(CONVERSATION_PAGE, text.length - offset);
+  // Escaping can grow text several times; a page always fits one answer and always moves forward.
+  while (size > 1 && Buffer.byteLength(JSON.stringify(text.slice(offset, offset + size))) > PAGE_BYTES) size = Math.floor(size / 2);
+  const end = offset + size;
+  return { conversation: { text: text.slice(offset, end), offset, next: end < text.length ? end : null, total: text.length,
+    sha256: createHash("sha256").update(text).digest("hex") } };
+}
+
+const pageSchema = z.object({ text: z.string(), offset: z.number().int().nonnegative(), next: z.number().int().positive().nullable(),
+  total: z.number().int().nonnegative().max(CONVERSATION_LIMIT), sha256: z.string().regex(/^[0-9a-f]{64}$/) });
+
+/**
+ * The receiving side: every page of the source's conversation through `page(offset)`, checked against its length
+ * and hash and redacted again here, or undefined when the source has none (an older Hook, a move that never
+ * built one) or it does not arrive whole. Never fails the launch: the brief's excerpt stands on its own.
+ */
+export async function fetchContinuationConversation(page: (offset: number) => Promise<Json>, redact: (text: string) => string): Promise<string | undefined> {
+  const parts: string[] = [];
+  let offset = 0, total: number | undefined, hash: string | undefined;
+  for (let pages = 0; pages < 64; pages++) {
+    let answer: Json;
+    try { answer = await page(offset); } catch { return undefined; }
+    const parsed = pageSchema.safeParse(answer.conversation);
+    if (!parsed.success || parsed.data.offset !== offset) return undefined;
+    if ((total ??= parsed.data.total) !== parsed.data.total || (hash ??= parsed.data.sha256) !== parsed.data.sha256) return undefined;
+    parts.push(parsed.data.text);
+    offset += parsed.data.text.length;
+    if (parsed.data.next === null) {
+      const text = parts.join("");
+      if (text.length !== total || createHash("sha256").update(text).digest("hex") !== hash) return undefined;
+      return redact(text);
+    }
+    if (parsed.data.next !== offset || offset > total) return undefined;
+  }
+  return undefined;
+}
+
+/** Where the copied conversation is, to tell the new agent; appended only when the brief has room for it. */
+export function withConversationPointer(text: string, file: string, limit = 32768): string {
+  const pointer = `\n\nThe previous agent's conversation, more of it than the excerpt above, is in ${file}. Read what you need of it, from the end back, before you write your hand-off.`;
+  return text.length + pointer.length <= limit ? `${text}${pointer}` : text;
 }

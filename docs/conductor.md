@@ -714,9 +714,31 @@ the excerpt, checks the checkout and continues. The record has
 `continuation: "summary-by-target"` and a `handoff` with `source: "fallback"`
 and that reason.
 
-The transcript file is not copied to the peer; only the excerpt travels in the
-brief. The prompts and replies in it are redacted like any other peer hand-off,
-not withheld. An explicit request whose transcript cannot be read fails the
+The whole conversation is copied too, since the brief only has room for its
+newest turns. The source reads the whole transcript, or its last 64 MiB with a
+note that earlier messages are missing. It saves every prompt and reply, oldest
+first, redacted like any other peer hand-off and with its checkout path
+replaced, as `<bridge>/move-intents/<move-id>.conversation.md`. That file is
+written once per move. At most 2,000,000 characters are kept, the newest
+messages first, with a note saying how many were left out.
+
+For a summary-by-target brief to a harness launched with a brief file (Claude
+or Codex), the destination's launch pulls the copy through
+`GET /v1/sessions/move/intent?id=<move-id>&conversation=<offset>`. That route
+admits only the move's verified destination, as the intent does (its enrollment
+is checked again at most once a minute while it pages), and answers
+`{conversation: {text, offset, next, total, sha256}}` one page at a time, each
+under 1 MiB of JSON. The destination checks the length and hash, redacts the
+text again, and writes it as `conversation.md` in the new agent's brief folder,
+which Claude may read (`--add-dir`). The brief gets one more line saying where
+it is; the source leaves 400 characters free for that line.
+
+The prompts and replies are not withheld, only redacted. When either Hook
+predates the copy, or the copy doesn't arrive whole, the launch goes ahead with
+the excerpt alone. `capabilities.moveSummaryByTarget` says a Hook accepts the
+explicit `continuation`, which older Hooks answer with 400, and
+`capabilities.moveConversationCopy` says it sends and takes the copy. An
+explicit request whose transcript cannot be read fails the
 move rather than launch an agent with nothing to go on. `summary-by-target` on
 a move within this computer is refused (409); switch accounts there with
 `continuation: "resume"`.

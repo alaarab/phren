@@ -737,6 +737,15 @@ describe("switching a Claude conversation to another account (resume)", () => {
 
 describe("stopping the agent so a held hand-off goes in", () => {
   /** A move whose hand-off request waits on the agent's step: it stays handing-off until `release`. */
+  // A held move runs on after its test: it is let go and waited for here, before the root it writes into is removed.
+  const running: Array<{ mover: SessionMover; release: () => void; id: string }> = [];
+  afterEach(async () => {
+    for (const { mover, release, id } of running.splice(0)) {
+      release();
+      await mover.abort(id).catch(() => undefined);
+      await Promise.race([Promise.resolve(mover.settled(from.server, from.pane)).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 2_000))]);
+    }
+  });
   async function held(deliver?: MoverDeps["deliver"]) {
     const w = world({ reply: writes });
     // The agent is on a step; the request waits behind it.
@@ -748,6 +757,7 @@ describe("stopping the agent so a held hand-off goes in", () => {
     else w.deps.deliver = async () => ({ ok: true, queued: true });
     const mover = new SessionMover(w.deps);
     const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
+    running.push({ mover, release, id: record.id });
     await new Promise(resolve => setImmediate(resolve));
     return { ...w, mover, record, release };
   }
