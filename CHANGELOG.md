@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- API credit left and expiry in usage. Each entered credit's usage window now says `remainingUSD` and `expiresAt`, and a Claude row with credits carries `apiCredit` (dollars left, total, used, and the soonest expiry among credits with money left). `phren dispatch usage` adds a total line and `account_usage` names each account's credit left. A credit that expires after its report is dropped instead of shown as reset. Still the owner's entry and a local estimate: Claude Code exposes no Console balance.
+
 - The phone can pick and boot a Mac's iOS simulators, and swipe and scroll in them.
   - `GET /v1/simulators?all=1` (capability `simulatorDevices`) lists every available iOS device with its state, booted first.
   - `boot` and `shutdown` take any available device and treat one already in that state as done. `boot` opens the device's Simulator window, which taps need.
