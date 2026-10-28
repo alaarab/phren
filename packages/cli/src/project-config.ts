@@ -68,6 +68,8 @@ export interface ProjectConfig {
   access?: ProjectAccessControl;
   /** The account pools whose Claude accounts may do this project's work (bridge/account-pools.ts); none: any. */
   allowedPools?: string[];
+  /** The Claude account and model the `helper` MCP tool runs this project's helper tasks with (bridge/helper.ts). */
+  helper?: { account?: string; model?: string };
 }
 
 export const PROJECT_HOOK_EVENTS = ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const;

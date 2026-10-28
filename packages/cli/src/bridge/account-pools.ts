@@ -95,6 +95,12 @@ export function setProjectAllowedPools(phrenPath: string, project: string, pools
   return next ?? undefined;
 }
 
+/** Whether an account in `pool` may work where `allowed` is the list: no list is any pool; a list leaves out an
+ * account with no pool. */
+export function poolAllowed(allowed: readonly string[] | undefined, pool: string | undefined): boolean {
+  return !allowed || pool !== undefined && allowed.includes(pool);
+}
+
 /** `phren bridge accounts pool|role|allowed-pools …`: the lines to print. */
 export async function accountPoolsCommand(args: readonly string[], projectStore: () => string, exists: (slug: string) => boolean): Promise<string[]> {
   const [command, ...rest] = args;
