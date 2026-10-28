@@ -13,9 +13,13 @@ export interface HarnessAccount extends AccountRef {
   signedIn: boolean; usable: boolean; plan?: string; reason?: string; signInAvailable?: boolean;
   /** The account's pool and role, when the owner set them (account-pools.ts). */
   pool?: string; role?: AccountRole;
+  /** Signed in with a Console (API billing) login: with no role it is never chosen automatically. */
+  console?: true;
 }
 export interface HarnessEntry {
   source: HarnessSource; installed: boolean; version?: string; usable: boolean; reason?: string; accounts?: HarnessAccount[];
+  /** Claude's entry: this computer's allowed pools, as on the inventory. */
+  allowedPools?: string[];
 }
 /** `allowedPools`: the pools this computer's accounts may do work for, when the owner set them; none means any. */
 export interface HarnessInventory { harnesses: HarnessEntry[]; allowedPools?: string[] }
@@ -49,12 +53,14 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
         // An unanswered sign-in check stays usable: only Claude saying "logged out" hides an account.
         const usable = auth.signedIn || auth.unknown === true;
         return { ...claudeAccountRef(home), ...settings[home.id], signedIn: auth.signedIn, usable,
-          ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }),
+          ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.console ? { console: true } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }),
           // Claude said it is signed out: the phone offers Sign in (POST /v1/accounts/claude/add {slug, mode: "sign-in"}).
           ...(!auth.signedIn && !auth.unknown ? { signInAvailable: true } : {}) };
       }));
       const usable = accounts.some(account => account.usable);
-      return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts };
+      // On the entry too, so a dispatch's capacity probe (which carries only the entries) knows this computer's pools.
+      const allowedPools = computerAllowedPools();
+      return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts, ...(allowedPools ? { allowedPools } : {}) };
     }
     if (source === "codex") {
       const signedIn = existsSync(path.join(codexHome(env), "auth.json"));

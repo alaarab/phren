@@ -93,10 +93,15 @@ All of this is opt-in. A store that sets none of it behaves exactly as before.
   - `last-resort`: offered only when no `helpers` account fits;
   - `off`: never chosen automatically, though still by hand on the phone.
 
-  An account with no role is an ordinary account, as every account was before.
-- **Allowed pools:** a project and a computer may each list `allowedPools`, the pools whose accounts may do its work. No list means any pool.
+  An account with no role is an ordinary account, as every account was before, except a Console (API-billed) login: with no role it is off for automatic use, so API credit is only spent once you give the account a role.
+- **Allowed pools:** a project and a computer may each list `allowedPools`, the pools whose accounts may do its work. No list means any pool; a list leaves out an account with no pool.
 
-For now these are recorded and reported only; nothing enforces them yet.
+Where they bind (`account-policy.ts`):
+- **Dispatch placement.** For a Claude worker, each candidate computer's accounts are checked against the project's and that computer's `allowedPools`. A named account outside them is refused (409, `code: "account_pool"`). With no account named, and once a pool, a role or a Console login is in play there, the dispatching Hook chooses the account itself and names it in the launch: most room among the accounts the pools allow, never `off` or a Console login with no role, `last-resort` only when no other account has room, and none the limits ledger holds back. The receipt's `accountChoice` says why, including what was ruled out. `anywhere` skips a computer where no account fits and lists it under `skipped`. A named computer is refused.
+- **Continue in…** The receiving computer's availability marks each login with its `pool`, `role`, `console` and, when the project's or its own pools rule it out, `poolRefused` (the reason). An unnamed Claude continuation picks the same way, and a named login with `poolRefused` is refused.
+- **A stopped worker's continuation** (account failover, still off unless `phren config account-failover on`) considers only the accounts an automatic choice may take on each computer. The continuation is a dispatch, so the project's pools are checked there.
+
+With no pools, no roles and no Console logins, every choice is the same as before. A launch from the phone or a schedule that names no account still picks on the receiving computer by room alone; pools and roles don't reach that choice yet.
 
 ```bash
 phren bridge accounts pool api200 personal        # or --clear
