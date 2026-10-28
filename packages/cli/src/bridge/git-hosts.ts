@@ -43,7 +43,9 @@ export interface GitHost {
 
 export interface RequestList { available: boolean; reason?: string; message?: string; pulls: Json[]; current: Json | null;
   /** Where the token came from and who it signs in as, when the host says. */
-  account?: { source: string; user?: string } }
+  account?: { source: string; user?: string };
+  /** The hosted repository the requests were listed from, when the host's tool chose it (see `repository`). */
+  repository?: string }
 
 export interface GitHostProvider {
   readonly kind: HostKind;
@@ -58,12 +60,18 @@ export interface GitHostProvider {
    * when one is given. The host's own refusal (checks, approvals, conflicts)
    * comes back as `{ ok: false, reason: "blocked", message }`. */
   merge(root: string, request: MergeRequest, host: GitHost): Promise<Json>;
+  /** The hosted repository `list` and `merge` act on, as a URL or `domain/owner/repo`, when the host's own
+   * tool picks it rather than the remote (gh prefers an `upstream` or its `repo set-default`). Without it,
+   * the remote's `webUrl` is that repository. Null when it cannot be told. */
+  repository?(root: string, host: GitHost): Promise<string | null>;
   /** Who a token signs in as, for Connect; HTTP hosts only. */
   whoami?(root: string, host: GitHost, token: string, api?: string): Promise<{ user: string }>;
 }
 
 export type MergeMethod = "merge" | "squash" | "rebase";
-export interface MergeRequest { number: number; method: MergeMethod; expectedHeadSha?: string; deleteBranch?: boolean }
+export interface MergeRequest { number: number; method: MergeMethod; expectedHeadSha?: string; deleteBranch?: boolean;
+  /** `domain/owner/repo` checked against the reviewed card: the merge acts there and nowhere else. */
+  repository?: string }
 
 const PULL_TERMS: HostTerms = { short: "PR", long: "pull request", ref: "#" };
 
@@ -237,7 +245,9 @@ const github: GitHostProvider = {
         return { number: pull.number, title: pull.title, head: pull.headRefName, base: pull.baseRefName,
           author: String(author.login ?? author.name ?? ""), url: pull.url, draft: pull.isDraft === true, state: pull.state, updated: pull.updatedAt };
       });
-      return { available: true, pulls, current: mine };
+      // gh picked the repository itself; its pull request URLs name it, without asking gh again.
+      const listed = [mine, ...pulls].map(pull => /^(https:\/\/[^\s?#]+?)\/pull\/\d+$/.exec(String(pull?.url ?? ""))?.[1]).find(Boolean);
+      return { available: true, pulls, current: mine, ...(listed ? { repository: listed } : {}) };
     } catch {
       return { available: false, reason: "auth", message: "The GitHub CLI (gh) is missing or not signed in on this computer. Install it, then run gh auth login there.", pulls: [], current: null };
     }
@@ -264,8 +274,10 @@ const github: GitHostProvider = {
   async merge(root, request, host) {
     // No --delete-branch: gh would also delete and leave the local branch,
     // which may be an agent's checkout.
+    // A checked repository is named, so gh cannot resolve another one between the check and the merge.
     const args = ["pr", "merge", String(request.number), `--${request.method}`,
-      ...(request.expectedHeadSha ? ["--match-head-commit", request.expectedHeadSha] : [])];
+      ...(request.expectedHeadSha ? ["--match-head-commit", request.expectedHeadSha] : []),
+      ...(request.repository ? ["--repo", request.repository] : [])];
     const result = await runCombined("gh", args, root, 60_000, ghEnv(host));
     if (result.missing) return { ok: false, reason: "missing", message: "The GitHub CLI (gh) is not installed on this computer." };
     if (result.code === 0) return { ok: true, number: request.number, method: request.method };
@@ -273,6 +285,14 @@ const github: GitHostProvider = {
     if (/not mergeable|required status|review|protected|blocked|head branch was modified|match-head-commit|conflict/i.test(output)) return { ok: false, reason: "blocked", message: output.slice(0, 1000) };
     if (/auth|login|401|403/i.test(output)) return { ok: false, reason: "auth", message: "The GitHub CLI is not signed in on this computer, or the account can't merge here. Run gh auth login there." };
     return { ok: false, reason: "failed", message: output.slice(0, 1000) || "gh pr merge failed." };
+  },
+
+  async repository(root, host) {
+    // The repository gh's own pr commands resolve here, which for a fork is usually its upstream.
+    try {
+      const { stdout } = await exec("gh", ["repo", "view", "--json", "url", "--jq", ".url"], { cwd: root, timeout: 15_000, maxBuffer: 65_536, env: ghEnv(host) });
+      return stdout.trim() || null;
+    } catch { return null; }
   },
 };
 

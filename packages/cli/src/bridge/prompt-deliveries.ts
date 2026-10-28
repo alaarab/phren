@@ -416,8 +416,11 @@ export class PromptDeliveries {
   }
   /** Whether a Codex transcript row can be `record`'s own: written after it was registered. A row at or past
    * its cursor was; one before it only if stamped after registration (written while the cursor was read),
-   * which a row without a timestamp, such as a materialized Codex 0.155 thread's, never is. The scan itself
-   * drops rows stamped more than `ENTRY_SLACK_MS` before registration. */
+   * which a row without a timestamp never is. A materialized Codex 0.155 thread's copy is append-only, so a row
+   * past the cursor was copied after registration, but not necessarily created after it: an older item the copy
+   * had not reached yet lands there too. Its rows are stamped with when the item was created (codex-threads.ts),
+   * and the scan drops any row stamped more than `ENTRY_SLACK_MS` before registration, which is what keeps an
+   * earlier identical message from being taken for this one. */
   private static codexRowIsOwn(record: Record, row: TranscriptEntry): boolean {
     return (record.cursor !== undefined && row.offset >= record.cursor) || (row.at !== undefined && row.at >= record.at);
   }
@@ -547,13 +550,22 @@ export function matchingOffsets(buffer: Buffer, start: number, record: { hash: s
   let events = false;
   const lines = buffer.toString("utf8").split("\n");
   let offset = start + buffer.length;
+  // A materialized Codex thread writes input the agent holds in its queue as a `phrenQueued` row, and a content-free
+  // `phren_queue_consumed` row with the same key once the agent takes it. The scan runs newest first, so a queued
+  // row's marker, written after it, is seen before it: only a queued row whose marker came counts as taken.
+  const consumed = new Set<string>();
   for (let index = lines.length - 1; index >= 0; index--) {
     const line = lines[index];
     offset -= Buffer.byteLength(line) + (index < lines.length - 1 ? 1 : 0);
+    if (line.includes('"phren_queue_consumed"')) {
+      try { const marker = object(JSON.parse(line)); if (marker.type === "phren_queue_consumed" && typeof marker.key === "string") consumed.add(marker.key); } catch { /* a cut line */ }
+      continue;
+    }
     // Only a row that can carry user text is parsed: the scan reads the whole tail now, not just its newest rows.
     if (!line.includes('"user') && !line.includes("queue-operation")) continue;
     let row: Json;
     try { row = object(JSON.parse(line)); } catch { continue; }
+    if (row.phrenQueued === true && row.type === "response_item" && !(typeof row.phrenQueueKey === "string" && consumed.has(row.phrenQueueKey))) continue;
     // Rows are not in time order: Claude writes a queued message's attachment rows, stamped when it was
     // typed, after the queue removal that took it. An older row is skipped, never the end of the scan,
     // or a message typed after an earlier queued one is never found (seen 2026-10-17: taken, reported failed).
@@ -576,7 +588,7 @@ export async function transcriptSize(record: { source: Provider; session: string
   try {
     const file = await transcriptPath(record.source, record.session);
     // Its copy made just now holds both older messages and maybe this one: no position tells them apart,
-    // and only a timestamped row (none in a copy) can confirm it.
+    // so only a row stamped after registration (a user row with its creation time) can confirm it.
     return file === materializedPath(record.session) ? undefined : (await stat(file)).size;
   } catch (error) {
     // A conversation not written yet (a new Codex thread) has nothing before its first row.

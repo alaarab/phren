@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { codexThreadPreview, materializeCodexThread, materializedPath, queuedQuestion, threadHealth } from "./codex-threads.js";
 import { childAgentTree, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { currentStep } from "./steps.js";
+import { matchingOffsets, promptHash, PromptDeliveries } from "./prompt-deliveries.js";
 
 const thread = "01a0aaaa-1111-7222-8333-444444444444";
 
@@ -94,6 +95,93 @@ describe.skipIf(!hasNodeSqlite)("Codex thread store", () => {
     const entries = (await new TranscriptReader(file, "codex").read()).entries.map(e => e.raw as any);
     expect(entries.filter(e => e.payload?.role === "user")).toHaveLength(1);
     expect(entries.filter(e => e.type === "phren_queue_consumed")).toEqual([{ type: "phren_queue_consumed", key: queued.phrenQueueKey }]);
+  });
+
+  it("stamps a message row with when its item was created; only a reply falls back to its turn's start", async () => {
+    const created = Date.parse("2026-10-28T12:00:05Z");
+    db.prepare("insert or replace into thread_turns values (?, 'turn-1', 1, 'completed', ?, 4)").run(thread, created / 1000 - 5);
+    db.prepare("insert into thread_items values (?, 'turn-1', 'u1', 1, ?, ?, 'userMessage', 1)").run(thread, created, JSON.stringify({ type: "userMessage", id: "u1", content: [{ type: "text", text: "Fix the build" }] }));
+    // No creation time: a user row stays unstamped (its turn's start would read as older than it is), a reply takes the turn's.
+    db.prepare("insert into thread_items values (?, 'turn-1', 'u2', 2, null, ?, 'userMessage', 2)").run(thread, JSON.stringify({ type: "userMessage", id: "u2", content: [{ type: "text", text: "Also lint" }] }));
+    db.prepare("insert into thread_items values (?, 'turn-1', 'a1', 3, null, ?, 'agentMessage', 3)").run(thread, JSON.stringify({ type: "agentMessage", id: "a1", text: "Fixed." }));
+    const rows = (await readFile((await materializeCodexThread(thread))!, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    const messages = rows.filter(row => row.type === "response_item" && row.payload?.type === "message");
+    expect(messages.map(row => row.timestamp)).toEqual(["2026-10-28T12:00:05.000Z", undefined, "2026-10-28T12:00:00.000Z"]);
+  });
+
+  describe("settling a phone message from the materialized thread", () => {
+    const at = Date.parse("2026-10-28T12:00:00Z");
+    // `updated` moves on with every write, as the store's updated_at_ordinal does, so the materializer sees each one.
+    let updated = 0;
+    const user = (ordinal: number, id: string, created: number, status?: string) =>
+      db.prepare("insert or replace into thread_items values (?, 'turn-1', ?, ?, ?, ?, 'userMessage', ?)").run(thread, id, ordinal, created,
+        JSON.stringify({ type: "userMessage", id, ...(status ? { status } : {}), content: [{ type: "text", text: "yes" }] }), ++updated);
+    const rows = async () => matchingOffsets(await readFile((await materializeCodexThread(thread))!), 0, { hash: promptHash("yes"), at });
+
+    it("never takes an earlier identical message, and takes a queued one only once the agent consumed it", async () => {
+      turn("inProgress");
+      // An old "yes" from an hour before the new one was typed.
+      user(1, "old-yes", at - 3_600_000);
+      expect(await rows()).toEqual([]);
+      // The new "yes" waits in Codex's queue: not taken yet.
+      user(2, "new-yes", at + 1_000, "queued");
+      expect(await rows()).toEqual([]);
+      // The agent takes it: its consumption marker pairs with the queued row by key.
+      user(2, "new-yes", at + 1_000, "completed");
+      const taken = await rows();
+      expect(taken).toHaveLength(1);
+      expect(taken[0].at).toBe(at + 1_000);
+    });
+
+    it("does not take an older item the copy reaches only after the message was typed (the copy's cursor)", async () => {
+      turn("completed", 3);
+      user(1, "first", at - 7_200_000);
+      // The copy exists before the message is typed, so the message's cursor is its size (default size reader).
+      await materializeCodexThread(thread);
+      let now = at;
+      const deliveries = new PromptDeliveries(undefined, () => now);
+      const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex" as const, session: thread };
+      void deliveries.expect(target, "yes", 10, undefined, "phone-yes-0003");
+      deliveries.queue("phone-yes-0003", target);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      // An hour-old "yes" the store had and the copy had not yet written lands past that cursor.
+      user(2, "old-yes", at - 3_600_000);
+      const pane = { pane_id: target.pane, agent: "codex", agent_status: "idle" };
+      now += 1;
+      deliveries.stopped(target);
+      await deliveries.observe("default", [pane]);
+      now += 31_000;
+      await deliveries.observe("default", [pane]);
+      expect(deliveries.status("phone-yes-0003", target)).toMatchObject({ state: "failed" });
+    });
+
+    it("leaves an earlier message unclaimed so a new identical one fails instead of settling on it", async () => {
+      turn("completed", 3);
+      user(1, "old-yes", at - 3_600_000);
+      let now = at;
+      const deliveries = new PromptDeliveries(undefined, () => now, undefined, async () => undefined);
+      const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex" as const, session: thread };
+      void deliveries.expect(target, "yes", 10, undefined, "phone-yes-0001");
+      deliveries.queue("phone-yes-0001", target);
+      const pane = { pane_id: target.pane, agent: "codex", agent_status: "idle" };
+      now += 1;
+      deliveries.stopped(target);
+      await deliveries.observe("default", [pane]);
+      now += 31_000;
+      await deliveries.observe("default", [pane]);
+      expect(deliveries.status("phone-yes-0001", target)).toMatchObject({ state: "failed" });
+      // Had it been taken, its row would be newer than the message: then it settles.
+      user(2, "new-yes", now + 1_000);
+      const later = new PromptDeliveries(undefined, () => now, undefined, async () => undefined);
+      void later.expect(target, "yes", 10, undefined, "phone-yes-0002");
+      later.queue("phone-yes-0002", target);
+      now += 1;
+      later.stopped(target);
+      await later.observe("default", [pane]);
+      now += 31_000;
+      await later.observe("default", [pane]);
+      expect(later.status("phone-yes-0002", target)).toMatchObject({ state: "delivered" });
+    });
   });
 
   it("materializes a thread as an append-only rollout and follows its updates", async () => {

@@ -5,9 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A phone message to a Codex 0.155 session (whose history the Hook copies out of Codex's thread store) can now be confirmed from that copy, without an earlier identical message standing in for it. Each copied message row is stamped with when Codex created it (or when its turn started), so an earlier "yes" is never taken for a new one. A message waiting in Codex's queue counts as taken only once its consumption marker is written, matched by key as the chat timeline already does.
 ### Added
 
 - A summary-by-target move now copies the whole conversation, not just the excerpt that fits in the brief. The source reads the whole transcript (up to 64 MiB), not the 512 KiB tail the hand-off reads. For a Claude or Codex destination, the receiving launch pulls the copy page by page from the source's intent route (`?conversation=<offset>`), checks its length and hash, redacts it again and puts it in the new agent's brief folder as `conversation.md`, and the brief says where it is. Either Hook being older leaves the excerpt alone. `capabilities.moveSummaryByTarget` and `capabilities.moveConversationCopy` tell clients which Hooks take the explicit continuation and the copy.
+- `POST /v1/git/pulls` now names the checkout (`repository`) and the hosted repository (`remote`, as `domain/owner/repo`) it listed, and `POST /v1/git/pr/merge` takes `expectedRemote`. A merge whose checkout's remote has since been pointed at another repository is refused with 409 `git-remote-changed`, so a phone cannot merge a same-number, same-head pull request in a different repository after a remote retarget or a pane move. On GitHub the repository is the one `gh` resolves, and the merge names it with `--repo`. Advertised as `capabilities.gitRemoteIdentity`.
 - API credit left and expiry in usage. Each entered credit's usage window now says `remainingUSD` and `expiresAt`, and a Claude row with credits carries `apiCredit` (dollars left, total, used, and the soonest expiry among credits with money left). `phren dispatch usage` adds a total line and `account_usage` names each account's credit left. A credit that expires after its report is dropped instead of shown as reset. Still the owner's entry and a local estimate: Claude Code exposes no Console balance.
 
 ### Fixed

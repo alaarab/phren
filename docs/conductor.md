@@ -217,7 +217,8 @@ phren dispatch usage --json
 computer and each computer in `hooks.yaml`, merged by account: one row per
 Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with
 each window's percent used and left and its reset time, `leftPercent` (the least
-room on any window), `nearLimit` (under 20% left), `exhausted` (a window at
+room on any window, an account's API credits counted as one balance with their
+limits and spend summed, as dispatch counts them), `nearLimit` (under 20% left), `exhausted` (a window at
 100% or refusing requests, with `availableIn`), freshness (`age`, `stale`) and the computers where it is signed in. A window
 whose reset passed says `reset` with no percent, and a report over 15 minutes
 old is stale. Unreachable and unlinked computers are listed apart, as in
