@@ -3,8 +3,9 @@ import { creditsText, HARNESS_NAMES, resetsIn, USAGE_SOURCES } from "../computer
 import { hookRequest } from "./client.js";
 import { notLinkedFrom, type NotLinkedComputer } from "./hand-off.js";
 import { optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
+import { creditSummary } from "./claude-credits.js";
 import { errorCode, object, type Json } from "./protocol.js";
-import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type Subscription, type UsageCredits, type UsageWindow } from "./usage.js";
+import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type ApiCredit, type Subscription, type UsageCredits, type UsageWindow } from "./usage.js";
 
 export { NEAR_LIMIT_LEFT };
 
@@ -54,6 +55,9 @@ export interface AccountWindow {
   exhausted?: true;
   usedUSD?: number;
   limitUSD?: number;
+  /** An API credit window: dollars left and its expiry. */
+  remainingUSD?: number;
+  expiresAt?: string;
 }
 
 export interface AccountUsageRow {
@@ -76,6 +80,8 @@ export interface AccountUsageRow {
   subscription?: Subscription;
   /** Codex's credit balance from the newest report that has one. */
   credits?: UsageCredits;
+  /** A Claude account's entered API credits added up over its unexpired credit windows (an estimate). */
+  apiCredit?: ApiCredit;
   updatedAt?: string;
   /** How old the standing report is, as "4m" or "2d 3h". */
   age?: string;
@@ -133,6 +139,13 @@ export function settleWindow(window: UsageWindow, now: number): AccountWindow {
   if (windowExhausted(window, now)) out.exhausted = true;
   if (window.usedUSD !== undefined) out.usedUSD = window.usedUSD;
   if (window.limitUSD !== undefined) out.limitUSD = window.limitUSD;
+  // A credit's expiry is its `resetsAt`; an older Hook sends only that.
+  const credit = window.id.startsWith("credit:");
+  const remaining = window.remainingUSD ?? (credit && window.usedUSD !== undefined && window.limitUSD !== undefined
+    ? Math.round(Math.max(0, window.limitUSD - window.usedUSD) * 100) / 100 : undefined);
+  const expiresAt = window.expiresAt ?? (credit ? window.resetsAt : undefined);
+  if (remaining !== undefined) out.remainingUSD = remaining;
+  if (expiresAt !== undefined) out.expiresAt = expiresAt;
   return out;
 }
 
@@ -219,7 +232,10 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       (date(b.usage.subscription?.checkedAt) || date(b.usage.updatedAt) || 0) - (date(a.usage.subscription?.checkedAt) || date(a.usage.updatedAt) || 0))[0]?.usage.subscription;
     const withWindows = reporting.filter(item => item.usage.windows.length);
     const standing = (withWindows.length ? withWindows : reporting).reduce(newer);
-    const windows = mergedWindows(withWindows).map(window => settleWindow(window, now));
+    // A credit that expired since its report is gone, not reset.
+    const windows = mergedWindows(withWindows).filter(window => !(window.id.startsWith("credit:") && date(window.expiresAt ?? window.resetsAt) <= now))
+      .map(window => settleWindow(window, now));
+    const apiCredit = creditSummary(windows);
     const spend = mergedSpend(source, reporting);
     const withCredits = reporting.filter(item => item.usage.credits);
     const credits = withCredits.length ? withCredits.reduce(newer).usage.credits : undefined;
@@ -240,6 +256,7 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       ...(spend ? { spend } : {}),
       ...(subscription ? { subscription } : {}),
       ...(credits ? { credits } : {}),
+      ...(apiCredit ? { apiCredit } : {}),
       ...(standing.usage.updatedAt ? { updatedAt: standing.usage.updatedAt } : {}),
       ...(Number.isFinite(updated) ? { age: ageText(now - updated) } : {}),
       stale: !Number.isFinite(updated) || now - updated > STALE_AFTER_MS || windows.some(w => w.reset),
@@ -350,6 +367,8 @@ export function usageSummary(view: AccountUsageView): string {
   if (limitedRows.length && limitedRows.every(row => row.exhausted)) parts.push("Every account with limits is out of quota: tell the owner before dispatching.");
   const claude = view.accounts.filter(row => row.harness === "claude" && claudeRoom(row));
   if (claude.length) parts.push(`Claude room: ${claude.map(row => `${title(row)} ${claudeRoom(row)}`).join("; ")}.`);
+  const credit = view.accounts.filter(row => row.apiCredit);
+  if (credit.length) parts.push(`API credit: ${credit.map(row => `${title(row)} ${apiCreditText(row.apiCredit!)}`).join("; ")}.`);
   const stale = view.accounts.filter(row => row.stale);
   if (stale.length) parts.push(`Stale: ${stale.map(row => `${title(row)} (${row.windows.some(w => w.reset) ? "a window reset since its report" : `reported ${row.age ? ago(row.age) : "at an unknown time"}`})`).join("; ")}.`);
   if (view.unreachable.length) parts.push(`Unreachable: ${view.unreachable.map(item => item.computer).join(", ")}.`);
@@ -366,6 +385,11 @@ export function claudeRoom(row: Pick<AccountUsageRow, "windows">): string {
     return w.leftPercent === undefined ? "" : `${name} ${w.leftPercent}% left${w.resetsIn ? ` (resets in ${w.resetsIn})` : ""}`;
   };
   return [part("five_hour", "5-hour"), part("seven_day", "weekly")].filter(Boolean).join(", ");
+}
+
+/** "about $142.50 left of $200.00, the soonest expires 2026-12-31". */
+export function apiCreditText(credit: ApiCredit): string {
+  return `about $${credit.remainingUSD.toFixed(2)} left of $${credit.limitUSD.toFixed(2)}${credit.expiresAt ? `, the soonest expires ${credit.expiresAt.slice(0, 10)}` : ""}`;
 }
 
 function tightest(row: AccountUsageRow): AccountWindow | undefined {
@@ -392,6 +416,7 @@ export function formatAccountUsage(view: AccountUsageView): string {
       const used = w.reset ? "reset, no new report" : w.usedPercent !== undefined ? `${w.usedPercent}% used${w.leftPercent !== undefined ? `, ${w.leftPercent}% left` : ""}` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
       lines.push(`  ${w.name.padEnd(30)} ${used.padEnd(22)}${w.limited ? "limited now  " : ""}${w.resetsIn ? `resets in ${w.resetsIn}${w.resetsAt ? ` (${w.resetsAt.slice(0, 16).replace("T", " ")} UTC)` : ""}` : ""}`.trimEnd());
     }
+    if (row.apiCredit && row.windows.filter(w => w.id.startsWith("credit:")).length > 1) lines.push(`  ${"API credit, all".padEnd(30)} ${apiCreditText(row.apiCredit)}`);
     if (row.credits?.hasCredits) lines.push(`  credits${" ".repeat(24)}${creditsText(row.credits)}`);
     if (row.spend) lines.push(`  spend ${row.spend.period.replace(/_/g, " ").padEnd(24)} $${row.spend.amountUSD.toFixed(2)}`);
     if (row.message) lines.push(`  ${row.message}`);

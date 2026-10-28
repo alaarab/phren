@@ -51,6 +51,22 @@ describe("account usage merged by account", () => {
     expect(formatAccountUsage({ accounts: [row], noData: [], computers: ["Desk"], unreachable: [], notLinked: [], enrolled: 0 })).toContain("$50.00 of $50.00, about $0.00 left  expires 2026-10-07");
   });
 
+  it("adds an account's API credits up, drops one that expired since its report, and says what is left", () => {
+    const credit = (id: string, usedUSD: number, limitUSD: number, expiresAt?: string) => ({ id: `credit:${id}`, name: `API credit · ${id}, estimate`,
+      usedUSD, limitUSD, usedPercent: Math.round(usedUSD / limitUSD * 100), ...(expiresAt ? { resetsAt: expiresAt } : {}) });
+    // An older Hook sends no remainingUSD or expiresAt: they come from limit, used and resetsAt.
+    const usage: AccountUsage = { ...claude("claude:0123456789ab", "api", at(1), 0), windows: [
+      credit("promo", 40, 100, later(48)), credit("paid", 10, 200), credit("old", 1, 50, at(5))] };
+    const [row] = mergeAccountUsage([{ computer: "Desk", accounts: [usage] }], now).accounts;
+    expect(row.windows.map(w => w.id)).toEqual(["credit:promo", "credit:paid"]);
+    expect(row.apiCredit).toEqual({ remainingUSD: 250, limitUSD: 300, usedUSD: 50, expiresAt: later(48), estimate: true });
+    const view = { accounts: [row], noData: [], computers: ["Desk"], unreachable: [], notLinked: [], enrolled: 0 };
+    expect(formatAccountUsage(view)).toContain("  API credit, all                about $250.00 left of $300.00, the soonest expires 2026-10-01");
+    expect(usageSummary(view)).toContain("API credit: Claude · sam@example.com about $250.00 left of $300.00, the soonest expires 2026-10-01.");
+    // An account with no credit carries none.
+    expect(mergeAccountUsage([{ computer: "Desk", accounts: [claude("claude:1", "work", at(1), 10)] }], now).accounts[0]).not.toHaveProperty("apiCredit");
+  });
+
   it("carries Codex credits from the newest report that has them, and prints them", () => {
     const older = { ...codex(30, at(20)), credits: { hasCredits: true, balance: 900 } };
     const newer = { ...codex(100, at(2)), credits: { hasCredits: true, balance: 1250.5, inUse: true as const } };
