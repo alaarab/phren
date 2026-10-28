@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Account pools and roles, opt-in, recorded and reported but not yet enforced. A Claude account slot can carry a `pool` tag and a `role` (`helpers`, `last-resort`, `off`), and a project or a computer can list its `allowedPools`. Set them with `phren bridge accounts pool|role|allowed-pools` or the owner-only `POST /v1/accounts/claude/settings` and `POST /v1/accounts/allowed-pools` (capability `accountPools`). `/v1/harnesses` reports them.
+
 - The phone can pick and boot a Mac's iOS simulators, and swipe and scroll in them.
   - `GET /v1/simulators?all=1` (capability `simulatorDevices`) lists every available iOS device with its state, booted first.
   - `boot` and `shutdown` take any available device and treat one already in that state as done. `boot` opens the device's Simulator window, which taps need.

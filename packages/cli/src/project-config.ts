@@ -66,6 +66,8 @@ export interface ProjectConfig {
   mcpServers?: Record<string, ProjectMcpServerEntry>;
   config?: ProjectConfigOverrides;
   access?: ProjectAccessControl;
+  /** The account pools whose Claude accounts may do this project's work (bridge/account-pools.ts); none: any. */
+  allowedPools?: string[];
 }
 
 export const PROJECT_HOOK_EVENTS = ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const;
@@ -152,6 +154,20 @@ export function writeProjectConfig(phrenPath: string, project: string, patch: Pa
       ...current,
       ...patch,
     };
+    writeProjectConfigFile(configPath, next);
+    return next;
+  });
+}
+
+/** Sets one top-level field of a project's config, or removes it when `value` is undefined. */
+export function setProjectConfigField<K extends keyof ProjectConfig>(phrenPath: string, project: string, key: K, value: ProjectConfig[K] | undefined): ProjectConfig {
+  const configPath = resolveProjectConfigPath(phrenPath, project);
+  if (!configPath) {
+    throw new Error(`Project config path escapes phren store`);
+  }
+  return withFileLock(configPath, () => {
+    const next: ProjectConfig = { ...readProjectConfig(phrenPath, project) };
+    if (value === undefined) delete next[key]; else next[key] = value;
     writeProjectConfigFile(configPath, next);
     return next;
   });

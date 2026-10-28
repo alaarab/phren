@@ -18,7 +18,8 @@ import { addPeerFromLink, discoverComputers, linkComputer } from "./link.js";
 import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, FANOUTS_ARCHIVE_USAGE, parseFanoutArchiveFlags } from "./fanouts.js";
 import { harnessInventory } from "./harnesses.js";
 import { addClaudeAccount } from "./claude-account-setup.js";
-import { setAccountLabel } from "./claude-accounts.js";
+import { claudeHome, setAccountLabel } from "./claude-accounts.js";
+import { accountPoolsCommand, computerAllowedPools } from "./account-pools.js";
 import { addClaudeCredit, claudeCredits, removeClaudeCredit } from "./claude-credits.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 
@@ -40,8 +41,13 @@ export async function runBridge(args: string[], version: string): Promise<number
       if (args.length === 1) {
         for (const harness of (await harnessInventory()).harnesses) {
           console.log(`${harness.source}: ${harness.installed ? `installed ${harness.version ?? ""}`.trim() : "not installed"}, ${harness.usable ? "usable" : `not usable (${harness.reason ?? "unknown"})`}`);
-          for (const account of harness.accounts ?? []) console.log(`  ${account.id}  ${account.label}  ${account.signedIn ? "signed in" : "not signed in"}  ${account.usable ? "usable" : `not usable (${account.reason ?? "unknown"})`}${account.plan ? `  plan ${account.plan}` : ""}`);
+          for (const account of harness.accounts ?? []) console.log(`  ${account.id}  ${account.label}  ${account.signedIn ? "signed in" : "not signed in"}  ${account.usable ? "usable" : `not usable (${account.reason ?? "unknown"})`}${account.plan ? `  plan ${account.plan}` : ""}${account.pool ? `  pool ${account.pool}` : ""}${account.role ? `  role ${account.role}` : ""}`);
         }
+        const allowed = computerAllowedPools();
+        if (allowed) console.log(`This computer's accounts work for pools: ${allowed.join(", ")}`);
+      } else if (args[1] === "pool" || args[1] === "role" || args[1] === "allowed-pools") {
+        const { phrenStoreRoot } = await import("./transcripts.js");
+        for (const line of await accountPoolsCommand(args.slice(1), phrenStoreRoot, slug => !!claudeHome(slug))) console.log(line);
       } else if (args[1] === "add" && args[2] && !args[2].startsWith("-")) {
         const at = args.indexOf("--label");
         if (at !== -1 && !args[at + 1]) throw new Error("Usage: phren bridge accounts add <slug> [--label <name>]");
@@ -64,7 +70,7 @@ export async function runBridge(args: string[], version: string): Promise<number
           if (!credits.length) console.log(`No credits on ${args[2]}. ${CREDIT_USAGE}`);
           for (const credit of credits) console.log(`${credit.id}  $${credit.amountUSD.toFixed(2)}  from ${credit.since.slice(0, 10)}${credit.expiresAt ? `  expires ${credit.expiresAt.slice(0, 10)}` : ""}${credit.label ? `  ${credit.label}` : ""}`);
         }
-      } else throw new Error("Usage: phren bridge accounts [add <slug> [--label <name>] | label <id> <label> | credit <id> [--amount <usd> [--expires <date>] [--since <date>] [--label <name>] | --remove <credit>]]");
+      } else throw new Error("Usage: phren bridge accounts [add <slug> [--label <name>] | label <id> <label> | credit <id> [--amount <usd> [--expires <date>] [--since <date>] [--label <name>] | --remove <credit>] | pool <id> <tag>|--clear | role <id> helpers|last-resort|off|--clear | allowed-pools [--project <name>] [<tag>… | --clear]]");
       break;
     }
     case "discover": {

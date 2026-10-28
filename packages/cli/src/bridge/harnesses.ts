@@ -6,13 +6,19 @@ import path from "node:path";
 import { codexHome } from "../home-paths.js";
 import { claudeAccountRef, claudeAuthStatus, claudeHomes, CODEX_ACCOUNT, type AccountRef, type AuthRunner } from "./claude-accounts.js";
 import { toolVersion, type ToolVersion } from "./health.js";
+import { accountSettings, computerAllowedPools, type AccountRole } from "./account-pools.js";
 
 export type HarnessSource = "claude" | "codex" | "opencode" | "copilot" | "phren";
-export interface HarnessAccount extends AccountRef { signedIn: boolean; usable: boolean; plan?: string; reason?: string; signInAvailable?: boolean }
+export interface HarnessAccount extends AccountRef {
+  signedIn: boolean; usable: boolean; plan?: string; reason?: string; signInAvailable?: boolean;
+  /** The account's pool and role, when the owner set them (account-pools.ts). */
+  pool?: string; role?: AccountRole;
+}
 export interface HarnessEntry {
   source: HarnessSource; installed: boolean; version?: string; usable: boolean; reason?: string; accounts?: HarnessAccount[];
 }
-export interface HarnessInventory { harnesses: HarnessEntry[] }
+/** `allowedPools`: the pools this computer's accounts may do work for, when the owner set them; none means any. */
+export interface HarnessInventory { harnesses: HarnessEntry[]; allowedPools?: string[] }
 export interface HarnessDeps {
   toolVersion?: (tool: string) => Promise<ToolVersion>;
   authRunner?: AuthRunner;
@@ -37,11 +43,12 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
     }
     const base = { source, installed: true, ...(found.version ? { version: found.version } : {}) };
     if (source === "claude") {
+      const settings = accountSettings();
       const accounts = await Promise.all(claudeHomes(env).map(async (home): Promise<HarnessAccount> => {
         const auth = await claudeAuthStatus(home, deps.authRunner);
         // An unanswered sign-in check stays usable: only Claude saying "logged out" hides an account.
         const usable = auth.signedIn || auth.unknown === true;
-        return { ...claudeAccountRef(home), signedIn: auth.signedIn, usable,
+        return { ...claudeAccountRef(home), ...settings[home.id], signedIn: auth.signedIn, usable,
           ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }),
           // Claude said it is signed out: the phone offers Sign in (POST /v1/accounts/claude/add {slug, mode: "sign-in"}).
           ...(!auth.signedIn && !auth.unknown ? { signInAvailable: true } : {}) };
@@ -56,7 +63,8 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
     }
     return { ...base, usable: true };
   }));
-  return { harnesses };
+  const allowedPools = computerAllowedPools();
+  return { harnesses, ...(allowedPools ? { allowedPools } : {}) };
 }
 
 /** The inventory, or undefined when it is not ready within `ms` (a cold `claude auth status` can take seconds). */
