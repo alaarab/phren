@@ -26,7 +26,7 @@ beforeEach(() => {
     mkdirSync(path.join(home, `.claude-${slug}`), { recursive: true });
     writeFileSync(path.join(home, `.claude-${slug}`, ".claude.json"), "{}");
   }
-  mkdirSync(path.join(store, "qualus"), { recursive: true });
+  mkdirSync(path.join(store, "client-a"), { recursive: true });
 });
 afterEach(() => { vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
 
@@ -37,8 +37,8 @@ describe("account pools and roles", () => {
     expect(await setAccountSettings("api200", { pool: "personal", role: "helpers" })).toEqual({ pool: "personal", role: "helpers" });
     expect(await setAccountSettings("team", { role: "off" })).toEqual({ role: "off" });
     // A field left out stays.
-    expect(await setAccountSettings("api200", { pool: "qualus" })).toEqual({ pool: "qualus", role: "helpers" });
-    expect(accountSettings()).toEqual({ api200: { pool: "qualus", role: "helpers" }, team: { role: "off" } });
+    expect(await setAccountSettings("api200", { pool: "client-a" })).toEqual({ pool: "client-a", role: "helpers" });
+    expect(accountSettings()).toEqual({ api200: { pool: "client-a", role: "helpers" }, team: { role: "off" } });
     expect(yaml()).toMatchObject({ claude: { api200: "API $200" }, credits: { api200: [expect.objectContaining({ amountUSD: 200 })] } });
     expect(await setAccountSettings("api200", { pool: null, role: null })).toEqual({});
     await setAccountSettings("team", { role: null });
@@ -85,29 +85,29 @@ describe("account pools and roles", () => {
   });
 
   it("keeps a project's config it can't parse", () => {
-    writeFileSync(path.join(store, "qualus/phren.project.yaml"), "sourcePath: [unclosed\n");
-    expect(() => setProjectAllowedPools(store, "qualus", ["qualus"])).toThrow(/can't be read/);
-    writeFileSync(path.join(store, "qualus/phren.project.yaml"), "- a list\n");
-    expect(() => setProjectAllowedPools(store, "qualus", ["qualus"])).toThrow(/not a mapping/);
-    expect(readFileSync(path.join(store, "qualus/phren.project.yaml"), "utf8")).toBe("- a list\n");
+    writeFileSync(path.join(store, "client-a/phren.project.yaml"), "sourcePath: [unclosed\n");
+    expect(() => setProjectAllowedPools(store, "client-a", ["client-a"])).toThrow(/can't be read/);
+    writeFileSync(path.join(store, "client-a/phren.project.yaml"), "- a list\n");
+    expect(() => setProjectAllowedPools(store, "client-a", ["client-a"])).toThrow(/not a mapping/);
+    expect(readFileSync(path.join(store, "client-a/phren.project.yaml"), "utf8")).toBe("- a list\n");
   });
 
   it("keeps this computer's and a project's allowed pools, none meaning any", async () => {
     expect(computerAllowedPools()).toBeUndefined();
-    expect(await setComputerAllowedPools(["personal", "qualus", "personal"])).toEqual(["personal", "qualus"]);
-    expect(computerAllowedPools()).toEqual(["personal", "qualus"]);
+    expect(await setComputerAllowedPools(["personal", "client-a", "personal"])).toEqual(["personal", "client-a"]);
+    expect(computerAllowedPools()).toEqual(["personal", "client-a"]);
     await expect(setComputerAllowedPools([])).rejects.toThrow(/at least one/);
     await expect(setComputerAllowedPools(["Nope"])).rejects.toThrow(/lowercase/);
     expect(await setComputerAllowedPools(null)).toBeUndefined();
     expect(computerAllowedPools()).toBeUndefined();
 
-    writeFileSync(path.join(store, "qualus/phren.project.yaml"), "sourcePath: /work/qualus\n");
-    expect(projectAllowedPools(store, "qualus")).toBeUndefined();
-    expect(setProjectAllowedPools(store, "qualus", ["qualus"])).toEqual(["qualus"]);
-    expect(projectAllowedPools(store, "qualus")).toEqual(["qualus"]);
-    expect(readProjectConfig(store, "qualus").sourcePath).toBe("/work/qualus");
-    setProjectAllowedPools(store, "qualus", null);
-    expect(readFileSync(path.join(store, "qualus/phren.project.yaml"), "utf8")).not.toContain("allowedPools");
+    writeFileSync(path.join(store, "client-a/phren.project.yaml"), "sourcePath: /work/client-a\n");
+    expect(projectAllowedPools(store, "client-a")).toBeUndefined();
+    expect(setProjectAllowedPools(store, "client-a", ["client-a"])).toEqual(["client-a"]);
+    expect(projectAllowedPools(store, "client-a")).toEqual(["client-a"]);
+    expect(readProjectConfig(store, "client-a").sourcePath).toBe("/work/client-a");
+    setProjectAllowedPools(store, "client-a", null);
+    expect(readFileSync(path.join(store, "client-a/phren.project.yaml"), "utf8")).not.toContain("allowedPools");
   });
 
   it("reads and sets them from the command line", async () => {
@@ -118,10 +118,10 @@ describe("account pools and roles", () => {
     await expect(run("role", "api200", "maybe")).rejects.toThrow(/role is/);
     await expect(run("pool", "ghost", "personal")).rejects.toThrow(/no Claude account "ghost"/);
     expect(await run("allowed-pools")).toEqual(["This computer: any pool."]);
-    expect(await run("allowed-pools", "personal", "qualus")).toEqual(["This computer: allowed pools personal, qualus."]);
-    expect(await run("allowed-pools", "--project", "qualus", "qualus")).toEqual(["Project qualus: allowed pools qualus."]);
-    expect(await run("allowed-pools", "--project", "qualus")).toEqual(["Project qualus: allowed pools qualus."]);
-    expect(await run("allowed-pools", "--project", "qualus", "--clear")).toEqual(["Project qualus: any pool."]);
+    expect(await run("allowed-pools", "personal", "client-a")).toEqual(["This computer: allowed pools personal, client-a."]);
+    expect(await run("allowed-pools", "--project", "client-a", "client-a")).toEqual(["Project client-a: allowed pools client-a."]);
+    expect(await run("allowed-pools", "--project", "client-a")).toEqual(["Project client-a: allowed pools client-a."]);
+    expect(await run("allowed-pools", "--project", "client-a", "--clear")).toEqual(["Project client-a: any pool."]);
     await expect(run("allowed-pools", "--project", "nowhere", "x")).rejects.toThrow(/no project "nowhere"/);
     await expect(run("allowed-pools", "--project", "../etc", "x")).rejects.toThrow(/no project/);
     await expect(run("pools")).rejects.toThrow(/Usage/);

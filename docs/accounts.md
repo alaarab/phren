@@ -101,8 +101,8 @@ For now these are recorded and reported only; nothing enforces them yet.
 ```bash
 phren bridge accounts pool api200 personal        # or --clear
 phren bridge accounts role api200 helpers         # helpers | last-resort | off | --clear
-phren bridge accounts allowed-pools personal qualus           # this computer; no tags: show; --clear: any pool
-phren bridge accounts allowed-pools --project qualus qualus    # the project's phren.project.yaml
+phren bridge accounts allowed-pools personal client-a           # this computer; no tags: show; --clear: any pool
+phren bridge accounts allowed-pools --project client-a client-a    # the project's phren.project.yaml
 phren bridge accounts                             # lists each account's pool and role
 ```
 
