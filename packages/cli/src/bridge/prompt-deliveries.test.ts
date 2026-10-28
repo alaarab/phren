@@ -2,8 +2,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, IN_FLIGHT_MS, matchingOffsets, promptHash, PromptDeliveries, transcriptSize, userTexts } from "./prompt-deliveries.js";
+import { DELIVERY_GIVE_UP_MS, DELIVERY_RETENTION_MS, IN_FLIGHT_MS, matchingOffsets, promptHash, PromptDeliveries, transcriptLine, transcriptSize, userTexts } from "./prompt-deliveries.js";
 import type { Json, Target } from "./protocol.js";
+import { clearAccountCaches } from "./claude-accounts.js";
+import { TranscriptReader } from "./transcripts.js";
 
 const target: Target = { server: "default", workspace: "w6", tab: "w6:t1", pane: "w6:p1", source: "codex", session: "01a10831-4b62-7000-8000-000000000001" };
 const rotated: Target = { ...target, session: "01a10985-bf36-7000-8000-000000000002" };
@@ -687,7 +689,8 @@ describe("a message the agent took into its running turn", () => {
     const item = JSON.stringify({ type: "response_item", timestamp: stamp, payload: { type: "message", role: "user", content: [{ type: "input_text", text: "yes" }] } });
     const event = JSON.stringify({ type: "event_msg", timestamp: stamp, payload: { type: "user_message", message: "yes" } });
     const rollout = Buffer.from(`${item}\n${event}\n`);
-    expect(matchingOffsets(rollout, 0, { hash: promptHash("yes"), at })).toEqual([{ offset: Buffer.byteLength(item + "\n"), hook: false, at: Date.parse(stamp) }]);
+    // The event is the entry; the item the stream shows for it is `shown`.
+    expect(matchingOffsets(rollout, 0, { hash: promptHash("yes"), at })).toEqual([{ offset: Buffer.byteLength(item + "\n"), hook: false, at: Date.parse(stamp), shown: 0 }]);
     // A thread materialized from Codex 0.155's history has only the items.
     expect(matchingOffsets(Buffer.from(`${item}\n`), 0, { hash: promptHash("yes"), at })).toEqual([{ offset: 0, hook: false, at: Date.parse(stamp) }]);
   });
@@ -763,6 +766,169 @@ describe("identical Claude messages and their rows", () => {
     rows = [{ offset: 0, hook: false }];
     await store.submitted(claudeTarget, "yes");
     expect(store.status("turn-00002", claudeTarget).state).toBe("delivered");
+  });
+});
+
+describe("the row a phone message landed as", () => {
+  // Rows sit 100 bytes apart in these fixtures, so a row's line is its offset / 100.
+  const lineOf = async (_record: unknown, offset: number) => offset / 100;
+
+  it("names the Claude row its hook settled it before the row was written, once that row appears", async () => {
+    let rows: { offset: number; hook: boolean; at?: number; uuid?: string }[] = [];
+    const store = new PromptDeliveries(file, () => clock, async () => rows, async () => 0, lineOf);
+    stores.push(store);
+    await send(store, "landed-c01", "Ship it", claudeTarget);
+    clock += 1_000; await store.submitted(claudeTarget, "Ship it");
+    // Delivered on the hook's word: no row yet, so no `landed`.
+    expect(store.status("landed-c01", claudeTarget)).toEqual({ state: "delivered", session: claudeTarget.session });
+    rows = [{ offset: 300, hook: true, at: clock + 500, uuid: "8a1b2c3d-0000-4000-8000-00000000c001" }];
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("landed-c01", claudeTarget).landed).toEqual({ line: 3, uuid: "8a1b2c3d-0000-4000-8000-00000000c001" }));
+    expect(store.forPane(claudeTarget)[0]).toMatchObject({ deliveryId: "landed-c01", state: "delivered", landed: { line: 3 } });
+    // Kept across a Hook restart.
+    await store.flush();
+    const restarted = new PromptDeliveries(file, () => clock, async () => rows, async () => 0, lineOf);
+    stores.push(restarted);
+    expect(restarted.status("landed-c01", claudeTarget).landed).toEqual({ line: 3, uuid: "8a1b2c3d-0000-4000-8000-00000000c001" });
+  });
+
+  it("names the row a message was taken from the transcript by, and never a row an earlier identical message has", async () => {
+    let rows: { offset: number; hook: boolean; at?: number }[] = [];
+    const store = new PromptDeliveries(undefined, () => clock, async () => rows, async () => 0, lineOf);
+    stores.push(store);
+    await send(store, "steer-l001", "yes", claudeTarget);
+    // Taken into the running turn (a queue removal, no hook).
+    rows = [{ offset: 200, hook: false }];
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("steer-l001", claudeTarget).landed).toEqual({ line: 2 }));
+    await send(store, "steer-l002", "yes", claudeTarget);
+    rows = [{ offset: 200, hook: false }, { offset: 500, hook: false }];
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("steer-l002", claudeTarget).landed).toEqual({ line: 5 }));
+    expect(store.status("steer-l001", claudeTarget).landed).toEqual({ line: 2 });
+  });
+
+  it("names the Codex row a message's hook settled it before", async () => {
+    let rows: { offset: number; hook: boolean; at?: number }[] = [];
+    const store = new PromptDeliveries(undefined, () => clock, async () => rows, async () => 0, lineOf);
+    stores.push(store);
+    await send(store, "codex-l001", "Run the suite");
+    await store.submitted(target, "Run the suite");
+    rows = [{ offset: 700, hook: true }];
+    clock += 3_000; await store.observe("default", [pane("working")]);
+    await vi.waitFor(() => expect(store.status("codex-l001", target).landed).toEqual({ line: 7 }));
+  });
+
+  it("says nothing it could not count, and nothing for a message still held or failed", async () => {
+    const store = new PromptDeliveries(undefined, () => clock, async () => [{ offset: 100, hook: false }], async () => 0, async () => undefined);
+    stores.push(store);
+    await send(store, "nocount-01", "yes", claudeTarget);
+    expect(store.status("nocount-01", claudeTarget).landed).toBeUndefined();
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    expect(store.status("nocount-01", claudeTarget)).toEqual({ state: "delivered", session: claudeTarget.session });
+  });
+
+  it("counts a row's line as the conversation stream numbers it, and reads Claude's row uuid", async () => {
+    const rows = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "user", uuid: "11111111-0000-4000-8000-000000000001", timestamp: new Date(clock + 1_000).toISOString(), message: { role: "user", content: "Ship it" } }),
+    ];
+    const text = `${rows.join("\n")}\n`;
+    const offsets = matchingOffsets(Buffer.from(text), 0, { hash: promptHash("Ship it"), at: clock });
+    expect(offsets).toEqual([{ offset: rows[0].length + 1, hook: true, at: clock + 1_000, uuid: "11111111-0000-4000-8000-000000000001" }]);
+    const projects = path.join(root, "claude", "projects", "-repo");
+    await mkdir(projects, { recursive: true });
+    await writeFile(path.join(projects, `${claudeTarget.session}.jsonl`), text);
+    vi.stubEnv("HOME", root); vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(root, "claude"));
+    clearAccountCaches();
+    try {
+      expect(await transcriptLine(claudeTarget, offsets[0].offset)).toBe(1);
+      expect(await transcriptLine(claudeTarget, 0)).toBe(0);
+      // An offset past the end (the file was replaced) is not a line.
+      expect(await transcriptLine(claudeTarget, text.length + 10)).toBeUndefined();
+    } finally { vi.unstubAllEnvs(); clearAccountCaches(); }
+  });
+
+  it("names the Codex rollout row the conversation stream shows, not the event that is the turn", async () => {
+    const at = clock;
+    const rows = [
+      JSON.stringify({ type: "session_meta", timestamp: new Date(at).toISOString(), payload: { id: target.session } }),
+      JSON.stringify({ type: "response_item", timestamp: new Date(at + 1_000).toISOString(), payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Run the suite" }] } }),
+      JSON.stringify({ type: "event_msg", timestamp: new Date(at + 1_000).toISOString(), payload: { type: "user_message", message: "Run the suite" } }),
+    ];
+    const text = `${rows.join("\n")}\n`;
+    const sessions = path.join(root, "codex", "sessions", "2026", "10", "28");
+    await mkdir(sessions, { recursive: true });
+    const rollout = path.join(sessions, `rollout-2026-10-28T12-00-00-${target.session}.jsonl`);
+    await writeFile(rollout, text);
+    vi.stubEnv("CODEX_HOME", path.join(root, "codex")); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
+    try {
+      const [entry] = matchingOffsets(Buffer.from(text), 0, { hash: promptHash("Run the suite"), at });
+      // The event is what is claimed; the item before it is what the stream shows.
+      expect(entry.offset).toBe(rows[0].length + rows[1].length + 2);
+      expect(entry.shown).toBe(rows[0].length + 1);
+      const shown = (await new TranscriptReader(rollout, "codex").read()).entries.find(item => (item.raw as Json & { payload?: Json }).payload?.role === "user");
+      expect(await transcriptLine(target, entry.shown!)).toBe(shown?.line);
+      // Through the store: a message its hook settled names that line once its rows are read.
+      const store = new PromptDeliveries(undefined, () => clock);
+      stores.push(store);
+      await send(store, "rollout-l01", "Run the suite");
+      await store.submitted(target, "Run the suite");
+      await vi.waitFor(() => expect(store.status("rollout-l01", target).landed).toEqual({ line: shown?.line }));
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("refuses a line for an offset that no longer starts the claimed row (a transcript made again)", async () => {
+    const rows = [
+      JSON.stringify({ type: "user", uuid: "22222222-0000-4000-8000-000000000001", message: { role: "user", content: "First" } }),
+      JSON.stringify({ type: "user", uuid: "22222222-0000-4000-8000-000000000002", message: { role: "user", content: "Second" } }),
+    ];
+    const projects = path.join(root, "claude", "projects", "-repo");
+    await mkdir(projects, { recursive: true });
+    await writeFile(path.join(projects, `${claudeTarget.session}.jsonl`), `${rows.join("\n")}\n`);
+    vi.stubEnv("HOME", root); vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(root, "claude"));
+    clearAccountCaches();
+    try {
+      const second = rows[0].length + 1;
+      expect(await transcriptLine(claudeTarget, second, "22222222-0000-4000-8000-000000000002")).toBe(1);
+      // Mid-row, or another row's id at that offset: not this message's row.
+      expect(await transcriptLine(claudeTarget, second + 3)).toBeUndefined();
+      expect(await transcriptLine(claudeTarget, second, "22222222-0000-4000-8000-000000000001")).toBeUndefined();
+    } finally { vi.unstubAllEnvs(); clearAccountCaches(); }
+  });
+
+  it("lets an identical Claude message settle on its own hook after an earlier one claimed its row only to name it", async () => {
+    let rows: { offset: number; hook: boolean; at?: number }[] = [];
+    const store = new PromptDeliveries(undefined, () => clock, async () => rows, async () => 0, lineOf);
+    stores.push(store);
+    await send(store, "again-0001", "continue", claudeTarget);
+    clock += 1_000; await store.submitted(claudeTarget, "continue");
+    rows = [{ offset: 100, hook: true, at: clock + 200 }];
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("again-0001", claudeTarget).landed).toEqual({ line: 1 }));
+    // The same words again, a turn later: its own hook settles it at once, with no row of its own yet.
+    clock += 1_000; await send(store, "again-0002", "continue", claudeTarget);
+    await store.submitted(claudeTarget, "continue");
+    expect(store.status("again-0002", claudeTarget).state).toBe("delivered");
+    // And it never names the first one's row; it takes its own when that appears.
+    expect(store.status("again-0002", claudeTarget).landed).toBeUndefined();
+    rows = [{ offset: 100, hook: true, at: clock - 4_800 }, { offset: 400, hook: true, at: clock + 200 }];
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("again-0002", claudeTarget).landed).toEqual({ line: 4 }));
+  });
+
+  it("keeps the rows beside the records, so an older Hook still reads every record", async () => {
+    let rows: { offset: number; hook: boolean; at?: number; uuid?: string }[] = [];
+    const store = new PromptDeliveries(file, () => clock, async () => rows, async () => 0, lineOf);
+    stores.push(store);
+    await send(store, "beside-001", "Ship it", claudeTarget);
+    rows = [{ offset: 200, hook: false, uuid: "33333333-0000-4000-8000-000000000001" }];
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("beside-001", claudeTarget).landed).toBeDefined());
+    await store.flush();
+    const records = JSON.parse(await readFile(file, "utf8")).records as Json[];
+    expect(Object.keys(records[0]).filter(key => key.startsWith("entry")).sort()).toEqual(["entry", "entryHook"]);
+    expect(JSON.parse(await readFile(`${file}.landed.json`, "utf8"))).toEqual({ "beside-001": { line: 2, uuid: "33333333-0000-4000-8000-000000000001" } });
   });
 });
 

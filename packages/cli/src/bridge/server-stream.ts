@@ -218,10 +218,12 @@ export function transcriptStreams(ctx: StreamContext) {
           if (deliveryFrames) {
             // Every message typed into this pane, also those sent while an
             // earlier conversation was showing there.
-            for (const { deliveryId, state, reason } of agentHooks.deliveries.forPane(target)) {
-              if (sentDelivery.get(deliveryId) === state) continue;
-              sentDelivery.set(deliveryId, state);
-              send(client, { type: "delivery", ...conversation, deliveryId, state, ...(reason ? { reason } : {}) });
+            // A delivered message is sent again once the row it landed as is known (`landed`).
+            for (const { deliveryId, state, reason, landed } of agentHooks.deliveries.forPane(target)) {
+              const key = landed ? `${state}:${landed.line}` : state;
+              if (sentDelivery.get(deliveryId) === key) continue;
+              sentDelivery.set(deliveryId, key);
+              send(client, { type: "delivery", ...conversation, deliveryId, state, ...(reason ? { reason } : {}), ...(landed ? { landed } : {}) });
             }
           }
           first = false;
