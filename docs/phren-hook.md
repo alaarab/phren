@@ -1032,6 +1032,30 @@ land on the next permission. Tapping the notification opens the session's
 details on the phone, led by the request, through `POST /v1/push/target`,
 which names the session without answering it.
 
+### iOS simulators on a Mac
+
+On a Mac the phone can pick, boot and drive the Mac's iOS simulators. The
+routes are listed in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`.
+
+- `GET /v1/simulators` lists the booted devices. With `?all=1` (capability
+  `simulatorDevices`), it lists every available iOS device instead, each with
+  its `state` (`Booted`, `Shutdown`, `Booting`…). Booted devices come first,
+  then the newest runtime, then by name, at most 64. A phone without the
+  capability keeps the booted-only answer.
+- `POST /v1/simulators/action` with `boot` or `shutdown` takes any available
+  device's `udid`. A device already in that state answers `ok`, and an unknown
+  `udid` answers 404. `boot` also opens the device's window in the Simulator
+  app, because taps, drags and keys go to that window.
+- `drag` (capability `simulatorDrag`) is a swipe or scroll. It takes `x1, y1`
+  to `x2, y2` as fractions of the screen, like a tap's `x, y`, over
+  `durationMs` (50 to 5000, default 300). The input helper presses at the
+  start, moves in steps of about 16 ms, and releases at the end. It uses the
+  same window and Accessibility grant as a tap.
+
+Updating the input helper rebuilds it, and macOS ties the Accessibility grant
+to the binary. So after this change macOS asks once more: switch simtap on
+again in System Settings → Privacy & Security → Accessibility.
+
 ### sudo from the phone
 
 A `sudo` with no terminal, such as a Claude Code `!` command or an agent's

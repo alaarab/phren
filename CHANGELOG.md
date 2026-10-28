@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- The phone can pick and boot a Mac's iOS simulators, and swipe and scroll in them.
+  - `GET /v1/simulators?all=1` (capability `simulatorDevices`) lists every available iOS device with its state, booted first.
+  - `boot` and `shutdown` take any available device and treat one already in that state as done. `boot` opens the device's Simulator window, which taps need.
+  - A `drag` action (capability `simulatorDrag`) moves from point to point over `durationMs` (default 300) through the input helper.
+  - The helper is rebuilt, so macOS asks for its Accessibility grant once more.
+
 - A chat whose Claude account is out of usage can now move to another computer. When the source transcript ends on Claude's usage-limit reply, or the request says `continuation: "summary-by-target"`, the Hook no longer asks the exhausted agent for a hand-off. It sends the peer the newest turns of the conversation, fitted to the brief, with the branch, HEAD, changes and original brief, and the new agent writes the hand-off itself and continues. The move records `continuation: "summary-by-target"`. On the same computer this is refused; `continuation: "resume"` switches accounts there.
 - Signing in a signed-out Claude account slot from the phone: `POST /v1/accounts/claude/add` with `{slug, mode: "sign-in"}` opens a pane running `claude /login` under that slot's own home (the default slot included), refusing a slot already signed in; `{slug, mode: "sign-in-status"}` says when it is signed in. `/v1/harnesses` marks signed-out slots `signInAvailable`.
 - A conditional interrupt for a held hand-off: `POST /v1/sessions/move` with `{id, interrupt: true}` sends Escape to the old agent only while the move's hand-off request is still waiting for its step, checked under the lock that types the request, and answers `{interrupted: true}` or why not (`idle`, `typed`, `writing`, `finished`). It sends one Escape per move, the way `/v1/keys` does for served OpenCode and app-server Codex panes. The phone's "Stop <agent> and hand off now" can no longer interrupt the hand-off it is waiting for.
