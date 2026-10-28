@@ -7,7 +7,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- `POST /v1/git/pulls` now names the checkout (`repository`) and the hosted repository (`remote`, as `domain/owner/repo`) it listed, and `POST /v1/git/pr/merge` takes `expectedRemote`. A merge whose checkout's remote has since been pointed at another repository is refused with 409 `git-remote-changed`, so a phone cannot merge a same-number, same-head pull request in a different repository after a remote retarget or a pane move. Advertised as `capabilities.gitRemoteIdentity`.
+- `POST /v1/git/pulls` now names the checkout (`repository`) and the hosted repository (`remote`, as `domain/owner/repo`) it listed, and `POST /v1/git/pr/merge` takes `expectedRemote`. A merge whose checkout's remote has since been pointed at another repository is refused with 409 `git-remote-changed`, so a phone cannot merge a same-number, same-head pull request in a different repository after a remote retarget or a pane move. On GitHub the repository is the one `gh` resolves, and the merge names it with `--repo`. Advertised as `capabilities.gitRemoteIdentity`.
+
+## [0.3.59] - 2026-10-28
+
+### Added
+
+- Account pools and roles, opt-in, recorded and reported but not yet enforced. A Claude account slot can carry a `pool` tag and a `role` (`helpers`, `last-resort`, `off`), and a project or a computer can list its `allowedPools`. Set them with `phren bridge accounts pool|role|allowed-pools` or the owner-only `POST /v1/accounts/claude/settings` and `POST /v1/accounts/allowed-pools` (capability `accountPools`). `/v1/harnesses` reports them.
+
+- A `helper` MCP tool (conductor module; not a core tool, so `phren_admin(action: "helper")` in `core`) runs one small task as a headless `claude -p` under the project's helper account and model (`helper: { account, model }` in `phren.project.yaml`, haiku by default) in the lead's project folder, and returns the reply. It bills that account, not the lead's login, which Claude Code's own subagents can't: the lead's login, routing and pane variables are removed. Read-only unless `allowEdits`, no MCP servers, bounded by `timeoutSeconds` and cancellable. Refused outside a project's folder, without a helper, for a role `off` account, a pool the project or computer leaves out, or an unreadable `accounts.yaml`. Each run's cost counts against the account's entered API credits (the cost ledger is now written under a lock) and is logged to `<bridge>/usage/helper-runs.jsonl`.
+
+- Account pools and roles are enforced in dispatch placement, Continue in… and a stopped worker's continuation. An account outside the project's or computer's `allowedPools` is refused even when named (`code: "account_pool"`). An automatic choice never takes an `off` account or a Console (API) login with no role, and takes a `last-resort` account only when no other has room. With pools or roles in play, dispatch names the chosen account in the launch and says why in `accountChoice`. Continue in… availability lists each login's `pool`, `role`, `console` and `poolRefused`, and the sending computer checks the project's list again. Same-computer moves and `resume` account switches check a named account's pool. `/v1/harnesses` marks Console logins `console: true` and an unreadable `accounts.yaml` `poolsUnreadable: true`; a config that can't be read allows no pool. Nothing changes without pools, roles or Console logins; account failover stays off unless enabled. Launches from the phone and schedules don't apply pools yet.
+
+- The phone can pick and boot a Mac's iOS simulators, and swipe and scroll in them.
+  - `GET /v1/simulators?all=1` (capability `simulatorDevices`) lists every available iOS device with its state, booted first.
+  - `boot` and `shutdown` take any available device and treat one already in that state as done. `boot` opens the device's Simulator window, which taps need.
+  - A `drag` action (capability `simulatorDrag`) moves from point to point over `durationMs` (default 300) through the input helper.
+  - The helper is rebuilt, so macOS asks for its Accessibility grant once more.
+
+- A chat whose Claude account is out of usage can now move to another computer. When the source transcript ends on Claude's usage-limit reply, or the request says `continuation: "summary-by-target"`, the Hook no longer asks the exhausted agent for a hand-off. It sends the peer the newest turns of the conversation, fitted to the brief, with the branch, HEAD, changes and original brief, and the new agent writes the hand-off itself and continues. The move records `continuation: "summary-by-target"`. On the same computer this is refused; `continuation: "resume"` switches accounts there.
 - Signing in a signed-out Claude account slot from the phone: `POST /v1/accounts/claude/add` with `{slug, mode: "sign-in"}` opens a pane running `claude /login` under that slot's own home (the default slot included), refusing a slot already signed in; `{slug, mode: "sign-in-status"}` says when it is signed in. `/v1/harnesses` marks signed-out slots `signInAvailable`.
 - A conditional interrupt for a held hand-off: `POST /v1/sessions/move` with `{id, interrupt: true}` sends Escape to the old agent only while the move's hand-off request is still waiting for its step, checked under the lock that types the request, and answers `{interrupted: true}` or why not (`idle`, `typed`, `writing`, `finished`). It sends one Escape per move, the way `/v1/keys` does for served OpenCode and app-server Codex panes. The phone's "Stop <agent> and hand off now" can no longer interrupt the hand-off it is waiting for.
 - `phren dispatch returns --watch` no longer takes returns away from an agent conductor on the same Hook: it reads them with the returns route's new `?peek=1`, which leaves them unread, and prints each once (again only when the worker returns anew). `--consume` keeps the old behaviour of marking them read.
@@ -15,6 +33,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Signing in two Claude account slots from the phone at the same moment no longer fails on both with "The new account pane could not be identified safely", leaving two unused panes. Herdr and tmux now say which pane they created. A terminal that doesn't say is checked one account pane at a time per terminal server.
+- A move that stops waiting for its hand-off (the wait ran out or failed, or the owner aborted it) now takes back its request while it is still queued. Before, the request stayed queued, and the old agent a new-chat move leaves running was asked for a hand-off later.
+- A move's "Stop <agent> and hand off now" is tighter:
+  - It sends its Escape only to the agent the move asked: the same harness, conversation and terminal. When the owner has started another agent in the pane since, it answers `state: "replaced"`.
+  - It can no longer land after the move's hand-off wait ran out and the move went on to exit the old agent.
+  - It goes only while this Hook waits on the move's queued request: never after a restart, before the request is queued, for a summary-by-target move, or after an abort.
+  - It still sends at most one Escape per move, and the move's own exit waits a few seconds after it before sending another.
+  - On a served OpenCode pane asking a question, it declines the question and also aborts the turn.
+- Signing in a Claude account slot from the phone now runs `claude /login` under that slot's home even when the pane's shell exports another account's `CLAUDE_CONFIG_DIR`. Its status is asked afresh while the sign-in pane is open.
+- Moving an out-of-usage chat to another computer:
+  - The original brief is cut to 8000 characters after it is redacted.
+  - A newer owner message with an image or other blocks now counts as the chat going on past an old usage limit.
 - phren agent's `auto-confirm` has a second set of fixes.
   - It now asks for:
     - a read of a path outside the project (`cat /tmp/x`, or a link that points out);

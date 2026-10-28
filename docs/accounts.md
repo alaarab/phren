@@ -31,7 +31,7 @@ A slug that isn't valid is refused with one that is: `Buildbox` suggests `buildb
 
 ### Signing in a slot from the phone
 
-A slot that exists but is signed out is signed in again with `POST /v1/accounts/claude/add` and `{slug, mode: "sign-in"}` (owner only; `default` is the default slot). The Hook opens a pane, as adding an account does, running `claude /login` under the slot's own home (`CLAUDE_CONFIG_DIR=~/.claude-<slug>`; none for the default), and answers `{target, terminalOnly: true, slug}` for the phone to open that pane's terminal. A slot already signed in is refused with 409 `signed-in`, one that doesn't exist with 404, and a second sign-in while the first pane is open with 409, for up to 10 minutes or until the slot reports signed in (the pane stays open as a Claude session). The default slot's login names its home too when the Hook's `CLAUDE_CONFIG_DIR` isn't `~/.claude`. `{slug, mode: "sign-in-status"}` answers `{slug, signedIn, plan?, unknown?}` without opening anything (`unknown`: Claude didn't report its state): the phone polls it until `signedIn` (a signed-out answer is at most 30 seconds old). A Hook without this answers 400 to the `mode` field. The route acts on this computer's slots; another computer's are signed in through its own Hook.
+A slot that exists but is signed out is signed in again with `POST /v1/accounts/claude/add` and `{slug, mode: "sign-in"}` (owner only; `default` is the default slot). The Hook opens a pane, as adding an account does, running `claude /login` under the slot's own home: `env CLAUDE_CONFIG_DIR=~/.claude-<slug>` for an added slot, and `env -u CLAUDE_CONFIG_DIR` for the default slot. Either way a pane shell that exports another account's home (the owner's profile) can't sign in that one instead. The command names the `claude` executable the Hook finds on its PATH (or Claude's own `~/.claude/local/claude`), since `env` doesn't see a shell alias. It answers `{target, terminalOnly: true, slug}` for the phone to open that pane's terminal. A slot already signed in is refused with 409 `signed-in`, one that doesn't exist with 404, and a second sign-in while the first pane is open with 409, for up to 10 minutes or until the slot reports signed in (the pane stays open as a Claude session). When the Hook itself found the default slot through `CLAUDE_CONFIG_DIR`, the default slot's login sets that home explicitly too, even when it is `~/.claude`. `{slug, mode: "sign-in-status"}` answers `{slug, signedIn, plan?, unknown?}` without opening anything (`unknown`: Claude didn't report its state): the phone polls it until `signedIn`. For up to 10 minutes after a sign-in pane for the slot was opened, Claude is asked afresh each time; otherwise a signed-out answer is at most 30 seconds old. A Hook without this answers 400 to the `mode` field. The route acts on this computer's slots; another computer's are signed in through its own Hook.
 
 Because transcripts live in `projects/` inside each home, a conversation started under one account is not visible to `claude --resume` under another. Switching a chat's account (`phren move <pane> --to claude --account <slug> --resume`) copies its transcript into the target home first; see conductor.md, "Switch a Claude conversation to another account".
 
@@ -81,6 +81,65 @@ The computer's inventory. The same object also rides on `GET /v1/dispatch/capaci
 - `key` is `claude:` followed by the first 12 hex characters of SHA-256 of the account's `oauthAccount.accountUuid` in that home's `.claude.json`. It is the same on every computer. When it is unknown, `key` is `claude:home:<id>` and the account is not deduplicated.
 - Codex has exactly one account on every computer, keyed `codex` (owner decision). OpenCode, Copilot and phren report no `accounts`; phren's provider credentials are not checked.
 - `usable` means that a launch should work now. A harness is usable when it is installed and at least one account is usable. `reason` explains a `false`, and also says why a usable account is not confirmed signed in. An account whose sign-in check did not answer stays usable, with `signedIn: false` and a `reason`. Only a missing binary or Claude reporting logged out makes something unusable.
+- A Claude account carries `pool` and `role` when the owner set them, and the inventory carries this computer's `allowedPools` when set (see [Account pools and roles](#account-pools-and-roles)).
+
+### Account pools and roles
+
+All of this is opt-in. A store that sets none of it behaves exactly as before.
+
+- **Pool:** a Claude account slot may have a `pool`, a short tag (`personal`, `client-a`) for whose work it may do.
+- **Role:** a slot may have a `role`, which says how it is used without being named:
+  - `helpers`: for helper runs;
+  - `last-resort`: offered only when no `helpers` account fits;
+  - `off`: never chosen automatically, though still by hand on the phone.
+
+  An account with no role is an ordinary account, as every account was before, except a Console (API-billed) login: with no role it is off for automatic use, so API credit is only spent once you give the account a role.
+- **Allowed pools:** a project and a computer may each list `allowedPools`, the pools whose accounts may do its work. No list means any pool; a list leaves out an account with no pool.
+
+Where they bind (`account-policy.ts`):
+- **Dispatch placement.** For a Claude worker, each candidate computer's accounts are checked against the project's and that computer's `allowedPools`. A named account outside them is refused (409, `code: "account_pool"`). With no account named, and once a pool, a role or a Console login is in play there, the dispatching Hook chooses the account itself and names it in the launch: most room among the accounts the pools allow, never `off` or a Console login with no role, `last-resort` only when no other account has room, and none the limits ledger holds back. The receipt's `accountChoice` says why, including what was ruled out. `anywhere` skips a computer where no account fits and lists it under `skipped`, and puts a computer that could only use a `last-resort` account after every computer with another account that fits. When nothing fits anywhere it answers 409 `account_pool`. A named computer is refused. A computer that doesn't report its accounts (a slow read, launch checks off) is refused when the project has a list, since its accounts can't be checked.
+- **Continue in…** The receiving computer's availability marks each login with its `pool`, `role`, `console` and, when the project's or its own pools rule it out, `poolRefused` (the reason). The sending computer checks the project's list again against what the peer reports, so a peer on an older Hook can't let a login through. An unnamed Claude continuation picks the same way as dispatch, and a named login with `poolRefused` is refused. On the same computer, a named account (a move or a `resume` account switch) is checked against the pools of the project whose checkout holds the pane's folder, and this computer's.
+- **A stopped worker's continuation** (account failover, still off unless `phren config account-failover on`) is offered only the accounts the project's and each computer's pools and the roles allow. `last-resort` accounts count only when no other allowed account on any computer has room; the stopped login and any the limits ledger holds back have none.
+
+A config that can't be read allows no pool rather than any. A `phren.project.yaml` that names `allowedPools` but can't be parsed refuses every Claude account for that project, named ones included (a broken file that never named a list still means any pool). An `accounts.yaml` that can't be read is flagged on the Claude listing entry (`poolsUnreadable: true`), and every Claude account on that computer is refused, named or not, until it is fixed. On the same computer, a move with no account named is checked against the account it will run under: the pane's own, else `default`.
+
+With no pools, no roles and no Console logins, every choice is the same as before. A launch from the phone or a schedule that names no account still picks on the receiving computer by room alone; pools and roles don't reach that choice yet.
+
+```bash
+phren bridge accounts pool api200 personal        # or --clear
+phren bridge accounts role api200 helpers         # helpers | last-resort | off | --clear
+phren bridge accounts allowed-pools personal client-a              # this computer; no tags: show; --clear: any pool
+phren bridge accounts allowed-pools --project client-a client-a    # the project's phren.project.yaml
+phren bridge accounts                             # lists each account's pool and role
+```
+
+A slot's pool and role live in `<bridge>/accounts.yaml` under `slots.<id>` (`{ pool, role }`). This computer's list is the same file's `allowedPools`, and a project's list is `allowedPools` in its `phren.project.yaml`. A pool is 1 to 32 lowercase letters, digits and dashes, and a list holds at most 32.
+
+The phone sets them through two owner-only routes, advertised as `capabilities.accountPools`:
+- `POST /v1/accounts/claude/settings` takes `{ slug, pool?, role? }`. A field left out stays as it is, and `null` clears it. It answers `{ ok, slug, pool?, role? }`: 404 for an unknown slot, 400 for a bad pool or role.
+- `POST /v1/accounts/allowed-pools` takes `{ allowedPools: [tags] | null }` for this computer and answers `{ ok, allowedPools? }`.
+
+### Helper runs
+
+A lead agent can hand a small, self-contained task to a cheaper model billed to another account with the `helper` MCP tool (conductor module; not one of the core tools, so in the `core` profile it is `phren_admin(action: "helper")`). Claude Code's own subagents can't do this: a subagent always runs under the lead's login and its usage. A helper is a separate headless `claude -p` under the account you choose.
+
+Opt in per project, in its `phren.project.yaml`:
+
+```yaml
+helper:
+  account: api      # a Claude account on this computer (phren bridge accounts); default is ~/.claude
+  model: haiku      # optional, haiku by default
+```
+
+Each call runs `claude -p --model <model> --output-format json --strict-mcp-config` with the prompt on stdin, in the lead's folder (or the `cwd` it passes), with the account's `CLAUDE_CONFIG_DIR`. The folder decides the project: it must be a project's checkout or worktree, and a `project` the lead names must be that one, so one project's helper account never runs in another project's folder.
+
+The lead's own login and routing are removed first (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK|VERTEX|FOUNDRY`), so the helper signs in and bills as that account only: sign the account in with a Console login to bill an API credit. So are the lead's pane and dispatch (`HERDR_*`, `TMUX`, `TMUX_PANE`, `PHREN_DISPATCH_ID`), so the helper's own hooks never report as the lead.
+
+Without `allowEdits` the run is read-only: `--permission-mode default` with Bash and the edit tools refused (`--disallowedTools`), whatever a settings file allows. With it, `--permission-mode acceptEdits`. No MCP servers load; the folder's Claude hooks still run, under the helper account. A run stops after `timeoutSeconds` (120 by default, at most 600) or when the lead cancels the call, with everything it started, and returns Claude's reply.
+
+The tool refuses, saying why, when the folder is not a project's, the project has no `helper`, the account isn't on this computer, its role is `off`, its pool is outside the project's or this computer's `allowedPools` (a list leaves out an account with no pool), or `accounts.yaml` can't be read.
+
+Each run's cost goes into the account's cost ledger, so it counts against the [API credits](#api-credits-estimate) entered for it, and one line per run (time, project, account, model, outcome, duration, cost and the token counts Claude printed; never the prompt) goes to `<bridge>/usage/helper-runs.jsonl`, trimmed to its last 1000 lines past 512 KB.
 
 ### Session rows
 

@@ -108,7 +108,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     localComputer: { id: computerID, name: hostname() },
     forward: (origin, text, deliveryId) => succession?.forward(origin, text, deliveryId) ?? Promise.resolve(undefined),
     // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
-    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => succession ? succession.automatic("dispatch", { ...input, continues }, origin, () => dispatches.dispatch(input, origin, continues)) : dispatches.dispatch(input, origin, continues) }),
+    failover: new AccountFailover({ rooms: context => dispatches.claudeRooms(context), dispatch: (input, origin, continues) => succession ? succession.automatic("dispatch", { ...input, continues }, origin, () => dispatches.dispatch(input, origin, continues)) : dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
     close: async (receipt, verifiedPeer) => {
       const data = { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn };
@@ -168,6 +168,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     identity: (server, pane) => paneIdentity(server, pane, true),
     terminal: terminalProvider(),
     deliver: (target, text, deliveryId) => handOffs ? handOffs.enqueue({ target, text, deliveryId }) : sendPrompt(target, text, deliveryId, async () => {}),
+    withdraw: async (target, deliveryId, reason) => handOffs?.withdraw(deliveryId, target, reason),
     // The new agent starts in the folder an agent already ran in, so it is trusted for the new harness too.
     launch: (server, data, options) => launches.run(() => launchSession(server, data, { trustFolder: true, ...options })),
     inventory: () => launchCheckOff() ? Promise.resolve(undefined) : harnessInventoryWithin(2_500),

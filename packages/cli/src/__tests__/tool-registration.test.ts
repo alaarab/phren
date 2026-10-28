@@ -19,6 +19,7 @@ import { register as registerNotes } from "../tools/notes.js";
 import { register as registerSummaries } from "../tools/summaries.js";
 import { register as registerCode } from "../tools/code.js";
 import { register as registerDispatch } from "../tools/dispatch.js";
+import { register as registerHelper } from "../tools/helper.js";
 import type { McpContext } from "../tools/types.js";
 
 // NOTE: this must list every module index.ts registers with the live MCP
@@ -42,6 +43,7 @@ const ALL_REGISTER_FNS = [
   registerSummaries,
   registerCode,
   registerDispatch,
+  registerHelper,
 ];
 
 function makeRecordingServer() {

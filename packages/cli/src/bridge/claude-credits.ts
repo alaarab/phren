@@ -5,11 +5,12 @@
 // The estimate never reads billing; it can drift from the Console's balance.
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { dump, load } from "js-yaml";
-import { atomic, atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
-import { accountsFile, isAccountSlug, type ClaudeHome } from "./claude-accounts.js";
+import { load } from "js-yaml";
+import { withFileLock } from "../governance/locks.js";
+import { atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
+import { accountsFile, isAccountSlug, updateAccountsFile, type ClaudeHome } from "./claude-accounts.js";
 import type { UsageWindow } from "./usage.js";
 
 export interface ClaudeCredit {
@@ -61,16 +62,14 @@ export function claudeCredits(home: string): ClaudeCredit[] {
 
 async function updateCredits(home: string, change: (list: ClaudeCredit[]) => ClaudeCredit[]): Promise<ClaudeCredit[]> {
   if (!isAccountSlug(home)) throw new Error(`"${home}" is not an account name: use lowercase letters, digits and dashes.`);
-  let text: string | undefined;
-  try { text = await readFile(accountsFile(), "utf8"); } catch { /* First entry. */ }
-  const parsed = readYaml(text);
-  const next = change(creditsOf(parsed, home));
-  const credits = { ...object(parsed.credits) } as Record<string, unknown>;
-  if (next.length) credits[home] = next; else delete credits[home];
-  parsed.credits = credits;
-  if (!Object.keys(credits).length) delete parsed.credits;
-  await mkdir(bridgeRoot(), { recursive: true, mode: 0o700 });
-  await atomic(accountsFile(), dump(parsed), 0o600);
+  let next: ClaudeCredit[] = [];
+  await updateAccountsFile(parsed => {
+    next = change(creditsOf(parsed, home));
+    const credits = { ...object(parsed.credits) } as Record<string, unknown>;
+    if (next.length) credits[home] = next; else delete credits[home];
+    parsed.credits = credits;
+    if (!Object.keys(credits).length) delete parsed.credits;
+  });
   return next;
 }
 
@@ -118,7 +117,13 @@ function readLedger(file: string): Record<string, SessionCost> {
   } catch { return {}; }
 }
 
-/** Record one status-line render: the session's running total only grows, so the largest seen stands. */
+let ledgerWrites: Promise<unknown> = Promise.resolve();
+
+/**
+ * Record one status-line render or helper run: the session's running total only grows, so the largest seen
+ * stands. Writes run one at a time in this process and under the ledger's lock across processes (the status
+ * line and the helper tool both write it), so none drops another's session.
+ */
 export async function recordSessionCost(home: ClaudeHome, payload: unknown, now = new Date()): Promise<void> {
   if (!claudeCredits(home.id).length) return;
   const value = object(payload);
@@ -126,12 +131,19 @@ export async function recordSessionCost(home: ClaudeHome, payload: unknown, now 
   const cost = object(value.cost).total_cost_usd;
   if (!session || typeof cost !== "number" || !Number.isFinite(cost) || cost < 0 || cost > 100_000) return;
   const file = costLedgerFile(home);
-  const sessions = readLedger(file);
-  const seen = sessions[session];
-  if (seen && seen.costUSD >= cost) return;
-  sessions[session] = { costUSD: cost, startedAt: seen?.startedAt ?? now.toISOString() };
-  const kept = Object.entries(sessions).sort(([, a], [, b]) => b.startedAt.localeCompare(a.startedAt)).slice(0, MAX_SESSIONS);
-  await atomicInPrivateDir(file, JSON.stringify({ sessions: Object.fromEntries(kept) }));
+  const run = ledgerWrites.then(async () => {
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await withFileLock(file, async () => {
+      const sessions = readLedger(file);
+      const seen = sessions[session];
+      if (seen && seen.costUSD >= cost) return;
+      sessions[session] = { costUSD: cost, startedAt: seen?.startedAt ?? now.toISOString() };
+      const kept = Object.entries(sessions).sort(([, a], [, b]) => b.startedAt.localeCompare(a.startedAt)).slice(0, MAX_SESSIONS);
+      await atomicInPrivateDir(file, JSON.stringify({ sessions: Object.fromEntries(kept) }));
+    });
+  });
+  ledgerWrites = run.catch(() => undefined);
+  return run;
 }
 
 /**

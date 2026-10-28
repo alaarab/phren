@@ -266,6 +266,37 @@ describe("an rg run is checked against rg's own file list", () => {
   });
 });
 
+describe("a recursive grep is listed the same way whichever grep is installed", () => {
+  // GNU grep refuses `-d RECURSE` (BSD takes it) and can exit 1, the status of "nothing found". The listing must
+  // recurse anyway, and a grep that refuses the listing's options must count as one that can't list.
+  it.each(["grep -d RECURSE x .", "grep -d rec x .", "grep -d recurse x .", "grep --directories=recurse x .", "grep --directories=RECURSE x config"])(
+    "%s asks under a GNU-like grep", (command) => {
+      const bin = fs.mkdtempSync(path.join(os.tmpdir(), "phren-fake-grep-"));
+      const log = path.join(bin, "args");
+      const real = spawnSync("sh", ["-c", "command -v grep"], { encoding: "utf-8" }).stdout.trim();
+      // Records its arguments; refuses an upper-case -d/--directories value as GNU does (message, exit 1); else runs grep.
+      fs.writeFileSync(path.join(bin, "grep"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${log}"\nfor a in "$@"; do case "$a" in *RECURSE*) echo "grep: invalid argument" >&2; exit 1;; esac; done\nexec "${real}" "$@"\n`, { mode: 0o755 });
+      vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+      try {
+        expect(verdict(command)).toBe("ask");
+        const args = fs.readFileSync(log, "utf-8").trim().split("\n");
+        expect(args).toContain("-r");
+        expect(args.some((arg) => /^(-d|--directories)/.test(arg))).toBe(false);
+      } finally { fs.rmSync(bin, { recursive: true, force: true }); }
+    });
+
+  it("counts a grep that exits 1 with a message as one that can't list, and a quiet exit 1 as an empty list", () => {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "phren-fake-grep-"));
+    fs.writeFileSync(path.join(bin, "grep"), `#!/bin/sh\n[ -n "$GREP_SAYS" ] && echo "$GREP_SAYS" >&2\nexit 1\n`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
+    try {
+      expect(verdict("grep -r x src")).toBe("allow");
+      vi.stubEnv("GREP_SAYS", "grep: unknown option");
+      expect(verdict("grep -r x src")).toBe("ask");
+    } finally { fs.rmSync(bin, { recursive: true, force: true }); }
+  });
+});
+
 describe("recursive reads and git config the owner's tools set up", () => {
   it.runIf(hasRg)("lets rg skip what it ignores and hidden files, as rg itself lists them", () => {
     expect(verdict("rg x pkg")).toBe("allow");

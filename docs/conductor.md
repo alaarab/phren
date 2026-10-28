@@ -237,6 +237,14 @@ choice of harness or account always wins. `anywhere` follows the same rule: it
 skips a computer whose account for the dispatch is exhausted, and otherwise
 ignores quota.
 
+Pools and roles bind dispatch too ([accounts](accounts.md#account-pools-and-roles)).
+A Claude account outside the project's or the computer's `allowedPools` is
+refused even when named (`code: "account_pool"`). With none named, the
+dispatching Hook picks the account itself once pools or roles apply there,
+never an `off` account or a Console login with no role, and a `last-resort` one
+only when nothing else has room. `anywhere` skips a computer with no account
+that fits, and the receipt's `skipped` says why.
+
 ## Dispatch new work
 
 ```sh
@@ -691,6 +699,27 @@ The old chat stays open, including on failure. The record has `to.computer`,
 404; offline peers, missing checkouts and unusable harnesses/accounts return
 409 before the hand-off request. Peer calls have bounded timeouts.
 
+A source agent whose Claude account is out of usage cannot write a hand-off.
+When the source transcript ends on Claude's usage-limit reply, or the request
+says `continuation: "summary-by-target"`, the Hook skips the hand-off request.
+Instead it sends the peer the newest turns of the conversation, along with the
+branch, HEAD and changes it saw. Up to 8000 characters of the original dispatch
+brief are kept first. Each long turn is cut to its end, and the excerpt is
+measured after redaction so the whole brief fits in 32768 characters.
+
+The new agent on the peer is told why the previous agent wrote no hand-off: it
+ran out of usage, or the owner asked. It writes its own short hand-off from
+the excerpt, checks the checkout and continues. The record has
+`continuation: "summary-by-target"` and a `handoff` with `source: "fallback"`
+and that reason.
+
+The transcript file is not copied to the peer; only the excerpt travels in the
+brief. The prompts and replies in it are redacted like any other peer hand-off,
+not withheld. An explicit request whose transcript cannot be read fails the
+move rather than launch an agent with nothing to go on. `summary-by-target` on
+a move within this computer is refused (409); switch accounts there with
+`continuation: "resume"`.
+
 Listing destinations and starting a cross-computer move require the owner.
 Scoped gitboy keys, MCP agents (including dispatched workers), and peer-originated
 requests cannot start one. `GET /v1/sessions/move/availability?project=<name>`
@@ -713,6 +742,11 @@ An omitted Claude account selects any usable login with room, preferring the
 most five-hour headroom and then weekly room, as the launcher does. The Hook
 pins that choice in `to.account`, records `accountChoice`, and advertises the
 listing's `selectedAccount`, so the receiving launcher uses the reported login.
+With [account pools and roles](accounts.md#account-pools-and-roles) set, the
+choice skips logins the project's or that computer's `allowedPools` rule out
+(each listed login carries `poolRefused` with the reason), `off` logins and
+Console logins with no role, and takes a `last-resort` login only when no other
+has room. A named login with `poolRefused` is refused.
 
 Moved-worker observations carry `computerFingerprint`, derived from the
 verified SSH host key and enrolled SSH username, and `computerId`, advertised by

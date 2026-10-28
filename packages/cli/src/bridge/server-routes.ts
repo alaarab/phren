@@ -5,6 +5,8 @@ import type { ConductorSuccessionService, ConductorExecutor } from "./conductor-
 import { relocationSupport } from "./worker-relocation.js";
 import { continuationIntent, continuationLaunchSchema, continuationPlacement, launchContinuation } from "./continuation-launch.js";
 import { addClaudeAccount, signInClaudeAccount } from "./account-add.js";
+import { ACCOUNT_ROLES, isAccountRole, setAccountSettings, setComputerAllowedPools, type AccountRole } from "./account-pools.js";
+import { claudeHome } from "./claude-accounts.js";
 import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
@@ -56,7 +58,7 @@ import { gitStatus } from "./git.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDeadline } from "./projects.js";
 import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
-import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
+import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
 import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
 import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
@@ -165,7 +167,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, claudeAccountAdd: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -565,7 +567,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/muxes": result = { muxes: muxListForClient(await servers(), url.searchParams.get("typed") === "1") }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
-          case "/v1/simulators": result = { simulators: await bootedSimulators() }; break;
+          // `all=1` (capability simulatorDevices): every available device with its state, for the phone's picker.
+          case "/v1/simulators": result = { simulators: url.searchParams.get("all") === "1" ? await simulatorDevices() : await bootedSimulators() }; break;
           case "/v1/simulators/screenshot": {
             const bytes = await simulatorScreenshot(String(url.searchParams.get("udid") ?? ""));
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
@@ -815,9 +818,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           const { id } = z.object({ id: z.string().uuid(), interrupt: z.literal(true), origin: z.unknown().optional() }).strict().parse(data);
           // Esc as /v1/keys sends it: a served OpenCode pane or a Codex pane on the Hook's own app-server stops
           // its turn over its API; otherwise the key goes to the pane. A question the Hook holds is declined
-          // first, and the key still goes: a declined question alone lets the turn carry on.
+          // first, and the turn is still stopped: a declined question alone lets the turn carry on.
           const escape = async (target: Target) => {
-            if (await agentHooks.servedKeys(target, ["Escape"], "working")) return;
+            if (await agentHooks.servedKeys(target, ["Escape"], "working", { abortTurn: true })) return;
             agentHooks.cancelHeldQuestion(target);
             const { codexServers } = await import("./codex-servers.js");
             const owned = codexServers.forTarget(target);
@@ -861,6 +864,21 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = data.mode === undefined ? await launches.run(() => addClaudeAccount(data, selectedServer(url)))
             : data.mode === "sign-in-status" ? await signInClaudeAccount(data, selectedServer(url))
             : await launches.run(() => signInClaudeAccount(data, selectedServer(url)));
+        } else if (url.pathname === "/v1/accounts/claude/settings") {
+          // An account's pool and role (account-pools.ts): a field left out stays, null clears it.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change an account's pool or role.");
+          const input = z.object({ slug: z.string().max(64), pool: z.string().max(64).nullable().optional(), role: z.string().max(32).nullable().optional(), origin: z.unknown().optional() }).strict().parse(data);
+          if (!claudeHome(input.slug)) throw new BridgeError(404, `There is no Claude account "${input.slug}" on this computer.`);
+          if (input.role !== undefined && input.role !== null && !isAccountRole(input.role)) throw new BridgeError(400, `A role is ${ACCOUNT_ROLES.join(", ")}.`);
+          const settings = await setAccountSettings(input.slug, { pool: input.pool, role: input.role as AccountRole | null | undefined })
+            .catch((error: Error) => { throw new BridgeError(400, error.message); });
+          result = { ok: true, slug: input.slug, ...settings };
+        } else if (url.pathname === "/v1/accounts/allowed-pools") {
+          // The pools this computer's accounts may do work for; null clears the list (any pool).
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change this computer's allowed pools.");
+          const input = z.object({ allowedPools: z.array(z.string().max(64)).max(64).nullable(), origin: z.unknown().optional() }).strict().parse(data);
+          const allowedPools = await setComputerAllowedPools(input.allowedPools).catch((error: Error) => { throw new BridgeError(400, error.message); });
+          result = { ok: true, ...(allowedPools ? { allowedPools } : {}) };
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/jobs/cleanup") {
@@ -976,7 +994,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // checkout, or a clone. Serialized like launches — one at a time.
           result = await launches.run(async () => enrollProject(z.object({ directory: z.string().max(4096).optional(), cloneUrl: z.string().max(512).optional(), project: z.string().max(100).optional(), store: z.string().max(200).optional() }).parse(data)));
         } else if (url.pathname === "/v1/simulators/action") {
-          result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(), text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
+          result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(),
+            x1: z.number().optional(), y1: z.number().optional(), x2: z.number().optional(), y2: z.number().optional(), durationMs: z.number().optional(),
+            text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launches.run(async () => {

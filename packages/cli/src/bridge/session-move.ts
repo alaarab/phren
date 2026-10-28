@@ -37,7 +37,7 @@ import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { findPane } from "./herdr.js";
 import { briefArrival, briefId, briefRoot, assertUnusedLaunchId, writeLaunchBrief } from "./launch-brief.js";
 import { atomic, BridgeError, bridgeRoot, object, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
-import { publicAssistant } from "./schedule-watch.js";
+import { finalTurnFromLines, isClaudeUsageLimit, publicAssistant } from "./schedule-watch.js";
 import type { TerminalProvider } from "./terminal.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 
@@ -53,8 +53,10 @@ export const moveRequestSchema = z.object({
   /** `resume` switches a Claude conversation to another account on this
    * computer without a hand-off: the transcript is copied into the target
    * account's home and the same conversation resumes there (`claude --resume`),
-   * so an account at its usage limit can still switch. */
-  continuation: z.enum(["handoff", "resume"]).default("handoff"),
+   * so an account at its usage limit can still switch. `summary-by-target` (a move to another computer):
+   * the source is not asked for a hand-off; the new agent there builds one from the copied conversation.
+   * A source whose last turn ended on its usage limit is moved this way without asking. */
+  continuation: z.enum(["handoff", "resume", "summary-by-target"]).default("handoff"),
   /** Kept on a retry: the same id returns the move already under way. */
   id: z.string().uuid().optional(),
   /** How long the agent gets to write its hand-off before Phren builds one. */
@@ -74,7 +76,9 @@ const moveRecordSchema = z.object({
   accountChoice: z.string().max(400).optional(),
   project: projectName.optional(),
   mode: z.enum(["replace", "new-chat"]).optional(),
-  continuation: z.literal("resume").optional(),
+  /** `resume`: the same conversation under another account here. `summary-by-target`: the source was out of
+   * usage, so the agent on the other computer builds the hand-off from the copied conversation. */
+  continuation: z.enum(["resume", "summary-by-target"]).optional(),
   modeForced: z.literal("conductor").optional(),
   handedOffTo: z.object({ computer: z.string().optional(), target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
   handedOffFrom: z.object({ target: targetSchema, title: z.string().max(200) }).strict().optional(),
@@ -107,12 +111,21 @@ export interface MovedWorker {
 /** What "stop and hand off now" did: interrupted the step, or why not. `idle`: the agent is on no step,
  * so its request goes in without one; `typed`: the request is being or was typed; `writing`: the agent took
  * it and writes its hand-off; `finished`: the move is past its hand-off, or its request can no longer be
- * delivered (the move then builds a hand-off itself). */
-export type MoveInterrupt = { interrupted: true } | { interrupted: false; state: "idle" | "typed" | "writing" | "finished" };
+ * delivered (the move then builds a hand-off itself); `replaced`: the pane now runs another agent or
+ * conversation than the one the move asked, which is never interrupted for it. */
+export type MoveInterrupt = { interrupted: true } | { interrupted: false; state: "idle" | "typed" | "writing" | "finished" | "replaced" };
 
 /** The slash command each harness ends its interactive session with. */
 const EXIT_COMMANDS: Record<string, string> = { claude: "/exit", codex: "/quit", copilot: "/exit", opencode: "/exit", phren: "/exit" };
 const HARNESS_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot", phren: "phren agent" };
+
+/** Refuses a Claude account on this computer that the pools of the pane's project or this computer rule out. */
+async function refuseOutsidePools(pane: Json, account: string): Promise<void> {
+  const cwd = String(pane.foreground_cwd || pane.cwd || "");
+  if (!path.isAbsolute(cwd)) return;
+  const refused = await (await import("./move-computers.js")).localPoolRefusal(cwd, account);
+  if (refused) throw new BridgeError(409, `Claude account ${account} may not take this session: ${refused}.`, { code: "account_pool" });
+}
 
 const MOVE_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_MOVES = 256;
@@ -139,6 +152,17 @@ async function saveMove(record: MoveRecord): Promise<void> {
   return run;
 }
 
+/** The mark that a move's agent was sent its one Escape, beside the move's record, so a Hook restart does not
+ * send a second. Written before the key goes: a crash between the two counts as sent. */
+const interruptFile = (id: string) => path.join(movesRoot(), `${z.string().uuid().parse(id)}.interrupted`);
+async function markInterrupted(id: string): Promise<void> {
+  await mkdir(movesRoot(), { recursive: true, mode: 0o700 });
+  await atomic(interruptFile(id), { at: new Date().toISOString() });
+}
+const interruptMarked = (id: string) => lstat(interruptFile(id)).then(info => info.isFile(), () => false);
+/** How long after the interrupt's Escape the move's own exit waits before sending another. */
+const INTERRUPT_SETTLE_MS = 5_000;
+
 export async function readMove(id: string): Promise<MoveRecord | undefined> {
   const file = recordFile(id);
   if (landedMoves.has(file)) return structuredClone(landedMoves.get(file)!);
@@ -154,7 +178,7 @@ export async function listMoves(now = Date.now()): Promise<MoveRecord[]> {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const settled = (record: MoveRecord) => record.state === "moved" || record.state === "failed";
   const stale = records.filter((record, index) => settled(record) && (index >= MAX_MOVES || now - Date.parse(record.updatedAt) > MOVE_KEEP_MS));
-  await Promise.all(stale.map(record => rm(recordFile(record.id), { force: true }).catch(() => undefined)));
+  await Promise.all(stale.flatMap(record => [recordFile(record.id), interruptFile(record.id)].map(file => rm(file, { force: true }).catch(() => undefined))));
   return records.filter(record => !stale.includes(record));
 }
 
@@ -374,6 +398,72 @@ export function fallbackHandoff(input: { reason: string; from: string; entries: 
   return input.original ? withOriginalBrief(head, input.original, Number.MAX_SAFE_INTEGER, "the original brief file") : head;
 }
 
+/** Whether a Claude conversation's last turn ended on its subscription's usage limit (Claude's own
+ * rate-limit row): its agent cannot answer a hand-off request. */
+export function sourceOutOfUsage(lines: readonly string[], source: Provider): boolean {
+  return source === "claude" && isClaudeUsageLimit(finalTurnFromLines(lines, "claude").error);
+}
+
+/** Room left in a cross-computer brief for the copied conversation, once the rest of the hand-off is in. */
+const TRANSCRIPT_MARGIN = 2_000;
+/** What of the original dispatch brief is kept ahead of the conversation: the oldest turns, which state the task, go first. */
+const ORIGINAL_RESERVE = 8_000;
+
+/**
+ * The hand-off for a source that does not write one (its account is out of usage, or the owner asked), for a
+ * fresh agent on the target computer to build itself: what happened, then as much of the conversation as fits
+ * in `room` characters, newest messages kept, oldest first. The target agent writes its own summary from it first.
+ */
+export function targetSummaryBody(input: { from: string; exhausted: boolean; entries: readonly TailEntry[]; room: number; original?: string; dispatch?: string; label?: string;
+  /** Each message as it will be sent (paths replaced, credentials redacted), so it is measured at its sent size. */
+  prepare?: (text: string) => string }): string {
+  const head = [
+    input.exhausted
+      ? `The previous agent (${input.from}) is out of usage on its account, so it could not write a hand-off. Phren copied its conversation instead, below, for you to build one from.`
+      : `The owner moved the previous agent (${input.from}) here without asking it for a hand-off. Phren copied its conversation instead, below, for you to build one from.`,
+    "",
+    "First, from this conversation, write yourself a short hand-off: the owner's goal, what is done, what is half done, and the next steps. Then check this checkout against it and continue from there; do not start over.",
+    "",
+    ...(input.dispatch ? [`It was working on dispatch ${input.dispatch}${input.label ? ` ("${input.label}")` : ""}.`, ""] : []),
+  ];
+  const summary = (kept: number) => `The last ${kept} of its ${input.entries.length} messages, oldest first:`;
+  const kept: string[][] = [];
+  // The original brief as it will be sent (redacted, paths replaced) and only then cut to its share, so a cut
+  // never lands inside a credential the redaction had to see whole.
+  const sentOriginal = input.original === undefined ? undefined : input.prepare ? input.prepare(input.original) : input.original;
+  const capNote = `\n[The original brief was cut to ${ORIGINAL_RESERVE} characters; the full text is in the dispatching computer's brief.]`;
+  const original = sentOriginal === undefined || sentOriginal.length <= ORIGINAL_RESERVE ? sentOriginal
+    : `${sentOriginal.slice(0, ORIGINAL_RESERVE - capNote.length)}${capNote}`;
+  // The list's own heading, and room for the original brief and its cut note, are counted up front.
+  const reserve = original ? original.length + 200 : 0;
+  let used = head.join("\n").length + summary(input.entries.length).length + 2 + reserve;
+  for (const entry of [...input.entries].reverse()) {
+    // One long message never takes the whole room: its end is what was said last.
+    const sent = input.prepare ? input.prepare(entry.text) : entry.text;
+    const text = sent.length > 6_000 ? `…${sent.slice(-6_000)}` : sent;
+    const block = quoted(entry.role === "owner" ? "Prompt to it" : "Its reply", text);
+    const size = block.join("\n").length + 1;
+    if (used + size > input.room) break;
+    kept.unshift(block); used += size;
+  }
+  const lines = [...head];
+  if (!kept.length) lines.push(input.entries.length ? "Its conversation did not fit beside the rest of this hand-off; ask the owner where it stood." : "Its conversation could not be read; ask the owner where it stood.", "");
+  else lines.push(summary(kept.length), "", ...kept.flat());
+  const body = lines.join("\n");
+  // The original brief takes what room is left, cut with a note when it doesn't fit.
+  return original ? withOriginalBrief(body, original, input.room, "the dispatching computer's brief") : body;
+}
+
+/**
+ * The prompt another computer gets: full inline text only, since the peer cannot read this Hook's brief path.
+ * Commit ids and the complete hand-off are kept, credentials redacted in place rather than through the lossy
+ * approval/log summarizer.
+ */
+function peerPrompt(record: MoveRecord, document: string): string {
+  const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
+  return redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
+}
+
 /** The hand-off file: who moved where and when, the body, then what Phren saw. */
 export function handoffDocument(record: MoveRecord, body: string, observed: string, at: string, conductor = false): string {
   return [
@@ -414,6 +504,8 @@ export interface MoverDeps {
   terminal: Pick<TerminalProvider, "prompt" | "sendKeys" | "processes" | "closePane">;
   /** The `hand_off` delivery path: queued while the agent is busy. */
   deliver: (target: Target, text: string, deliveryId: string) => Promise<Json>;
+  /** Takes back a message `deliver` queued while it is still untyped (`HandOffQueue.withdraw`). */
+  withdraw?: (target: Target, deliveryId: string, reason: string) => Promise<unknown>;
   /** Starts the new agent (`startSession`), in `into` when given. */
   launch: (server: string, data: Json, options: { into?: { workspaceId: string; tabId: string; paneId: string }; dispatchId?: string; resumeClaude?: string }) => Promise<Json>;
   inventory: () => Promise<HarnessInventory | undefined>;
@@ -450,11 +542,24 @@ const DEFAULT_HANDOFF_MS = 240_000;
  * request that started it (the Hook answers in seconds); its record says where it is. */
 export class SessionMover {
   private readonly cancelled = new Set<string>();
-  /** Moves whose held hand-off request was interrupted (one Escape per move). */
-  private readonly interrupted = new Set<string>();
+  /** Moves this process is waiting on: their hand-off request was handed to the queue, and the wait for the
+   * agent's answer is not over (it answered, the wait ran out, or the owner aborted). Only these are interrupted:
+   * a move whose request was never sent (summary-by-target, or not yet), or one this process no longer runs
+   * (the Hook restarted), has no request an Escape would let in. */
+  private readonly asking = new Set<string>();
+  /** Per move, the hand-off's end and an interrupt's check-and-send, one at a time. */
+  private readonly lifecycles = new Map<string, Promise<unknown>>();
   private readonly admissions = new Set<string>();
   private readonly running = new Map<string, Promise<void>>();
   constructor(private readonly deps: MoverDeps) {}
+
+  private lifecycle<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const result = (this.lifecycles.get(id) ?? Promise.resolve()).then(work);
+    const tail = result.catch(() => undefined);
+    this.lifecycles.set(id, tail);
+    void tail.then(() => { if (this.lifecycles.get(id) === tail) this.lifecycles.delete(id); });
+    return result;
+  }
 
   private get now(): number { return (this.deps.now ?? Date.now)(); }
   private sleep(ms: number): Promise<void> { return (this.deps.sleep ?? (value => new Promise(resolve => setTimeout(resolve, value))))(ms); }
@@ -489,6 +594,8 @@ export class SessionMover {
     const peer = data.to.computer ? await (await import("./move-computers.js")).movePeer(data.to.computer, stableComputerName()) : undefined;
     const to = { ...data.to };
     if (!peer) delete to.computer;
+    // Another computer's agent builds the hand-off; on this one, an exhausted account switches with `resume`.
+    if (data.continuation === "summary-by-target" && !peer) throw new BridgeError(409, "summary-by-target continues on another computer; on this one, switch accounts with continuation resume.");
     const active = (await listMoves(this.now)).find(record => record.from.target.server === target.server && record.from.target.pane === target.pane
       && record.state !== "moved" && record.state !== "failed");
     if (active || [...this.running.keys()].some(key => key === `${target.server}\0${target.pane}`)) throw new BridgeError(409, "This session is already being moved.", { code: "move_in_progress" });
@@ -518,6 +625,7 @@ export class SessionMover {
       if (conductor) throw new BridgeError(409, "Switching the conductor's account is not supported yet; use Continue in… for the conductor.");
       if (!to.account || to.account === account) throw new BridgeError(400, "Choose another Claude account to switch to.");
       if (!claudeHome(to.account)) throw new BridgeError(409, `No Claude account "${to.account}" on this computer.`, { code: "account_unavailable" });
+      await refuseOutsidePools(pane, to.account);
       if (!this.deps.copyConversation) throw new BridgeError(503, "This Hook cannot switch accounts.");
       await this.deps.copyConversation(target, claudeHome(to.account)!, true);
     }
@@ -533,6 +641,9 @@ export class SessionMover {
     }
     const cwd = String(pane.foreground_cwd || pane.cwd || "");
     if (!path.isAbsolute(cwd)) throw new BridgeError(409, "The pane's folder is unknown, so the new agent could not start there.");
+    // A Claude account named on this computer keeps to the pools too (a peer's is checked by checkMovePeer).
+    // Unnamed, the new Claude runs under the pane's own account (relaunch), else default: that one is checked.
+    if (!peer && data.continuation !== "resume" && to.harness === "claude") await refuseOutsidePools(pane, to.account ?? account ?? DEFAULT_ACCOUNT);
     let project: string | undefined;
     let accountChoice: string | undefined;
     let computerId: string | undefined;
@@ -561,7 +672,7 @@ export class SessionMover {
     const at = new Date(this.now).toISOString();
     const resume = data.continuation === "resume";
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: resume ? "exiting" : "handing-off", createdAt: at, updatedAt: at,
-      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
+      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : data.continuation === "summary-by-target" ? { continuation: "summary-by-target" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}), ...(workerDispatch ? { workerDispatch } : {}) };
     await assertUnusedLaunchId(record.id);
     if (conductor && peer) {
@@ -592,12 +703,47 @@ export class SessionMover {
       const pids = pane ? (await this.deps.terminal.processes(from.server, from.pane).catch(() => undefined))?.foregroundPids ?? [] : [];
       const [git, processes] = await Promise.all([(this.deps.git ?? readGitState)(record.cwd).catch(() => undefined),
         (this.deps.processesBelow ?? processesBelow)(pids).catch(() => [] as string[])]);
-      const written = await this.askForHandoff(record, handoffMs);
-      const fallback = "text" in written ? undefined : await this.fallback(record, written.reason);
-      const body = "text" in written ? written.text : record.mode === "new-chat"
-        ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
-        : fallback!;
-      const document = handoffDocument(record, body, observedState(git, processes, !peer), new Date(this.now).toISOString(), !!conductor);
+      // A source out of usage cannot answer a hand-off request: on another computer, the new agent builds it.
+      const requested = record.continuation === "summary-by-target";
+      const lines = peer ? await this.deps.transcript(from).catch(() => undefined) : [];
+      // Asked for by name, the move never launches an agent with no conversation to build from.
+      if (requested && !lines?.length) throw new BridgeError(409, "The conversation could not be read, so the agent on the other computer would have nothing to build a hand-off from; the old chat remains open.");
+      const exhausted = !!peer && sourceOutOfUsage(lines ?? [], from.source);
+      const byTarget = !!peer && (requested || exhausted);
+      if (byTarget && !requested) await this.update(record, { continuation: "summary-by-target" });
+      const written = byTarget ? { reason: `${exhausted ? "its account is out of usage" : "the owner asked"}, so the agent on ${peer!.name} builds the hand-off from the copied conversation.` }
+        : await this.askForHandoff(record, handoffMs);
+      // The wait is over. Its request, if still untyped, is taken back first: typed later it would ask the old
+      // agent (left running by a new-chat move) for a hand-off nobody reads. Then an interrupt already checking
+      // finishes, and none starts after (the move goes on to exit or launch, where an Escape would hit the exit
+      // command or the agent's last turn).
+      if (this.asking.has(record.id)) await this.withdrawRequest(record, "The move stopped waiting for this hand-off.");
+      await this.lifecycle(record.id, async () => { this.asking.delete(record.id); });
+      const observed = observedState(git, processes, !peer), at = new Date(this.now).toISOString();
+      let body: string;
+      if (byTarget) {
+        const original = record.dispatch ? await this.deps.brief?.(record.dispatch).catch(() => undefined) : undefined;
+        const entries = conversationEntries(lines ?? [], from.source);
+        const fit = (room: number) => targetSummaryBody({ from: harnessName({ harness: from.source, account: record.from.account }), exhausted,
+          entries, room, prepare: text => redactPeerHandoff(text.replaceAll(record.cwd, "<source checkout>")), ...(original ? { original } : {}),
+          ...(record.dispatch ? { dispatch: record.dispatch } : {}), ...(record.from.label ? { label: record.from.label } : {}) });
+        // What fits beside the rest of the hand-off in the one brief the other computer gets, measured as sent:
+        // the checkout path replaced and credentials redacted, either of which can lengthen the text. Messages
+        // are prepared that way before they are counted; the refit only catches what the rest of the brief adds.
+        let room = PROMPT_LIMIT - peerPrompt(record, handoffDocument(record, "", observed, at, !!conductor)).length - TRANSCRIPT_MARGIN;
+        body = fit(room);
+        for (let tries = 0; tries < 4; tries++) {
+          const over = peerPrompt(record, handoffDocument(record, body, observed, at, !!conductor)).length - PROMPT_LIMIT;
+          if (over <= 0) break;
+          room -= over + 500; body = fit(room);
+        }
+      } else {
+        const fallback = "text" in written ? undefined : await this.fallback(record, written.reason);
+        body = "text" in written ? written.text : record.mode === "new-chat"
+          ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
+          : fallback!;
+      }
+      const document = handoffDocument(record, body, observed, at, !!conductor);
       await this.assertNotAborted(record);
       const file = handoffPath(record.id);
       const prompt = briefText(continuePrompt(document, file));
@@ -661,6 +807,12 @@ export class SessionMover {
       logger.info("move", `Moved ${from.source} in pane ${from.pane} to ${harnessName(record.to)} (${launched.placement}); hand-off ${record.handoff?.source}.`);
     } catch (error) {
       const message = (error instanceof Error ? error.message : String(error)).replace(/[\x00-\x1f\x7f]+/g, " ");
+      // A wait that failed (the pane went missing for a moment, Herdr did not answer) leaves the old agent running
+      // with the request still queued for it: taken back, as when the wait ends, and no interrupt after.
+      if (this.asking.has(record.id)) {
+        await this.withdrawRequest(record, "The move failed before the agent wrote its hand-off.");
+        await this.lifecycle(record.id, async () => { this.asking.delete(record.id); });
+      }
       if (roleTransferred) {
         // update() has already populated the complete moved record. The role
         // and worker routes committed; a later status save cannot undo them.
@@ -697,30 +849,43 @@ export class SessionMover {
    * "Stop <agent> and hand off now": Escape to the old agent only while the move's hand-off request is
    * still held for it (queued behind the step it is on, not yet typed), so the step stops and the request
    * goes in, and never into the hand-off the agent is writing. Checked and sent under the hand-off queue's
-   * lock (`whileQueued`), which is what types the request. `state` says why it did not: the request is
-   * being or was typed (`typed`), the agent is writing its hand-off (`writing`), or the move is past it.
+   * lock (`whileQueued`), which is what types the request, and under the move's own lifecycle lock, which is
+   * what ends the hand-off wait: the move cannot go on to exit or launch between the check and the key.
+   * `state` says why it did not: the request is being or was typed (`typed`), the agent is writing its
+   * hand-off (`writing`), the move is past it, or the pane runs another agent now (`replaced`).
    */
   async interrupt(id: string, queue?: Pick<HandOffQueue, "whileQueued">, escape?: (target: Target) => Promise<void>): Promise<MoveInterrupt> {
     const record = await readMove(id);
     if (!record) throw new BridgeError(404, "No move with that id is recorded.");
-    if (record.state !== "handing-off") { this.interrupted.delete(id); return { interrupted: false, state: "finished" }; }
+    if (record.state !== "handing-off" || !this.asking.has(id)) return { interrupted: false, state: "finished" };
     // Without the queue the request was typed the moment it was sent: it is never held.
     if (!queue) return { interrupted: false, state: "typed" };
     const from = record.from.target;
     let answer: MoveInterrupt = { interrupted: true };
-    const result = await queue.whileQueued(`move-${id}`, from, async () => {
-      // A move that left the hand-off (it timed out and is exiting) needs no Escape from here.
-      if ((await readMove(id))?.state !== "handing-off") { answer = { interrupted: false, state: "finished" }; return; }
-      // One Escape per move: a second (a double tap, a retry) would land on the stopped agent's empty
-      // input, where Claude and Codex take Esc Esc as "go back to an earlier message".
-      if (this.interrupted.has(id)) return;
+    const result = await queue.whileQueued(`move-${id}`, from, row => this.lifecycle(id, async () => {
+      // A move that left the hand-off (it answered, timed out and is exiting, or was aborted) needs no Escape.
+      if ((await readMove(id))?.state !== "handing-off" || !this.asking.has(id)) { answer = { interrupted: false, state: "finished" }; return; }
+      // No request waiting yet: there is nothing an Escape would let in.
+      if (!row) { answer = { interrupted: false, state: "idle" }; return; }
+      // One Escape per move, across Hook restarts: a second (a double tap, a retry) would land on the stopped
+      // agent's empty input, where Claude and Codex take Esc Esc as "go back to an earlier message".
+      if (await interruptMarked(id)) return;
       // An agent not on a step has nothing to stop: its request goes in at the queue's next look.
       const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
       if (!pane || !["working", "blocked", "waiting", "unknown"].includes(String(pane.agent_status))) { answer = { interrupted: false, state: "idle" }; return; }
-      // Marked once it went: an Escape that failed leaves the next tap free to try again.
-      await (escape ?? (target => this.deps.terminal.sendKeys(target.server, target.pane, ["esc"])))(from);
-      this.interrupted.add(id);
-    });
+      // Only the agent the request is for: the same harness, terminal and conversation (the one the queued row
+      // followed to, when the pane's conversation changed in the same terminal). The owner may have started
+      // another in the pane since; one whose conversation can't be read is not taken for it.
+      const session = await this.deps.identity(from.server, pane).catch(() => undefined);
+      const wanted = row.session ?? from.session;
+      if (pane.agent !== from.source || (wanted && session !== wanted)
+        || (typeof pane.terminal_id === "string" && pane.terminal_id !== row.terminal)) { answer = { interrupted: false, state: "replaced" }; return; }
+      // Marked before it goes, so a crash after the key counts as sent; an Escape known to have failed
+      // clears the mark, leaving the next tap free to try again.
+      await markInterrupted(id);
+      try { await (escape ?? (target => this.deps.terminal.sendKeys(target.server, target.pane, ["esc"])))(from); }
+      catch (error) { await rm(interruptFile(id), { force: true }).catch(() => undefined); throw error; }
+    }));
     if (!result.ran) return { interrupted: false, state: result.state === "delivered" ? "writing" : result.state === "failed" ? "finished" : "typed" };
     return answer;
   }
@@ -733,19 +898,28 @@ export class SessionMover {
       await this.deps.succession!.abort(id);
       if ((await this.deps.succession!.status(id)).phase === "committed") throw new BridgeError(409, "This ownership generation is committed; reconcile it instead of rolling back.");
     } else if (record.state !== "handing-off" && record.state !== "failed") throw new BridgeError(409, "This launch may already exist; reconcile it before aborting.");
+    // Marked first, so a move not yet at its request never sends it (askForHandoff checks). Its request, if
+    // already queued and still untyped, is taken back (even one a restarted Hook no longer waits on); then, after
+    // an interrupt already checking and before any other, no Escape goes for an aborted move.
     this.cancelled.add(id);
+    if (record.state === "handing-off") await this.withdrawRequest(record, "The owner aborted the move.");
+    await this.lifecycle(id, async () => { this.asking.delete(id); });
     await this.update(record, { state: "failed", error: "The owner aborted this uncommitted move; the original chat keeps its role." });
     return record;
+  }
+
+  /** Takes the move's hand-off request back while it is still queued. Outside the move's lifecycle lock: an
+   * interrupt holds the queue's lock while it waits for that one, so this must not wait the other way round. */
+  private async withdrawRequest(record: MoveRecord, reason: string): Promise<void> {
+    await this.deps.withdraw?.(record.from.target, `move-${record.id}`, reason).catch(error => {
+      logger.warn("move", `Taking back the hand-off request of move ${record.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
   private async assertNotAborted(record: MoveRecord): Promise<void> {
     if (this.cancelled.has(record.id) || (await readMove(record.id))?.state === "failed" || record.modeForced === "conductor" && record.to.computer && (await this.deps.succession!.status(record.id)).phase === "aborted") throw new BridgeError(409, "This uncommitted move was aborted; no conductor role was transferred.");
   }
   private async continueOnPeer(record: MoveRecord, peer: DispatchHost, project: string, document: string): Promise<Target> {
-    // Full inline text only: the peer cannot read this Hook's brief path.
-    // Preserve commit ids and the complete hand-off, redacting credentials
-    // in place instead of applying the lossy approval/log summarizer to it.
-    const safeDocument = document.replaceAll(record.cwd, "<source checkout>");
-    const remotePrompt = redactPeerHandoff(briefText(`Continue the owner's work from this hand-off. This is a different checkout: local uncommitted files and running processes were not copied. Check its branch and files before proceeding.\n\n${safeDocument}`));
+    const remotePrompt = peerPrompt(record, document);
     if (remotePrompt.length > PROMPT_LIMIT) throw new BridgeError(409, "The hand-off is too long to send in full to another computer; the old chat remains open.");
     const checked = await (await import("./move-computers.js")).checkMovePeer(peer, project, record.to, record.modeForced === "conductor");
     if (record.computerId && checked.computerId !== record.computerId) throw new BridgeError(409, "The destination Hook identity changed during the move; nothing was launched.");
@@ -875,14 +1049,22 @@ export class SessionMover {
   private async askForHandoff(record: MoveRecord, handoffMs: number): Promise<{ text: string } | { reason: string }> {
     const from = record.from.target;
     const deadline = this.now + handoffMs;
+    // An abort before, during or after the request was sent: it is not sent, or taken back (run's catch).
+    const aborted = () => { if (this.cancelled.has(record.id)) throw new BridgeError(409, "This uncommitted move was aborted; no conductor role was transferred."); };
+    aborted();
     try {
       const sent = await this.deps.deliver(from, handoffRequest(record.id, record.to, record.mode), `move-${record.id}`);
       // A lost delivery acknowledgement can still have reached the agent;
       // its marked transcript reply is authoritative for the normal window.
       if (sent.state !== "uncertain" && sent.ok !== true && sent.queued !== true) return { reason: `the request could not be delivered (${String(sent.error ?? sent.state ?? "not confirmed")}).` };
+      // From here the owner may stop the agent's step so the request goes in (`interrupt`, which the queue
+      // answers `typed` or `writing` once it went).
+      this.asking.add(record.id);
     } catch (error) { return { reason: `the request could not be delivered (${error instanceof Error ? error.message : String(error)}).` }; }
     while (this.now < deadline) {
+      aborted();
       await this.sleep(this.poll);
+      aborted();
       const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
       if (!pane || pane.agent !== from.source) throw new BridgeError(409, "The session ended before it wrote its hand-off; nothing was started.");
       const lines = await this.deps.transcript(from).catch(() => [] as string[]);
@@ -954,7 +1136,14 @@ export class SessionMover {
         await this.sleep(Math.min(this.poll, 500));
       }
     };
-    const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
+    let pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
+    // Just after the owner's interrupt sent its Escape, the pane can still read working: wait that out and look
+    // again, rather than a second Escape at once, which Claude and Codex take as "go back to an earlier message".
+    const since = await readFile(interruptFile(record.id), "utf8").then(text => Date.now() - Date.parse(String(JSON.parse(text).at)), () => Infinity);
+    if (pane?.agent_status === "working" && since < INTERRUPT_SETTLE_MS) {
+      await this.sleep(INTERRUPT_SETTLE_MS - since);
+      pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
+    }
     // A turn still running (a hand-off that ran late) is stopped first, as Esc in the terminal would.
     if (pane?.agent_status === "working") {
       await this.checkPromotion(record);

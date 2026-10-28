@@ -343,7 +343,7 @@ async function main() {
     import("./tools/notes.js"),
     import("./tools/summaries.js"),
     ...(codeAvailable ? [import("./tools/code.js")] : []),
-    ...(hasModule("conductor") ? [import("./tools/dispatch.js")] : []),
+    ...(hasModule("conductor") ? [import("./tools/dispatch.js"), import("./tools/helper.js")] : []),
   ]);
   for (const mod of toolModules) {
     registeringIndexModule = "readsIndex" in mod && mod.readsIndex === true;

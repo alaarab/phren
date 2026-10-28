@@ -234,7 +234,7 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
       if (ownerPrompt(raw)) { for (const id of tail.awaited) tail.earlier.add(id); tail.awaited.clear(); }
     }
     if (turnInterrupted(raw, source)) { interrupted = true; completed = false; continue; }
-    const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && typeof object(raw.message).content === "string"
+    const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && claudeUserText(raw) !== undefined
       : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
       : source === "copilot" ? raw.type === "user.message"
       : raw.type === "user/message";
@@ -257,10 +257,22 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
 /** A prompt the owner (or a dispatcher) typed, not a task's notification or
  * a teammate's message waking the session. */
 function ownerPrompt(raw: Json): boolean {
-  const content = object(raw.message).content;
-  if (raw.type !== "user" || raw.isMeta || typeof content !== "string") return false;
+  // Claude files "[Request interrupted by user]" as a user row too: that is a stop, not the owner moving on.
+  const content = raw.type === "user" && !raw.isMeta && !turnInterrupted(raw, "claude") ? claudeUserText(raw) : undefined;
+  if (content === undefined) return false;
   const text = content.trimStart();
   return !text.startsWith("<task-notification>") && !text.startsWith("<teammate-message");
+}
+
+/** A Claude user row's text when it is a message someone typed: a string, or blocks of text and images (a
+ * prompt with a pasted screenshot). A tool's result, which Claude also files as a user row, is not one. */
+function claudeUserText(raw: Json): string | undefined {
+  const content = object(raw.message).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content) || !content.length) return undefined;
+  const blocks = content.map(object);
+  if (!blocks.every(block => block.type === "text" || block.type === "image")) return undefined;
+  return blocks.filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)).join("\n");
 }
 
 /** The final turn of a conversation, read from the tail of its transcript. */

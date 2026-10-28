@@ -12,8 +12,8 @@ Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
 user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
 ```sh
-npx --yes @phren/cli@0.3.58 bridge install
-npx --yes @phren/cli@0.3.58 bridge doctor
+npx --yes @phren/cli@0.3.59 bridge install
+npx --yes @phren/cli@0.3.59 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
@@ -859,10 +859,10 @@ Hook's own folder (mode 600), never in your Phren store.
 ## Maintain and diagnose
 
 ```sh
-npx --yes @phren/cli@0.3.58 bridge status
-npx --yes @phren/cli@0.3.58 bridge update
-npx --yes @phren/cli@0.3.58 bridge rollback
-npx --yes @phren/cli@0.3.58 bridge uninstall
+npx --yes @phren/cli@0.3.59 bridge status
+npx --yes @phren/cli@0.3.59 bridge update
+npx --yes @phren/cli@0.3.59 bridge rollback
+npx --yes @phren/cli@0.3.59 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
@@ -1031,6 +1031,30 @@ digit is typed, since Claude takes a digit at once and an Enter after it could
 land on the next permission. Tapping the notification opens the session's
 details on the phone, led by the request, through `POST /v1/push/target`,
 which names the session without answering it.
+
+### iOS simulators on a Mac
+
+On a Mac the phone can pick, boot and drive the Mac's iOS simulators. The
+routes are listed in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`.
+
+- `GET /v1/simulators` lists the booted devices. With `?all=1` (capability
+  `simulatorDevices`), it lists every available iOS device instead, each with
+  its `state` (`Booted`, `Shutdown`, `Booting`…). Booted devices come first,
+  then the newest runtime, then by name, at most 64. A phone without the
+  capability keeps the booted-only answer.
+- `POST /v1/simulators/action` with `boot` or `shutdown` takes any available
+  device's `udid`. A device already in that state answers `ok`, and an unknown
+  `udid` answers 404. `boot` also opens the device's window in the Simulator
+  app, because taps, drags and keys go to that window.
+- `drag` (capability `simulatorDrag`) is a swipe or scroll. It takes `x1, y1`
+  to `x2, y2` as fractions of the screen, like a tap's `x, y`, over
+  `durationMs` (50 to 5000, default 300). The input helper presses at the
+  start, moves in steps of about 16 ms, and releases at the end. It uses the
+  same window and Accessibility grant as a tap.
+
+Updating the input helper rebuilds it, and macOS ties the Accessibility grant
+to the binary. So after this change macOS asks once more: switch simtap on
+again in System Settings → Privacy & Security → Accessibility.
 
 ### sudo from the phone
 
@@ -1493,20 +1517,46 @@ its id. The record's fields and the steps are in docs/conductor.md.
 While a move is `handing-off`, its hand-off request waits for the agent's step
 to end. The phone's "Stop <agent> and hand off now" sends the owner-only
 `POST /v1/sessions/move` with `{id, interrupt: true}` (not a plain Escape on
-`/v1/keys`): the Hook sends Escape to the old agent only if that request is
-still held, not yet typed, checked under the same lock that types it, so the
-Escape stops the step and never the hand-off the agent then writes. It answers
+`/v1/keys`). The Hook sends Escape to the old agent only while that request is
+still held, not yet typed. The check runs under the same lock that types the
+request, and under the move's own lock, which also ends its hand-off wait. So
+the Escape stops the step, never the hand-off the agent then writes, and never
+the exit or launch the move goes on to once the wait is over. It goes only for
+a move this Hook is waiting on: one whose request reached the queue and is
+still held there, so not after a restart, not before the request is queued,
+not for a summary-by-target move, and not once the owner aborted. It goes only
+to the agent the request is for: the same harness and terminal, and the
+conversation the queued request follows. An agent whose conversation can't be
+read is not taken for it. When the move then exits the old agent soon after
+the interrupt, it waits a few seconds and looks again before sending its own
+Escape. It answers
 `{ok: true, interrupted: true}`, or `{ok: true, interrupted: false, state}` with
-`state` `idle` (the agent is on no step; its request goes in without one),
-`typed` (the request is being or was typed), `writing` (the agent took it and
-is writing its hand-off) or `finished` (the move is past its hand-off, or its
-request can no longer be delivered and the move builds a hand-off itself).
+one of these `state` values:
+- `idle`: the agent is on no step, so its request goes in without one.
+- `typed`: the request is being or was typed.
+- `writing`: the agent took it and is writing its hand-off.
+- `finished`: the move is past its hand-off, or its request can no longer be
+  delivered and the move builds a hand-off itself.
+- `replaced`: the pane now runs another agent or conversation, which is left
+  alone.
+
 The Escape goes the way `/v1/keys` sends one: over a served OpenCode pane's
 API, as a turn interrupt on a Codex pane the Hook runs on its own app-server,
-else as the key (a question the Hook holds is declined first). One Escape per move:
-a second interrupt (a double tap, two at once) answers `interrupted: true`
-without another, which Claude and Codex would take as "go back to an earlier
-message". An older message for the same pane is still typed first. A Hook
+else as the key. A question the Hook holds is declined first, and the turn is
+still stopped: on a served OpenCode pane the decline is followed by an abort.
+There is one Escape per move. A marker beside the move's record is written
+before the key goes, so a crash in between counts as sent.
+
+When the move stops waiting for the hand-off (the wait ran out, the wait
+failed, or the owner aborted the move), it takes its request back while the
+request is still queued. So the old agent, which a new-chat move leaves
+running, is never later asked for a hand-off nobody reads; the row fails with
+the reason. A request already typed is left alone. An interrupt that was
+checking when the wait ran out still sends its Escape, though the move has
+already gone on to build the hand-off itself. A second interrupt (a double tap, two at once)
+answers `interrupted: true` without another Escape, which Claude and Codex
+would take as "go back to an earlier message". An older message for the same
+pane is still typed first. A Hook
 without this answers 400 to `{id, interrupt: true}`; the phone then falls back
 to a plain Escape.
 

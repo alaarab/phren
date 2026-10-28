@@ -395,9 +395,15 @@ export const tmuxTerminal: TerminalProvider = {
   async create(server, { workspace, label, cwd }) {
     const directory = cwd && path.isAbsolute(cwd) ? ["-c", cwd] : [];
     const name = label ? ["-n", label.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 100)] : [];
-    if (workspace) { await tmux(server, ["new-window", "-d", "-t", `${toTmuxId(workspace, "s")}:`, ...directory, ...name]); return; }
+    // `-P -F` prints the new pane's ids, so the caller knows it without diffing the pane list.
+    const printed = ["-P", "-F", "#{session_id} #{window_id} #{pane_id}"];
+    const created = (output: string) => {
+      const [session, window, pane] = output.trim().split(/\s+/).map(fromTmuxId);
+      return session && window && pane ? { workspace: session, tab: window, pane } : undefined;
+    };
+    if (workspace) return created(await tmux(server, ["new-window", "-d", ...printed, "-t", `${toTmuxId(workspace, "s")}:`, ...directory, ...name]));
     const taken = new Set((await tmux(server, ["list-sessions", "-F", "#{session_name}"]).catch(() => "")).split("\n").filter(Boolean));
-    await tmux(server, ["new-session", "-d", "-s", sessionName(label, taken), "-x", "200", "-y", "50", ...directory, ...name]);
+    return created(await tmux(server, ["new-session", "-d", ...printed, "-s", sessionName(label, taken), "-x", "200", "-y", "50", ...directory, ...name]));
   },
   async startAgent(server, pane, { name, kind, args, timeoutMs, env }) {
     if (!["claude", "codex", "copilot", "opencode", "phren"].includes(kind)) throw new BridgeError(400, "This agent cannot be started in tmux.");

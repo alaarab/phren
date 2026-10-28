@@ -22,7 +22,8 @@ import { object, atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
-import type { AccountRoom, WindowRoom } from "./account-choice.js";
+import { limitedBy, limitKey, readAccountLimits, type AccountRoom, type WindowRoom } from "./account-choice.js";
+import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplies, poolRefusal, projectRule, withPolicy, type PolicyRoom, type PoolRule } from "./account-policy.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -346,15 +347,45 @@ export function outOfQuota(data: { harness: string; account?: string }, usage: r
   return `Its ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} has no quota left${backIn(room.until, now)}.`;
 }
 
-/** A computer's signed-in Claude accounts with their room, from its capacity probe. */
-export function capacityClaudeRooms(harnesses: HarnessInventory["harnesses"] | undefined, usage: readonly Room[] | undefined): AccountRoom[] {
+/** A computer's signed-in Claude accounts with their room, pool and role, from its capacity probe. */
+export function capacityClaudeRooms(harnesses: HarnessInventory["harnesses"] | undefined, usage: readonly Room[] | undefined): PolicyRoom[] {
   const accounts = harnesses?.find(entry => entry.source === "claude")?.accounts ?? [];
   return accounts.map(account => {
     const room = usage?.find(item => item.source === "claude" && (item.account ?? "default") === account.id);
-    return { account: account.id, ...(account.key ? { key: account.key } : {}), usable: account.usable,
+    return withPolicy({ account: account.id, ...(account.key ? { key: account.key } : {}), usable: account.usable,
       ...(room?.fiveHour ? { fiveHour: room.fiveHour } : {}), ...(room?.week ? { week: room.week } : {}),
-      ...(room?.exhausted ? { exhausted: true, ...(room.until ? { until: room.until } : {}) } : {}) };
+      ...(room?.exhausted ? { exhausted: true, ...(room.until ? { until: room.until } : {}) } : {}) }, account);
   });
+}
+
+/**
+ * The Claude account a dispatch runs under on `computer` once pools and roles apply (account-policy.ts):
+ * `account` (and why) to name in the launch, or `refused` with why. Undefined leaves the choice to that
+ * computer's launch as before: not Claude, nothing reported, or no pool, role or API login in play.
+ * A named account is only checked against the pools; roles bind automatic choices only.
+ */
+export function policyAccount(data: { harness: string; account?: string }, harnesses: HarnessInventory["harnesses"] | undefined, usage: readonly Room[] | undefined,
+  computer: string, project: PoolRule, blocked?: (room: AccountRoom) => string | undefined): { account?: string; reason?: string; refused?: string; lastResort?: true } | undefined {
+  if (data.harness !== "claude") return undefined;
+  // Accounts not reported (a slow read, launch checks off): with the project's pools set they can't be checked.
+  if (!harnesses) return project.pools ? { refused: `Its Hook did not report its Claude accounts, so ${project.owner}'s allowed pools can't be checked.` } : undefined;
+  const rules = [project, claudeComputerRule(computer, harnesses)];
+  const rooms = capacityClaudeRooms(harnesses, usage);
+  if (data.account) {
+    const room = rooms.find(item => item.account === data.account);
+    const why = room && poolRefusal(room, rules);
+    return why ? { refused: `Claude account ${data.account} may not do this work: ${why}.` } : undefined;
+  }
+  if (!policyApplies(rooms, rules)) return undefined;
+  const { choice, skipped, lastResort } = choosePolicyAccount(rooms, rules, blocked);
+  return choice ? { account: choice.account, reason: choice.reason, ...(lastResort ? { lastResort } : {}) }
+    : { refused: `No Claude account there may do this work${skipped.length ? `: ${skipped.join("; ")}` : ""}.`.slice(0, 500) };
+}
+
+/** A computer's own pool rule from its Claude listing entry. */
+function claudeComputerRule(computer: string, harnesses: HarnessInventory["harnesses"] | undefined): PoolRule {
+  const entry = harnesses?.find(item => item.source === "claude");
+  return computerRule(computer, entry?.allowedPools, entry?.poolsUnreadable === true);
 }
 
 /** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
@@ -579,6 +610,16 @@ export class DispatchService {
       let remoteComputerID: string | undefined;
       const skipped: Skipped[] = [];
       let incapable = false, spentSeen = false;
+      const pooledOut: string[] = [];
+      // Pools and roles (account-policy.ts): which Claude account may run this on each computer.
+      const projectPools = projectRule(phrenStoreRoot(), data.project);
+      const limits = data.harness === "claude" ? await readAccountLimits() : [];
+      const pooled = new Map<string, ReturnType<typeof policyAccount>>();
+      const poolCheck = (host: DispatchHost, reported: { harnesses?: HarnessInventory["harnesses"]; usage?: Room[] }) => {
+        const result = policyAccount(data, reported.harnesses, reported.usage, host.name, projectPools, limitedBy(limits, host.name));
+        pooled.set(host.name, result);
+        return result?.refused;
+      };
       if (data.computer === "anywhere") {
         const available = await Promise.all(peers.map(async candidate => {
           try { return { peer: candidate, ...await capacity(candidate, caller) }; } catch (error) {
@@ -596,14 +637,21 @@ export class DispatchService {
           if (reason) return false;
           // The one quota rule: never place a worker on an account with none left. Low quota still counts as room.
           const spent = outOfQuota(data, item.usage);
-          if (spent) { spentSeen = true; skipped.push({ computer: item.peer.name, reason: spent }); }
-          return !spent;
+          if (spent) { spentSeen = true; skipped.push({ computer: item.peer.name, reason: spent }); return false; }
+          const refused = poolCheck(item.peer, item);
+          if (refused) { pooledOut.push(item.peer.name); skipped.push({ computer: item.peer.name, reason: refused.slice(0, 200) }); }
+          return !refused;
         });
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
+        // A computer that could only use a last-resort account comes after every computer with another account that fits.
+        const lastResort = (name: string) => Number(pooled.get(name)?.lastResort === true);
         const selected = capable
-          .sort((a, b) => a.working + this.inFlight(a.peer.name) - b.working - this.inFlight(b.peer.name) || a.peer.name.localeCompare(b.peer.name))[0];
+          .sort((a, b) => lastResort(a.peer.name) - lastResort(b.peer.name)
+            || a.working + this.inFlight(a.peer.name) - b.working - this.inFlight(b.peer.name) || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
+        // Pools ruled some computers out: say so whatever ruled out the rest, with each computer's reason in `skipped`.
+        if (!peer && pooledOut.length) throw new BridgeError(409, `No connected computer has a Claude account that may do this work: pools and roles rule out ${pooledOut.join(", ")}${spentSeen || incapable ? ", and the others are out of quota or can't run it" : ""}.`.slice(0, 500), { code: "account_pool", skipped });
         if (!peer && spentSeen) throw new BridgeError(503, `No connected computer has ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} quota left right now.`, { code: "out_of_quota", skipped });
         if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
@@ -616,7 +664,11 @@ export class DispatchService {
         // itself, except for a non-default account: it would ignore `account` and launch under its default login.
         const reason = unusable(data, reported.harnesses, true);
         if (reason) throw new BridgeError(409, `${peer.name} cannot run ${data.harness}${data.account ? ` account ${data.account}` : ""}: ${reason}`);
+        const refused = poolCheck(peer, reported);
+        if (refused) throw new BridgeError(409, `${peer.name}: ${refused}`, { code: "account_pool" });
       }
+      // Chosen here by pools and roles, the account goes in the launch; otherwise that computer picks, as before.
+      const policyChoice = data.account ? undefined : pooled.get(peer.name);
       const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });
       // An agent (a call that names its pane) may start a worker only up to its grant's
       // permission ceiling; the owner, calling from the phone or the CLI without a pane, is not capped.
@@ -643,11 +695,15 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt } });
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
+        if (policyChoice?.account) {
+          receipt.account = policyChoice.account;
+          if (policyChoice.reason) receipt.accountChoice = policyChoice.reason.slice(0, 400);
+          logger.info("dispatch", `${receipt.label} on ${peer.name} runs under Claude account ${policyChoice.account}: ${receipt.accountChoice ?? "pools and roles"}.`);
         // The receiving Hook chose the Claude account (the one with the most room) when none was named.
-        if (!data.account && typeof launched.account === "string" && isAccountSlug(launched.account)) {
+        } else if (!data.account && typeof launched.account === "string" && isAccountSlug(launched.account)) {
           receipt.account = launched.account;
           if (typeof launched.accountChoice === "string") receipt.accountChoice = launched.accountChoice.slice(0, 400);
           logger.info("dispatch", `${receipt.label} on ${peer.name} runs under Claude account ${launched.account}${receipt.accountChoice ? `: ${receipt.accountChoice}` : ""}.`);
@@ -821,16 +877,37 @@ export class DispatchService {
 
   /** Every connected computer's signed-in Claude accounts and their room, this computer first:
    * where a worker that hit its usage limit can continue (account-failover.ts). */
-  async claudeRooms(): Promise<Array<{ computer: string; local: boolean; rooms: AccountRoom[] }>> {
+  async claudeRooms(context?: { project: string; stopped: { computer: string; account: string } }): Promise<Array<{ computer: string; local: boolean; rooms: AccountRoom[] }>> {
     const here = this.local();
     const hosts = [here, ...(await hookPeers().catch(() => [])).map(candidate => peerHost(candidate))];
+    const project = context ? projectRule(phrenStoreRoot(), context.project) : undefined;
     const found = await Promise.all(hosts.map(async host => {
       try {
         const reported = await capacity(host);
-        return { computer: host.name, local: host.local, rooms: capacityClaudeRooms(reported.harnesses, reported.usage) };
+        const rooms = capacityClaudeRooms(reported.harnesses, reported.usage);
+        // Accounts not reported can't be checked against the project's pools: none of them is offered.
+        if (!reported.harnesses && project?.pools) return { computer: host.name, local: host.local, rooms: [] as PolicyRoom[], all: rooms };
+        // Only accounts an automatic choice may take there, under the project's and that computer's pools.
+        const rules = [...(project ? [project] : []), claudeComputerRule(host.name, reported.harnesses)];
+        return { computer: host.name, local: host.local, rooms: allowedRooms(rooms, rules), all: rooms };
       } catch { return undefined; }
     }));
-    return found.filter((item): item is NonNullable<typeof item> => !!item);
+    const listed = found.filter((item): item is NonNullable<typeof item> => !!item);
+    // Last-resort accounts only when no other allowed account anywhere has room: the stopped login and any the
+    // limits ledger holds back have none.
+    const limits = await readAccountLimits();
+    // The stopped login by its key, so the same login signed in on another computer has no room either.
+    const stoppedRoom = context ? listed.find(item => item.computer === context.stopped.computer)?.all.find(room => room.account === context.stopped.account) : undefined;
+    const stoppedKey = context ? limitKey(stoppedRoom ?? { account: context.stopped.account }, context.stopped.computer) : undefined;
+    const held = (computer: string) => { const blocked = limitedBy(limits, computer);
+      return (room: PolicyRoom) => !!blocked(room) || limitKey(room, computer) === stoppedKey; };
+    const other = listed.some(item => item.rooms.some(room => room.role !== "last-resort" && openRoom(room, held(item.computer))));
+    // The stopped login stays listed (unchosen, it is held back) so the failover can find its room and reset time.
+    return listed.map(({ all, ...item }) => {
+      const rooms = other ? item.rooms.filter(room => room.role !== "last-resort") : item.rooms;
+      const stopped = context?.stopped.computer === item.computer ? all.find(room => room.account === context.stopped.account) : undefined;
+      return { ...item, rooms: stopped && !rooms.includes(stopped) ? [...rooms, stopped] : rooms };
+    });
   }
 
   /** The query a conductor's dispatch sends with each capacity probe; undefined for any other caller. */

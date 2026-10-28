@@ -145,6 +145,17 @@ function nonSpace(text: string): number {
   return text.replace(/\s+/g, "").length;
 }
 
+/** `text` after the last sentence its first `count` characters that are not whitespace end (within two of
+ * them, as a whole chunk is), so a sentence cut off is said again whole; all of it when they end none. */
+function after(text: string, count: number): string {
+  let rest = text;
+  for (const match of text.matchAll(/[.!?:;](?=\s|$)/g)) {
+    if (nonSpace(text.slice(0, match.index + 1)) > count + 2) break;
+    rest = text.slice(match.index + 1).trim();
+  }
+  return rest;
+}
+
 /** Seconds of audio in a chunk of the given format. */
 function seconds(format: SpeechFormat, bytes: number): number {
   const mp3 = /^mp3_\d+_(\d+)$/.exec(format);
@@ -279,15 +290,19 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       put = words => { if (current()) carry(words); };
       /** What this socket was sent and never voiced, by the characters its alignment covered, spaces left out
        * on both sides (ElevenLabs may or may not time the spaces); a chunk short of at most two of its own
-       * characters counts as voiced. Without alignment: what came after its first audio, or nothing once the
-       * reply is done (its close was sent with it). */
+       * characters counts as voiced, and one voiced in part is replayed from the sentence its voicing stopped
+       * in (a phone frame of several paragraphs is one chunk). Without alignment: what came after its first
+       * audio, or nothing once the reply is done (its close was sent with it). */
       const unvoiced = (): string[] => {
         if (!voicedChars) return done ? [] : sent.slice(Math.max(0, sentAtFirstAudio));
         let covered = 0;
         for (const [index, words] of sent.entries()) {
-          const length = nonSpace(words);
+          const length = nonSpace(words), before = covered;
           covered += length;
-          if (voicedChars < covered - Math.min(2, Math.floor(length / 2))) return sent.slice(index);
+          if (voicedChars < covered - Math.min(2, Math.floor(length / 2))) {
+            const rest = voicedChars > before ? after(words, voicedChars - before) : words;
+            return rest ? [rest, ...sent.slice(index + 1)] : sent.slice(index + 1);
+          }
         }
         return [];
       };
@@ -299,9 +314,10 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       };
       // Before the first audio, the next model (Flash) takes the reply over;
       // with none left, the phone gets `failure`.
-      const fallBack = (failure: { code: string; error: string }) => {
+      // `bench` false: the model voiced this reply already, so it is not set aside for the next.
+      const fallBack = (failure: { code: string; error: string }, bench = true) => {
         detach();
-        if (models.length > 1) { state.bench(model, "failed"); models = models.slice(1); open([...sent], resumed); return; }
+        if (models.length > 1) { if (bench) state.bench(model, "failed"); models = models.slice(1); open([...sent], resumed); return; }
         fail(failure);
       };
       // A refused format or model: ElevenLabs answers some in the handshake
@@ -353,8 +369,12 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
         if (message.isFinal === true || message.is_final === true) {
           // Text-to-dialogue (v4) ends a socket after the text it had, though the reply goes on: what it never
           // voiced, and the reply's next text, go to a fresh socket, timed on from this one's audio.
+          // A socket given words (letters or digits: a lone emoji or rule has no sound) that voiced none of
+          // them falls back, the phone's done or not: a fresh socket ending just after that done would
+          // otherwise end the reply with its words never spoken.
           if (!voiced) {
-            if (done) { tell({ type: "done" }); finish(); } else fallBack({ code: "speech-failed", error: "ElevenLabs ended without voicing the reply." });
+            if (done && !sent.some(words => /[\p{L}\p{N}]/u.test(words))) { tell({ type: "done" }); finish(); }
+            else fallBack({ code: "speech-failed", error: "ElevenLabs ended without voicing the reply." }, !resumed);
             return;
           }
           // Stream-input ends only after the close sent with the phone's done; text-to-dialogue may end after

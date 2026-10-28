@@ -110,13 +110,17 @@ export function recursiveReads(tokens: string[]): RecursiveRead | null {
     const { options } = read.parsed;
     const follow = named(options, "-R", "--dereference-recursive");
     // Any -d value but an exact `read` or `skip` may recurse (GNU takes `rec`, BSD `RECURSE`).
-    const recurse = follow || named(options, "-r", "--recursive")
-      || options.some((o) => (o.name === "-d" || o.name === "--directories") && o.value !== "read" && o.value !== "skip");
+    const directories = (o: { name: string; value?: string }) => o.name === "-d" || o.name === "--directories";
+    const recursing = (o: { name: string; value?: string }) => directories(o) && o.value !== "read" && o.value !== "skip";
+    const recurse = follow || named(options, "-r", "--recursive") || options.some(recursing);
     if (!recurse) return null;
     // grep itself says which files its selection reads; the operands it names (not the -f/--exclude-from files) start it.
     const patternGiven = named(options, "-e", "--regexp", "-f", "--file");
     const roots = patternGiven ? read.parsed.operands : read.parsed.operands.slice(1);
-    const listArgs = options.filter((o) => GREP_SELECT.has(o.name)).map(optionArg);
+    // The listing recurses with -r whatever the run spelled: the grep here may not take that spelling (GNU refuses
+    // `-d RECURSE`, BSD takes it), and a listing that fails to recurse would see none of the files below.
+    const listArgs = options.filter((o) => GREP_SELECT.has(o.name) && !directories(o)).map(optionArg);
+    if (options.some(recursing)) listArgs.unshift("-r");
     return { roots: roots.length ? roots : ["."], follow, scope: "grep", listArgs };
   }
   if (binary === "rg") {

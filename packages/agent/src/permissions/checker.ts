@@ -200,13 +200,16 @@ const GIT_LIST_LIMIT = 200_000;
 /** A list a program prints, NUL- or newline-separated, or undefined when it fails. Exit 1 is an empty list,
  * and so is a program that isn't installed: the command can't run it either. git never fetches a missing
  * object for the check (a partial clone's lazy fetch would reach the network and its credential helper). */
-function listed(program: string, args: string[], cwd: string, separator: string): string[] | undefined {
+function listed(program: string, args: string[], cwd: string, separator: string, quietOnEmpty = false): string[] | undefined {
   try {
     const out = execFileSync(program, args, { cwd, env: { ...shellEnv(), GIT_NO_LAZY_FETCH: "1" }, encoding: "utf-8", timeout: 10_000,
-      maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
+      maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", quietOnEmpty ? "pipe" : "ignore"] });
     return out.split(separator).filter(Boolean);
   } catch (err: unknown) {
-    const { status, code } = err as { status?: number; code?: string };
+    const { status, code, stderr } = err as { status?: number; code?: string; stderr?: string };
+    // `quietOnEmpty`: the program says nothing when it only finds nothing (grep -s), so exit 1 with a message is
+    // a refused option, not an empty list (some greps exit 1 on a bad option value).
+    if (status === 1 && quietOnEmpty && typeof stderr === "string" && stderr.trim()) return undefined;
     return status === 1 || code === "ENOENT" ? [] : undefined;
   }
 }
@@ -243,7 +246,7 @@ function recursiveReachesSecret(read: RecursiveRead, cwd: string, config: Permis
   }
   if (read.scope === "grep") {
     // Every file grep's selection reads matches an empty pattern (an empty file has nothing to show).
-    const files = listed("grep", ["-l", "--null", "-s", ...(read.listArgs ?? []), "-e", "", "--", ...read.roots], cwd, "\0");
+    const files = listed("grep", ["-l", "--null", "-s", ...(read.listArgs ?? []), "-e", "", "--", ...read.roots], cwd, "\0", true);
     return files === undefined || secretAmong(files, cwd, read.follow, config);
   }
   if (read.scope === "tracked") {

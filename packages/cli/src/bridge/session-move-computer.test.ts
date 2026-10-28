@@ -15,7 +15,8 @@ import * as peers from "./peers.js";
 import * as harnesses from "./harnesses.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
-import { SessionMover, readMove, type MoverDeps } from "./session-move.js";
+import { SessionMover, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
+import { finalTurnFromLines } from "./schedule-watch.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { admitScopedRequest } from "./scoped-gateway.js";
@@ -50,7 +51,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); resetRoleState(); await rm(root, { recursive: true, force: true }); });
 
-function fixture(options: { availability?: Json; offline?: boolean; confirmed?: boolean; text?: string; processes?: string[]; reply?: boolean; launchedTarget?: Target } = {}) {
+function fixture(options: { availability?: Json; offline?: boolean; confirmed?: boolean; text?: string; processes?: string[]; reply?: boolean; launchedTarget?: Target; exhausted?: boolean; history?: string[]; recovered?: boolean } = {}) {
   const sent: Array<{ route: string; data?: Json; timeout?: number }> = [];
   let brief: Json | undefined;
   const launchedTarget = options.launchedTarget ?? target;
@@ -66,6 +67,14 @@ function fixture(options: { availability?: Json; offline?: boolean; confirmed?: 
   });
   const pane: Json = { pane_id: from.pane, tab_id: from.tab, workspace_id: from.workspace, terminal_id: "term-1", agent: "claude", agent_status: "idle", cwd: path.join(root, "checkout") };
   const lines: string[] = [JSON.stringify({ type: "user", message: { role: "user", content: `Finish the parser. ${options.text ?? ""}` } })];
+  for (const text of options.history ?? []) lines.push(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } }));
+  if (options.exhausted) lines.push(
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Parser half done; tokens.ts still open." }] } }),
+    JSON.stringify({ type: "assistant", isApiErrorMessage: true, error: "rate_limit", message: { role: "assistant", content: [{ type: "text", text: "You've hit your session limit · resets 3pm" }] } }));
+  // The limit reset and the chat went on: the agent can answer a hand-off request again.
+  if (options.recovered) lines.push(
+    JSON.stringify({ type: "user", message: { role: "user", content: "Carry on." } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Back on the parser." }] } }));
   const deliver = vi.fn(async (_target: Target, text: string) => {
     if (options.reply === false) { lines.push(JSON.stringify({ type: "user", message: { role: "user", content: text } })); return { ok: true, delivered: true }; }
     const marker = /=== PHREN HANDOFF (\w+) BEGIN ===/.exec(text)?.[1];
@@ -112,6 +121,106 @@ describe.skipIf(process.platform === "win32")("continue on another computer", ()
     const receipt = { id: "old", computer: "local", harness: "claude", target: from } as Receipt;
     observe(receipt, state.workers[0], Date.now(), await peers.hookPeers());
     expect(receipt).toMatchObject({ computer: "remote", target });
+  });
+
+  it("has the agent on the peer build the hand-off when the source's account is out of usage", async () => {
+    const f = fixture({ exhausted: true });
+    const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote", account: "work" } });
+    expect(answer.status).toBe(200);
+    await f.mover.settled(from.server, from.pane);
+    const moved = await readMove(answer.body.move.id);
+    expect(moved, JSON.stringify(moved)).toMatchObject({ state: "moved", placement: "peer", continuation: "summary-by-target", handedOffTo: { computer: "remote", target } });
+    // The exhausted source is never asked; the peer gets the conversation and is told to summarize it.
+    expect(f.deliver).not.toHaveBeenCalled();
+    const text = String(f.brief()?.text);
+    expect(text).toContain("out of usage");
+    expect(text).toContain("Finish the parser.");
+    expect(text).toContain("Parser half done; tokens.ts still open.");
+    expect(moved?.handoff).toMatchObject({ source: "fallback", reason: expect.stringContaining("out of usage") });
+  });
+
+  it("fits a long conversation into the brief as sent, after redaction lengthens it", async () => {
+    // Short credential values grow when redacted; the newest turns still fit and the move still goes.
+    const history = Array.from({ length: 60 }, (_, i) => `turn ${i} ${"token=x ".repeat(200)}`);
+    const f = fixture({ exhausted: true, history });
+    const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" } });
+    await f.mover.settled(from.server, from.pane);
+    expect(await readMove(answer.body.move.id)).toMatchObject({ state: "moved", continuation: "summary-by-target" });
+    const text = String(f.brief()?.text);
+    expect(text.length).toBeLessThanOrEqual(32_768);
+    expect(text).toContain("turn 59 ");
+    expect(text).not.toContain("turn 0 ");
+    expect(text).not.toContain("token=x");
+  });
+
+  it("asks the source as usual once a usage limit has passed and the chat went on", async () => {
+    const f = fixture({ exhausted: true, recovered: true });
+    const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" } });
+    await f.mover.settled(from.server, from.pane);
+    const moved = await readMove(answer.body.move.id);
+    expect(moved).toMatchObject({ state: "moved", handoff: { source: "agent" } });
+    expect(moved?.continuation).toBeUndefined();
+    expect(f.deliver).toHaveBeenCalled();
+  });
+
+  it("fits a long conversation into its room, newest turns kept, with room left for the original brief", () => {
+    const entries = Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "agent" as const : "owner" as const, text: `turn ${i} ${"x".repeat(2_000)}` }));
+    const body = targetSummaryBody({ from: "Claude", exhausted: true, entries, room: 10_000 });
+    expect(body.length).toBeLessThanOrEqual(10_000);
+    expect(body).toContain("turn 39 ");
+    expect(body).not.toContain("turn 0 ");
+    expect(body.indexOf("turn 38 ")).toBeLessThan(body.indexOf("turn 39 "));
+    const withBrief = targetSummaryBody({ from: "Claude", exhausted: true, entries, room: 20_000, original: `Build the tokenizer. ${"y".repeat(3_000)}` });
+    expect(withBrief.length).toBeLessThanOrEqual(20_000);
+    expect(withBrief).toContain("Build the tokenizer.");
+    expect(withBrief).not.toContain("was cut to fit");
+    expect(targetSummaryBody({ from: "Claude", exhausted: false, entries, room: 5_000 })).toContain("without asking it for a hand-off");
+  });
+
+  it("caps the original brief at 8000 characters, cut after it is redacted", () => {
+    const entries = [{ role: "owner" as const, text: "Build the tokenizer." }];
+    const original = `${"a".repeat(7_950)} SECRETTOKEN ${"b".repeat(4_000)}`;
+    const body = targetSummaryBody({ from: "Claude", exhausted: true, entries, room: 100_000, original,
+      prepare: text => text.replaceAll("SECRETTOKEN", "[redacted]") });
+    const brief = body.slice(body.indexOf("The original brief follows.\n---\n") + "The original brief follows.\n---\n".length);
+    expect(brief.length).toBeLessThanOrEqual(8_000);
+    expect(brief).toContain("cut to 8000 characters");
+    expect(body).not.toContain("SECRET");
+    expect(body).not.toContain("b".repeat(10));
+  });
+
+  it("counts a newer owner message with blocks (text and a screenshot) as the chat going on past a usage limit", () => {
+    const limit = JSON.stringify({ type: "assistant", isApiErrorMessage: true, error: "rate_limit", message: { role: "assistant", content: [{ type: "text", text: "You've hit your session limit · resets 3pm" }] } });
+    const blocks = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "Try again now" }, { type: "image", source: { type: "base64", data: "AA==" } }] } });
+    const toolResult = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } });
+    expect(sourceOutOfUsage([limit], "claude")).toBe(true);
+    expect(sourceOutOfUsage([limit, blocks], "claude")).toBe(false);
+    // A tool's result is not the owner moving on.
+    expect(sourceOutOfUsage([limit, toolResult], "claude")).toBe(true);
+  });
+
+  it("keeps a background shell awaited across an interrupt, and leaves it behind once the owner moves on", () => {
+    const launch = JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "pnpm test", run_in_background: true } }] } });
+    const started = JSON.stringify({ type: "user", toolUseResult: { backgroundTaskId: "b1" }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "started" }] } });
+    // Claude files an Escape as a user row of text blocks; it stops the turn but is not the owner moving on.
+    const interrupt = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } });
+    const prompt = JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "Now look at the docs" }] } });
+    expect(finalTurnFromLines([launch, started], "claude").awaited).toBe(1);
+    expect(finalTurnFromLines([launch, started, interrupt], "claude").awaited).toBe(1);
+    expect(finalTurnFromLines([launch, started, prompt], "claude").awaited).toBeUndefined();
+  });
+
+  it("honours an explicit summary-by-target request and refuses it on this computer", async () => {
+    const f = fixture();
+    const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" }, continuation: "summary-by-target" });
+    expect(answer.status).toBe(200);
+    await f.mover.settled(from.server, from.pane);
+    expect(await readMove(answer.body.move.id)).toMatchObject({ state: "moved", continuation: "summary-by-target" });
+    expect(f.deliver).not.toHaveBeenCalled();
+    expect(String(f.brief()?.text)).toContain("Finish the parser.");
+    expect(String(f.brief()?.text)).toContain("without asking it for a hand-off");
+    const local = await request(fixture().mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", account: "work" }, continuation: "summary-by-target" });
+    expect(local.status).toBe(409);
   });
 
   it.each([
