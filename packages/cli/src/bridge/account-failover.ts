@@ -97,8 +97,9 @@ export function withOriginalBrief(head: string, original: string, limit: number,
 }
 
 export interface AccountFailoverOptions {
-  /** Every connected computer's Claude accounts with their room (`DispatchService.claudeRooms`). */
-  rooms: () => Promise<ComputerRooms[]>;
+  /** Every connected computer's Claude accounts with their room (`DispatchService.claudeRooms`): those the
+   * stopped worker's project and each computer's pools and roles let it continue on, and the stopped login. */
+  rooms: (context: { project: string; stopped: { computer: string; account: string } }) => Promise<ComputerRooms[]>;
   /** Places the continuing worker (`DispatchService.dispatch`); `continues` names the stopped dispatch. */
   dispatch: (input: Json, origin: unknown, continues: string) => Promise<Json>;
   peers?: () => Promise<HookPeer[]>;
@@ -137,7 +138,7 @@ export class AccountFailover {
     const placed = receipts.find(candidate => candidate.continues === receipt.id);
     if (placed) { await this.record(receipt, { id: placed.id, computer: placed.computer, account: placed.account }); return; }
     const account = receipt.account ?? "default";
-    const computers = await this.options.rooms();
+    const computers = await this.options.rooms({ project: receipt.project, stopped: { computer: receipt.computer, account } });
     const room = computers.find(item => item.computer === receipt.computer)?.rooms.find(candidate => candidate.account === account);
     // Never this login again until its window resets, here or wherever else it is signed in.
     await noteAccountLimit({ key: limitKey(room ?? { account }, receipt.computer), account, until: limitUntil(room) }, this.now);

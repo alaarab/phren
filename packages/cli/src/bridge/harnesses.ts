@@ -6,13 +6,24 @@ import path from "node:path";
 import { codexHome } from "../home-paths.js";
 import { claudeAccountRef, claudeAuthStatus, claudeHomes, CODEX_ACCOUNT, type AccountRef, type AuthRunner } from "./claude-accounts.js";
 import { toolVersion, type ToolVersion } from "./health.js";
+import { accountPolicy, accountSettings, computerAllowedPools, type AccountRole } from "./account-pools.js";
 
 export type HarnessSource = "claude" | "codex" | "opencode" | "copilot" | "phren";
-export interface HarnessAccount extends AccountRef { signedIn: boolean; usable: boolean; plan?: string; reason?: string; signInAvailable?: boolean }
+export interface HarnessAccount extends AccountRef {
+  signedIn: boolean; usable: boolean; plan?: string; reason?: string; signInAvailable?: boolean;
+  /** The account's pool and role, when the owner set them (account-pools.ts). */
+  pool?: string; role?: AccountRole;
+  /** Signed in with a Console (API billing) login: with no role it is never chosen automatically. */
+  console?: true;
+}
 export interface HarnessEntry {
   source: HarnessSource; installed: boolean; version?: string; usable: boolean; reason?: string; accounts?: HarnessAccount[];
+  /** Claude's entry: this computer's allowed pools, as on the inventory, or that accounts.yaml can't be read. */
+  allowedPools?: string[];
+  poolsUnreadable?: true;
 }
-export interface HarnessInventory { harnesses: HarnessEntry[] }
+/** `allowedPools`: the pools this computer's accounts may do work for, when the owner set them; none means any. */
+export interface HarnessInventory { harnesses: HarnessEntry[]; allowedPools?: string[] }
 export interface HarnessDeps {
   toolVersion?: (tool: string) => Promise<ToolVersion>;
   authRunner?: AuthRunner;
@@ -37,17 +48,24 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
     }
     const base = { source, installed: true, ...(found.version ? { version: found.version } : {}) };
     if (source === "claude") {
+      const settings = accountSettings();
       const accounts = await Promise.all(claudeHomes(env).map(async (home): Promise<HarnessAccount> => {
         const auth = await claudeAuthStatus(home, deps.authRunner);
         // An unanswered sign-in check stays usable: only Claude saying "logged out" hides an account.
         const usable = auth.signedIn || auth.unknown === true;
-        return { ...claudeAccountRef(home), signedIn: auth.signedIn, usable,
-          ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }),
+        return { ...claudeAccountRef(home), ...settings[home.id], signedIn: auth.signedIn, usable,
+          ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.console ? { console: true } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }),
           // Claude said it is signed out: the phone offers Sign in (POST /v1/accounts/claude/add {slug, mode: "sign-in"}).
           ...(!auth.signedIn && !auth.unknown ? { signInAvailable: true } : {}) };
       }));
       const usable = accounts.some(account => account.usable);
-      return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts };
+      // On the entry too, so a dispatch's capacity probe (which carries only the entries) knows this computer's pools,
+      // and that they can't be known when accounts.yaml can't be read (an automatic choice then takes no account here).
+      const allowedPools = computerAllowedPools();
+      let poolsUnreadable = false;
+      try { accountPolicy(); } catch { poolsUnreadable = true; }
+      return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts, ...(allowedPools ? { allowedPools } : {}),
+        ...(poolsUnreadable ? { poolsUnreadable: true as const } : {}) };
     }
     if (source === "codex") {
       const signedIn = existsSync(path.join(codexHome(env), "auth.json"));
@@ -56,7 +74,8 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
     }
     return { ...base, usable: true };
   }));
-  return { harnesses };
+  const allowedPools = computerAllowedPools();
+  return { harnesses, ...(allowedPools ? { allowedPools } : {}) };
 }
 
 /** The inventory, or undefined when it is not ready within `ms` (a cold `claude auth status` can take seconds). */
