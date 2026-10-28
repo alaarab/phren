@@ -39,10 +39,24 @@ const settingsOf = (raw: unknown): AccountSettings => {
   return { ...(isPoolTag(item.pool) ? { pool: item.pool } : {}), ...(isAccountRole(item.role) ? { role: item.role } : {}) };
 };
 
-/** Every slot's pool and role that is set, by slug. */
-export function accountSettings(): Record<string, AccountSettings> {
-  return Object.fromEntries(Object.entries(object(readSync().slots)).filter(([slug]) => isAccountSlug(slug))
+const settingsFrom = (parsed: Record<string, unknown>): Record<string, AccountSettings> =>
+  Object.fromEntries(Object.entries(object(parsed.slots)).filter(([slug]) => isAccountSlug(slug))
     .map(([slug, raw]) => [slug, settingsOf(raw)] as const).filter(([, settings]) => Object.keys(settings).length));
+
+/** Every slot's pool and role that is set, by slug. For listings: an unreadable file reads as none set. */
+export function accountSettings(): Record<string, AccountSettings> { return settingsFrom(readSync()); }
+
+/**
+ * The slots' pools and roles and this computer's allowed pools, for a caller that enforces them: an
+ * `accounts.yaml` that is there but can't be read throws rather than reading as "nothing restricted".
+ */
+export function accountPolicy(): { settings: Record<string, AccountSettings>; allowedPools?: string[] } {
+  let text: string | undefined;
+  try { text = readFileSync(accountsFile(), "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  let parsed: Record<string, unknown>;
+  try { parsed = parseAccountsYaml(text); } catch (error) { throw new Error(`${accountsFile()} can't be read (${error instanceof Error ? error.message.split("\n")[0] : "bad YAML"}); fix it first.`); }
+  const allowedPools = poolsOf(parsed.allowedPools);
+  return { settings: settingsFrom(parsed), ...(allowedPools ? { allowedPools } : {}) };
 }
 
 /** Sets or clears (`null`) a slot's pool and role; a field left out stays as it is. */
@@ -93,6 +107,12 @@ export function setProjectAllowedPools(phrenPath: string, project: string, pools
   const next = checkedPools(pools);
   setProjectConfigField(phrenPath, project, "allowedPools", next ?? undefined);
   return next ?? undefined;
+}
+
+/** Whether an account in `pool` may work where `allowed` is the list: no list is any pool; a list leaves out an
+ * account with no pool. */
+export function poolAllowed(allowed: readonly string[] | undefined, pool: string | undefined): boolean {
+  return !allowed || pool !== undefined && allowed.includes(pool);
 }
 
 /** `phren bridge accounts pool|role|allowed-pools …`: the lines to print. */
