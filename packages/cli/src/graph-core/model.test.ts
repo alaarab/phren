@@ -134,7 +134,7 @@ describe("adjacency + detail", () => {
   afterEach(() => { vi.useRealTimers(); });
 
   it("assembles a detail record with quality from the score map", () => {
-    // Health is judged against the clock; the fixture's last use is two days before NOW.
+    // normalizeNode judges health against the clock; the fixture's last use is two days before NOW.
     vi.useFakeTimers({ now: NOW });
     const m = model();
     const detail = nodeDetail(m, "f:1")!;
