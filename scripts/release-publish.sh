@@ -15,10 +15,10 @@ version="${INPUT_VERSION:?INPUT_VERSION is not set}"
 
 # One lookup for both fields, so a failure can't pass for "no commit recorded".
 # A version npm doesn't have answers nothing, an empty object or list, or (with
-# --json) an error object with code E404; a failed lookup (network, registry)
-# answers nothing too. These are taken as not published, so npm publish runs
-# and, if the version is there after all, its refusal fails the step. Any other
-# error object fails the step.
+# --json) an error object with code E404. These are taken as not published, so
+# npm publish runs and, if the version is there after all, its refusal fails
+# the step. Any other error object (a network or registry failure) fails the
+# step before publishing; a rerun tries again.
 found=$(npm view "$name@$version" version gitHead --json 2>/dev/null || true)
 # "absent", or "present" and the commit npm records (empty when it records none).
 # An answer that isn't JSON, or names another version, fails the step.
