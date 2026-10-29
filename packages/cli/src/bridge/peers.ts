@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Duplex } from "node:stream";
 import { dump, load } from "js-yaml";
@@ -128,6 +128,7 @@ export async function peerRequest(peer: HookPeer, route: string, data?: Json, ti
   const root = bridgeRoot(), key = dispatchKeyPath(root);
   const info = await lstat(key).catch(() => undefined);
   if (!info?.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw new BridgeError(409, "Run phren bridge enroll-computer on this computer first (private key mode 0600).", { code: "dispatch-key-missing" });
+  sweepPeerTempsSometimes(root);
   const temporary = await mkdtemp(path.join(root, "peer-"));
   let child: ReturnType<typeof spawn> | undefined, stream: Duplex | undefined;
   try {
@@ -164,5 +165,33 @@ export async function peerRequest(peer: HookPeer, route: string, data?: Json, ti
       if (error instanceof BridgeError && error.status === 504 && error.message.startsWith("Hook did not confirm")) throw withErrorCode(error, "peer-timeout");
       throw error;
     }
-  } finally { stream?.destroy(); child?.kill(); await rm(temporary, { recursive: true, force: true }); }
+  } finally {
+    // The pinned known_hosts folder goes on every exit (an answer, a timeout, an SSH that could not start), even
+    // when stopping the stream or the process throws.
+    try { stream?.destroy(); child?.kill(); } catch { /* already gone */ }
+    await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/** How old a request's known_hosts folder must be to count as left behind (by a Hook stopped mid-request). */
+const PEER_TEMP_MAX_AGE_MS = 10 * 60_000;
+let lastSweep = 0;
+/** Removes `peer-*` known_hosts folders a stopped Hook left behind: no request runs anywhere near this long. */
+export async function sweepPeerTemps(root = bridgeRoot(), now = Date.now(), maxAgeMs = PEER_TEMP_MAX_AGE_MS): Promise<number> {
+  let removed = 0;
+  for (const name of await readdir(root).catch(() => [] as string[])) {
+    if (!/^peer-[A-Za-z0-9]{6}$/.test(name)) continue;
+    const folder = path.join(root, name);
+    const info = await lstat(folder).catch(() => undefined);
+    if (!info?.isDirectory() || now - info.mtimeMs < maxAgeMs) continue;
+    await rm(folder, { recursive: true, force: true }).then(() => { removed++; }, () => undefined);
+  }
+  return removed;
+}
+/** At most one sweep per `PEER_TEMP_MAX_AGE_MS`, in the background of a request. */
+function sweepPeerTempsSometimes(root: string): void {
+  const now = Date.now();
+  if (now - lastSweep < PEER_TEMP_MAX_AGE_MS) return;
+  lastSweep = now;
+  void sweepPeerTemps(root, now).catch(() => undefined);
 }

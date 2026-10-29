@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The owner inbox no longer opens an SSH login to another computer every five seconds. With the conductor module on, each open blocked or needs-you dispatch on another computer was re-checked over SSH on every activity tick, with no age limit: a receipt days old was polled forever, about 17,000 logins a day to one computer, which loaded it and crowded out phone connections. For a dispatch the returns loop watches (24 hours), the item now comes from what that loop already stores, refreshed every 15 seconds. An older one is asked about at most once an hour per computer, and a failure is waited out as long. A worker reported closed, or gone after the returns loop stopped watching it, now closes its receipt unless its return is still unread. Each peer request's `peer-*` known_hosts folder is removed on every exit path, and folders left by a Hook stopped mid-request are swept.
+
 ## [0.3.60] - 2026-10-28
 
 ### Fixed
