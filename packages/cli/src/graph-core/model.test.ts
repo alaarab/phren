@@ -8,7 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   StoreColorAssigner,
   bestSearchMatch,
@@ -131,7 +131,11 @@ describe("adjacency + detail", () => {
     expect(connectionCounts(m, "e:1").projects).toBe(2);
   });
 
+  afterEach(() => { vi.useRealTimers(); });
+
   it("assembles a detail record with quality from the score map", () => {
+    // Health is judged against the clock; the fixture's last use is two days before NOW.
+    vi.useFakeTimers({ now: NOW });
     const m = model();
     const detail = nodeDetail(m, "f:1")!;
     expect(detail.projectName).toBe("harbor");
