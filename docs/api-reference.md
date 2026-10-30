@@ -523,6 +523,15 @@ input text (`Try "…"`, the queued-message hints, `Message @…`) and a suggest
 a narrow pane cut short with `…` are never sent. Codex, OpenCode and Copilot
 have no such prediction and never send it.
 
+`POST /v1/prompt/queue { target, action }` (capability `queuedMessageActions`,
+the harnesses it covers: `["claude"]`) acts on the messages a working Claude
+Code pane holds in its own queue, all of them at once, as Claude Code itself
+does. `action: "send-now"` hands them to the running turn now; `"withdraw"`
+takes them back unsent. The transcript rows Claude writes (`phren_queue_consumed`,
+`phren_queue_returned`) settle or drop the phone's queued bubbles. It refuses
+with 409 and a `code` while the pane's input box holds text, a prompt is held,
+the terminal shows a subagent, or the agent is no longer working.
+
 `POST /v1/prompt { target, text, deliveryId? }` answers with how far the
 message got, as `state` plus the older flags: `{ ok, delivered: true, state:
 "delivered" }` once a conversation in the pane submitted it through its

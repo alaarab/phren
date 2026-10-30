@@ -51,16 +51,34 @@ export function claudeSubagentView(screen: string): boolean {
   return !!text && SUBAGENT_VIEW.test(text);
 }
 
+/** Whether Claude's live input box holds no typed text: nothing after the
+ * prompt glyph, or only dim placeholder or suggestion text. False for typed
+ * text, a subagent's view, or no single-line live box on screen (typed text
+ * that wraps leaves no rule under the prompt line). */
+export function claudeInputEmpty(screen: string): boolean {
+  const line = liveInputLine(screen);
+  if (line === undefined) return false;
+  if (!stripTerminal(line).replace(/^\s*❯/, "").trim()) return true;
+  const dim = dimText(line);
+  return !!dim && !SUBAGENT_VIEW.test(dim);
+}
+
 /** The dim text in the live input box (between its two rules), "" when the
  * box holds typed text, undefined when there is no live box on screen. */
 function liveInputDimText(screen: string): string | undefined {
+  const line = liveInputLine(screen);
+  return line === undefined ? undefined : dimText(line);
+}
+
+/** The live input box's prompt line, as read with its styles. */
+function liveInputLine(screen: string): string | undefined {
   const lines = screen.split("\n").map(line => line.replace(/\r$/, ""));
   for (let index = lines.length - 2; index > 0; index--) {
     const plain = stripTerminal(lines[index]);
     if (!/^\s*❯/.test(plain)) continue;
     // Only the live input box: a sent prompt in the history has no rules around it.
     if (!rule(stripTerminal(lines[index - 1])) || !rule(stripTerminal(lines[index + 1]))) return undefined;
-    return dimText(lines[index]);
+    return lines[index];
   }
   return undefined;
 }

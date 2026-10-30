@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { claudeSubagentView, claudeSuggestion } from "./claude-suggestion.js";
+import { claudeInputEmpty, claudeSubagentView, claudeSuggestion } from "./claude-suggestion.js";
 
 // Screens recorded from Claude Code 2.1.284 with their styles: Herdr's
 // `pane.read --format ansi` (trimmed to the input box) and tmux `capture-pane -e`.
@@ -49,5 +49,19 @@ describe("Claude's suggested next prompt", () => {
     expect(claudeSubagentView(recorded("owner-typing-tmux.ansi"))).toBe(false);
     expect(claudeSubagentView(box("Message @general-purpose…").replace(/\x1b\[[0-9;]*m/g, ""))).toBe(false);
     expect(claudeSubagentView("")).toBe(false);
+  });
+
+  it("tells an empty input box, placeholder or suggestion included, from typed text", () => {
+    const box = (text: string) => recorded("next-suggestion-herdr.ansi").replace("merged 313 and 314", text);
+    expect(claudeInputEmpty(recorded("empty-prompt-herdr.ansi"))).toBe(true);
+    expect(claudeInputEmpty(recorded("working-tmux.ansi"))).toBe(true);
+    expect(claudeInputEmpty(recorded("next-suggestion-herdr.ansi"))).toBe(true);
+    expect(claudeInputEmpty(box("Press up to edit queued messages"))).toBe(true);
+    expect(claudeInputEmpty(recorded("owner-typing-tmux.ansi"))).toBe(false);
+    // Plain text where the suggestion was is the owner's draft.
+    expect(claudeInputEmpty(recorded("next-suggestion-herdr.ansi").replace(/\x1b\[[0-9;]*m/g, ""))).toBe(false);
+    // Keys typed into a subagent's view would go to the subagent.
+    expect(claudeInputEmpty(box("Message @researcher…"))).toBe(false);
+    expect(claudeInputEmpty("")).toBe(false);
   });
 });
