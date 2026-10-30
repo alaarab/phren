@@ -576,7 +576,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // turn now, or withdrawn unsent. Only Claude Code's queue can be reached;
     // a pane the Hook types into for any other harness has none it can act on.
     // The owner's words: an agent may not send or discard another pane's queue.
-    refuseAgentOrigin(data && typeof data === "object" && "origin" in data ? data.origin ?? null : undefined);
+    if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner sends or cancels queued messages, from the phone.");
     const action = z.enum(["send-now", "withdraw"]).parse(data.action);
     if (target.source !== "claude") throw new BridgeError(409, "Only Claude Code's queued messages can be sent now or withdrawn.", { code: "queue-unsupported" });
     const guards = promptGuards(agentHooks, target);
