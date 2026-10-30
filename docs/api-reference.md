@@ -527,10 +527,12 @@ have no such prediction and never send it.
 the harnesses it covers: `["claude"]`) acts on the messages a working Claude
 Code pane holds in its own queue, all of them at once, as Claude Code itself
 does. `action: "send-now"` hands them to the running turn now; `"withdraw"`
-takes them back unsent. The transcript rows Claude writes (`phren_queue_consumed`,
+takes them back unsent. The reply's `messages` are the queued texts it acted
+on, oldest first, read from the transcript's queue rows. The transcript rows Claude writes (`phren_queue_consumed`,
 `phren_queue_returned`) settle or drop the phone's queued bubbles. It refuses
 with 409 and a `code` while the pane's input box holds text, a prompt is held,
-the terminal shows a subagent, or the agent is no longer working.
+the terminal shows a subagent, nothing is queued, or the agent is no longer
+working, and when Claude did not act on a key. Agents may not call it.
 
 `POST /v1/prompt { target, text, deliveryId? }` answers with how far the
 message got, as `state` plus the older flags: `{ ok, delivered: true, state:

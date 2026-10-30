@@ -34,7 +34,7 @@ import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
 import { promptWithStartupRetry } from "./prompt-startup.js";
 import { sendServedPrompt, servedPane } from "./opencode-panes.js";
 import { claudeSuggestionShown } from "./claude-suggestion.js";
-import { claudeQueueAction } from "./claude-queue.js";
+import { claudeQueueAction, transcriptTail } from "./claude-queue.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
  * secrets, uploads, diffs, git, approvals and questions. A starting pane (no
@@ -575,11 +575,14 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // The messages a busy agent holds in its own queue: sent to the running
     // turn now, or withdrawn unsent. Only Claude Code's queue can be reached;
     // a pane the Hook types into for any other harness has none it can act on.
+    // The owner's words: an agent may not send or discard another pane's queue.
+    refuseAgentOrigin(data && typeof data === "object" && "origin" in data ? data.origin ?? null : undefined);
     const action = z.enum(["send-now", "withdraw"]).parse(data.action);
     if (target.source !== "claude") throw new BridgeError(409, "Only Claude Code's queued messages can be sent now or withdrawn.", { code: "queue-unsupported" });
     const guards = promptGuards(agentHooks, target);
+    const transcript = await targetTranscriptPath(target);
     result = await claudeQueueAction(action, String(pane.agent_status), { held: guards.held!, screen: guards.screen!,
-      sendKeys: keys => terminalProvider().sendKeys(target.server, target.pane, keys), sleep: ms => sleep(ms) });
+      transcript: () => transcriptTail(transcript), sendKeys: keys => terminalProvider().sendKeys(target.server, target.pane, keys), sleep: ms => sleep(ms) });
   } else if (url.pathname === "/v1/side-question/dismiss") {
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
