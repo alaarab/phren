@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.62] - 2026-10-30
+
 ### Added
 
 - `POST /v1/prompt/queue` sends a working Claude Code pane's queued messages to the running turn now, or withdraws them unsent, with Claude Code's own keys (send now, then pull back into the input and clear it). It acts only when the pane's input box is empty and nothing is held there, and says so when the input did not clear. Capability `queuedMessageActions: ["claude"]`.
