@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.66] - 2026-10-31
+
 ### Fixed
 
 - Shell tool cards in a busy, large checkout no longer show "Changes unavailable: Git change capture failed or timed out" under most calls, including read-only ones like `grep` or `git log`. Each shell call started one Git process per path its command named, plus four per repository, in turn through two shared slots, so parallel calls queued past the 2.5 s hook budget (8 parallel calls naming paths in five worktrees under load: 12 of 24 failed, p90 2.5 s). Repositories are now found without Git and remembered, and calls that overlap share one read of each repository's working tree and one scratch object store (same load: none failed, p90 0.7 s). A capture that still runs out of time shows no changes rather than an error; a real failure (Git missing, a corrupt repository) is shown once per conversation, not on every row.
