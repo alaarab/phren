@@ -1,6 +1,7 @@
 import { checkoutGitEnv } from "./projects.js";
 import { execFile } from "node:child_process";
-import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, unlink, utimes } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { appendFile, copyFile, mkdir, readdir, readFile, realpath, rm, stat, unlink, utimes } from "node:fs/promises";
 import { homeDir } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -20,10 +21,10 @@ export const changedFileSchema = z.object({ root: z.string(), path: z.string(), 
 export type ChangedFile = z.infer<typeof changedFileSchema>;
 const changeRowSchema = z.object({ toolUseId: z.string(), files: z.array(changedFileSchema) });
 export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|keychain-db|tfstate)|id_rsa.*|id_ed25519.*|(?:.*\.)?credentials\.json|\.netrc|\.npmrc|\.pypirc)$/i.test(path.basename(file));
-/** Two captures at a time, each holding its slot for all of its Git work. A
- * slot per Git process interleaved every waiting capture, so under load they
- * all finished late together and every one overran the budget; now they finish
- * in turn and only the end of a long queue misses it. */
+/** Two Git jobs at a time: one repository's tree read (shared by every call
+ * waiting for it), one call's diff, or a repository lookup. Each holds its slot
+ * for all of its Git processes, so under load jobs finish in turn rather than
+ * all late together. */
 const capturePool = new ProcessPool(2);
 
 /** Tools whose filesystem changes are captured around the lifecycle callback. */
@@ -60,58 +61,118 @@ async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, s
   })).stdout;
 }
 
-/** The repository holding `target` (a file, a folder, or something not yet
- * created), confined to the user's home; undefined otherwise. */
-async function repositoryOf(target: string, cwd: string, home = homeDir(), signal?: AbortSignal): Promise<string | undefined> {
-  const absolute = target === "~" || target.startsWith("~/") ? path.join(home, target.slice(1)) : path.resolve(cwd, target);
-  let existing = absolute;
-  while (!(await stat(existing).catch(() => undefined))) {
-    const parent = path.dirname(existing); if (parent === existing) return undefined;
-    existing = parent;
-  }
-  const real = await realpath(existing);
-  home = await realpath(home);
-  if (real !== home && !real.startsWith(home + path.sep)) return undefined;
-  const dir = (await stat(real)).isDirectory() ? real : path.dirname(real);
-  try { return await realpath((await git(dir, ["rev-parse", "--show-toplevel"], {}, signal)).replace(/\r?\n$/, "")); }
-  catch (error) {
-    if (/not a git repository/.test(String((error as { stderr?: string }).stderr))) return undefined;
-    throw error;
+/** A capture that ran out of time (the hook budget, Git's own timeout, or the
+ * Hook closing). The call shows no changes; nothing is wrong with the repository. */
+class CaptureTimeout extends Error {}
+function timedOut(error: unknown): boolean {
+  const failure = error as { name?: string; code?: string; killed?: boolean } | undefined;
+  return error instanceof CaptureTimeout || failure?.name === "AbortError" || failure?.code === "ABORT_ERR" || failure?.killed === true;
+}
+/** `work`, but given up on (not stopped) when `signal` fires. */
+function until<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+/** One tree read of a repository and the calls waiting for it. */
+interface Read { result: Promise<string>; waiting: number; controller: AbortController }
+/** One repository lookup and the calls waiting for it. */
+interface Lookup { result: Promise<Repository | undefined>; waiting: number; controller: AbortController }
+/** What a capture needs to know about one repository. */
+interface Repository { root: string; objects: string; index: string }
+
+/** The nearest folder at or above `dir` with a `.git` entry: where Git's own
+ * discovery would start looking, found without starting a Git process. */
+async function checkoutOf(dir: string): Promise<string | undefined> {
+  for (let at = dir; ; at = path.dirname(at)) {
+    if (await stat(path.join(at, ".git")).then(() => true, () => false)) return at;
+    if (path.dirname(at) === at) return undefined;
   }
 }
 
-interface Tree { hash: string; scratch: string; env: NodeJS.ProcessEnv }
-async function scratchTree(root: string, signal: AbortSignal): Promise<Tree> {
-  const dir = path.join(bridgeRoot(), "changes-scratch");
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  const scratch = await mkdtemp(path.join(dir, "repo-"));
-  try {
-    const objects = await realpath(path.resolve(root, (await git(root, ["rev-parse", "--git-path", "objects"], {}, signal)).trim()));
-    await mkdir(path.join(scratch, "objects"), { mode: 0o700 });
-    const env = { GIT_OBJECT_DIRECTORY: path.join(scratch, "objects"), GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objects), GIT_INDEX_FILE: path.join(scratch, "index") };
-    return { hash: await treeHash(root, env, signal), scratch, env };
-  } catch (error) { await rm(scratch, { recursive: true, force: true }); throw error; }
-}
-
-/** Both the index and all new blobs/trees stay in scratch storage. The real
- * object store is a read-only alternate, including for linked worktrees. */
-async function treeHash(root: string, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<string> {
-  const index = path.resolve(root, (await git(root, ["rev-parse", "--git-path", "index"], {}, signal)).trim());
-  const temp = env.GIT_INDEX_FILE!;
-  await unlink(temp).catch(() => undefined);
-  // Keep the real index's mtime (a second early, for rounding): Git rechecks
-  // the content of entries as new as the index, so a file rewritten to the
-  // same size in one instant is still seen. Read before the copy, so an index
-  // replaced meanwhile only makes more entries racy. An epoch mtime instead
-  // made every tracked file racy, and rehashing them all overran the budget
-  // on a busy machine (about 3 s for 6,000 files).
-  const real = await stat(index).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
-  if (real && await copyFile(index, temp).then(() => true, error => { if (error.code !== "ENOENT") throw error; return false; })) {
-    await utimes(temp, real.atimeMs / 1000, real.mtimeMs / 1000 - 1);
+/** One repository's captures share a scratch object store, kept between
+ * calls so each blob is written once, where every call used to write all its
+ * modified and untracked files twice into a store of its own. One read runs at
+ * a time and serves every call that asked for the tree while it waited.
+ * Retired after `SCRATCH_AGE` or a failed read; deleted once no snapshot holds
+ * a tree in it. */
+class Scratch {
+  readonly env: NodeJS.ProcessEnv;
+  readonly born = Date.now();
+  /** Snapshots holding a tree whose objects live here. */
+  users = 0;
+  retired = false;
+  private created?: Promise<unknown>;
+  private reads = 0;
+  private running?: Read;
+  private next?: Read;
+  constructor(readonly repo: Repository, readonly dir: string, private readonly closing: AbortSignal, private readonly settled: () => void) {
+    this.env = { GIT_OBJECT_DIRECTORY: path.join(dir, "objects"), GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(repo.objects), GIT_INDEX_FILE: path.join(dir, "index") };
   }
-  await git(root, ["add", "-A", "--", "."], env, signal);
-  return (await git(root, ["write-tree"], env, signal)).trim();
+  get busy(): boolean { return !!(this.running || this.next); }
+  /** The working tree as read no earlier than this call: the read already
+   * running may have started before the caller's tool ran or finished, so a
+   * caller arriving then waits for the next one, shared with later arrivals.
+   * A read every caller gave up on is stopped. */
+  tree(signal: AbortSignal): Promise<string> {
+    let read = this.next;
+    if (!read && this.running) {
+      const queued: Read = this.next = { waiting: 0, controller: new AbortController(), result: this.running.result.then(() => {}, () => {}).then(() => {
+        this.next = undefined; return this.start(queued);
+      }) };
+      read = queued;
+    }
+    if (!read) { read = { waiting: 0, controller: new AbortController() } as Read; this.start(read); }
+    // A queued read its earlier callers gave up on has not started; it can still serve this one.
+    if (read.controller.signal.aborted && read === this.next) read.controller = new AbortController();
+    read.waiting++;
+    return until(read.result, signal).catch(error => {
+      if (signal.aborted && --read.waiting === 0) read.controller.abort();
+      throw error;
+    });
+  }
+  private start(read: Read): Promise<string> {
+    const signal = AbortSignal.any([this.closing, read.controller.signal]);
+    this.running = read;
+    // An index of its own: an aborted read's Git may still be exiting while the next one starts.
+    const env = { ...this.env, GIT_INDEX_FILE: path.join(this.dir, `index-${++this.reads}`) };
+    read.result = capturePool.run(signal, async () => {
+      await (this.created ??= mkdir(path.join(this.dir, "objects"), { recursive: true, mode: 0o700 }));
+      try {
+        await this.seed(env.GIT_INDEX_FILE);
+        await git(this.repo.root, ["add", "-A", "--", "."], env, signal);
+        return (await git(this.repo.root, ["write-tree"], env, signal)).trim();
+      } finally { await unlink(env.GIT_INDEX_FILE).catch(() => undefined); }
+    }).catch(error => { if (!timedOut(error)) this.retired = true; throw error; })
+      .finally(() => { if (this.running === read) this.running = undefined; this.settled(); });
+    read.result.catch(() => {});
+    return read.result;
+  }
+  /** Both the index and all new blobs/trees stay in scratch storage. The real
+   * object store is a read-only alternate, including for linked worktrees.
+   * Every read starts from a fresh copy of the real index: one kept from the
+   * last read would trust its own stat data, and miss a same-size rewrite that
+   * restored the file's mtime within the second its ctime was recorded. */
+  private async seed(temp: string): Promise<void> {
+    // Keep the real index's mtime (a second early, for rounding): Git rechecks
+    // the content of entries as new as the index, so a file rewritten to the
+    // same size in one instant is still seen. Read before the copy, so an index
+    // replaced meanwhile only makes more entries racy. An epoch mtime instead
+    // made every tracked file racy, and rehashing them all overran the budget
+    // on a busy machine (about 3 s for 6,000 files).
+    const index = this.repo.index;
+    const real = await stat(index).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
+    if (real && await copyFile(index, temp).then(() => true, error => { if (error.code !== "ENOENT") throw error; return false; })) {
+      await utimes(temp, real.atimeMs / 1000, real.mtimeMs / 1000 - 1);
+    }
+  }
 }
+const SCRATCH_AGE = 10 * 60_000;
+const REPOSITORY_TTL = 5 * 60_000;
 
 const NO_DIFF = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
 async function treeDiff(root: string, before: string, after: string, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<ChangedFile[]> {
@@ -127,8 +188,14 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
     const counts = (await git(root, [...NO_DIFF, "--numstat", before, after, "--", ...specs], env, signal)).split("\t");
     const binary = counts[0] === "-" || counts[1] === "-";
     const redacted = secretName(original) || secretName(file) || binary;
-    let patch = redacted ? "" : await git(root, [...NO_DIFF, before, after, "--", ...specs], env, signal);
-    const truncated = patch.length > 200_000;
+    let overflowed = false;
+    let patch = redacted ? "" : await git(root, [...NO_DIFF, before, after, "--", ...specs], env, signal).catch(error => {
+      // One patch past Git's output buffer is shown truncated, not as a failed capture.
+      const failure = error as { code?: string; stdout?: string };
+      if (failure.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") throw error;
+      overflowed = true; return String(failure.stdout ?? "");
+    });
+    const truncated = overflowed || patch.length > 200_000;
     if (truncated) patch = patch.slice(0, 200_000) + "\n… (truncated)\n";
     const added = Number(counts[0]) || 0, removed = Number(counts[1]) || 0;
     files.push({ root, path: file, status, patch, added, removed, binary, truncated, ...(redacted ? { redacted: true } : {}) });
@@ -139,7 +206,8 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
 /** `taking` until its trees are all read: a PostToolUse arriving before then
  * (its PreToolUse callback gave up, so the tool ran meanwhile) has no true
  * before-state to diff against. */
-interface Snapshot { at: number; conversation: string; own: Set<string>; trees: Map<string, Tree>; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout; taking?: boolean; dropped?: boolean }
+interface Tree { scratch: Scratch; hash?: string }
+interface Snapshot { at: number; conversation: string; own: Set<string>; trees: Map<string, Tree>; roots: string[]; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout; taking?: boolean; dropped?: boolean }
 /** Files one tool call named in its own input (an Edit's file_path, a patch's
  * headers), from its start to its end. Another conversation's claim over a
  * file keeps that file out of a shell call's diff taken over the same time. */
@@ -185,6 +253,13 @@ export async function pruneChanges(now = Date.now()): Promise<void> {
     if (now - file.at > 30 * DAY || size + file.size > 268_435_456) await unlink(file.file).catch(() => undefined);
     else size += file.size;
   }
+  // Scratch a stopped Hook left behind; a live one is rewritten on every read
+  // and retired within SCRATCH_AGE of its first.
+  const scratch = path.join(bridgeRoot(), "changes-scratch");
+  for (const entry of await readdir(scratch, { withFileTypes: true }).catch(() => [])) {
+    const dir = path.join(scratch, entry.name), info = await stat(dir).catch(() => undefined);
+    if (info && now - info.mtimeMs > DAY) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 export async function startChangeRetention(): Promise<() => void> {
@@ -207,8 +282,30 @@ export class ToolChanges {
   private controllers = new Set<AbortController>();
   private claims: Claim[] = [];
   private failures = new Map<string, Error>();
-  private failed(key: string, error: unknown): Error {
-    const failure = error instanceof BridgeError ? error : new BridgeError(503, "Git change capture failed or timed out. Refresh repository Changes for the current status.", { code: "git-capture-failed" });
+  /** Conversation and repository root pairs already shown that Git could not capture changes. */
+  private reported = new Set<string>();
+  private repositories = new Map<string, { at: number; lookup: Lookup }>();
+  private scratches = new Map<string, Scratch>();
+  private closing = new AbortController();
+  /** The failure to show on this call's row, if any. A capture that ran out of
+   * time shows no changes rather than an error: a busy machine is not
+   * something to act on per call, and repository Changes still has the
+   * status. A broken capture (Git missing, a corrupt repository) shows on the
+   * first call it hits in a conversation, not on every later one. A per-call
+   * limit (too many files) shows on its own call. */
+  private failed(conversation: string, key: string, error: unknown, roots: readonly string[] = []): Error | undefined {
+    if (timedOut(error)) return undefined;
+    const failure = error instanceof BridgeError ? error : new BridgeError(503, "Git change capture failed. Refresh repository Changes for the current status.", { code: "git-capture-failed" });
+    if (failure.details?.code === "git-capture-failed") {
+      // A breakage is news once per repository: a healthy checkout's capture
+      // must not let a corrupt sibling repo report its error again.
+      const marks = roots.length ? [...new Set(roots)].map(root => `${conversation}\0${root}`) : [`${conversation}\0`];
+      if (marks.every(mark => this.reported.has(mark))) return undefined;
+      for (const mark of marks) {
+        if (this.reported.size >= 512) this.reported.delete(this.reported.keys().next().value!);
+        this.reported.add(mark);
+      }
+    }
     if (this.failures.size >= 512) this.failures.delete(this.failures.keys().next().value!);
     this.failures.set(key, failure);
     return failure;
@@ -224,16 +321,90 @@ export class ToolChanges {
     const controller = new AbortController(); this.controllers.add(controller);
     const timer = setTimeout(() => controller.abort(), this.budgetMs);
     try { return await work(controller.signal); }
+    catch (error) { throw controller.signal.aborted ? new CaptureTimeout() : error; }
     finally { clearTimeout(timer); this.controllers.delete(controller); }
   }
   private async discard(snapshot: Snapshot) {
     clearTimeout(snapshot.expiry);
-    await Promise.all([...snapshot.trees.values()].map(tree => rm(tree.scratch, { recursive: true, force: true })));
+    const trees = [...snapshot.trees.values()]; snapshot.trees.clear();
+    for (const tree of trees) { tree.scratch.users--; await this.sweep(tree.scratch); }
   }
   async close() {
     for (const controller of this.controllers) controller.abort();
+    for (const { lookup } of this.repositories.values()) lookup.controller.abort();
+    this.repositories.clear();
+    this.closing.abort();
     for (const snapshot of this.snapshots.values()) { await snapshot.result?.catch(() => {}); await this.discard(snapshot); }
     this.snapshots.clear();
+    for (const scratch of this.scratches.values()) scratch.retired = true;
+    await Promise.all([...this.scratches.values()].map(scratch => this.sweep(scratch)));
+  }
+
+  /** The repository holding `target` (a file, a folder, or something not yet
+   * created), confined to the user's home; undefined otherwise. Git is asked
+   * once per checkout every few minutes, not once per path a command names. */
+  private async repositoryOf(target: string, cwd: string, signal: AbortSignal, home = homeDir()): Promise<Repository | undefined> {
+    const absolute = target === "~" || target.startsWith("~/") ? path.join(home, target.slice(1)) : path.resolve(cwd, target);
+    let existing = absolute;
+    while (!(await stat(existing).catch(() => undefined))) {
+      const parent = path.dirname(existing); if (parent === existing) return undefined;
+      existing = parent;
+    }
+    const real = await realpath(existing);
+    home = await realpath(home);
+    if (real !== home && !real.startsWith(home + path.sep)) return undefined;
+    const dir = (await stat(real)).isDirectory() ? real : path.dirname(real), checkout = await checkoutOf(dir);
+    if (!checkout) return undefined;
+    const now = Date.now(), known = this.repositories.get(checkout);
+    // A lookup every caller gave up on is not reused: a new call starts a fresh one.
+    if (known && now - known.at < REPOSITORY_TTL && !known.lookup.controller.signal.aborted) return this.awaitRepository(known.lookup, signal);
+    if (this.repositories.size >= 256) this.repositories.clear();
+    // The lookup belongs to the repository, not to whichever call asked first:
+    // it stops only once every call waiting for it has given up.
+    const lookup: Lookup = { waiting: 0, controller: new AbortController(), result: Promise.resolve(undefined) };
+    this.repositories.set(checkout, { at: now, lookup });
+    // Asked from the target's own folder, so Git's discovery limits (GIT_CEILING_DIRECTORIES) still apply.
+    const repository = capturePool.run(lookup.controller.signal, async () => {
+      const [root, objects, index] = (await git(dir, ["rev-parse", "--show-toplevel", "--git-path", "objects", "--git-path", "index"], {}, lookup.controller.signal)).split(/\r?\n/);
+      return { root: await realpath(root), objects: await realpath(path.resolve(dir, objects)), index: path.resolve(dir, index) };
+    }).catch(error => {
+      if (/not a git repository/.test(String((error as { stderr?: string }).stderr))) return undefined;
+      // Asked again next time rather than remembered.
+      if (this.repositories.get(checkout)?.lookup === lookup) this.repositories.delete(checkout);
+      throw error;
+    });
+    lookup.result = repository;
+    repository.catch(() => {});
+    return this.awaitRepository(lookup, signal);
+  }
+
+  /** Wait for a shared repository lookup, dropping this caller's interest when
+   * it gives up; the lookup is stopped only when no caller is left. */
+  private awaitRepository(lookup: Lookup, signal: AbortSignal): Promise<Repository | undefined> {
+    lookup.waiting++;
+    return until(lookup.result, signal).finally(() => {
+      if (--lookup.waiting === 0 && signal.aborted) lookup.controller.abort();
+    });
+  }
+
+  /** The scratch a new snapshot of `repository` reads into. */
+  private scratchFor(repository: Repository): Scratch {
+    const now = Date.now();
+    for (const scratch of this.scratches.values()) {
+      if (scratch.retired || now - scratch.born > SCRATCH_AGE) { scratch.retired = true; void this.sweep(scratch); }
+    }
+    const current = this.scratches.get(repository.root);
+    if (current && !current.retired) return current;
+    const dir = path.join(bridgeRoot(), "changes-scratch", `repo-${randomBytes(8).toString("hex")}`);
+    const scratch: Scratch = new Scratch(repository, dir, this.closing.signal, () => void this.sweep(scratch));
+    this.scratches.set(repository.root, scratch);
+    return scratch;
+  }
+  /** Delete a retired scratch once nothing reads it or holds a tree in it. */
+  private async sweep(scratch: Scratch): Promise<void> {
+    if (!scratch.retired || scratch.users > 0 || scratch.busy) return;
+    if (this.scratches.get(scratch.repo.root) === scratch) this.scratches.delete(scratch.repo.root);
+    await rm(scratch.dir, { recursive: true, force: true }).catch(() => undefined);
   }
 
   async before(conversation: string, toolUseId: string, cwd: string, command: string, input: Json = {}): Promise<void> {
@@ -243,22 +414,25 @@ export class ToolChanges {
     const claimed = await Promise.all(claimedPaths(input, cwd).map(realPathOf));
     this.claim(conversation, toolUseId, claimed);
     if (this.snapshots.size >= 64 || this.snapshots.has(key)) return;
-    const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map(), taking: true };
+    const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map(), roots: [], taking: true };
     this.snapshots.set(key, snapshot);
     try {
-      await this.budget(signal => capturePool.run(signal, async () => {
+      await this.budget(async signal => {
         await realpath(cwd); // A vanished checkout must not resolve to its parent repository.
-        const roots = new Set<string>();
+        const repositories = new Map<string, Repository>();
         for (const target of [cwd, phrenStoreRoot(), ...namedPaths(command, input)]) {
           signal.throwIfAborted();
-          if (roots.size >= 6) break;
-          const root = await repositoryOf(target, cwd, homeDir(), signal); if (root) roots.add(root);
+          if (repositories.size >= 6) break;
+          const repository = await this.repositoryOf(target, cwd, signal); if (repository) repositories.set(repository.root, repository);
         }
-        for (const root of roots) {
-          snapshot.trees.set(root, await scratchTree(root, signal));
-        }
+        snapshot.roots = [...repositories.keys()];
+        await Promise.all([...repositories.values()].map(async repository => {
+          const tree: Tree = { scratch: this.scratchFor(repository) };
+          tree.scratch.users++; snapshot.trees.set(repository.root, tree);
+          tree.hash = await tree.scratch.tree(signal);
+        }));
         signal.throwIfAborted();
-      }));
+      });
       snapshot.taking = false;
       if (snapshot.dropped) { await this.discard(snapshot); return; }
       if (!snapshot.trees.size) { this.snapshots.delete(key); return; }
@@ -267,7 +441,7 @@ export class ToolChanges {
         if (!snapshot.result) { this.snapshots.delete(key); void this.discard(snapshot).catch(() => {}); }
       }, 30 * 60_000);
       snapshot.expiry.unref();
-    } catch (error) { this.failed(key, error); if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
+    } catch (error) { this.failed(conversation, key, error, snapshot.roots); if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
   }
 
   /** Forget the snapshot of a tool call whose PreToolUse callback gave up
@@ -300,19 +474,26 @@ export class ToolChanges {
     snapshot.result ??= this.compute(snapshot);
     let files: ChangedFile[];
     try { files = await snapshot.result; }
-    catch (error) { this.snapshots.delete(key); throw this.failed(key, error); }
+    catch (error) {
+      if (this.snapshots.get(key) === snapshot) { this.snapshots.delete(key); this.failed(conversation, key, error, snapshot.roots); }
+      const failure = this.failures.get(key);
+      if (failure) throw failure;
+      return;
+    }
     if (this.snapshots.get(key) === snapshot) {
       this.snapshots.delete(key); await this.record(conversation, toolUseId, files);
+      // Capture works again for these repositories: a later breakage there is news worth one more row.
+      for (const root of snapshot.roots) this.reported.delete(`${conversation}\0${root}`);
     }
   }
   private async compute(snapshot: Snapshot): Promise<ChangedFile[]> {
     try {
       return await this.budget(async signal => {
+        const trees = [...snapshot.trees.entries()];
+        const after = await Promise.all(trees.map(([, tree]) => tree.scratch.tree(signal)));
         const files = await capturePool.run(signal, async () => {
           const found: ChangedFile[] = [];
-          for (const [root, before] of snapshot.trees) {
-            found.push(...await treeDiff(root, before.hash, await treeHash(root, before.env, signal), before.env, signal));
-          }
+          for (const [i, [root, tree]] of trees.entries()) found.push(...await treeDiff(root, tree.hash!, after[i], tree.scratch.env, signal));
           return found;
         });
         // A file another agent's edit named during this call is its change,

@@ -94,11 +94,57 @@ it("sees a same-size rewrite made in the instant the index last read the file", 
   expect(await files("codex:a", "rewrite")).toEqual(["README.md"]);
 });
 
-it("surfaces a failed post-tool Git read instead of recording a clean result", async () => {
+it("records an edited, a new untracked and a deleted file in one shell call", async () => {
+  await writeFile(path.join(repo, "gone.txt"), "bye\n");
+  await exec("git", ["-C", repo, "add", "gone.txt"]);
+  await exec("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", repo, "commit", "-qm", "gone"]);
+  await changes.before("codex:a", "sh", repo, "./script.sh");
+  await writeFile(path.join(repo, "README.md"), "hello again\n");
+  await writeFile(path.join(repo, "new.txt"), "new\n");
+  await rm(path.join(repo, "gone.txt"));
+  await changes.after("codex:a", "sh");
+  const found = (await changes.view("codex:a").changes("sh"))?.map(file => [file.path, file.status]);
+  expect(found).toEqual([["README.md", "M"], ["gone.txt", "D"], ["new.txt", "A"]]);
+});
+
+it("surfaces a failed post-tool Git read once per conversation instead of recording a clean result", async () => {
   await changes.before("codex:a", "broken", repo, "format");
+  await changes.before("codex:a", "broken-again", repo, "format");
+  await changes.before("codex:b", "broken", repo, "format");
   await writeFile(path.join(repo, ".git/index"), "corrupt index");
   await expect(changes.after("codex:a", "broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
   await expect(changes.view("codex:a").changes("broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+  // The same breakage on a later call of that conversation is not repeated on its row.
+  await changes.after("codex:a", "broken-again");
+  await expect(changes.view("codex:a").changes("broken-again")).resolves.toBeUndefined();
+  // Another conversation is told once too.
+  await expect(changes.after("codex:b", "broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+});
+
+it("reports a broken repository once per conversation even when another checkout succeeds", async () => {
+  const healthy = path.join(home, "healthy");
+  const git = (...args: string[]) => exec("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", healthy, ...args]);
+  await exec("git", ["init", "-q", "-b", "main", healthy]);
+  await writeFile(path.join(healthy, "README.md"), "hello\n");
+  await git("add", "."); await git("commit", "-qm", "start");
+
+  // The broken checkout captures its start state, then its index is corrupted.
+  await changes.before("codex:a", "broken-1", repo, "format");
+  await writeFile(path.join(repo, ".git/index"), "corrupt index");
+  await expect(changes.after("codex:a", "broken-1")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+
+  // A healthy checkout captures successfully and must not clear the broken one.
+  await changes.before("codex:a", "healthy", healthy, "format");
+  await writeFile(path.join(healthy, "a.txt"), "a\n");
+  await expect(changes.after("codex:a", "healthy")).resolves.toBeUndefined();
+
+  // The broken checkout's error is not shown again.
+  await rm(path.join(repo, ".git/index"));
+  await exec("git", ["-C", repo, "reset", "-q"]);
+  await changes.before("codex:a", "broken-2", repo, "format");
+  await writeFile(path.join(repo, ".git/index"), "corrupt index");
+  await expect(changes.after("codex:a", "broken-2")).resolves.toBeUndefined();
+  await expect(changes.view("codex:a").changes("broken-2")).resolves.toBeUndefined();
 });
 
 it("reports the capture file cap instead of returning an apparently complete subset", async () => {

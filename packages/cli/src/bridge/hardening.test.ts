@@ -104,8 +104,9 @@ describe("isolated and bounded changes", () => {
       expect(JSON.stringify(page)).not.toContain("SECRET");
       expect((await changes.view("codex:write").changes("write-call"))?.map(f => f.path)).toEqual(["created.txt"]);
       expect((await changes.view("codex:write").changes("shell-call"))?.find(f => f.path === ".env")).toMatchObject({ redacted: true, patch: "" });
-      expect(await readdir(path.join(home, "bridge/changes-scratch"))).toEqual([]);
     } finally { await changes.close(); }
+    // Scratch (untracked contents included) is gone once the Hook closes.
+    expect(await readdir(path.join(home, "bridge/changes-scratch"))).toEqual([]);
   });
   it("does not change real object counts or index while capturing untracked files, and removes scratch", async () => {
     const dir = await repo("repo"), objects = path.join(dir, ".git/objects"), index = path.join(dir, ".git/index");
@@ -119,8 +120,8 @@ describe("isolated and bounded changes", () => {
     await changes.after("c", "t");
     expect((await changes.view("c").changes("t"))?.[0].patch).toContain("+untracked after");
     expect(await fileCount(objects)).toBe(before); expect(await readFile(index)).toEqual(indexBefore);
-    expect(await readdir(path.join(home, "bridge/changes-scratch"))).toEqual([]);
     await changes.close();
+    expect(await readdir(path.join(home, "bridge/changes-scratch"))).toEqual([]);
   });
   it("isolates linked worktrees too", async () => {
     const dir = await repo("main"), worktree = path.join(home, "worktree");
