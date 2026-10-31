@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.64] - 2026-10-30
+
+### Fixed
+
+- Launching a projectless agent from the phone right after the Hook started could fail with "could not complete this request": the launch needed the store folder that startup was still creating. It now creates the folder itself.
+- On Windows, saving a task or finding could fail with `EPERM` when another process was reading `tasks.md` or `FINDINGS.md` at that moment. The write now retries the rename briefly, and removes its temporary file if it gives up.
+- On Windows, taking a store lock (such as the owner inbox's) could fail with `EPERM` when the previous holder released it at the same moment. It now retries for a bounded time.
+
 ## [0.3.63] - 2026-10-30
 
 ### Fixed
