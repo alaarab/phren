@@ -807,7 +807,11 @@ export class AccountUsageReader {
       const withCredit = credit.length ? { ...usage, windows: [...usage.windows, ...credit], ...(apiCredit ? { apiCredit } : {}), message: undefined, updatedAt: usage.updatedAt ?? now.toISOString() } : usage;
       return { ...withCredit, ...(subscription ? { subscription } : {}), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
     };
-    const [codexValue, claude, subscription] = await Promise.all([codex, Promise.all(homes.map(claudeRow)), readCodexSubscription(undefined, new Date(this.now()))]);
+    const [codexValue, rows, subscription] = await Promise.all([codex, Promise.all(homes.map(claudeRow)), readCodexSubscription(undefined, new Date(this.now()))]);
+    // Two homes signed in to one login are one allowance: one row, the first
+    // (default) home's. Phones refuse an answer with two rows of one key.
+    const keys = new Set<string>();
+    const claude = rows.filter(row => !row.account?.key || (!keys.has(row.account.key) && Boolean(keys.add(row.account.key))));
     return [{ ...codexValue, ...(subscription ? { subscription } : {}), account: CODEX_ACCOUNT }, ...claude];
   }
   /** ElevenLabs is read only when the caller shows it: every read spends a request against the key's quota. */

@@ -512,6 +512,14 @@ describe("Claude accounts in usage", () => {
     expect(row.account?.key).toMatch(/^claude:[0-9a-f]{12}$/);
     expect(usage.accounts.find(a => a.account?.id === "work")!.account).not.toHaveProperty("email");
   });
+  it("sends one row when two homes are signed in to the same login, the default home's", async () => {
+    const login = JSON.stringify({ oauthAccount: { accountUuid: "uuid-1", emailAddress: "me@example.com" } });
+    await writeFile(path.join(home, ".claude.json"), login);
+    await writeFile(path.join(home, ".claude-work", ".claude.json"), login);
+    const usage = await reader("linux", async (date, h) => claudeUsage({ rate_limits: { five_hour: { used_percentage: h.id === "work" ? 70 : 10 } } }, date)).read(undefined, true);
+    const claude = usage.accounts.filter(a => a.source === "claude");
+    expect(claude.map(a => [a.account?.id, a.windows[0].usedPercent])).toEqual([["default", 10]]);
+  });
   it("reports a window past its reset as reset without its old percent, and drops reports older than three days", () => {
     const day = 86_400_000, at = Date.parse("2026-09-26T16:18:46.273Z");
     const saved = { source: "claude" as const, origin: "status-line" as const, updatedAt: new Date(at).toISOString(), windows: [
