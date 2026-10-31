@@ -458,10 +458,12 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // mkdtemp keeps simultaneous chats with the same title isolated.
   let scratch: string | undefined;
   if (agentFolder) {
-    const store = await realpath(defaultPhrenPath());
     // Runtime folders are excluded from project discovery and store sync.
+    // Created before resolving the store: it may not exist yet, on a
+    // computer without one or before the Hook's own startup made it.
+    await mkdir(path.join(defaultPhrenPath(), ".runtime"), { recursive: true, mode: 0o700 });
+    const store = await realpath(defaultPhrenPath());
     const runtime = path.join(store, ".runtime");
-    await mkdir(runtime, { recursive: true, mode: 0o700 });
     if (await realpath(runtime) !== runtime) throw new BridgeError(403, "The runtime folder must be inside the Phren directory.");
     const agents = path.join(runtime, "agents");
     await mkdir(agents, { recursive: true, mode: 0o700 });
