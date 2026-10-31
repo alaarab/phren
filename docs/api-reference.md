@@ -1697,8 +1697,10 @@ budget; expiry aborts active Git processes and stops further commands with
 limits; write operations are not retried or covered by this read deadline.
 A no-index diff's exit 1 is accepted only without diagnostics or a termination
 signal; a disappeared/unreadable file is an error. The Hook never deletes
-`index.lock`. Tool-call change capture also exposes failed or timed-out collection (`git-capture-failed`)
-instead of recording an empty success. Transcript tool results remain visible
+`index.lock`. Tool-call change capture exposes a failed collection (`git-capture-failed`, such as Git
+missing or a corrupt repository) instead of recording an empty success, on the
+first tool call it hits in a conversation only. A capture that runs out of its
+hook budget records no changes and no error. Transcript tool results remain visible
 and carry `phren_change_errors: {toolUseId: {error, code}}` when capture fails;
 clients can show that message beside the result. Its patch rows add `binary` and
 `truncated`, and more than 40 changed files is an explicit output-limit error.
