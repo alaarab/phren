@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `phren pair`: when two phones typed the code at once and the first was allowed, the second could still be asked about, and refused, while the first phone's key was being written. Pairing now closes the moment a phone is allowed, so the second phone is told pairing is closed and never asked.
+
 ## [0.3.62] - 2026-10-30
 
 ### Added
