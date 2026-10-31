@@ -80,6 +80,8 @@ function until<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 
 /** One tree read of a repository and the calls waiting for it. */
 interface Read { result: Promise<string>; waiting: number; controller: AbortController }
+/** One repository lookup and the calls waiting for it. */
+interface Lookup { result: Promise<Repository | undefined>; waiting: number; controller: AbortController }
 /** What a capture needs to know about one repository. */
 interface Repository { root: string; objects: string; index: string }
 
@@ -205,7 +207,7 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
  * (its PreToolUse callback gave up, so the tool ran meanwhile) has no true
  * before-state to diff against. */
 interface Tree { scratch: Scratch; hash?: string }
-interface Snapshot { at: number; conversation: string; own: Set<string>; trees: Map<string, Tree>; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout; taking?: boolean; dropped?: boolean }
+interface Snapshot { at: number; conversation: string; own: Set<string>; trees: Map<string, Tree>; roots: string[]; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout; taking?: boolean; dropped?: boolean }
 /** Files one tool call named in its own input (an Edit's file_path, a patch's
  * headers), from its start to its end. Another conversation's claim over a
  * file keeps that file out of a shell call's diff taken over the same time. */
@@ -280,9 +282,9 @@ export class ToolChanges {
   private controllers = new Set<AbortController>();
   private claims: Claim[] = [];
   private failures = new Map<string, Error>();
-  /** Conversations already shown that Git could not capture changes. */
+  /** Conversation and repository root pairs already shown that Git could not capture changes. */
   private reported = new Set<string>();
-  private repositories = new Map<string, { at: number; repository: Promise<Repository | undefined> }>();
+  private repositories = new Map<string, { at: number; lookup: Lookup }>();
   private scratches = new Map<string, Scratch>();
   private closing = new AbortController();
   /** The failure to show on this call's row, if any. A capture that ran out of
@@ -291,13 +293,18 @@ export class ToolChanges {
    * status. A broken capture (Git missing, a corrupt repository) shows on the
    * first call it hits in a conversation, not on every later one. A per-call
    * limit (too many files) shows on its own call. */
-  private failed(conversation: string, key: string, error: unknown): Error | undefined {
+  private failed(conversation: string, key: string, error: unknown, roots: readonly string[] = []): Error | undefined {
     if (timedOut(error)) return undefined;
     const failure = error instanceof BridgeError ? error : new BridgeError(503, "Git change capture failed. Refresh repository Changes for the current status.", { code: "git-capture-failed" });
     if (failure.details?.code === "git-capture-failed") {
-      if (this.reported.has(conversation)) return undefined;
-      if (this.reported.size >= 512) this.reported.delete(this.reported.keys().next().value!);
-      this.reported.add(conversation);
+      // A breakage is news once per repository: a healthy checkout's capture
+      // must not let a corrupt sibling repo report its error again.
+      const marks = roots.length ? [...new Set(roots)].map(root => `${conversation}\0${root}`) : [`${conversation}\0`];
+      if (marks.every(mark => this.reported.has(mark))) return undefined;
+      for (const mark of marks) {
+        if (this.reported.size >= 512) this.reported.delete(this.reported.keys().next().value!);
+        this.reported.add(mark);
+      }
     }
     if (this.failures.size >= 512) this.failures.delete(this.failures.keys().next().value!);
     this.failures.set(key, failure);
@@ -324,6 +331,8 @@ export class ToolChanges {
   }
   async close() {
     for (const controller of this.controllers) controller.abort();
+    for (const { lookup } of this.repositories.values()) lookup.controller.abort();
+    this.repositories.clear();
     this.closing.abort();
     for (const snapshot of this.snapshots.values()) { await snapshot.result?.catch(() => {}); await this.discard(snapshot); }
     this.snapshots.clear();
@@ -347,21 +356,35 @@ export class ToolChanges {
     const dir = (await stat(real)).isDirectory() ? real : path.dirname(real), checkout = await checkoutOf(dir);
     if (!checkout) return undefined;
     const now = Date.now(), known = this.repositories.get(checkout);
-    if (known && now - known.at < REPOSITORY_TTL) return until(known.repository, signal);
+    // A lookup every caller gave up on is not reused: a new call starts a fresh one.
+    if (known && now - known.at < REPOSITORY_TTL && !known.lookup.controller.signal.aborted) return this.awaitRepository(known.lookup, signal);
     if (this.repositories.size >= 256) this.repositories.clear();
+    // The lookup belongs to the repository, not to whichever call asked first:
+    // it stops only once every call waiting for it has given up.
+    const lookup: Lookup = { waiting: 0, controller: new AbortController(), result: Promise.resolve(undefined) };
+    this.repositories.set(checkout, { at: now, lookup });
     // Asked from the target's own folder, so Git's discovery limits (GIT_CEILING_DIRECTORIES) still apply.
-    const repository = capturePool.run(signal, async () => {
-      const [root, objects, index] = (await git(dir, ["rev-parse", "--show-toplevel", "--git-path", "objects", "--git-path", "index"], {}, signal)).split(/\r?\n/);
+    const repository = capturePool.run(lookup.controller.signal, async () => {
+      const [root, objects, index] = (await git(dir, ["rev-parse", "--show-toplevel", "--git-path", "objects", "--git-path", "index"], {}, lookup.controller.signal)).split(/\r?\n/);
       return { root: await realpath(root), objects: await realpath(path.resolve(dir, objects)), index: path.resolve(dir, index) };
     }).catch(error => {
       if (/not a git repository/.test(String((error as { stderr?: string }).stderr))) return undefined;
       // Asked again next time rather than remembered.
-      if (this.repositories.get(checkout)?.repository === repository) this.repositories.delete(checkout);
+      if (this.repositories.get(checkout)?.lookup === lookup) this.repositories.delete(checkout);
       throw error;
     });
+    lookup.result = repository;
     repository.catch(() => {});
-    this.repositories.set(checkout, { at: now, repository });
-    return until(repository, signal);
+    return this.awaitRepository(lookup, signal);
+  }
+
+  /** Wait for a shared repository lookup, dropping this caller's interest when
+   * it gives up; the lookup is stopped only when no caller is left. */
+  private awaitRepository(lookup: Lookup, signal: AbortSignal): Promise<Repository | undefined> {
+    lookup.waiting++;
+    return until(lookup.result, signal).finally(() => {
+      if (--lookup.waiting === 0 && signal.aborted) lookup.controller.abort();
+    });
   }
 
   /** The scratch a new snapshot of `repository` reads into. */
@@ -391,7 +414,7 @@ export class ToolChanges {
     const claimed = await Promise.all(claimedPaths(input, cwd).map(realPathOf));
     this.claim(conversation, toolUseId, claimed);
     if (this.snapshots.size >= 64 || this.snapshots.has(key)) return;
-    const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map(), taking: true };
+    const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map(), roots: [], taking: true };
     this.snapshots.set(key, snapshot);
     try {
       await this.budget(async signal => {
@@ -402,6 +425,7 @@ export class ToolChanges {
           if (repositories.size >= 6) break;
           const repository = await this.repositoryOf(target, cwd, signal); if (repository) repositories.set(repository.root, repository);
         }
+        snapshot.roots = [...repositories.keys()];
         await Promise.all([...repositories.values()].map(async repository => {
           const tree: Tree = { scratch: this.scratchFor(repository) };
           tree.scratch.users++; snapshot.trees.set(repository.root, tree);
@@ -417,7 +441,7 @@ export class ToolChanges {
         if (!snapshot.result) { this.snapshots.delete(key); void this.discard(snapshot).catch(() => {}); }
       }, 30 * 60_000);
       snapshot.expiry.unref();
-    } catch (error) { this.failed(conversation, key, error); if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
+    } catch (error) { this.failed(conversation, key, error, snapshot.roots); if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
   }
 
   /** Forget the snapshot of a tool call whose PreToolUse callback gave up
@@ -451,15 +475,15 @@ export class ToolChanges {
     let files: ChangedFile[];
     try { files = await snapshot.result; }
     catch (error) {
-      if (this.snapshots.get(key) === snapshot) { this.snapshots.delete(key); this.failed(conversation, key, error); }
+      if (this.snapshots.get(key) === snapshot) { this.snapshots.delete(key); this.failed(conversation, key, error, snapshot.roots); }
       const failure = this.failures.get(key);
       if (failure) throw failure;
       return;
     }
     if (this.snapshots.get(key) === snapshot) {
       this.snapshots.delete(key); await this.record(conversation, toolUseId, files);
-      // Capture works again: a later breakage is news worth one more row.
-      this.reported.delete(conversation);
+      // Capture works again for these repositories: a later breakage there is news worth one more row.
+      for (const root of snapshot.roots) this.reported.delete(`${conversation}\0${root}`);
     }
   }
   private async compute(snapshot: Snapshot): Promise<ChangedFile[]> {
