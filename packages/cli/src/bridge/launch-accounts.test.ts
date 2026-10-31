@@ -69,6 +69,22 @@ describe("launching under a Claude account", () => {
     } finally { setChoiceReaders({}); }
   });
 
+  it("keeps a launch that names no account to its project's pools, and refuses with 409 account_pool before creating a pane when none fits", async () => {
+    const store = path.join(home, "store");
+    mkdirSync(path.join(store, "client-a"), { recursive: true });
+    writeFileSync(path.join(store, "client-a", "phren.project.yaml"), "allowedPools: [client-a]\n");
+    vi.stubEnv("PHREN_PATH", store);
+    const pooled = (): HarnessInventory => { const value = inventory(); value.harnesses[0].accounts![1].pool = "client-a"; return value; };
+    const usage = (id: string, used: number): AccountUsage => ({ source: "claude", account: { id, label: id, key: id }, windows: [{ id: "five_hour", name: "5-hour", usedPercent: used, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }] });
+    setChoiceReaders({ usage: async () => [usage("default", 0), usage("work", 90)], inventory: async () => pooled() });
+    try {
+      expect(await launchSession("default", { cwd, label: "A", kind: "claude", project: "client-a" })).toMatchObject({ account: "work" });
+      setChoiceReaders({ usage: async () => [], inventory: async () => inventory() });
+      await expect(launchSession("default", { cwd, label: "B", kind: "claude", project: "client-a" })).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+      expect(placements).toHaveLength(1);
+    } finally { setChoiceReaders({}); }
+  });
+
   it("launches unchanged without an account, and for the default account", async () => {
     const plain = await launchSession("default", { cwd, label: "A", kind: "claude" });
     expect(plain).not.toHaveProperty("account");

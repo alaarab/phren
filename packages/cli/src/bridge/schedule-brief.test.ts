@@ -31,7 +31,8 @@ async function run(launched: Json): Promise<Json[]> {
 // Harness audit §4.1: a scheduled run's prompt goes with the launch like a dispatch brief.
 it("offers the prompt with the launch and types nothing when the harness took it", async () => {
   const calls = await run({ briefLaunched: true });
-  expect(calls[0]).toMatchObject({ kind: "codex", brief: { id: runId, text: "Run the test suite." } });
+  // The project goes too, so the launch keeps to its pools when it picks a Claude account.
+  expect(calls[0]).toMatchObject({ kind: "codex", project: "demo", brief: { id: runId, text: "Run the test suite." } });
   expect(typed).toEqual([]);
 });
 

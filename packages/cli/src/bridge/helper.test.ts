@@ -41,7 +41,7 @@ const config = (text: string) => writeFileSync(path.join(store, "client-a/phren.
 const READ_ONLY = ["--strict-mcp-config", "--permission-mode", "default", "--disallowedTools", "Bash,Edit,MultiEdit,Write,NotebookEdit"];
 
 describe.skipIf(process.platform === "win32")("helper runs", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     home = mkdtempSync(path.join(tmpdir(), "phren-helper-"));
     store = path.join(home, "store"); bin = path.join(home, "bin"); work = path.join(home, "work");
     vi.stubEnv("HOME", home); vi.stubEnv("CLAUDE_CONFIG_DIR", ""); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
@@ -49,6 +49,7 @@ describe.skipIf(process.platform === "win32")("helper runs", () => {
     for (const dir of [path.join(home, ".claude"), path.join(home, ".claude-api"), path.join(store, "client-a"), bin, work]) mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(home, ".claude-api", ".claude.json"), "{}");
     writeFileSync(path.join(bin, "claude"), FAKE); chmodSync(path.join(bin, "claude"), 0o755);
+    await setAccountSettings("api", { role: "helpers" }); await setAccountSettings("default", { role: "helpers" });
   });
   afterEach(() => { vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
 
@@ -59,10 +60,14 @@ describe.skipIf(process.platform === "win32")("helper runs", () => {
     config("helper: { account: api, model: 'haiku; rm' }\n");
     expect(() => helperFor(store, "client-a")).toThrow(/helper.model/);
     config("helper: { account: api }\n");
-    expect(helperFor(store, "client-a")).toMatchObject({ account: "api", model: "haiku" });
+    await setAccountSettings("api", { role: null });
+    expect(() => helperFor(store, "client-a")).toThrow(/role is not set: a helper runs only under an account with role helpers/);
     await setAccountSettings("api", { role: "off" });
     expect(() => helperFor(store, "client-a")).toThrow(/role is off/);
+    await setAccountSettings("api", { role: "last-resort" });
+    expect(() => helperFor(store, "client-a")).toThrow(/role is last-resort/);
     await setAccountSettings("api", { role: "helpers" });
+    expect(helperFor(store, "client-a")).toMatchObject({ account: "api", model: "haiku" });
     setProjectAllowedPools(store, "client-a", ["client-a"]);
     expect(() => helperFor(store, "client-a")).toThrow(/api \(no pool\) is not in project client-a's allowed pools: client-a/);
     await setAccountSettings("api", { pool: "client-a" });

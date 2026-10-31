@@ -11,7 +11,11 @@ import { logger } from "../logger.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { claudeHomes, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { harnessInventoryWithin, type HarnessInventory } from "./harnesses.js";
-import { atomic, bridgeRoot } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot } from "./protocol.js";
+import { choosePolicyAccount, computerRule, policyApplies, projectRule, withPolicy, type PoolRule } from "./account-policy.js";
+import { accountPolicy } from "./account-pools.js";
+import { phrenStoreRoot } from "./transcripts.js";
+import { detectProject } from "../shared/index.js";
 import type { AccountUsage, UsageWindow } from "./usage.js";
 
 /** One window's room: percent left, and when it resets. A window whose reset has passed is full again. */
@@ -153,26 +157,61 @@ async function within<T>(ms: number, value: Promise<T>): Promise<T | undefined> 
   try { return await Promise.race([value.catch(() => undefined), late]); } finally { clearTimeout(timer); }
 }
 
+/** Whose pools a launch keeps to: its project (by name, else the project whose checkout holds `cwd`). */
+export interface PickScope { project?: string; cwd?: string; phrenPath?: string }
+
+function scopeRule(scope: PickScope): PoolRule | undefined {
+  const store = scope.phrenPath ?? phrenStoreRoot();
+  let project = scope.project;
+  if (!project && scope.cwd) { try { project = detectProject(store, scope.cwd) ?? undefined; } catch { /* No store here: no project rule. */ } }
+  return project ? projectRule(store, project) : undefined;
+}
+
 /**
  * The account a Claude launch that names none runs under on this computer, or
- * undefined to launch as before (`default`): only when more than one account is
- * signed in here and their room can be read. Logged with the reason.
+ * undefined to launch as before (`default`). With no pool, role or Console login
+ * in play: only when more than one account is signed in here and their room can
+ * be read. Otherwise as dispatch picks (account-policy.ts): the project's and this
+ * computer's pools, never `off`, `last-resort` last; 409 `account_pool` when no
+ * account fits. Logged with the reason.
  */
-export async function pickClaudeAccount(what: string, computer = "this computer", now = Date.now()): Promise<AccountChoice | undefined> {
+export async function pickClaudeAccount(what: string, scope: PickScope = {}, computer = "this computer", now = Date.now()): Promise<AccountChoice | undefined> {
   if (!usageReader) return undefined;
-  // One Claude home means nothing to choose. Checking the folders first keeps a
-  // launch from running `claude auth status` against the config it is about to
-  // pretrust: that process can write .claude.json back over the new trust entry.
-  if (!inventoryReader && claudeHomes().length < 2) return undefined;
+  const project = scopeRule(scope);
+  // One Claude home and no rule that could refuse it means nothing to choose. Checking the folders first keeps a
+  // launch from running `claude auth status` against the config it is about to pretrust: that process can write
+  // .claude.json back over the new trust entry.
+  if (!inventoryReader && claudeHomes().length < 2 && !project?.pools && !localPolicyApplies()) return undefined;
   const inventory = await within(2_500, (inventoryReader ?? (() => harnessInventoryWithin(2_500)))());
-  const rooms = claudeRooms(inventory, [], now);
-  if (rooms.filter(room => room.usable !== false).length < 2) return undefined;
-  const usage = await within(2_500, usageReader());
-  if (!usage) return undefined;
-  const { choice, skipped } = chooseAccount(claudeRooms(inventory, usage, now), limitedBy(await readAccountLimits(now), computer));
-  if (choice) logger.info("accounts", `${what}: Claude account ${choice.account}, ${choice.reason}.`);
-  else logger.info("accounts", `${what}: no Claude account has room (${skipped.join("; ")}); launching under default.`);
+  const entry = inventory?.harnesses.find(item => item.source === "claude");
+  const rules = [...(project ? [project] : []), computerRule(computer, entry?.allowedPools, entry?.poolsUnreadable === true)];
+  const policyRooms = (usage: readonly AccountUsage[]) => claudeRooms(inventory, usage, now).map(room => withPolicy(room, entry?.accounts?.find(item => item.id === room.account)));
+  if (!policyApplies(policyRooms([]), rules)) {
+    if (policyRooms([]).filter(room => room.usable !== false).length < 2) return undefined;
+    const usage = await within(2_500, usageReader());
+    if (!usage) return undefined;
+    const { choice, skipped } = chooseAccount(claudeRooms(inventory, usage, now), limitedBy(await readAccountLimits(now), computer));
+    if (choice) logger.info("accounts", `${what}: Claude account ${choice.account}, ${choice.reason}.`);
+    else logger.info("accounts", `${what}: no Claude account has room (${skipped.join("; ")}); launching under default.`);
+    return choice;
+  }
+  // Unknown room ranks last, so a slow usage read still leaves the policy to choose.
+  const usage = await within(2_500, usageReader()) ?? [];
+  const { choice, skipped } = choosePolicyAccount(policyRooms(usage), rules, limitedBy(await readAccountLimits(now), computer));
+  if (!choice) {
+    throw new BridgeError(409, `No Claude account on ${computer} may do this work${skipped.length ? `: ${skipped.join("; ")}` : ""}.`.slice(0, 500),
+      { code: "account_pool", skipped });
+  }
+  logger.info("accounts", `${what}: Claude account ${choice.account}, ${choice.reason}.`);
   return choice;
+}
+
+/** Whether this computer's accounts.yaml sets a pool, role or allowed pools (an unreadable one counts). */
+function localPolicyApplies(): boolean {
+  try {
+    const policy = accountPolicy();
+    return Boolean(policy.allowedPools) || Object.values(policy.settings).some(item => item.pool || item.role);
+  } catch { return true; }
 }
 
 // ── The switch ───────────────────────────────────────────────────────────────
