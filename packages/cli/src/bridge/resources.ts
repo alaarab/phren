@@ -8,6 +8,7 @@ import { recentServers, sharedSnapshot } from "./herdr.js";
 import { JobRegistry, jobPgids, paneKey, type CleanupReport, type JobSource, type ProcessLike, type TrackedJob } from "./job-registry.js";
 import { intervalFromEnv } from "./limits.js";
 import { objects } from "./protocol.js";
+import { MachineHealth, type HealthFinding } from "./machine-health.js";
 
 const exec = promisify(execFile);
 
@@ -62,6 +63,8 @@ export interface ComputerResources {
   pressure: { cpu: number; memory: number; disk: number; overall: number };
   level: "ok" | "busy" | "stressed";
   warnings: Array<"load-high" | "memory-low" | "disk-low" | "battery-low">;
+  /** Named health findings with severity and a fix (machine-health.ts), worst first. */
+  health?: HealthFinding[];
 }
 
 /** What the computer is, read once per Hook run: "MacBook Pro", "Apple M1 Max",
@@ -421,6 +424,8 @@ export interface ResourceDeps {
   panes: () => Promise<{ panes: Set<string>; servers: Set<string> } | undefined>;
   hardware?: () => Promise<ComputerHardware | undefined>;
   jobs?: JobSource;
+  /** Named findings for this read from the numbers and the process table. */
+  health?: (value: ComputerResources, rows: ProcessRow[]) => HealthFinding[];
 }
 
 export async function collectResources(deps: ResourceDeps): Promise<ComputerResources> {
@@ -452,7 +457,11 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
     memory, ...(disk ? { disk } : {}), ...(battery ? { battery } : {}), ...(hardware ? { hardware } : {}),
     heavy: owners.size || jobs.length ? heavyProcesses(rows, owners, jobs) : preliminary,
   };
-  return { ...value, ...assess(value) };
+  const result: ComputerResources = { ...value, ...assess(value) };
+  const check = deps.health;
+  if (!check) return result;
+  const health = (() => { try { return check(result, rows); } catch { return undefined; } })();
+  return health ? { ...result, health } : result;
 }
 
 /** One collection at a time, reused for `RESOURCES_MAX_AGE_MS`. */
@@ -463,7 +472,9 @@ export class ResourceMonitor {
   private readonly registry: JobSource;
   constructor(deps: Partial<ResourceDeps> = {}, private maxAgeMs = RESOURCES_MAX_AGE_MS) {
     this.registry = deps.jobs ?? new JobRegistry();
-    this.deps = { platform: process.platform, now: Date.now, home: homeDir, processes: processTable, owners: paneOwners, panes: livePanes, ...deps, jobs: this.registry };
+    const health = new MachineHealth();
+    this.deps = { platform: process.platform, now: Date.now, home: homeDir, processes: processTable, owners: paneOwners, panes: livePanes,
+      health: (value, rows) => health.assess(value, rows, this.deps.now()), ...deps, jobs: this.registry };
   }
   async read(): Promise<ComputerResources> {
     if (this.cached && this.deps.now() - this.cached.at < this.maxAgeMs) return this.cached.value;
