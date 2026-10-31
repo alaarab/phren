@@ -87,6 +87,8 @@ it("asks about typed phones one at a time, each answer for its own phone", async
   const body = (name: string) => ({ v: 1, publicKey, proof: pairingProof("ABC234", "phone", publicKey), name, typed: true });
   const [first, second] = await Promise.all([post(session.port, body("A")), post(session.port, body("B"))]);
   expect(most).toBe(1);
+  // Once one phone is allowed the other is never asked about, however long the key write takes.
+  expect(asked).toHaveLength(1);
   // The first answer allows one phone and pairing ends; the other gets nothing.
   expect([first.status, second.status].sort()).toEqual([200, 410]);
   const keys = await readFile(path.join(sshDirectory, "authorized_keys"), "utf8");
