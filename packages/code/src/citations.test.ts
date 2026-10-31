@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { grantAdmin, makeTempDir } from "../../cli/src/test-helpers.js";
 import { parseCitationComment, validateFindingCitation, type FindingCitation } from "../../cli/src/content/citation.js";
 import { indexProject } from "./indexer.js";
@@ -10,6 +10,10 @@ import { findingsCitingSymbol, symbolCandidates } from "./citations.js";
 import { register as registerCode } from "../../cli/src/tools/code.js";
 import { register as registerFinding } from "../../cli/src/tools/finding.js";
 import type { McpContext } from "../../cli/src/tools/types.js";
+
+// Each test's setup (and some tests) commits the fixtures with real Git and
+// indexes them, which takes 10-25x longer on the Windows runners than on Linux.
+vi.setConfig({ testTimeout: process.platform === "win32" ? 60_000 : 15_000, hookTimeout: process.platform === "win32" ? 60_000 : 10_000 });
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
 const PROJECT = "fixture";
