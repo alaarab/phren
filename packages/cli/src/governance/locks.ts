@@ -84,6 +84,7 @@ export function tryFileLock(filePath: string): (() => void) | null {
   const lockPath = filePath + ".lock";
   const owner = `${process.pid}\n${Date.now()}\n${Math.random()}`;
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  let refusedWithoutFile = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       fs.writeFileSync(lockPath, owner, { flag: "wx", mode: 0o600 });
@@ -97,13 +98,14 @@ export function tryFileLock(filePath: string): (() => void) | null {
       // Windows refuses to create a lock another process is deleting (still
       // open somewhere) with EPERM, EACCES or EBUSY: it is held, not broken.
       // With no lock file there, the delete may have finished since the
-      // create: try once more. Refused again with no file, the error is a
-      // real permission problem.
+      // create, and another process may lock and release again before the
+      // next create: try a few times without spending an attempt. Refused
+      // every time with no file, the error is a real permission problem.
       if (process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY")) {
         let present = true;
         try { fs.statSync(lockPath); } catch (statErr: unknown) { present = (statErr as NodeJS.ErrnoException).code !== "ENOENT"; }
         if (present) return null;
-        if (attempt === 0) continue;
+        if (++refusedWithoutFile < 5) { attempt--; continue; }
         throw err;
       }
       if (code !== "EEXIST") throw err;

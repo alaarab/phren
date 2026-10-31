@@ -63,7 +63,8 @@ describe("tryFileLock", () => {
       // by the time tryFileLock looked: no lock file, and nobody holds it.
       Object.defineProperty(process, "platform", { value: "win32" });
       fail.code = "EPERM";
-      fail.times = 1;
+      // Again on the retry: another process took and released it in between.
+      fail.times = 2;
       const release = tryFileLock(path.join(tmp.path, "owner-inbox.json"));
       expect(release).toBeTypeOf("function");
       expect(fs.existsSync(path.join(tmp.path, "owner-inbox.json.lock"))).toBe(true);
