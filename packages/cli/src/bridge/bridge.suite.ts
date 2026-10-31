@@ -2906,6 +2906,9 @@ schedules:
     });
 
     it("launches projectless agents in isolated Phren folders, reusing one launch id", async () => {
+      // A launch can arrive before the Hook's startup has created anything in
+      // the store, or on a computer with no store yet.
+      await rm(path.join(root, ".phren"), { recursive: true, force: true });
       const launchId = "a655a44e-5606-48bf-8a59-1daa237d8fae";
       const request = { label: "No project / ../ chat", kind: "claude", agentFolder: true, launchId, permissionMode: "auto-edits" };
       const first = await api("/v1/workspaces/launch?mux=herdr:default", request);
