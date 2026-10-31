@@ -49,6 +49,7 @@ import { PermissionModeSwitcher } from "./permission-mode.js";
 import { SideQuestions } from "./side-questions.js";
 import { AccountUsageReader } from "./usage.js";
 import { ResourceMonitor } from "./resources.js";
+import { ALERT_CHECK_MS, HealthAlerts } from "./machine-health-alerts.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -306,6 +307,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // Every store converges with its remote even when no agent session runs here (store-sync.ts).
   const storeSync = startStoreSyncLoop(scheduleStore);
   const canaryTimer = setInterval(() => { countTick("canary"); void dailyCanaryDue().then(due => due ? canary("daily") : undefined).catch(() => {}); }, 10 * 60_000);
+  // A new high machine health finding reaches the phone once (machine-health-alerts.ts).
+  const healthAlerts = new HealthAlerts(finding => agentHooks.push.notifyMachineHealth({ computer: hostname(), ...finding }));
+  const healthTimer = setInterval(() => { countTick("health"); void resources.read().then(value => healthAlerts.observe(value.health, Date.now())).catch(() => {}); }, ALERT_CHECK_MS);
   let recording = false;
   const activityTimer = setInterval(() => {
     countTick("activity");
@@ -352,7 +356,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

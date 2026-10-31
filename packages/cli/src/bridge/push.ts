@@ -39,6 +39,7 @@ type APNsConfig = z.infer<typeof configSchema>;
 
 export interface ApprovalPush { binding: string; provider: string; question: boolean; expiresAt: string;
   project?: string; computer?: string; request?: string; requestKind?: RequestKind }
+export interface MachineHealthPush { computer: string; id: string; title: string; detail: string; fix: string }
 export interface FanoutBlockedPush { job: string; label: string; provider: string; reason: string }
 export type SchedulePushKind = "scheduleStarted" | "scheduleFinished" | "scheduleFailed" | "scheduleBlocked";
 export interface SchedulePush {
@@ -90,6 +91,13 @@ export function fanoutBlockedPushPayload(value: FanoutBlockedPush): Record<strin
   return {
     aps: { alert: { title: `${value.label} blocked`, body: value.reason }, sound: "default", category: "PHREN_FANOUT" },
     phren: { kind: "fanoutBlocked", job: value.job, provider: value.provider, label: value.label, reason: value.reason },
+  };
+}
+
+export function machineHealthPushPayload(value: MachineHealthPush): Record<string, unknown> {
+  return {
+    aps: { alert: { title: `${value.computer}: ${value.title}`, body: `${value.detail} ${value.fix}`.trim() }, sound: "default", category: "PHREN_HEALTH" },
+    phren: { kind: "machineHealth", computer: value.computer, id: value.id, title: value.title, detail: value.detail, fix: value.fix, route: "resources" },
   };
 }
 
@@ -317,6 +325,14 @@ export class ApprovalPushService {
     if (!devices.length) return false;
     return (await Promise.all(devices.map(device => this.send(device, fanoutBlockedPushPayload(value), {
       expiration: "0", collapseId: `fanout-${value.job}`,
+    })))).some(Boolean);
+  }
+  /** A new high-severity machine health finding (machine-health-alerts.ts dedupes). */
+  async notifyMachineHealth(value: MachineHealthPush): Promise<boolean> {
+    const devices = this.reachable.filter(device => device.kinds.includes("approval"));
+    if (!devices.length) return false;
+    return (await Promise.all(devices.map(device => this.send(device, machineHealthPushPayload(value), {
+      expiration: "0", collapseId: `health-${value.id}`.slice(0, 64),
     })))).some(Boolean);
   }
   async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
