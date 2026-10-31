@@ -22,6 +22,7 @@ import {
   openCodeUsage,
   readClaudeToken,
   settleClaudeUsage,
+  oneRowPerLogin,
   readCodexLimits,
   readCopilotUsage,
   openCodeGoPlan,
@@ -511,6 +512,22 @@ describe("Claude accounts in usage", () => {
     expect(row.account).toMatchObject({ email: "me@example.com" });
     expect(row.account?.key).toMatch(/^claude:[0-9a-f]{12}$/);
     expect(usage.accounts.find(a => a.account?.id === "work")!.account).not.toHaveProperty("email");
+  });
+  it("sends one row when two homes are signed in to the same login, the default home's", async () => {
+    const login = JSON.stringify({ oauthAccount: { accountUuid: "uuid-1", emailAddress: "me@example.com" } });
+    await writeFile(path.join(home, ".claude.json"), login);
+    await writeFile(path.join(home, ".claude-work", ".claude.json"), login);
+    const usage = await reader("linux", async (date, h) => claudeUsage({ rate_limits: { five_hour: { used_percentage: h.id === "work" ? 70 : 10 } } }, date)).read(undefined, true);
+    const claude = usage.accounts.filter(a => a.source === "claude");
+    expect(claude.map(a => [a.account?.id, a.windows[0].usedPercent])).toEqual([["default", 10]]);
+    // Account choice still sees every home.
+    expect((await reader("linux", async date => claudeUsage({ rate_limits: { five_hour: { used_percentage: 1 } } }, date)).limits()).filter(a => a.source === "claude")).toHaveLength(2);
+  });
+  it("keeps the freshest report of a shared login under the first home's name", () => {
+    const row = (id: string, updatedAt: string | undefined, used?: number) => ({ source: "claude" as const, updatedAt,
+      windows: used === undefined ? [] : [{ id: "five_hour", name: "5-hour limit", usedPercent: used }], account: { id, label: id, key: "claude:abc" } });
+    const merged = oneRowPerLogin([row("default", "2026-09-20T00:00:00Z", 5), row("work", "2026-09-28T00:00:00Z", 40), row("spare", undefined)]);
+    expect(merged.map(a => [a.account?.id, a.updatedAt, a.windows[0]?.usedPercent])).toEqual([["default", "2026-09-28T00:00:00Z", 40]]);
   });
   it("reports a window past its reset as reset without its old percent, and drops reports older than three days", () => {
     const day = 86_400_000, at = Date.parse("2026-09-26T16:18:46.273Z");

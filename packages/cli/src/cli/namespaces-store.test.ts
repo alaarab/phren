@@ -17,6 +17,10 @@ vi.mock("../link/refresh.js", () => ({ refreshLinkedContext: relink.refresh }));
 
 import { handleStoreNamespace } from "./namespaces-store.js";
 
+// Real Git: each test runs dozens of git processes, which take 10-25x longer
+// on the Windows runners than on Linux (as store-sync.test.ts sizes it).
+vi.setConfig({ testTimeout: process.platform === "win32" ? 60_000 : 15_000 });
+
 const cleanups: Array<() => void> = [];
 
 afterEach(() => {

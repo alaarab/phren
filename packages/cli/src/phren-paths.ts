@@ -61,6 +61,28 @@ export interface AtomicWriteOptions {
   mode?: number;
 }
 
+/**
+ * Windows refuses to replace a file another process holds open (an MCP server
+ * or hook reading the same tasks.md or FINDINGS.md) with EPERM, EACCES or
+ * EBUSY, where POSIX replaces it atomically. Readers hold it for
+ * milliseconds, so retry briefly before giving up. bridge/protocol.ts does
+ * the same for the Hook's async writes. `from` is a temp file: when the
+ * rename fails for good it is removed, so no tmp file is left in the store.
+ */
+export function renameOverSync(from: string, to: string): void {
+  const waiter = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 0; ; attempt++) {
+    try { return fs.renameSync(from, to); } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (process.platform !== "win32" || attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code)) {
+        try { fs.unlinkSync(from); } catch { /* never written, or already gone */ }
+        throw error;
+      }
+      Atomics.wait(waiter, 0, 0, 5 * (attempt + 1));
+    }
+  }
+}
+
 export function atomicWriteText(filePath: string, content: string | Uint8Array, opts: AtomicWriteOptions = {}): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
@@ -70,7 +92,7 @@ export function atomicWriteText(filePath: string, content: string | Uint8Array, 
     // temp name is unguessable and freshly created, so this happens before any
     // other process can have the file open under its final name.
     if (opts.mode !== undefined && process.platform !== "win32") fs.chmodSync(tmpPath, opts.mode);
-    fs.renameSync(tmpPath, filePath);
+    renameOverSync(tmpPath, filePath);
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch {}
     throw err;

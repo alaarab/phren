@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { renameOverSync } from "./phren-paths.js";
 import { debugLog } from "./shared.js";
 import { withFileLock } from "./governance/locks.js";
 import { STOP_WORDS, errorMessage, extractKeywords, isValidProjectName } from "./utils.js";
@@ -707,7 +708,7 @@ function writePinnedTopics(phrenPath: string, project: string, pinnedTopics: Pro
     };
     const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2) + "\n");
-    fs.renameSync(tmpPath, configPath);
+    renameOverSync(tmpPath, configPath);
   });
   return { ok: true, pinnedTopics: pinned };
 }
@@ -749,7 +750,7 @@ export function writeProjectTopics(phrenPath: string, project: string, topics: P
     };
     const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2) + "\n");
-    fs.renameSync(tmpPath, configPath);
+    renameOverSync(tmpPath, configPath);
   });
   return { ok: true, topics: normalized };
 }
@@ -824,7 +825,7 @@ export function appendArchivedEntriesToTopicDoc(filePath: string, project: strin
     }
     const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpPath, existing.trimEnd() + "\n\n" + sections.join("\n"));
-    fs.renameSync(tmpPath, filePath);
+    renameOverSync(tmpPath, filePath);
   });
 }
 
@@ -838,7 +839,7 @@ export function ensureTopicReferenceDoc(phrenPath: string, project: string, topi
         if (fs.existsSync(filePath)) return;
         const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
         fs.writeFileSync(tmpPath, topicDocHeader(project, topic));
-        fs.renameSync(tmpPath, filePath);
+        renameOverSync(tmpPath, filePath);
       });
     }
     return { ok: true, path: filePath };

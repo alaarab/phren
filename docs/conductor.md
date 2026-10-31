@@ -1124,10 +1124,27 @@ phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
 
 Reading dispatch returns does not resolve inbox items. Automatic items resolve
 when their pane or session disappears or stops waiting, or their question is
-answered, checked on inbox reads and the Hook’s five-second tick. Manual items
-remain until the owner resolves them. Repeated observations update one item per
-pane, session and question. `live:true` requires a current source; unverified
-remote items are hidden during outages, without being resolved. Resolving does
+answered. This is checked on inbox reads and on the Hook's five-second tick.
+
+A dispatch on this computer is checked live, without SSH. A dispatch on another
+computer is not asked about on each tick:
+
+- While the returns loop watches it (24 hours), its item comes from what that
+  loop last observed and stored on the receipt, refreshed every 15 seconds. It
+  shows while the worker waits on an approval, is blocked, or stopped with a
+  question, and goes once the loop sees the worker back at work or gone. If
+  that computer can't be reached, the item keeps the last stored state.
+- After that, the inbox asks the computer about all such receipts in one
+  request at most once an hour, and waits out a failed request for an hour. An
+  item shows only while that answer confirms the wait. An unanswered one is
+  hidden, not resolved, so the owner can still read and dismiss it.
+
+A worker reported closed, or gone after the loop stopped watching it, has its
+receipt closed so it stops being checked at all. The exception is a return
+that is still unread, which stays open so a conductor taking over is handed
+it. Manual items remain until the owner resolves them. Repeated observations
+update one item per pane, session and question. `live:true` requires a current
+source; a dispatch whose worker can't be read is hidden, without being resolved. Resolving does
 not approve or answer an agent; a dismissed wait stays dismissed until it ends.
 The first read after upgrade retires legacy stale automatic items with
 `stale: source gone` and collapses duplicates. History remains available with

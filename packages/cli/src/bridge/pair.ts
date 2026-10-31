@@ -134,7 +134,7 @@ export async function startPairing(options: {
    */
   approve?: (phone: PairingApproval) => Promise<boolean>;
 }): Promise<PairingSession> {
-  let failures = 0, finished = false, timer: NodeJS.Timeout | undefined;
+  let failures = 0, finished = false, claimed = false, timer: NodeJS.Timeout | undefined;
   let approvals: Promise<unknown> = Promise.resolve();
   let resolve!: (paired: Paired) => void, reject!: (error: Error) => void;
   const done = new Promise<Paired>((yes, no) => { resolve = yes; reject = no; });
@@ -164,19 +164,25 @@ export async function startPairing(options: {
       if (input.typed) {
         // One question at a time, each bound to its own phone: a single answer
         // never allows two keys.
-        const ask = approvals.then(() => finished || incoming.socket.destroyed ? false
+        const ask = approvals.then(() => finished || claimed || incoming.socket.destroyed ? false
           : options.approve ? options.approve({ device: input.device, name: input.name, check: pairingCheckCode(keyFingerprint(publicKey)) }) : false);
         approvals = ask.catch(() => false);
         const allowed = await ask;
-        if (finished) throw new BridgeError(410, "Pairing is closed. Run phren pair again.");
+        if (finished || claimed) throw new BridgeError(410, "Pairing is closed. Run phren pair again.");
         // A phone that gave up while the question waited gets nothing written.
         if (incoming.socket.destroyed) return;
         if (!allowed) throw new BridgeError(403, "The computer didn't allow this phone. Run phren pair again and allow it there.");
       }
+      // Claimed before the key is written, so a phone queued behind this one is
+      // told pairing is closed rather than asked about while the write runs.
+      if (finished || claimed) throw new BridgeError(410, "Pairing is closed. Run phren pair again.");
+      claimed = true;
       const comment = input.device === "android" ? "phren-android" : "phren-iphone";
       const encoded = publicKey.split(" ")[1];
-      await appendAuthorizedKey(`restrict,pty,${forcedCommand} ${publicKey} ${comment}`,
-        existing => existing.split(/\s+/).includes(encoded), "This phone key is already authorized with different options.", options.sshDirectory);
+      try {
+        await appendAuthorizedKey(`restrict,pty,${forcedCommand} ${publicKey} ${comment}`,
+          existing => existing.split(/\s+/).includes(encoded), "This phone key is already authorized with different options.", options.sshDirectory);
+      } catch (error) { claimed = false; throw error; }
       reply(response, 200, {
         v: 1, name: options.name, user: options.user, sshPort: options.sshPort, fingerprint: options.fingerprint ?? null,
         proof: pairingProof(options.code, "computer", options.fingerprint ?? "", publicKey),

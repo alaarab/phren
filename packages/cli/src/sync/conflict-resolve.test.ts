@@ -1,11 +1,15 @@
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { pullAtSessionStart, recoverPushConflict } from "../cli/session-git.js";
 import { runtimeFile } from "../phren-paths.js";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 import { conflictStrategy } from "./conflict-resolve.js";
+
+// Real Git: each test runs dozens of git processes, which take 10-25x longer
+// on the Windows runners than on Linux (as store-sync.test.ts sizes it).
+vi.setConfig({ testTimeout: process.platform === "win32" ? 60_000 : 15_000 });
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });

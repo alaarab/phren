@@ -1339,13 +1339,12 @@ test.describe.serial("graph visualization e2e", () => {
     const activeProject = () =>
       page.locator(".phren-project-orb.active").first().getAttribute("data-project-id");
 
-    // Focus the canvas (not a text field) before sending keys. That click is a
-    // *background* click, and the renderer answers it with clearSelection()
-    // (graph/scene.ts onBackgroundClick) — asynchronously. When that landed
-    // after the first ArrowRight it wiped the focus the press had just set, so
-    // the second press started from nothing and re-selected the same project.
-    // Waiting for the clear makes both presses deterministic.
-    await page.locator("#graph-canvas").click({ position: { x: 5, y: 5 } });
+    // Keys must not land in a text field. Take focus away rather than clicking
+    // the canvas: the renderer handles a click on the next animation frame
+    // (three-render-objects), and on a slow software-GL frame that background
+    // click's clearSelection() ran after the first ArrowRight and wiped the
+    // focus it had just set.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await expect(page.locator(".phren-project-orb.active")).toHaveCount(0);
 
     await page.keyboard.press("ArrowRight");

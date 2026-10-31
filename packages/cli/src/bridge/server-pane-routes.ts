@@ -34,6 +34,7 @@ import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
 import { promptWithStartupRetry } from "./prompt-startup.js";
 import { sendServedPrompt, servedPane } from "./opencode-panes.js";
 import { claudeSuggestionShown } from "./claude-suggestion.js";
+import { claudeQueueAction, transcriptTail } from "./claude-queue.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
  * secrets, uploads, diffs, git, approvals and questions. A starting pane (no
@@ -431,7 +432,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
   const target = targetSchema.parse(data.target);
   // Uploads store bytes without answering or interrupting the agent.
   // They still require fresh identity, just like prompt mutations.
-  const sendsInput = ["/v1/prompt", "/v1/keys", "/v1/secret", "/v1/model", "/v1/settings", "/v1/agents/permission-mode"].includes(url.pathname);
+  const sendsInput = ["/v1/prompt", "/v1/prompt/queue", "/v1/keys", "/v1/secret", "/v1/model", "/v1/settings", "/v1/agents/permission-mode"].includes(url.pathname);
   if (sendsInput) { modelSwitcher.assertAvailable(target); settingsSwitcher.assertAvailable(target); permissionModeSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
   // A key press is how a prompt the agent draws in its terminal gets
   // answered, so keys are the one input allowed while the agent is
@@ -570,6 +571,18 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     if (!id) throw new BridgeError(400, "Name the message by its deliveryId.");
     // Bound to the pane: the conversation that took it may be a newer one.
     result = { ok: true, ...agentHooks.deliveries.status(id, target) };
+  } else if (url.pathname === "/v1/prompt/queue") {
+    // The messages a busy agent holds in its own queue: sent to the running
+    // turn now, or withdrawn unsent. Only Claude Code's queue can be reached;
+    // a pane the Hook types into for any other harness has none it can act on.
+    // The owner's words: an agent may not send or discard another pane's queue.
+    if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner sends or cancels queued messages, from the phone.");
+    const action = z.enum(["send-now", "withdraw"]).parse(data.action);
+    if (target.source !== "claude") throw new BridgeError(409, "Only Claude Code's queued messages can be sent now or withdrawn.", { code: "queue-unsupported" });
+    const guards = promptGuards(agentHooks, target);
+    const transcript = await targetTranscriptPath(target);
+    result = await claudeQueueAction(action, String(pane.agent_status), { held: guards.held!, screen: guards.screen!,
+      transcript: () => transcriptTail(transcript), sendKeys: keys => terminalProvider().sendKeys(target.server, target.pane, keys), sleep: ms => sleep(ms) });
   } else if (url.pathname === "/v1/side-question/dismiss") {
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
