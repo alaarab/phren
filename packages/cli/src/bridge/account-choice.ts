@@ -9,8 +9,8 @@ import { z } from "zod";
 import { readInstallPreferences } from "../init/preferences.js";
 import { logger } from "../logger.js";
 import { findPhrenPath } from "../phren-paths.js";
-import { claudeAuthStatus, claudeHomes, DEFAULT_ACCOUNT, type ClaudeHome } from "./claude-accounts.js";
-import { readLastKnown, rememberLogin, rememberPolicy, type KnownPolicy, type LastKnown, type LoginKind } from "./account-last-known.js";
+import { claudeAuthStatus, claudeHomes, claudeLoginFingerprint, DEFAULT_ACCOUNT, type ClaudeHome } from "./claude-accounts.js";
+import { knownLogin, readLastKnown, rememberLogin, rememberPolicy, type KnownPolicy, type LastKnown, type LoginKind } from "./account-last-known.js";
 import { harnessInventoryWithin, type HarnessInventory } from "./harnesses.js";
 import { atomic, BridgeError, bridgeRoot } from "./protocol.js";
 import { choosePolicyAccount, computerRule, policyApplies, projectRule, withPolicy, type PoolRule } from "./account-policy.js";
@@ -172,14 +172,16 @@ const AUTH_BUDGET_MS = 2_500;
 
 /** A home's login type: the probe's definitive answer, else the last one seen. Never waits past the budget. */
 async function loginKind(home: ClaudeHome, last: LastKnown): Promise<LoginKind | undefined> {
+  // The fingerprint names the login this probe is about: a later one makes this answer stale.
+  const fingerprint = claudeLoginFingerprint(home);
   const status = claudeAuthStatus(home);
   // A definitive answer still records the classification when it lands after the budget.
   void status.then(answer => {
-    if (answer.unknown !== true && answer.signedIn) return rememberLogin(home.id, answer.console ? "console" : "subscription");
+    if (answer.unknown !== true && answer.signedIn) return rememberLogin(home, fingerprint, answer.console ? "console" : "subscription");
   }).catch(() => undefined);
   const answer = await within(AUTH_BUDGET_MS, status);
   if (answer && answer.unknown !== true) return answer.signedIn && answer.console ? "console" : "subscription";
-  return last.logins?.[home.id];
+  return knownLogin(last, home);
 }
 
 /**
@@ -214,6 +216,10 @@ export async function pickClaudeAccount(what: string, scope: PickScope = {}, com
   // .claude.json back over the new trust entry. A Console (API-billed) login is the exception: it is never chosen
   // automatically without a role, so the sole account's login is confirmed before taking the shortcut.
   const homes = claudeHomes();
+  const knownKind = (account: string) => {
+    const home = homes.find(item => item.id === account);
+    return home ? knownLogin(last, home) : undefined;
+  };
   if (!inventoryReader && homes.length < 2 && !project?.pools && !effective.restricted) {
     if (await loginKind(homes[0], last) !== "console") return undefined;
     throw new BridgeError(409, `The only Claude account on ${computer} is an API (Console) login with no role, so it is not used automatically. Give it a role or name it by hand.`.slice(0, 500),
@@ -228,18 +234,36 @@ export async function pickClaudeAccount(what: string, scope: PickScope = {}, com
       { code: "account_pool" });
   }
   const rules = [...(project ? [project] : []), computerRule(computer, effective.allowedPools)];
+  // An unanswered sign-in check leaves console off the listing: use the login last seen for that home, so a
+  // Console account is never chosen automatically just because this probe did not answer.
   const policyRooms = (usage: readonly AccountUsage[]) => claudeRooms(inventory, usage, now).map(room => {
     const listed = entry?.accounts?.find(item => item.id === room.account);
-    return withPolicy(room, { ...listed, ...effective.settings[room.account] });
+    const unknown = Boolean(listed && !listed.signedIn && listed.usable);
+    const console = listed?.console === true || (unknown && knownKind(room.account) === "console");
+    return withPolicy(room, { ...listed, ...(console ? { console: true } : {}), ...effective.settings[room.account] });
   });
+  // Falling back to `default` is also a choice: never launch a last-known Console login without a role.
+  const defaultListed = entry?.accounts?.find(item => item.id === DEFAULT_ACCOUNT);
+  const defaultUnknown = Boolean(defaultListed && !defaultListed.signedIn && defaultListed.usable);
+  const defaultConsole = defaultListed?.console === true || ((!defaultListed || defaultUnknown) && knownKind(DEFAULT_ACCOUNT) === "console");
+  const fallback = (choice?: AccountChoice): AccountChoice | undefined => {
+    if (choice) return choice;
+    if (defaultConsole) throw new BridgeError(409, `The default Claude account on ${computer} is an API (Console) login with no role, so it is not used automatically. Give it a role or name it by hand.`.slice(0, 500),
+      { code: "account_pool", skipped: [`${DEFAULT_ACCOUNT}: an API account with no role (chosen only by hand)`] });
+    return undefined;
+  };
   if (!policyApplies(policyRooms([]), rules)) {
-    if (policyRooms([]).filter(room => room.usable !== false).length < 2) return undefined;
+    if (policyRooms([]).filter(room => room.usable !== false).length < 2) return fallback();
     const usage = await within(2_500, usageReader());
-    if (!usage) return undefined;
+    if (!usage) return fallback();
     const { choice, skipped } = chooseAccount(claudeRooms(inventory, usage, now), limitedBy(await readAccountLimits(now), computer));
-    if (choice) logger.info("accounts", `${what}: Claude account ${choice.account}, ${choice.reason}.`);
-    else logger.info("accounts", `${what}: no Claude account has room (${skipped.join("; ")}); launching under default.`);
-    return choice;
+    if (choice) {
+      logger.info("accounts", `${what}: Claude account ${choice.account}, ${choice.reason}.`);
+      return choice;
+    }
+    if (defaultConsole) return fallback();
+    logger.info("accounts", `${what}: no Claude account has room (${skipped.join("; ")}); launching under default.`);
+    return undefined;
   }
   // Unknown room ranks last, so a slow usage read still leaves the policy to choose.
   const usage = await within(2_500, usageReader()) ?? [];

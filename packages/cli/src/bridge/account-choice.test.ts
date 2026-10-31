@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountWindows, chooseAccount, claudeRooms, limitedBy, noteAccountLimit, pickClaudeAccount, setChoiceReaders, readAccountLimits, resolveAccountFailover, UNKNOWN_RESET_MS, type AccountRoom } from "./account-choice.js";
-import { clearAccountCaches } from "./claude-accounts.js";
-import { rememberLogin, rememberPolicy } from "./account-last-known.js";
+import { clearAccountCaches, claudeHomes, claudeLoginFingerprint } from "./claude-accounts.js";
+import { rememberLogin, rememberPolicy, type LoginKind } from "./account-last-known.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { AccountUsage } from "./usage.js";
 
@@ -175,6 +175,12 @@ describe("a launch whose account restrictions cannot be read", () => {
 describe("the sole Claude account with no pools or role", () => {
   let home: string, bin: string;
   const claude = (auth: string) => writeFileSync(path.join(bin, "claude"), `#!/bin/sh\nprintf '%s' '${auth}'\n`, { mode: 0o755 });
+  const defaultHome = () => claudeHomes().find(item => item.id === "default")!;
+  const remember = async (kind: LoginKind) => {
+    const home = defaultHome();
+    await rememberLogin(home, claudeLoginFingerprint(home), kind);
+  };
+  const identify = (uuid: string) => writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: uuid } }));
   beforeEach(() => {
     home = mkdtempSync(path.join(tmpdir(), "phren-pick-sole-")); bin = path.join(home, "bin"); mkdirSync(bin);
     mkdirSync(path.join(home, ".claude"));
@@ -197,7 +203,7 @@ describe("the sole Claude account with no pools or role", () => {
   });
 
   it("refuses when the probe is unknown and the last-known login was Console", async () => {
-    await rememberLogin("default", "console");
+    await remember("console");
     claude("not json");
     await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
   });
@@ -208,7 +214,7 @@ describe("the sole Claude account with no pools or role", () => {
   });
 
   it("bounds a stalled login probe and falls back to the last-known login", async () => {
-    await rememberLogin("default", "subscription");
+    await remember("subscription");
     writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n/bin/sleep 4\n", { mode: 0o755 });
     const started = Date.now();
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
@@ -220,6 +226,79 @@ describe("the sole Claude account with no pools or role", () => {
     writeFileSync(path.join(home, "bridge", "accounts.yaml"), "[not, a, mapping]\n");
     claude('{"loggedIn":true,"subscriptionType":"max"}');
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+  });
+
+  it("refuses a Console login after a cached subscription answer", async () => {
+    identify("login-subscription"); claude('{"loggedIn":true,"subscriptionType":"max"}');
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+    identify("login-console-changed"); claude('{"loggedIn":true,"authMethod":"console"}');
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it("proceeds after switching from a cached Console login to a subscription", async () => {
+    identify("login-console"); claude('{"loggedIn":true,"authMethod":"console"}');
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+    identify("login-subscription-changed"); claude('{"loggedIn":true,"subscriptionType":"max"}');
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+  });
+
+  it("ignores a persisted Console classification after the login changes", async () => {
+    identify("login-console"); await remember("console");
+    identify("login-subscription-changed"); claude("not json");
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+  });
+});
+
+describe("last-known logins with more than one home", () => {
+  let home: string;
+  const usage = (id: string, used: number): AccountUsage => ({ source: "claude", account: { id, label: id, key: id }, windows: [{ id: "five_hour", name: "5-hour", usedPercent: used, resetsAt: at(2) }] });
+  const unknown = (ids: readonly string[]): HarnessInventory => ({ harnesses: [{ source: "claude", installed: true, usable: true,
+    accounts: ids.map(id => ({ id, label: id, key: `claude:${id}`, signedIn: false, usable: true, reason: "Claude did not report its sign-in state" })) }] });
+  const homeOf = (id: string) => claudeHomes().find(item => item.id === id)!;
+  beforeEach(() => {
+    home = mkdtempSync(path.join(tmpdir(), "phren-pick-many-"));
+    mkdirSync(path.join(home, ".claude")); writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "default-login" } }));
+    mkdirSync(path.join(home, ".claude-work")); writeFileSync(path.join(home, ".claude-work", ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "work-login" } }));
+    vi.stubEnv("HOME", home); vi.stubEnv("CLAUDE_CONFIG_DIR", ""); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
+    clearAccountCaches();
+    setChoiceReaders({ usage: async () => [usage("default", 0), usage("work", 0)], inventory: async () => unknown(["default", "work"]) });
+  });
+  afterEach(() => { setChoiceReaders({}); vi.unstubAllEnvs(); clearAccountCaches(); rmSync(home, { recursive: true, force: true }); });
+
+  it("skips a home whose live answer is unknown but whose last login was Console", async () => {
+    const work = homeOf("work");
+    await rememberLogin(work, claudeLoginFingerprint(work), "console");
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toMatchObject({ account: "default" });
+  });
+
+  it("refuses a default fallback when the inventory times out and default's last login was Console", async () => {
+    const def = homeOf("default");
+    await rememberLogin(def, claudeLoginFingerprint(def), "console");
+    setChoiceReaders({ usage: async () => [], inventory: () => new Promise<HarnessInventory | undefined>(() => {}) });
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+});
+
+describe("the last-known account file", () => {
+  let root: string;
+  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), "phren-last-known-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
+  afterEach(() => { vi.resetModules(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+  it("keeps a classification and a policy written at the same time", async () => {
+    const first = await import("./account-last-known.js");
+    vi.resetModules();
+    const second = await import("./account-last-known.js");
+    const dir = path.join(root, "home"); mkdirSync(dir);
+    const configFile = path.join(dir, ".claude.json"); writeFileSync(configFile, JSON.stringify({ oauthAccount: { accountUuid: "one" } }));
+    const home = { id: "default", dir, configFile, isDefault: true };
+    const fingerprint = claudeLoginFingerprint(home);
+    await Promise.all([
+      first.rememberPolicy({ settings: { default: { role: "off" } } }),
+      second.rememberLogin(home, fingerprint, "console"),
+    ]);
+    const known = await first.readLastKnown();
+    expect(known.policy).toEqual({ settings: { default: { role: "off" } } });
+    expect(known.logins).toEqual({ default: { kind: "console", fingerprint } });
   });
 });
 
