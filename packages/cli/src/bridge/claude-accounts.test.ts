@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { accountLabel, claudeAccountKey, claudeAccountSubscription, claudeAuthSpawn, claudePlanUnknown, claudeAccountRef, claudeHome, claudeHomeOfEnv, claudeHomeOfPath, claudeHomes, claudeLaunchEnv, clearAccountCaches, parseAuthStatus, setAccountLabel } from "./claude-accounts.js";
+import { accountLabel, claudeAccountKey, claudeAccountSubscription, claudeAuthKill, claudeAuthSpawn, claudePlanUnknown, claudeAccountRef, claudeHome, claudeHomeOfEnv, claudeHomeOfPath, claudeHomes, claudeLaunchEnv, clearAccountCaches, parseAuthStatus, setAccountLabel } from "./claude-accounts.js";
 
 let home = "";
 beforeEach(() => {
@@ -103,4 +103,27 @@ it("starts the auth probe through a shell on Windows, where an npm install is cl
   expect(claudeAuthSpawn("win32")).toEqual({ command: "claude", shell: true });
   expect(claudeAuthSpawn("darwin")).toEqual({ command: "claude", shell: false });
   expect(claudeAuthSpawn("linux")).toEqual({ command: "claude", shell: false });
+});
+
+it("kills the auth probe's whole tree with taskkill on Windows", () => {
+  const calls: Array<{ command: string; args: readonly string[]; options: unknown }> = [];
+  let onError: (() => void) | undefined;
+  const child = { pid: 4321, kill: vi.fn(() => true) };
+  const run = ((command: string, args: readonly string[], options: object) => {
+    calls.push({ command, args, options });
+    return { on: (_event: string, listener: () => void) => { onError = listener; return {}; } };
+  }) as Parameters<typeof claudeAuthKill>[2];
+  claudeAuthKill(child, "win32", run, { SystemRoot: "D:\\Windows" });
+  expect(calls).toEqual([{ command: "D:\\Windows\\System32\\taskkill.exe", args: ["/pid", "4321", "/T", "/F"], options: { stdio: "ignore", windowsHide: true } }]);
+  expect(child.kill).not.toHaveBeenCalled();
+  onError?.();
+  expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+});
+
+it("kills the auth probe directly off Windows, where the child is claude itself", () => {
+  const run = vi.fn();
+  const child = { pid: 4321, kill: vi.fn(() => true) };
+  claudeAuthKill(child, "linux", run as never);
+  expect(run).not.toHaveBeenCalled();
+  expect(child.kill).toHaveBeenCalledWith("SIGKILL");
 });

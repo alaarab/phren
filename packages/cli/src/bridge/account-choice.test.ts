@@ -178,8 +178,9 @@ describe("the sole Claude account with no pools or role", () => {
   const claude = (auth: string) => process.platform === "win32"
     ? writeFileSync(path.join(bin, "claude.cmd"), `@echo off\r\necho ${auth}\r\n`)
     : writeFileSync(path.join(bin, "claude"), `#!/bin/sh\nprintf '%s' '${auth}'\n`, { mode: 0o755 });
+  // PATH holds only the temp bin, so the Windows stall names ping by its absolute path.
   const stall = () => process.platform === "win32"
-    ? writeFileSync(path.join(bin, "claude.cmd"), "@echo off\r\nping -n 6 127.0.0.1 >nul\r\n")
+    ? writeFileSync(path.join(bin, "claude.cmd"), '@echo off\r\n"%SystemRoot%\\System32\\ping.exe" -n 6 127.0.0.1 >nul\r\n')
     : writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n/bin/sleep 4\n", { mode: 0o755 });
   const defaultHome = () => claudeHomes().find(item => item.id === "default")!;
   const remember = async (kind: LoginKind) => {
@@ -224,6 +225,8 @@ describe("the sole Claude account with no pools or role", () => {
     stall();
     const started = Date.now();
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+    // The probe ran to its budget rather than failing at once.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(2_000);
     expect(Date.now() - started).toBeLessThan(3_500);
   });
 
