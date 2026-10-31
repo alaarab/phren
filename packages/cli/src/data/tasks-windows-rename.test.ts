@@ -47,4 +47,6 @@ it("does not retry the same refusal off Windows, where a rename never waits on r
   Object.defineProperty(process, "platform", { value: "linux" });
   reader.held = 1;
   expect(() => addTask(tmp.path, "demo", "Refused once")).toThrow(/EPERM/);
+  // The refused write leaves no temp file in the project.
+  expect(fs.readdirSync(path.join(tmp.path, "demo")).filter(name => name.includes(".tmp"))).toEqual([]);
 });

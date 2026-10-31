@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { renameOverSync } from "../phren-paths.js";
 import { PhrenError, phrenErr, phrenOk, type PhrenResult, type FindingTag } from "../phren-core.js";
 
 // Phren lifecycle comment prefix. No backward compat.
@@ -317,7 +318,7 @@ export function supersedeFinding(
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     const tmpPath = findingsPath + ".tmp." + process.pid;
     fs.writeFileSync(tmpPath, normalized);
-    fs.renameSync(tmpPath, findingsPath);
+    renameOverSync(tmpPath, findingsPath);
     return phrenOk({ finding: matched.data.text, superseded_by: ref, status: "superseded" });
   });
 }
@@ -347,7 +348,7 @@ export function retractFinding(
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     const tmpPath = findingsPath + ".tmp." + process.pid;
     fs.writeFileSync(tmpPath, normalized);
-    fs.renameSync(tmpPath, findingsPath);
+    renameOverSync(tmpPath, findingsPath);
     return phrenOk({ finding: matched.data.text, reason: reasonText, status: "retracted" });
   });
 }
@@ -418,7 +419,7 @@ export function resolveFindingContradiction(
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     const tmpPath = findingsPath + ".tmp." + process.pid;
     fs.writeFileSync(tmpPath, normalized);
-    fs.renameSync(tmpPath, findingsPath);
+    renameOverSync(tmpPath, findingsPath);
     return phrenOk({
       resolution,
       finding_a: { text: matchedA.data.text, status: statusA },

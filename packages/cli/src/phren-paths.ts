@@ -66,14 +66,18 @@ export interface AtomicWriteOptions {
  * or hook reading the same tasks.md or FINDINGS.md) with EPERM, EACCES or
  * EBUSY, where POSIX replaces it atomically. Readers hold it for
  * milliseconds, so retry briefly before giving up. bridge/protocol.ts does
- * the same for the Hook's async writes.
+ * the same for the Hook's async writes. `from` is a temp file: when the
+ * rename fails for good it is removed, so no tmp file is left in the store.
  */
 export function renameOverSync(from: string, to: string): void {
   const waiter = new Int32Array(new SharedArrayBuffer(4));
   for (let attempt = 0; ; attempt++) {
     try { return fs.renameSync(from, to); } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? "";
-      if (process.platform !== "win32" || attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code)) throw error;
+      if (process.platform !== "win32" || attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(code)) {
+        try { fs.unlinkSync(from); } catch { /* never written, or already gone */ }
+        throw error;
+      }
       Atomics.wait(waiter, 0, 0, 5 * (attempt + 1));
     }
   }
