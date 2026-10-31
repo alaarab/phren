@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { renameOverSync } from "../phren-paths.js";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
@@ -248,7 +249,7 @@ export function autoArchiveToReference(
 
   const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, cleaned.join("\n"));
-  fs.renameSync(tmpPath, learningsPath);
+  renameOverSync(tmpPath, learningsPath);
 
   const skippedCount = alreadyArchivedEntries.length;
   const failedTopics = [...byTopic.keys()].filter(t => !successfulTopics.has(t));

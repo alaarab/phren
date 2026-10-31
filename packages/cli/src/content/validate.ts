@@ -1,6 +1,7 @@
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
+import { renameOverSync } from "../phren-paths.js";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "../shared.js";
@@ -643,7 +644,7 @@ export function autoMergeConflicts(phrenPath: string): boolean {
 
       const tmpMergePath = fullPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpMergePath, merged);
-      fs.renameSync(tmpMergePath, fullPath);
+      renameOverSync(tmpMergePath, fullPath);
       execFileSync("git", ["add", "--", relFile], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_MS });
       debugLog(`Auto-merged: ${relFile}`);
     } catch (err: unknown) {
