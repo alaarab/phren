@@ -149,14 +149,16 @@ describe.skipIf(process.platform === "win32")("Phren Hook malformed WebSocket is
       stdio: ["ignore", "ignore", "pipe"],
     });
     hook.stderr!.on("data", bytes => { stderr += bytes; });
+    // Wait for the Hook to answer or exit: loading its bundle takes seconds
+    // on a loaded CI runner.
     let ready = false;
-    for (let i = 0; i < 80; i++) {
+    for (const deadline = Date.now() + 10_000; Date.now() < deadline;) {
       try { ready = await health() === 200; } catch { /* Service startup. */ }
       if (ready || hook.exitCode !== null) break;
       await new Promise(resolve => setTimeout(resolve, 25));
     }
     expect(ready, stderr).toBe(true);
-  });
+  }, 15_000);
 
   afterEach(async () => {
     if (hook && hook.exitCode === null) { hook.kill("SIGTERM"); await once(hook, "exit"); }

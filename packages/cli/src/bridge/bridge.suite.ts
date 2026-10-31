@@ -39,6 +39,8 @@ const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1"
 const row = (text: string) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 /** Resolves once `condition` holds, or after `timeoutMs` so the caller's own expectation reports the miss. */
+/** How long a spawned Hook may take to answer; past it, the fixture fails with its log. */
+const HOOK_START_MS = 10_000;
 async function waitFor(condition: () => unknown, timeoutMs = 2_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!(await condition()) && Date.now() < deadline) await sleep(10);
@@ -742,8 +744,12 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       PHREN_STALL_MS: "1000", PHREN_APPROVAL_HOLD_MS: "2500", PHREN_SUDO_TEST_PARENT: "1", PHREN_SUDO_OUTCOME_MS: "4000", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
+    // A new Hook loads its bundle before it answers, which takes seconds on a
+    // loaded CI runner: wait until it answers or exits, not a fixed 2 s.
+    const started = hook;
     let ready = false;
-    await waitFor(async () => ready = await api("/v1/health").then(r => r.status === 200, () => false));
+    await waitFor(async () => started.exitCode !== null || started.signalCode !== null
+      || (ready = await api("/v1/health").then(r => r.status === 200, () => false)), HOOK_START_MS);
     expect(ready, log).toBe(true);
   }
   /** SIGTERM, then SIGKILL when a Hook still has not exited three seconds later. */
@@ -764,7 +770,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     if (egress) { await new Promise<void>(resolve => egress!.close(() => resolve())); egress = undefined; }
     if (root) await rm(root, { recursive: true, force: true });
   }
-  beforeAll(startFixture);
+  beforeAll(startFixture, HOOK_START_MS + 5_000);
   afterAll(stopFixture);
   async function dispatchFixture(): Promise<void> {
     const remoteRoot = path.join(root, "remote");
@@ -793,7 +799,8 @@ socket.on('close', () => process.exit(0));
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_PATH: path.join(root, "remote-store"), PHREN_BRIDGE_HOME: remoteRoot,
       PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
     remoteHook.stderr!.on("data", bytes => log += bytes);
-    await waitFor(() => stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined), 2_000);
+    const remote = remoteHook;
+    await waitFor(async () => remote.exitCode !== null || await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined), HOOK_START_MS);
     if (!await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined)) throw new Error(`Remote Hook did not start: ${log}`);
   }
 
@@ -1815,7 +1822,7 @@ schedules:
     });
 
     describe("Codex keyless terminal menus", () => {
-      beforeEach(startFixture);
+      beforeEach(startFixture, HOOK_START_MS + 5_000);
 
       async function status() {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
@@ -2727,7 +2734,7 @@ schedules:
   });
 
   describeAll("isolated fixture", () => {
-    beforeEach(startFixture);
+    beforeEach(startFixture, HOOK_START_MS + 5_000);
     afterEach(stopFixture);
 
     it("queues a busy hand-off in a real Hook and delivers it once on the next idle", async () => {
