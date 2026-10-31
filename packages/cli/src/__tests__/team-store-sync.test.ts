@@ -7,7 +7,7 @@
  * add_finding reached appendTeamJournal without the secret scan or size caps
  * every other finding write goes through.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -15,6 +15,10 @@ import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { register } from "../tools/finding.js";
 import { addStoreToRegistry } from "../store-registry.js";
 import type { McpContext } from "../tools/types.js";
+
+// Real Git: each test runs dozens of git processes, which take 10-25x longer
+// on the Windows runners than on Linux (as store-sync.test.ts sizes it).
+vi.setConfig({ testTimeout: process.platform === "win32" ? 60_000 : 15_000, hookTimeout: process.platform === "win32" ? 60_000 : 10_000 });
 
 const PROJECT = "shared-proj";
 
