@@ -5,7 +5,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { dump, load } from "js-yaml";
 import { withFileLock } from "../governance/locks.js";
@@ -256,14 +256,42 @@ export function parseAuthStatus(output: string): AuthStatus {
 
 export type AuthRunner = (home: ClaudeHome) => Promise<string>;
 
+/** How the sign-in probe starts Claude: an npm install on Windows is `claude.cmd`, which only a shell starts. */
+export function claudeAuthSpawn(platform: NodeJS.Platform = process.platform): { command: string; shell: boolean } {
+  return { command: "claude", shell: platform === "win32" };
+}
+
+type AuthKillSpawn = (command: string, args: readonly string[], options: { stdio: "ignore"; windowsHide: boolean }) => Pick<ChildProcess, "on">;
+
+/**
+ * Stops the sign-in probe and anything it started. On Windows the child is cmd.exe, so
+ * killing it alone leaves the claude started by claude.cmd running: kill the tree with
+ * taskkill. Elsewhere the child is claude itself.
+ */
+export function claudeAuthKill(
+  child: Pick<ChildProcess, "pid" | "kill">,
+  platform: NodeJS.Platform = process.platform,
+  run: AuthKillSpawn = spawn,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const signal = () => { try { child.kill("SIGKILL"); } catch { /* Already gone. */ } };
+  if (platform !== "win32" || !child.pid) return signal();
+  const root = env.SystemRoot || env.SYSTEMROOT || env.windir || "C:\\Windows";
+  try {
+    run(path.win32.join(root, "System32", "taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true })
+      .on("error", signal);
+  } catch { signal(); }
+}
+
 const runAuthStatus: AuthRunner = home => new Promise(resolve => {
   let out = "", done = false;
-  const child = spawn("claude", ["auth", "status", "--json"], {
-    cwd: homeDir(), stdio: ["ignore", "pipe", "ignore"],
+  const { command, shell } = claudeAuthSpawn();
+  const child = spawn(command, ["auth", "status", "--json"], {
+    cwd: homeDir(), stdio: ["ignore", "pipe", "ignore"], shell, windowsHide: true,
     env: { ...process.env, ...claudeLaunchEnv(home), NO_COLOR: "1" },
   });
   const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };
-  const timer = setTimeout(() => { child.kill("SIGKILL"); finish(); }, AUTH_TIMEOUT_MS);
+  const timer = setTimeout(() => { claudeAuthKill(child); finish(); }, AUTH_TIMEOUT_MS);
   child.stdout.on("data", (chunk: Buffer) => { if (out.length < 16_384) out += chunk.toString(); });
   child.on("error", finish); child.on("close", finish);
 });

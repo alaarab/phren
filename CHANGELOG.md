@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Claude account choice on Windows: the `claude auth status` probe now runs through a shell there, so an npm-installed `claude.cmd` answers instead of reading as unknown and letting a lone Console (API) login be chosen automatically without a role.
 - Account pools: when the harness inventory is slow or fails, this computer's `accounts.yaml` roles and pools still apply instead of falling back to the default account, and an unreadable file keeps enforcing the last policy that restricted anything. A lone API (Console) login is never chosen automatically without a role. The login-type check is bounded and remembers each account's last known type, tied to a hash of that login rather than the whole config file. The helper tool now requires `role: helpers`.
 - A PR report the integrator keeps refusing is retried with back-off instead of on every tick.
 
