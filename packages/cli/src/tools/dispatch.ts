@@ -6,6 +6,7 @@ import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions, moveSession, moveSessionSchema } from "../bridge/hand-off.js";
 import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
+import { machineHealthReport, readComputers } from "../computers/read.js";
 import { terminalPaneFromEnv } from "../bridge/terminal.js";
 import { dispatchIdFromEnv } from "../bridge/launch-brief.js";
 import { approvalDecisions } from "../bridge/protocol.js";
@@ -111,6 +112,20 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: true, data: result, message: `${usageSummary(result)}${note}` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read account usage." });
+    }
+  });
+  server.registerTool("machine_health", {
+    title: "◆ phren · machine health",
+    description: "Named health findings for this computer and every linked computer, worst computer first: swap, disk, load pileups, memory hogs and leaks, orphaned processes, simulator clones, restart loops, failed units, backup age, pending updates, crashes, OOM kills, GPU errors and stale locks. Each finding has id, check, severity (high, warn, info), title, detail and fix. A computer whose Hook predates health findings says unsupported; an unreachable one says offline. For the conductor's watchdog: act on or report high findings; warn is worth a mention. Read-only.",
+    inputSchema: {},
+  }, async () => {
+    try {
+      const read = await readComputers();
+      const report = machineHealthReport(read.computers);
+      const note = read.hookError ? ` ${read.hookError}` : read.peerError ? ` Linked computers were skipped: ${read.peerError}` : "";
+      return mcpResponse({ ok: true, data: report, message: `${report.message}${note}` });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read machine health." });
     }
   });
   server.registerTool("authority", {

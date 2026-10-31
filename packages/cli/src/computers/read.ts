@@ -212,3 +212,32 @@ export async function readUsage(options: { peers?: boolean; request?: Request; n
   const combined = combineUsage(computers.flatMap(c => c.harnesses ? [c.harnesses] : []));
   return { computers, combined, ...(typeof answer.peerError === "string" ? { peerError: answer.peerError } : {}) };
 }
+
+export interface MachineHealthRow {
+  name: string;
+  local: boolean;
+  online: boolean;
+  /** Worst severity on this computer, `ok` when it reported none. */
+  worst?: "high" | "warn" | "info" | "ok";
+  findings?: NonNullable<ComputerResources["health"]>;
+  /** The computer's Hook predates health findings; nothing is known about it. */
+  unsupported?: true;
+  error?: string;
+}
+
+/** Each computer's health findings, worst computer first, and a one-line summary. */
+export function machineHealthReport(computers: ComputerReport[]): { computers: MachineHealthRow[]; high: number; warn: number; message: string } {
+  const order = { high: 0, warn: 1, info: 2, ok: 3 } as const;
+  const rows: MachineHealthRow[] = computers.map(c => {
+    if (!c.online || !c.resources) return { name: c.name, local: c.local, online: false, error: c.error ?? "Unavailable" };
+    const findings = c.resources.health;
+    if (!findings) return { name: c.name, local: c.local, online: true, unsupported: true };
+    return { name: c.name, local: c.local, online: true, worst: findings[0]?.severity ?? "ok", findings };
+  });
+  rows.sort((a, b) => (a.worst ? order[a.worst] : 4) - (b.worst ? order[b.worst] : 4));
+  const count = (s: string) => rows.reduce((n, r) => n + (r.findings?.filter(f => f.severity === s).length ?? 0), 0);
+  const high = count("high"), warn = count("warn");
+  const parts = rows.map(r => !r.online ? `${r.name} offline` : r.unsupported ? `${r.name} no health (older Hook)`
+    : r.worst === "ok" ? `${r.name} ok` : `${r.name}: ${r.findings!.filter(f => f.severity !== "info").map(f => `${f.severity} ${f.title}`).join("; ") || "info only"}`);
+  return { computers: rows, high, warn, message: `${high} high, ${warn} warn across ${rows.length} computers. ${parts.join(". ")}.` };
+}

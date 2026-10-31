@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ComputerResources } from "../bridge/resources.js";
-import { combineUsage, pickComputer, readComputers, readUsage, resetsIn } from "./read.js";
+import { combineUsage, machineHealthReport, pickComputer, readComputers, readUsage, resetsIn } from "./read.js";
 
 const GB = 1024 ** 3;
 function resources(platform: string, load1: number, freeGB: number, level: ComputerResources["level"] = "ok", overall = load1 / 20): ComputerResources {
@@ -79,5 +79,22 @@ describe("computers surface", () => {
     expect(resetsIn("2026-09-26T00:11:00Z", now)).toBe("11m");
     expect(resetsIn("2026-10-03T19:00:00Z", now)).toBe("7d 19h");
     expect(resetsIn(undefined, now)).toBeUndefined();
+  });
+});
+
+describe("machine health report", () => {
+  it("lists each computer's findings worst first and says which cannot tell", () => {
+    const base = { collectedAt: "", platform: "darwin", uptimeSeconds: 1, cpu: { cores: 8, load1: 0, load5: 0, load15: 0, loadPerCore: 0 },
+      memory: { totalBytes: 1 }, heavy: [], pressure: { cpu: 0, memory: 0, disk: 0, overall: 0 }, level: "ok" as const, warnings: [] };
+    const swap = { id: "swap", check: "swap" as const, severity: "high" as const, title: "Swap at 30 GB", detail: "", fix: "" };
+    const report = machineHealthReport([
+      { name: "mini", local: true, online: true, resources: { ...base, health: [] } },
+      { name: "old", local: false, online: true, resources: base },
+      { name: "jets", local: false, online: true, resources: { ...base, health: [swap] } },
+      { name: "gone", local: false, online: false, error: "timeout" },
+    ]);
+    expect(report.computers.map(c => `${c.name}:${c.worst ?? (c.unsupported ? "unsupported" : "offline")}`)).toEqual(["jets:high", "mini:ok", "old:unsupported", "gone:offline"]);
+    expect(report.high).toBe(1);
+    expect(report.message).toBe("1 high, 0 warn across 4 computers. jets: high Swap at 30 GB. mini ok. old no health (older Hook). gone offline.");
   });
 });
