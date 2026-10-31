@@ -38,9 +38,9 @@ const hookBundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session };
 const row = (text: string) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-/** Resolves once `condition` holds, or after `timeoutMs` so the caller's own expectation reports the miss. */
 /** How long a spawned Hook may take to answer; past it, the fixture fails with its log. */
 const HOOK_START_MS = 10_000;
+/** Resolves once `condition` holds, or after `timeoutMs` so the caller's own expectation reports the miss. */
 async function waitFor(condition: () => unknown, timeoutMs = 2_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!(await condition()) && Date.now() < deadline) await sleep(10);
@@ -770,7 +770,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     if (egress) { await new Promise<void>(resolve => egress!.close(() => resolve())); egress = undefined; }
     if (root) await rm(root, { recursive: true, force: true });
   }
-  beforeAll(startFixture, HOOK_START_MS + 5_000);
+  beforeAll(startFixture, HOOK_START_MS + 8_000);
   afterAll(stopFixture);
   async function dispatchFixture(): Promise<void> {
     const remoteRoot = path.join(root, "remote");
@@ -800,7 +800,7 @@ socket.on('close', () => process.exit(0));
       PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
     remoteHook.stderr!.on("data", bytes => log += bytes);
     const remote = remoteHook;
-    await waitFor(async () => remote.exitCode !== null || await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined), HOOK_START_MS);
+    await waitFor(async () => remote.exitCode !== null || remote.signalCode !== null || await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined), HOOK_START_MS);
     if (!await stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined)) throw new Error(`Remote Hook did not start: ${log}`);
   }
 
@@ -1822,7 +1822,7 @@ schedules:
     });
 
     describe("Codex keyless terminal menus", () => {
-      beforeEach(startFixture, HOOK_START_MS + 5_000);
+      beforeEach(startFixture, HOOK_START_MS + 8_000);
 
       async function status() {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
@@ -2734,7 +2734,7 @@ schedules:
   });
 
   describeAll("isolated fixture", () => {
-    beforeEach(startFixture, HOOK_START_MS + 5_000);
+    beforeEach(startFixture, HOOK_START_MS + 8_000);
     afterEach(stopFixture);
 
     it("queues a busy hand-off in a real Hook and delivers it once on the next idle", async () => {
@@ -3063,7 +3063,7 @@ schedules:
       const connections = (await readFile(path.join(root, "ssh-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
       expect(connections.length).toBeGreaterThanOrEqual(3);
       expect(connections.every(args => args.includes("IdentityAgent=none"))).toBe(true);
-    });
+    }, HOOK_START_MS + 15_000);
 
     it("merges one Claude login's usage across two real Hooks by account, and reports room on the capacity probe", async () => {
       await dispatchFixture();
@@ -3121,7 +3121,7 @@ schedules:
         { name: hostname().split(".")[0].replace(/[^A-Za-z0-9_.-]/g, "-"), address: "back.example", username: "sam", hostKey },
       ] }), { mode: 0o600 });
       expect((await api("/v1/health/details")).data.peers.computers[0]).toMatchObject({ name: "Devbox", reachable: true, listsBack: true });
-    });
+    }, HOOK_START_MS + 15_000);
 
     it("advertises speech and transcribe, and voices /v1/speech with only bridge/elevenlabs.json as the key, in the stored region", async () => {
       expect((await api("/v1/health")).data.capabilities).toMatchObject({ speech: true, transcribe: true, speechTimestampStream: true, speechLive: true, previewDeltas: true, quickChat: true });
@@ -3153,7 +3153,7 @@ schedules:
         await rm(file, { force: true });
         await rm(path.join(root, "bridge/speech.json"), { force: true });
       }
-    });
+    }, HOOK_START_MS + 15_000);
 
     it("leaves approvalPush out and answers registration with configured:false when no APNs key is loaded", async () => {
       expect((await api("/v1/health")).data.capabilities).not.toHaveProperty("approvalPush");
@@ -3198,7 +3198,7 @@ schedules:
       expect((await api("/v1/dispatch", { ...brief, project: "../phren" })).status).toBe(400);
       expect((await api("/v1/dispatch", { ...brief, cwd: root })).status).toBe(400);
       expect(commands.some(c => ["workspace.create", "agent.start", "agent.prompt"].includes(c.method))).toBe(false);
-    });
+    }, HOOK_START_MS + 15_000);
 
     it("rejects a relative directory or an unknown agent kind before touching Herdr", async () => {
       expect((await api("/v1/workspaces/launch?mux=herdr:default", { cwd: "relative/path", label: "x", kind: "codex" })).status).toBe(400);

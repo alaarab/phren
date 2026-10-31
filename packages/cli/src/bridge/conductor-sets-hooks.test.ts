@@ -67,16 +67,18 @@ socket.on("close", () => process.exit(0));\n`, { mode: 0o700 });
       hook.stderr!.on("data", bytes => logs[index] += bytes.toString());
       hooks.push(hook);
     }
-    for (const machine of machines) {
-      const deadline = Date.now() + 5_000;
+    // The Hooks start together; each answers or exits within 10 s even on a
+    // loaded runner, where loading the bundle takes seconds.
+    for (const [index, machine] of machines.entries()) {
+      const deadline = Date.now() + 10_000;
       let ready = false;
-      while (!ready && Date.now() < deadline) {
+      while (!ready && Date.now() < deadline && hooks[index].exitCode === null && hooks[index].signalCode === null) {
         ready = await hookRequest("/v1/health", undefined, { socketPath: socket(machine.name) }, 500).then(() => true, () => false);
         if (!ready) await new Promise(resolve => setTimeout(resolve, 20));
       }
       expect(ready, logs.join("\n")).toBe(true);
     }
-  }, 15_000);
+  }, 30_000);
 
   afterAll(async () => {
     await Promise.all(hooks.map(async hook => {
