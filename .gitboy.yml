@@ -1,4 +1,4 @@
-# Parallel release candidate on a gitboy instance (see docs/gitboy-ci.md).
+# Parallel release candidate on a gitboy instance (setup notes are kept outside this repository).
 #
 # GitHub Actions stays authoritative: release.yml only reads GitHub's own RC
 # run. This pipeline runs the same RC suites on Linux Docker runners and on a

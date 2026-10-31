@@ -318,7 +318,6 @@ later requests. Missing or broken policy preserves the ordinary approval flow;
 Settings reports load failures. Rules only ask or deny and never automatically
 approve. No automatic approval audit file is written. Same-user storage is not
 rollback protected; tampering can remove restrictions only back to baseline.
-See [Approval rules](approval-rules.md).
 
 ### Agent provider settings
 

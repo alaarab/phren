@@ -1,5 +1,5 @@
 // Shared contract for the Phren desktop phase 0 spike.
-// Design: docs/desktop/DESIGN.md (PR #367). Every module in src/ implements
+// Design: PR #367. Every module in src/ implements
 // exactly the exports declared for it here and imports types only from here.
 // Do not change this file; ask the orchestrator.
 

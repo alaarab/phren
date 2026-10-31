@@ -2,7 +2,7 @@
 
 A client of every computer's Phren Hook: sessions across computers, chat,
 terminals, Changes, a built-in editor with the code index, and find in files.
-Design: `docs/desktop/DESIGN.md` (PR #367). Private package, not published.
+Design: PR #367. Private package, not published.
 
 ```sh
 pnpm --filter @phren/desktop build

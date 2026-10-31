@@ -1181,8 +1181,7 @@ match, scope, projectName and optional until retain their format. Project scope
 binds registered worktrees; optional scope fields intersect; expiry is checked
 at enforcement time. Disabled/revoked rules have no effect.
 
-Astra's review found same-user self-enrollment, policy rollback, arbitrary code
+A security review found same-user self-enrollment, policy rollback, arbitrary code
 behind allowed commands, coverage gaps and erasable audit. Auto-allow is deferred
 until a protected OS user enforces rollback-protected policy and durable audit.
 Tampering can remove restrictions back to today's behavior, never grant beyond it.
-See [Approval rules](approval-rules.md) for coverage and the linked Astra findings.
