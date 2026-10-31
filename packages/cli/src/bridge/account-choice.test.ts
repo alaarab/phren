@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountWindows, chooseAccount, claudeRooms, limitedBy, noteAccountLimit, pickClaudeAccount, setChoiceReaders, readAccountLimits, resolveAccountFailover, UNKNOWN_RESET_MS, type AccountRoom } from "./account-choice.js";
 import { clearAccountCaches } from "./claude-accounts.js";
+import { rememberLogin, rememberPolicy } from "./account-last-known.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { AccountUsage } from "./usage.js";
 
@@ -109,6 +110,9 @@ describe("a launch that names no account, under pools and roles", () => {
 describe("a launch whose account restrictions cannot be read", () => {
   let root: string, bridge: string;
   const restrictive = (text: string) => writeFileSync(path.join(bridge, "accounts.yaml"), text);
+  const usage = (id: string, used: number): AccountUsage => ({ source: "claude", account: { id, label: id, key: id }, windows: [{ id: "five_hour", name: "5-hour", usedPercent: used, resetsAt: at(2) }] });
+  const listing = (accounts: Array<Record<string, unknown>>): HarnessInventory => ({ harnesses: [{ source: "claude", installed: true, usable: true,
+    accounts: accounts.map(item => ({ label: String(item.id), key: `claude:${item.id}`, signedIn: true, usable: true, ...item })) }] });
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), "phren-pick-unread-")); bridge = path.join(root, "bridge"); mkdirSync(bridge);
     vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
@@ -127,18 +131,39 @@ describe("a launch whose account restrictions cannot be read", () => {
 
   it("refuses when the inventory times out and accounts.yaml sets a role", async () => {
     restrictive("slots:\n  default:\n    role: off\n");
-    vi.useFakeTimers();
-    const pending = new Promise<HarnessInventory | undefined>(() => {});
-    setChoiceReaders({ usage: async () => [], inventory: () => pending });
-    const refusal = expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
-    await vi.advanceTimersByTimeAsync(2_600);
-    await refusal;
+    setChoiceReaders({ usage: async () => [], inventory: () => new Promise<HarnessInventory | undefined>(() => {}) });
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
   });
 
-  it("refuses when accounts.yaml cannot be read", async () => {
+  it("enforces the last-known role when accounts.yaml cannot be read", async () => {
+    await rememberPolicy({ settings: { default: { role: "off" } } });
+    restrictive("[not, a, mapping]\n");
+    setChoiceReaders({ usage: async () => [], inventory: async () => listing([{ id: "default" }]) });
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it("enforces the last-known pools when accounts.yaml cannot be read", async () => {
+    await rememberPolicy({ settings: { default: { pool: "personal" }, client: { pool: "client-a" } }, allowedPools: ["client-a"] });
+    restrictive("[not, a, mapping]\n");
+    setChoiceReaders({ usage: async () => [usage("default", 0), usage("client", 0)], inventory: async () => listing([{ id: "default" }, { id: "client" }]) });
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toMatchObject({ account: "client" });
+  });
+
+  it("refuses when a last-known restriction cannot be evaluated because the inventory did not answer", async () => {
+    await rememberPolicy({ settings: { default: { role: "off" } } });
     restrictive("[not, a, mapping]\n");
     setChoiceReaders({ usage: async () => [], inventory: async () => undefined });
     await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it.each([
+    ["none was ever parsed", async () => {}],
+    ["the last parsed policy never restricted", async () => { await rememberPolicy({ settings: {} }); }],
+  ])("launches when accounts.yaml cannot be read and %s", async (_name, remembered) => {
+    await remembered();
+    restrictive("[not, a, mapping]\n");
+    setChoiceReaders({ usage: async () => [usage("default", 0), usage("work", 50)], inventory: async () => listing([{ id: "default" }, { id: "work" }]) });
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).resolves.toMatchObject({ account: "default" });
   });
 
   it("still launches as before when nothing restricts the account", async () => {
@@ -167,6 +192,32 @@ describe("the sole Claude account with no pools or role", () => {
   });
 
   it("still takes the shortcut for a lone subscription login", async () => {
+    claude('{"loggedIn":true,"subscriptionType":"max"}');
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+  });
+
+  it("refuses when the probe is unknown and the last-known login was Console", async () => {
+    await rememberLogin("default", "console");
+    claude("not json");
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it("proceeds when the probe is unknown and no login is known yet", async () => {
+    claude("not json");
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+  });
+
+  it("bounds a stalled login probe and falls back to the last-known login", async () => {
+    await rememberLogin("default", "subscription");
+    writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n/bin/sleep 4\n", { mode: 0o755 });
+    const started = Date.now();
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(3_500);
+  });
+
+  it("launches when accounts.yaml cannot be read and no restriction was ever known", async () => {
+    await rememberPolicy({ settings: {} });
+    writeFileSync(path.join(home, "bridge", "accounts.yaml"), "[not, a, mapping]\n");
     claude('{"loggedIn":true,"subscriptionType":"max"}');
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
   });
