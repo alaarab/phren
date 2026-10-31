@@ -1300,13 +1300,16 @@ schedules:
       });
       // The pane's conversation changed after validation: the message is for
       // the pane, so the conversation there now takes it, and it is delivered.
+      // Each prompt is submitted once the Hook has typed it (and so armed its
+      // delivery record): a fixed pause lost to a slow runner's validation.
+      const typed = (text: string) => waitFor(() => commands.some(c => c.method === "agent.prompt" && c.params.text === text), 8_000);
       const followed = api("/v1/prompt", { target, text: "reaches the pane's conversation" });
-      await sleep(150);
+      await typed("reaches the pane's conversation");
       expect(await submit(other, "<pasted_content id=\"7\">\nreaches the pane's conversation\n</pasted_content id=\"7\">")).toEqual({ status: 200 });
       expect((await followed).data).toEqual({ ok: true, delivered: true, state: "delivered" });
       // The intended conversation submits it: confirmed, not merely uncertain.
       const confirmed = api("/v1/prompt", { target, text: "hello there" });
-      await sleep(150);
+      await typed("hello there");
       expect(await submit(session, "hello there")).toEqual({ status: 200 });
       expect(await confirmed).toEqual({ status: 200, data: { ok: true, delivered: true, state: "delivered" } });
       // A prompt nobody typed from the phone is never blocked, whoever submits it.
