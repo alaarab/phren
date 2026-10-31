@@ -94,11 +94,31 @@ it("sees a same-size rewrite made in the instant the index last read the file", 
   expect(await files("codex:a", "rewrite")).toEqual(["README.md"]);
 });
 
-it("surfaces a failed post-tool Git read instead of recording a clean result", async () => {
+it("records an edited, a new untracked and a deleted file in one shell call", async () => {
+  await writeFile(path.join(repo, "gone.txt"), "bye\n");
+  await exec("git", ["-C", repo, "add", "gone.txt"]);
+  await exec("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", repo, "commit", "-qm", "gone"]);
+  await changes.before("codex:a", "sh", repo, "./script.sh");
+  await writeFile(path.join(repo, "README.md"), "hello again\n");
+  await writeFile(path.join(repo, "new.txt"), "new\n");
+  await rm(path.join(repo, "gone.txt"));
+  await changes.after("codex:a", "sh");
+  const found = (await changes.view("codex:a").changes("sh"))?.map(file => [file.path, file.status]);
+  expect(found).toEqual([["README.md", "M"], ["gone.txt", "D"], ["new.txt", "A"]]);
+});
+
+it("surfaces a failed post-tool Git read once per conversation instead of recording a clean result", async () => {
   await changes.before("codex:a", "broken", repo, "format");
+  await changes.before("codex:a", "broken-again", repo, "format");
+  await changes.before("codex:b", "broken", repo, "format");
   await writeFile(path.join(repo, ".git/index"), "corrupt index");
   await expect(changes.after("codex:a", "broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
   await expect(changes.view("codex:a").changes("broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+  // The same breakage on a later call of that conversation is not repeated on its row.
+  await changes.after("codex:a", "broken-again");
+  await expect(changes.view("codex:a").changes("broken-again")).resolves.toBeUndefined();
+  // Another conversation is told once too.
+  await expect(changes.after("codex:b", "broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
 });
 
 it("reports the capture file cap instead of returning an apparently complete subset", async () => {
