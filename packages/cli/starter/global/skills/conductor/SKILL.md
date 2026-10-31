@@ -50,6 +50,12 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
   optional resolution. In core use `phren_admin(action: "owner_inbox", ...)`.
   Use an item's `inboxComputer` as `computer` when resolving a remote item;
   omit it for `local`. Say which computers were unreachable.
+- `machine_health`: named health findings for this computer and every linked
+  one, worst first, each with severity (high, warn, info), detail and fix.
+  Your hourly watchdog calls it first, acts on or reports each high finding
+  (clear clearly orphaned, regenerable strays; ask about anything else) and
+  mentions warn ones. Say which computers were offline or unsupported. In core
+  use `phren_admin(action: "machine_health")`.
 - `phren dispatch status`: receipts of what you dispatched.
 - `get_tasks`, `get_project_summary`, `search_knowledge`: the store's memory.
 
