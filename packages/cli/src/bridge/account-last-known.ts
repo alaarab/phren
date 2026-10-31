@@ -68,10 +68,13 @@ function readSync(): LastKnown {
 /** The last-known logins and policy, or empty when there is no readable file. */
 export async function readLastKnown(): Promise<LastKnown> { return readSync(); }
 
-/** A home's last-known login type, only when it belongs to the home's current login. */
+/** A home's last-known login type: only when it belongs to the current login, or the config names none. */
 export function knownLogin(last: LastKnown, home: ClaudeHome): LoginKind | undefined {
   const entry = last.logins?.[home.id];
-  return entry && entry.fingerprint === claudeLoginFingerprint(home) ? entry.kind : undefined;
+  if (!entry) return undefined;
+  const current = claudeLoginFingerprint(home);
+  // No identity to compare against: keep the previous classification rather than discarding it.
+  return current === undefined || entry.fingerprint === current ? entry.kind : undefined;
 }
 
 function writeSync(value: LastKnown): void {
@@ -102,8 +105,9 @@ function update(change: (value: LastKnown) => void): Promise<void> {
 }
 
 /** Remembers a home's login type once Claude answered for the fingerprint seen before the probe. */
-export function rememberLogin(home: ClaudeHome, seenFingerprint: string, kind: LoginKind): Promise<void> {
-  if (!SLUG.test(home.id)) return Promise.resolve();
+export function rememberLogin(home: ClaudeHome, seenFingerprint: string | undefined, kind: LoginKind): Promise<void> {
+  // No identity to bind the answer to: keep the previous classification instead of storing an unbound one.
+  if (!SLUG.test(home.id) || !seenFingerprint) return Promise.resolve();
   return update(value => {
     // A later login already changed the home: this older answer is not about it.
     if (claudeLoginFingerprint(home) !== seenFingerprint) return;

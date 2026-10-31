@@ -203,7 +203,7 @@ describe("the sole Claude account with no pools or role", () => {
   });
 
   it("refuses when the probe is unknown and the last-known login was Console", async () => {
-    await remember("console");
+    identify("login-console"); await remember("console");
     claude("not json");
     await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
   });
@@ -214,7 +214,7 @@ describe("the sole Claude account with no pools or role", () => {
   });
 
   it("bounds a stalled login probe and falls back to the last-known login", async () => {
-    await remember("subscription");
+    identify("login-subscription"); await remember("subscription");
     writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n/bin/sleep 4\n", { mode: 0o755 });
     const started = Date.now();
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
@@ -242,7 +242,17 @@ describe("the sole Claude account with no pools or role", () => {
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
   });
 
-  it("ignores a persisted Console classification after the login changes", async () => {
+  it("keeps a last-known Console classification when only the config's project settings change", async () => {
+    identify("login-console");
+    writeFileSync(path.join(home, ".claude", ".credentials.json"), JSON.stringify({ claudeAiOauth: {} }));
+    await remember("console");
+    // A folder-trust prompt or project setting rewrites .claude.json; the login did not change.
+    writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "login-console" }, projects: { "/tmp/project": { hasTrustDialogAccepted: true } } }));
+    claude("not json");
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it("reclassifies when the identity changes", async () => {
     identify("login-console"); await remember("console");
     identify("login-subscription-changed"); claude("not json");
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();

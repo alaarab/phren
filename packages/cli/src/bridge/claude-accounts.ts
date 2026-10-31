@@ -210,19 +210,24 @@ export function claudeAccountRef(home: ClaudeHome, labels = readLabels()): Accou
 }
 
 /**
- * A privacy-preserving fingerprint of a home's current login: its stable identity (never the raw
- * email or token) and the config file's metadata. A re-login changes it, so cached and persisted
- * answers for the old login are dropped. Only the hash is ever stored.
+ * A privacy-preserving fingerprint of a home's login: the signed-in account's stable identity and the
+ * credential file's own metadata, never the main config file's (a trust prompt or project setting
+ * rewrites it without changing the login). A re-login changes it, so cached and persisted answers for
+ * the old login are dropped. Undefined when the config names no identity: the last classification is
+ * then kept rather than discarded. Only the hash is ever stored.
  */
-export function claudeLoginFingerprint(home: ClaudeHome): string {
+export function claudeLoginFingerprint(home: ClaudeHome): string | undefined {
   const identity = oauthIdentity(home.configFile);
-  let stat: { mtimeMs: number; size: number; ino: number } | undefined;
+  // accountUuid is the login; the organization separates two seats of one login. Email only when no uuid.
+  const stable = identity.uuid ? `${identity.uuid}|${identity.organization ?? ""}` : identity.email;
+  if (!stable) return undefined;
+  let credentials: { mtimeMs: number; size: number; ino: number } | undefined;
   try {
-    const value = statSync(home.configFile);
-    if (value.isFile()) stat = { mtimeMs: value.mtimeMs, size: value.size, ino: value.ino };
-  } catch { /* No config yet: the home id alone names it. */ }
-  const stable = identity.uuid ?? identity.email ?? "";
-  return createHash("sha256").update([home.id, stable, stat?.mtimeMs ?? "", stat?.size ?? "", stat?.ino ?? ""].join("|")).digest("hex");
+    const value = statSync(path.join(home.dir, ".credentials.json"));
+    if (value.isFile()) credentials = { mtimeMs: value.mtimeMs, size: value.size, ino: value.ino };
+  } catch { /* No credentials file here (macOS often keeps its own in the keychain). */ }
+  return createHash("sha256")
+    .update([stable, credentials?.mtimeMs ?? "", credentials?.size ?? "", credentials?.ino ?? ""].join("|")).digest("hex");
 }
 
 export const CODEX_ACCOUNT: AccountRef = { id: DEFAULT_ACCOUNT, label: "Codex", key: "codex" };
@@ -237,7 +242,7 @@ export interface AuthStatus { signedIn: boolean; unknown?: boolean; plan?: strin
 const AUTH_CACHE_MS = 5 * 60_000;
 const AUTH_TIMEOUT_MS = 10_000;
 const SIGNED_OUT_CACHE_MS = 30_000;
-const authCache = new Map<string, { at: number; fingerprint: string; value: Promise<AuthStatus>; signedIn?: boolean }>();
+const authCache = new Map<string, { at: number; fingerprint: string | undefined; value: Promise<AuthStatus>; signedIn?: boolean }>();
 
 /** Parse `claude auth status --json`. Never keeps anything but the state and plan. */
 export function parseAuthStatus(output: string): AuthStatus {
@@ -268,7 +273,7 @@ export function claudeAuthStatus(home: ClaudeHome, run: AuthRunner = runAuthStat
   const cached = authCache.get(home.dir);
   // A re-login changes the fingerprint: an answer cached for the old login must not be reused.
   if (cached && cached.fingerprint === fingerprint && now - cached.at < (cached.signedIn === false ? SIGNED_OUT_CACHE_MS : AUTH_CACHE_MS)) return cached.value;
-  const entry: { at: number; fingerprint: string; value: Promise<AuthStatus>; signedIn?: boolean } = { at: now, fingerprint, value: Promise.resolve({ signedIn: false }) };
+  const entry: { at: number; fingerprint: string | undefined; value: Promise<AuthStatus>; signedIn?: boolean } = { at: now, fingerprint, value: Promise.resolve({ signedIn: false }) };
   // A signed-out answer is kept briefly so a fresh /login shows up within half a minute.
   entry.value = run(home).then(parseAuthStatus, (): AuthStatus => ({ signedIn: false, unknown: true, reason: "Claude did not report its sign-in state" }))
     .then(status => { entry.signedIn = status.unknown ? false : status.signedIn; return status; });
