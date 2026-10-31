@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.65] - 2026-10-31
+
+### Fixed
+
+- A computer whose Claude homes are signed in to the same login no longer fails the phone's whole usage answer with "returned invalid account usage": `/v1/usage?accounts=all` sends one row per login, named after the default home with the freshest report, while account choice and failover still see every home.
+
 ## [0.3.64] - 2026-10-30
 
 ### Fixed
