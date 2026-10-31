@@ -283,8 +283,14 @@ export function claudeAuthKill(
   } catch { signal(); }
 }
 
+let probeExit: Promise<void> | undefined;
+
+/** Only for tests: settles when the most recent sign-in probe's child has exited. */
+export function claudeAuthProbeExit(): Promise<void> | undefined { return probeExit; }
+
 const runAuthStatus: AuthRunner = home => new Promise(resolve => {
-  let out = "", done = false;
+  let out = "", done = false, exit!: () => void;
+  probeExit = new Promise<void>(settle => { exit = settle; });
   const { command, shell } = claudeAuthSpawn();
   const child = spawn(command, ["auth", "status", "--json"], {
     cwd: homeDir(), stdio: ["ignore", "pipe", "ignore"], shell, windowsHide: true,
@@ -293,7 +299,7 @@ const runAuthStatus: AuthRunner = home => new Promise(resolve => {
   const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };
   const timer = setTimeout(() => { claudeAuthKill(child); finish(); }, AUTH_TIMEOUT_MS);
   child.stdout.on("data", (chunk: Buffer) => { if (out.length < 16_384) out += chunk.toString(); });
-  child.on("error", finish); child.on("close", finish);
+  child.on("error", () => { exit(); finish(); }); child.on("close", () => { exit(); finish(); });
 });
 
 export function claudeAuthStatus(home: ClaudeHome, run: AuthRunner = runAuthStatus, now = Date.now()): Promise<AuthStatus> {

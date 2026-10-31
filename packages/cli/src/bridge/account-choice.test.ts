@@ -1,17 +1,20 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { setComputerAllowedPools } from "./account-pools.js";
 import { clearProjectConfigCache } from "../project-config.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountWindows, chooseAccount, claudeRooms, limitedBy, noteAccountLimit, pickClaudeAccount, setChoiceReaders, readAccountLimits, resolveAccountFailover, UNKNOWN_RESET_MS, type AccountRoom } from "./account-choice.js";
-import { clearAccountCaches, claudeHomes, claudeLoginFingerprint } from "./claude-accounts.js";
+import { clearAccountCaches, claudeAuthProbeExit, claudeHomes, claudeLoginFingerprint } from "./claude-accounts.js";
 import { rememberLogin, rememberPolicy, type LoginKind } from "./account-last-known.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { AccountUsage } from "./usage.js";
 
 const now = Date.parse("2026-10-10T12:00:00Z");
 const at = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
+/** Windows can briefly hold a temp dir while a just-exited probe's child is still closing. */
+const removeTree = (dir: string) => rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 const room = (account: string, fiveHour?: number, week?: number, extra: Partial<AccountRoom> = {}): AccountRoom => ({ account, usable: true,
   ...(fiveHour !== undefined ? { fiveHour: { leftPercent: fiveHour, resetsAt: at(2) } } : {}),
   ...(week !== undefined ? { week: { leftPercent: week, resetsAt: at(72) } } : {}), ...extra });
@@ -58,7 +61,7 @@ describe("choosing the Claude account with the most headroom", () => {
 describe("the ledger of accounts that hit their limit", () => {
   let root: string;
   beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), "phren-account-limits-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
-  afterEach(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(async () => { vi.unstubAllEnvs(); await removeTree(root); });
 
   it("holds a login back until its reset, or one 5-hour window when the reset is unknown, by key on every computer", async () => {
     await noteAccountLimit({ key: "claude:a", account: "default", until: at(3) }, now);
@@ -85,7 +88,7 @@ describe("a launch that names no account, under pools and roles", () => {
     vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
     setChoiceReaders({ usage: async () => [usage("default", 0), usage("client", 70), usage("api", 0), usage("spare", 0)], inventory: async () => inventory() });
   });
-  afterEach(() => { setChoiceReaders({}); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(async () => { setChoiceReaders({}); vi.unstubAllEnvs(); await removeTree(root); });
 
   it("keeps to the project's pools, never picks off, and takes a last-resort account only when nothing else has room", async () => {
     pools("client-a", ["client-a"]);
@@ -118,7 +121,7 @@ describe("a launch whose account restrictions cannot be read", () => {
     vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
     setChoiceReaders({ usage: async () => [] });
   });
-  afterEach(() => { vi.useRealTimers(); setChoiceReaders({}); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(async () => { vi.useRealTimers(); setChoiceReaders({}); vi.unstubAllEnvs(); await removeTree(root); });
 
   it.each([
     ["a role off", "slots:\n  default:\n    role: off\n"],
@@ -197,7 +200,7 @@ describe("the sole Claude account with no pools or role", () => {
     // Only the usage reader: injecting an inventory would disable the shortcut under test.
     setChoiceReaders({ usage: async () => [] });
   });
-  afterEach(() => { setChoiceReaders({}); vi.unstubAllEnvs(); clearAccountCaches(); rmSync(home, { recursive: true, force: true }); });
+  afterEach(async () => { setChoiceReaders({}); vi.unstubAllEnvs(); clearAccountCaches(); await removeTree(home); });
 
   it("refuses a lone Console login with no role instead of launching under it", async () => {
     claude('{"loggedIn":true,"authMethod":"console"}');
@@ -228,6 +231,9 @@ describe("the sole Claude account with no pools or role", () => {
     // The probe ran to its budget rather than failing at once.
     expect(Date.now() - started).toBeGreaterThanOrEqual(2_000);
     expect(Date.now() - started).toBeLessThan(3_500);
+    // The stalled child (cmd.exe and its ping on Windows) is still exiting: let it finish
+    // before the teardown removes this home, which Windows keeps locked until it does.
+    await Promise.race([claudeAuthProbeExit() ?? Promise.resolve(), new Promise<void>(resolve => setTimeout(resolve, 3_000))]);
   });
 
   it("launches when accounts.yaml cannot be read and no restriction was ever known", async () => {
@@ -282,7 +288,7 @@ describe("last-known logins with more than one home", () => {
     clearAccountCaches();
     setChoiceReaders({ usage: async () => [usage("default", 0), usage("work", 0)], inventory: async () => unknown(["default", "work"]) });
   });
-  afterEach(() => { setChoiceReaders({}); vi.unstubAllEnvs(); clearAccountCaches(); rmSync(home, { recursive: true, force: true }); });
+  afterEach(async () => { setChoiceReaders({}); vi.unstubAllEnvs(); clearAccountCaches(); await removeTree(home); });
 
   it("skips a home whose live answer is unknown but whose last login was Console", async () => {
     const work = homeOf("work");
@@ -301,7 +307,7 @@ describe("last-known logins with more than one home", () => {
 describe("the last-known account file", () => {
   let root: string;
   beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), "phren-last-known-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
-  afterEach(() => { vi.resetModules(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(async () => { vi.resetModules(); vi.unstubAllEnvs(); await removeTree(root); });
 
   it("keeps a classification and a policy written at the same time", async () => {
     const first = await import("./account-last-known.js");
