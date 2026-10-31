@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Json, type Target, atomicInPrivateDir } from "./protocol.js";
+import { BridgeError, type Json, type Target, atomicInPrivateDir } from "./protocol.js";
 import { snapshot, sharedSnapshot, paneIdentity, validateTarget } from "./herdr.js";
 import { closeFinishedWorker, closeOwnPane, markWorkerClosed } from "./worker-close.js";
 import { reportWorker } from "./worker-reports.js";
-import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
+import { DispatchReturns, observe, PR_RETRY_MAX_MS, PR_RETRY_MS, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { noteTurn } from "./turn-records.js";
 import { recordBriefArrival } from "./launch-brief.js";
@@ -116,11 +116,30 @@ describe("finished worker lifecycle", () => {
     const original = { target: { ...target, pane: "integrator" } };
     await writeFile(path.join(root, "integrator.json"), JSON.stringify(original));
     vi.mocked(handOff).mockRejectedValueOnce(new Error("lost reply"));
-    const returns = new DispatchReturns({ peers: async () => [] }); await returns.forwardPrs();
+    let now = Date.now();
+    const returns = new DispatchReturns({ peers: async () => [], now: () => now }); await returns.forwardPrs();
     expect((await dispatchStatus())[0].returned!.integratorDelivery).toMatchObject({ state: "pending", integrator: original });
     await writeFile(path.join(root, "integrator.json"), JSON.stringify({ target: { ...target, pane: "replacement" } }));
-    await returns.forwardPrs();
+    now += PR_RETRY_MS; await returns.forwardPrs();
     expect(vi.mocked(handOff).mock.calls[1][0]).toMatchObject({ target: original.target, deliveryId: (vi.mocked(handOff).mock.calls[0][0] as Json).deliveryId });
+  });
+  it("backs off a PR report the integrator keeps refusing instead of resending it every tick", async () => {
+    const value = receipt(); observe(value, { state: "done", completed: true, reply: "Checks passed", prs }, Date.now()); await save(value);
+    await writeFile(path.join(root, "integrator.json"), JSON.stringify({ target: { ...target, pane: "closed" } }));
+    vi.mocked(handOff).mockRejectedValue(new BridgeError(409, "This pane's conversation changed. Reopen the chat."));
+    let now = Date.now();
+    const returns = new DispatchReturns({ peers: async () => [], now: () => now });
+    const sends = () => vi.mocked(handOff).mock.calls.length;
+    for (let tick = 0; tick < 5; tick++) await returns.forwardPrs();
+    expect(sends()).toBe(1);
+    now += PR_RETRY_MS; await returns.forwardPrs(); await returns.forwardPrs();
+    expect(sends()).toBe(2);
+    // The wait doubled: half of it is not enough, the full doubled wait is.
+    now += PR_RETRY_MS; await returns.forwardPrs(); expect(sends()).toBe(2);
+    now += PR_RETRY_MS; await returns.forwardPrs(); expect(sends()).toBe(3);
+    now += PR_RETRY_MAX_MS * 4; vi.mocked(handOff).mockResolvedValue({ ok: true, delivered: false, queued: true, target });
+    await returns.forwardPrs(); expect(sends()).toBe(4);
+    expect((await dispatchStatus())[0].returned!.integratorDelivery).toHaveProperty("state", "queued");
   });
   it.each(["working", "new turn", "queued message", "opt out"])("preserves a finished pane with %s", async reason => {
     const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now());
