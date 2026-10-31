@@ -412,7 +412,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   // Checked before anything is created, so a refusal leaves no pane, worktree or brief file behind.
   // A Claude launch that names no account runs under the signed-in one with the most room left.
-  const choice = kind === "claude" && named === undefined ? await pickClaudeAccount(`Launch "${label}"`).catch(() => undefined) : undefined;
+  // Pools and roles apply as in dispatch: a 409 account_pool when no account may do this project's work.
+  const project = typeof data.project === "string" && data.project ? data.project : undefined;
+  const choice = kind === "claude" && named === undefined ? await pickClaudeAccount(`Launch "${label}"`, { project, cwd: projectDirectory }) : undefined;
   const account = named ?? choice?.account;
   await requireAvailable(kind, account);
   const home = kind === "claude" && account && account !== DEFAULT_ACCOUNT ? claudeHome(account) : undefined;

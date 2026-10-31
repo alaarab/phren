@@ -4,9 +4,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { codexHome } from "../home-paths.js";
-import { claudeAccountRef, claudeAuthStatus, claudeHomes, CODEX_ACCOUNT, type AccountRef, type AuthRunner } from "./claude-accounts.js";
+import { claudeAccountRef, claudeAuthStatus, claudeHomes, claudeLoginFingerprint, CODEX_ACCOUNT, type AccountRef, type AuthRunner } from "./claude-accounts.js";
 import { toolVersion, type ToolVersion } from "./health.js";
 import { accountPolicy, accountSettings, computerAllowedPools, type AccountRole } from "./account-pools.js";
+import { rememberLogin, rememberPolicy } from "./account-last-known.js";
 
 export type HarnessSource = "claude" | "codex" | "opencode" | "copilot" | "phren";
 export interface HarnessAccount extends AccountRef {
@@ -50,7 +51,11 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
     if (source === "claude") {
       const settings = accountSettings();
       const accounts = await Promise.all(claudeHomes(env).map(async (home): Promise<HarnessAccount> => {
+        const fingerprint = claudeLoginFingerprint(home);
         const auth = await claudeAuthStatus(home, deps.authRunner);
+        // Keep the login type for a launch whose own probe is slow or unanswered. The saved answer is
+        // bound to the login seen before the probe, so a re-login in between is not recorded.
+        if (auth.unknown !== true && auth.signedIn) void rememberLogin(home, fingerprint, auth.console ? "console" : "subscription");
         // An unanswered sign-in check stays usable: only Claude saying "logged out" hides an account.
         const usable = auth.signedIn || auth.unknown === true;
         return { ...claudeAccountRef(home), ...settings[home.id], signedIn: auth.signedIn, usable,
@@ -63,7 +68,7 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
       // and that they can't be known when accounts.yaml can't be read (an automatic choice then takes no account here).
       const allowedPools = computerAllowedPools();
       let poolsUnreadable = false;
-      try { accountPolicy(); } catch { poolsUnreadable = true; }
+      try { void rememberPolicy(accountPolicy()); } catch { poolsUnreadable = true; }
       return { ...base, usable, ...(usable ? {} : { reason: "No signed-in Claude account" }), accounts, ...(allowedPools ? { allowedPools } : {}),
         ...(poolsUnreadable ? { poolsUnreadable: true as const } : {}) };
     }
