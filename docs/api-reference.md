@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 78 MCP tools across 17 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 79 MCP tools across 17 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -213,6 +213,19 @@ this one first), `unreachable: [{ computer, error, code? }]`,
 `notLinked: [{ name, aliases? }]` (their usage is unknown, not zero),
 `enrolled` and `peerError` when `hooks.yaml` is broken. In the core profile use
 `phren_admin(action: "account_usage")`.
+
+### `machine_health`
+
+Named machine health findings for this computer and each linked computer, read
+through this Hook (`GET /v1/resources?peers=1`), so the conductor's hourly
+watchdog sees every machine in one call. No parameters. `data.computers` is
+worst first: `{ name, local, online, worst, findings }`, where `worst` is
+`high`, `warn`, `info` or `ok` and each finding is
+`{ id, check, severity, title, detail, fix }`. A computer whose Hook predates
+health findings says `unsupported: true`; an unreachable one has `online: false`
+and `error`. `data.high` and `data.warn` count findings across computers, and
+`message` lists them per computer. In the core profile use
+`phren_admin(action: "machine_health")`.
 
 CLI equivalent: `phren dispatch usage` (text; `--json` for the view).
 
