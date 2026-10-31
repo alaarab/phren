@@ -9,7 +9,7 @@ import { z } from "zod";
 import { readInstallPreferences } from "../init/preferences.js";
 import { logger } from "../logger.js";
 import { findPhrenPath } from "../phren-paths.js";
-import { claudeHomes, DEFAULT_ACCOUNT } from "./claude-accounts.js";
+import { accountsFile, claudeAuthStatus, claudeHomes, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { harnessInventoryWithin, type HarnessInventory } from "./harnesses.js";
 import { atomic, BridgeError, bridgeRoot } from "./protocol.js";
 import { choosePolicyAccount, computerRule, policyApplies, projectRule, withPolicy, type PoolRule } from "./account-policy.js";
@@ -178,13 +178,31 @@ function scopeRule(scope: PickScope): PoolRule | undefined {
 export async function pickClaudeAccount(what: string, scope: PickScope = {}, computer = "this computer", now = Date.now()): Promise<AccountChoice | undefined> {
   if (!usageReader) return undefined;
   const project = scopeRule(scope);
+  // This computer's accounts.yaml roles and pools, read here rather than only through the inventory: a slow or
+  // failed inventory read must not hide a restriction it would have applied.
+  const local = localPolicy();
+  const localRestricts = local.unreadable || restricts(local.policy);
   // One Claude home and no rule that could refuse it means nothing to choose. Checking the folders first keeps a
   // launch from running `claude auth status` against the config it is about to pretrust: that process can write
-  // .claude.json back over the new trust entry.
-  if (!inventoryReader && claudeHomes().length < 2 && !project?.pools && !localPolicyApplies()) return undefined;
+  // .claude.json back over the new trust entry. A Console (API-billed) login is the exception: it is never chosen
+  // automatically without a role, so the sole account's login is confirmed before taking the shortcut.
+  const homes = claudeHomes();
+  if (!inventoryReader && homes.length < 2 && !project?.pools && !localRestricts) {
+    if (!(await claudeAuthStatus(homes[0])).console) return undefined;
+    throw new BridgeError(409, `The only Claude account on ${computer} is an API (Console) login with no role, so it is not used automatically. Give it a role or name it by hand.`.slice(0, 500),
+      { code: "account_pool", skipped: [`${homes[0].id}: an API account with no role (chosen only by hand)`] });
+  }
   const inventory = await within(2_500, (inventoryReader ?? (() => harnessInventoryWithin(2_500)))());
   const entry = inventory?.harnesses.find(item => item.source === "claude");
-  const rules = [...(project ? [project] : []), computerRule(computer, entry?.allowedPools, entry?.poolsUnreadable === true)];
+  // The inventory did not answer: there is no account data to apply a role or pool to. When accounts.yaml sets one
+  // (or can't be read), refuse rather than launch under default, which may be exactly the account it forbids.
+  if (!entry && localRestricts) {
+    throw new BridgeError(409, (local.unreadable
+      ? `${accountsFile()} can't be read, so this computer's Claude account roles and pools are unknown; fix it before a launch that chooses an account.`
+      : "This computer's Claude account roles and pools can't be evaluated because the harness inventory did not answer; refusing rather than launch under an account they may forbid.").slice(0, 500),
+      { code: "account_pool" });
+  }
+  const rules = [...(project ? [project] : []), computerRule(computer, entry?.allowedPools ?? local.policy?.allowedPools, local.unreadable || entry?.poolsUnreadable === true)];
   const policyRooms = (usage: readonly AccountUsage[]) => claudeRooms(inventory, usage, now).map(room => withPolicy(room, entry?.accounts?.find(item => item.id === room.account)));
   if (!policyApplies(policyRooms([]), rules)) {
     if (policyRooms([]).filter(room => room.usable !== false).length < 2) return undefined;
@@ -206,12 +224,14 @@ export async function pickClaudeAccount(what: string, scope: PickScope = {}, com
   return choice;
 }
 
-/** Whether this computer's accounts.yaml sets a pool, role or allowed pools (an unreadable one counts). */
-function localPolicyApplies(): boolean {
-  try {
-    const policy = accountPolicy();
-    return Boolean(policy.allowedPools) || Object.values(policy.settings).some(item => item.pool || item.role);
-  } catch { return true; }
+/** This computer's accounts.yaml policy, or that it can't be read. */
+function localPolicy(): { policy?: ReturnType<typeof accountPolicy>; unreadable: boolean } {
+  try { return { policy: accountPolicy(), unreadable: false }; } catch { return { unreadable: true }; }
+}
+
+/** Whether a policy sets a pool, role or allowed pools. */
+function restricts(policy: ReturnType<typeof accountPolicy> | undefined): boolean {
+  return Boolean(policy?.allowedPools) || Object.values(policy?.settings ?? {}).some(item => item.pool || item.role);
 }
 
 // ── The switch ───────────────────────────────────────────────────────────────

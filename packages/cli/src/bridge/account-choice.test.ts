@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountWindows, chooseAccount, claudeRooms, limitedBy, noteAccountLimit, pickClaudeAccount, setChoiceReaders, readAccountLimits, resolveAccountFailover, UNKNOWN_RESET_MS, type AccountRoom } from "./account-choice.js";
+import { clearAccountCaches } from "./claude-accounts.js";
 import type { HarnessInventory } from "./harnesses.js";
 import type { AccountUsage } from "./usage.js";
 
@@ -102,6 +103,72 @@ describe("a launch that names no account, under pools and roles", () => {
     pools("client-a", ["client-a"]);
     setChoiceReaders({ usage: async () => [], inventory: async () => ({ harnesses: [{ ...inventory().harnesses[0], allowedPools: ["personal"] }] }) });
     await expect(pickClaudeAccount("Launch", { project: "client-a", phrenPath: store }, "Mini", now)).rejects.toThrow(/No Claude account on Mini may do this work/);
+  });
+});
+
+describe("a launch whose account restrictions cannot be read", () => {
+  let root: string, bridge: string;
+  const restrictive = (text: string) => writeFileSync(path.join(bridge, "accounts.yaml"), text);
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), "phren-pick-unread-")); bridge = path.join(root, "bridge"); mkdirSync(bridge);
+    vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
+    setChoiceReaders({ usage: async () => [] });
+  });
+  afterEach(() => { vi.useRealTimers(); setChoiceReaders({}); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+  it.each([
+    ["a role off", "slots:\n  default:\n    role: off\n"],
+    ["the computer's pools", "allowedPools: [personal]\n"],
+  ])("refuses when the inventory rejects and accounts.yaml sets %s", async (_name, yaml) => {
+    restrictive(yaml);
+    setChoiceReaders({ usage: async () => [], inventory: async () => { throw new Error("probe failed"); } });
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it("refuses when the inventory times out and accounts.yaml sets a role", async () => {
+    restrictive("slots:\n  default:\n    role: off\n");
+    vi.useFakeTimers();
+    const pending = new Promise<HarnessInventory | undefined>(() => {});
+    setChoiceReaders({ usage: async () => [], inventory: () => pending });
+    const refusal = expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+    await vi.advanceTimersByTimeAsync(2_600);
+    await refusal;
+  });
+
+  it("refuses when accounts.yaml cannot be read", async () => {
+    restrictive("[not, a, mapping]\n");
+    setChoiceReaders({ usage: async () => [], inventory: async () => undefined });
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it("still launches as before when nothing restricts the account", async () => {
+    setChoiceReaders({ usage: async () => [], inventory: async () => undefined });
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
+  });
+});
+
+describe("the sole Claude account with no pools or role", () => {
+  let home: string, bin: string;
+  const claude = (auth: string) => writeFileSync(path.join(bin, "claude"), `#!/bin/sh\nprintf '%s' '${auth}'\n`, { mode: 0o755 });
+  beforeEach(() => {
+    home = mkdtempSync(path.join(tmpdir(), "phren-pick-sole-")); bin = path.join(home, "bin"); mkdirSync(bin);
+    mkdirSync(path.join(home, ".claude"));
+    vi.stubEnv("HOME", home); vi.stubEnv("CLAUDE_CONFIG_DIR", ""); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
+    vi.stubEnv("PATH", bin);
+    clearAccountCaches();
+    // Only the usage reader: injecting an inventory would disable the shortcut under test.
+    setChoiceReaders({ usage: async () => [] });
+  });
+  afterEach(() => { setChoiceReaders({}); vi.unstubAllEnvs(); clearAccountCaches(); rmSync(home, { recursive: true, force: true }); });
+
+  it("refuses a lone Console login with no role instead of launching under it", async () => {
+    claude('{"loggedIn":true,"authMethod":"console"}');
+    await expect(pickClaudeAccount("Launch", {}, "Mini", now)).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+  });
+
+  it("still takes the shortcut for a lone subscription login", async () => {
+    claude('{"loggedIn":true,"subscriptionType":"max"}');
+    expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
   });
 });
 
