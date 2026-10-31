@@ -9,6 +9,7 @@ import { JobRegistry, jobPgids, paneKey, type CleanupReport, type JobSource, typ
 import { intervalFromEnv } from "./limits.js";
 import { objects } from "./protocol.js";
 import { MachineHealth, type HealthFinding } from "./machine-health.js";
+import { PlatformProbes } from "./machine-probes.js";
 
 const exec = promisify(execFile);
 
@@ -472,7 +473,7 @@ export class ResourceMonitor {
   private readonly registry: JobSource;
   constructor(deps: Partial<ResourceDeps> = {}, private maxAgeMs = RESOURCES_MAX_AGE_MS) {
     this.registry = deps.jobs ?? new JobRegistry();
-    const health = new MachineHealth();
+    const health = new MachineHealth(process.env.PHREN_HEALTH_PROBES === "off" ? undefined : new PlatformProbes());
     this.deps = { platform: process.platform, now: Date.now, home: homeDir, processes: processTable, owners: paneOwners, panes: livePanes,
       health: (value, rows) => health.assess(value, rows, this.deps.now()), ...deps, jobs: this.registry };
   }

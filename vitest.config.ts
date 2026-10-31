@@ -34,7 +34,7 @@ export default defineConfig({
     // Codex launches stay on the typed path unless a test opts in.
     // The Hook's own helper calls never reach a real `codex` (bridge/codex-binary.ts); tests inject their own binary.
     // Launches skip the installed-harness check (it probes real binaries); tests of it inject an inventory.
-    env: { PHREN_TMUX: "off", PHREN_CODEX_APP_SERVER: "off", PHREN_CODEX_BINARY: "off", PHREN_LAUNCH_CHECK: "off", PHREN_ELEVENLABS_USAGE: "off", PHREN_STORE_SYNC_SECONDS: "0" },
+    env: { PHREN_TMUX: "off", PHREN_HEALTH_PROBES: "off", PHREN_CODEX_APP_SERVER: "off", PHREN_CODEX_BINARY: "off", PHREN_LAUNCH_CHECK: "off", PHREN_ELEVENLABS_USAGE: "off", PHREN_STORE_SYNC_SECONDS: "0" },
     include: [
       "packages/cli/src/**/*.test.ts",
       "packages/code/src/**/*.test.ts",

@@ -11,7 +11,9 @@ import type { ComputerResources, ProcessRow } from "./resources.js";
  */
 
 export type HealthSeverity = "info" | "warn" | "high";
-export type HealthCheck = "swap" | "disk" | "load" | "memory-hog" | "memory-leak" | "orphan" | "simulator-clones" | "uptime";
+export type HealthCheck = "swap" | "disk" | "load" | "memory-hog" | "memory-leak" | "orphan" | "simulator-clones" | "uptime"
+  // Slow platform probes (machine-probes.ts).
+  | "restart-loop" | "failed-units" | "backup" | "os-updates" | "crashes" | "oom" | "journal" | "gpu" | "stale-lock";
 
 export interface HealthFinding {
   id: string;
@@ -142,11 +144,13 @@ export function assessHealth(value: ComputerResources, rows: readonly ProcessRow
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
-/** Keeps the sample history and assesses each read. */
+/** Keeps the sample history and assesses each read, adding the slow probes' cached findings. */
 export class MachineHealth {
   private history: HealthSample[] = [];
+  constructor(private readonly probes?: { current(): HealthFinding[] }) {}
   assess(value: ComputerResources, rows: readonly ProcessRow[], now: number): HealthFinding[] {
-    const findings = assessHealth(value, rows, this.history, now);
+    const findings = [...assessHealth(value, rows, this.history, now), ...(this.probes?.current() ?? [])]
+      .sort((a, b) => rank[a.severity] - rank[b.severity]);
     const last = this.history.at(-1);
     if (!last || now - last.at >= SAMPLE_EVERY_MS) {
       this.history.push(healthSample(value, rows, now));
