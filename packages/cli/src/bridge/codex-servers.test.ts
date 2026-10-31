@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -260,8 +260,9 @@ describe.skipIf(process.platform === "win32")("driving the thread", () => {
     await until(() => entry.lastTurn?.status === "completed", "the finished turn");
     expect(entry.activeTurn).toBeUndefined();
     expect(servers.turnState("thread-1")).toMatchObject({ lastTurn: { id: "turn-1", status: "completed" } });
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(await registry(entry)).toMatchObject({ lastTurn: { id: "turn-1", status: "completed" } });
+    // The registry is written after the event, in order; wait for that write
+    // rather than a fixed 50 ms a loaded runner overran.
+    await vi.waitFor(async () => expect(await registry(entry)).toMatchObject({ lastTurn: { id: "turn-1", status: "completed" } }), { timeout: 3_000 });
   });
 
   it("hands the thread's approvals to the sink and answers with its decision", async () => {
