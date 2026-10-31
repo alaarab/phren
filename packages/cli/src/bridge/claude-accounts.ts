@@ -256,10 +256,16 @@ export function parseAuthStatus(output: string): AuthStatus {
 
 export type AuthRunner = (home: ClaudeHome) => Promise<string>;
 
+/** How the sign-in probe starts Claude: an npm install on Windows is `claude.cmd`, which only a shell starts. */
+export function claudeAuthSpawn(platform: NodeJS.Platform = process.platform): { command: string; shell: boolean } {
+  return { command: "claude", shell: platform === "win32" };
+}
+
 const runAuthStatus: AuthRunner = home => new Promise(resolve => {
   let out = "", done = false;
-  const child = spawn("claude", ["auth", "status", "--json"], {
-    cwd: homeDir(), stdio: ["ignore", "pipe", "ignore"],
+  const { command, shell } = claudeAuthSpawn();
+  const child = spawn(command, ["auth", "status", "--json"], {
+    cwd: homeDir(), stdio: ["ignore", "pipe", "ignore"], shell,
     env: { ...process.env, ...claudeLaunchEnv(home), NO_COLOR: "1" },
   });
   const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };

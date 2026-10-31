@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { accountLabel, claudeAccountKey, claudeAccountSubscription, claudePlanUnknown, claudeAccountRef, claudeHome, claudeHomeOfEnv, claudeHomeOfPath, claudeHomes, claudeLaunchEnv, clearAccountCaches, parseAuthStatus, setAccountLabel } from "./claude-accounts.js";
+import { accountLabel, claudeAccountKey, claudeAccountSubscription, claudeAuthSpawn, claudePlanUnknown, claudeAccountRef, claudeHome, claudeHomeOfEnv, claudeHomeOfPath, claudeHomes, claudeLaunchEnv, clearAccountCaches, parseAuthStatus, setAccountLabel } from "./claude-accounts.js";
 
 let home = "";
 beforeEach(() => {
@@ -97,4 +97,10 @@ it("parses claude auth status output", () => {
   expect(parseAuthStatus('{"loggedIn":false}').unknown).toBeUndefined();
   expect(parseAuthStatus("not json")).toMatchObject({ signedIn: false, unknown: true });
   expect(parseAuthStatus("")).toMatchObject({ signedIn: false });
+});
+
+it("starts the auth probe through a shell on Windows, where an npm install is claude.cmd", () => {
+  expect(claudeAuthSpawn("win32")).toEqual({ command: "claude", shell: true });
+  expect(claudeAuthSpawn("darwin")).toEqual({ command: "claude", shell: false });
+  expect(claudeAuthSpawn("linux")).toEqual({ command: "claude", shell: false });
 });

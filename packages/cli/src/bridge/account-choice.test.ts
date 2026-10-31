@@ -174,7 +174,13 @@ describe("a launch whose account restrictions cannot be read", () => {
 
 describe("the sole Claude account with no pools or role", () => {
   let home: string, bin: string;
-  const claude = (auth: string) => writeFileSync(path.join(bin, "claude"), `#!/bin/sh\nprintf '%s' '${auth}'\n`, { mode: 0o755 });
+  // Windows runs the npm shim, claude.cmd, and has no /bin/sh to execute a POSIX script.
+  const claude = (auth: string) => process.platform === "win32"
+    ? writeFileSync(path.join(bin, "claude.cmd"), `@echo off\r\necho ${auth}\r\n`)
+    : writeFileSync(path.join(bin, "claude"), `#!/bin/sh\nprintf '%s' '${auth}'\n`, { mode: 0o755 });
+  const stall = () => process.platform === "win32"
+    ? writeFileSync(path.join(bin, "claude.cmd"), "@echo off\r\nping -n 6 127.0.0.1 >nul\r\n")
+    : writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n/bin/sleep 4\n", { mode: 0o755 });
   const defaultHome = () => claudeHomes().find(item => item.id === "default")!;
   const remember = async (kind: LoginKind) => {
     const home = defaultHome();
@@ -215,7 +221,7 @@ describe("the sole Claude account with no pools or role", () => {
 
   it("bounds a stalled login probe and falls back to the last-known login", async () => {
     identify("login-subscription"); await remember("subscription");
-    writeFileSync(path.join(bin, "claude"), "#!/bin/sh\n/bin/sleep 4\n", { mode: 0o755 });
+    stall();
     const started = Date.now();
     expect(await pickClaudeAccount("Launch", {}, "Mini", now)).toBeUndefined();
     expect(Date.now() - started).toBeLessThan(3_500);

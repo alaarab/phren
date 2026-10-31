@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude account choice on Windows: the `claude auth status` probe now runs through a shell there, so an npm-installed `claude.cmd` answers instead of reading as unknown and letting a lone Console (API) login be chosen automatically without a role.
+
 ## [0.3.67] - 2026-10-31
 
 ### Added
