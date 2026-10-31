@@ -549,6 +549,23 @@ export async function readClaudeToken(execSecurity = exec, platform = process.pl
   try { return parse(await readFile(claudeCredentialsFile(home), "utf8")); } catch { return undefined; }
 }
 
+/**
+ * Two Claude homes signed in to one login are one allowance, and phones refuse
+ * an answer with two rows of one key: one row each, in the first home's place
+ * and under its name (the default home comes first), carrying the freshest
+ * report any of those homes has. Account choice reads `limits()` per home.
+ */
+export function oneRowPerLogin(rows: AccountUsage[]): AccountUsage[] {
+  const at = (row: AccountUsage) => row.windows.length ? Date.parse(row.updatedAt ?? "") || 0 : -1;
+  const best = new Map<string, AccountUsage>();
+  for (const row of rows) {
+    const key = row.account?.key;
+    if (key && (!best.has(key) || at(row) > at(best.get(key)!))) best.set(key, row);
+  }
+  return rows.filter(row => !row.account?.key || rows.find(other => other.account?.key === row.account!.key) === row)
+    .map(row => row.account?.key ? { ...best.get(row.account.key)!, account: row.account } : row);
+}
+
 /** Fetch live limits; any failure falls back to the local snapshot. */
 export async function fetchClaudeUsage(token: string, fetchImpl: typeof fetch = fetch, now = new Date()): Promise<AccountUsage> {
   const controller = new AbortController();
@@ -783,7 +800,7 @@ export class AccountUsageReader {
   async read(sources?: Set<string>, allAccounts = false): Promise<{ accounts: AccountUsage[] }> {
     const [limits, spending] = await Promise.all([this.limits(allAccounts),
       this.spending(sources?.has("copilot") ?? true, sources?.has("elevenlabs") ?? true)]);
-    return { accounts: [...limits, ...spending] };
+    return { accounts: [...oneRowPerLogin(limits), ...spending] };
   }
   /** Codex and every Claude home, without the spend readers: what a dispatch capacity probe asks. */
   async limits(allAccounts = true): Promise<AccountUsage[]> {
@@ -807,11 +824,7 @@ export class AccountUsageReader {
       const withCredit = credit.length ? { ...usage, windows: [...usage.windows, ...credit], ...(apiCredit ? { apiCredit } : {}), message: undefined, updatedAt: usage.updatedAt ?? now.toISOString() } : usage;
       return { ...withCredit, ...(subscription ? { subscription } : {}), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
     };
-    const [codexValue, rows, subscription] = await Promise.all([codex, Promise.all(homes.map(claudeRow)), readCodexSubscription(undefined, new Date(this.now()))]);
-    // Two homes signed in to one login are one allowance: one row, the first
-    // (default) home's. Phones refuse an answer with two rows of one key.
-    const keys = new Set<string>();
-    const claude = rows.filter(row => !row.account?.key || (!keys.has(row.account.key) && Boolean(keys.add(row.account.key))));
+    const [codexValue, claude, subscription] = await Promise.all([codex, Promise.all(homes.map(claudeRow)), readCodexSubscription(undefined, new Date(this.now()))]);
     return [{ ...codexValue, ...(subscription ? { subscription } : {}), account: CODEX_ACCOUNT }, ...claude];
   }
   /** ElevenLabs is read only when the caller shows it: every read spends a request against the key's quota. */
