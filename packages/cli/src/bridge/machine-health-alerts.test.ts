@@ -31,8 +31,8 @@ describe("machine health alerts", () => {
   });
 
   it("builds a push that names the computer and opens Resources", () => {
-    const payload = machineHealthPushPayload({ computer: "mini", id: "disk", title: "5 GB free", detail: "Builds fail.", fix: "Free space." });
+    const payload = machineHealthPushPayload({ computer: "mini", id: "disk", title: "5 GB free", detail: "Builds fail.", fix: "Free space." }, "6f1c0e8e-0000-4000-8000-000000000001");
     expect(payload).toMatchObject({ aps: { alert: { title: "mini: 5 GB free", body: "Builds fail. Free space." }, category: "PHREN_HEALTH" },
-      phren: { kind: "machineHealth", id: "disk", route: "resources" } });
+      phren: { kind: "machineHealth", host: "6f1c0e8e-0000-4000-8000-000000000001", id: "disk", route: "resources" } });
   });
 });

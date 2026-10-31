@@ -94,10 +94,10 @@ export function fanoutBlockedPushPayload(value: FanoutBlockedPush): Record<strin
   };
 }
 
-export function machineHealthPushPayload(value: MachineHealthPush): Record<string, unknown> {
+export function machineHealthPushPayload(value: MachineHealthPush, host?: string): Record<string, unknown> {
   return {
     aps: { alert: { title: `${value.computer}: ${value.title}`, body: `${value.detail} ${value.fix}`.trim() }, sound: "default", category: "PHREN_HEALTH" },
-    phren: { kind: "machineHealth", computer: value.computer, id: value.id, title: value.title, detail: value.detail, fix: value.fix, route: "resources" },
+    phren: { kind: "machineHealth", ...(host ? { host } : {}), computer: value.computer, id: value.id, title: value.title, detail: value.detail, fix: value.fix, route: "resources" },
   };
 }
 
@@ -331,7 +331,7 @@ export class ApprovalPushService {
   async notifyMachineHealth(value: MachineHealthPush): Promise<boolean> {
     const devices = this.reachable.filter(device => device.kinds.includes("approval"));
     if (!devices.length) return false;
-    return (await Promise.all(devices.map(device => this.send(device, machineHealthPushPayload(value), {
+    return (await Promise.all(devices.map(device => this.send(device, machineHealthPushPayload(value, device.hostID), {
       expiration: "0", collapseId: `health-${value.id}`.slice(0, 64),
     })))).some(Boolean);
   }
