@@ -1,7 +1,7 @@
 name: gitboy RC
 
 # Advisory: starts the same release candidate on a gitboy instance at the RC's
-# exact commit (.gitboy.yml, docs/gitboy-ci.md), which reports back as the
+# exact commit (.gitboy.yml), which reports back as the
 # `gitboy/rc` commit status. It lives outside ci.yml so it never holds the RC
 # run open; release.yml reads only that run. It starts when the owner
 # dispatches CI with release_candidate=true on the default branch (the
