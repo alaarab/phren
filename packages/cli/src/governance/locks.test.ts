@@ -5,11 +5,11 @@ import { makeTempDir } from "../test-helpers.js";
 
 // Windows answers a create of a lock file another process is deleting with
 // EPERM rather than EEXIST; stand in for that one write.
-const fail = vi.hoisted(() => ({ code: undefined as string | undefined }));
+const fail = vi.hoisted(() => ({ code: undefined as string | undefined, times: Infinity }));
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
   const writeFileSync = ((...args: Parameters<typeof actual.writeFileSync>) => {
-    if (fail.code) throw Object.assign(new Error(`${fail.code}: operation not permitted, open`), { code: fail.code });
+    if (fail.code && fail.times-- > 0) throw Object.assign(new Error(`${fail.code}: operation not permitted, open`), { code: fail.code });
     return actual.writeFileSync(...args);
   }) as typeof actual.writeFileSync;
   return { ...actual, default: { ...actual, writeFileSync }, writeFileSync };
@@ -20,6 +20,7 @@ const { tryFileLock } = await import("./locks.js");
 const platform = process.platform;
 afterEach(() => {
   fail.code = undefined;
+  fail.times = Infinity;
   Object.defineProperty(process, "platform", { value: platform });
 });
 
@@ -50,6 +51,24 @@ describe("tryFileLock", () => {
       Object.defineProperty(process, "platform", { value: "win32" });
       fail.code = "EACCES";
       expect(() => tryFileLock(path.join(tmp.path, "index-rebuild"))).toThrow(/EACCES/);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("takes a lock whose delete finished between the refused create and the check", () => {
+    const tmp = makeTempDir("phren-trylock-");
+    try {
+      // The holder's unlink was still pending when the create ran, and done
+      // by the time tryFileLock looked: no lock file, and nobody holds it.
+      Object.defineProperty(process, "platform", { value: "win32" });
+      fail.code = "EPERM";
+      // Again on the retry: another process took and released it in between.
+      fail.times = 2;
+      const release = tryFileLock(path.join(tmp.path, "owner-inbox.json"));
+      expect(release).toBeTypeOf("function");
+      expect(fs.existsSync(path.join(tmp.path, "owner-inbox.json.lock"))).toBe(true);
+      release!();
     } finally {
       tmp.cleanup();
     }
