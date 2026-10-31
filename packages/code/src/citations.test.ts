@@ -11,9 +11,9 @@ import { register as registerCode } from "../../cli/src/tools/code.js";
 import { register as registerFinding } from "../../cli/src/tools/finding.js";
 import type { McpContext } from "../../cli/src/tools/types.js";
 
-// Each test's setup commits the fixtures with real Git and indexes them, which
-// takes 10-25x longer on the Windows runners than on Linux.
-vi.setConfig({ hookTimeout: process.platform === "win32" ? 60_000 : 10_000 });
+// Each test's setup (and some tests) commits the fixtures with real Git and
+// indexes them, which takes 10-25x longer on the Windows runners than on Linux.
+vi.setConfig({ testTimeout: process.platform === "win32" ? 60_000 : 15_000, hookTimeout: process.platform === "win32" ? 60_000 : 10_000 });
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
 const PROJECT = "fixture";
