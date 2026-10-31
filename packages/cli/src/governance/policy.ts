@@ -8,6 +8,7 @@ import { storeAwareProjectPath } from "../store-routing.js";
 import { readProjectConfig, type ProjectConfigOverrides } from "../project-config.js";
 import { getActiveProfileDefaults, type ProfilePolicyDefaults } from "../profile-store.js";
 import { runCustomHooks } from "../hooks.js";
+import { renameOverSync } from "../phren-paths.js";
 import {
   METADATA_REGEX,
   isCitationLine,
@@ -707,7 +708,7 @@ function writeJsonFileUnlocked(filePath: string, data: unknown): void {
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = path.join(dir, `.tmp-${crypto.randomUUID()}`);
   fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n");
-  fs.renameSync(tmpPath, filePath);
+  renameOverSync(tmpPath, filePath);
 }
 
 function getRetentionPolicyGlobal(phrenPath: string): RetentionPolicy {
@@ -1152,7 +1153,7 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
       if (!dryRun) {
         const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
         fs.writeFileSync(tmpFile, next.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
-        fs.renameSync(tmpFile, file);
+        renameOverSync(tmpFile, file);
       }
     });
   }
@@ -1320,7 +1321,7 @@ export function consolidateProjectFindings(phrenPath: string, project: string, d
     fs.copyFileSync(file, file + ".bak");
     const tmpFile = file + `.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpFile, out.join("\n").trimEnd() + "\n");
-    fs.renameSync(tmpFile, file);
+    renameOverSync(tmpFile, file);
     appendAuditLog(phrenPath, "consolidate_project", `project=${project} dates=${dates.length}`);
     return phrenOk(`Consolidated findings for ${project}.`);
   });

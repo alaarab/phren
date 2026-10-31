@@ -8,6 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Shell tool cards in a busy, large checkout no longer show "Changes unavailable: Git change capture failed or timed out" under most calls, including read-only ones like `grep` or `git log`. Each shell call started one Git process per path its command named, plus four per repository, in turn through two shared slots, so parallel calls queued past the 2.5 s hook budget (8 parallel calls naming paths in five worktrees under load: 12 of 24 failed, p90 2.5 s). Repositories are now found without Git and remembered, and calls that overlap share one read of each repository's working tree and one scratch object store (same load: none failed, p90 0.7 s). A capture that still runs out of time shows no changes rather than an error; a real failure (Git missing, a corrupt repository) is shown once per conversation, not on every row.
+- On Windows, saving a governance config file (such as a retention policy) or the memory scores could fail with `EPERM` when another process was reading it at that moment. Those writes now use the same bounded rename retry as task and finding writes, and remove their temporary file if it gives up.
+
+## [0.3.65] - 2026-10-31
+
+### Fixed
+
+- A computer whose Claude homes are signed in to the same login no longer fails the phone's whole usage answer with "returned invalid account usage": `/v1/usage?accounts=all` sends one row per login, named after the default home with the freshest report, while account choice and failover still see every home.
 
 ## [0.3.64] - 2026-10-30
 

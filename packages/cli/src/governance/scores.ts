@@ -5,6 +5,7 @@ import { appendAuditLog, debugLog, isRecord, memoryScoresFile, memoryUsageLogFil
 import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+import { renameOverSync } from "../phren-paths.js";
 
 const MAX_LOG_LINES = 1000;
 
@@ -102,7 +103,7 @@ function writeScoresFile(phrenPath: string, scores: Record<string, EntryScore>):
       schemaVersion: GOVERNANCE_SCHEMA_VERSION,
       entries: scores,
     } satisfies VersionedEntriesFile<EntryScore>, null, 2) + "\n");
-    fs.renameSync(tmpPath, file);
+    renameOverSync(tmpPath, file);
   });
 }
 
