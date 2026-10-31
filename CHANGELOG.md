@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.67] - 2026-10-31
+
+### Added
+
+- Machine health findings: `GET /v1/resources` and the overview socket's resource frames carry named health findings (memory growth, swap and disk trends, load against cores, orphaned processes, simulators left running), and slower probes check restart loops, backup age, pending updates, recent crashes and out-of-memory kills, GPU and stale locks. A new high-severity finding is pushed to the phone once. The `machine_health` MCP action reads every linked computer's findings, and the conductor's hourly watchdog uses it.
+
+### Fixed
+
+- Account pools: when the harness inventory is slow or fails, this computer's `accounts.yaml` roles and pools still apply instead of falling back to the default account, and an unreadable file keeps enforcing the last policy that restricted anything. A lone API (Console) login is never chosen automatically without a role. The login-type check is bounded and remembers each account's last known type, tied to a hash of that login rather than the whole config file. The helper tool now requires `role: helpers`.
+- A PR report the integrator keeps refusing is retried with back-off instead of on every tick.
+
 ## [0.3.66] - 2026-10-31
 
 ### Fixed
