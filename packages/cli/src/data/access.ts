@@ -3,6 +3,7 @@
 // and owns finding/queue logic directly.
 import * as fs from "fs";
 import * as path from "path";
+import { renameOverSync } from "../phren-paths.js";
 import * as yaml from "js-yaml";
 import { loadYamlDocument } from "../phren-core.js";
 import {
@@ -523,7 +524,7 @@ export function removeFinding(phrenPath: string, project: string, match: string,
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     const tmp = filePath + ".tmp." + process.pid;
     fs.writeFileSync(tmp, normalized);
-    fs.renameSync(tmp, filePath);
+    renameOverSync(tmp, filePath);
     return phrenOk(`Removed from ${project}: ${matched}`);
   });
 }
@@ -578,7 +579,7 @@ export function removeFindings(phrenPath: string, project: string, matches: stri
       const normalized = filtered.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
       const tmp = findingsPath + ".tmp." + process.pid;
       fs.writeFileSync(tmp, normalized);
-      fs.renameSync(tmp, findingsPath);
+      renameOverSync(tmp, findingsPath);
     }
 
     return phrenOk({ removed, errors });
@@ -628,7 +629,7 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     const tmp = findingsPath + ".tmp." + process.pid;
     fs.writeFileSync(tmp, normalized);
-    fs.renameSync(tmp, findingsPath);
+    renameOverSync(tmp, findingsPath);
     return phrenOk(`Updated finding in ${project}`);
   });
 }
@@ -737,7 +738,7 @@ function writeQueueLines(file: string, lines: string[]): void {
   const content = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
   const tmp = file + ".tmp." + process.pid;
   fs.writeFileSync(tmp, content);
-  fs.renameSync(tmp, file);
+  renameOverSync(tmp, file);
 }
 
 /**
@@ -1035,7 +1036,7 @@ export function rejectQueueItemDetailed(
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     const tmp = `${target.file}.tmp.${process.pid}`;
     fs.writeFileSync(tmp, normalized);
-    fs.renameSync(tmp, target.file);
+    renameOverSync(tmp, target.file);
     return phrenOk(undefined);
   });
   if (!purge.ok) return forwardErr(purge);

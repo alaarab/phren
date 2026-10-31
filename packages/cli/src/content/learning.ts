@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { renameOverSync } from "../phren-paths.js";
 import * as crypto from "crypto";
 import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult, type FindingTag } from "../shared.js";
 import { normalizeMemoryScope } from "../shared.js";
@@ -317,7 +318,7 @@ export function upsertCanonical(phrenPath: string, project: string, memory: stri
         const content = updated.endsWith("\n") ? updated : updated + "\n";
         const tmpPath = canonicalPath + `.tmp-${crypto.randomUUID()}`;
         fs.writeFileSync(tmpPath, content);
-        fs.renameSync(tmpPath, canonicalPath);
+        renameOverSync(tmpPath, canonicalPath);
       }
     }
   });
@@ -381,7 +382,7 @@ export function addFindingToFile(
       const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
       const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpPath, newContent);
-      fs.renameSync(tmpPath, learningsPath);
+      renameOverSync(tmpPath, learningsPath);
       return phrenOk({
         content: newContent,
         citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
@@ -456,7 +457,7 @@ export function addFindingToFile(
 
     const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmpPath, updated);
-    fs.renameSync(tmpPath, learningsPath);
+    renameOverSync(tmpPath, learningsPath);
     return phrenOk({
       content: updated,
       citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
@@ -573,7 +574,7 @@ export function addFindingsToFile(
       if (added.length > 0) {
         const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
         fs.writeFileSync(tmpPath, content.endsWith("\n") ? content : `${content}\n`);
-        fs.renameSync(tmpPath, learningsPath);
+        renameOverSync(tmpPath, learningsPath);
       }
       return phrenOk({ content, wrote: added.length > 0 });
     }
@@ -609,7 +610,7 @@ export function addFindingsToFile(
     if (added.length > 0) {
       const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpPath, content);
-      fs.renameSync(tmpPath, learningsPath);
+      renameOverSync(tmpPath, learningsPath);
     }
 
     return phrenOk({ content, wrote: added.length > 0 });

@@ -4,6 +4,7 @@ import { moduleEnabled } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
 import * as fs from "fs";
 import * as path from "path";
+import { renameOverSync } from "../phren-paths.js";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import {
   phrenErr,
@@ -493,7 +494,7 @@ function writeTaskDoc(doc: TaskDoc): void {
   const tmpPath = `${doc.path}.tmp-${randomUUID()}`;
   const content = renderTask(doc);
   fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, doc.path);
+  renameOverSync(tmpPath, doc.path);
   recordTaskWrite(doc.path, content);
 }
 
@@ -1204,7 +1205,7 @@ export function tidyDoneTasks(phrenPath: string, project: string, keep: number =
     const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} tasks archive\n\n`;
     const tmpPath = `${archiveFile}.tmp-${randomUUID()}`;
     fs.writeFileSync(tmpPath, prior + block);
-    fs.renameSync(tmpPath, archiveFile);
+    renameOverSync(tmpPath, archiveFile);
 
     writeTaskDoc(parsed.data);
     return phrenOk(`Tidied ${project}: archived ${archived.length} done item(s), kept ${safeKeep}.`);
