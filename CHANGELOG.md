@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, saving a governance config file (such as a retention policy) or the memory scores could fail with `EPERM` when another process was reading it at that moment. Those writes now use the same bounded rename retry as task and finding writes, and remove their temporary file if it gives up.
+
 ## [0.3.65] - 2026-10-31
 
 ### Fixed
