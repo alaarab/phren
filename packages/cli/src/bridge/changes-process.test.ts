@@ -29,6 +29,38 @@ it("gives up at the hook budget without a row error and cancels the Git read nob
   } finally { await changes.close(); await rm(home, { recursive: true, force: true }); }
 });
 
+it("stops a stalled sibling read when another repository fails, freeing its pool slot", async () => {
+  const home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-sibling-"))); vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", home + "/bridge"); vi.stubEnv("PHREN_PATH", home + "/store");
+  const broken = path.join(home, "broken"), stalled = path.join(home, "stalled");
+  await mkdir(path.join(broken, ".git/objects"), { recursive: true });
+  await mkdir(path.join(stalled, ".git/objects"), { recursive: true });
+  let failBroken: (() => void) | undefined, stalledSignal: AbortSignal | undefined;
+  state.exec.mockReset();
+  state.exec.mockImplementation((_file, args: string[], options) => {
+    const dir = args[1];
+    if (args.includes("rev-parse")) return Promise.resolve({ stdout: `${dir}\n.git/objects\n.git/index\n`, stderr: "" });
+    if (args.includes("add")) {
+      if (dir === broken) return new Promise((_resolve, reject) => { failBroken = () => reject(new Error("fatal: unable to read index")); });
+      stalledSignal = options.signal;
+      return new Promise((_resolve, reject) => options.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true }));
+    }
+    return Promise.resolve({ stdout: "", stderr: "" });
+  });
+  const changes = new ToolChanges({ budgetMs: 60_000 });
+  try {
+    const pending = changes.before("c", "t", broken, "ls", { file_path: path.join(stalled, "x") });
+    // Both repository reads hold a pool slot before the broken one fails.
+    await vi.waitFor(() => { expect(failBroken).toBeDefined(); expect(stalledSignal).toBeDefined(); });
+    failBroken!();
+    await pending;
+    await expect(changes.view("c").changes("t")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+    // The stalled read's waiter was released and its Git process stopped, so
+    // its slot came back without waiting for Git's own timeout.
+    await vi.waitFor(() => expect(stalledSignal?.aborted).toBe(true), { interval: 1 });
+    await vi.waitFor(() => expect([...(changes as any).scratches.values()].every((scratch: { busy: boolean }) => !scratch.busy)).toBe(true), { interval: 1 });
+  } finally { await changes.close(); await rm(home, { recursive: true, force: true }); }
+});
+
 it("keeps a shared repository lookup alive while another caller still waits for it", async () => {
   const home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-shared-"))); vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", home + "/bridge"); vi.stubEnv("PHREN_PATH", home + "/store");
   await mkdir(path.join(home, ".git/objects"), { recursive: true });
