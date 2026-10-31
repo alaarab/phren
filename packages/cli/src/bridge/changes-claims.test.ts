@@ -121,24 +121,34 @@ it("surfaces a failed post-tool Git read once per conversation instead of record
   await expect(changes.after("codex:b", "broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
 });
 
-it("reports a broken repository once per conversation even when another checkout succeeds", async () => {
+it("reports a broken repository once per conversation even when a healthy checkout and a shared store are captured with it", async () => {
   const healthy = path.join(home, "healthy");
   const git = (...args: string[]) => exec("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", healthy, ...args]);
   await exec("git", ["init", "-q", "-b", "main", healthy]);
   await writeFile(path.join(healthy, "README.md"), "hello\n");
   await git("add", "."); await git("commit", "-qm", "start");
 
+  // The shared store is a Git checkout too, so every capture below takes it
+  // alongside the working repository.
+  const store = path.join(home, "store");
+  const storeGit = (...args: string[]) => exec("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", store, ...args]);
+  await exec("git", ["init", "-q", "-b", "main", store]);
+  await writeFile(path.join(store, "AGENTS.md"), "store\n");
+  await storeGit("add", "."); await storeGit("commit", "-qm", "start");
+
   // The broken checkout captures its start state, then its index is corrupted.
   await changes.before("codex:a", "broken-1", repo, "format");
   await writeFile(path.join(repo, ".git/index"), "corrupt index");
   await expect(changes.after("codex:a", "broken-1")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
 
-  // A healthy checkout captures successfully and must not clear the broken one.
+  // A healthy checkout captures successfully (with the shared store) and must
+  // not clear the broken repository's mark.
   await changes.before("codex:a", "healthy", healthy, "format");
   await writeFile(path.join(healthy, "a.txt"), "a\n");
   await expect(changes.after("codex:a", "healthy")).resolves.toBeUndefined();
 
-  // The broken checkout's error is not shown again.
+  // The broken checkout's error is not shown again, even though the store was
+  // captured and cleared by the healthy call.
   await rm(path.join(repo, ".git/index"));
   await exec("git", ["-C", repo, "reset", "-q"]);
   await changes.before("codex:a", "broken-2", repo, "format");

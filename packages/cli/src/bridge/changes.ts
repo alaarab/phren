@@ -68,6 +68,16 @@ function timedOut(error: unknown): boolean {
   const failure = error as { name?: string; code?: string; killed?: boolean } | undefined;
   return error instanceof CaptureTimeout || failure?.name === "AbortError" || failure?.code === "ABORT_ERR" || failure?.killed === true;
 }
+/** The repository whose Git work failed, carried on the error so a report
+ * marks that root and not every repository the call happened to capture. */
+const failedRepository = Symbol("failed-repository");
+function failedIn(error: unknown, root: string): unknown {
+  if (error && (typeof error === "object" || typeof error === "function")) (error as Record<symbol, unknown>)[failedRepository] = root;
+  return error;
+}
+function failureRoot(error: unknown): string | undefined {
+  return error && (typeof error === "object" || typeof error === "function") ? (error as Record<symbol, unknown>)[failedRepository] as string | undefined : undefined;
+}
 /** `work`, but given up on (not stopped) when `signal` fires. */
 function until<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason);
@@ -299,7 +309,9 @@ export class ToolChanges {
     if (failure.details?.code === "git-capture-failed") {
       // A breakage is news once per repository: a healthy checkout's capture
       // must not let a corrupt sibling repo report its error again.
-      const marks = roots.length ? [...new Set(roots)].map(root => `${conversation}\0${root}`) : [`${conversation}\0`];
+      const root = failureRoot(error);
+      const marks = root ? [`${conversation}\0${root}`]
+        : roots.length ? [...new Set(roots)].map(entry => `${conversation}\0${entry}`) : [`${conversation}\0`];
       if (marks.every(mark => this.reported.has(mark))) return undefined;
       for (const mark of marks) {
         if (this.reported.size >= 512) this.reported.delete(this.reported.keys().next().value!);
@@ -322,7 +334,14 @@ export class ToolChanges {
     const timer = setTimeout(() => controller.abort(), this.budgetMs);
     try { return await work(controller.signal); }
     catch (error) { throw controller.signal.aborted ? new CaptureTimeout() : error; }
-    finally { clearTimeout(timer); this.controllers.delete(controller); }
+    finally {
+      clearTimeout(timer); this.controllers.delete(controller);
+      // Leaving the scope gives up on every read this call started, including
+      // ones still running beside a sibling that failed: a shared read stops
+      // once its last waiter detaches, so it cannot hold a pool slot until
+      // Git's own timeout.
+      controller.abort();
+    }
   }
   private async discard(snapshot: Snapshot) {
     clearTimeout(snapshot.expiry);
@@ -429,7 +448,7 @@ export class ToolChanges {
         await Promise.all([...repositories.values()].map(async repository => {
           const tree: Tree = { scratch: this.scratchFor(repository) };
           tree.scratch.users++; snapshot.trees.set(repository.root, tree);
-          tree.hash = await tree.scratch.tree(signal);
+          tree.hash = await tree.scratch.tree(signal).catch(error => { throw failedIn(error, repository.root); });
         }));
         signal.throwIfAborted();
       });
@@ -490,10 +509,13 @@ export class ToolChanges {
     try {
       return await this.budget(async signal => {
         const trees = [...snapshot.trees.entries()];
-        const after = await Promise.all(trees.map(([, tree]) => tree.scratch.tree(signal)));
+        const after = await Promise.all(trees.map(([root, tree]) => tree.scratch.tree(signal).catch(error => { throw failedIn(error, root); })));
         const files = await capturePool.run(signal, async () => {
           const found: ChangedFile[] = [];
-          for (const [i, [root, tree]] of trees.entries()) found.push(...await treeDiff(root, tree.hash!, after[i], tree.scratch.env, signal));
+          for (const [i, [root, tree]] of trees.entries()) {
+            try { found.push(...await treeDiff(root, tree.hash!, after[i], tree.scratch.env, signal)); }
+            catch (error) { throw failedIn(error, root); }
+          }
           return found;
         });
         // A file another agent's edit named during this call is its change,
