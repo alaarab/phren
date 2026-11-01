@@ -42,7 +42,10 @@ async function worktree() {
   const root = path.join(base, "repo"), worker = path.join(base, "worker");
   const env = { ...process.env, HOME: base, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "fixture", GIT_AUTHOR_EMAIL: "fixture@example.com",
     GIT_COMMITTER_NAME: "fixture", GIT_COMMITTER_EMAIL: "fixture@example.com" };
-  const git = async (cwd: string, ...args: string[]) => (await exec("git", ["-C", cwd, ...args], { env })).stdout;
+  // Raw fixture operations delete the same long ref lock paths as the Hook.
+  // This process-local option leaves the repo config unchanged, so capture
+  // still independently exercises the Hook's own long-path handling.
+  const git = async (cwd: string, ...args: string[]) => (await exec("git", ["-c", "core.longpaths=true", "-C", cwd, ...args], { env })).stdout;
   await exec("git", ["init", "-q", "-b", "main", root], { env });
   await writeFile(path.join(root, "file.txt"), "base\n");
   await git(root, "add", "."); await git(root, "commit", "-qm", "baseline");
@@ -67,26 +70,32 @@ it("produces exactly the conformance fixture's checkpoint list and prompt mappin
   const stopCheckpoint = fixture.checkpoints.find(row => row.boundary === "stop")!;
   const recoveryCheckpoint = fixture.checkpoints.find(row => row.boundary === "recovery")!;
   const readPane = async () => ({ agent_status: "idle" });
+  const settled = () => checkpointRoute(worker, target, "list", {}, readPane);
 
   vi.useFakeTimers({ toFake: ["Date"] });
   ids.n = 0;
   const at = (time: string) => vi.setSystemTime(Date.parse(time));
   at(alphaCheckpoint.at);
   await writeFile(path.join(worker, "file.txt"), "alpha\n");
-  await checkpointBoundary(worker, target, "UserPromptSubmit", 1, alpha.message.content, alphaId);
+  checkpointBoundary(worker, target, "UserPromptSubmit", 1, alpha.message.content, alphaId);
+  await settled();
   at(stopCheckpoint.at);
   await writeFile(path.join(worker, "file.txt"), "stop\n");
-  await checkpointBoundary(worker, target, "Stop", 2, "");
+  checkpointBoundary(worker, target, "Stop", 2, "");
+  await settled();
   at(betaCheckpoint.at);
   await writeFile(path.join(worker, "file.txt"), "beta\n");
-  await checkpointBoundary(worker, target, "UserPromptSubmit", 3, beta.message.content, betaId);
+  checkpointBoundary(worker, target, "UserPromptSubmit", 3, beta.message.content, betaId);
+  await settled();
   at(new Date(Date.parse(betaCheckpoint.at) + 1_000).toISOString());
   await writeFile(path.join(worker, "file.txt"), "gamma\n");
-  await checkpointBoundary(worker, target, "UserPromptSubmit", 4, gamma.message.content, gammaId);
+  checkpointBoundary(worker, target, "UserPromptSubmit", 4, gamma.message.content, gammaId);
+  await settled();
 
   // The gamma prompt's own checkpoint is pruned, while its transcript entry
   // keeps the identity.
-  const captured = await checkpointRoute(worker, target, "list", {}, readPane) as { checkpoints: CheckpointRow[] };
+  const captured = await checkpointRoute(worker, target, "list", {}, readPane) as { checkpoints: CheckpointRow[]; skippedCaptures: unknown[] };
+  expect(captured.skippedCaptures).toEqual([]);
   const gammaRow = captured.checkpoints.find(row => row.promptEntryId === gammaId)!;
   const gammaRef = (await git(worker, "for-each-ref", "--format=%(refname)", "refs/phren/checkpoints/")).trim().split("\n")
     .find(ref => ref.endsWith(gammaRow.id))!;

@@ -237,9 +237,6 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
     await writeFile(`/tmp/previewflap-retirement-${suffix ? "cursor" : "opening"}.json`, JSON.stringify({ reconstructed: true, frames: trace }, null, 2));
   });
   it.each(["full", "fast"])("%s forwarder preserves generation, deliveries, checkpoints and replyless final Stop", async mode => {
-    // This case checks boundary admission and persisted Git checkpoints,
-    // not elapsed-time limits. Freeze the budget clock while real Git runs.
-    vi.spyOn(performance, "now").mockReturnValue(0);
     await forward(mode, { hook_event_name: "UserPromptSubmit", prompt });
     const initial = (await readTurn("default", "w1:p1"))!;
     const checkpoints = () => checkpointRoute(String(pane.foreground_cwd), target, "list", {}, async () => pane);

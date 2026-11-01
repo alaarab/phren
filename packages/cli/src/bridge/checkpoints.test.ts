@@ -1,9 +1,13 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile, symlink } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile, symlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { request, type ServerResponse } from "node:http";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+vi.mock("node:fs/promises", async original => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, lstat: vi.fn(actual.lstat) };
+});
 const pane = vi.hoisted(() => ({ cwd: "", foreground_cwd: "", terminal_id: "term-checkpoint", agent_status: "idle" }));
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), validateTarget: vi.fn(async () => ({ ...pane })), snapshot: vi.fn(), rpc: vi.fn() }));
 import { AgentHooks } from "./agent-hooks.js";
@@ -31,7 +35,7 @@ beforeEach(async () => {
   vi.mocked(readFinalTurn).mockReset().mockResolvedValue(undefined);
   vi.mocked(childAgentTree).mockReset().mockResolvedValue([]);
 });
-afterEach(async () => { vi.unstubAllEnvs(); await rm(base, { recursive: true, force: true }); });
+afterEach(async () => { await list().catch(() => {}); vi.unstubAllEnvs(); await rm(base, { recursive: true, force: true }); });
 async function fixture() {
   const root = path.join(base, "repo"), worker = path.join(base, "worker");
   const env = { ...process.env, HOME: base, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "fixture", GIT_AUTHOR_EMAIL: "fixture@example.com", GIT_COMMITTER_NAME: "fixture", GIT_COMMITTER_EMAIL: "fixture@example.com" };
@@ -49,7 +53,10 @@ const call = (suffix = "", data: Record<string, unknown> = {}) => paneRoute({} a
 const list = async () => await call() as { state: string; checkpoints: CheckpointRow[]; limit: number };
 const preview = async (id: string) => await call("/preview", { checkpointId: id }) as { token: string; files: { path: string; status: string }[] };
 const restore = async (id: string, token: string) => await call("/restore", { checkpointId: id, token }) as { recoveryId: string };
-const capture = (event = "UserPromptSubmit", turn = 1) => checkpointBoundary(pane.foreground_cwd, target, event, turn, "Fix the file");
+const capture = async (event = "UserPromptSubmit", turn = 1) => {
+  checkpointBoundary(pane.foreground_cwd, target, event, turn, "Fix the file");
+  await list(); // The public route waits for background capture.
+};
 
 it("takes no checkpoints in the main checkout and refuses preview/restore there", async () => {
   const { root, git } = await fixture(); pane.foreground_cwd = root;
@@ -130,6 +137,7 @@ it.skipIf(process.platform === "win32")("restores file/directory/symlink transit
   expect(await readFile(path.join(outside, "item"), "utf8")).toBe("outside");
 });
 
+// Retention cases run 50 real Git snapshots; they assert history, not latency.
 it("bounds conversation history and deletes pruned refs", async () => {
   const { worker, git } = await fixture();
   await capture(); const first = (await list()).checkpoints[0].id, limit = (await list()).limit;
@@ -137,7 +145,7 @@ it("bounds conversation history and deletes pruned refs", async () => {
   const history = await list(); expect(history.checkpoints).toHaveLength(limit); expect(history.checkpoints.some(row => row.id === first)).toBe(false);
   expect((await git(worker, "for-each-ref", "--format=%(refname)", "refs/phren/checkpoints/")).trim().split("\n")).toHaveLength(limit);
   await expect(preview(first)).rejects.toMatchObject({ status: 404 });
-}, process.platform === "win32" ? 120_000 : 30_000);
+}, 120_000);
 
 async function callbacks(worker: string) {
   vi.mocked(snapshot).mockResolvedValue({ panes: [{ ...pane, pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: "claude" }] });
@@ -163,10 +171,68 @@ it.skipIf(process.platform === "win32")("captures prompt and Stop through the re
     expect(await post("UserPromptSubmit")).toBe("{}");
     const first = (await list()).checkpoints[0]; expect(first).toMatchObject({ boundary: "prompt", prompt: "Callback prompt" });
     expect(await post("UserPromptSubmit", "Second callback prompt")).toBe("{}");
+    await list();
     await writeFile(path.join(worker, "file.txt"), "stopped edit");
     expect(await post("Stop")).toBe("{}");
     expect((await list()).checkpoints[0]).toMatchObject({ boundary: "stop", prompt: "Second callback prompt", turn: first.turn + 1, filesChanged: 1 });
   } finally { close(); }
+});
+
+it("records a failed capture in list and continues capturing the conversation", async () => {
+  const { worker } = await fixture();
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.mocked(lstat).mockImplementation((async (...args: Parameters<typeof lstat>) => {
+    if (String(args[0]) === path.join(worker, "file.txt")) throw Object.assign(new Error("unreadable"), { code: "EACCES" });
+    return actual.lstat(...args);
+  }) as typeof lstat);
+  try {
+    checkpointBoundary(worker, target, "UserPromptSubmit", 1, "first", "claude:prompt:failed");
+    expect(await list()).toMatchObject({ checkpoints: [], skippedCaptures: [
+      { turn: 1, boundary: "prompt", promptEntryId: "claude:prompt:failed", reason: "checkpoint-failed" },
+    ] });
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("checkpoint-failed"));
+    vi.mocked(lstat).mockImplementation(actual.lstat);
+    checkpointBoundary(worker, target, "UserPromptSubmit", 2, "second", "claude:prompt:after-failure");
+    expect((await list()).checkpoints).toMatchObject([{ turn: 2, promptEntryId: "claude:prompt:after-failure" }]);
+  } finally { vi.mocked(lstat).mockImplementation(actual.lstat); warning.mockRestore(); }
+});
+
+// This fixture posts through a Unix-domain callback socket.
+it.skipIf(process.platform === "win32")("acknowledges callbacks while capture is blocked and serializes queued boundaries before list", async () => {
+  const { worker } = await fixture();
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  let unblock!: () => void, entered!: () => void;
+  const blocked = new Promise<void>(resolve => { unblock = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  vi.mocked(lstat).mockImplementation((async (...args: Parameters<typeof lstat>) => {
+    const info = await actual.lstat(...args);
+    if (String(args[0]) === path.join(worker, "file.txt")) { entered(); await blocked; }
+    return info;
+  }) as typeof lstat);
+  const { post, close } = await callbacks(worker);
+  const firstAt = new Date(Date.now() + 60_000).toISOString(), secondAt = new Date(Date.now() + 120_000).toISOString();
+  let answer: Awaited<ReturnType<typeof list>> | undefined;
+  try {
+    let acknowledged = false;
+    const sent = post("UserPromptSubmit", "first", target, { promptEntryId: "claude:prompt:slow-first" }).then(value => { acknowledged = true; return value; });
+    await started;
+    await vi.waitFor(() => expect(acknowledged).toBe(true));
+    expect(await sent).toBe("{}");
+    // Facts are copied on admission while the first snapshot is still blocked.
+    checkpointBoundary(worker, target, "UserPromptSubmit", 2, "second", "claude:prompt:slow-second", firstAt);
+    checkpointBoundary(worker, target, "UserPromptSubmit", 3, "third", "claude:prompt:slow-third", secondAt);
+    const reading = list().then(value => { answer = value; return value; });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(answer).toBeUndefined();
+    unblock();
+    const history = await reading;
+    expect(history.checkpoints.map(row => [row.turn, row.promptEntryId])).toEqual([
+      [3, "claude:prompt:slow-third"], [2, "claude:prompt:slow-second"], [1, "claude:prompt:slow-first"],
+    ]);
+    expect(history.checkpoints.find(row => row.turn === 2)).toMatchObject({ at: firstAt, prompt: "second" });
+    expect(history.checkpoints.find(row => row.turn === 3)).toMatchObject({ at: secondAt, prompt: "third" });
+  } finally { unblock(); await list().catch(() => {}); vi.mocked(lstat).mockImplementation(actual.lstat); close(); }
 });
 
 it.skipIf(process.platform === "win32")("selects identical prompts by native id, never by text or time", async () => {
@@ -211,17 +277,17 @@ it.skipIf(process.platform === "win32")("creates a distinct prompt checkpoint fo
 it("prunes a prompt's checkpoint without reassigning its identity", async () => {
   const { worker } = await fixture();
   const p1 = claudePromptEntryId(["fixture", "prune", "one"].join("-"))!, p2 = claudePromptEntryId(["fixture", "prune", "two"].join("-"))!;
-  await checkpointBoundary(worker, target, "UserPromptSubmit", 1, "continue", p1);
+  checkpointBoundary(worker, target, "UserPromptSubmit", 1, "continue", p1);
   const first = (await list()).checkpoints.find(row => row.promptEntryId === p1)!;
-  await checkpointBoundary(worker, target, "UserPromptSubmit", 2, "continue", p2);
+  checkpointBoundary(worker, target, "UserPromptSubmit", 2, "continue", p2);
   const limit = (await list()).limit;
-  for (let i = 0; i < limit - 1; i++) await checkpointBoundary(worker, target, "UserPromptSubmit", i + 3, "continue", `claude:prompt:extra-${i}`);
+  for (let i = 0; i < limit - 1; i++) checkpointBoundary(worker, target, "UserPromptSubmit", i + 3, "continue", `claude:prompt:extra-${i}`);
   const history = await list();
   expect(history.checkpoints).toHaveLength(limit);
   expect(history.checkpoints.some(row => row.promptEntryId === p1)).toBe(false);
   expect(history.checkpoints.filter(row => row.promptEntryId === p2)).toHaveLength(1);
   await expect(preview(first.id)).rejects.toMatchObject({ status: 404, details: { code: "checkpoint-not-found" } });
-}, process.platform === "win32" ? 120_000 : 30_000);
+}, 120_000);
 
 it("lists a legacy checkpoint row that predates prompt identities", async () => {
   const { worker, git } = await fixture();
@@ -240,7 +306,7 @@ it("lists a legacy checkpoint row that predates prompt identities", async () => 
 
 it("takes no checkpoints from activity-only harness events", async () => {
   const { worker } = await fixture();
-  await checkpointBoundary(worker, { ...target, source: "opencode" }, "chat.message", 1, "hello", "claude:prompt:not-used");
+  checkpointBoundary(worker, { ...target, source: "opencode" }, "chat.message", 1, "hello", "claude:prompt:not-used");
   expect((await list()).checkpoints).toEqual([]);
 });
 

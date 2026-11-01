@@ -1962,7 +1962,7 @@ filesystem path or Git ref is accepted.
 
 | Route | Additional request fields | Success response (HTTP 200) |
 | --- | --- | --- |
-| `/v1/git/checkpoints` | none | `{state: "ready", repository, limit: 50, checkpoints: [...]}`, newest first; or `{state: "not-isolated", limit: 50, checkpoints: []}` outside a linked worktree. |
+| `/v1/git/checkpoints` | none | `{state: "ready", repository, limit: 50, checkpoints: [...], skippedCaptures: [...]}`, newest first; or `{state: "not-isolated", limit: 50, checkpoints: []}` outside a linked worktree. |
 | `/v1/git/checkpoints/preview` | `checkpointId` (UUID string) | `{state: "ready", repository, checkpointId, files: [{path, status}], token}`. `status` is `A` (would create), `M` (would replace bytes, mode or type), or `D` (would delete), relative to the **current** working tree. Renames appear as delete/add. `files: []` means no change. |
 | `/v1/git/checkpoints/restore` | `checkpointId`, `token` (the opaque preview string) | `{ok: true, checkpointId, recoveryId, files: [{path, status}]}`. `recoveryId` identifies the pre-restore tree, for Undo restore. |
 
@@ -1973,7 +1973,7 @@ Every checkpoint row has these required fields:
 | `id` | UUID string, opaque checkpoint selector; never a Git SHA. |
 | `turn` | Nonnegative integer: this conversation's prompt event sequence from the Hook turn record (fallback: Stop event sequence when the prompt was not observed). Gaps are valid; this is not a transcript message index. Recovery rows carry the restored checkpoint's turn. |
 | `boundary` | `"prompt"`, `"stop"` or `"recovery"`. |
-| `at` | UTC ISO 8601 timestamp when captured. |
+| `at` | UTC ISO 8601 timestamp when the boundary was recorded (before background capture). |
 | `prompt` | Prompt excerpt, at most 240 characters, control characters replaced by spaces; empty when unavailable. Stop snapshots use their turn’s prompt excerpt (empty if unavailable after restart). Recovery rows say `"Before restore"`. |
 | `filesChanged` | Integer count of paths changed since the preceding retained snapshot at creation, or HEAD for the first snapshot. Renames count as two paths. This is historical metadata; use preview for the current restore delta. |
 
@@ -1983,12 +1983,18 @@ Captures are driven by `UserPromptSubmit`/`Stop` lifecycle callbacks; a harness
 that supplies only activity stamps produces no checkpoints.
 Prompt-submitted and turn-stopped callbacks try to capture tracked and untracked
 non-ignored files, including raw binary/CRLF bytes, symlinks and executable modes,
-without applying Git filters. Empty directories are not represented. An authoritative
+without applying Git filters. Checkpoint Git commands enable Windows long paths
+per process, without changing repository configuration. Empty directories are not represented. An authoritative
 prompt identity creates a distinct prompt checkpoint even when file contents are
 unchanged. Other unchanged captures reuse the previous checkpoint without changing
-its metadata or assigning it to another prompt. Capture is best effort, has a 300 ms total Git budget
-(5 seconds on Windows to allow for Git process startup), skips busy/failed
-captures, and never fails the agent callback. Missing rows do not imply missing
+its metadata or assigning it to another prompt. The callback records the boundary's
+identity, sequence and time, then queues capture in the background. Operations are
+serialized per worktree; list, preview and restore wait for previously queued
+captures before proceeding. Snapshot bytes reflect the files when capture runs,
+which may be later than the callback. Capture has a 60 second safety cap on every
+platform and never delays or fails the agent callback. Failed or timed-out captures
+are logged and retained in the list response's `skippedCaptures` (boundary metadata
+and a `reason`, at most 50 per conversation, in memory until Hook restart). Missing rows do not imply missing
 messages. At most 50 rows/refs per worktree and conversation are retained, including
 recovery rows; pruned ids return 404. Pruning removes the checkpoint and its prompt
 association. Older checkpoints are not backfilled by inference. Stop and recovery

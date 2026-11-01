@@ -773,6 +773,8 @@ describe.skipIf(!hasNodeSqlite)("conversation search over Codex's SQLite thread 
     clock.mockRestore();
     expect(fresh.results.map(row => row.conversation)).toEqual([later]);
     expect(fresh.partial).toBeUndefined();
-  }, 30_000);
+  // This stress case materializes 505 JSONL/cursor pairs and repeatedly opens
+  // SQLite stores. Windows file open/atomic rename costs made the RC take 31 s.
+  }, process.platform === "win32" ? 90_000 : 30_000);
 
 });
