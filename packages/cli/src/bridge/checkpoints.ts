@@ -27,6 +27,9 @@ const activityGeneration = (target: Target) => Math.max(...activityKeys(target).
 
 const exec = promisify(execFile);
 const LIMIT = 50;
+// Capture starts roughly a dozen Git processes. Git for Windows needs more
+// startup time; keep the whole operation below the callback's 12 second timeout.
+const CAPTURE_BUDGET_MS = process.platform === "win32" ? 5_000 : 300;
 const secret = randomBytes(32);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const rowSchema = z.object({ id: z.string().uuid(), turn: z.number().int().nonnegative(),
@@ -152,7 +155,7 @@ const prompts = new Map<string, { turn: number; text: string }>();
 export async function checkpointBoundary(cwd: string, target: Target, event: string, turn: number, prompt = "", promptEntryId?: string): Promise<void> {
   if (event !== "UserPromptSubmit" && event !== "Stop") return;
   try {
-    const ctx = await context(cwd, target, 300);
+    const ctx = await context(cwd, target, CAPTURE_BUDGET_MS);
     if (event === "UserPromptSubmit") {
       prompts.delete(ctx.prefix);
       prompts.set(ctx.prefix, { turn, text: prompt.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 240) });
@@ -168,7 +171,7 @@ export async function checkpointBoundary(cwd: string, target: Target, event: str
     });
   } catch (error) {
     if (error instanceof BridgeError && ["checkpoint-not-isolated", "checkpoint-busy"].includes(String(error.details?.code))) return;
-    if (!warned) { warned = true; console.warn("[phren-hook] Checkpoint capture skipped (failed or exceeded its 300 ms budget)."); }
+    if (!warned) { warned = true; console.warn(`[phren-hook] Checkpoint capture skipped (failed or exceeded its ${CAPTURE_BUDGET_MS} ms budget).`); }
   }
 }
 

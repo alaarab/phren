@@ -137,7 +137,7 @@ it("bounds conversation history and deletes pruned refs", async () => {
   const history = await list(); expect(history.checkpoints).toHaveLength(limit); expect(history.checkpoints.some(row => row.id === first)).toBe(false);
   expect((await git(worker, "for-each-ref", "--format=%(refname)", "refs/phren/checkpoints/")).trim().split("\n")).toHaveLength(limit);
   await expect(preview(first)).rejects.toMatchObject({ status: 404 });
-}, 30_000);
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 async function callbacks(worker: string) {
   vi.mocked(snapshot).mockResolvedValue({ panes: [{ ...pane, pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: "claude" }] });
@@ -221,7 +221,7 @@ it("prunes a prompt's checkpoint without reassigning its identity", async () => 
   expect(history.checkpoints.some(row => row.promptEntryId === p1)).toBe(false);
   expect(history.checkpoints.filter(row => row.promptEntryId === p2)).toHaveLength(1);
   await expect(preview(first.id)).rejects.toMatchObject({ status: 404, details: { code: "checkpoint-not-found" } });
-}, 30_000);
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it("lists a legacy checkpoint row that predates prompt identities", async () => {
   const { worker, git } = await fixture();

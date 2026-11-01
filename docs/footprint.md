@@ -54,7 +54,8 @@ The worktree's private Git admin directory holds a transient
 `phren-checkpoint-*/index` and `phren-checkpoint.lock` during operations; both are
 removed on completion/failure. A process crash can leave these behind; after
 ensuring no checkpoint operation runs, they can be removed manually. Capture has
-a 300 ms Git budget and logs one generic warning per Hook process on failure.
+a 300 ms Git budget (5 seconds on Windows to allow for Git process startup) and
+logs one generic warning per Hook process on failure.
 An explicit restore writes/deletes only validated repository-relative working
 files, preserving ignored files. It creates a recovery checkpoint first. Neither
 capture nor restore changes the user's index, HEAD, branch or stash refs.

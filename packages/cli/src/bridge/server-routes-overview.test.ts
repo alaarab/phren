@@ -1,4 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { noteTurn, readTurn } from "./turn-records.js";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -82,7 +84,7 @@ describe("the overview on a loaded computer", () => {
   });
 
   it("keeps an unanswered owner working when child reads outlast the budget", async () => {
-    const root = await mkdtemp("/tmp/phren-overview-foreground-");
+    const root = await mkdtemp(path.join(tmpdir(), "phren-overview-foreground-"));
     const session = "aaaaaaaa-1111-4111-8111-111111111111";
     vi.stubEnv("PHREN_BRIDGE_HOME", root); reads.session = session;
     reads.children.mockImplementation(() => new Promise(() => {}));

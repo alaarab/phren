@@ -166,7 +166,8 @@ it.each([
   vi.spyOn(Date, "now").mockImplementation(() => now);
   const old = "aaaaaaaa-1111-4111-8111-111111111111", current = "bbbbbbbb-1111-4111-8111-111111111111";
   let transcript = old;
-  state.exec.mockReset().mockImplementation(async () => ({ stdout: `n${root}/${transcript}.jsonl\n` }));
+  // This mocks macOS lsof even when the test runner is on Windows.
+  state.exec.mockReset().mockImplementation(async () => ({ stdout: `n/claude/${transcript}.jsonl\n` }));
   const { setTerminalProvider } = await import("./terminal.js");
   const restore = setTerminalProvider({ processes: async () => ({ foregroundPids: [4242] }) } as unknown as import("./terminal.js").TerminalProvider);
   const pane = { pane_id: "claude-switch", terminal_id: root, agent: "claude",
@@ -206,7 +207,7 @@ it.each([
   vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
   const sessions: Record<string, string> = { report: "aaaaaaaa-1111-4111-8111-111111111111",
     binding: "bbbbbbbb-1111-4111-8111-111111111111", other: "cccccccc-1111-4111-8111-111111111111" };
-  state.exec.mockReset().mockResolvedValue({ stdout: transcripts.map(name => `n${root}/${sessions[name]}.jsonl\n`).join("") });
+  state.exec.mockReset().mockResolvedValue({ stdout: transcripts.map(name => `n/claude/${sessions[name]}.jsonl\n`).join("") });
   const { setTerminalProvider } = await import("./terminal.js");
   const restore = setTerminalProvider({ processes: async () => ({ foregroundPids: [4242] }) } as unknown as import("./terminal.js").TerminalProvider);
   const pane = { pane_id: "claude-fallback", terminal_id: root, agent: "claude",

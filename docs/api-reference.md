@@ -1986,7 +1986,8 @@ non-ignored files, including raw binary/CRLF bytes, symlinks and executable mode
 without applying Git filters. Empty directories are not represented. An authoritative
 prompt identity creates a distinct prompt checkpoint even when file contents are
 unchanged. Other unchanged captures reuse the previous checkpoint without changing
-its metadata or assigning it to another prompt. Capture is best effort, has a 300 ms total Git budget, skips busy/failed
+its metadata or assigning it to another prompt. Capture is best effort, has a 300 ms total Git budget
+(5 seconds on Windows to allow for Git process startup), skips busy/failed
 captures, and never fails the agent callback. Missing rows do not imply missing
 messages. At most 50 rows/refs per worktree and conversation are retained, including
 recovery rows; pruned ids return 404. Pruning removes the checkpoint and its prompt
