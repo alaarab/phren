@@ -63,6 +63,16 @@ export function claudeInputEmpty(screen: string): boolean {
   return !!dim && !SUBAGENT_VIEW.test(dim);
 }
 
+/** Exact visible typed text in an unambiguous single-line composer. Wrapped,
+ * collapsed-paste and dim suggestion inputs cannot prove the delivery's text. */
+export function claudeInputMatches(screen: string, text: string): boolean {
+  const line = liveInputLine(screen);
+  if (line === undefined || dimText(line) || /[\r\n]/.test(text)) return false;
+  // Remove only Claude's prompt and its separator space. Extra whitespace,
+  // including ambiguous screen padding, cannot prove an exact match.
+  return stripTerminal(line).replace(/^\s*❯ /, "") === text;
+}
+
 /** The dim text in the live input box (between its two rules), "" when the
  * box holds typed text, undefined when there is no live box on screen. */
 function liveInputDimText(screen: string): string | undefined {

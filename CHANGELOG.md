@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook delivery recovery now presses Enter only for the exact unsettled message in the original terminal and conversation, while idle or done with no held input. Unsafe or unverifiable state fails the receipt with a reason, queued follow-up expires after 30 seconds, and starting panes no longer receive blind recovery Enter keys.
+
 ## [0.3.68] - 2026-11-01
 
 ### Added
