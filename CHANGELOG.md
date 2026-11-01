@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `WS /v1/git/watch` streams live Changes: a debounced `changed` frame when a pane's checkout, a child's worktree or a listed worktree may have changed, with `ping` heartbeats, one shared watcher per checkout and a 16-checkout cap. Advertised as `capabilities.gitWatch`.
 - Session rows carry `statusSince`, the ISO time the agent status they send last changed, so the phone can say how long a session has been waiting rather than how long ago its tab last changed. It follows background work that turns idle into working, is not reset by a title, label or activity-counter change, survives a Hook restart, and older Hooks omit it.
 
 ### Fixed
