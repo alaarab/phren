@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Unread replies across the phone and the desktop: session rows from `GET /v1/workspaces` and the `/v1/overview` socket carry `completion: {id, at, entry?}` for a finished turn and the `seenCompletion` a person last marked seen (capability `sessionSeen`). The optional `entry` is the transcript row’s `line` key as a string; clients auto-mark only after displaying that row or a later one in the active conversation. Without it, seen/unread stays manual. `POST /v1/sessions/seen` stores that mark per pane beside its turn record, or clears `seenCompletion` with `unread: true` only when the stored mark equals the completion supplied.
+- `WS /v1/git/watch` streams live Changes: a debounced `changed` frame when a pane's checkout, a child's worktree or a listed worktree may have changed, with `ping` heartbeats, one shared watcher per checkout and a 16-checkout cap. Advertised as `capabilities.gitWatch`.
 - Session rows carry `statusSince`, the ISO time the agent status they send last changed, so the phone can say how long a session has been waiting rather than how long ago its tab last changed. It follows background work that turns idle into working, is not reset by a title, label or activity-counter change, survives a Hook restart, and older Hooks omit it.
 
 ### Fixed
