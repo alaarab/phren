@@ -115,6 +115,55 @@ describe("transcript image payloads", () => {
   });
 });
 
+describe("checkpoint prompt identity conformance", () => {
+  it("keeps the optional entry field across snapshot, live, older and a fresh reader", async () => {
+    const fixture = JSON.parse(await readFile(new URL("../../fixtures/conformance/checkpoint-prompt-identity.json", import.meta.url), "utf8")) as {
+      source: Provider; rows: Json[]; entries: { line: number; type: string; promptEntryId?: string | null }[];
+      checkpoints: { id: string; boundary: string; prompt: string; promptEntryId?: string }[];
+      expectedCheckpointIdByPromptEntryId: Record<string, string>;
+    };
+    const root = await mkdtemp(path.join(tmpdir(), "phren-prompt-conformance-")), file = path.join(root, `${fixture.source}.jsonl`);
+    try {
+      await writeFile(file, fixture.rows.slice(0, 2).map(row => JSON.stringify(row)).join("\n") + "\n");
+      const expected = fixture.entries.map(entry => ({ line: entry.line, type: entry.type, promptEntryId: entry.promptEntryId ?? null }));
+      const project = (entries: { line: number; raw: Json; promptEntryId?: string }[]) =>
+        entries.map(entry => ({ line: entry.line, type: entry.raw.type, promptEntryId: entry.promptEntryId ?? null }));
+      const live = new TranscriptReader(file, fixture.source);
+      const backlog = await live.read();
+      expect(project(backlog.entries)).toEqual(expected.filter(entry => entry.line < 2));
+      // The stream's established reader sees the appended rows as its next live page.
+      await appendFile(file, fixture.rows.slice(2).map(row => JSON.stringify(row)).join("\n") + "\n");
+      expect(project((await live.read()).entries)).toEqual(expected.filter(entry => entry.line >= 2));
+      const older = await new TranscriptReader(file, fixture.source).read(2);
+      expect(project(older.entries)).toEqual(expected.filter(entry => entry.line < 2));
+      const fresh = await new TranscriptReader(file, fixture.source).read();
+      expect(project(fresh.entries)).toEqual(expected);
+
+      // The shared checkpoint contract: identical prompts keep distinct
+      // identities, mapped prompt boundaries select their own row, and a
+      // pruned prompt has no checkpoint even though its entry keeps an id.
+      const alpha = fixture.entries[0].promptEntryId!, beta = fixture.entries[3].promptEntryId!;
+      const gamma = fixture.entries[4].promptEntryId!;
+      expect(alpha).not.toBe(beta);
+      expect((fixture.rows[0].message as { content: string }).content).toBe((fixture.rows[3].message as { content: string }).content);
+      const mapped = fixture.checkpoints.filter(row => row.boundary === "prompt" && row.promptEntryId);
+      expect(Object.keys(fixture.expectedCheckpointIdByPromptEntryId).sort()).toEqual(mapped.map(row => row.promptEntryId!).sort());
+      for (const [promptEntryId, checkpointId] of Object.entries(fixture.expectedCheckpointIdByPromptEntryId)) {
+        expect(fixture.checkpoints.filter(row => row.boundary === "prompt" && row.promptEntryId === promptEntryId)).toEqual([
+          expect.objectContaining({ id: checkpointId, promptEntryId }),
+        ]);
+      }
+      expect(fixture.expectedCheckpointIdByPromptEntryId[gamma]).toBeUndefined();
+      expect(fixture.checkpoints.some(row => row.promptEntryId === gamma)).toBe(false);
+      for (const boundary of ["stop", "recovery"]) {
+        const boundaryRows = fixture.checkpoints.filter(row => row.boundary === boundary);
+        expect(boundaryRows.length).toBeGreaterThan(0);
+        expect(boundaryRows.every(row => row.promptEntryId === undefined)).toBe(true);
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+});
+
 describe("child agent relationships", () => {
   it("carries a blocked worker's reason through the wire projection", () => {
     const tree = [{

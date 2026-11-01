@@ -30,7 +30,8 @@ const LIMIT = 50;
 const secret = randomBytes(32);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const rowSchema = z.object({ id: z.string().uuid(), turn: z.number().int().nonnegative(),
-  boundary: z.enum(["prompt", "stop", "recovery"]), at: z.string().datetime(), prompt: z.string().max(240), filesChanged: z.number().int().nonnegative() });
+  boundary: z.enum(["prompt", "stop", "recovery"]), at: z.string().datetime(), prompt: z.string().max(240), filesChanged: z.number().int().nonnegative(),
+  promptEntryId: z.string().min(1).max(256).optional() });
 export type CheckpointRow = z.infer<typeof rowSchema>;
 type FileChange = { path: string; status: "A" | "M" | "D" };
 type Context = {
@@ -148,7 +149,7 @@ async function save(ctx: Context, current: string, meta: Omit<CheckpointRow, "id
 /** Budget includes all Git subprocesses; a failed/slow capture never fails the lifecycle callback. */
 let warned = false;
 const prompts = new Map<string, { turn: number; text: string }>();
-export async function checkpointBoundary(cwd: string, target: Target, event: string, turn: number, prompt = ""): Promise<void> {
+export async function checkpointBoundary(cwd: string, target: Target, event: string, turn: number, prompt = "", promptEntryId?: string): Promise<void> {
   if (event !== "UserPromptSubmit" && event !== "Stop") return;
   try {
     const ctx = await context(cwd, target, 300);
@@ -157,12 +158,13 @@ export async function checkpointBoundary(cwd: string, target: Target, event: str
       prompts.set(ctx.prefix, { turn, text: prompt.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 240) });
       if (prompts.size > 256) prompts.delete(prompts.keys().next().value!);
     }
+    const identity = event === "UserPromptSubmit" ? promptEntryId : undefined;
     await locked(ctx, async () => {
       const previous = await rows(ctx), last = previous.at(-1);
       const remembered = prompts.get(ctx.prefix);
       const excerpt = remembered?.turn === turn ? remembered.text : last?.turn === turn ? last.prompt : "";
       await save(ctx, await tree(ctx), { turn, boundary: event === "Stop" ? "stop" : "prompt", at: new Date().toISOString(),
-        prompt: excerpt });
+        prompt: excerpt, ...(identity ? { promptEntryId: identity } : {}) }, Boolean(identity));
     });
   } catch (error) {
     if (error instanceof BridgeError && ["checkpoint-not-isolated", "checkpoint-busy"].includes(String(error.details?.code))) return;

@@ -10,6 +10,7 @@ import { terminalPaneFromEnv } from "./terminal.js";
 import { briefId, DISPATCH_ID_ENV } from "./launch-brief.js";
 import { CODEX_SERVER_ENV, codexServerId } from "./codex-servers.js";
 import { localSocket } from "./agent-hook-stores.js";
+import { claudePromptEntryId } from "./prompt-identity.js";
 
 /** The agent side of the Hook's callbacks: `hook <source>` reads the agent's
  * payload and posts it to the daemon's local socket (agent-hooks.ts). */
@@ -89,10 +90,12 @@ async function forwardHook(source: Provider, target: Target, event: string, valu
   // daemon's variables belong to another pane, so it sends none.
   const dispatchId = !daemon && (event === "SessionStart" || event === "UserPromptSubmit") && briefId.safeParse(process.env[DISPATCH_ID_ENV]).success
     ? process.env[DISPATCH_ID_ENV] : undefined;
+  const promptEntryId = source === "claude" && event === "UserPromptSubmit" ? claudePromptEntryId(value.prompt_id) : undefined;
   const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), ...(autoReview ? { autoReview: true } : {}), ...(dispatchId ? { dispatchId } : {}),
     ...(source === "claude" && typeof value.transcript_path === "string" ? { transcript: value.transcript_path.slice(0, 4096) } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
+    ...(promptEntryId ? { promptEntryId } : {}),
     ...(event === "SessionStart" && typeof value.source === "string" ? { startSource: value.source.slice(0, 32) } : {}),
     ...(event === "Stop" ? stopFacts(value) : {}) });
   await new Promise<void>(resolve => {

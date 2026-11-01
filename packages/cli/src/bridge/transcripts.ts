@@ -1,4 +1,4 @@
-import { readdir, realpath, lstat } from "node:fs/promises";
+import { readdir, realpath, lstat, type FileHandle } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { codexHome } from "../home-paths.js";
@@ -10,7 +10,7 @@ import { BridgeError, object, objects, sessionId, type Json, type Provider, type
 import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 import { fanoutChildren } from "./fanouts.js";
-import { claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
+import { claudeChildAgents, claudePromptIdentity, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
 import { childTranscriptBelongsTo, codeModeOutputCall, directChildAgents, findCodeModeCall, projectCodeModeOutput, projectCodexRow,
   rewriteProjectedOutput, visibleCodexEvent } from "./transcript-codex.js";
 import { visibleCopilotEvent } from "./transcript-copilot.js";
@@ -19,7 +19,7 @@ import { visibleOpencodeEvent } from "./transcript-opencode.js";
 export { isNarration, unwrapPastedContent } from "./transcript-claude.js";
 export { codeToolCalls, projectCodexRow, type CodeToolCall } from "./transcript-codex.js";
 
-export interface Entry { line: number; raw: Json }
+export interface Entry { line: number; raw: Json; promptEntryId?: string }
 export interface ChildAgentRelation {
   /** `id` is a parent-scoped public reference; local session and transcript details never leave Hook. */
   id: string; session?: string; transcript?: string; provider: Provider; path: string; callId: string; state: "running" | "completed" | "failed" | "gone" | "unavailable";
@@ -292,6 +292,45 @@ function projectTranscriptRows(raw: Json, source: Provider): { rows: Json[]; bas
   return source === "codex" ? projectCodexRow(raw) : { rows: [raw] };
 }
 
+/** Prompt ids seen on eligible user rows across the whole conversation, kept
+ * per file revision and extended by appends so every page and reader applies
+ * the same ambiguity rule. */
+const promptIdentityCounts = new Map<string, { revision: string; lines: number; counts: Map<string, number> }>();
+
+export async function ambiguousPromptIdentities(file: string, handle: FileHandle,
+  index: { revision: string; lines: number; rows: (handle: FileHandle, before: number, after: number, signal?: AbortSignal) => AsyncIterable<{ line: number; bytes?: Buffer }> },
+  source: Provider, includeSidechain: boolean, signal?: AbortSignal): Promise<Set<string>> {
+  if (source !== "claude") return new Set();
+  const key = `${file}\0${source}\0${includeSidechain ? 1 : 0}`;
+  const current = promptIdentityCounts.get(key);
+  const reset = !current || current.revision !== index.revision || current.lines > index.lines;
+  const ambiguous = (counts: Map<string, number>) => {
+    const ids = new Set<string>();
+    for (const [id, count] of counts) if (count > 1) ids.add(id);
+    return ids;
+  };
+  if (!reset && current && current.lines === index.lines) return ambiguous(current.counts);
+  // Work on a private copy. Nothing is published until the whole scan succeeds,
+  // so an aborted or failed read leaves the previous counts and position intact.
+  const counts = new Map<string, number>(reset || !current ? [] : current.counts), start = reset || !current ? 0 : current.lines;
+  if (start < index.lines) {
+    const queue: ClaudeQueueState = {};
+    for await (const row of index.rows(handle, index.lines, start, signal)) {
+      signal?.throwIfAborted();
+      if (!row.bytes) continue;
+      try {
+        const original = object(JSON.parse(row.bytes.toString()));
+        const id = claudePromptIdentity(original, visibleClaudeEvent(original, includeSidechain, queue));
+        if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+      } catch { /* A malformed row cannot make another prompt ambiguous. */ }
+    }
+  }
+  promptIdentityCounts.delete(key);
+  promptIdentityCounts.set(key, { revision: index.revision, lines: index.lines, counts });
+  while (promptIdentityCounts.size > 64) promptIdentityCounts.delete(promptIdentityCounts.keys().next().value!);
+  return ambiguous(counts);
+}
+
 const completionEntries = new Map<string, { signature: string; entry?: string }>();
 
 /** A finished turn's last public row, using the same absolute line key as
@@ -351,10 +390,18 @@ export async function completionEntry(file: string, source: Provider, promptAt: 
 export class TranscriptReader {
   private revision?: string;
   private nextLine = 0;
+  private ambiguous = new Set<string>();
   constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup,
               private readonly includeSidechain = false, private readonly cwd?: string,
               /** The phone delivery bound to each Claude queue row, by byte offset (PromptDeliveries). */
               private readonly queueBindings?: () => Promise<Map<number, string> | undefined>) {}
+  /** Prompt ids the latest page found ambiguous across the conversation. */
+  get ambiguousPromptIds(): ReadonlySet<string> { return this.ambiguous; }
+  /** A fresh opening page with the same reader options, for a reset after an
+   * identity already delivered by this stream became ambiguous. */
+  snapshot(signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
+    return new TranscriptReader(this.file, this.source, this.imageLine, this.changes, this.includeSidechain, this.cwd, this.queueBindings).read(undefined, signal);
+  }
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return this.readPage(before, undefined, signal);
   }
@@ -396,8 +443,12 @@ export class TranscriptReader {
         signal?.throwIfAborted();
         queue.offset = row.offset;
         let rows: Json[] = [];
+        let promptEntryId: string | undefined;
         try {
-          let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain, this.cwd, queue);
+          // Read the native identity from the original row before visibility
+          // filtering removes harness metadata from the projected entry.
+          const original = row.bytes ? object(JSON.parse(row.bytes.toString())) : undefined;
+          let raw = original && visibleEvent(original, this.source, this.includeSidechain, this.cwd, queue);
           // A child agent's transcript is the sidechain. Its rows are that
           // conversation's own turns, not something for the reader to skip.
           if (raw && this.includeSidechain && raw.isSidechain === true) { const { isSidechain: _sidechain, ...own } = raw; raw = own; }
@@ -431,6 +482,7 @@ export class TranscriptReader {
             const projected = projectTranscriptRows(raw, this.source);
             rows = this.imageLine === row.line ? projected.rows : projected.rows.map(r => chatFrame(r, this.source));
             if (projected.base) rewriteProjectedOutput(entries, projected.base);
+            if (this.source === "claude" && original) promptEntryId = claudePromptIdentity(original, raw);
           }
         } catch { /* A malformed old row cannot block the next readable page. */ }
         if (rows.length) {
@@ -440,20 +492,30 @@ export class TranscriptReader {
             if (this.imageLine === undefined && bytes + size > byteBudget) break;
             // Rows arrive newest first; reverse a row's blocks so the page
             // lists several calls from one source in the order they were written.
-            entries.push(...rows.slice().reverse().map(raw => ({ line: row.line, raw })));
+            entries.push(...rows.slice().reverse().map(raw => ({ line: row.line, raw, ...(promptEntryId ? { promptEntryId } : {}) })));
             bytes += size;
           }
         }
         cursor = row.line;
         if (entries.length >= entryBudget) break;
       }
-      if (before === undefined) { this.revision = index.revision; this.nextLine = held ?? index.lines; }
       // Live reads run newest first. After a long disconnect or a burst of
       // output, a bounded page can stop before the phone's cursor. Mark that
       // page as a replacement so its start becomes a usable older-page cursor
       // instead of silently merging two disjoint windows. A pending diff
       // holds its row for a later poll and is not a completed page.
       const skippedLiveLines = before === undefined && held === undefined && cursor > lower;
+      // One prompt identity on several displayed prompts is ambiguous, so
+      // none of them may claim it, whichever page or reader sees it.
+      // A cursor resume must also invalidate identities retained by the phone,
+      // even when the resumed page contains no prompt rows at all.
+      if (resuming || entries.some(entry => entry.promptEntryId)) {
+        this.ambiguous = await ambiguousPromptIdentities(this.file, handle, index, this.source, this.includeSidechain, signal);
+        for (const entry of entries) if (entry.promptEntryId && this.ambiguous.has(entry.promptEntryId)) delete entry.promptEntryId;
+      } else if (reset) this.ambiguous.clear();
+      // Only a completed read (including the fallible identity scan) advances
+      // the live cursor, so a retry rereads the same rows.
+      if (before === undefined) { this.revision = index.revision; this.nextLine = held ?? index.lines; }
       // The phone resumes after `totalLines - 1`, so a live page does not
       // count a held row or what follows it: those are still owed. An older
       // page is never a replacement. The history route reads with a fresh

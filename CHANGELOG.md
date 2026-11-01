@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Claude queued phone messages carry `phrenDeliveryId`, the Hook’s own delivery id bound to that individual enqueue occurrence after the send’s transcript cursor (never Claude’s `deliveryId`/`commandUuid`), on the enqueue, its accepted removal, `popAll`/cancellation withdrawal, dequeue, and the submitted turn that replaces it, so a client can join the queued and sent copies of one message without retiring an earlier identical turn; bindings are kept beside the delivery records in `deliveries.json.queue.json`.
+- Checkpoint rows and Claude transcript entries now carry an optional `promptEntryId` for an exact chat-turn file restore. It is the Claude hook payload’s normalized `prompt_id`, also persisted on the matching user transcript row, and never replaces the existing turn, line or message ids. Codex and OpenCode omit it.
 - Isolated-worktree turn checkpoints with preview-token guarded file restore and recovery checkpoints for undo, advertised by the Hook’s `turnCheckpoints` capability.
 - Event-triggered schedules: version 2 definitions with payload equality filters, capped prompt templates, coalescing and persistent delivery dedupe; authenticated schedule event ingestion and signed GitHub workflow/check completions, bounded decision history, and the `scheduleEvents` Hook capability. A file with an event schedule requires this event-capable Hook version on every computer that reads it; upgrade all of them before adding events, because older Hooks skip the entire version 2 file, including timed schedules.
 - Hook-held “After this turn” prompts: a persisted, conversation-bound FIFO queue that sends one item per confirmed turn boundary while the phone sleeps, with edit/cancel routes, delivery settlement, safe restart handling, `afterTurnQueue` capability and `queuedPrompts` session counts.
@@ -21,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Chat-turn file restore can select checkpoints through an exact prompt identity. Unsupported or unavailable identities disable the action instead of matching prompt text or time.
 - Claude live reply previews exclude background notifications and terminal chrome; task-notification user rows are normalized as background notices.
 - Claude approvals answered in the PC terminal now clear on the phone even when Git change capture is disabled.
 - Tool completion matches the approval's tool-use ID, or inputs regardless of key order when IDs are unavailable, so unrelated calls cannot clear it.

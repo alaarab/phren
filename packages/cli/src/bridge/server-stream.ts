@@ -112,8 +112,12 @@ export function transcriptStreams(ctx: StreamContext) {
     // pushed as it changes to a stream opened with `deliveries=1`.
     const deliveryFrames = url.pathname === "/v1/transcripts" && child === null && url.searchParams.get("deliveries") === "1";
     const sentDelivery = new Map<string, string>();
+    // Prompt identities this stream already delivered. A later duplicate makes
+    // one or more of them ambiguous, which needs a replacement backlog so the
+    // client cannot keep matching its checkpoint.
+    const sentPromptIds = new Set<string>();
     // The first frame stays a backlog for protocol compatibility, but a
-    // reconnect only reads rows beyond the phone's retained raw-line cursor.
+    // reconnect normally reads rows beyond the phone's retained raw-line cursor.
     let resumeAfterLine = cursor === null ? undefined : z.coerce.number().int().nonnegative().max(4_294_967_295).parse(cursor);
     let conversation = { source: target.source, session: target.session };
     // The transcript file of a fresh conversation appears with its first
@@ -134,22 +138,36 @@ export function transcriptStreams(ctx: StreamContext) {
             if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
           } else if (reader) {
             await refreshTranscript(reader.file, conversation.source, conversation.session);
+            const resumingClaude = first && conversation.source === "claude" && resumeAfterLine !== undefined;
             if (first && child === null && target.source === "claude" && resumeAfterLine !== undefined) {
               // A reconnect cursor can omit the current user row entirely.
               // Seed only ephemeral turn state from the bounded recent tail.
-              previews.observe((await new TranscriptReader(reader.file, conversation.source).read(undefined, abort.signal)).entries);
+              const tail = (await new TranscriptReader(reader.file, conversation.source).read(undefined, abort.signal)).entries;
+              previews.observe(tail);
             }
-            const page = resumeAfterLine === undefined
+            let page = resumeAfterLine === undefined
               ? await reader.read(undefined, abort.signal)
               : await reader.readAfter(resumeAfterLine, abort.signal);
             resumeAfterLine = undefined;
+            const ambiguous = reader.ambiguousPromptIds;
+            if (!page.reset && ambiguous.size && (resumingClaude || [...sentPromptIds].some(id => ambiguous.has(id)))) {
+              // A reconnect cannot know which identities the phone retains:
+              // the fresh tail already omits any that became ambiguous offline.
+              // Replace its backlog on any ambiguity, or when a live append
+              // invalidates an identity this stream delivered.
+              page = await reader.snapshot(abort.signal);
+              sentPromptIds.clear();
+            }
             if (child === null) previews.observe(page.entries, page.reset);
             const preview = child === null ? await previews.update(pane.agent_status, reader.file) : undefined;
             // `activityVerb` stays for phones that predate `activity`.
             const activity = previews.activity ? { activityVerb: previews.activity.verb, activity: { ...previews.activity } }
               : previews.verb ? { activityVerb: previews.verb } : {};
-            if (first || page.entries.length || page.reset) send(client, { ...page, ...preview, ...activity, type: first || page.reset ? "backlog" : "append", ...conversation });
-            else if (preview) send(client, { type: "preview", ...conversation, ...preview, ...activity });
+            if (first || page.entries.length || page.reset) {
+              if (page.reset) sentPromptIds.clear();
+              for (const entry of page.entries) if (entry.promptEntryId) sentPromptIds.add(entry.promptEntryId);
+              send(client, { ...page, ...preview, ...activity, type: first || page.reset ? "backlog" : "append", ...conversation });
+            } else if (preview) send(client, { type: "preview", ...conversation, ...preview, ...activity });
           } else {
             let pendingApproval = agentHooks.approval(target);
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
@@ -236,6 +254,7 @@ export function transcriptStreams(ctx: StreamContext) {
           const before = pending.shift()!;
           await validateTarget(target, false, false, SNAPSHOT_SHARE_MS);
           const page = await reader.read(before, abort.signal);
+          for (const entry of page.entries) if (entry.promptEntryId) sentPromptIds.add(entry.promptEntryId);
           send(client, { ...page, type: "older", ...conversation });
         }
         // A transcript the agent has not written yet has no older pages; a

@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { object, objects, type Json } from "./protocol.js";
+import { claudePromptEntryId } from "./prompt-identity.js";
 import type { ChildAgentRelation } from "./transcripts.js";
 import { latestStopTasks, type StopTasks } from "./turn-records.js";
 
@@ -621,6 +622,22 @@ export function phrenHookContext(raw: Json, includeSidechain = false): Json | un
   if (!/^\s*◆ phren\b/.test(content) && !content.includes("<phren-context>")) return undefined;
   return { type: "phren_hook_context", timestamp: raw.timestamp, uuid: raw.uuid, parentUuid: raw.parentUuid,
     content: content.length > HOOK_CONTEXT_LIMIT ? content.slice(0, HOOK_CONTEXT_LIMIT) + "\n…" : content };
+}
+
+/** The normalized prompt identity of a displayed Claude user prompt. Tool
+ * results, hidden/meta or scheduled turns, sidechains, compaction summaries,
+ * queue placeholders and synthetic rows never carry one. */
+export function claudePromptIdentity(original: Json, projected: Json | undefined): string | undefined {
+  if (original.type !== "user" || original.isSidechain === true || original.isMeta === true
+      || original.isCompactSummary === true || original.isSynthetic === true
+      || original.isApiErrorMessage === true || original.isVisibleInTranscriptOnly === true) return undefined;
+  if (original.toolUseResult !== undefined) return undefined;
+  const message = object(original.message);
+  if (message.role !== undefined && message.role !== "user") return undefined;
+  if (objects(message.content).some(block => block.type === "tool_result")) return undefined;
+  if (!projected || projected.type !== "user" || projected.isCompactSummary === true || projected.isMeta === true
+      || projected.isSidechain === true || projected.phrenQueued === true) return undefined;
+  return claudePromptEntryId(original.promptId);
 }
 
 /** Claude Code rows the phone may see: user, assistant and system turns with
