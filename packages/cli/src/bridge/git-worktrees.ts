@@ -61,7 +61,7 @@ async function listed(root: string): Promise<{ main: string | undefined; worktre
 
 /** Relative to the repository when the worktree lives inside it (the usual
  * `.claude/worktrees/agent-*`), otherwise with the home folder shortened. */
-function displayPath(abs: string, roots: string[]): string {
+export function displayPath(abs: string, roots: string[]): string {
   for (const root of roots) {
     const rel = path.relative(root, abs);
     if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return rel.split(path.sep).join("/");
@@ -138,10 +138,20 @@ async function readGitWorktrees(cwd: string, workers: WorktreeWorker[]): Promise
 /** The checkout for one listed worktree id of the pane's repository, or a
  * 404; never a path the phone supplied. */
 export async function resolveWorktree(cwd: string, id: unknown): Promise<string> {
+  return (await resolveWorktreeEntry(cwd, id)).abs;
+}
+
+/** One listed worktree id resolved against the pane's repository: its checkout,
+ * branch, the primary checkout, the repository root the id was listed from and
+ * whether Git has it locked. */
+export interface ResolvedWorktree { abs: string; branch: string | null; main: string | undefined; root: string; locked: boolean }
+
+export async function resolveWorktreeEntry(cwd: string, id: unknown): Promise<ResolvedWorktree> {
   if (typeof id !== "string" || !worktreeIdPattern.test(id)) throw new BridgeError(400, "Invalid worktree.");
   const root = await gitRoot(cwd);
   if (!root) throw new BridgeError(409, "This pane is not in a Git repository.", { code: "git-not-repository" });
-  const match = (await listed(root)).worktrees.find(worktree => worktreeId(worktree.abs) === id);
+  const { main, worktrees } = await listed(root);
+  const match = worktrees.find(worktree => worktreeId(worktree.abs) === id);
   if (!match) throw new BridgeError(404, "That worktree is not part of this repository.");
-  return match.abs;
+  return { abs: match.abs, branch: match.branch, main, root, locked: match.locked };
 }
