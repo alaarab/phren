@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "UserPromptSubmit",
+  "session_id": "11111111-2222-4333-8444-555555555555",
+  "transcript_path": "/Users/example/.claude/projects/-work-app/11111111-2222-4333-8444-555555555555.jsonl",
+  "cwd": "/work/app",
+  "prompt": "continue",
+  "prompt_id": "fixture-prompt-alpha"
+}

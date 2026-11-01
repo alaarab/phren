@@ -11,7 +11,7 @@ import type { HookInfo } from "./server-routes.js";
 import { transcriptStreams, type StreamContext, type TranscriptStreams } from "./server-stream.js";
 import type { SideQuestions } from "./side-questions.js";
 
-type Page = { entries: { line: number; raw: Json }[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean };
+type Page = { entries: { line: number; raw: Json; promptEntryId?: string }[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean };
 
 const transcript = vi.hoisted(() => ({ found: true, pages: [] as Page[], reads: [] as number[] }));
 
@@ -26,11 +26,15 @@ vi.mock("./transcripts.js", async importOriginal => {
     },
     refreshTranscript: async () => undefined,
     TranscriptReader: class {
+      get ambiguousPromptIds() { return new Set<string>(); }
       async read(before?: number) {
         transcript.reads.push(before ?? -1);
         return transcript.pages.shift() ?? { entries: [], totalLines: 0, startLine: 0, hasMore: false, reset: true };
       }
       async readAfter() {
+        return transcript.pages.shift() ?? { entries: [], totalLines: 0, startLine: 0, hasMore: false, reset: true };
+      }
+      async snapshot() {
         return transcript.pages.shift() ?? { entries: [], totalLines: 0, startLine: 0, hasMore: false, reset: true };
       }
     },
@@ -190,6 +194,31 @@ describe("transcript stream requests", () => {
     expect(client.closed).toEqual({ code: 1008, reason: "Invalid history request" });
     await tickBy(10_000);
     expect(client.frames()).toHaveLength(1);
+  });
+
+  it("passes the optional promptEntryId through backlog, live append and older frames", async () => {
+    const h = harness(), client = new FakeClient();
+    transcript.pages.push({ entries: [
+      { line: 1, raw: { type: "user" }, promptEntryId: "claude:prompt:one" },
+      { line: 2, raw: { type: "assistant" } },
+    ], totalLines: 3, startLine: 2, hasMore: true, reset: true });
+    await open(h.streams, client, target, "/v1/transcripts");
+    expect(client.frames()[0]).toMatchObject({ type: "backlog", entries: [
+      { line: 1, promptEntryId: "claude:prompt:one" },
+      { line: 2 },
+    ] });
+    const backlog = client.frames()[0] as { entries: Record<string, unknown>[] };
+    expect(backlog.entries[1]).not.toHaveProperty("promptEntryId");
+    transcript.pages.push({ entries: [{ line: 3, raw: { type: "user" }, promptEntryId: "claude:prompt:two" }],
+      totalLines: 4, startLine: 3, hasMore: true, reset: false });
+    await tickBy(500);
+    expect(client.frames()[1]).toMatchObject({ type: "append", entries: [{ line: 3, promptEntryId: "claude:prompt:two" }] });
+    transcript.pages.push({ entries: [{ line: 0, raw: { type: "user" }, promptEntryId: "claude:prompt:zero" }],
+      totalLines: 4, startLine: 0, hasMore: false, reset: false });
+    client.emit("message", Buffer.from(JSON.stringify({ type: "older", beforeLine: 1 })));
+    await tickBy(100);
+    expect(client.frames()[2]).toMatchObject({ type: "older", entries: [{ line: 0, promptEntryId: "claude:prompt:zero" }] });
+    client.close(1000);
   });
 
   it("does not let a history request made before the transcript exists stall the stream", async () => {

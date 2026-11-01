@@ -1959,17 +1959,22 @@ Every checkpoint row has these required fields:
 | `prompt` | Prompt excerpt, at most 240 characters, control characters replaced by spaces; empty when unavailable. Stop snapshots use their turn’s prompt excerpt (empty if unavailable after restart). Recovery rows say `"Before restore"`. |
 | `filesChanged` | Integer count of paths changed since the preceding retained snapshot at creation, or HEAD for the first snapshot. Renames count as two paths. This is historical metadata; use preview for the current restore delta. |
 
+`promptEntryId` — Optional opaque string identifying the originating user prompt. Present only on prompt-boundary checkpoints with an authoritative harness identity. It equals the originating transcript entry’s `promptEntryId`; it is not `turn`, `line`, or the client’s message ID.
+
 Captures are driven by `UserPromptSubmit`/`Stop` lifecycle callbacks; a harness
 that supplies only activity stamps produces no checkpoints.
 Prompt-submitted and turn-stopped callbacks try to capture tracked and untracked
 non-ignored files, including raw binary/CRLF bytes, symlinks and executable modes,
-without applying Git filters. Empty directories are not represented. An unchanged
-tree reuses the prior checkpoint and its original id/row; it does not add an empty
-turn row. Capture is best effort, has a 300 ms total Git budget, skips busy/failed
+without applying Git filters. Empty directories are not represented. An authoritative
+prompt identity creates a distinct prompt checkpoint even when file contents are
+unchanged. Other unchanged captures reuse the previous checkpoint without changing
+its metadata or assigning it to another prompt. Capture is best effort, has a 300 ms total Git budget, skips busy/failed
 captures, and never fails the agent callback. Missing rows do not imply missing
 messages. At most 50 rows/refs per worktree and conversation are retained, including
-recovery rows; pruned ids return 404. Listings survive Hook restart; preview tokens
-do not. The current tree token covers file contents, paths, types and modes, not
+recovery rows; pruned ids return 404. Pruning removes the checkpoint and its prompt
+association. Older checkpoints are not backfilled by inference. Stop and recovery
+checkpoints do not participate in chat-prompt matching. Listings survive Hook restart;
+preview tokens do not. The current tree token covers file contents, paths, types and modes, not
 ignored files or index-only edits.
 
 For “Restore files to here”, preview the selected id, show `files`, and pass the
@@ -2225,6 +2230,10 @@ after route target validation. This code does not mean every 404 is a missing
 transcript. An identified conversation whose transcript has not been written
 yet still opens an empty transcript WebSocket and waits for it; startup does
 not trigger terminal fallback merely because its file is absent.
+
+Transcript entries may include `promptEntryId`. Clients may offer “Restore files to here” only when exactly one retained prompt-boundary checkpoint in the same conversation and repository has the identical value. Missing or ambiguous identity disables this action. Never match using prompt text, timestamps, transcript position, or a neighboring checkpoint.
+
+The field appears on live WebSocket backlog and append pages, older pages and `GET /v1/transcripts/history` responses alike, and survives a Hook restart because it is read from the transcript. Codex and OpenCode omit it; their chat-turn restore stays unavailable.
 
 ### Live transcript previews
 

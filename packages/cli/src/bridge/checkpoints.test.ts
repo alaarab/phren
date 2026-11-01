@@ -10,6 +10,7 @@ import { AgentHooks } from "./agent-hooks.js";
 import { localSocket } from "./agent-hook-stores.js";
 import { snapshot, rpc, validateTarget } from "./herdr.js";
 import { checkpointBoundary, type CheckpointRow } from "./checkpoints.js";
+import { claudePromptEntryId } from "./prompt-identity.js";
 import { paneRoute, type PaneRouteContext } from "./server-pane-routes.js";
 vi.mock("./schedule-watch.js", async original => ({ ...await original<object>(), readFinalTurn: vi.fn() }));
 vi.mock("./transcripts.js", async original => ({ ...await original<object>(), childAgentTree: vi.fn() }));
@@ -144,11 +145,11 @@ async function callbacks(worker: string) {
     if (method === "pane.process_info") return { process_info: { foreground_processes: [{ pid: process.pid }] } };
     throw new Error(`Unexpected RPC ${method}`);
   });
-  const post = (event: string, prompt = "Callback prompt", callbackTarget = target) => new Promise<string>((resolve, reject) => {
+  const post = (event: string, prompt = "Callback prompt", callbackTarget = target, extra: Record<string, unknown> = {}) => new Promise<string>((resolve, reject) => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST" }, res => {
       let body = ""; res.on("data", bytes => { body += bytes; }); res.on("end", () => resolve(body));
     });
-    req.on("error", reject); req.end(JSON.stringify({ target: callbackTarget, event, cwd: worker, prompt }));
+    req.on("error", reject); req.end(JSON.stringify({ target: callbackTarget, event, cwd: worker, prompt, ...extra }));
   });
   const hooks = new AgentHooks();
   try { await hooks.start(); } catch (error) { hooks.close(); throw error; }
@@ -167,6 +168,166 @@ it.skipIf(process.platform === "win32")("captures prompt and Stop through the re
     expect((await list()).checkpoints[0]).toMatchObject({ boundary: "stop", prompt: "Second callback prompt", turn: first.turn + 1, filesChanged: 1 });
   } finally { close(); }
 });
+
+it.skipIf(process.platform === "win32")("selects identical prompts by native id, never by text or time", async () => {
+  const { worker } = await fixture();
+  const { post, close } = await callbacks(worker);
+  const p1 = claudePromptEntryId(["fixture", "callback", "one"].join("-"))!;
+  const p2 = claudePromptEntryId(["fixture", "callback", "two"].join("-"))!;
+  try {
+    await writeFile(path.join(worker, "file.txt"), "state one\n");
+    expect(await post("UserPromptSubmit", "continue", target, { promptEntryId: p1 })).toBe("{}");
+    const first = (await list()).checkpoints.find(row => row.promptEntryId === p1)!;
+    expect(first).toMatchObject({ boundary: "prompt", prompt: "continue", promptEntryId: p1 });
+    await writeFile(path.join(worker, "file.txt"), "state two\n");
+    expect(await post("UserPromptSubmit", "continue", target, { promptEntryId: p2 })).toBe("{}");
+    const second = (await list()).checkpoints.find(row => row.promptEntryId === p2)!;
+    expect(second.id).not.toBe(first.id);
+    // The current tree is P2's state: P1's snapshot differs, P2's does not.
+    expect((await preview(first.id)).files).toEqual([{ path: "file.txt", status: "M" }]);
+    expect((await preview(second.id)).files).toEqual([]);
+  } finally { close(); }
+});
+
+it.skipIf(process.platform === "win32")("creates a distinct prompt checkpoint for each authoritative id even when files are unchanged", async () => {
+  const { worker } = await fixture();
+  const { post, close } = await callbacks(worker);
+  const p1 = claudePromptEntryId(["fixture", "same-tree", "one"].join("-"))!;
+  const p2 = claudePromptEntryId(["fixture", "same-tree", "two"].join("-"))!;
+  try {
+    expect(await post("UserPromptSubmit", "continue", target, { promptEntryId: p1 })).toBe("{}");
+    const first = (await list()).checkpoints.find(row => row.promptEntryId === p1)!;
+    expect(await post("UserPromptSubmit", "continue", target, { promptEntryId: p2 })).toBe("{}");
+    const rows = (await list()).checkpoints;
+    const second = rows.find(row => row.promptEntryId === p2)!;
+    expect(second.id).not.toBe(first.id);
+    expect(second).toMatchObject({ boundary: "prompt", filesChanged: 0, promptEntryId: p2 });
+    // The earlier row is neither relabelled nor rewritten.
+    expect(rows.find(row => row.id === first.id)).toEqual(first);
+    expect(rows.filter(row => row.promptEntryId === p1)).toHaveLength(1);
+  } finally { close(); }
+});
+
+it("prunes a prompt's checkpoint without reassigning its identity", async () => {
+  const { worker } = await fixture();
+  const p1 = claudePromptEntryId(["fixture", "prune", "one"].join("-"))!, p2 = claudePromptEntryId(["fixture", "prune", "two"].join("-"))!;
+  await checkpointBoundary(worker, target, "UserPromptSubmit", 1, "continue", p1);
+  const first = (await list()).checkpoints.find(row => row.promptEntryId === p1)!;
+  await checkpointBoundary(worker, target, "UserPromptSubmit", 2, "continue", p2);
+  const limit = (await list()).limit;
+  for (let i = 0; i < limit - 1; i++) await checkpointBoundary(worker, target, "UserPromptSubmit", i + 3, "continue", `claude:prompt:extra-${i}`);
+  const history = await list();
+  expect(history.checkpoints).toHaveLength(limit);
+  expect(history.checkpoints.some(row => row.promptEntryId === p1)).toBe(false);
+  expect(history.checkpoints.filter(row => row.promptEntryId === p2)).toHaveLength(1);
+  await expect(preview(first.id)).rejects.toMatchObject({ status: 404, details: { code: "checkpoint-not-found" } });
+}, 30_000);
+
+it("lists a legacy checkpoint row that predates prompt identities", async () => {
+  const { worker, git } = await fixture();
+  await capture();
+  const ref = (await git(worker, "for-each-ref", "--format=%(refname)", "refs/phren/checkpoints/")).trim().split("\n")[0];
+  const tree = (await git(worker, "rev-parse", `${ref}^{tree}`)).trim();
+  const legacy = { id: "33333333-3333-4333-8333-333333333333", turn: 1, boundary: "prompt", at: new Date().toISOString(),
+    prompt: "legacy prompt", filesChanged: 0 };
+  const commit = (await git(worker, "-c", "user.name=Phren checkpoint", "-c", "user.email=checkpoint@phren.local",
+    "commit-tree", tree, "-m", JSON.stringify(legacy))).trim();
+  await git(worker, "update-ref", ref, commit);
+  const row = (await list()).checkpoints.find(value => value.id === legacy.id)!;
+  expect(row).toMatchObject(legacy);
+  expect(row).not.toHaveProperty("promptEntryId");
+});
+
+it("takes no checkpoints from activity-only harness events", async () => {
+  const { worker } = await fixture();
+  await checkpointBoundary(worker, { ...target, source: "opencode" }, "chat.message", 1, "hello", "claude:prompt:not-used");
+  expect((await list()).checkpoints).toEqual([]);
+});
+
+it.skipIf(process.platform === "win32")("keeps the prompt identity and checkpoint UUID across replacement Hook processes", async () => {
+  const { worker } = await fixture();
+  const p1 = claudePromptEntryId(["fixture", "restart", "one"].join("-"))!;
+  const session = target.session, home = path.join(base, "claude-home");
+  const project = path.join(home, "projects", "test"), transcript = path.join(project, `${session}.jsonl`);
+  await mkdir(path.join(base, "store"), { recursive: true });
+  await mkdir(project, { recursive: true });
+  const transcriptRows = [
+    { type: "user", uuid: "uuid-restart", timestamp: "2026-01-02T03:04:05.000Z", sessionId: session, promptId: ["fixture", "restart", "one"].join("-"),
+      message: { role: "user", content: "continue" } },
+    { type: "assistant", uuid: "uuid-restart-answer", parentUuid: "uuid-restart", timestamp: "2026-01-02T03:04:06.000Z", sessionId: session,
+      message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "done" }] } },
+  ];
+  await writeFile(transcript, transcriptRows.map(row => JSON.stringify(row)).join("\n") + "\n");
+  // Each run starts and closes a real AgentHooks process with its callback
+  // socket and the Hook's checkpoint/history routes, under a fake terminal.
+  const script = path.join(base, "restart-hook.mts");
+  const sources = {
+    agentHooks: new URL("./agent-hooks.ts", import.meta.url).href,
+    terminal: new URL("./terminal.ts", import.meta.url).href,
+    stores: new URL("./agent-hook-stores.ts", import.meta.url).href,
+    routes: new URL("./server-routes.ts", import.meta.url).href,
+  };
+  await writeFile(script, [
+    `import { createServer, request } from "node:http";`,
+    `import { AgentHooks } from ${JSON.stringify(sources.agentHooks)};`,
+    `import { setTerminalProvider } from ${JSON.stringify(sources.terminal)};`,
+    `import { localSocket } from ${JSON.stringify(sources.stores)};`,
+    `import { createRouteHandler } from ${JSON.stringify(sources.routes)};`,
+    `const [mode, worker, targetJson, promptEntryId, session] = process.argv.slice(2);`,
+    `const target = JSON.parse(targetJson);`,
+    `const pane = { pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: target.source,`,
+    `  agent_status: "idle", terminal_id: "term-restart", cwd: worker, foreground_cwd: worker,`,
+    `  agent_session: { kind: "id", agent: target.source, value: target.session } };`,
+    `const provider = { kind: "fake", ping: async () => {}, snapshot: async () => ({ panes: [pane] }),`,
+    `  listPanes: async () => [], processes: async () => ({ foregroundPids: [process.pid] }), readScreen: async () => "",`,
+    `  sendKeys: async () => {}, prompt: async () => {}, create: async () => ({}), startAgent: async () => {},`,
+    `  focusPane: async () => {}, closePane: async () => {}, renamePane: async () => {}, groupAction: async () => {} };`,
+    `const restore = setTerminalProvider(provider);`,
+    `const hooks = new AgentHooks();`,
+    `await hooks.start();`,
+    `let result;`,
+    `try {`,
+    `  const handler = createRouteHandler({ version: "test",`,
+    `    modules: { has: () => true, store: "store", profile: "profile", modules: [], generation: "test" },`,
+    `    info: { computer: { id: "computer", name: "computer" }, modules: {}, store: "store", profile: "profile", generation: "test" },`,
+    `    computerID: "33333333-3333-4333-8333-333333333333", agentHooks: hooks, streams: {},`,
+    `    journal: { recent: async () => [], record: async () => {} },`,
+    `    tabActivity: { observe: async () => ({ generation: "test", stamps: new Map() }) }, contextUsage: { read: async () => ({}) } });`,
+    `  const http = createServer((req, res) => { void handler(req, res); });`,
+    `  await new Promise((resolve, reject) => { http.once("error", reject); http.listen(0, "127.0.0.1", resolve); });`,
+    `  const base = \`http://127.0.0.1:\${http.address().port}\`;`,
+    `  const list = async () => await (await fetch(\`\${base}/v1/git/checkpoints\`, { method: "POST",`,
+    `    headers: { "content-type": "application/json" }, body: JSON.stringify({ target, expectedRepository: worker }) })).json();`,
+    `  let capture;`,
+    `  if (mode === "capture") capture = await new Promise((resolve, reject) => {`,
+    `    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST" }, res => {`,
+    `      let body = ""; res.on("data", chunk => { body += chunk; }); res.on("end", () => resolve({ status: res.statusCode, body }));`,
+    `    });`,
+    `    req.on("error", reject);`,
+    `    req.end(JSON.stringify({ target, event: "UserPromptSubmit", cwd: worker, prompt: "continue", promptEntryId }));`,
+    `  });`,
+    `  const checkpoints = await list();`,
+    `  const query = new URLSearchParams({ historical: "1", source: "claude", session, beforeLine: "2" });`,
+    `  const history = await (await fetch(\`\${base}/v1/transcripts/history?\${query}\`)).json();`,
+    `  result = { capture, list: checkpoints, history };`,
+    `  http.closeAllConnections(); await new Promise(resolve => http.close(resolve));`,
+    `} finally { hooks.close(); restore(); }`,
+    `process.stdout.write(JSON.stringify(result), () => process.exit(0));`,
+  ].join("\n"));
+  const runHook = async (mode: "capture" | "read") => {
+    const { stdout } = await exec(process.execPath, ["--import", "tsx", script, mode, worker, JSON.stringify(target), p1, session],
+      { cwd: process.cwd(), env: { ...process.env, CLAUDE_CONFIG_DIR: home, PHREN_PATH: path.join(base, "store") } });
+    return JSON.parse(stdout) as { capture?: { status: number }; list: { checkpoints: CheckpointRow[] };
+      history: { entries: { line: number; promptEntryId?: string }[] } };
+  };
+  const captured = await runHook("capture");
+  expect(captured.capture?.status).toBe(200);
+  const before = captured.list.checkpoints.find(row => row.promptEntryId === p1)!;
+  expect(before).toBeDefined();
+  const after = await runHook("read");
+  expect(after.list.checkpoints.find(row => row.promptEntryId === p1)).toMatchObject({ id: before.id, promptEntryId: p1 });
+  expect(after.history.entries.find(entry => entry.line === 0)).toMatchObject({ promptEntryId: p1 });
+}, 30_000);
 
 it.each([
   { session: "22222222-2222-4222-8222-222222222222" },

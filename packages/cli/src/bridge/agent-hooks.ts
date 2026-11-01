@@ -31,6 +31,7 @@ import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from 
 import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
 import { checkpointBoundary, checkpointActivityArrived } from "./checkpoints.js";
+import { normalizedPromptEntryId } from "./prompt-identity.js";
 import { noteTurn as recordTurn } from "./turn-records.js";
 import { PromptDeliveries } from "./prompt-deliveries.js";
 import { countTick } from "./metrics.js";
@@ -513,7 +514,8 @@ export class AgentHooks {
       ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);
     const cwd = typeof body.cwd === "string" ? body.cwd : pane.foreground_cwd || pane.cwd;
     if (this.modules?.has("git") !== false && recorded && typeof cwd === "string") await checkpointBoundary(cwd, target, String(body.event), recorded.prompt?.seq ?? recorded.seq,
-      typeof body.prompt === "string" ? body.prompt : "");
+      typeof body.prompt === "string" ? body.prompt : "",
+      target.source === "claude" && body.event === "UserPromptSubmit" ? normalizedPromptEntryId(body.promptEntryId) : undefined);
   }
   private rememberTerminalPrompt(target: Target, body: Json, dialogSeenAt?: number) {
     const tool = String(body.tool || "action").slice(0, 200);

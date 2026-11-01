@@ -40,7 +40,10 @@ In linked Git worktrees only, prompt/Stop hooks write raw file blobs and parentl
 snapshot commits to the repository's common Git object database. Private refs live
 under `refs/phren/checkpoints/<sha256-worktree-root>/<sha256-provider-session>/<checkpoint-uuid>`.
 They are local repository data, outside the Phren store, and may contain untracked
-non-ignored file contents and a 240-character prompt excerpt. Git does not push
+non-ignored file contents and a 240-character prompt excerpt. A prompt checkpoint
+with an authoritative harness prompt identity also records that bounded, normalized
+identifier in its commit metadata; it creates a distinct row even when the file
+contents are unchanged (a zero-change prompt row). Git does not push
 these refs by default. Each worktree/conversation retains at most 50 checkpoint
 refs (including recovery snapshots); older refs are deleted atomically with the
 new ref, and ordinary Git garbage collection can reclaim their objects. Removing

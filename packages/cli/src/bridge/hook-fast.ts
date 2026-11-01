@@ -12,6 +12,7 @@
 // the git module itself and the hook module's settings entries are removed
 // when it is off, so the store's module config is not read here.
 import path from "node:path";
+import { claudePromptEntryId } from "./prompt-identity.js";
 
 /** The script's file name in a version's folder, beside `bridge-hook.mjs`. */
 export const FAST_HOOK_FILE = "claude-hook.mjs";
@@ -55,6 +56,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const env = process.env, source = process.argv[2];
 const hookOutput = ${hookOutput.toString()};
+const claudePromptEntryId = ${claudePromptEntryId.toString()};
 async function full() {
   const bundle = path.join(path.dirname(fileURLToPath(import.meta.url)), "bridge-hook.mjs");
   process.argv = [process.argv[0], bundle, "hook", source];
@@ -85,9 +87,11 @@ async function forward(place) {
     .sort((a, b) => Number(b.running) - Number(a.running)).slice(0, ${STOP_TASKS_SENT}) : undefined;
   const stop = event !== "Stop" ? {} : { ...(tasks ? { background: tasks.length } : {}), ...(listed ? { backgroundTasks: listed } : {}),
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
+  const promptEntryId = source === "claude" && event === "UserPromptSubmit" ? claudePromptEntryId(value.prompt_id) : undefined;
   const data = JSON.stringify({ target, event, ...(dispatchId ? { dispatchId } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
+    ...(promptEntryId ? { promptEntryId } : {}),
     ...(event === "SessionStart" && typeof value.source === "string" ? { startSource: value.source.slice(0, 32) } : {}), ...stop });
   const socketPath = path.join(env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"), "agent.sock");
   // A tool call's callback fits its budget from process start, or is skipped.

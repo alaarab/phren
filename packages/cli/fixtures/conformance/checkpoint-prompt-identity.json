@@ -1,0 +1,28 @@
+{
+  "source": "claude",
+  "session": "11111111-2222-4333-8444-555555555555",
+  "rows": [
+    {"type":"user","uuid":"uuid-user-alpha","parentUuid":null,"timestamp":"2026-01-02T03:04:05.000Z","sessionId":"11111111-2222-4333-8444-555555555555","promptId":"fixture-prompt-alpha","gitBranch":"main","cwd":"/work/app","message":{"role":"user","content":"continue"}},
+    {"type":"assistant","uuid":"uuid-assistant-alpha","parentUuid":"uuid-user-alpha","timestamp":"2026-01-02T03:04:06.000Z","sessionId":"11111111-2222-4333-8444-555555555555","gitBranch":"main","cwd":"/work/app","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"true"}}]}},
+    {"type":"user","uuid":"uuid-tool-result","parentUuid":"uuid-assistant-alpha","timestamp":"2026-01-02T03:04:07.000Z","sessionId":"11111111-2222-4333-8444-555555555555","promptId":"fixture-prompt-alpha","gitBranch":"main","cwd":"/work/app","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"ok"}]},"toolUseResult":{"stdout":"ok"}},
+    {"type":"user","uuid":"uuid-user-beta","parentUuid":"uuid-tool-result","timestamp":"2026-01-02T03:04:05.000Z","sessionId":"11111111-2222-4333-8444-555555555555","promptId":"fixture-prompt-beta","gitBranch":"main","cwd":"/work/app","message":{"role":"user","content":"continue"}},
+    {"type":"user","uuid":"uuid-user-gamma","parentUuid":"uuid-user-beta","timestamp":"2026-01-02T03:04:08.000Z","sessionId":"11111111-2222-4333-8444-555555555555","promptId":"fixture-prompt-gamma","gitBranch":"main","cwd":"/work/app","message":{"role":"user","content":"a pruned prompt"}}
+  ],
+  "entries": [
+    {"line":0,"type":"user","promptEntryId":"claude:prompt:fixture-prompt-alpha"},
+    {"line":1,"type":"assistant"},
+    {"line":2,"type":"user","promptEntryId":null},
+    {"line":3,"type":"user","promptEntryId":"claude:prompt:fixture-prompt-beta"},
+    {"line":4,"type":"user","promptEntryId":"claude:prompt:fixture-prompt-gamma"}
+  ],
+  "checkpoints": [
+    {"id":"c0000000-0000-4000-8000-000000000005","turn":1,"boundary":"recovery","at":"2026-01-02T03:04:09.000Z","prompt":"Before restore","filesChanged":1},
+    {"id":"c0000000-0000-4000-8000-000000000003","turn":3,"boundary":"prompt","at":"2026-01-02T03:04:07.000Z","prompt":"continue","filesChanged":1,"promptEntryId":"claude:prompt:fixture-prompt-beta"},
+    {"id":"c0000000-0000-4000-8000-000000000002","turn":2,"boundary":"stop","at":"2026-01-02T03:04:06.000Z","prompt":"","filesChanged":1},
+    {"id":"c0000000-0000-4000-8000-000000000001","turn":1,"boundary":"prompt","at":"2026-01-02T03:04:05.000Z","prompt":"continue","filesChanged":1,"promptEntryId":"claude:prompt:fixture-prompt-alpha"}
+  ],
+  "expectedCheckpointIdByPromptEntryId": {
+    "claude:prompt:fixture-prompt-alpha": "c0000000-0000-4000-8000-000000000001",
+    "claude:prompt:fixture-prompt-beta": "c0000000-0000-4000-8000-000000000003"
+  }
+}
