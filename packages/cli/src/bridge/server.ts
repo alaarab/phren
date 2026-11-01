@@ -11,6 +11,8 @@ import { isLocalComputer } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { handOff } from "./hand-off.js";
 import { sessionStalls } from "./stalls.js";
+import { TurnQueue } from "./turn-queue.js";
+import { turnQueuePaneReader } from "./turn-queue-pane.js";
 import { HandOffQueue } from "./hand-off-queue.js";
 import { paneRouteOnce, promptGuards } from "./server-pane-routes.js";
 import { FanoutMessages } from "./fanout-messages.js";
@@ -142,6 +144,14 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const sideQuestions = new SideQuestions();
   const sendPrompt = async (target: Target, text: string, deliveryId: string, typing: () => Promise<void>) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions },
     new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>;
+  const turnQueue = new TurnQueue(path.join(root, "turn-queue.json"), {
+    current: turnQueuePaneReader(agentHooks),
+    holding: (target, exceptId) => agentHooks.deliveries.holding(target, exceptId),
+    send: sendPrompt,
+    delivery: (target, id) => agentHooks.deliveries.status(id, target),
+  });
+  // Never send while the Stop callback is held: the harness must first resume.
+  agentHooks.onTurnStopped = () => { setImmediate(() => { void turnQueue.tick().catch(() => {}); }); };
   const handOffs = dispatches ? new HandOffQueue({
     forward: (target, text, deliveryId) => succession?.forward(target, text, deliveryId) ?? Promise.resolve(undefined),
     validate: target => validateTarget(target, false, true),
@@ -251,7 +261,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const { stream } = streams;
   // The phone's overview, pushed over a WebSocket when it changes.
   const overview = overviewStream({
-    read: workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage }),
+    read: workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage, turnQueue }),
     info: () => ({ ...info, capabilities: info.capabilities }),
     renew: server => agentHooks.overview.renew(server),
     resources: () => resources.read(),
@@ -261,7 +271,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
   const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams, returns, handOffs, inbox, mover, succession, storePulls, gitboyWebhooks }));
+    fanoutMessages, canary, streams, returns, handOffs, inbox, mover, succession, storePulls, gitboyWebhooks, turnQueue }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   const socketPools = new SocketBudget<WebSocket>();
@@ -352,6 +362,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       await codexServers.sweep(live.map(server => String(server.session))).catch(() => {});
       // Dispatch returns ride this tick and its shared snapshots. The returns
       // loop throttles its own peer polls and never holds up activity.
+      void turnQueue.tick().catch(() => {});
       void handOffs?.tick().catch(() => {});
       void mover.reconcile().catch(() => {});
       void succession?.reconcile().catch(() => {});

@@ -114,6 +114,8 @@ and `installed.json` rollback record.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for
+dispatch returns), `turn-queue.json` (the Hook-held after-turn queue, including
+unsent prompt text; finished items retained for 24 hours), bounded `activity.jsonl` and
 dispatch returns), a bounded `conversation-search.sqlite` index of settled
 conversation text for `/v1/conversations/search` (with SQLite `-wal`/`-shm`
 companions and transient `conversation-search-rows/` pieces for rows still being

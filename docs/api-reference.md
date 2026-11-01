@@ -536,6 +536,98 @@ input text (`Try "…"`, the queued-message hints, `Message @…`) and a suggest
 a narrow pane cut short with `…` are never sent. Codex, OpenCode and Copilot
 have no such prediction and never send it.
 
+#### After this turn (Hook-held queue)
+
+Offer this option only when the Hook info capabilities (`capabilities` in
+health, `phren.capabilities` in workspace and overview responses) contain
+`afterTurnQueue: true`. Unlike
+Claude's own queue below, these words stay unsent on the computer until a safe
+turn boundary, even when the phone is asleep. These routes use the same
+transport authentication and Hook module scope as `/v1/prompt`; they are not
+available to gitboy-scoped keys. All four routes use **POST** with JSON bodies:
+
+| Route | Body | Success (HTTP 200) |
+| --- | --- | --- |
+| `/v1/prompt/after-turn` | `{target, id, text}` | `{item}` (new item, or the existing item for that id) |
+| `/v1/prompt/after-turn/list` | `{target}` | `{items: [...]}` in FIFO creation order, including retained finished items |
+| `/v1/prompt/after-turn/edit` | `{target, id, text}` | `{item}` with the replacement text; position is unchanged |
+| `/v1/prompt/after-turn/cancel` | `{target, id}` | `{item}` in state `cancelled` |
+
+`target` is `{server, workspace, tab, pane, source, session}`, exactly as for
+`/v1/prompt`: use the session row's target. `source` is `claude`, `codex`,
+`copilot`, `opencode` or `phren`; `session` is the conversation UUID (or
+OpenCode's `ses_...` identifier). A starting/transcript-less target is not
+accepted. `id` is chosen by the client, 8–64 ASCII letters, digits, `_` or `-`
+(a UUID works). Use a fresh id per composed message, and reuse it on network
+retries. IDs share the delivery ID namespace: do not reuse one from an ordinary
+send. Within retention, enqueueing the same id for the same pane, provider and
+conversation returns its existing item, even when the text differs or the item
+has finished. Use edit to change its words. Reusing an id for a different target
+returns 409. `text` is 1–32768 characters, must contain non-whitespace text,
+and permits tabs/newlines but no other ASCII control characters. Unknown body
+fields are rejected. No attachments or reorder operation are provided.
+
+Every `item` contains `id`, `target`, `terminal` (an opaque terminal instance
+identifier), `text`, `state`, `createdAt` and `updatedAt` (UTC ISO 8601 strings).
+A failed item also contains a machine-readable `reason`; optional `detail`
+contains the existing delivery path's human-readable explanation. Treat
+`reason` as the stable value:
+
+| State | Meaning |
+| --- | --- |
+| `queued` | Unsent; editable and cancellable. |
+| `sending` | Sending was durably recorded; the delivery path has not yet confirmed or failed it. |
+| `delivered` | The existing delivery path confirmed the message. |
+| `failed` | `reason` is `pane-closed`, `agent-restarted`, `conversation-changed` (binding invalidated before send), or `delivery-failed` (submission refused or the existing delivery path failed it); `detail` may explain the failure. |
+| `cancelled` | Cancelled while unsent; never sent. |
+| `unknown` | A send may have happened without a conclusive receipt, including a Hook restart during `sending`. Never automatically resent. |
+
+Only `queued` can be edited or cancelled; every other state returns 409,
+including a repeat cancellation. A send moves `queued` → `sending` →
+`delivered`, `failed` or `unknown`. A subsequently conclusive delivery receipt
+can resolve `unknown` to `delivered` or `failed`; a late confirmed submission
+also corrects a `delivery-failed` item to `delivered`. Definite permanent send
+refusals become `failed` with `delivery-failed`. A retryable startup refusal
+returns to `queued` without consuming its turn boundary. An unresolved `sending` or
+`unknown` item holds later items for that pane; the client must not assume it
+is safe to retry an unknown send under a new id.
+
+The Hook requires an ended turn record (Stop after the latest prompt), no
+awaited background shells or running children under the session-activity rules,
+no held approval/question/terminal dialog or outstanding prompt delivery, and
+the same conversation in the same terminal. A pane merely looking idle is
+insufficient. OpenCode uses its plugin’s busy/idle timestamps as confirmed turn
+records. A queue on a harness that reports no turn records waits rather than
+guessing. Enqueueing while
+already at a confirmed idle boundary can send immediately on the next tick.
+One item consumes each boundary; the next waits for the next turn to end.
+Processing wakes on Stop arrivals and on the existing five-second Hook tick.
+Temporary unreadable/offline state preserves queued items.
+
+The item id becomes the prompt path's `deliveryId`, so existing settlement and
+failure detection apply. `/v1/prompt/status` and delivery stream frames describe
+only that downstream send; use `/after-turn/list` as the queue's authoritative
+state. Listing and modifying use the **original** target and work after the
+pane closes or its conversation changes, so the client can still inspect
+failure or cancel unsent words. Enqueue returns 404 for an absent pane, 409 for
+a changed conversation, a full queue (20 unsent items per pane or 512 retained
+items per Hook), or a reused delivery id. Edit/cancel return 404 for an unknown
+id or an id belonging to another target. Invalid/missing fields return 400.
+
+The queue is atomically persisted in the private bridge directory as
+`turn-queue.json`, including unsent text. It survives Hook restarts. Finished
+items are kept for 24 hours and pruned on subsequent enqueues; unresolved
+queued/sending/unknown items are retained subject to the global admission cap.
+Idempotency is guaranteed while an item is retained.
+
+Session/tab rows (`groups[].children[]`) in `GET /v1/workspaces` and
+`WS /v1/overview` gain `queuedPrompts`, a nonnegative integer counting only
+`queued` items across that tab's agent panes, including words awaiting
+invalidation. It is zero when empty; older Hooks omit it. Counts update on the
+normal overview refresh (within ten seconds when its snapshot is unchanged).
+Poll `/after-turn/list` to refresh individual item states while the chat is
+open; the Hook does not require that polling to send.
+
 `POST /v1/prompt/queue { target, action }` (capability `queuedMessageActions`,
 the harnesses it covers: `["claude"]`) acts on the messages a working Claude
 Code pane holds in its own queue, all of them at once, as Claude Code itself
