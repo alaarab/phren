@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `GET /v1/terminals/resolve?ref=<token>&from=<pane>` opens a terminal reference from chat text: a Herdr pane (`w2E:p1`) or tab (`w2E:t1`) id, optionally prefixed by a computer (`MacBook/w2E:p1`). A bare reference resolves on this Hook, this computer's own names resolve locally, and a verified peer's reference is forwarded over its pinned SSH pipe. The answer names the live terminal's computer, server, pane, tab, workspace, title, agent and status; a malformed reference is 400 and a missing terminal or unknown computer is 404 `terminal-not-found`. Advertised as `capabilities.terminalResolve`.
+
 ### Fixed
 
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.

@@ -89,6 +89,7 @@ import { SPEECH_FORMATS, streamSpeech } from "./speech.js";
 import { readSpeechKey } from "./speech-key.js";
 import { DEFAULT_SPEECH_VOICE, listSpeechVoices, resolveSpeechVoice } from "./speech-voice.js";
 import { terminalKind, terminalMux } from "./terminal.js";
+import { resolveTerminalReference } from "./terminal-resolve.js";
 import { muxListForClient, muxReplyForClient, typedMuxRequest } from "./mux-wire.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
@@ -167,7 +168,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
-  approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
+  approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"], terminalResolve: true,
   files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
@@ -448,6 +449,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             result = { computer: info.computer, version, ...await listsCaller(caller) }; break;
           }
           case "/v1/owner-inbox": result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" }, url.searchParams.get("local") === "1"); break;
+          // A terminal reference from chat text (alaarab/phren-apps#676): this computer's pane or tab, or a linked peer's.
+          case "/v1/terminals/resolve": result = await resolveTerminalReference(url.searchParams.get("ref"),
+            { computer: info.computer, from: url.searchParams.get("from") }); break;
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // A session move (session-move.ts) by its id, or this computer's recent moves.
