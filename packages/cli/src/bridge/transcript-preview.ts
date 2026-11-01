@@ -64,8 +64,9 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   if (scrolled && !previous && !inTurn) return "";
   const reply: string[] = [], shown: string[] = [];
   // Scrolled past its ⏺, a reply already previewed continues from the top; without one, the top of the
-  // screen may be tool output, so only a ⏺ text block starts a reply.
-  let writing = scrolled && !!previous;
+  // screen may be tool output, so only a ⏺ text block starts a reply. A marker alone cannot establish
+  // authorship: notices and tools share it, so each is classified before a reply can start.
+  let block: ClaudePreviewBlock = scrolled && !!previous ? "reply" : "none";
   const body = lines.slice(Math.max(0, start)), rawBody = raw.slice(Math.max(0, start)), markedBody = marked.slice(Math.max(0, start));
   // A "⏺" block whose next line is a "⎿" result is a tool call, collapsed
   // ("⏺ Running 1 shell command…") or not; it lands as its own entry.
@@ -73,6 +74,9 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
     let wrapped = false;
     for (let next = index + 1; next < body.length; next++) {
       if (!body[next].trim()) continue;
+      // A notice can be drawn under a tool call's marker ("  ⎿ Background
+      // command …"); it is not that call's result.
+      if (claudeNotice(body[next])) return false;
       // A result ("⎿") or a sub-agent tree ("├─ Plan · 0 tool uses") follows a tool call.
       // A narrow pane wraps the call's description ("⏺ Finding retire wording
       // around Power" / "Portal reports"); its "⎿", indented under the call as
@@ -88,22 +92,32 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   for (const [index, line] of body.entries()) {
     if (/^\s*[❯>]/.test(line) || /esc(?:ape)? to interrupt/i.test(line)) break;
     if (/^\s*[✻✽✶✢✳✦·⠁-⣿]/u.test(line) || parseClaudeSpinnerLine(line)) continue;
+    // Claude Code's own notices (a background command's completion, a hook's
+    // output, a Monitor event, an interruption or a compaction) can share the
+    // reply's marker. They never clear or join an already collected reply, and
+    // their wrapped payload stays out until a fresh reply marker starts one.
+    if (claudeNotice(line)) { block = "notice"; continue; }
     // Claude Code draws a finished or running tool group as an unbulleted,
     // indented summary under the reply ("  Ran 1 shell command", "  Called
     // phren, ran 1 shell command", "  Running 1 shell command… grep -rn …").
     // It starts a block after a blank line; it and its wrapped command lines
     // are tool activity, which lands as its own entry.
-    if (!body[index - 1]?.trim() && claudeToolSummary(line)) { writing = false; continue; }
+    if (!body[index - 1]?.trim() && claudeToolSummary(line)) { block = "tool"; continue; }
     // A running tool group ("⏺ Running 2 agents…") and a tool call
     // ("⏺ Bash(ls)", "⏺ phren - search (MCP)(…)") are not reply
     // text; it lands as its own entry a moment later.
     if (/^\s*[⏺●]\s*[\w.:-]+(?: - [\w.:-]+)?(?: \(MCP\))?\(/.test(line) || (/^\s*[⏺●]/.test(line) && toolBlock(index))
-      || /^\s*[⏺●]\s*(?:Running|Calling|Reading|Searching|Writing|Editing|Fetching|Updating|Listing|Creating)\b[^.!?]*(?:…|\.\.\.)/.test(line)) { writing = false; continue; }
-    if (/^\s*[⏺●]/.test(line)) { reply.length = 0; shown.length = 0; writing = true; }
-    if (!writing) continue;
+      || /^\s*[⏺●]\s*(?:Running|Calling|Reading|Searching|Writing|Editing|Fetching|Updating|Listing|Creating)\b[^.!?]*(?:…|\.\.\.)/.test(line)) { block = "tool"; continue; }
     const tidy = (value: string) => value.replace(/^\s*[⏺●]\s?/, "").replace(/[⠁-⣿✻✽✶✢✳]/gu, "");
     const clean = tidy(line);
-    if (/^\s*(?:↳|⎿|ctrl\+|shift\+|\? for shortcuts)/i.test(clean) || claudeChrome(clean)) continue;
+    const skipped = /^\s*(?:↳|⎿|ctrl\+|shift\+|\? for shortcuts)/i.test(clean) || claudeChrome(clean);
+    if (/^\s*[⏺●]/.test(line)) { reply.length = 0; shown.length = 0; block = "reply"; }
+    else if (block === "reply") {
+      // A reply's wrapped rows stay indented under its marker; an unmarked,
+      // nonindented row (a notice's payload included) ends the acceptance.
+      if (line.trim() && !/^ {2,}\S/.test(line)) { block = "none"; continue; }
+    } else continue;
+    if (skipped) continue;
     reply.push(clean.replace(/^ {2}/, ""));
     // A rule line has no marked twin: it never reaches here.
     shown.push(tidy(markedBody[index] ?? line).replace(/^ {2}/, ""));
@@ -137,8 +151,34 @@ export function claudeChrome(line: string): boolean {
     || /^(?:Tip|Hint):\s/i.test(text)
     || /^(?:⏵⏵|⏸)\s/.test(text)
     || /\b(?:auto-accept edits|plan mode) (?:on|off)\b/i.test(text)
+    || /^(?:(?:manual|auto) mode|accept edits|auto-accept edits|plan mode|bypass permissions) (?:on|off)\b/i.test(text)
     || /^Context left until auto-compact\b/i.test(text)
     || /^(?:esc to (?:interrupt|cancel)|press esc)\b/i.test(text);
+}
+
+type ClaudePreviewBlock = "none" | "reply" | "tool" | "notice";
+
+/** A notice line's detection text: terminal borders, indentation and the
+ * optional ⏺ / ● / ⎿ decoration are presentation, not part of what it says. */
+function noticeText(line: string): string {
+  return line.replace(/^[\s\u2500-\u257f]*/, "").replace(/^[⏺●⎿]\s*/, "").trim();
+}
+
+/** Claude Code's own notices, which share the reply's marker. A header starts
+ * a notice block; its wrapped payload must not be taken for reply text. */
+function claudeNotice(line: string): boolean {
+  const text = noticeText(line);
+  if (!text) return false;
+  return /^Background command\s+["“]/.test(text)
+    || /^Monitor event\b/.test(text)
+    || /^<task-notification>/.test(text)
+    || /^Agent\b.+\bcompleted\b/.test(text)
+    || /^(?:SessionStart|UserPromptSubmit|PreToolUse|PostToolUse|Stop|SubagentStop|Notification|PreCompact|SessionEnd)(?::[\w-]+)? hook\b/.test(text)
+    || /^Hook output:/.test(text)
+    || /^(?:Interrupted by user\b|\[Request interrupted by user)/.test(text)
+    || /^(?:Compacting conversation(?:…|\.\.\.)|Conversation compacted|Context compacted)/.test(text)
+    || /^(?:⏵⏵|⏸)\s/.test(text)
+    || /^(?:(?:manual|auto) mode|accept edits|auto-accept edits|plan mode|bypass permissions) (?:on|off)\b/i.test(text);
 }
 
 /** A block line that starts its own row even inside a paragraph: a list

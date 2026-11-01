@@ -6,8 +6,9 @@ import path from "node:path";
 import { stopFacts } from "./agent-hook-callback.js";
 import { CLAUDE_SKILL_QUIET_MS, CLAUDE_STOP_TRUST_MS, claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
 import { runningChildAgents, TranscriptReader } from "./transcripts.js";
+import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { noteTurn } from "./turn-records.js";
-import type { Json } from "./protocol.js";
+import type { Json, Target } from "./protocol.js";
 
 describe("Claude child completion", () => {
   const roots: string[] = [];
@@ -647,5 +648,122 @@ describe("Claude queue consumption through the transcript reader", () => {
       .toEqual({ type: "phren_queue_consumed", key: digest("Check CI on PR #256 (gh pr checks 256)"), scheduled: true, timestamp: "2026-09-16T08:55:00.184Z" });
     // The scheduled turn itself stays hidden.
     expect(rows.some(row => row.isMeta === true)).toBe(false);
+  });
+});
+
+describe("Claude task-notification user rows", () => {
+  const timestamp = "2026-11-01T18:25:01.000Z";
+  const notification = `<task-notification>
+<task-id>merge-689</task-id>
+<tool-use-id>bash-689</tool-use-id>
+<status>failed</status>
+<summary>Background command "Merge #689 once CI is green" failed with exit code 1</summary>
+<output-file>/private/task-output.txt</output-file>
+<result>PRIVATE_OUTPUT</result>
+</task-notification>`;
+  const expected = `<task-notification>
+<task-id>merge-689</task-id>
+<tool-use-id>bash-689</tool-use-id>
+<status>failed</status>
+<summary>Background command "Merge #689 once CI is green" failed with exit code 1</summary>
+</task-notification>`;
+  const row = (content: unknown, origin?: unknown, extra: Json = {}) => ({
+    type: "user", timestamp,
+    ...(origin === undefined ? {} : { origin }),
+    message: { role: "user", content },
+    ...extra,
+  });
+
+  const cases: { label: string; content: unknown; origin?: unknown }[] = [
+    { label: "a string with origin", content: notification, origin: { kind: "task-notification" } },
+    { label: "text blocks with origin", content: [{ type: "text", text: notification }], origin: { kind: "task-notification" } },
+    { label: "a string without origin", content: notification },
+    { label: "text blocks without origin", content: [{ type: "text", text: notification }] },
+    { label: "a system-reminder wrapper", content: `<system-reminder>\n${notification}\n</system-reminder>` },
+  ];
+  it.each(cases)("normalizes $label to a background notice", ({ content, origin }) => {
+    expect(visibleClaudeEvent(row(content, origin))).toEqual({
+      type: "system", phrenBackground: true, timestamp,
+      message: { role: "user", content: expected },
+    });
+  });
+
+  it("keeps the row's UUID and parent UUID", () => {
+    expect(visibleClaudeEvent(row(notification, undefined, { uuid: "u2", parentUuid: "u1" })))
+      .toMatchObject({ uuid: "u2", parentUuid: "u1", phrenBackground: true });
+  });
+
+  // Reconstructed from a captured Claude Code 2.1.316 row, session 6344b61f at
+  // 2026-11-01T01:23:43.684Z: a real non-meta user row with a task-notification
+  // origin. Only the four sanitized tags may cross the wire.
+  it("normalizes a reconstructed non-meta user notification row", () => {
+    const reconstructed = `<task-notification>
+<task-id>blbocr5r6</task-id>
+<tool-use-id>toolu_011jM1Bzc8tFVJjQi1F6BeJU</tool-use-id>
+<output-file>/private/tmp/claude-501/redacted/tasks/blbocr5r6.output</output-file>
+<status>completed</status>
+<summary>Background command "Launch Codex worker for OpenCode question card" completed (exit code 0)</summary>
+</task-notification>`;
+    const raw = { type: "user", timestamp: "2026-11-01T01:23:43.684Z", uuid: "f0fe18d5-d841-488d-a84a-655979958646",
+      parentUuid: "06fa9d76-09f7-4508-a9aa-1cab7cb4ac54", origin: { kind: "task-notification", producer: "session-task", runId: "redacted" },
+      message: { role: "user", content: reconstructed } };
+    const event = visibleClaudeEvent(raw);
+    expect(event).toMatchObject({ type: "system", phrenBackground: true, timestamp: raw.timestamp, uuid: raw.uuid, parentUuid: raw.parentUuid,
+      message: { role: "user", content: `<task-notification>
+<task-id>blbocr5r6</task-id>
+<tool-use-id>toolu_011jM1Bzc8tFVJjQi1F6BeJU</tool-use-id>
+<status>completed</status>
+<summary>Background command "Launch Codex worker for OpenCode question card" completed (exit code 0)</summary>
+</task-notification>` } });
+    expect(JSON.stringify(event)).not.toContain("/private/tmp");
+    expect(JSON.stringify(event)).not.toContain("blbocr5r6.output");
+  });
+
+  // Reconstructed from captured Monitor notifications (session 6344b61f, 2026-11-01T14:18:16.919Z)
+  // carry no tool-use ID, so established provenance is hidden, never user text.
+  it("hides a reconstructed Monitor user notification without a tool-use ID", () => {
+    const reconstructed = `<task-notification>
+<task-id>b4clq7rdz</task-id>
+<summary>Monitor event: "Worker exits (680/681/682 Hook + iOS)"</summary>
+<event>bug-longchat exited: 0</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>`;
+    expect(visibleClaudeEvent({ type: "user", timestamp: "2026-11-01T14:18:16.919Z", origin: { kind: "task-notification" },
+      message: { role: "user", content: reconstructed } })).toBeUndefined();
+  });
+
+  it("never exports private notification data or falls back to user text", () => {
+    const origin = { kind: "task-notification" };
+    expect(visibleClaudeEvent(row("PRIVATE_OUTPUT", origin))).toBeUndefined();
+    expect(visibleClaudeEvent(row("<task-notification><task-id>merge-689</task-id></task-notification>", origin))).toBeUndefined();
+    expect(visibleClaudeEvent(row(`${notification}\n${"x".repeat(65_536)}`, origin))).toBeUndefined();
+    const exported = JSON.stringify(visibleClaudeEvent(row(notification, origin)));
+    expect(exported).not.toContain("PRIVATE_OUTPUT");
+    expect(exported).not.toContain("/private/task-output.txt");
+  });
+
+  it("keeps sidechain notifications private and ordinary prose ordinary", () => {
+    expect(visibleClaudeEvent(row(notification, undefined, { isSidechain: true }))).toBeUndefined();
+    const prose = "How does the <task-notification> envelope work in the transcript?";
+    expect(visibleClaudeEvent(row(prose))).toMatchObject({ type: "user", message: { role: "user", content: prose } });
+  });
+
+  it("does not reopen the pane after a turn ends on a notification", async () => {
+    const target: Target = { source: "claude", session: "preview-session", server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" };
+    const pane = vi.fn(async () => "❯ Fix CI\n⏺ Old reply\n❯");
+    const stream = new TranscriptPreviewStream(target, pane);
+    const normalize = (raw: Json) => {
+      const event = visibleClaudeEvent(raw);
+      expect(event).toBeDefined();
+      return event!;
+    };
+    const prompt = normalize({ type: "user", timestamp: "2026-11-01T18:25:00.000Z", message: { role: "user", content: "Fix CI" } });
+    const ended = normalize({ type: "assistant", timestamp: "2026-11-01T18:25:01.000Z", message: { role: "assistant", content: [], stop_reason: "end_turn" } });
+    const notice = normalize(row(notification, { kind: "task-notification" }));
+    stream.observe([{ line: 0, raw: prompt }, { line: 1, raw: ended }]);
+    expect(await stream.update("working", undefined, 0)).toBeUndefined();
+    stream.observe([{ line: 2, raw: notice }]);
+    expect(await stream.update("working", undefined, 600)).toBeUndefined();
+    expect(pane).not.toHaveBeenCalled();
   });
 });
