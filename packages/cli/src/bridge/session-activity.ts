@@ -55,10 +55,11 @@ export function recordedBackground(record: TurnRecord | undefined, finishedTasks
 }
 
 /** What may still be open in a pane whose turn record says it ended: Claude
- * starts a turn on its own when a background agent finishes (its task
- * notification, with no UserPromptSubmit), and that turn can open a dialog
- * Herdr still reads as working (plan approval, an MCP elicitation, a
- * permission request the Hook holds). Pasted text plus Enter would answer it. */
+ * starts a turn on its own when a background agent finishes. That turn's
+ * UserPromptSubmit carries the notification, not the owner's prompt
+ * (input-classification.ts), and it can open a dialog Herdr still reads as
+ * working (plan approval, an MCP elicitation, a permission request the Hook
+ * holds). Pasted text plus Enter would answer it. */
 export interface PromptGuards {
   /** An approval the Hook holds, a terminal prompt or a question it serves for this pane. */
   held?: () => boolean;
@@ -117,6 +118,57 @@ export function awaitedShells(record: TurnRecord | undefined, final: FinalTurn |
 export function liveWork(record: TurnRecord | undefined, final: FinalTurn | undefined, runningChildren = 0, now = Date.now()): number | undefined {
   const total = (awaitedShells(record, final, now) ?? 0) + runningChildren;
   return total || undefined;
+}
+
+/** The evidence every surface may have when it asks what a pane is doing. */
+export interface EffectiveStatusInput {
+  /** The terminal's own snapshot (`pane.agent_status`). */
+  paneStatus?: unknown;
+  /** The pane's guarded turn record (turn-records.ts). */
+  record?: TurnRecord;
+  /** The transcript's final turn, when the caller already read it. */
+  final?: FinalTurn;
+  runningChildren?: number;
+  /** A real held approval or question the Hook serves. */
+  held?: boolean;
+  /** A confirmed dialog in the pane. */
+  dialog?: boolean;
+  /** A conversation/terminal replacement or an agent exit: old state is void. */
+  replaced?: boolean;
+  now?: number;
+}
+
+/**
+ * One answer to "what is this pane doing?", shared by the transcript/status
+ * streams, the overview and tmux lifecycle status. It resolves the separate
+ * definitions (terminal snapshot, hook order, transcript final turn,
+ * background enrichment) once, in this order:
+ *
+ * 1. a conversation/terminal replacement or agent exit invalidates old state;
+ * 2. a real held ask or confirmed dialog wins (`waiting` / `blocked`);
+ * 3. an unanswered owner prompt is working, though the terminal says idle;
+ * 4. a confirmed foreground end applies the bounded background rules;
+ * 5. without usable turn evidence the terminal snapshot is the answer.
+ *
+ * A notification never advances the prompt, so it cannot make an unanswered
+ * foreground turn look ended here.
+ */
+export function resolveEffectiveStatus(input: EffectiveStatusInput): string | undefined {
+  const terminal = typeof input.paneStatus === "string" ? input.paneStatus : undefined;
+  if (input.replaced) return terminal;
+  if (input.held) return "waiting";
+  if (input.dialog) return "blocked";
+  // The terminal's own blocked/waiting report is real waiting, not an idle
+  // snapshot: keep it even when the turn record has no dialog evidence.
+  if (terminal === "blocked" || terminal === "waiting") return terminal;
+  const phase = input.record ? turnPhase(input.record) : undefined;
+  if (phase?.phase === "working") return "working";
+  const background = liveWork(input.record, input.final, input.runningChildren ?? 0, input.now);
+  if (background) return "working";
+  if (phase?.phase === "ended") {
+    return terminal === "done" ? "done" : "idle";
+  }
+  return terminal;
 }
 
 /** Every background task the finished turn left running, awaited or not, less

@@ -55,7 +55,7 @@ const tabOf = (answer: Json, pane: string, snapshot: Json) => {
   return objects(answer.groups).flatMap(group => objects(group.children)).find(child => child.id === tab)!;
 };
 const turn = (pane: string, terminal: string, events: Array<[string, Partial<Parameters<typeof noteTurn>[2]>?]>) =>
-  events.reduce((previous, [event, extra]) => previous.then(() => noteTurn("default", pane, { event, terminal, source: "claude", session: sessions[pane], ...extra }).then(() => undefined)), Promise.resolve());
+  events.reduce((previous, [event, extra]) => previous.then(() => noteTurn("default", pane, { event, input: "owner", terminal, source: "claude", session: sessions[pane], ...extra }).then(() => undefined)), Promise.resolve());
 
 describe("session rows on a computer with background work and dispatched workers", () => {
   it("shows an idle tab whose Stop left background tasks as working, and names a dispatched worker by its label", async () => {
@@ -85,6 +85,19 @@ describe("session rows on a computer with background work and dispatched workers
     const codex = tabOf(answer, "w1S:p1", snapshot);
     expect(codex).toMatchObject({ agentStatus: "working", backgroundTasks: 2, title: "worker" });
     expect(codex).not.toHaveProperty("currentStep");
+  });
+
+  it("keeps an unanswered owner prompt working when the terminal snapshot says idle", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w13:p2")!;
+    pane.agent_status = "idle";
+    objects(snapshot.tabs).find(tab => tab.tab_id === pane.tab_id)!.agent_status = "idle";
+    awaited[sessions["w13:p2"]] = undefined;
+    await turn("w13:p2", String(pane.terminal_id), [["UserPromptSubmit"]]);
+    const row = tabOf(await read(snapshot), "w13:p2", snapshot);
+    // The overview uses the same resolver as the transcript/status streams.
+    expect(row).toMatchObject({ agentStatus: "working" });
+    expect(row).not.toHaveProperty("completion");
   });
 
   it("moves statusSince between disconnected overview reads while the raw status stays idle", async () => {

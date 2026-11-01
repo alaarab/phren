@@ -19,6 +19,7 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { opencodeTurnStamps } from "./harness-status.js";
+import type { InputCategory } from "./input-classification.js";
 import { briefId } from "./launch-brief.js";
 import { atomicInPrivateDir, bridgeRoot, provider, serverName, sessionId, type Provider } from "./protocol.js";
 
@@ -41,6 +42,10 @@ const turnRecordSchema = z.object({
   dispatch: briefId.optional(),
   startedAt: z.string().datetime().optional(),
   prompt: stamp.optional(),
+  /** Automatic input (a task notification, a teammate message, a harness
+   * envelope) seen in this conversation. It is activity, never a new prompt:
+   * the owner's `prompt` and its generation stay put. */
+  notification: stamp.extend({ reason: z.string().max(80).optional() }).optional(),
   stop: stamp.extend({
     /** Background tasks (shells, subagents, monitors) the harness still ran when the turn stopped. */
     background: z.number().int().min(0).max(999).optional(),
@@ -63,6 +68,14 @@ export interface TurnEvent {
   dispatch?: string;
   /** SessionStart only: how the session started, as the harness names it (Claude: startup, resume, clear, compact). */
   start?: string;
+  /** UserPromptSubmit: whose input this is. Trusted turn writers omit this for owner input;
+   * the callback endpoint explicitly classifies automatic and unresolved submissions. */
+  input?: InputCategory;
+  /** Deferred classification of an already recorded submission, preserving
+   * its original order relative to Stops and intervening owner prompts. */
+  resolvePrompt?: { seq: number; at: string; previous: number };
+  /** Stop: this Stop belongs to background activity, not to a foreground turn that is still running. */
+  notificationStop?: boolean;
   /** Stop only: the harness's count of in-flight background tasks, when it reports one. */
   background?: number;
   /** Stop only: the background tasks it listed, `{id, running}` each (validated here). */
@@ -108,6 +121,12 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
   const at = new Date(event.at ?? Date.now()).toISOString();
   const same = previous && previous.terminal === event.terminal && previous.source === event.source && previous.session === event.session;
   const record: TurnRecord = same ? structuredClone(previous) : { terminal: event.terminal, source: event.source, session: event.session, seq: 0, at };
+  // Another deferred owner may have resolved since submission. Promote past
+  // that earlier owner, but never replace an equal/newer owner. Recheck here
+  // inside noteTurn's serialized write, after callback-side discovery awaits.
+  if (event.resolvePrompt && (!same || !record.prompt || record.prompt.seq < event.resolvePrompt.previous
+    || record.prompt.seq >= event.resolvePrompt.seq || event.resolvePrompt.seq > record.seq
+    || event.resolvePrompt.seq <= event.resolvePrompt.previous)) return undefined;
   record.seq++; record.at = at;
   if (event.dispatch && briefId.safeParse(event.dispatch).success) record.dispatch ??= event.dispatch;
   if (event.event === "SessionStart") {
@@ -116,8 +135,19 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
     // last Stop counted; a compaction keeps them.
     if ((event.start === "resume" || event.start === "clear") && record.stop) { delete record.stop.background; delete record.stop.tasks; }
   }
-  else if (event.event === "UserPromptSubmit") record.prompt = { seq: record.seq, at };
-  else {
+  else if (event.event === "UserPromptSubmit") {
+    // Only the owner moves the logical prompt generation. A notification or a
+    // harness envelope is activity in the same turn; it may not replace the
+    // owner's anchor, completion identity or preview turn.
+    if (event.input === "owner" || event.input === undefined) record.prompt = event.resolvePrompt ? { seq: event.resolvePrompt.seq, at: event.resolvePrompt.at } : { seq: record.seq, at };
+    else record.notification = { seq: record.seq, at, reason: `input:${event.input ?? "unresolved"}` };
+    if (event.resolvePrompt && record.notification?.seq === event.resolvePrompt.seq) delete record.notification;
+  }
+  else if (event.notificationStop) {
+    // A Stop tied to background notification traffic does not end the
+    // foreground turn that is still running.
+    record.notification = { seq: record.seq, at, reason: "stop:notification" };
+  } else {
     const reply = event.reply?.trim() ? truncateUtf8(event.reply.trim()) : undefined;
     const tasks = stopTasks(event.backgroundTasks);
     record.stop = { seq: record.seq, at, ...(event.background !== undefined ? { background: Math.min(999, Math.max(0, Math.floor(event.background))) } : {}),

@@ -81,7 +81,7 @@ class TranscriptIndex {
   /** Read newest first and stop as soon as the caller has a page. Large rows
    * are skipped with bounded memory while keeping absolute line and byte
    * identities. */
-  async *rows(handle: FileHandle, before: number, after: number, signal?: AbortSignal): AsyncGenerator<{ line: number; offset: number; bytes?: Buffer }> {
+  async *rows(handle: FileHandle, before: number, after: number, signal?: AbortSignal, maxRowBytes = MAX_ROW_BYTES): AsyncGenerator<{ line: number; offset: number; bytes?: Buffer }> {
     const endLine = Math.min(before, this.lines);
     if (endLine <= after) return;
     let cursor = await this.position(handle, endLine, signal) - 1;
@@ -98,14 +98,14 @@ class TranscriptIndex {
       while (end > 0) {
         const newline = buffer.lastIndexOf(10, end - 1), begin = newline + 1;
         size += end - begin;
-        if (size <= MAX_ROW_BYTES) parts.push(Buffer.from(buffer.subarray(begin, end))); else parts = [];
+        if (size <= maxRowBytes) parts.push(Buffer.from(buffer.subarray(begin, end))); else parts = [];
         if (newline < 0) break;
-        yield { line: line--, offset: start + begin, bytes: size <= MAX_ROW_BYTES ? Buffer.concat(parts.reverse(), size) : undefined };
+        yield { line: line--, offset: start + begin, bytes: size <= maxRowBytes ? Buffer.concat(parts.reverse(), size) : undefined };
         parts = []; size = 0; end = newline;
       }
       cursor = start;
     }
-    if (line >= after) yield { line, offset: lower, bytes: size <= MAX_ROW_BYTES ? Buffer.concat(parts.reverse(), size) : undefined };
+    if (line >= after) yield { line, offset: lower, bytes: size <= maxRowBytes ? Buffer.concat(parts.reverse(), size) : undefined };
   }
 }
 

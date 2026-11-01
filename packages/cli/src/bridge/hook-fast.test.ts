@@ -74,6 +74,14 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
     expect(bodies.every(body => !("promptEntryId" in body))).toBe(true);
   });
 
+  it("forwards the same automatic category the full callback applies", async () => {
+    const monitor = "<task-notification>\n<task-id>bru2vhgmb</task-id>\n<summary>Monitor event: \"Worker exits\"</summary>\n</task-notification>";
+    await run({ hook_event_name: "UserPromptSubmit", session_id: session, prompt: "Review the login link" }, herdr());
+    expect(bodies[0]).not.toHaveProperty("inputCategory");
+    await run({ hook_event_name: "UserPromptSubmit", session_id: session, prompt: monitor }, herdr());
+    expect(bodies[1]).toMatchObject({ event: "UserPromptSubmit", inputCategory: "notification", inputReason: "envelope:task-notification" });
+  });
+
   it("carries Stop facts and prints permission answers", async () => {
     const stop = { hook_event_name: "Stop", session_id: session, last_assistant_message: "Done.", background_tasks: [{ id: "aworker1", status: "running" }, { id: "bshell2", status: "completed" }, { status: "running" }] };
     expect((await run(stop, { ...herdr(), PHREN_DISPATCH_ID: "brief-12345" })).stdout).toBe("");

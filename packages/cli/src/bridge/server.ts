@@ -356,7 +356,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
             if (parsed.success) await sessionStalls.observe(parsed.data, pane);
             return parsed.success ? parsed.data : undefined;
           });
-          await tabActivity.recordStatus(name, await effectiveStatusRows(name, current), generation);
+          await tabActivity.recordStatus(name, await effectiveStatusRows(name, current, undefined, agentHooks), generation);
         }
         catch { /* A disconnected computer keeps its previous local activity. */ }
       }

@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { classifyClaudeInput } from "./input-classification.js";
 import { object, objects, type Json } from "./protocol.js";
 import { claudePromptEntryId } from "./prompt-identity.js";
 import type { ChildAgentRelation } from "./transcripts.js";
@@ -499,7 +500,7 @@ async function claudeChildBelongsTo(file: string, parent: string, agentId: strin
 // `effort` rides on each assistant row (Claude Code 2.1): with `message.model`
 // it is what the phone's model chip shows as in effect. `permissionMode` on a
 // user row is the mode that turn ran in (the phone's permission chip).
-const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted", "effort", "permissionMode"]);
+const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenExecution", "phrenCompacted", "effort", "permissionMode"]);
 
 /** State one newest-first pass over a Claude transcript keeps so a
  * content-free `dequeue` can name the prompt turn it delivered: the queue key
@@ -741,28 +742,6 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
   if (raw.type === "permission-mode" && typeof raw.permissionMode === "string" && /^[A-Za-z]{1,30}$/.test(raw.permissionMode)) {
     return { type: "permission-mode", permissionMode: raw.permissionMode, ...(typeof raw.timestamp === "string" ? { timestamp: raw.timestamp } : {}) };
   }
-  // A background task's completion reaches Claude Code as a user row whose
-  // origin says "task-notification" (sometimes wrapped in a system reminder).
-  // It is a notice, not a prompt: normalize only its public envelope and never
-  // let established notification provenance fall through as ordinary user text.
-  if (raw.type === "user") {
-    const origin = object(raw.origin);
-    const content = object(raw.message).content;
-    const text = typeof content === "string" ? content
-      : objects(content).filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)).join("\n");
-    const trimmed = text.trimStart();
-    const envelope = trimmed.startsWith("<task-notification>")
-      || (trimmed.startsWith("<system-reminder>") && trimmed.includes("<task-notification>"));
-    if (origin.kind === "task-notification" || envelope) {
-      if (raw.isSidechain && !includeSidechain) return undefined;
-      if (text.length > 65_536 || !envelope) return undefined;
-      const notice = taskNotification(text);
-      return notice ? { type: "system", phrenBackground: true, timestamp: raw.timestamp,
-        ...(typeof raw.uuid === "string" ? { uuid: raw.uuid } : {}),
-        ...(typeof raw.parentUuid === "string" ? { parentUuid: raw.parentUuid } : {}),
-        message: { role: "user", content: notice } } : undefined;
-    }
-  }
   // Remember the prompt turn a queued message was delivered as, so the
   // content-free dequeue written before it can be keyed and flagged scheduled,
   // and the phone id the Hook's records bound to that occurrence, so a real
@@ -772,7 +751,39 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
     const key = queuePromptKey(raw);
     if (key !== undefined) { queue.key = key; queue.scheduled = scheduledPromptTurn(raw); queue.delivery = queue.deliveryFor?.(raw, queue.offset); }
   }
+  // A background task's completion reaches Claude Code as a user row whose
+  // origin says "task-notification" (sometimes wrapped in a system reminder).
+  // It is a notice, not a prompt: normalize only its public envelope and never
+  // let established notification provenance fall through as ordinary user text.
+  if (raw.type === "user") {
+    const content = object(raw.message).content;
+    const text = typeof content === "string" ? content
+      : objects(content).filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)).join("\n");
+    const input = classifyClaudeInput({ text, hasImage: objects(content).some(block => block.type === "image"), origin: raw.origin, commandMode: raw.commandMode,
+      isMeta: raw.isMeta, isSidechain: raw.isSidechain && !includeSidechain, isCompactSummary: raw.isCompactSummary,
+      toolResult: objects(content).some(block => block.type === "tool_result") });
+    if (input.category === "internal" && !objects(content).some(block => block.type === "tool_result")) return undefined;
+    if (input.category === "notification") {
+      if (raw.isSidechain && !includeSidechain) return undefined;
+      const trimmed = text.trimStart();
+      const envelope = trimmed.startsWith("<task-notification>")
+        || (trimmed.startsWith("<system-reminder>") && trimmed.includes("<task-notification>"));
+      // A system-origin notification that is not a public task envelope stays private.
+      if (text.length > 65_536 || !envelope) return undefined;
+      const notice = taskNotification(text);
+      return notice ? { type: "system", phrenBackground: true, timestamp: raw.timestamp,
+        ...(typeof raw.uuid === "string" ? { uuid: raw.uuid } : {}),
+        ...(typeof raw.parentUuid === "string" ? { parentUuid: raw.parentUuid } : {}),
+        message: { role: "user", content: notice } } : undefined;
+    }
+  }
   if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
+  if (raw.type === "assistant" || (raw.type === "system" && raw.subtype === "turn_duration")) {
+    // Publish only the execution category, never raw origin metadata. A
+    // background end_turn is not the foreground execution's boundary.
+    const execution = classifyClaudeInput({ text: "execution", origin: raw.origin, isSidechain: raw.isSidechain && !includeSidechain });
+    if (execution.category !== "owner") raw = { ...raw, phrenExecution: "background" };
+  }
   raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
   const message = unwrapUserText(object(raw.message));
   const delivery = raw.type === "user" ? queue?.delivery : undefined;

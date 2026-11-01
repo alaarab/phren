@@ -9,6 +9,10 @@ import { BridgeError, type Json, MAX_FRAME, object, type Provider, type Target, 
 import type { CodexQuestions } from "./questions.js";
 import type { HookInfo } from "./server-routes.js";
 import type { SideQuestions } from "./side-questions.js";
+import { claudeInputState } from "./claude-input-state.js";
+import { effectivePaneEvidence } from "./session-evidence.js";
+import { resolveEffectiveStatus } from "./session-activity.js";
+import { turnPhase } from "./turn-records.js";
 import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { childAgent, childAgentTree, refreshTranscript, targetTranscriptPath, TranscriptReader } from "./transcripts.js";
 import type { ModuleSnapshot } from "../modules/runtime.js";
@@ -133,18 +137,17 @@ export function transcriptStreams(ctx: StreamContext) {
       try {
         if (first || pending.length === 0) {
           const pane = first ? initialPane : await validateTarget(target, false, false, SNAPSHOT_SHARE_MS);
+          // One resolved status for every surface on this tick. A notification
+          // or a stale idle snapshot cannot end an unanswered foreground turn.
+          if (child === null) void agentHooks.reconcileSubmissions?.(target);
+          const evidence = child === null ? await effectivePaneEvidence(target.server, pane, conversation.session, agentHooks, codexQuestions) : { paneStatus: pane.agent_status, record: undefined };
+          const resolvedStatus = resolveEffectiveStatus(evidence);
           if (awaitingTranscript) await findTranscript();
           if (awaitingTranscript) {
             if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
           } else if (reader) {
             await refreshTranscript(reader.file, conversation.source, conversation.session);
             const resumingClaude = first && conversation.source === "claude" && resumeAfterLine !== undefined;
-            if (first && child === null && target.source === "claude" && resumeAfterLine !== undefined) {
-              // A reconnect cursor can omit the current user row entirely.
-              // Seed only ephemeral turn state from the bounded recent tail.
-              const tail = (await new TranscriptReader(reader.file, conversation.source).read(undefined, abort.signal)).entries;
-              previews.observe(tail);
-            }
             let page = resumeAfterLine === undefined
               ? await reader.read(undefined, abort.signal)
               : await reader.readAfter(resumeAfterLine, abort.signal);
@@ -158,8 +161,23 @@ export function transcriptStreams(ctx: StreamContext) {
               page = await reader.snapshot(abort.signal);
               sentPromptIds.clear();
             }
-            if (child === null) previews.observe(page.entries, page.reset);
-            const preview = child === null ? await previews.update(pane.agent_status, reader.file) : undefined;
+            if (child === null) {
+              if (page.reset) previews.observe([], true);
+              if ((first || page.reset) && target.source === "claude") {
+                const recovered = await claudeInputState(reader.file).catch(() => undefined);
+                if (recovered?.owner) {
+                  previews.seedTurn(recovered.owner.at, recovered.owner.text);
+                  previews.observe(recovered.recovery);
+                }
+                // Cursor reconnects also need landed/final evidence omitted by
+                // the cursor. This reader uses the same normalization path.
+                if (cursor !== null) previews.observe((await new TranscriptReader(reader.file, conversation.source).read(undefined, abort.signal)).entries);
+              }
+              previews.observe(page.entries);
+            }
+            const preview = child === null
+              ? await previews.update(resolvedStatus, reader.file, undefined, { ended: evidence.record ? turnPhase(evidence.record).phase === "ended" : false })
+              : undefined;
             // `activityVerb` stays for phones that predate `activity`.
             const activity = previews.activity ? { activityVerb: previews.activity.verb, activity: { ...previews.activity } }
               : previews.verb ? { activityVerb: previews.verb } : {};
@@ -173,7 +191,7 @@ export function transcriptStreams(ctx: StreamContext) {
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = modules.has("git") && cwd ? await repositoryBranch(cwd) : undefined;
-            const waiting = !pendingApproval && ["blocked", "waiting"].includes(String(pane.agent_status));
+            const waiting = !pendingApproval && ["blocked", "waiting"].includes(String(resolvedStatus));
             // Claude Code's auto-mode fallback, opencode and Codex draw a
             // numbered dialog in the pane with no PermissionRequest hook
             // behind it: read the pane (at most once per three seconds) and
@@ -207,12 +225,12 @@ export function transcriptStreams(ctx: StreamContext) {
             // Claude's suggested next prompt, only between turns. The footer
             // read can be a throttle old, so one from before a turn this
             // stream saw start is stale: the turn cleared it.
-            const between = ["idle", "done"].includes(String(pane.agent_status)) && !pendingApproval && !servedQuestion;
+            const between = ["idle", "done"].includes(String(resolvedStatus)) && !pendingApproval && !servedQuestion;
             if (!between) busyAt = Date.now();
             const nextPrompt = between && suggestion && suggestion.readAt > busyAt ? suggestion.text : undefined;
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
-              status: pendingApproval || servedQuestion ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
+              status: pendingApproval || servedQuestion ? "waiting" : resolvedStatus, pendingApproval, pendingQuestions, terminalPrompt,
               ...(waiting && agentHooks.passwordPrompt(target) ? { passwordPrompt: true } : {}),
               compacting: agentHooks.compacting(target),
               ...(nextPrompt ? { suggestion: nextPrompt } : {}),

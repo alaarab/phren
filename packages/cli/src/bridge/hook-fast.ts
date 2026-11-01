@@ -13,6 +13,7 @@
 // when it is off, so the store's module config is not read here.
 import path from "node:path";
 import { claudePromptEntryId } from "./prompt-identity.js";
+import { claudeCallbackFacts, classifyClaudePromptText } from "./input-classification.js";
 
 /** The script's file name in a version's folder, beside `bridge-hook.mjs`. */
 export const FAST_HOOK_FILE = "claude-hook.mjs";
@@ -57,6 +58,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const env = process.env, source = process.argv[2];
 const hookOutput = ${hookOutput.toString()};
 const claudePromptEntryId = ${claudePromptEntryId.toString()};
+// The same classification the full callback forwards; embedded so this small
+// script never needs the bundle to name a notification as owner input.
+const classifyClaudePromptText = ${classifyClaudePromptText.toString()};
+const claudeCallbackFacts = ${claudeCallbackFacts.toString()};
 async function full() {
   const bundle = path.join(path.dirname(fileURLToPath(import.meta.url)), "bridge-hook.mjs");
   process.argv = [process.argv[0], bundle, "hook", source];
@@ -88,8 +93,11 @@ async function forward(place) {
   const stop = event !== "Stop" ? {} : { ...(tasks ? { background: tasks.length } : {}), ...(listed ? { backgroundTasks: listed } : {}),
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
   const promptEntryId = source === "claude" && event === "UserPromptSubmit" ? claudePromptEntryId(value.prompt_id) : undefined;
-  const data = JSON.stringify({ target, event, ...(dispatchId ? { dispatchId } : {}),
+  const promptInput = source === "claude" && event === "UserPromptSubmit" ? classifyClaudePromptText(value.prompt) : undefined;
+  const data = JSON.stringify({ target, event, ...claudeCallbackFacts(value),
+    ...(typeof value.transcript_path === "string" ? { transcript: value.transcript_path.slice(0, 4096) } : {}), ...(dispatchId ? { dispatchId } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
+    ...(promptInput && promptInput.category !== "owner" && !(claudeCallbackFacts(value).hasImage && promptInput.reason === "text:empty") ? { inputCategory: promptInput.category, inputReason: promptInput.reason } : {}),
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
     ...(promptEntryId ? { promptEntryId } : {}),
     ...(event === "SessionStart" && typeof value.source === "string" ? { startSource: value.source.slice(0, 32) } : {}), ...stop });
