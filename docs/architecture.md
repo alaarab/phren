@@ -344,8 +344,8 @@ provides these connections directly. See [the connection protocol](../packages/c
 ## Scheduling
 
 A project's `schedules.yaml` names an assigned computer, a harness, and one of
-five timing forms. The assigned computer's Phren Hook evaluates them in its
-local time and launches the prompt through Herdr or a headless wrapper, keeping
+six timing forms (five time forms plus declarative event triggers). The assigned computer's Phren Hook evaluates time forms in its
+local time, admits authenticated events with persistent delivery dedupe and coalescing, and launches the prompt through Herdr or a headless wrapper, keeping
 its own run ledger. `phren schedule` edits the store file directly and asks the
 Hook to run now or list local history. See [Scheduled prompts](schedules.md).
 

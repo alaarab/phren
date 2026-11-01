@@ -1,7 +1,7 @@
 import { approvalRuleContext, approvalRuleEffect } from "./approval-rules.js";
 import { recordedConductor } from "./conductor-role.js";
 import { conductorBrief, conductorContext } from "./conductor-context.js";
-import { disabledHint } from "../modules/registry.js";
+import { isDeepStrictEqual } from "node:util";
 import type { ModuleSnapshot } from "../modules/runtime.js";
 import { logger } from "../logger.js";
 import { createServer, type Server, type ServerResponse } from "node:http";
@@ -85,7 +85,7 @@ export function watchHangUp(res: ServerResponse): () => boolean {
 }
 
 interface HeldReply { end(body: string): unknown; readonly destroyed: boolean }
-interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: ConductorCall;
+interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; toolUseId?: string; dialogSeenAt?: number; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: ConductorCall;
   /** A server request of the Hook's own Codex app-server: answered over RPC, never held on a timer. */
   appServer?: { requestId: AppServerRequestId; answer: (result: Json) => void } }
 
@@ -122,6 +122,8 @@ function projectField(cwd: string | undefined): { project?: string } {
 }
 
 export class AgentHooks {
+  /** Wake the Hook-held prompt queue after a recorded Stop. */
+  onTurnStopped?: () => void;
   readonly changes = new ToolChanges();
   private pending = new Map<string, Pending>();
   /** Phone messages Phren typed into a pane, until a conversation there
@@ -133,7 +135,7 @@ export class AgentHooks {
    * from the pane's own numbered lines, whose answers gain an Enter, and
    * `questions` carries a released AskUserQuestion's normalized question set
    * with the index currently being answered. */
-  private terminalPrompts = new Map<string, { tool: string; input?: unknown; message: string; request?: string; requestKind?: RequestKind; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
+  private terminalPrompts = new Map<string, { tool: string; input?: unknown; toolUseId?: string; dialogSeenAt?: number; message: string; request?: string; requestKind?: RequestKind; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
   /** The last time each pane's terminal lines were read for a dialog, so a
    * status tick reads them at most once per three seconds per pane. */
   private dialogReads = new Map<string, number>();
@@ -513,12 +515,12 @@ export class AgentHooks {
     if (this.modules?.has("git") !== false && recorded && typeof cwd === "string") await checkpointBoundary(cwd, target, String(body.event), recorded.prompt?.seq ?? recorded.seq,
       typeof body.prompt === "string" ? body.prompt : "");
   }
-  private rememberTerminalPrompt(target: Target, body: Json) {
+  private rememberTerminalPrompt(target: Target, body: Json, dialogSeenAt?: number) {
     const tool = String(body.tool || "action").slice(0, 200);
     const questions = tool === "AskUserQuestion" ? terminalQuestions(body.input) : undefined;
     const choice = questions ? questionChoice(questions, 0) : terminalChoice(body.input);
     const summary = approvalSummary({ tool, input: body.input, question: tool === "AskUserQuestion" });
-    this.terminalPrompts.set(JSON.stringify(target), { tool, input: body.input,
+    this.terminalPrompts.set(JSON.stringify(target), { tool, input: body.input, dialogSeenAt, toolUseId: typeof body.toolUseId === "string" ? body.toolUseId : undefined,
       message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}),
       ...summary,
       ...(questions ? { questions, questionIndex: 0 } : {}), at: Date.now() });
@@ -541,7 +543,7 @@ export class AgentHooks {
    * waits with nothing else to ask, read its last lines (at most once per
    * three seconds per pane) and publish the dialog as a terminal choice; drop
    * it when the pane leaves waiting or the dialog lines vanish. A remembered
-   * permission request that is not a dialog keeps the slot untouched. The same
+   * Claude request is retired only after its dialog was seen and disappeared. The same
    * read notes whether the terminal is reading a password. */
   async syncTerminalDialog(target: Target, active: boolean): Promise<void> {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
@@ -573,7 +575,7 @@ export class AgentHooks {
     if (question && !active) { this.terminalPrompts.delete(key); this.passwords.delete(key); return; }
     // A released permission request that carried its own choices keeps them;
     // one without (a Bash or MCP call) reads the pane's rows below.
-    if (!question && entry && !entry.dialog && entry.choice && !entry.released) return;
+    if (target.source !== "claude" && !question && entry && !entry.dialog && entry.choice && !entry.released) return;
     if (!active) {
       if (entry) this.terminalPrompts.delete(key);
       this.passwords.delete(key);
@@ -583,7 +585,10 @@ export class AgentHooks {
     if (now - (this.dialogReads.get(key) ?? 0) < DIALOG_READ_MS) return;
     this.dialogReads.set(key, now);
     while (this.dialogReads.size > 128) this.dialogReads.delete(this.dialogReads.keys().next().value!);
-    const text = await this.paneLines(target);
+    // Unlike optional display text, a failed read cannot prove a dialog is gone.
+    const text = await terminalProvider().readScreen(target.server, target.pane,
+      { scope: "agent", source: "visible", lines: 40, stripAnsi: true, timeoutMs: 2_000 }).catch(() => undefined);
+    if (text === undefined) return;
     // A tall question has its tab bar above the 40 lines: look further up, for it only.
     const tall = target.source === "claude" && /Chat about this/.test(text) && !claudeQuestionDialog(text)
       ? await this.paneLines(target, true, QUESTION_READ_LINES).catch(() => "") : "";
@@ -600,6 +605,26 @@ export class AgentHooks {
     }
     if (question) { this.terminalPrompts.delete(key); return; }
     const dialog = await this.screenDialog(target, text);
+    if (target.source === "claude") {
+      // A callback or a new ask may have replaced this request during the read.
+      if ((held && ![...this.pending.values()].includes(held)) || this.terminalPrompts.get(key) !== entry) return;
+      const observed = held ?? entry;
+      if (dialog?.title && observed) observed.dialogSeenAt ??= now;
+      if (!dialog?.title && observed?.dialogSeenAt !== undefined && now - observed.dialogSeenAt >= 3_000) {
+        for (const [action, pending] of this.pending) {
+          if (pending !== held) continue;
+          clearTimeout(pending.timer); this.pending.delete(action); this.pushedHolds.delete(action); this.dropPushBindings(action);
+          if (!pending.response.destroyed) pending.response.end("{}");
+        }
+        const released = this.releasedHolds.get(key);
+        if (released) { this.dropPushBindings(released.action); this.releasedHolds.delete(key); }
+        this.terminalPrompts.delete(key); this.dropDialogPush(key); this.dropForwardedDialog(key);
+        settleBlockedPane(target.server, target.pane);
+        return;
+      }
+      // Never settle a held or remembered ask before its dialog was observed.
+      if (held || (!dialog?.title && observed)) return;
+    }
     if (entry && !entry.dialog) {
       // The permission the pane still shows after its hook let go: keep the
       // request's own details and answer it with the dialog's rows, so the
@@ -617,7 +642,7 @@ export class AgentHooks {
     if (!dialog?.title) { if (entry) this.terminalPrompts.delete(key); settleBlockedPane(target.server, target.pane); return; }
     this.terminalPrompts.set(key, { tool: "Question", message: dialog.title,
       ...approvalSummary({ tool: "Question", message: dialog.title }),
-      choice: dialog, dialog: true, at: now });
+      choice: dialog, dialog: true, ...(target.source === "claude" ? { dialogSeenAt: now } : {}), at: now });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
   }
   /** Resolve a phone option identifier. Real shortcuts retain their key path;
@@ -1005,19 +1030,24 @@ export class AgentHooks {
   async observeWaitingPanes(server: string, panes: Json[], resolve: (pane: Json) => Promise<Target | undefined>): Promise<void> {
     const waiting = new Set<string>();
     for (const pane of panes) {
-      if (!pane.agent || !["waiting", "blocked"].includes(String(pane.agent_status))) continue;
+      const isWaiting = ["waiting", "blocked"].includes(String(pane.agent_status));
+      if (!pane.agent || (!isWaiting && pane.agent !== "claude")) continue;
       const target = await resolve(pane).catch(() => undefined);
       if (!target) continue;
       const key = JSON.stringify(target);
+      // tmux can already report working after its own dialog read. Keep
+      // reconciling tracked Claude asks until our read confirms disappearance.
+      if (!isWaiting && !this.terminalPrompts.has(key) && !this.releasedHolds.has(key)
+        && ![...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
       waiting.add(key);
       // A served OpenCode pane's asks were pushed as its server listed them.
       if (target.source === "opencode" && servedPane(target.server, target.pane)) continue;
-      // A request its own hook already holds was pushed on arrival.
-      if ([...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
+      // Held asks were pushed on arrival; Claude still needs its dialog reconciled.
+      if (target.source !== "claude" && [...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
       // Read the dialog even with no push device: the overview marks the
       // tab as needing permission from it, and the phone answers it there.
       await this.syncTerminalDialog(target, true).catch(() => {});
-      if (!this.push.available) continue;
+      if (!this.push.available || [...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
       const entry = this.terminalPrompts.get(key);
       const title = entry?.dialog || entry?.released ? entry.choice?.title : undefined;
       if (!entry?.choice || !title) { this.dropDialogPush(key); continue; }
@@ -1203,17 +1233,18 @@ export class AgentHooks {
    * took a new prompt, or the agent asked something else. */
   private settleTerminalAnswered(target: Target, body: Json) {
     const event = String(body.event), key = JSON.stringify(target);
-    const asked = event === "PermissionRequest" ? JSON.stringify([body.tool, body.input]) : undefined;
-    const settled = (held: { tool: string; input: unknown }) => ["Stop", "UserPromptSubmit"].includes(event)
-      || (event === "PermissionRequest" && JSON.stringify([held.tool, held.input]) !== asked)
-      || (event === "PostToolUse" && held.tool === body.tool && JSON.stringify(held.input) === JSON.stringify(body.input));
+    const matches = (held: { tool: string; input: unknown; toolUseId?: string }) => held.toolUseId && typeof body.toolUseId === "string" && body.toolUseId
+      ? held.toolUseId === body.toolUseId : held.tool === body.tool && isDeepStrictEqual(held.input, body.input);
+    const settled = (held: { tool: string; input: unknown; toolUseId?: string }) => ["Stop", "UserPromptSubmit"].includes(event)
+      || (event === "PermissionRequest" && !matches(held))
+      || (event === "PostToolUse" && matches(held));
     for (const [action, held] of this.pending) {
       if (held.appServer || JSON.stringify(held.target) !== key || !settled(held)) continue;
       clearTimeout(held.timer); this.pending.delete(action); this.pushedHolds.delete(action); this.dropPushBindings(action);
       if (!held.response.destroyed) held.response.end("{}");
     }
     const hold = this.releasedHolds.get(key), remembered = this.terminalPrompts.get(key);
-    if (remembered && !remembered.questions?.length && settled({ tool: remembered.tool, input: remembered.input })) {
+    if (remembered && !remembered.questions?.length && settled({ tool: remembered.tool, input: remembered.input, toolUseId: remembered.toolUseId })) {
       this.terminalPrompts.delete(key);
       if (hold) { this.dropPushBindings(hold.action); this.releasedHolds.delete(key); }
     }
@@ -1299,9 +1330,6 @@ export class AgentHooks {
         let target = targetSchema.parse(body.target);
         const activity = eventStatus(body.event);
         if (activity === "working" || activity === "blocked") checkpointActivityArrived(target);
-        if (this.modules?.has("git") === false && ["PreToolUse", "PostToolUse"].includes(String(body.event))) {
-          res.statusCode = 404; res.end(JSON.stringify({ error: disabledHint("git") })); return;
-        }
         // A callback Codex's app-server daemon ran names the pane that started
         // the daemon, not the conversation's. Place it by the conversation the
         // Hook proves each pane shows, and never record a binding from it.
@@ -1364,6 +1392,7 @@ export class AgentHooks {
         }
         if (body.event === "Stop") this.deliveries.stopped(target);
         if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
+        if (body.event === "Stop") this.onTurnStopped?.();
         if (body.event === "SessionStart") {
           const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
           res.end(JSON.stringify(context ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } } : {})); return;
@@ -1429,7 +1458,8 @@ export class AgentHooks {
         // and then answers that, instead of going dead with the hold.
         let released = false;
         const timer = setTimeout(() => {
-          released = true; this.pending.delete(action); this.rememberTerminalPrompt(target, body);
+          const dialogSeenAt = this.pending.get(action)?.dialogSeenAt;
+          released = true; this.pending.delete(action); this.rememberTerminalPrompt(target, body, dialogSeenAt);
           // The id was already handed out (phone card, push, dispatcher): it keeps answering the dialog.
           const pushed = this.pushedHolds.get(action);
           this.releasedHolds.set(JSON.stringify(target), { action, expiresAt: pushed ?? Date.now() + DIALOG_PUSH_MS, pushed: pushed !== undefined });
@@ -1439,7 +1469,7 @@ export class AgentHooks {
         const expiresAt = new Date(Date.now() + APPROVAL_HOLD_MS).toISOString();
         const { choice, title } = permissionPrompt(String(body.tool || "action"), body.input);
         const summary = approvalSummary({ tool: String(body.tool || "action"), input: body.input, cwd, question: body.tool === "AskUserQuestion" });
-        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input, title,
+        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input, toolUseId: typeof body.toolUseId === "string" ? body.toolUseId : undefined, title,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...summary, ...(choice ? { choice } : {}), expiresAt, timer,
           ...(conductor ? { conductor } : {}) });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.pushedHolds.delete(action); if (!released) this.dropPushBindings(action); });

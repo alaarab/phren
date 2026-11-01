@@ -136,7 +136,17 @@ and `installed.json` rollback record.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for
-dispatch returns), bounded `activity.jsonl` and
+dispatch returns), `turn-queue.json` (the Hook-held after-turn queue, including
+unsent prompt text; finished items retained for 24 hours), bounded `activity.jsonl` and
+dispatch returns), a bounded `conversation-search.sqlite` index of settled
+conversation text for `/v1/conversations/search` (with SQLite `-wal`/`-shm`
+companions and transient `conversation-search-rows/` pieces for rows still being
+read), derived `codex-threads/` projections and their state files (with resumable
+`.building` files while upgrading old projections to retain turn identities), bounded
+`activity.jsonl` and `activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
+dispatch returns; a pane's `<pane>.seen.json` beside its record is the
+completion a person last marked seen, and `opencode-turns/<session>.json` is
+an OpenCode conversation's advancing Stop sequence), bounded `activity.jsonl` and
 `activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
 Uploads are limited to 8 MiB each and 256 MiB total; uploads older than 14 days
 are removed on the next upload. Activity stores status and project metadata,
@@ -144,7 +154,13 @@ not conversation text. See [Phren Hook](phren-hook.md).
 
 The optional `<bridge>/gitboy-webhooks.json` and its referenced secret files are
 private (0600), local configuration for loopback-only gitboy push sync. No file
-means no receiver. Delivery IDs and health outcomes are held in memory only.
+means no receiver. Push-sync delivery IDs and listener health outcomes are held
+in memory only. The same listener can accept signed GitHub workflow/check
+completions for event schedules. The scheduler writes private local
+`<bridge>/schedule-runs.jsonl` (bounded runs/decisions and capped, credential-redacted
+referenced payload fields) and `<bridge>/schedule-runs.jsonl.deliveries.json`
+(hashes of the newest 1000 event delivery IDs). Raw event payloads are not saved.
+See [event schedules](schedules.md#event-schedules-hook-capability-scheduleevents).
 
 The Hook keeps the shipped conductor instructions at
 `<bridge>/conductor/brief.md` (0600). Its agent-only socket returns a bounded

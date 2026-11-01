@@ -230,8 +230,9 @@ export class PromptDeliveries {
   private inFlight(record: Record): boolean {
     return PromptDeliveries.open(record) && (this.now() - record.at < IN_FLIGHT_MS || this.hookPanes.has(this.paneKey(record)));
   }
-  /** Whether any message typed into `target`'s pane is still waiting to be taken or refused. */
-  holding(target: Pick<Target, "server" | "pane" | "source">): boolean { return this.records.some(record => this.samePane(record, target) && this.inFlight(record)); }
+  /** Whether any message typed into `target`'s pane is still waiting to be taken or refused.
+   * A pre-typing guard can exclude only its own freshly registered reservation by id. */
+  holding(target: Pick<Target, "server" | "pane" | "source">, exceptId?: string): boolean { return this.records.some(record => (exceptId === undefined || record.id !== exceptId) && this.samePane(record, target) && this.inFlight(record)); }
   /** Whether phone message `id` may still be taken: held by the agent, and in flight as `holding` counts it. */
   held(id: string, target: Pick<Target, "server" | "pane" | "source">): boolean { const record = this.find(id, target); return !!record && this.inFlight(record); }
   /** Wait again for a message `expect` reported pending, after a second Enter. */

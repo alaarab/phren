@@ -75,7 +75,7 @@ export async function withinToolBudget<T>(event: string, work: (left: () => numb
 
 async function forwardHook(source: Provider, target: Target, event: string, value: Json, left: () => number): Promise<void> {
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
-  if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;
+  if (!modules.has("hook")) return;
   // Codex 0.157 runs hooks inside its shared app-server daemon, whose pane
   // variables belong to whichever pane first started it.
   // The Hook's own per-pane app-server (codex-servers.ts) runs its hooks

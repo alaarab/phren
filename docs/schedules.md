@@ -38,6 +38,7 @@ The `id` is eight lowercase hexadecimal characters and does not change. Names ar
 | `weekly` | `at`, `days` | `days: [mon, wed, fri]` |
 | `once` | `once` | `once: 2026-09-21T09:00:00` |
 | `cron` | `cron` | `cron: "0 7 * * 1-5"` |
+| `event` | `event` (document version 2) | `event: github.workflow_run.completed` |
 
 Times have no zone in the file. The Hook evaluates them in the assigned computer's local time zone. A nonexistent wall-clock time during a daylight-saving transition is skipped. A once schedule disables itself after its run is recorded, provided its timing and revision still match the occurrence that fired. An edit accepted during launch admission is left unchanged.
 
@@ -151,7 +152,7 @@ timestamp with a zone; the exact stored string must match). For example:
 
 `changes` accepts only `name`, `prompt`, `enabled`, `computer`, `harness`,
 `model`, `account`, `notify`, `projects`, `session`, `every`, `at`, `days`,
-`interval`, `once`, and `cron`. Omitted keys, including fields unknown to this
+`interval`, `once`, `cron`, `event`, `filters`, and `coalesceSeconds`. Omitted keys, including fields unknown to this
 Hook, are preserved. Set an optional field to `null` to remove it; required
 fields (including the selected timing form's fields) cannot be removed.
 `id`, `createdAt`, and `updatedAt` cannot be edited. Unknown body or change
@@ -162,3 +163,153 @@ A successful merge gets a new `updatedAt` in canonical UTC form
 (`YYYY-MM-DDTHH:mm:ss.sssZ`) and an atomic write under the same
 lock as CLI schedule edits. The existing YAML serializer preserves values
 and unknown keys, but may reformat comments, quoting, or whitespace.
+
+## Event schedules (Hook capability `scheduleEvents`)
+
+The schedules module advertises `capabilities.scheduleEvents: true` in Hook
+info. Require it before showing event schedule creation/editing or sending
+`POST /v1/schedules/events`. Event schedules have `nextRun: null`; do not
+register local time reminders for them. They retain the ordinary computer,
+harness, targets, session and notification settings.
+
+A file with an event schedule needs this event-capable Hook version on **every
+computer that reads the file**, including computers assigned only its timed
+schedules. Upgrade every such computer before adding an event schedule.
+Files containing event schedules require `version: 2`. This Hook reads versions
+1 and 2; writers upgrade to 2 on the first event schedule and preserve 2 on
+subsequent edits. Version 1 files without events retain their format. Older
+Hooks reject version 2 and skip the **whole file**, including timed siblings,
+in their scheduler; their CLI may report an unsupported-version error. Older
+phones must not edit version 2 files. Upgrade every reader/writer of a shared
+file before enabling events. Unknown future document versions are refused.
+
+```yaml
+version: 2
+schedules:
+  - id: 7f3a2c1d
+    name: Repair failed main CI
+    enabled: true
+    computer: Desk
+    harness: codex
+    every: event
+    event: github.workflow_run.completed
+    filters:
+      - path: repository.full_name
+        equals: alice/app
+      - path: workflow_run.head_branch
+        equals: main
+      - path: workflow_run.conclusion
+        equals: failure
+    coalesceSeconds: 120
+    prompt: "Repair CI for {{payload.repository.full_name}} on {{payload.workflow_run.head_branch}}."
+    createdAt: 2026-11-01T12:00:00Z
+    updatedAt: 2026-11-01T12:00:00Z
+```
+
+`every: event` requires `event`, a case-sensitive name matching
+`[A-Za-z][A-Za-z0-9_.:-]{0,127}`. Built-in GitHub names are
+`github.workflow_run.completed` and `github.check_run.completed`; generic names
+such as `deploy.failed` use the same syntax. `filters` defaults to `[]`, has at
+most 16 entries, and every entry must be `{ path, equals }` with no extra keys.
+All filters must match. Equality is exact and type-sensitive; `equals` is a
+string (at most 1024 characters), finite number, boolean, or null. Missing
+paths do not equal null. Paths are relative to `payload`, at most 200
+characters, with dotted identifier segments (`[A-Za-z_][A-Za-z0-9_]*`) and
+numeric array indices after the first segment. `__proto__`, `prototype` and
+`constructor` segments are forbidden. Only own properties are traversed.
+There are no expressions, operators, coercion, globbing or code evaluation.
+`coalesceSeconds` is an optional integer from 0 to 86400, default 0.
+
+Prompts substitute `{{payload.a.b}}` in one pass. Missing paths, null, objects,
+arrays and invalid paths become empty strings. Strings, booleans and numbers
+become plain text, credential detection runs before truncation, each value is
+capped at 1024 characters, disallowed control characters are removed, and the
+final prompt is capped at 8000 characters. Detected credentials become a
+redaction marker. Replacement text is never evaluated or recursively expanded.
+The worker still receives external text as part of its prompt; write prompts
+that treat event values as data.
+
+`POST /v1/schedules/events` uses the same authenticated Hook connection and
+module route gate as other schedule writes. The exact JSON body is:
+
+```json
+{"event":"deploy.failed","deliveryId":"deploy-123","payload":{"environment":"production"}}
+```
+
+The body has no extra keys. `payload` must be a JSON object. `deliveryId` is
+1–200 ASCII letters, digits, underscores, dots, colons or hyphens. The entire
+UTF-8 JSON request is capped at 262144 bytes (413); malformed JSON, missing
+fields, invalid types or names return 400 without consuming the delivery ID.
+A successful request returns HTTP 200 with
+`{ "ok": true, "duplicate": false, "runs": [...] }`. `duplicate` reports
+Hook-wide delivery identity; `runs` contains child runs for accepted schedules
+and one decision row for each non-accepted schedule. An unmatched event returns
+an empty array. `ok` acknowledges ingestion, not worker success: inspect each
+run's `status`. Acknowledgement waits for durable admission and run reservations,
+not external worker startup. Accepted response rows initially have
+`status: launched`; poll history for startup success or failure. Each schedule's
+preparation failure is recorded separately as `status: failed`,
+`outcome: accepted`, with a capped, credential-redacted `reason`, and processing continues
+with the remaining schedules. Its row identifies the owning project because no
+target worker was launched. Events run only schedules owned by the receiving computer;
+they are not forwarded to other computers.
+
+On the existing optional `/gitboy/push` HTTP listener, GitHub deliveries use
+`X-GitHub-Event: workflow_run` or `check_run`, `X-GitHub-Delivery`, and
+`X-Hub-Signature-256` (HMAC-SHA256 over the raw body). Existing private
+`gitboy-webhooks.json` store secrets authenticate the delivery, and
+`payload.repository.full_name` must match a repository associated with a
+verified secret. Only `action: completed` reaches schedules; other actions
+return 200 without ingestion. Configure repository and branch filters on the
+schedule; the configured store branch is only a push/pull filter. This path
+retains its loopback-only Host/browser guards and 1 MiB transport cap; schedule
+events additionally have the 256 KiB cap above. Successful completions return
+202 after ingestion, including replays (inspect schedule history for decisions).
+Existing gitboy pushes still use the original pull/nudge path.
+
+Admission checks, in order: a previously seen delivery ID is `duplicate`;
+a disabled schedule or filter mismatch is `ignored`; a matching event strictly
+less than `coalesceSeconds` after its last accepted event is `coalesced`;
+a schedule with an open run is `ignored`; otherwise it is `accepted`.
+Receipt time is captured before queuing admission and is used for coalescing
+and event rows' `startedAt`. Worker startup never holds the admission queue.
+Coalescing drops the new event, does not queue it, and does not extend the
+window. At the exact window boundary it can be accepted. Failed launches still
+count as accepted. Run now remains available, bypasses event filters and
+coalescing, and uses the stored prompt literally without event substitution.
+Timed ticks never launch event schedules.
+
+Delivery IDs are global to this Hook, across event names and schedules; use
+unique IDs across producers. The private file
+`schedule-runs.jsonl.deliveries.json` stores SHA-256 hashes of the last 1000
+new IDs, oldest first, and survives restart. Replays do not extend retention.
+Evicted IDs may be accepted again. The ledger is persisted before schedule
+admission and all child rows are recorded before external launch, providing
+at-most-once attempts: a crash between recording delivery identity and launch
+can drop a firing; it is not replayed automatically. A corrupt/unwritable ledger
+fails ingestion rather than disabling dedupe.
+
+Existing `/v1/schedules/history` rows, `/v1/schedules` `lastRun` and `lastRuns`
+add optional `trigger: { event, deliveryId }`, `outcome` (`accepted`, `ignored`,
+`duplicate`, `coalesced`) and `fields` (a map from payload paths to strings).
+Accepted child rows keep normal launch status and destinations; non-accepted
+rows use `status: skipped`, equal start/finish timestamps and a placeholder
+`launch: { mode: headless }` which does **not** identify a launched worker.
+Timed/manual rows omit these event fields. `fields` contains only referenced
+filter/template scalar fields (at most 64 distinct paths, 1024 characters per
+value, credential-redacted); no raw payload or rendered prompt is written to
+schedule history or the ledger. Missing/non-scalar referenced values are empty
+strings. Launchers and the worker's own transcripts may retain the rendered
+prompt as for any scheduled worker. Non-accepted rows are limited to the newest
+50 per owning project/schedule, within the existing global 2000-row retention
+plus open batches and the latest accepted event batch per schedule within
+24 hours of the newest recorded run (retained to preserve coalescing). The newest decision can be `lastRun` while an earlier
+accepted run remains active; use `running` for overlap state.
+
+`/v1/schedules/update` additionally accepts `event`, `filters` and
+`coalesceSeconds` in `changes`, with `null` removing an optional field. The
+merged form must validate; switching to `every: event` requires `event` and
+upgrades the document to version 2. CLI listing prints the event, equality
+filters and coalescing window. CLI creation accepts `--every event --event
+<name> [--filters '<JSON filter array>'] [--coalesce-seconds <integer>]` along
+with the ordinary required name, harness, computer and prompt options.

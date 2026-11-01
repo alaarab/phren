@@ -410,12 +410,78 @@ anything. A failed Herdr create removes the new worktree and branch.
 ## Scheduled prompts
 
 A project's `schedules.yaml` names an assigned computer, a harness, and one of
-five timing forms (interval, daily, weekly, once, cron) that the assigned
-computer's Phren Hook evaluates in its local time. Manage them with
+six timing forms (interval, daily, weekly, once, cron, event). Time forms are evaluated by the assigned
+computer's Phren Hook in its local time. Manage them with
 `phren schedule list|add|remove|enable|disable|run|history`; `run` and `history`
 call the local Hook, the other commands edit the store file directly. See
 [Scheduled prompts](schedules.md) for the store format, timing forms and run
 history.
+
+### Event schedules
+
+When the schedules module is enabled, `capabilities.scheduleEvents: true`
+advertises event definitions, ingestion and history decisions. Require this
+capability before offering event schedules; `nextRun` is always null for them.
+
+An event definition uses `version: 2` in `schedules.yaml`, `every: event`, and
+`event: <name>`, with optional `filters: [{ path: "workflow_run.conclusion",
+equals: "failure" }]` and `coalesceSeconds: 120`. Filters are ANDed exact,
+type-sensitive scalar equalities on dotted payload paths (max 16); the window
+is an integer from 0 to 86400 seconds (default 0). Prompts substitute
+`{{payload.a.b}}` once, missing/non-scalar paths become empty, each value is
+credential-redacted and capped at 1024 characters, and the prompt is capped at
+8000. Version 1 timed files remain supported; older Hooks skip the whole
+version 2 file and older phones must not edit it.
+
+`POST /v1/schedules/events` uses the same authenticated connection and module
+gate as other schedule writes. Body (no extra keys):
+
+```json
+{"event":"deploy.failed","deliveryId":"deploy-123","payload":{"environment":"production"}}
+```
+
+`event` matches `[A-Za-z][A-Za-z0-9_.:-]{0,127}`, `deliveryId` matches
+`[A-Za-z0-9_.:-]{1,200}`, and `payload` is a JSON object. The UTF-8 request cap
+is 262144 bytes (413); malformed bodies return 400 without consuming identity.
+HTTP 200 returns `{ ok: true, duplicate: boolean, runs: [...] }`; `ok` means
+ingested, not worker success. No matching local schedule means `runs: []`.
+Acknowledgement waits for durable reservations, not worker startup; accepted
+rows initially have `status: launched`. Poll history for startup results.
+Preparation failures are recorded per schedule as accepted failed attempts
+with a capped, credential-redacted `reason`, without stopping healthy schedules.
+The receiving computer alone runs its assigned schedules; there is no forwarding.
+
+The existing signed `/gitboy/push` listener also admits GitHub `workflow_run`
+and `check_run` deliveries with `action: completed`, emitting respectively
+`github.workflow_run.completed` and `github.check_run.completed`. It validates
+the raw-body HMAC and repository against configured private store secrets.
+It uses `X-GitHub-Event`, `X-GitHub-Delivery`, and `X-Hub-Signature-256`.
+
+History rows and schedule `lastRun`/`lastRuns` add optional
+`trigger: { event, deliveryId }`, `outcome: accepted|ignored|duplicate|coalesced`,
+and `fields: { "workflow_run.conclusion": "failure" }` (keys are paths relative
+to payload, without a `payload.` prefix). Accepted child rows use normal run
+statuses; other decisions use `status: skipped` and a placeholder headless
+launch, with at most 50 non-accepted rows per schedule. `fields` contains only
+referenced template/filter fields, at most 64, each capped at 1024 characters
+and credential-redacted. Raw payloads and rendered prompts are not written to
+schedule history. Timed/manual runs omit these fields.
+
+Admission prioritizes duplicate delivery ID, disabled/filter mismatch (ignored),
+coalescing, then overlap (ignored), else accepted. Coalescing drops events
+strictly inside the window from the last accepted event without extending it.
+The receipt timestamp is captured before admission queues and supplies both
+coalescing comparisons and event rows' `startedAt`. External launches do not
+hold the admission queue.
+Delivery identity is Hook-wide and persisted as hashes of the newest 1000 IDs;
+replays do not renew retention. Admission records identity before processing,
+and records runs before launch: a crash can lose an attempt, never replay it
+automatically. Run now uses the literal stored prompt and bypasses event rules.
+
+`POST /v1/schedules/update` accepts `event`, `filters`, `coalesceSeconds` in
+`changes`; changing to an event form requires `event` and upgrades the file.
+See [the event schedule contract](schedules.md#event-schedules-hook-capability-scheduleevents)
+for full validation, compatibility, webhook setup, retention and crash semantics.
 
 ---
 
@@ -535,6 +601,98 @@ the owner typing in the pane drops it with the next read. Claude's other dim
 input text (`Try "…"`, the queued-message hints, `Message @…`) and a suggestion
 a narrow pane cut short with `…` are never sent. Codex, OpenCode and Copilot
 have no such prediction and never send it.
+
+#### After this turn (Hook-held queue)
+
+Offer this option only when the Hook info capabilities (`capabilities` in
+health, `phren.capabilities` in workspace and overview responses) contain
+`afterTurnQueue: true`. Unlike
+Claude's own queue below, these words stay unsent on the computer until a safe
+turn boundary, even when the phone is asleep. These routes use the same
+transport authentication and Hook module scope as `/v1/prompt`; they are not
+available to gitboy-scoped keys. All four routes use **POST** with JSON bodies:
+
+| Route | Body | Success (HTTP 200) |
+| --- | --- | --- |
+| `/v1/prompt/after-turn` | `{target, id, text}` | `{item}` (new item, or the existing item for that id) |
+| `/v1/prompt/after-turn/list` | `{target}` | `{items: [...]}` in FIFO creation order, including retained finished items |
+| `/v1/prompt/after-turn/edit` | `{target, id, text}` | `{item}` with the replacement text; position is unchanged |
+| `/v1/prompt/after-turn/cancel` | `{target, id}` | `{item}` in state `cancelled` |
+
+`target` is `{server, workspace, tab, pane, source, session}`, exactly as for
+`/v1/prompt`: use the session row's target. `source` is `claude`, `codex`,
+`copilot`, `opencode` or `phren`; `session` is the conversation UUID (or
+OpenCode's `ses_...` identifier). A starting/transcript-less target is not
+accepted. `id` is chosen by the client, 8–64 ASCII letters, digits, `_` or `-`
+(a UUID works). Use a fresh id per composed message, and reuse it on network
+retries. IDs share the delivery ID namespace: do not reuse one from an ordinary
+send. Within retention, enqueueing the same id for the same pane, provider and
+conversation returns its existing item, even when the text differs or the item
+has finished. Use edit to change its words. Reusing an id for a different target
+returns 409. `text` is 1–32768 characters, must contain non-whitespace text,
+and permits tabs/newlines but no other ASCII control characters. Unknown body
+fields are rejected. No attachments or reorder operation are provided.
+
+Every `item` contains `id`, `target`, `terminal` (an opaque terminal instance
+identifier), `text`, `state`, `createdAt` and `updatedAt` (UTC ISO 8601 strings).
+A failed item also contains a machine-readable `reason`; optional `detail`
+contains the existing delivery path's human-readable explanation. Treat
+`reason` as the stable value:
+
+| State | Meaning |
+| --- | --- |
+| `queued` | Unsent; editable and cancellable. |
+| `sending` | Sending was durably recorded; the delivery path has not yet confirmed or failed it. |
+| `delivered` | The existing delivery path confirmed the message. |
+| `failed` | `reason` is `pane-closed`, `agent-restarted`, `conversation-changed` (binding invalidated before send), or `delivery-failed` (submission refused or the existing delivery path failed it); `detail` may explain the failure. |
+| `cancelled` | Cancelled while unsent; never sent. |
+| `unknown` | A send may have happened without a conclusive receipt, including a Hook restart during `sending`. Never automatically resent. |
+
+Only `queued` can be edited or cancelled; every other state returns 409,
+including a repeat cancellation. A send moves `queued` → `sending` →
+`delivered`, `failed` or `unknown`. A subsequently conclusive delivery receipt
+can resolve `unknown` to `delivered` or `failed`; a late confirmed submission
+also corrects a `delivery-failed` item to `delivered`. Definite permanent send
+refusals become `failed` with `delivery-failed`. A retryable startup refusal
+returns to `queued` without consuming its turn boundary. An unresolved `sending` or
+`unknown` item holds later items for that pane; the client must not assume it
+is safe to retry an unknown send under a new id.
+
+The Hook requires an ended turn record (Stop after the latest prompt), no
+awaited background shells or running children under the session-activity rules,
+no held approval/question/terminal dialog or outstanding prompt delivery, and
+the same conversation in the same terminal. A pane merely looking idle is
+insufficient. OpenCode uses its plugin’s busy/idle timestamps as confirmed turn
+records. A queue on a harness that reports no turn records waits rather than
+guessing. Enqueueing while
+already at a confirmed idle boundary can send immediately on the next tick.
+One item consumes each boundary; the next waits for the next turn to end.
+Processing wakes on Stop arrivals and on the existing five-second Hook tick.
+Temporary unreadable/offline state preserves queued items.
+
+The item id becomes the prompt path's `deliveryId`, so existing settlement and
+failure detection apply. `/v1/prompt/status` and delivery stream frames describe
+only that downstream send; use `/after-turn/list` as the queue's authoritative
+state. Listing and modifying use the **original** target and work after the
+pane closes or its conversation changes, so the client can still inspect
+failure or cancel unsent words. Enqueue returns 404 for an absent pane, 409 for
+a changed conversation, a full queue (20 unsent items per pane or 512 retained
+items per Hook), or a reused delivery id. Edit/cancel return 404 for an unknown
+id or an id belonging to another target. Invalid/missing fields return 400.
+
+The queue is atomically persisted in the private bridge directory as
+`turn-queue.json`, including unsent text. It survives Hook restarts. Finished
+items are kept for 24 hours and pruned on subsequent enqueues; unresolved
+queued/sending/unknown items are retained subject to the global admission cap.
+Idempotency is guaranteed while an item is retained.
+
+Session/tab rows (`groups[].children[]`) in `GET /v1/workspaces` and
+`WS /v1/overview` gain `queuedPrompts`, a nonnegative integer counting only
+`queued` items across that tab's agent panes, including words awaiting
+invalidation. It is zero when empty; older Hooks omit it. Counts update on the
+normal overview refresh (within ten seconds when its snapshot is unchanged).
+Poll `/after-turn/list` to refresh individual item states while the chat is
+open; the Hook does not require that polling to send.
 
 `POST /v1/prompt/queue { target, action }` (capability `queuedMessageActions`,
 the harnesses it covers: `["claude"]`) acts on the messages a working Claude
@@ -1621,6 +1779,53 @@ resolved only against that listing. The bounded repository cache is keyed by HEA
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.
 
+`POST /v1/git/worktrees/remove/preview` takes `worktree` (a `/v1/git/worktrees`
+id) and optional `server` and `pane`, or the full session target. It resolves
+the id exactly as the listing does, against the requesting pane's repository,
+and only a linked worktree qualifies: the main checkout and the pane's own
+checkout answer 409 `worktree-not-removable`. The reply is `{token, path,
+branch, dirty, untracked, submodules, sessions, removable, reason?}`. `dirty`
+lists up to 50 changed paths (rename pairs count once), `untracked` counts the
+untracked paths Git reports (a collapsed directory once), and `submodules` is `[{path, unpushedCommits}]` for
+nested submodules whose HEAD commit is on no remote branch. `sessions` is
+`[{pane, title}]` for live panes on every running terminal server whose folder
+is inside the worktree; any session makes `removable` false with `reason:
+"sessions-open"`. A locked worktree is `removable: false` with `reason:
+"locked"`, and a clean worktree with initialized submodules is `removable:
+false` with `reason: "initialized-submodules"` because Git refuses that removal
+without force, which a clean worktree never gets. `token` is an opaque digest
+of that exact preview state.
+
+`POST /v1/git/worktrees/remove` takes the same `worktree` plus `token`. Hook
+recomputes the preview: a different token answers 409 `worktree-changed` with
+`preview: {…new preview}` and removes nothing. A matching token runs `git
+worktree remove`, with `--force` only when the preview showed dirty or
+untracked files, and answers `{removed: true, branch}`. It never deletes the
+branch. A live session in the worktree, a locked worktree, or a clean worktree
+with initialized submodules blocks removal with 409 `worktree-not-removable`
+and the preview's `reason`. Session discovery reads every running terminal
+server, including the requesting one even when discovery omitted it; if
+discovery or any snapshot fails, the request fails rather than assuming the
+worktree is unused. Hook advertises
+`worktreeRemove`; both routes are part of the `git` module.
+### Live repository changes
+
+`WS /v1/git/watch` takes the same query as `GET /v1/git/status` (the full
+session target plus optional `child` or `worktree`) and uses the same repository
+resolution. It sends JSON text frames: `{type: "changed", at}` when the working
+tree or index may have changed (at most one per second, trailing), `{type:
+"ping"}` every 20 seconds, and `{type: "error", code, message}` followed by a
+close when the checkout cannot be watched. `code` is `git-not-repository` for a
+folder that is not a repository, `too-many-watchers` when 16 checkouts are
+already being watched, and `git-watch-failed` for a watcher failure.
+
+One watcher serves every subscriber of a resolved checkout root and stops 30
+seconds after its last subscriber leaves. macOS and Windows use a recursive
+`fs.watch` on the root; `.git/index` and `.git/HEAD` changes trigger it. Linux
+polls `git status --porcelain=v2 -z` every 3 seconds with optional locks
+disabled and emits when its hash changes, so the Hook never takes the index
+lock. Advertised as `capabilities.gitWatch`.
+
 ### Repository status, diff and staging
 
 `GET /v1/git/status` takes the full session target in the query; the existing
@@ -1932,6 +2137,24 @@ New clients opt in with `mux=tmux:<server>`. Older Hooks ignore `typed=1`, so
 clients must accept legacy discovery aliases during upgrades. A typed tmux
 selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 
+`GET /v1/terminals/resolve?ref=<token>&from=<pane>` opens a terminal reference
+in chat text. A token is a Herdr pane id (`w2E:p1`) or tab id (`w2E:t1`),
+optionally prefixed by a computer name (`MacBook/w2E:p1`). A bare token
+resolves on this Hook; a prefixed one resolves on this computer (its own name
+or alias) or on a verified `hooks.yaml` peer, whose Hook is asked over its
+pinned SSH pipe. `from` is the pane the text came from and only chooses which
+of this computer's Herdr servers to read first. The answer is
+`{computer, server, pane, tab, workspace, title, agent, status}` for a pane or
+tab that exists now; a tab answers with the pane it shows. A malformed token is
+400, and a missing pane or tab, an unknown computer, or a peer that is not
+linked is 404 `code: "terminal-not-found"`. A server whose snapshot cannot be
+read reports its own error instead of claiming the terminal is absent. The
+answer uses the
+shared pane snapshots the Hook keeps for its streams, so a resolve adds no
+per-pane Herdr call; a miss refreshes the server list once for a server that
+started after discovery was cached. Advertised as
+`capabilities.terminalResolve`; a computer without it predates the route.
+
 Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 `agentStatus` and `title`. Newer Hooks also send `statusSince`, the ISO-8601
 time that tab's `agentStatus` last changed; older Hooks omit it. Only a status
@@ -1940,7 +2163,24 @@ for the first time gets the current time. The Hook persists it across restarts.
 A tab whose turn ended carries `lastReply`: the
 agent's last message from its Stop hook (Claude and Codex), as one plain line
 of at most 240 characters with markdown dropped. It is absent while a turn or
-its background work runs, and when the Stop carried no message. A session whose main turn ended while background
+its background work runs, and when the Stop carried no message. A finished
+turn also carries `completion: {id, at, entry?}`: an opaque id of the latest finished
+turn of the conversation now in the pane (the conversation id and its Stop's
+sequence), and when it stopped. It is absent while a prompt is unanswered, when
+a Stop has no prompt before it, or when the harness has no turn record.
+`completion.entry`, when resolved, is the decimal string of the last transcript
+entry's zero-based `line` key, exactly as WS transcript frames and history pages
+identify and order rows. For Claude it names the turn's final assistant message;
+for Codex and OpenCode it names the last public row written before the Stop.
+It is absent when the Hook cannot resolve that row from the indexed recent tail.
+Claude requires a transcript `stop_reason: "end_turn"` marker and, when both
+the Stop and the row contain reply text, a match to the Stop’s complete final
+reply. Matching progress text alone never identifies the completion.
+Codex uses the stream’s projection, excluding
+covered code-mode wrapper results.
+`seenCompletion` is the completion id a person last marked seen on the phone or
+the desktop, absent until one is. A row is unread while `completion.id` differs
+from `seenCompletion`. A session whose main turn ended while background
 work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
 where Herdr or tmux say idle or done. `n` counts the work the session is
 waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
@@ -1961,6 +2201,24 @@ title, except a title made from the brief launch's first prompt ("Read and
 follow the brief...", a `/briefs/` path, "Brief" and a bare id), which is
 dropped so the client falls back to `label`. `GET /v1/workspaces/panes` gives
 each pane's `title` by the same rule.
+
+#### Unread replies
+
+Auto-mark a completion seen only when the open chat is bound to that pane's
+conversation, the app is active and following the end, and it has displayed
+`completion.entry` or a row ordered after it. Compare numeric line order, not
+lexicographic string order. If `entry` is absent (an older Hook or an unresolved
+row), never auto-mark; Mark seen/unread remains manual in the session menu.
+
+`POST /v1/sessions/seen` records which finished turn a person has seen. Its body
+is `{ server, pane, completion }`: the computer's terminal source, the pane id
+from the session row, and the row's `completion.id`. Without `unread` it stores
+that completion as the pane's `seenCompletion`, last writer wins. With
+`unread: true` it clears `seenCompletion` only when the stored mark equals the
+completion supplied, so a stale clear cannot remove a newer mark. The reply is
+`{ ok: true }`; a malformed body is 400 and a pane this computer does not list
+is 404. The mark is written atomically in the Hook's bridge folder and survives
+a restart. Hook advertises `capabilities.sessionSeen`.
 
 Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
 after route target validation. This code does not mean every 404 is a missing
@@ -2004,6 +2262,70 @@ cursor. A completed entry clears the preview without the throttle delay. The
 phone replaces it in place and keeps the reveal progress, avoiding duplicate
 text. Reconnect history retains existing rows unless Hook explicitly resets
 the conversation.
+
+### Conversation search
+
+`GET /v1/conversations/search?q=<text>&limit=<1..50>&cursor=<opaque>` searches
+the settled user and assistant message text of the conversations this Hook can
+read transcripts for: Claude Code, Codex, Copilot and OpenCode, through the same
+readers the chat stream uses. Only messages whose harness wrote its turn end
+are published; a partial reply and a prompt still queued for delivery stay out
+of search until that turn settles. It answers `{results, cursor, partial?}` with the
+newest conversations first. Each result is
+`{conversation, source, title, cwd, pane, entry, at, role, snippet}`:
+
+- `q` is 2 to 200 characters after trimming. Every query word must appear in
+  the message (AND), case-insensitively; words are never silently dropped.
+  Queries outside the character limits return 400.
+- `limit` defaults to 20 and is 1 to 50.
+- `cursor` is opaque; pass the previous answer's cursor for the next page. The
+  last page answers `cursor: null`. A bounded scan may return fewer results
+  than `limit`, including an empty page with a continuation cursor; keep paging
+  until the cursor is null. Eviction or transcript replacement invalidates an
+  older snapshot cursor with 400; start a fresh search.
+- `conversation` is the harness session id, `source` is `claude`, `codex`,
+  `copilot` or `opencode`, and `title` is the conversation's first user message.
+  Search selects the same transcript as identity-based chat reads: a unique
+  Codex rollout takes precedence over its materialized copy; ambiguous Claude
+  account copies are omitted until a single transcript can be resolved.
+- `entry` is the row id the `/v1/transcripts` stream gives that message (`line`
+  as a string), so the phone can open the conversation at it.
+- `at` is the message's ISO-8601 timestamp and `role` is `user` or
+  `assistant`.
+- `snippet` is at most 200 characters around the first match. After selecting
+  the window, the Hook checks the complete original message for credentials
+  and withholds the snippet if any are detected, even outside that window.
+- `pane` is the pane that currently runs that conversation, checked against the terminal provider's live panes and terminal instance; a closed or reused pane, or a different conversation there, is null.
+- `partial: true` means indexing, eviction recovery, or the bounded search
+  scan has more work. Start a fresh search to advance indexing; follow the
+  cursor to continue the current snapshot. All transcript sources rotate fairly
+  by last check, with a separate bounded queue for SQLite materialization.
+  The two queues alternate first position to prevent either from starving,
+  with stat slots reserved for new materialized tails when that queue runs second.
+  Legacy SQLite rows whose turn metadata is unavailable remain withheld and
+  explicitly keep coverage partial; they do not block other completed rows.
+
+The index lives at `<bridge>/conversation-search.sqlite`. It is advanced from
+each transcript's size and mtime, discovers Codex threads that exist only in
+its SQLite store by materializing them, and holds a stable snapshot watermark
+in each cursor so growth and partial indexing cannot duplicate or skip pages.
+An incompatible index layout is rebuilt from the original transcripts.
+Directory enumeration, SQLite thread discovery, message publication (including
+individual tokens), eviction, and result traversal share one 1.5-second work
+deadline. Directory handles and SQLite identity cursors resume interrupted
+discovery; SQLite discovery restarts periodically to find new identities.
+Conversation activity is indexed independently of the matching words, and the
+cursor freezes activity at its publication watermark. Completed SQLite turns
+remain searchable while a newer turn runs. Forward materialization retains its
+position while a separate cursored update pass and deferred-reply queue reconcile
+changes. Queued text keeps its original entry and becomes searchable only after
+consumption and completion of its delivery turn. Older materialized caches are
+rebuilt beside their live file and replaced atomically to add turn identities
+without exposing a partially rebuilt transcript. If storage pruning evicts a file's
+index rows, it resets that file's scan offsets and reports incomplete coverage
+until reindexing catches up. Long individual filesystem or SQLite operations
+can still take longer than their surrounding budget check.
+Capability `conversationSearch`.
 
 ### Computer memory
 
@@ -2108,3 +2430,7 @@ verified finished pane after reading its done return; false keeps it open.
 Optional `integrator:{computer?,target}` overrides the configured default.
 Done returns can carry `prs` and `integratorDelivery`; receipts also retain
 `closedAt` and pending closes. CLI dispatch `--keep-open` opts out of closure.
+
+### Finished conversation search results
+
+`GET /v1/transcripts/history?historical=1&source=<provider>&session=<conversation>&beforeLine=<positive integer>` reads a bounded older page through the existing transcript reader. This owner-only variant has no live pane; do not send server, workspace, tab, pane or child. The reply includes `type: "older"`, `source`, `session`, `entries`, `startLine`, `totalLines` and `hasMore`. Files resolve from the provider's known transcript roots, never a caller-supplied path. Search `entry` is retained as returned; numeric entries identify the transcript row's `line`.
