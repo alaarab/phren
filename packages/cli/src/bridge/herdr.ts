@@ -11,7 +11,7 @@ import { BridgeError, id, object, objects, requestID, serverName, provider, sess
 import { logger } from "../logger.js";
 import { boundSession, recordedSession } from "./agent-hook-stores.js";
 import { paneRecord, recordTitle } from "./session-activity.js";
-import { tabActivityKey } from "./tab-activity.js";
+import { tabActivityKey, type TabActivityStamp } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -230,7 +230,7 @@ export function isConductorName(name: string | undefined): boolean {
 
 /** `conductorPane` is the pane the Hook records as the conductor (null for
  * none); left out, the agent's name decides, as before the record. */
-export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, string>,
+export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, TabActivityStamp>,
   conductorPane?: string | null): Json {
   const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
     && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
@@ -245,6 +245,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
     children: objects(s.tabs).filter(t => t.workspace_id === w.workspace_id).map(t => {
       const panes = objects(s.panes).filter(p => p.tab_id === t.tab_id && p.workspace_id === t.workspace_id);
       const agent = panes.find(p => p.agent);
+      const activity = lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id));
       // Herdr's per-pane state_change_seq climbs with every agent status
       // change; the phone orders "just finished" ahead of "finished an hour ago" by it.
       const changed = Math.max(0, ...panes.map(p => Number.isSafeInteger(p.state_change_seq) ? Number(p.state_change_seq) : 0));
@@ -252,7 +253,8 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
         role: (conductorPane === undefined ? isConductorName(paneAgentName(s, agent)) : !!agent && agent.pane_id === conductorPane) ? "conductor" : undefined,
         changedSeq: changed || undefined,
-        lastChangedAt: lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id)),
+        lastChangedAt: activity?.lastChangedAt,
+        statusSince: activity?.statusSince,
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
         contextUsedPercent: agent && panes.filter(p => p.agent).length === 1 ? contextUsedPercent?.get(agent) : undefined,
         agentPaneCount: panes.filter(p => p.agent).length, paneCount: panes.length };
