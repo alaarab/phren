@@ -183,6 +183,27 @@ describe("Hook schedule updates", () => {
     ]);
   });
 
+  it("resolves the project name case-insensitively", async () => {
+    const result = await post({ ...input({ name: "Case edit" }), project: "DEMO" });
+    expect(result).toMatchObject({ status: 200, body: { schedule: { id: original.id, name: "Case edit" } } });
+    expect((await readScheduleDocument(project)).schedules[0].name).toBe("Case edit");
+  });
+
+  it("bumps the revision for an edit that changes no fields", async () => {
+    const result = await post(input({}));
+    expect(result.status).toBe(200);
+    expect(result.body.schedule).toMatchObject({ ...original, updatedAt: expect.any(String) });
+    expect(Date.parse(result.body.schedule.updatedAt)).toBeGreaterThan(Date.parse(original.updatedAt));
+    expect((await readScheduleDocument(project)).schedules[0]).toEqual(result.body.schedule);
+  });
+
+  it("advances a far-future revision by one millisecond instead of moving it backwards", async () => {
+    const ahead = { ...original, updatedAt: "2099-01-01T00:00:00.000Z" };
+    await writeScheduleDocument(project, [ahead]);
+    const result = await post({ ...input({ name: "Ahead" }), expectedUpdatedAt: ahead.updatedAt });
+    expect(result).toMatchObject({ status: 200, body: { schedule: { name: "Ahead", updatedAt: "2099-01-01T00:00:00.001Z" } } });
+  });
+
   it("checks the revision after a competing CLI edit releases the lock", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     let release!: () => void, entered!: () => void;
