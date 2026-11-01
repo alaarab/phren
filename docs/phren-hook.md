@@ -414,6 +414,9 @@ queue for a shared machine is still counted, as Claude counts it.
   script stays with its error.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
+- Conversation search across the settled user and assistant text of Claude,
+  Codex, Copilot and OpenCode transcripts (`GET /v1/conversations/search`),
+  with a bounded local index, newest conversations first and cursor paging.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
 - Without Herdr, tmux: Claude Code, Codex, OpenCode, Copilot and phren-agent
   sessions in your own tmux servers, and sessions the phone starts in a hidden

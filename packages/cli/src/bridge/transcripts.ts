@@ -223,6 +223,18 @@ export function targetTranscriptPath(target: { server: string; pane: string; sou
   return transcriptPath(target.source, target.session, account);
 }
 
+/** Shared ambiguity rule for chat reads and the search index. A session ID
+ * alone cannot select between Claude account copies. Codex's caller falls
+ * back to its materialized store when no unique rollout can be chosen. */
+export function selectTranscriptMatch<T extends { id?: string | undefined }>(source: Provider, found: T[], account?: string): T | undefined {
+  let chosen = found;
+  if (source === "claude" && found.length > 1 && account) {
+    const preferred = found.filter(item => item.id === account);
+    if (preferred.length) chosen = preferred;
+  }
+  return chosen.length === 1 ? chosen[0] : undefined;
+}
+
 /** `account` (a Claude home id) settles a session id found in more than one home. */
 export async function transcriptPath(source: Provider, session: string, account?: string): Promise<string> {
   if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
@@ -241,20 +253,16 @@ export async function transcriptPath(source: Provider, session: string, account?
     const matches = await findPatternMatches(root, pattern).catch(() => [] as string[]);
     for (const match of matches) found.push({ id: entry.id, root, match });
   }
-  let chosen = found;
-  if (source === "claude" && found.length > 1 && account) {
-    const preferred = found.filter(item => item.id === account);
-    if (preferred.length) chosen = preferred;
-  }
-  if (chosen.length !== 1) {
+  const chosen = selectTranscriptMatch(source, found, account);
+  if (!chosen) {
     // Codex 0.155 keeps new threads only in its sqlite store; the Hook
     // materializes those into a rollout-shaped file of its own.
     const materialized = source === "codex" ? await materializeCodexThread(session) : undefined;
     if (materialized) return materialized;
     throw new BridgeError(404, "The transcript is not available for this conversation.", { code: "transcript-unavailable" });
   }
-  const file = await realpath(chosen[0].match);
-  if (!file.startsWith(chosen[0].root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");
+  const file = await realpath(chosen.match);
+  if (!file.startsWith(chosen.root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");
   return file;
 }
 
@@ -270,6 +278,72 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
   if (source === "codex") return visibleCodexEvent(raw);
   if (source === "claude") return visibleClaudeEvent(raw, includeSidechain, queue);
   return visibleCopilotEvent(raw);
+}
+
+/** Apply the code-mode wrapper projection used by both stream pages and
+ * completion lookup. Covered script status rows never become public entries. */
+async function projectTranscriptEvent(raw: Json | undefined, source: Provider, line: number,
+  rows: (before: number, after: number) => AsyncIterable<{ line: number; bytes?: Buffer }>): Promise<Json | undefined> {
+  const call = raw && source === "codex" ? codeModeOutputCall(raw) : undefined;
+  return raw && call ? projectCodeModeOutput(raw, await findCodeModeCall(rows, line, call)) : raw;
+}
+
+function projectTranscriptRows(raw: Json, source: Provider): { rows: Json[]; base?: string } {
+  return source === "codex" ? projectCodexRow(raw) : { rows: [raw] };
+}
+
+const completionEntries = new Map<string, { signature: string; entry?: string }>();
+
+/** A finished turn's last public row, using the same absolute line key as
+ * stream frames and history pages. Reuse their incremental byte index and
+ * inspect at most 256 recent rows / 1 MiB, never scan the full history for a
+ * completion. Missing timestamps or an unresolved tail leave it manual. */
+export async function completionEntry(file: string, source: Provider, promptAt: string, stopAt: string, finalReply?: { reply?: string; truncated?: boolean }): Promise<string | undefined> {
+  const since = Date.parse(promptAt), until = Date.parse(stopAt);
+  if (!Number.isFinite(since) || !Number.isFinite(until) || until < since || (source === "claude" && finalReply?.truncated)) return undefined;
+  return withTranscriptIndex(file, async (handle, index) => {
+    const key = `${file}\0${source}`, signature = JSON.stringify([index.revision, index.lines, promptAt, stopAt, finalReply?.reply, finalReply?.truncated]);
+    const cached = completionEntries.get(key);
+    if (cached?.signature === signature) return cached.entry;
+    let entry: string | undefined, bytes = 0;
+    for await (const row of index.rows(handle, index.lines, Math.max(0, index.lines - 256))) {
+      if (!row.bytes || (bytes += row.bytes.length) > 1_048_576) break;
+      try {
+        const raw = await projectTranscriptEvent(visibleEvent(object(JSON.parse(row.bytes.toString())), source), source, row.line,
+          (before, after) => index.rows(handle, before, after));
+        if (!raw || raw.isSidechain === true) continue;
+        const projected = projectTranscriptRows(raw, source).rows.map(value => chatFrame(value, source));
+        if (!projected.length || Buffer.byteLength(JSON.stringify(projected)) >= 2_097_152) continue;
+        // Progress can repeat the final reply verbatim. Require terminal
+        // evidence even when the text matches the Stop's complete reply.
+        if (source === "claude") {
+          if (raw.type !== "assistant") continue;
+          const message = object(raw.message), content = message.content;
+          if (message.stop_reason !== "end_turn") continue;
+          const blocks = objects(content);
+          if (!(typeof content === "string" ? content.trim() : blocks.some(block =>
+            ["text", "image", "tool_use", "tool_result"].includes(String(block.type))))) continue;
+          const text = typeof content === "string" ? content.trim()
+            : blocks.filter(block => block.type === "text").map(block => String(block.text ?? "")).join("\n").trim();
+          if (finalReply?.reply && text) {
+            if (text !== finalReply.reply.trim()) continue;
+          }
+        }
+        const stamp = raw.timestamp ?? raw.time;
+        const at = typeof stamp === "string" ? Date.parse(stamp) : NaN;
+        // An undated candidate could be the final row: falling back to an
+        // earlier answer would let the phone mark an unseen reply seen.
+        if (!Number.isFinite(at)) break;
+        if (at < since || at > until) continue;
+        entry = String(row.line);
+        break;
+      } catch { /* Malformed rows do not identify a completion. */ }
+    }
+    completionEntries.delete(key);
+    completionEntries.set(key, { signature, entry });
+    while (completionEntries.size > 128) completionEntries.delete(completionEntries.keys().next().value!);
+    return entry;
+  });
 }
 
 /** Parse only the requested page; shared byte indexes make reopening and
@@ -321,8 +395,8 @@ export class TranscriptReader {
           if (raw && this.includeSidechain && raw.isSidechain === true) { const { isSidechain: _sidechain, ...own } = raw; raw = own; }
           // A code-mode script's result follows from the script it answers,
           // a few rows earlier: hidden when its items carry the actions.
-          const codeModeCall = raw && this.source === "codex" ? codeModeOutputCall(raw) : undefined;
-          if (raw && codeModeCall) raw = projectCodeModeOutput(raw, await findCodeModeCall((upper, lower) => index.rows(handle, upper, lower, signal), row.line, codeModeCall));
+          raw = await projectTranscriptEvent(raw, this.source, row.line,
+            (upper, lower) => index.rows(handle, upper, lower, signal));
           if (raw) {
             if (this.changes && this.imageLine === undefined) {
               // A shell call's output carries what it changed on disk. While
@@ -346,7 +420,7 @@ export class TranscriptReader {
               // write or patch) keeps it; the shell lookup only fills in the rest.
               if (Object.keys(attached).length) raw = { ...raw, phren_changes: { ...attached, ...object(raw.phren_changes) } };
             }
-            const projected = this.source === "codex" ? projectCodexRow(raw) : { rows: [raw] as Json[] };
+            const projected = projectTranscriptRows(raw, this.source);
             rows = this.imageLine === row.line ? projected.rows : projected.rows.map(r => chatFrame(r, this.source));
             if (projected.base) rewriteProjectedOutput(entries, projected.base);
           }

@@ -7,14 +7,23 @@ import path from "node:path";
 // The hold is read once at import; keep it short so a test can outlive it.
 vi.hoisted(() => { process.env.PHREN_APPROVAL_HOLD_MS = "300"; });
 
-import { AgentHooks } from "./agent-hooks.js";
+import { AgentHooks, agentHook } from "./agent-hooks.js";
 import { localSocket } from "./agent-hook-stores.js";
 import { rpc, snapshot, validateTarget } from "./herdr.js";
 import type { ApprovalPushService } from "./push.js";
 import type { Target } from "./protocol.js";
+import { activateModules, moduleSnapshot } from "../modules/runtime.js";
+import { terminalPaneFromEnv } from "./terminal.js";
 
 vi.mock("./herdr.js", async importOriginal => ({
   ...await importOriginal<typeof import("./herdr.js")>(), rpc: vi.fn(), snapshot: vi.fn(), validateTarget: vi.fn(),
+}));
+
+vi.mock("../modules/runtime.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../modules/runtime.js")>(), activateModules: vi.fn(),
+}));
+vi.mock("./terminal.js", async importOriginal => ({
+  ...await importOriginal<typeof import("./terminal.js")>(), terminalPaneFromEnv: vi.fn(),
 }));
 
 const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1",
@@ -24,13 +33,13 @@ const dialog = " Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n â
 const lease = { server: target.server, pane: target.pane, source: target.source };
 
 /** Claude's hook subprocess: posts the ask and waits for the Hook's answer. */
-function ask(input: unknown = { command: "rm -rf build" }): Promise<string> {
+function ask(input: unknown = { command: "rm -rf build" }, toolUseId?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST" }, res => {
       let body = ""; res.on("data", chunk => { body += chunk; }); res.on("end", () => resolve(body));
     });
     req.on("error", reject);
-    req.end(JSON.stringify({ event: "PermissionRequest", target, tool: "Bash", input }));
+    req.end(JSON.stringify({ event: "PermissionRequest", target, tool: "Bash", input, toolUseId }));
   });
 }
 
@@ -68,6 +77,7 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
   });
   afterEach(async () => {
     hooks.close();
+    vi.restoreAllMocks();
     if (previous === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = previous;
     await rm(bridge, { recursive: true, force: true });
   });
@@ -86,17 +96,45 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     expect(hooks.workerApproval(target)).toBeUndefined();
   });
 
-  it("drops a held ask the owner approved in the terminal once the call it held runs", async () => {
+  it.each([false, true])("clears only the completed terminal ask with tool IDs available: %s", async withId => {
     hooks.leaseDispatch([lease]);
-    const answer = ask();
+    const input = { command: "rm -rf build", description: "Clean build" };
+    const answer = ask(input, withId ? "tool-held" : undefined);
     await vi.waitFor(() => expect(hooks.approval(target)).toBeDefined());
-    await event({ event: "PostToolUse", tool: "Bash", input: { command: "ls" } });
+    await event({ event: "PostToolUse", tool: "Bash", input: { command: "ls" }, toolUseId: "tool-other" });
     expect(hooks.approval(target)).toBeDefined();
-    await event({ event: "PostToolUse", tool: "Bash", input: { command: "rm -rf build" } });
+    if (withId) {
+      // Identical inputs do not make a different call the held one.
+      await event({ event: "PostToolUse", tool: "Bash", input, toolUseId: "tool-other" });
+      expect(hooks.approval(target)).toBeDefined();
+    }
+    await event({ event: "PostToolUse", tool: "Bash", input: { description: "Clean build", command: "rm -rf build" },
+      toolUseId: withId ? "tool-held" : undefined });
     expect(await answer).toBe("{}");
     expect(hooks.approval(target)).toBeUndefined();
     expect(hooks.workerApproval(target)).toBeUndefined();
     expect(hooks.terminalPrompt(target)).toBeUndefined();
+  });
+
+  it("forwards terminal completion and clears its held approval with git disabled", async () => {
+    hooks.close();
+    const modules = { ...moduleSnapshot(bridge), has: (name: string) => name === "hook" };
+    hooks = new AgentHooks({ available: false, start: async () => {}, status: { configured: false }, notify } as unknown as ApprovalPushService, modules);
+    await hooks.start();
+    hooks.leaseDispatch([lease]);
+    const answer = ask(undefined, "tool-held");
+    await vi.waitFor(() => expect(hooks.approval(target)).toBeDefined());
+    vi.mocked(activateModules).mockReturnValue(modules);
+    vi.mocked(terminalPaneFromEnv).mockResolvedValue(target);
+    vi.spyOn(process.stdin, Symbol.asyncIterator).mockImplementation(async function* () {
+      yield Buffer.from(JSON.stringify({ hook_event_name: "PostToolUse", session_id: target.session,
+        tool_name: "Bash", tool_input: { command: "rm -rf build" }, tool_use_id: "tool-held" }));
+    });
+    const capture = vi.spyOn(hooks.changes, "after");
+    await agentHook("claude", () => 0);
+    expect(hooks.approval(target)).toBeUndefined();
+    expect(await answer).toBe("{}");
+    expect(capture).not.toHaveBeenCalled();
   });
 
   it("forgets a released ask once the turn ends, though the dialog read never ran", async () => {
@@ -229,7 +267,7 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     expect(keys()).toEqual([]);
   });
 
-  it("forgets a forwarded dialog once its pane stops waiting", async () => {
+  it("forgets a forwarded dialog when it disappears and its pane reports working", async () => {
     hooks.leaseDispatch([lease]);
     await ask();
     await vi.waitFor(async () => {
@@ -237,8 +275,12 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
       expect(hooks.workerApproval(target)).toBeDefined();
     });
     const { actionId } = hooks.workerApproval(target)!;
-    await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: "working" }], async () => target);
-    await expect(hooks.answer(target, actionId, "approve")).rejects.toThrow(/no longer pending/);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 4_000);
+    try {
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "Working" } }));
+      await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: "working" }], async () => target);
+      await expect(hooks.answer(target, actionId, "approve")).rejects.toThrow(/no longer pending/);
+    } finally { clock.mockRestore(); }
   });
 
   it("pushes a forwarded request once and answers it through the callback", async () => {

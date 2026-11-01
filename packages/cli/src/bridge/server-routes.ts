@@ -51,17 +51,20 @@ import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
-import { liveBackground, markBackground, paneRecord, recordTitle, replyExcerpt } from "./session-activity.js";
+import { liveBackground, markBackground, ownRecord, paneRecord, recordTitle, replyExcerpt, turnCompletion } from "./session-activity.js";
+import { markSessionSeen, readSessionSeen } from "./session-seen.js";
+import { opencodeTurn, type TurnRecord } from "./turn-records.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitStatus } from "./git.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDeadline } from "./projects.js";
-import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema } from "./protocol.js";
+import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema, sessionId } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
 import { tabActivityKey, type TabActivityStore } from "./tab-activity.js";
-import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
+import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath, transcriptPath, TranscriptReader } from "./transcripts.js";
+import { conversationSearch } from "./conversation-search.js";
 import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
@@ -90,6 +93,7 @@ import { SPEECH_FORMATS, streamSpeech } from "./speech.js";
 import { readSpeechKey } from "./speech-key.js";
 import { DEFAULT_SPEECH_VOICE, listSpeechVoices, resolveSpeechVoice } from "./speech-voice.js";
 import { terminalKind, terminalMux } from "./terminal.js";
+import { resolveTerminalReference } from "./terminal-resolve.js";
 import { muxListForClient, muxReplyForClient, typedMuxRequest } from "./mux-wire.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
@@ -207,9 +211,9 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
 }
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
+  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -268,6 +272,15 @@ export function selectedServer(url: URL): string {
  */
 export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean) => Promise<Json>;
 
+/** The pane's turn record for its session row. OpenCode's plugin stamps its
+ * turns per PID instead of writing a lifecycle record. */
+async function paneTurnRecord(server: string, pane: Json, session: string): Promise<TurnRecord | undefined> {
+  if (pane.agent !== "opencode") return paneRecord(server, pane, session);
+  if (typeof pane.terminal_id !== "string") return undefined;
+  const pids = (await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids;
+  return ownRecord(await opencodeTurn(pids, pane.terminal_id), pane, "opencode", session);
+}
+
 export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "agentHooks" | "journal" | "tabActivity" | "contextUsage">): WorkspacesReader {
   const { modules, info, agentHooks, journal, tabActivity, contextUsage } = ctx;
   return async (server, s, watchApprovals) => {
@@ -316,31 +329,49 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
     const awaited = new Map<Json, number>();
+    const recordEnrichment: Array<() => Promise<void>> = [];
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
-      const session = agents.length === 1 && object(tab.target).session;
-      const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
-      const [title, background] = await Promise.all([
-        recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label }),
-        liveBackground(record, readFinalTurn),
+      const pane = agents.length === 1 ? agents[0] : undefined;
+      const session = pane ? object(tab.target).session : undefined;
+      const [record, seen] = await Promise.all([
+        typeof session === "string" && pane ? paneTurnRecord(server, pane, session).catch(() => undefined) : undefined,
+        pane ? readSessionSeen(server, String(pane.pane_id)) : undefined,
       ]);
       if (expired) return;
-      if (background) awaited.set(tab, background);
-      markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
-      const target = targetSchema.safeParse(tab.target);
-      const stall = target.success && agents.length === 1
-        ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
+      const completion = turnCompletion(record);
+      if (completion) tab.completion = completion;
+      if (seen) tab.seenCompletion = seen;
+      const title = await recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
       if (expired) return;
-      Object.assign(tab, stall);
       tab.title = title;
-      if (target.success) {
-        const moves = await movesRead;
-        if (expired) return;
-        Object.assign(tab, moveSessionFields(moves, target.data, title));
-      }
-      // What a finished turn said last; a row still working (background work) has no last word yet.
       const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
       if (reply) tab.lastReply = reply;
+      // Apply every row's small-file metadata before starting transcript reads.
+      // A stalled lookup must not hide another row's completion or pane label.
+      if (completion && record && pane) recordEnrichment.push(async () => {
+        const file = await targetTranscriptPath({ server, pane: String(pane.pane_id), source: record.source, session: record.session });
+        await refreshTranscript(file, record.source, record.session);
+        const entry = await completionEntry(file, record.source, record.prompt!.at, completion.at, record.stop);
+        if (!expired && entry !== undefined) completion.entry = entry;
+      });
+      recordEnrichment.push(async () => {
+        const background = await liveBackground(record, readFinalTurn);
+        if (expired) return;
+        if (background) awaited.set(tab, background);
+        markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
+        if (tab.agentStatus === "working") delete tab.lastReply;
+        const target = targetSchema.safeParse(tab.target);
+        const stall = target.success && agents.length === 1
+          ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
+        if (expired) return;
+        Object.assign(tab, stall);
+        if (target.success) {
+          const moves = await movesRead;
+          if (expired) return;
+          Object.assign(tab, moveSessionFields(moves, target.data, title));
+        }
+      });
     }));
     // Separate bounded queues: a stalled git/model/step read cannot prevent
     // the child tree from reaching the phone. Apply each answer as it arrives.
@@ -357,7 +388,10 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       return typeof session === "string" ? { source: agents[0].agent as Provider, session, pane: agents[0] } : undefined;
     };
     const enrich = Promise.all([
-      records,
+      records.then(() => {
+        if (expired) return;
+        return Promise.all(recordEnrichment.map(read => read().catch(() => {})));
+      }),
       eachTab(async ({ tab }) => {
         if (!modules.has("git") || typeof tab.cwd !== "string" || !tab.agent) return;
         const branch = await repositoryBranch(tab.cwd);
@@ -370,6 +404,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (expired) return;
         Object.assign(tab, children);
         markBackground(tab, (awaited.get(tab) ?? 0) + children.runningChildren);
+        if (tab.agentStatus === "working") delete tab.lastReply;
       }),
       eachTab(async ({ group, tab }) => {
         const identity = identified(group, tab);
@@ -496,6 +531,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             result = { computer: info.computer, version, ...await listsCaller(caller) }; break;
           }
           case "/v1/owner-inbox": result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" }, url.searchParams.get("local") === "1"); break;
+          // A terminal reference from chat text (alaarab/phren-apps#676): this computer's pane or tab, or a linked peer's.
+          case "/v1/terminals/resolve": result = await resolveTerminalReference(url.searchParams.get("ref"),
+            { computer: info.computer, from: url.searchParams.get("from") }); break;
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // A session move (session-move.ts) by its id, or this computer's recent moves.
@@ -625,6 +663,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }
           case "/v1/muxes": result = { muxes: muxListForClient(await servers(), url.searchParams.get("typed") === "1") }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
+          case "/v1/conversations/search": result = await conversationSearch(
+            url.searchParams.get("q"), url.searchParams.get("limit"), url.searchParams.get("cursor")); break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
           // `all=1` (capability simulatorDevices): every available device with its state, for the phone's picker.
           case "/v1/simulators": result = { simulators: url.searchParams.get("all") === "1" ? await simulatorDevices() : await bootedSimulators() }; break;
@@ -744,6 +784,22 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             response.setHeader("Content-Type", "application/octet-stream"); response.end(bytes); return;
           }
           case "/v1/transcripts/history": {
+            // Finished conversations use the same bounded history reader, but
+            // have no live pane to validate. Only the owner's gateway may read
+            // by identity; transcriptPath validates IDs and resolves known roots.
+            if (url.searchParams.get("historical") === "1") {
+              if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner can read historical conversations.");
+              if (["server", "workspace", "tab", "pane", "child"].some(key => url.searchParams.has(key))) throw new BridgeError(400, "Historical reads cannot name a live target.");
+              const source = provider.parse(url.searchParams.get("source"));
+              const session = sessionId.parse(url.searchParams.get("session"));
+              const before = z.coerce.number().int().positive().safe().parse(url.searchParams.get("beforeLine"));
+              const abort = new AbortController();
+              response.once("close", () => { if (!response.writableEnded) abort.abort(); });
+              const reader = new TranscriptReader(await transcriptPath(source, session), source);
+              await refreshTranscript(reader.file, source, session);
+              result = { ...await reader.read(before, abort.signal), type: "older", source, session };
+              break;
+            }
             const target = targetFromURL(url);
             const before = z.coerce.number().int().positive().parse(url.searchParams.get("beforeLine"));
             const abort = new AbortController();
@@ -949,6 +1005,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = { ok: true, ...(allowedPools ? { allowedPools } : {}) };
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
+        } else if (url.pathname === "/v1/sessions/seen") {
+          result = await markSessionSeen(data);
         } else if (url.pathname === "/v1/jobs/cleanup") {
           // Ends only registered worker process groups whose pane is gone.
           result = { ok: true, ...await ctx.resources.cleanupJobs() };

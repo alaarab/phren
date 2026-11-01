@@ -161,6 +161,19 @@ export function markBackground(tab: Json, count: number | undefined): void {
   else if (typeof tab.backgroundTasks === "number") tab.backgroundTasks = Math.max(tab.backgroundTasks, count);
 }
 
+/** A finished turn's identity on a session row: its conversation and Stop
+ * sequence, with when it stopped. The id is opaque to clients. */
+export interface TurnCompletion { id: string; at: string; entry?: string }
+
+/** The latest finished turn of the conversation a record holds: absent while
+ * a prompt is still unanswered, and for a Stop with no prompt before it (hooks
+ * installed mid-conversation). */
+export function turnCompletion(record: TurnRecord | undefined): TurnCompletion | undefined {
+  const prompt = record?.prompt, stop = record?.stop;
+  if (!record || !prompt || !stop || stop.seq <= prompt.seq) return undefined;
+  return { id: `${record.session}:${stop.seq}`, at: stop.at };
+}
+
 /** How much of a turn's last reply a session row carries. */
 export const REPLY_EXCERPT_CHARS = 240;
 

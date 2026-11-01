@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { objects, type Json } from "./protocol.js";
 
@@ -23,15 +23,23 @@ vi.mock("./schedule-watch.js", async importOriginal => ({ ...await importOrigina
   readFinalTurn: async (_source: string, session: string) => stalledReads.has(session) ? new Promise<never>(() => {})
     : ({ completed: true, ...(awaited[session] ? { awaited: awaited[session] } : {}) }) }));
 
-const { effectiveStatusRows, workspacesReader } = await import("./server-routes.js");
+const { effectiveStatusRows, workspacesReader, OVERVIEW_ENRICH_BUDGET_MS } = await import("./server-routes.js");
 const { noteTurn } = await import("./turn-records.js");
+const { markSessionSeen } = await import("./session-seen.js");
 const { TabActivityStore, tabActivityKey } = await import("./tab-activity.js");
 const { writeLaunchBrief } = await import("./launch-brief.js");
+const transcripts = await import("./transcripts.js");
+const { TranscriptReader } = transcripts;
 const recorded = JSON.parse(readFileSync(new URL("./fixtures/herdr/0.9.1/snapshot.json", import.meta.url), "utf8")).result.snapshot as Json;
 
 let root: string;
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-session-status-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); stalledReads.clear(); });
-afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+beforeEach(async () => {
+  root = await mkdtemp(path.join(tmpdir(), "phren-session-status-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(root, "claude"));
+  stalledReads.clear();
+});
+afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 
 const dispatchId = "40000000-0000-4000-8000-000000000001";
 const read = (snapshot: Json) => workspacesReader({
@@ -217,6 +225,128 @@ describe("session rows on a computer with background work and dispatched workers
     expect(tabOf(await read(snapshot), "w1P:p2", snapshot).lastReply).toBe("Tests pass. Merge it?");
     await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"]]);
     expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("lastReply");
+  });
+
+  it("carries each finished turn's final assistant entry in stream order, and none while a turn runs", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    const terminal = String(pane.terminal_id), at = Date.parse("2026-10-31T10:00:00Z");
+    const folder = path.join(root, "claude", "projects", "project");
+    await mkdir(folder, { recursive: true });
+    const file = path.join(folder, `${sessions["w1P:p2"]}.jsonl`);
+    const row = (offset: number, type: string, text: string) => JSON.stringify({ type,
+      timestamp: new Date(at + offset).toISOString(), message: { role: type, content: text,
+        ...(type === "assistant" ? { stop_reason: "end_turn" } : {}) } }) + "\n";
+    await writeFile(file, row(100, "user", "First prompt") + row(800, "assistant", "First answer")
+      + JSON.stringify({ type: "progress" }) + "\n");
+    await turn("w1P:p2", terminal, [["UserPromptSubmit", { at }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("completion");
+    await turn("w1P:p2", terminal, [["Stop", { at: at + 1_000, reply: "First answer" }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({ id: `${sessions["w1P:p2"]}:2`, at: new Date(at + 1_000).toISOString(), entry: "1" });
+    expect((await new TranscriptReader(file, "claude").read()).entries).toContainEqual({ line: 1,
+      raw: { type: "assistant", timestamp: new Date(at + 800).toISOString(), message: { role: "assistant", content: "First answer", stop_reason: "end_turn" } } });
+    // A later row must not be attributed to the old Stop during a hook race.
+    await appendFile(file, row(2_100, "user", "Second prompt") + row(2_800, "assistant", "Second answer"));
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toMatchObject({ entry: "1" });
+    // A new prompt is unanswered, then the next Stop names a different completion.
+    await turn("w1P:p2", terminal, [["UserPromptSubmit", { at: at + 2_000 }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("completion");
+    await turn("w1P:p2", terminal, [["Stop", { at: at + 3_000, reply: "Second answer" }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({ id: `${sessions["w1P:p2"]}:4`, at: new Date(at + 3_000).toISOString(), entry: "4" });
+    // Another conversation in the same pane has its own id.
+    const original = sessions["w1P:p2"], next = "00000005-1111-4111-8111-111111111111";
+    try {
+      sessions["w1P:p2"] = next;
+      await turn("w1P:p2", terminal, [["UserPromptSubmit", { at: at + 4_000 }], ["Stop", { at: at + 5_000 }]]);
+      expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({ id: `${next}:2`, at: new Date(at + 5_000).toISOString() });
+    } finally { sessions["w1P:p2"] = original; }
+  });
+
+  it.each(["missing transcript", "no assistant row", "undated row", "undated final row", "earlier turn", "sidechain"])("keeps a completion manual for an unresolved entry: %s", async reason => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    const at = Date.parse("2026-10-31T10:00:00Z");
+    if (reason !== "missing transcript") {
+      const folder = path.join(root, "claude", "projects", "project");
+      await mkdir(folder, { recursive: true });
+      await writeFile(path.join(folder, `${sessions["w1P:p2"]}.jsonl`), JSON.stringify({
+        type: reason === "no assistant row" ? "user" : "assistant",
+        ...(reason.startsWith("undated") ? {} : { timestamp: new Date(at + (reason === "earlier turn" ? -500 : 500)).toISOString() }),
+        ...(reason === "sidechain" ? { isSidechain: true } : {}),
+        message: { role: reason === "no assistant row" ? "user" : "assistant", content: "Visible text", stop_reason: "end_turn" },
+      }) + "\n");
+      if (reason === "undated final row") {
+        const file = path.join(folder, `${sessions["w1P:p2"]}.jsonl`);
+        await writeFile(file, JSON.stringify({ type: "assistant", timestamp: new Date(at + 500).toISOString(),
+          message: { role: "assistant", content: "Earlier progress", stop_reason: "end_turn" } }) + "\n"
+          + JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Final reply without a timestamp", stop_reason: "end_turn" } }) + "\n");
+      }
+    }
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit", { at }], ["Stop", { at: at + 1_000 }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({
+      id: `${sessions["w1P:p2"]}:2`, at: new Date(at + 1_000).toISOString(),
+    });
+  });
+
+  it.each([
+    { authority: "Stop reply", reply: "Finished" },
+    { authority: "terminal row marker", reply: undefined },
+  ])("requires terminal evidence with $authority when progress and the delayed final reply have identical text", async ({ reply }) => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    const at = Date.parse("2026-10-31T10:00:00Z");
+    const folder = path.join(root, "claude", "projects", "project");
+    await mkdir(folder, { recursive: true });
+    const file = path.join(folder, `${sessions["w1P:p2"]}.jsonl`);
+    const row = (offset: number, text: string, final = false) => JSON.stringify({ type: "assistant",
+      timestamp: new Date(at + offset).toISOString(), message: { role: "assistant", content: text, ...(final ? { stop_reason: "end_turn" } : {}) } }) + "\n";
+    await writeFile(file, row(500, "Finished"));
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit", { at }], ["Stop", { at: at + 1_000, reply }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({
+      id: `${sessions["w1P:p2"]}:2`, at: new Date(at + 1_000).toISOString(),
+    });
+    await appendFile(file, row(900, "Finished", true));
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toMatchObject({ entry: "1" });
+  });
+
+  it("preserves completion, seen state and existing metadata while transcript lookup stalls", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    pane.label = "My session";
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"], ["Stop", { reply: "Finished" }]]);
+    const id = `${sessions["w1P:p2"]}:2`;
+    await markSessionSeen({ server: "default", pane: "w1P:p2", completion: id }, { snapshot: async () => snapshot });
+    let started!: () => void, finish!: (file: string) => void;
+    const lookupStarted = new Promise<void>(resolve => { started = resolve; });
+    const lookup = new Promise<string>(resolve => { finish = resolve; });
+    vi.spyOn(transcripts, "targetTranscriptPath").mockImplementationOnce(() => { started(); return lookup; });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = read(snapshot);
+    await lookupStarted;
+    await vi.advanceTimersByTimeAsync(OVERVIEW_ENRICH_BUDGET_MS);
+    const tab = tabOf(await pending, "w1P:p2", snapshot);
+    expect(tab).toMatchObject({ completion: { id }, seenCompletion: id, title: "My session", lastReply: "Finished" });
+    expect(tab.completion).not.toHaveProperty("entry");
+    // Release the stalled lookup; its missing file is handled as unresolved.
+    finish(path.join(root, "missing.jsonl"));
+  });
+
+  it("does not carry a completion for a Stop with no prompt before it", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w13:p2")!;
+    await turn("w13:p2", String(pane.terminal_id), [["Stop"]]);
+    expect(tabOf(await read(snapshot), "w13:p2", snapshot)).not.toHaveProperty("completion");
+  });
+
+  it("carries the completion a client marked seen", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"], ["Stop"]]);
+    const completion = tabOf(await read(snapshot), "w1P:p2", snapshot).completion as { id: string; at: string };
+    expect(completion.id).toBe(`${sessions["w1P:p2"]}:2`);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("seenCompletion");
+    await markSessionSeen({ server: "default", pane: "w1P:p2", completion: completion.id }, { snapshot: async () => snapshot });
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).seenCompletion).toBe(completion.id);
   });
 
   it("shows a renamed session under its pane label, ahead of a dispatch label and the harness title", async () => {

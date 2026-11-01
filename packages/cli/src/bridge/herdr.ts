@@ -79,7 +79,9 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const client = connect(socket);
     const key = requestID();
     let pending = Buffer.alloc(0);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error, result?: Json) => {
+      if (deadline) clearTimeout(deadline);
       signal?.removeEventListener("abort", abort);
       client.destroy();
       if (error) reject(error); else resolve(result!);
@@ -87,7 +89,7 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const abort = () => finish(new BridgeError(499, "Request cancelled."));
     if (signal?.aborted) { abort(); return; }
     signal?.addEventListener("abort", abort, { once: true });
-    client.setTimeout(timeoutMs, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.", { code: "herdr-timeout" })));
+    deadline = setTimeout(() => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.", { code: "herdr-timeout" })), timeoutMs);
     client.on("error", error => finish(herdrSocketError(error)));
     client.on("end", () => finish(new BridgeError(503, "Herdr closed the request before confirming it.")));
     client.on("connect", () => client.write(JSON.stringify({ id: key, method, params }) + "\n"));
@@ -138,6 +140,32 @@ export async function servers(): Promise<Json[]> {
   // running Herdr show up too, including an already-running hidden server.
   // Without Herdr, also offer the hidden server before its first launch.
   running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServers({ hidden: !running.length })).catch(() => []));
+  knownServers = running.map(server => String(server.session));
+  return running;
+}
+
+/** The running terminal servers for a safety check. Unlike `servers()`, a
+ * server that cannot be read (timeout, permission, unreachable) or a discovery
+ * failure fails the call; only a server that is actually stopped is left out. */
+export async function serversStrict(): Promise<Json[]> {
+  const folder = path.join(herdrRoot(), "sessions");
+  let sessions: string[];
+  try { sessions = (await readdir(folder)).filter(name => serverName.safeParse(name).success); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") sessions = [];
+    else throw new BridgeError(503, "Could not list this computer's Herdr servers.", { code: "herdr-discovery-failed" });
+  }
+  const names = ["default", ...sessions];
+  const results = await Promise.all(names.map(async name => {
+    try { await rpc(name, "ping"); return { id: `herdr:${name}`, kind: "herdr", session: name, running: true } as Json; }
+    catch (error) {
+      const code = error instanceof BridgeError ? error.details?.code : undefined;
+      if (code === "herdr-not-running" || code === "herdr-stale-socket") return null;
+      throw error;
+    }
+  }));
+  const running = results.filter((value): value is Json => value !== null);
+  running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServersStrict()));
   knownServers = running.map(server => String(server.session));
   return running;
 }
