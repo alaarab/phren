@@ -1,12 +1,13 @@
-import { afterEach, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterEach, expect, it, vi } from "vitest";
+import { ToolChanges } from "./changes.js";
+
 // /tmp keeps POSIX paths short; Windows has no /tmp.
 const scratchRoot = process.platform === "win32" ? tmpdir() : "/tmp";
 const state = vi.hoisted(() => ({ exec: vi.fn() }));
 vi.mock("node:child_process", () => ({ execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }) }));
-import { ToolChanges } from "./changes.js";
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 it("gives up at the hook budget without a row error and cancels the Git read nobody waits for", async () => {
   const home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-abort-"))); vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", home + "/bridge"); vi.stubEnv("PHREN_PATH", home + "/store");
@@ -29,7 +30,7 @@ it("gives up at the hook budget without a row error and cancels the Git read nob
   } finally { await changes.close(); await rm(home, { recursive: true, force: true }); }
 });
 
-it("stops a stalled sibling read when another repository fails, freeing its pool slot", async () => {
+it.each([false, true])("stops a stalled sibling read when another repository fails, freeing its pool slot (abandoned: %s)", async abandoned => {
   const home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-sibling-"))); vi.stubEnv("HOME", home); vi.stubEnv("PHREN_BRIDGE_HOME", home + "/bridge"); vi.stubEnv("PHREN_PATH", home + "/store");
   const broken = path.join(home, "broken"), stalled = path.join(home, "stalled");
   await mkdir(path.join(broken, ".git/objects"), { recursive: true });
@@ -51,9 +52,11 @@ it("stops a stalled sibling read when another repository fails, freeing its pool
     const pending = changes.before("c", "t", broken, "ls", { file_path: path.join(stalled, "x") });
     // Both repository reads hold a pool slot before the broken one fails.
     await vi.waitFor(() => { expect(failBroken).toBeDefined(); expect(stalledSignal).toBeDefined(); });
+    if (abandoned) changes.drop("c", "t");
     failBroken!();
     await pending;
-    await expect(changes.view("c").changes("t")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+    if (abandoned) await expect(changes.view("c").changes("t")).resolves.toBeUndefined();
+    else await expect(changes.view("c").changes("t")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
     // The stalled read's waiter was released and its Git process stopped, so
     // its slot came back without waiting for Git's own timeout.
     await vi.waitFor(() => expect(stalledSignal?.aborted).toBe(true), { interval: 1 });
