@@ -593,9 +593,10 @@ export class AgentHooks {
     // not capture the foreground turn's boundary.
     const automaticInput = input !== undefined && input.category !== "owner";
     if (this.modules?.has("git") !== false && recorded && !notificationStop && !automaticInput && typeof cwd === "string") {
-      await checkpointBoundary(cwd, target, String(body.event), recorded.prompt?.seq ?? recorded.seq,
+      checkpointBoundary(cwd, target, String(body.event), recorded.prompt?.seq ?? recorded.seq,
         input?.category === "owner" || input === undefined ? (typeof body.prompt === "string" ? body.prompt : "") : "",
-        target.source === "claude" && body.event === "UserPromptSubmit" ? normalizedPromptEntryId(body.promptEntryId) : undefined);
+        target.source === "claude" && body.event === "UserPromptSubmit" ? normalizedPromptEntryId(body.promptEntryId) : undefined,
+        body.event === "UserPromptSubmit" ? recorded.prompt?.at ?? recorded.at : recorded.at);
     }
     return recorded;
   }

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { listProfiles } from "../data/access.js";
 
 // ── Shared helpers used across the config sub-modules ──────────────────────────
@@ -16,7 +17,7 @@ export function checkProjectInProfile(phrenPath: string, project: string): strin
   if (profiles.ok) {
     const registered = profiles.data.some((entry) => entry.projects.includes(project));
     if (!registered) {
-      return `Warning: Project '${project}' not found in active profile. Run 'phren add /path/to/${project}' first.\n  Config was written to ${phrenPath}/${project}/phren.project.yaml but won't be used until the project is registered.`;
+      return `Warning: Project '${project}' not found in active profile. Run 'phren add /path/to/${project}' first.\n  Config was written to ${path.join(phrenPath, project, "phren.project.yaml")} but won't be used until the project is registered.`;
     }
   }
   return null;
