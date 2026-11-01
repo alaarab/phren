@@ -63,7 +63,7 @@ import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Js
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
-import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
+import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
 import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
@@ -286,6 +286,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
     const awaited = new Map<Json, number>();
+    const entryReads: Promise<void>[] = [];
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const pane = agents.length === 1 ? agents[0] : undefined;
@@ -294,6 +295,16 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         typeof session === "string" && pane ? paneTurnRecord(server, pane, session).catch(() => undefined) : undefined,
         pane ? readSessionSeen(server, String(pane.pane_id)) : undefined,
       ]);
+      if (expired) return;
+      const completion = turnCompletion(record);
+      if (completion) tab.completion = completion;
+      if (seen) tab.seenCompletion = seen;
+      if (completion && record && pane) entryReads.push((async () => {
+        const file = await targetTranscriptPath({ server, pane: String(pane.pane_id), source: record.source, session: record.session });
+        await refreshTranscript(file, record.source, record.session);
+        const entry = await completionEntry(file, record.source, record.prompt!.at, completion.at, record.stop);
+        if (!expired && entry !== undefined) completion.entry = entry;
+      })().catch(() => {}));
       const [title, background] = await Promise.all([
         recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label }),
         liveBackground(record, readFinalTurn),
@@ -301,23 +312,20 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       if (expired) return;
       if (background) awaited.set(tab, background);
       markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
-      const completion = turnCompletion(record);
-      if (completion) tab.completion = completion;
-      if (seen) tab.seenCompletion = seen;
+      tab.title = title;
+      // A finished turn's metadata does not wait for transcript or move lookups.
+      const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
+      if (reply) tab.lastReply = reply;
       const target = targetSchema.safeParse(tab.target);
       const stall = target.success && agents.length === 1
         ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
       if (expired) return;
       Object.assign(tab, stall);
-      tab.title = title;
       if (target.success) {
         const moves = await movesRead;
         if (expired) return;
         Object.assign(tab, moveSessionFields(moves, target.data, title));
       }
-      // What a finished turn said last; a row still working (background work) has no last word yet.
-      const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
-      if (reply) tab.lastReply = reply;
     }));
     // Separate bounded queues: a stalled git/model/step read cannot prevent
     // the child tree from reaching the phone. Apply each answer as it arrives.
@@ -335,6 +343,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     };
     const enrich = Promise.all([
       records,
+      records.then(() => Promise.all(entryReads)),
       eachTab(async ({ tab }) => {
         if (!modules.has("git") || typeof tab.cwd !== "string" || !tab.agent) return;
         const branch = await repositoryBranch(tab.cwd);

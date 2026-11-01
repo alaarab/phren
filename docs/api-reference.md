@@ -1844,10 +1844,20 @@ Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 agent's last message from its Stop hook (Claude and Codex), as one plain line
 of at most 240 characters with markdown dropped. It is absent while a turn or
 its background work runs, and when the Stop carried no message. A finished
-turn also carries `completion: {id, at}`: an opaque id of the latest finished
+turn also carries `completion: {id, at, entry?}`: an opaque id of the latest finished
 turn of the conversation now in the pane (the conversation id and its Stop's
 sequence), and when it stopped. It is absent while a prompt is unanswered, when
 a Stop has no prompt before it, or when the harness has no turn record.
+`completion.entry`, when resolved, is the decimal string of the last transcript
+entry's zero-based `line` key, exactly as WS transcript frames and history pages
+identify and order rows. For Claude it names the turn's final assistant message;
+for Codex and OpenCode it names the last public row written before the Stop.
+It is absent when the Hook cannot resolve that row from the indexed recent tail.
+Claude requires a transcript `stop_reason: "end_turn"` marker and, when both
+the Stop and the row contain reply text, a match to the Stop’s complete final
+reply. Matching progress text alone never identifies the completion.
+Codex uses the stream’s projection, excluding
+covered code-mode wrapper results.
 `seenCompletion` is the completion id a person last marked seen on the phone or
 the desktop, absent until one is. A row is unread while `completion.id` differs
 from `seenCompletion`. A session whose main turn ended while background
@@ -1873,6 +1883,12 @@ dropped so the client falls back to `label`. `GET /v1/workspaces/panes` gives
 each pane's `title` by the same rule.
 
 #### Unread replies
+
+Auto-mark a completion seen only when the open chat is bound to that pane's
+conversation, the app is active and following the end, and it has displayed
+`completion.entry` or a row ordered after it. Compare numeric line order, not
+lexicographic string order. If `entry` is absent (an older Hook or an unresolved
+row), never auto-mark; Mark seen/unread remains manual in the session menu.
 
 `POST /v1/sessions/seen` records which finished turn a person has seen. Its body
 is `{ server, pane, completion }`: the computer's terminal source, the pane id

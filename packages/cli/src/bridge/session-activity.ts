@@ -163,7 +163,7 @@ export function markBackground(tab: Json, count: number | undefined): void {
 
 /** A finished turn's identity on a session row: its conversation and Stop
  * sequence, with when it stopped. The id is opaque to clients. */
-export interface TurnCompletion { id: string; at: string }
+export interface TurnCompletion { id: string; at: string; entry?: string }
 
 /** The latest finished turn of the conversation a record holds: absent while
  * a prompt is still unanswered, and for a Stop with no prompt before it (hooks

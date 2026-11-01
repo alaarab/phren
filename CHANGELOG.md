@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- Unread replies across the phone and the desktop: session rows from `GET /v1/workspaces` and the `/v1/overview` socket carry `completion: {id, at}` for a finished turn and the `seenCompletion` a person last marked seen (capability `sessionSeen`). `POST /v1/sessions/seen` stores that mark per pane beside its turn record, or clears `seenCompletion` with `unread: true` only when the stored mark equals the completion supplied.
+- Unread replies across the phone and the desktop: session rows from `GET /v1/workspaces` and the `/v1/overview` socket carry `completion: {id, at, entry?}` for a finished turn and the `seenCompletion` a person last marked seen (capability `sessionSeen`). The optional `entry` is the transcript row’s `line` key as a string; clients auto-mark only after displaying that row or a later one in the active conversation. Without it, seen/unread stays manual. `POST /v1/sessions/seen` stores that mark per pane beside its turn record, or clears `seenCompletion` with `unread: true` only when the stored mark equals the completion supplied.
 
 ### Fixed
 
