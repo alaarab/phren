@@ -233,9 +233,32 @@ describe("OpenCode's status from phren's plugin", () => {
     await writeFile(path.join(folder, "opencode-status-23.json"), JSON.stringify({ status: "working", session: "ses_abc", at: "2026-09-01T00:00:04Z",
       busyAt: "2026-09-01T00:00:04Z" }));
     vi.stubEnv("PHREN_PATH", home);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
     expect(turnPhase((await opencodeTurn([21, 22], "term-o"))!)).toEqual({ phase: "ended", at: "2026-09-01T00:00:02Z" });
     expect(turnPhase((await opencodeTurn([21, 23], "term-o"))!)).toEqual({ phase: "working", since: "2026-09-01T00:00:04Z" });
     expect(await opencodeTurn([22], "term-o")).toBeUndefined();
+  });
+
+  it("advances a conversation's Stop sequence across turns and suppresses an older observation", async () => {
+    const folder = path.join(home, ".runtime", "sessions");
+    await mkdir(folder, { recursive: true });
+    vi.stubEnv("PHREN_PATH", home);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
+    const file = path.join(folder, "opencode-status-31.json");
+    const stamp = (busyAt: string, idleAt: string) =>
+      writeFile(file, JSON.stringify({ status: "idle", session: "ses_turn", at: idleAt, busyAt, idleAt }));
+    await stamp("2026-09-01T00:00:01Z", "2026-09-01T00:00:02Z");
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(2);
+    // The same idle stamp is the same finished turn, not a new one.
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(2);
+    await stamp("2026-09-01T00:00:03Z", "2026-09-01T00:00:04Z");
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(4);
+    // An older stamp arriving after the newer one is the same finished turn, not another.
+    await stamp("2026-09-01T00:00:01Z", "2026-09-01T00:00:02Z");
+    expect(await opencodeTurn([31], "term-o")).toBeUndefined();
+    // The newer stamp still names the same completion.
+    await stamp("2026-09-01T00:00:03Z", "2026-09-01T00:00:04Z");
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(4);
   });
 
   it("takes the newest record among a pane's processes", async () => {
