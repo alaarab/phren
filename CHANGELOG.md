@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Chat-turn file restore can select checkpoints through an exact prompt identity. Unsupported or unavailable identities disable the action instead of matching prompt text or time.
+- Claude live reply previews exclude background notifications and terminal chrome; task-notification user rows are normalized as background notices.
 - Claude approvals answered in the PC terminal now clear on the phone even when Git change capture is disabled.
 - Tool completion matches the approval's tool-use ID, or inputs regardless of key order when IDs are unavailable, so unrelated calls cannot clear it.
 - A tmux pane blocked by a permission request returns to working after its observed dialog disappears; unreadable screens keep it blocked.

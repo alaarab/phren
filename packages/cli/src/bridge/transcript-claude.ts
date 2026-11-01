@@ -718,6 +718,28 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
   if (raw.type === "permission-mode" && typeof raw.permissionMode === "string" && /^[A-Za-z]{1,30}$/.test(raw.permissionMode)) {
     return { type: "permission-mode", permissionMode: raw.permissionMode, ...(typeof raw.timestamp === "string" ? { timestamp: raw.timestamp } : {}) };
   }
+  // A background task's completion reaches Claude Code as a user row whose
+  // origin says "task-notification" (sometimes wrapped in a system reminder).
+  // It is a notice, not a prompt: normalize only its public envelope and never
+  // let established notification provenance fall through as ordinary user text.
+  if (raw.type === "user") {
+    const origin = object(raw.origin);
+    const content = object(raw.message).content;
+    const text = typeof content === "string" ? content
+      : objects(content).filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)).join("\n");
+    const trimmed = text.trimStart();
+    const envelope = trimmed.startsWith("<task-notification>")
+      || (trimmed.startsWith("<system-reminder>") && trimmed.includes("<task-notification>"));
+    if (origin.kind === "task-notification" || envelope) {
+      if (raw.isSidechain && !includeSidechain) return undefined;
+      if (text.length > 65_536 || !envelope) return undefined;
+      const notice = taskNotification(text);
+      return notice ? { type: "system", phrenBackground: true, timestamp: raw.timestamp,
+        ...(typeof raw.uuid === "string" ? { uuid: raw.uuid } : {}),
+        ...(typeof raw.parentUuid === "string" ? { parentUuid: raw.parentUuid } : {}),
+        message: { role: "user", content: notice } } : undefined;
+    }
+  }
   // Remember the prompt turn a queued message was delivered as, so the
   // content-free dequeue written before it can be keyed and flagged scheduled.
   if (queue && raw.type === "user") {
