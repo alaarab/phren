@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- Hook delivery recovery now presses Enter only for the exact unsettled message in the original terminal and conversation, while idle or done with no held input. Unsafe or unverifiable state fails the receipt with a reason, queued follow-up expires after 30 seconds, and starting panes no longer receive blind recovery Enter keys.
+- Hook delivery follow-up observes legitimate working turns without expiring at 30 seconds, then waits up to 30 seconds after the pane finishes for confirmation. It never sends delayed Enter keys: tmux and Herdr cannot atomically verify Claude's full composer and submit it. Unconfirmed messages remain reviewable with a reason and may still settle from a late submission hook. Recorded Claude nonbreaking prompt separators are recognized without normalizing message whitespace; wrapped or collapsed inputs are reported as unverifiable rather than submitted. Starting panes receive no blind recovery keys.
 
 ## [0.3.68] - 2026-11-01
 

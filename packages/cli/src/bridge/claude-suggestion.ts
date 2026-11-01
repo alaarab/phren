@@ -70,7 +70,7 @@ export function claudeInputMatches(screen: string, text: string): boolean {
   if (line === undefined || dimText(line) || /[\r\n]/.test(text)) return false;
   // Remove only Claude's prompt and its separator space. Extra whitespace,
   // including ambiguous screen padding, cannot prove an exact match.
-  return stripTerminal(line).replace(/^\s*❯ /, "") === text;
+  return stripTerminal(line).replace(/^\s*❯[ \u00a0]/, "") === text;
 }
 
 /** The dim text in the live input box (between its two rules), "" when the

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { paneIdentity, snapshot, validateStartingTarget, validateTarget } from "./herdr.js";
 import { PromptDeliveries } from "./prompt-deliveries.js";
@@ -11,7 +12,8 @@ const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane:
   session: "aaaaaaaa-1111-4111-8111-111111111111" };
 const text = "Review the parser";
 let id: string, sequence = 0;
-const input = (value: string) => `──────────\n❯ ${value}\n──────────\n`;
+const recorded = readFileSync(new URL("./fixtures/claude/2.1.284/owner-typing-tmux.ansi", import.meta.url), "utf8");
+const input = (value: string) => recorded.replace("❯\u00a0x", `❯\u00a0${value}`);
 let pane: Json, store: PromptDeliveries, context: PaneRouteContext, restore: () => void;
 const prompt = vi.fn(), sendKeys = vi.fn(), readScreen = vi.fn(), question = vi.fn(), approval = vi.fn(), terminalPrompt = vi.fn();
 beforeEach(() => {
@@ -40,7 +42,7 @@ async function send() {
 describe("queued phone delivery recovery", () => {
   it.each(["/login", "", "another draft", `${text} extra`, `${text} `, `\x1b[2m${text}\x1b[0m`])("does not submit changed or ambiguous input %j", async value => {
     await send(); pane.agent_status = "idle"; readScreen.mockResolvedValue(input(value));
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(sendKeys).not.toHaveBeenCalled();
     expect(store.status(id, target)).toMatchObject({ state: "failed", reason: expect.any(String) });
   });
@@ -54,14 +56,30 @@ describe("queued phone delivery recovery", () => {
     else if (change === "snapshot failure") vi.mocked(snapshot).mockRejectedValue(new Error("unavailable"));
     else if (change === "screen failure") readScreen.mockRejectedValue(new Error("unavailable"));
     else pane.agent_status = change;
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(sendKeys).not.toHaveBeenCalled();
     expect(store.status(id, target)).toMatchObject({ state: "failed", reason: expect.any(String) });
   });
-  it("presses Enter exactly once for the unchanged input in the original idle conversation", async () => {
+  it("never submits an owner replacement made after the matching screen was read", async () => {
+    await send(); pane.agent_status = "idle";
+    let current = input(text);
+    readScreen.mockImplementation(async () => {
+      const observed = current;
+      // The read response can already be stale when the Hook receives it.
+      await Promise.resolve();
+      current = input("/login");
+      return observed;
+    });
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(current).toBe(input("/login"));
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(store.status(id, target)).toMatchObject({ state: "failed", reason: expect.any(String) });
+  });
+  it("reports unchanged visible text for manual submission when atomic submission is unavailable", async () => {
     await send(); pane.agent_status = "done";
     await vi.advanceTimersByTimeAsync(40_000);
-    expect(sendKeys).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, ["enter"]);
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(store.status(id, target)).toMatchObject({ state: "failed", reason: expect.stringContaining("cannot be safely resubmitted") });
   });
   it("does not recover a settled delivery even while identical text is still pending", async () => {
     await send(); pane.agent_status = "idle";
@@ -69,12 +87,12 @@ describe("queued phone delivery recovery", () => {
     await vi.advanceTimersByTimeAsync(1); await another;
     store.queue(`${id}-other`, target);
     readScreen.mockImplementation(async () => { await store.submitted(target, text); return input(text); });
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(sendKeys).not.toHaveBeenCalled();
     expect(store.status(id, target).state).toBe("delivered");
     expect(store.status(`${id}-other`, target).state).toBe("queued");
   });
-  it.each(["status", "conversation", "question"])("rechecks %s after reading the matching input", async change => {
+  it.each(["status", "conversation", "question"])("never types when %s changes while reading the matching input", async change => {
     await send(); pane.agent_status = "idle";
     readScreen.mockImplementation(async () => {
       if (change === "status") pane.agent_status = "blocked";
@@ -82,28 +100,50 @@ describe("queued phone delivery recovery", () => {
       if (change === "question") question.mockReturnValue({ question: "Continue?" });
       return input(text);
     });
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(sendKeys).not.toHaveBeenCalled();
     expect(store.status(id, target)).toMatchObject({ state: "failed", reason: expect.any(String) });
   });
-  it("confirms the one recovery Enter through the receiving conversation's hook", async () => {
+  it("confirms a submission hook during the finished window without typing", async () => {
     await send(); pane.agent_status = "idle";
-    sendKeys.mockImplementation(async () => { await store.submitted(target, text); });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await store.submitted(target, text);
     await vi.advanceTimersByTimeAsync(40_000);
-    expect(sendKeys).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, ["enter"]);
+    expect(sendKeys).not.toHaveBeenCalled();
     expect(store.status(id, target).state).toBe("delivered");
   });
   it("accepts a late submission after recovery stopped on login", async () => {
     await send(); pane.agent_status = "idle"; readScreen.mockResolvedValue(input("/login"));
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(store.status(id, target).state).toBe("failed");
     await store.submitted(target, text);
     expect(store.status(id, target).state).toBe("delivered");
     expect(sendKeys).not.toHaveBeenCalled();
   });
-  it("stops after 30 seconds of working, even if the pane later becomes idle", async () => {
-    await send(); await vi.advanceTimersByTimeAsync(31_000); pane.agent_status = "idle";
-    await vi.advanceTimersByTimeAsync(10_000);
+  it.each(["wrapped", "multiline", "collapsed"])("leaves a %s long paste for manual verification without expanding or submitting it", async shape => {
+    // Keep the recorded tmux frame and prompt separator, substituting only
+    // the composer body to exercise text not available as one visible row.
+    const words = shape === "wrapped" ? "Review the parser and explain every change" : "Review the parser\nand explain every change";
+    const shown = shape === "collapsed" ? "[Pasted text #1 +2 lines]"
+      : shape === "wrapped" ? "Review the parser and\n  explain every change" : words.replace("\n", "\n  ");
+    const reply = paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text: words, deliveryId: id }, {} as never);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(await reply).toMatchObject({ queued: true });
+    pane.agent_status = "idle"; readScreen.mockResolvedValue(input(shown));
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(store.status(id, target)).toMatchObject({ state: "failed", reason: expect.stringContaining("full message cannot be verified") });
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, words);
+    await store.submitted(target, words);
+    expect(store.status(id, target).state).toBe("delivered");
+  });
+  it("starts its bounded observation window after a legitimate long turn finishes", async () => {
+    await send(); await vi.advanceTimersByTimeAsync(120_000);
+    expect(store.status(id, target).state).toBe("queued");
+    pane.agent_status = "idle";
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(store.status(id, target).state).toBe("queued");
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(sendKeys).not.toHaveBeenCalled();
     expect(store.status(id, target)).toMatchObject({ state: "failed", reason: expect.any(String) });
   });
@@ -114,7 +154,7 @@ describe("immediate idle delivery recovery", () => {
     pane.agent_status = "idle";
     prompt.mockImplementation(async () => { pane.agent_status = status; readScreen.mockResolvedValue(input("/login")); });
     const reply = paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId: id }, {} as never);
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(await reply).toMatchObject({ deliveryUncertain: true, state: "failed", reason: expect.any(String) });
     expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, text);
     expect(sendKeys).not.toHaveBeenCalled();
@@ -127,7 +167,7 @@ it("observes an unacknowledged first prompt without adding a recovery Enter", as
   const { session: _session, ...place } = target;
   const starting = { ...place, starting: true, startingToken: "a".repeat(64) };
   const reply = paneRoute(context, new URL("http://phren.local/v1/prompt"), { target: starting, text, deliveryId: id }, {} as never);
-  await vi.advanceTimersByTimeAsync(10_000);
+  await vi.advanceTimersByTimeAsync(40_000);
   expect(await reply).toMatchObject({ deliveryUncertain: true, unsubmitted: true });
   expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, text);
   expect(sendKeys).not.toHaveBeenCalled();

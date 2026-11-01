@@ -245,33 +245,28 @@ async function deliveryPane(target: Target, terminal: unknown): Promise<Json> {
   return pane;
 }
 
-/** Only the original, still-unsettled text in the original idle conversation
- * may receive one recovery Enter. Every failed check stops recovery. */
-async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, id?: string, deadline = Infinity): Promise<DeliveryOutcome | "unsubmitted"> {
+/** Screen reads cannot authorize a later key write: neither tmux nor Herdr
+ * exposes an atomic Claude composer/identity/held-state check-and-submit.
+ * Observe the receipt and report what can be verified, without writing keys.
+ * In particular, expanding a collapsed paste with keys would have the same
+ * race and still would not expose authoritative full composer text. */
+async function observeIdleDelivery(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, id?: string): Promise<DeliveryOutcome | "unsubmitted"> {
   const fail = (reason: string) => { agentHooks.deliveries.fail(id, target, reason); return "unsubmitted" as const; };
   const guards = promptGuards(agentHooks, target);
   try {
     if (!id) return fail("No delivery identity is available; check the terminal.");
-    let pane = await deliveryPane(target, terminal);
-    // Working is observation only; no keys are sent while awaiting its hook.
+    const pane = await deliveryPane(target, terminal);
     if (pane.agent_status === "working" && !guards.held()) return await agentHooks.deliveries.awaitLate(target, text);
-    if (!["idle", "done"].includes(String(pane.agent_status))) return fail("The agent is not idle or done; recovery stopped.");
-    if (guards.held()) return fail("The agent has a held approval, question or terminal prompt; recovery stopped.");
+    if (!["idle", "done"].includes(String(pane.agent_status))) return fail("The agent is not idle or done; observation stopped.");
+    if (guards.held()) return fail("The agent has a held approval, question or terminal prompt; observation stopped.");
     const screen = await guards.screen();
-    if (screenDialog(target.source, screen) || !claudeInputMatches(screen, text)) return fail("The input box no longer contains exactly this message; recovery stopped.");
-    // Screen/identity reads yield: recheck the live binding, status, held input
-    // and exact delivery immediately before the only key write.
-    pane = await deliveryPane(target, terminal);
-    if (!["idle", "done"].includes(String(pane.agent_status)) || guards.held()) return fail("The agent's input state changed during recovery.");
+    // These are observations only. The owner or harness may change the input
+    // even before readScreen resolves; no screen result permits an Enter.
     if (!agentHooks.deliveries.pending(target, text, id)) return agentHooks.deliveries.status(id, target).state === "delivered" ? "delivered" : "unsubmitted";
-    if (Date.now() >= deadline) return fail("Delivery recovery expired after 30 seconds; check the terminal.");
-    const late = agentHooks.deliveries.awaitLate(target, text);
-    await terminalProvider().sendKeys(target.server, target.pane, ["enter"]);
-    const outcome = await late;
-    if (outcome !== "pending") return outcome;
-    return fail("The agent did not confirm the recovery submission; check the terminal.");
+    if (screenDialog(target.source, screen) || !claudeInputMatches(screen, text)) return fail("The full message cannot be verified in the input box; check the terminal.");
+    return fail("The message is visible but cannot be safely resubmitted; check and submit it in the terminal.");
   } catch (error) {
-    return fail(error instanceof Error ? error.message : "The recovery checks failed; check the terminal.");
+    return fail(error instanceof Error ? error.message : "The delivery checks failed; check the terminal.");
   }
 }
 
@@ -328,31 +323,33 @@ export function retryAfterSubagentView(agentHooks: AgentHooks, target: Target, t
     process.stderr.write(`phren hook: retrying phone message ${id} in the conversation after leaving the subagent view\n`);
     const expected = agentHooks.deliveries.expect(target, text, 1_500, undefined, id, typeof terminal === "string" ? terminal : undefined);
     await terminalProvider().prompt(target.server, target.pane, text);
-    if (await expected === "pending") await resubmitIfIdle(agentHooks, target, terminal, text, id);
+    if (await expected === "pending") await observeIdleDelivery(agentHooks, target, terminal, text, id);
   };
   const schedule = () => { const timer = setTimeout(() => void look().catch(() => undefined), intervalMs); timer.unref?.(); };
   schedule();
 }
 
-/** Observe a busy Claude delivery for at most 30 seconds. Two finished looks
- * permit one guarded recovery; unsafe or unreadable state ends the follow-up. */
+/** Observe while the original conversation works, then allow 30 seconds for
+ * its submission acknowledgement after it finishes. A new legitimate turn
+ * resets that window. No observation sends input to the terminal. */
 export function followQueuedDelivery(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, id?: string, intervalMs = 2_000): void {
-  const started = Date.now();
-  let finishedLooks = 0;
+  let finishedAt: number | undefined;
   const fail = (reason: string) => agentHooks.deliveries.fail(id, target, reason);
   const look = async () => {
     if (!id || !agentHooks.deliveries.pending(target, text, id)) return;
-    if (Date.now() - started >= 30_000) { fail("Delivery recovery expired after 30 seconds; check the terminal."); return; }
     try {
       const pane = await deliveryPane(target, terminal);
       const status = String(pane.agent_status);
       if (promptGuards(agentHooks, target).held() || !["working", "idle", "done"].includes(status)) {
-        fail("The agent needs input or its status is unknown; recovery stopped."); return;
+        fail("The agent needs input or its status is unknown; observation stopped."); return;
       }
-      finishedLooks = status === "idle" || status === "done" ? finishedLooks + 1 : 0;
-      if (finishedLooks >= 2) { await resubmitIfIdle(agentHooks, target, terminal, text, id, started + 30_000); return; }
+      if (status === "working") finishedAt = undefined;
+      else {
+        finishedAt ??= Date.now();
+        if (Date.now() - finishedAt >= 30_000) { await observeIdleDelivery(agentHooks, target, terminal, text, id); return; }
+      }
       schedule();
-    } catch { fail("The terminal or conversation could not be verified; recovery stopped."); }
+    } catch { fail("The terminal or conversation could not be verified; observation stopped."); }
   };
   const schedule = () => { const timer = setTimeout(() => void look(), intervalMs); timer.unref?.(); };
   schedule();
@@ -625,7 +622,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // Only Claude confirms plain prompts through its hook, and a slash
     // command opens a menu that a second Enter would answer.
     if (outcome === "pending" && target.source === "claude" && !text.trim().startsWith("/")) {
-      if (!busy) outcome = await resubmitIfIdle(agentHooks, target, pane.terminal_id, text, deliveryId);
+      if (!busy) outcome = await observeIdleDelivery(agentHooks, target, pane.terminal_id, text, deliveryId);
       else followQueuedDelivery(agentHooks, target, pane.terminal_id, text, deliveryId);
     }
     if (deliveryId && target.source === "claude" && outcome !== "delivered") retryAfterSubagentView(agentHooks, target, pane.terminal_id, text, deliveryId);
