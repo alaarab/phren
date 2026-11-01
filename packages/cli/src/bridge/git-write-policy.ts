@@ -4,7 +4,7 @@ import type { IncomingHttpHeaders } from "node:http";
 // once the warning counts show no older clients (owner-approved 2026-10-14).
 export const EXPECTED_REPOSITORY_REQUIRED = false;
 
-const WRITE_ROUTES = new Set(["stage", "unstage", "discard", "commit", "push", "pr", "pr/merge", "host-token", "checkout", "fetch", "pull", "apply"]
+const WRITE_ROUTES = new Set(["checkpoints", "checkpoints/preview", "checkpoints/restore", "stage", "unstage", "discard", "commit", "push", "pr", "pr/merge", "host-token", "checkout", "fetch", "pull", "apply"]
   .map(action => `/v1/git/${action}`));
 
 export const isGitWriteRoute = (route: string): boolean => WRITE_ROUTES.has(route);

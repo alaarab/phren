@@ -34,6 +34,28 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 
 ## Paths phren may write
 
+### Hook turn checkpoints (Git module)
+
+In linked Git worktrees only, prompt/Stop hooks write raw file blobs and parentless
+snapshot commits to the repository's common Git object database. Private refs live
+under `refs/phren/checkpoints/<sha256-worktree-root>/<sha256-provider-session>/<checkpoint-uuid>`.
+They are local repository data, outside the Phren store, and may contain untracked
+non-ignored file contents and a 240-character prompt excerpt. Git does not push
+these refs by default. Each worktree/conversation retains at most 50 checkpoint
+refs (including recovery snapshots); older refs are deleted atomically with the
+new ref, and ordinary Git garbage collection can reclaim their objects. Removing
+a worktree does not remove its refs: they remain until explicitly deleted with
+`git update-ref -d <ref>` (list with `git for-each-ref refs/phren/checkpoints/`).
+
+The worktree's private Git admin directory holds a transient
+`phren-checkpoint-*/index` and `phren-checkpoint.lock` during operations; both are
+removed on completion/failure. A process crash can leave these behind; after
+ensuring no checkpoint operation runs, they can be removed manually. Capture has
+a 300 ms Git budget and logs one generic warning per Hook process on failure.
+An explicit restore writes/deletes only validated repository-relative working
+files, preserving ignored files. It creates a recovery checkpoint first. Neither
+capture nor restore changes the user's index, HEAD, branch or stash refs.
+
 ### Desktop account warnings
 
 - `$XDG_CONFIG_HOME/phren/desktop-quota.json` (default

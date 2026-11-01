@@ -1718,6 +1718,99 @@ and carry `phren_change_errors: {toolUseId: {error, code}}` when capture fails;
 clients can show that message beside the result. Its patch rows add `binary` and
 `truncated`, and more than 40 changed files is an explicit output-limit error.
 
+### Turn checkpoints and file restore
+
+Advertised as `capabilities.turnCheckpoints: true` in Hook health/hello when the
+Git module is enabled. These are **files-only** operations: they never rewind a
+conversation or alter messages, HEAD, the branch, the user's index or stash list.
+Only a pane whose repository is a linked Git worktree is eligible; the main
+checkout and non-repository folders take no snapshots. Submodules and nested Git
+repositories are unsupported. No installation, dependency or store is required
+beyond the existing Hook/Git module.
+
+All three routes use `POST`, JSON bodies, the same owner authentication and module
+scope as the Git write routes, and the full session `target` (server, workspace,
+tab, pane, source, session). They accept `expectedRepository` with the existing
+Git write semantics; clients should always send the absolute `repository` returned
+by the latest Changes/list/preview response. `child` and `worktree` selectors are
+400: checkpoints belong to this pane's own checkout and provider/conversation.
+A checkpoint id from another checkout/conversation is 404. No client-supplied
+filesystem path or Git ref is accepted.
+
+| Route | Additional request fields | Success response (HTTP 200) |
+| --- | --- | --- |
+| `/v1/git/checkpoints` | none | `{state: "ready", repository, limit: 50, checkpoints: [...]}`, newest first; or `{state: "not-isolated", limit: 50, checkpoints: []}` outside a linked worktree. |
+| `/v1/git/checkpoints/preview` | `checkpointId` (UUID string) | `{state: "ready", repository, checkpointId, files: [{path, status}], token}`. `status` is `A` (would create), `M` (would replace bytes, mode or type), or `D` (would delete), relative to the **current** working tree. Renames appear as delete/add. `files: []` means no change. |
+| `/v1/git/checkpoints/restore` | `checkpointId`, `token` (the opaque preview string) | `{ok: true, checkpointId, recoveryId, files: [{path, status}]}`. `recoveryId` identifies the pre-restore tree, for Undo restore. |
+
+Every checkpoint row has these required fields:
+
+| Field | Type and meaning |
+| --- | --- |
+| `id` | UUID string, opaque checkpoint selector; never a Git SHA. |
+| `turn` | Nonnegative integer: this conversation's prompt event sequence from the Hook turn record (fallback: Stop event sequence when the prompt was not observed). Gaps are valid; this is not a transcript message index. Recovery rows carry the restored checkpoint's turn. |
+| `boundary` | `"prompt"`, `"stop"` or `"recovery"`. |
+| `at` | UTC ISO 8601 timestamp when captured. |
+| `prompt` | Prompt excerpt, at most 240 characters, control characters replaced by spaces; empty when unavailable. Stop snapshots use their turn’s prompt excerpt (empty if unavailable after restart). Recovery rows say `"Before restore"`. |
+| `filesChanged` | Integer count of paths changed since the preceding retained snapshot at creation, or HEAD for the first snapshot. Renames count as two paths. This is historical metadata; use preview for the current restore delta. |
+
+Captures are driven by `UserPromptSubmit`/`Stop` lifecycle callbacks; a harness
+that supplies only activity stamps produces no checkpoints.
+Prompt-submitted and turn-stopped callbacks try to capture tracked and untracked
+non-ignored files, including raw binary/CRLF bytes, symlinks and executable modes,
+without applying Git filters. Empty directories are not represented. An unchanged
+tree reuses the prior checkpoint and its original id/row; it does not add an empty
+turn row. Capture is best effort, has a 300 ms total Git budget, skips busy/failed
+captures, and never fails the agent callback. Missing rows do not imply missing
+messages. At most 50 rows/refs per worktree and conversation are retained, including
+recovery rows; pruned ids return 404. Listings survive Hook restart; preview tokens
+do not. The current tree token covers file contents, paths, types and modes, not
+ignored files or index-only edits.
+
+For “Restore files to here”, preview the selected id, show `files`, and pass the
+returned `token` and id to restore. For “Undo restore”, preview `recoveryId`, then
+restore it using its new token; undo uses the same guards. Restore replaces and
+deletes non-ignored working files to match the snapshot, creates a recovery row
+before any file writes (even for an empty delta), and leaves ignored files alone.
+An ignored path that obstructs a replacement causes refusal. All returned paths
+are repository-relative; absolute paths, traversal, `.git` components and symlink
+parent escapes are prohibited. File/directory and symlink replacements are
+supported without following symlinks outside the worktree.
+
+Errors use `{error, code, ...}`:
+
+| HTTP | `code` | Client action |
+| --- | --- | --- |
+| 409 | `checkpoint-not-isolated` | Preview/restore unavailable here; list instead returns `state: "not-isolated"`. |
+| 409 | `checkpoint-working` | Wait for the agent, live awaited background work and running child agents to stop. Unknown/waiting/blocked pane status also refuses writes conservatively. |
+| 409 | `checkpoint-stale` | Current files differ from preview, token missing/invalid, or Hook restarted; preview again. |
+| 409 | `checkpoint-busy` | Another checkpoint operation holds this worktree; retry. |
+| 409 | `checkpoint-obstructed` | Ignored files or unsafe parent paths obstruct restore; resolve locally, then preview again. |
+| 409 | `checkpoint-unsafe-path` / `checkpoint-unsupported-tree` | Unsafe paths or nested repositories/submodules; no restore available. |
+| 404 | `checkpoint-not-found` | Id was pruned or belongs elsewhere; refresh the list. |
+| 413 | `checkpoint-output-limit` | Preparation exceeded 8 MiB per command/blob or 64 MiB of restored file data; restore locally. |
+| 504 | `checkpoint-timeout` | Preparation exceeded its 15 second Git budget; retry when idle. |
+| 503 | `checkpoint-failed` | Git/file preparation failed; retry when the repository is idle. |
+| 503 | `checkpoint-restore-failed` | File I/O could not finish; response includes `recoveryId` for recovery through the same preview/restore flow. |
+
+The ordinary `git-checkout-changed` precondition and request validation errors
+also apply. Preparation reads are bounded to 15 seconds and 8 MiB per command/blob;
+Restored file data also has a 64 MiB aggregate limit. Git/I/O failures never return an empty success. Guards are rechecked after
+preparation and immediately before file writes. Turn records are considered only
+when terminal, provider and session match the freshly validated pane. Background
+work uses transcript completion evidence and the same two-hour stale-count limit
+as session status; finishing work needs no additional Stop callback. A synchronous
+activity-generation check after the final awaited guard refuses restore if work
+or an input request arrived during preparation, even before status or turn records
+reach disk. This includes `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+`PreCompact` and `PermissionRequest`, covering automatic work resumed without a
+new prompt.
+Restore is not an atomic
+filesystem transaction against unrelated external editors: the phone must refresh
+after an error; a recovery snapshot remains available if a write fails. A refused
+restore during preparation can still leave a recovery row, which counts toward
+the retention limit.
+
 ### Commit, push and pull request
 
 Each takes the session's full target, optional `child` or `worktree`, and the

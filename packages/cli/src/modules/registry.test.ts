@@ -159,6 +159,7 @@ describe("built-in registration declarations", () => {
       + source("bridge/server-pane-routes.ts");
     const currentPosts = new Set([...postBlock.matchAll(/url.pathname === "(\/v1\/[^\"]+)"/g)].map(match => match[1]));
     for (const operation of ["create", "focus", "rename", "close"]) currentPosts.add(`/v1/workspaces/${operation}`);
+    for (const operation of ["preview", "restore"]) currentPosts.add(`/v1/git/checkpoints/${operation}`);
     for (const route of storeRoutes("POST")) currentPosts.add(route);
     // Routed before the per-method blocks, beside the other /v1/store/ prefix routes.
     currentPosts.add("/v1/store/pull-now");

@@ -1,3 +1,4 @@
+import { checkpointRoute } from "./checkpoints.js";
 import type { IncomingHttpHeaders, ServerResponse } from "node:http";
 import { EXPECTED_REPOSITORY_REQUIRED, isGitWriteRoute, type GitWriteDiagnostics } from "./git-write-policy.js";
 import path from "node:path";
@@ -706,6 +707,8 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
   else if (url.pathname.startsWith("/v1/git/")) {
     // Git routes read the pane's repository, or a spawned child's own
     // worktree, exactly as /v1/diff resolves it.
+    const checkpoint = url.pathname.startsWith("/v1/git/checkpoints");
+    if (checkpoint && (data.child !== undefined || data.worktree !== undefined)) throw new BridgeError(400, "Checkpoints belong to the pane checkout; child and worktree selectors are unsupported.");
     let cwd = await gitRepository(pane, target, data.child, data.worktree);
     if (isGitWriteRoute(url.pathname)
       && data.expectedRepository !== undefined) {
@@ -714,7 +717,13 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       if (root !== expected) throw new BridgeError(409, "This pane's checkout changed. Refresh Changes before writing.", { code: "git-checkout-changed" });
       cwd = root; // Execute in the validated root, never a path selected by the client.
     }
-    if (url.pathname === "/v1/git/status") result = await gitStatus(cwd, z.string().min(1).max(4096).optional().parse(data.untrackedPath));
+    if (checkpoint) result = await checkpointRoute(cwd, target, url.pathname === "/v1/git/checkpoints" ? "list" : url.pathname.slice("/v1/git/checkpoints/".length), data,
+      async () => {
+        const current = await validateTarget(target, false, true);
+        if (await gitRoot(await trustedDirectory(current)) !== await gitRoot(cwd)) throw new BridgeError(409, "This pane’s checkout changed. Refresh Changes before writing.", { code: "git-checkout-changed" });
+        return current;
+      });
+    else if (url.pathname === "/v1/git/status") result = await gitStatus(cwd, z.string().min(1).max(4096).optional().parse(data.untrackedPath));
     else if (url.pathname === "/v1/git/worktrees") result = await gitWorktrees(cwd, await worktreeWorkers(target));
     else if (url.pathname === "/v1/git/log") result = await gitLog(cwd, z.coerce.number().int().min(1).max(200).optional().parse(data.limit) ?? 60, z.string().min(1).max(512).optional().parse(data.ref));
     else if (url.pathname === "/v1/git/branches") result = await gitBranches(cwd);
