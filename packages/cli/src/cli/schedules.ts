@@ -45,6 +45,7 @@ function projectDirectory(store: string, name: string): string {
 }
 
 function scheduleDescription(schedule: Schedule): string {
+  if (schedule.every === "event") return `on ${schedule.event}${schedule.filters?.length ? ` where ${schedule.filters.map(filter => `${filter.path}=${JSON.stringify(filter.equals)}`).join(", ")}` : ""}${schedule.coalesceSeconds ? ` (coalesce ${schedule.coalesceSeconds}s)` : ""}`;
   if (schedule.every === "interval") return `every ${schedule.interval}`;
   if (schedule.every === "daily") return `daily at ${schedule.at}`;
   if (schedule.every === "weekly") return `${schedule.days!.join(",")} at ${schedule.at}`;
@@ -97,6 +98,9 @@ async function add(store: string, args: string[]): Promise<void> {
     ...(option(args, "--days") ? { days: option(args, "--days")!.split(",").map(day => day.trim().toLowerCase()) as Weekday[] } : {}),
     ...(option(args, "--interval") ? { interval: option(args, "--interval") } : {}),
     ...(option(args, "--once") ? { once: option(args, "--once") } : {}),
+    ...(every === "event" ? { event: option(args, "--event"),
+      ...(option(args, "--filters") ? { filters: JSON.parse(option(args, "--filters")!) } : {}),
+      ...(option(args, "--coalesce-seconds") ? { coalesceSeconds: Number(option(args, "--coalesce-seconds")) } : {}) } : {}),
     ...(option(args, "--cron") ? { cron: option(args, "--cron") } : {}),
   };
   if (schedule.days?.some(day => !WEEKDAYS.includes(day))) throw new Error(`--days accepts: ${WEEKDAYS.join(", ")}.`);
@@ -162,7 +166,7 @@ async function history(args: string[]): Promise<void> {
   const result = await hookPost("/v1/schedules/history", { ...(project ? { project } : {}), ...(option(args, "--id") ? { id: option(args, "--id") } : {}), ...(limit ? { limit } : {}) });
   const runs = Array.isArray(result.runs) ? result.runs.map(object) : [];
   if (!runs.length) { console.log("No schedule runs."); return; }
-  for (const run of runs) console.log(`${String(run.startedAt)}  ${String(run.status).padEnd(9)}  ${String(run.project)}/${String(run.scheduleId)}${run.reason ? `  ${String(run.reason)}` : ""}`);
+  for (const run of runs) console.log(`${String(run.startedAt)}  ${String(run.status).padEnd(9)}  ${String(run.project)}/${String(run.scheduleId)}${run.outcome ? `  ${String(run.outcome)} ${String(object(run.trigger).event)} (${String(object(run.trigger).deliveryId)})` : ""}${run.reason ? `  ${String(run.reason)}` : ""}`);
 }
 
 export async function handleScheduleCommand(args: string[], store: string): Promise<number> {

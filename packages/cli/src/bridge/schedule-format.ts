@@ -11,9 +11,9 @@ import { tryFileLock } from "../governance/locks.js";
 import { isAccountSlug } from "./claude-accounts.js";
 
 /** The schedules.yaml store: the schedule and run record shapes, validation,
- * the five timing forms evaluated in local time, and the run history file. */
+ * the five time forms evaluated in local time and event triggers, and the run history file. */
 
-export const SCHEDULE_EVERY = ["interval", "daily", "weekly", "once", "cron"] as const;
+export const SCHEDULE_EVERY = ["interval", "daily", "weekly", "once", "cron", "event"] as const;
 export const SCHEDULE_HARNESSES = ["claude", "codex", "opencode", "copilot"] as const;
 export const SCHEDULE_NOTIFY = ["start", "finish", "failure"] as const;
 export const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -50,6 +50,9 @@ export interface Schedule {
   interval?: string;
   once?: string;
   cron?: string;
+  event?: string;
+  filters?: { path: string; equals: string | number | boolean | null }[];
+  coalesceSeconds?: number;
   prompt: string;
   createdAt: string;
   updatedAt: string;
@@ -78,6 +81,10 @@ export interface ScheduleRun {
   finishedAt?: string;
   status: ScheduleRunStatus;
   reason?: string;
+  trigger?: { event: string; deliveryId: string };
+  outcome?: "accepted" | "ignored" | "duplicate" | "coalesced";
+  /** Only referenced scalar fields, capped and credential-redacted. */
+  fields?: Record<string, string>;
   blockedStartupPrompt?: string;
   blockNotified?: boolean;
   notified?: boolean;
@@ -159,6 +166,13 @@ export function intervalMilliseconds(value: string): number {
   return milliseconds;
 }
 
+export const eventNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/);
+export const payloadPathSchema = z.string().max(200).regex(/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\.\d+)*$/)
+  .refine(value => !value.split(".").some(part => ["__proto__", "prototype", "constructor"].includes(part)));
+export const eventFiltersSchema = z.array(z.object({ path: payloadPathSchema,
+  equals: z.union([z.string().max(1024), z.number().finite(), z.boolean(), z.null()]),
+}).strict()).max(16);
+
 export function parseSchedule(value: unknown): Schedule {
   const raw = object(value);
   const every = z.enum(SCHEDULE_EVERY).parse(raw.every);
@@ -188,6 +202,11 @@ export function parseSchedule(value: unknown): Schedule {
   if (every === "interval") { schedule.interval = singleLine(32).parse(raw.interval); intervalMilliseconds(schedule.interval); }
   if (every === "once") schedule.once = validateLocalTimestamp(singleLine(32).parse(raw.once));
   if (every === "cron") { schedule.cron = singleLine(200).parse(raw.cron); parseCron(schedule.cron); }
+  if (every === "event") {
+    schedule.event = eventNameSchema.parse(raw.event);
+    if (raw.filters !== undefined) schedule.filters = eventFiltersSchema.parse(raw.filters);
+    if (raw.coalesceSeconds !== undefined) schedule.coalesceSeconds = z.number().int().min(0).max(86400).parse(raw.coalesceSeconds);
+  }
   return schedule;
 }
 
@@ -214,10 +233,11 @@ export function readScheduleDocumentSync(projectDir: string): ScheduleDocument {
 
 function parseScheduleDocument(text: string): ScheduleDocument {
   const document = object(yaml.load(text, { schema: yaml.CORE_SCHEMA }));
-  if (document.version !== 1) throw new Error("schedules.yaml must have version: 1.");
+  if (document.version !== 1 && document.version !== 2) throw new Error("schedules.yaml must have version: 1 or 2.");
   if (!Array.isArray(document.schedules)) throw new Error("schedules.yaml must contain a schedules list.");
   if (document.schedules.length > MAX_SCHEDULES) throw new Error(`A project can have at most ${MAX_SCHEDULES} schedules.`);
   const schedules = document.schedules.map(parseSchedule);
+  if (document.version === 1 && schedules.some(item => item.every === "event")) throw new Error("Event schedules require version: 2.");
   if (new Set(schedules.map(item => item.id)).size !== schedules.length) throw new Error("Schedule IDs must be unique within a project.");
   return { document, schedules };
 }
@@ -268,7 +288,7 @@ export function writeScheduleDocumentSync(projectDir: string, schedules: Schedul
 function serializeScheduleDocument(schedules: Schedule[], original: Record<string, unknown>): string {
   if (schedules.length > MAX_SCHEDULES) throw new Error(`A project can have at most ${MAX_SCHEDULES} schedules.`);
   schedules.forEach(parseSchedule);
-  return yaml.dump({ ...original, version: 1, schedules }, { lineWidth: 1000, noRefs: true, sortKeys: false });
+  return yaml.dump({ ...original, version: schedules.some(item => item.every === "event") || original.version === 2 ? 2 : 1, schedules }, { lineWidth: 1000, noRefs: true, sortKeys: false });
 }
 
 export function canonicalComputer(value: string): string {
@@ -375,6 +395,7 @@ function localDate(value: string): Date | null {
 }
 
 export function nextRun(schedule: Schedule, lastRun?: ScheduleRun): Date | null {
+  if (schedule.every === "event") return null;
   if (schedule.every === "once") return lastRun ? null : localDate(schedule.once!);
   const after = new Date(lastRun?.startedAt ?? schedule.createdAt);
   if (!Number.isFinite(after.getTime())) return null;
@@ -435,7 +456,22 @@ export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
 export async function writeScheduleRuns(file: string, runs: ScheduleRun[]): Promise<void> {
   // Open children still block their owner. Keep entire retained batches so
   // trimming cannot hide a sibling's failure from the aggregate status.
+  const counts = new Map<string, number>();
+  const retained = new Set(runs.filter(run => run.outcome && run.outcome !== "accepted").reverse().filter(run => {
+    const key = `${run.scheduleProject ?? run.project}/${run.scheduleId}`, count = (counts.get(key) ?? 0) + 1;
+    counts.set(key, count); return count <= 50;
+  }).map(run => run.id));
+  runs = runs.filter(run => !run.outcome || run.outcome === "accepted" || retained.has(run.id));
   const recent = new Set(runs.slice(-MAX_RUNS).map(run => run.id));
+  // History noise must not erase an event schedule's coalescing watermark.
+  // A window is at most 24 hours; retain the latest accepted batch per owner
+  // within that horizon, measured against the newest recorded event/run.
+  const newest = runs.reduce((time, run) => Math.max(time, Date.parse(run.startedAt) || 0), 0);
+  const accepted = new Map<string, ScheduleRun>();
+  for (const run of runs) if (run.outcome === "accepted" && Date.parse(run.startedAt) >= newest - 86400_000) {
+    accepted.set(`${run.scheduleProject ?? run.project}/${run.scheduleId}`, run);
+  }
+  for (const run of accepted.values()) recent.add(run.id);
   const batches = new Set(runs.filter(run => recent.has(run.id) || runningStatuses.has(run.status))
     .map(run => run.batchId).filter((id): id is string => Boolean(id)));
   const kept = runs.filter(run => recent.has(run.id) || runningStatuses.has(run.status) || (run.batchId && batches.has(run.batchId)));

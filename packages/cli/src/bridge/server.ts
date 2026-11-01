@@ -254,7 +254,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }
 
   const storePulls = new StorePulls(scheduleStore);
-  const gitboyWebhooks = new GitboyWebhooks(root, storeId => storePulls.request(storeId));
+  const gitboyWebhooks = new GitboyWebhooks(root, storeId => storePulls.request(storeId), undefined,
+    scheduler ? event => scheduler.ingestEvent(event) : undefined);
   const stopRetention = modules.has("git") ? await startChangeRetention() : () => {};
   if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
   const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, settingsSwitcher, info, activeCapabilities });

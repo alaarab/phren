@@ -75,6 +75,7 @@ import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
 import { type AccountUsageReader, capacityRoom, usageForCaller } from "./usage.js";
 import type { ResourceMonitor } from "./resources.js";
+import { SCHEDULE_EVENT_BODY_CAP } from "./schedule-events.js";
 import type { Scheduler } from "./schedules.js";
 import { updateScheduleRoute } from "./schedule-update.js";
 import { readFinalTurn } from "./schedule-watch.js";
@@ -221,7 +222,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
-  if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; }
+  if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; result.scheduleEvents = true; }
   if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
   return result;
 }
@@ -240,11 +241,11 @@ async function codePackageStatus(store: string, enabled: boolean): Promise<Recor
   return code && from ? { loadedFrom: from } : { missing: true };
 }
 
-async function body(request: IncomingMessage): Promise<Json> {
+async function body(request: IncomingMessage, cap = 11_500_000): Promise<Json> {
   let size = 0; const chunks: Buffer[] = [];
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 11_500_000) throw new BridgeError(413, "Request is too large.");
+    if (size > cap) throw new BridgeError(413, "Request is too large.");
     chunks.push(chunk);
   }
   return object(JSON.parse(Buffer.concat(chunks).toString() || "{}"));
@@ -864,7 +865,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           default: throw new BridgeError(404, "Unknown Phren Hook route.");
         }
       } else if (request.method === "POST") {
-        const data = await body(request);
+        const data = await body(request, url.pathname === "/v1/schedules/events" ? SCHEDULE_EVENT_BODY_CAP : undefined);
         if (url.pathname.startsWith("/v1/conductor/move/")) await ctx.succession!.authorize(z.string().uuid().parse(data.id), requestPeer(request), url.pathname.endsWith("/prepare") ? z.string().uuid().parse(data.originId) : undefined);
         const executeConductor: ConductorExecutor = async (action, payload, origin, remote = false) => {
           if (action === "dispatch") return dispatches!.dispatch(payload, { server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane });
@@ -1019,6 +1020,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             expectedUpdatedAt: z.string().datetime({ offset: true }).optional() }).parse(data);
           const runs = await scheduler!.launchNow(input.project, input.id, false, input.expectedUpdatedAt);
           result = { ok: runs.every(run => run.status !== "failed"), run: runs[0], runs };
+        } else if (url.pathname === "/v1/schedules/events") {
+          result = await scheduler!.ingestEvent(data);
         } else if (url.pathname === "/v1/schedules/update") {
           result = await updateScheduleRoute(scheduleStore, data);
         } else if (url.pathname === "/v1/schedules/history") {

@@ -1,21 +1,30 @@
-import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
 import { localNames, stableComputerName } from "./computer-names.js";
 import path from "node:path";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
-import { BridgeError } from "./protocol.js";
+import { parseScheduleEvent, scheduleEventPrompt, type ScheduleEvent } from "./schedule-events.js";
+import { atomicInPrivateDir, BridgeError } from "./protocol.js";
 import { scheduleProblems } from "./schedule-problems.js";
+import { redactSecretsForLog } from "../content/secrets.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { getProjectDirs } from "../shared.js";
 import {
   computerMatches, latestScheduleBatch, nextRun, readScheduleDocument, readScheduleRuns, reusableLaunches, runningStatuses, scheduleNotifications, scheduleSessionRoute,
   readScheduleDocumentSync, withScheduleLock, writeScheduleDocumentSync, writeScheduleRuns,
-  type Schedule, type ScheduleLauncher, type ScheduleNotify, type ScheduleRun, type ScheduleRunOutcome, type SchedulePushSender, type ScheduleStatus,
+  type Schedule, type ScheduleLaunchRecord, type ScheduleLauncher, type ScheduleNotify, type ScheduleRun, type ScheduleRunOutcome, type SchedulePushSender, type ScheduleStatus,
 } from "./schedule-format.js";
 
 export * from "./schedule-format.js";
 export * from "./schedule-launch.js";
 export * from "./schedule-watch.js";
+
+interface PreparedSchedule {
+  schedule: Schedule;
+  children: { project: string; projectDir: string; cwd: string; reuse?: ScheduleLaunchRecord[]; run: ScheduleRun }[];
+  decisions?: ScheduleRun[];
+}
+type ReceivedScheduleEvent = ScheduleEvent & { duplicate: boolean; receivedAt: string };
 
 export class Scheduler {
   private readonly now: () => Date;
@@ -31,6 +40,7 @@ export class Scheduler {
   private readonly revisionWaitMs: number;
   private serial: Promise<void> = Promise.resolve();
   private ticking = false;
+  private eventSerial: Promise<unknown> = Promise.resolve();
   private readonly dispatching = new Set<string>();
   /** Runs this process launched; any other open run was left by an earlier Hook. */
   private readonly own = new Set<string>();
@@ -92,6 +102,7 @@ export class Scheduler {
           lastRun: last ? { startedAt: last.startedAt, ...(last.finishedAt ? { finishedAt: last.finishedAt } : {}), status: last.status,
             ...(last.batchId ? { batchId: last.batchId, scheduleProject: last.scheduleProject } : {}),
             ...(last.reason ? { reason: last.reason } : {}),
+            ...(last.trigger ? { trigger: last.trigger, outcome: last.outcome, fields: last.fields } : {}),
             ...(last.blockedStartupPrompt ? { blockedStartupPrompt: last.blockedStartupPrompt } : {}),
             ...(last.blockNotified !== undefined ? { blockNotified: last.blockNotified } : {}), launch: last.launch } : null, running });
       }
@@ -103,6 +114,70 @@ export class Scheduler {
     const limit = Math.min(500, Math.max(1, filters.limit ?? 50));
     return (await readScheduleRuns(this.runsFile)).filter(run => (!filters.project || (run.scheduleProject ?? run.project).toLowerCase() === filters.project.toLowerCase())
       && (!filters.id || run.scheduleId === filters.id)).slice(-limit).reverse();
+  }
+
+  /** Delivery IDs are Hook-wide, independent of the bounded run history. */
+  ingestEvent(body: unknown): Promise<{ ok: true; duplicate: boolean; runs: ScheduleRun[] }> {
+    const receivedAt = this.now().toISOString(), event = parseScheduleEvent(body);
+    const work = this.eventSerial.catch(() => undefined).then(async () => {
+      const duplicate = await this.exclusive(async () => {
+        const file = `${this.runsFile}.deliveries.json`;
+        let ids: string[];
+        try {
+          const value: unknown = JSON.parse(await readFile(file, "utf8"));
+          if (!Array.isArray(value) || !value.every(id => typeof id === "string")) throw new Error("Invalid schedule delivery ledger.");
+          ids = value;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          ids = [];
+        }
+        const key = createHash("sha256").update(event.deliveryId).digest("hex");
+        if (ids.includes(key)) return true;
+        await atomicInPrivateDir(file, JSON.stringify([...ids, key].slice(-1000)) + "\n");
+        return false;
+      });
+      const runs: ScheduleRun[] = [], launches: PreparedSchedule[] = [];
+      const failures: { run: ScheduleRun; schedule: Schedule }[] = [];
+      for (const directory of this.projectDirectories()) {
+        let schedules: Schedule[];
+        try { schedules = (await readScheduleDocument(directory)).schedules; } catch { continue; }
+        for (const schedule of schedules) {
+          if (schedule.every !== "event" || schedule.event !== event.event || !this.owns(schedule)) continue;
+          const project = path.basename(directory), received = { ...event, duplicate, receivedAt };
+          let prepared: PreparedSchedule | undefined;
+          try { prepared = await this.prepareRun(project, schedule.id, false, undefined, received); }
+          catch (error) {
+            // A definition with unavailable targets must not consume the event
+            // for its healthy siblings. Persist its own failed attempt first.
+            const failed: ScheduleRun = { id: randomUUID(), scheduleId: schedule.id, project, scheduleProject: project,
+              startedAt: receivedAt, finishedAt: this.now().toISOString(), status: "failed", outcome: "accepted",
+              trigger: { event: event.event, deliveryId: event.deliveryId }, launch: { mode: "headless" },
+              fields: scheduleEventPrompt(schedule, event).fields,
+              reason: redactSecretsForLog(error instanceof Error ? error.message : "Schedule preparation failed.").slice(0, 1000) };
+            await this.exclusive(async () => writeScheduleRuns(this.runsFile, [...await readScheduleRuns(this.runsFile), failed]));
+            runs.push(failed);
+            failures.push({ run: failed, schedule });
+            continue;
+          }
+          if (!prepared) continue;
+          runs.push(...prepared.decisions ?? prepared.children.map(child => child.run));
+          if (prepared.children.length) launches.push(prepared);
+        }
+      }
+      return { response: { ok: true as const, duplicate, runs }, launches, failures };
+    });
+    // Serialize only ledger updates and durable reservations. External worker
+    // startup is independent of later deliveries and their acknowledgements.
+    this.eventSerial = work.then(() => undefined, () => undefined);
+    return work.then(({ response, launches, failures }) => {
+      for (const { run, schedule } of failures) void this.notifyRun(run, schedule, "scheduleFailed").catch(() => {
+        this.log(`[schedule] Could not record preparation failure notification for ${run.id}.`);
+      });
+      for (const prepared of launches) void this.launchPrepared(prepared).catch(() => {
+        this.log(`[schedule] Could not persist event launch results for ${prepared.schedule.id}.`);
+      });
+      return response;
+    });
   }
 
   async launchNow(projectName: string, id: string, onlyIfDue = false, expectedUpdatedAt?: string): Promise<ScheduleRun[]> {
@@ -129,16 +204,42 @@ export class Scheduler {
   }
 
   private async prepareAndLaunch(projectName: string, id: string, onlyIfDue: boolean, expectedUpdatedAt?: string): Promise<ScheduleRun[]> {
-    const prepared = await this.exclusive(async () => {
+    return this.launchPrepared(await this.prepareRun(projectName, id, onlyIfDue, expectedUpdatedAt));
+  }
+
+  private async prepareRun(projectName: string, id: string, onlyIfDue: boolean, expectedUpdatedAt?: string,
+    event?: ReceivedScheduleEvent): Promise<PreparedSchedule | undefined> {
+    return this.exclusive(async () => {
       const projectDir = this.projectDirectory(projectName), project = path.basename(projectDir);
-      const file = await readScheduleDocument(projectDir), schedule = file.schedules.find(item => item.id === id);
-      if (!schedule) throw new BridgeError(404, `Schedule "${id}" was not found in ${project}.`);
+      const file = await readScheduleDocument(projectDir);
+      const stored = file.schedules.find(item => item.id === id);
+      if (!stored) throw new BridgeError(404, `Schedule "${id}" was not found in ${project}.`);
+      let schedule: Schedule = stored;
       if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== schedule.updatedAt) {
         throw new BridgeError(409, "This computer has a different schedule revision. Wait for store sync to finish, refresh the schedule, and try Run now again.");
       }
       if (!this.owns(schedule)) throw new BridgeError(409, `${schedule.computer} owns this schedule; run it from that computer.`);
       const runs = await readScheduleRuns(this.runsFile);
       const matching = runs.filter(run => (run.scheduleProject ?? run.project) === project && run.scheduleId === id);
+      let eventFields: Record<string, string> | undefined;
+      if (event) {
+        // Recheck the current definition after ingestion's snapshot.
+        if (schedule.every !== "event" || schedule.event !== event.event) return undefined;
+        const rendered = scheduleEventPrompt(schedule, event);
+        eventFields = rendered.fields;
+        const lastAccepted = matching.filter(run => run.outcome === "accepted").at(-1);
+        const outcome = event.duplicate ? "duplicate" : !schedule.enabled || !rendered.matches ? "ignored"
+          : lastAccepted && Date.parse(event.receivedAt) - Date.parse(lastAccepted.startedAt) < (schedule.coalesceSeconds ?? 0) * 1000 ? "coalesced"
+          : matching.some(run => runningStatuses.has(run.status)) ? "ignored" : "accepted";
+        if (outcome !== "accepted") {
+          const run: ScheduleRun = { id: randomUUID(), scheduleId: id, project, scheduleProject: project,
+            startedAt: event.receivedAt, finishedAt: event.receivedAt, status: "skipped", launch: { mode: "headless" },
+            trigger: { event: event.event, deliveryId: event.deliveryId }, outcome, fields: eventFields };
+          await writeScheduleRuns(this.runsFile, [...runs, run]);
+          return { schedule, children: [], decisions: [run] };
+        }
+        schedule = { ...schedule, prompt: rendered.prompt };
+      }
       if (matching.some(run => runningStatuses.has(run.status))) {
         throw new BridgeError(409, `Schedule "${schedule.name}" is already running.`);
       }
@@ -156,11 +257,12 @@ export class Scheduler {
         }
         targets.push({ project: target, projectDir: targetDir, cwd });
       }
-      const batchId = randomUUID(), startedAt = this.now().toISOString();
+      const batchId = randomUUID(), startedAt = event?.receivedAt ?? this.now().toISOString();
       const children = targets.map(target => ({ ...target,
         ...(schedule.session === "reuse" ? { reuse: reusableLaunches(matching.filter(run => run.project === target.project)) } : {}), run: {
         id: randomUUID(), scheduleId: id, project: target.project, scheduleProject: project, batchId,
         startedAt, status: "launched", launch: { mode: "headless" },
+        ...(event ? { trigger: { event: event.event, deliveryId: event.deliveryId }, outcome: "accepted", fields: eventFields } : {}),
       } as ScheduleRun }));
       // One atomic replacement reserves every target before any external launch.
       await writeScheduleRuns(this.runsFile, [...runs, ...children.map(child => child.run)]);
@@ -188,7 +290,11 @@ export class Scheduler {
       }
       return { schedule, children };
     });
+  }
+
+  private async launchPrepared(prepared: PreparedSchedule | undefined): Promise<ScheduleRun[]> {
     if (!prepared) return [];
+    if (prepared.decisions) return prepared.decisions;
     // Independent attempts: one target's startup failure never cancels siblings.
     return Promise.all(prepared.children.map(async child => {
       try {

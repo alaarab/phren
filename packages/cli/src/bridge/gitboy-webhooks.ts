@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import path from "node:path";
 import { z } from "zod";
 import { DeliveryLog, parseGitboyPush, storePushMatches, verifyGitboySignature } from "../sync/gitboy-webhook.js";
+import { parseScheduleEvent, type ScheduleEvent } from "./schedule-events.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import type { StorePullIdentity } from "./store-pull.js";
 
@@ -59,7 +60,8 @@ export class GitboyWebhooks {
   private closed = false;
 
   constructor(private readonly root: string, private readonly pull: (storeId: string) => string | undefined,
-    private readonly nudge: (identity: StorePullIdentity) => Promise<void> = nudgePeers) {}
+    private readonly nudge: (identity: StorePullIdentity) => Promise<void> = nudgePeers,
+    private readonly scheduleEvent?: (event: ScheduleEvent) => Promise<unknown>) {}
 
   private notify(store: z.infer<typeof storeSchema>): void {
     // Configuration may name a local attachment. Only the ID carried by that store is portable.
@@ -116,6 +118,17 @@ export class GitboyWebhooks {
           // Authenticate the raw bytes against EVERY secret before parsing or traversing the payload.
           const verified = stores.filter(store => verifyGitboySignature(store.secret, raw, typeof signature === "string" ? signature : undefined));
           if (!verified.length) { reply(401, "unauthorized"); return; }
+          const githubEvent = request.headers["x-github-event"];
+          if (githubEvent === "workflow_run" || githubEvent === "check_run") {
+            if (!this.scheduleEvent) { reply(404, "not-supported"); return; }
+            const payload = JSON.parse(raw.toString("utf8"));
+            const repo = typeof payload?.repository?.full_name === "string" ? payload.repository.full_name.toLowerCase() : "";
+            if (!verified.some(store => `${store.owner}/${store.name}`.toLowerCase() === repo)) { reply(401, "unauthorized"); return; }
+            const event = parseScheduleEvent({ event: `github.${githubEvent}.completed`, deliveryId: request.headers["x-github-delivery"], payload });
+            if (payload.action !== "completed") { reply(200, "non-matching"); return; }
+            await this.scheduleEvent(event);
+            reply(202, "accepted"); return;
+          }
           const push = parseGitboyPush(raw, request.headers);
           if (!push?.repository) { reply(400, "malformed"); return; }
           const candidates = verified.filter(store => store.owner.toLowerCase() === push.repository!.owner.toLowerCase()
@@ -131,7 +144,7 @@ export class GitboyWebhooks {
           if (!matching.length) { reply(200, "non-matching"); return; }
           reply(202, "accepted");
           setImmediate(() => { if (!this.closed) for (const store of matching) this.notify(store); });
-        })().catch(error => reply(typeof error === "number" ? error : 400, typeof error === "number" && error === 413 ? "too-large" : "malformed"));
+        })().catch(error => reply(typeof error === "number" ? error : typeof error?.status === "number" ? error.status : 400, typeof error === "number" && error === 413 ? "too-large" : "malformed"));
       });
       this.server = server;
       server.requestTimeout = 6000; server.headersTimeout = 5000; server.maxHeadersCount = 32;
