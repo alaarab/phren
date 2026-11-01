@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Secret scanning names an AWS secret access key written as `AWS_SECRET_ACCESS_KEY=...` correctly; it was caught before, but only as a generic long base64 secret.
+
 ## [0.3.67] - 2026-10-31
 
 ### Added
