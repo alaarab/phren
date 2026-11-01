@@ -5,9 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Session rows carry `statusSince`, the ISO time the agent status they send last changed, so the phone can say how long a session has been waiting rather than how long ago its tab last changed. It follows background work that turns idle into working, is not reset by a title, label or activity-counter change, survives a Hook restart, and older Hooks omit it.
+
 ### Fixed
 
 - A Herdr socket reply that keeps trickling bytes without a newline no longer keeps the phone's terminal spinning forever: the request now has an absolute deadline instead of an inactivity timeout, so it fails with `herdr-timeout` as intended.
+- Claude pane chats follow the foreground conversation after a clear or resume even when Herdr and the Hook's binding still name the old session, using the existing cached process probe.
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.
 - Secret scanning names an AWS secret access key written as `AWS_SECRET_ACCESS_KEY=...` correctly; it was caught before, but only as a generic long base64 secret.
 - A transcript stream no longer spins re-reading the pane when the phone asks for older history before the agent has written its transcript.

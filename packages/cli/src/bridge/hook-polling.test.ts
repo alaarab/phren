@@ -83,11 +83,12 @@ it.skipIf(process.platform === "win32")("never keeps a failed snapshot", async (
   expect(objects(await sharedSnapshot("default"))).toHaveLength(1);
 });
 
-it.skipIf(process.platform === "win32")("skips the process probe when Herdr reports the session", async () => {
-  expect(await paneChatState("default", pane(), { tokenWhenIdentified: false })).toEqual({ sessionId: session });
+it.skipIf(process.platform === "win32")("skips the process probe when Herdr reports an OpenCode session", async () => {
+  const opencode = { ...pane(), agent: "opencode", agent_session: { ...reported(session), agent: "opencode" } };
+  expect(await paneChatState("default", opencode, { tokenWhenIdentified: false })).toEqual({ sessionId: session });
   expect(calls.get("pane.process_info")).toBeUndefined();
   // Other callers still get the starting token, from one probe.
-  const state = await paneChatState("default", pane());
+  const state = await paneChatState("default", opencode);
   expect(state.sessionId).toBe(session);
   expect(state.startingToken).toMatch(/^[a-f0-9]{64}$/);
   expect(calls.get("pane.process_info")).toBe(1);
