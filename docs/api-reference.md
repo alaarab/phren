@@ -1650,6 +1650,23 @@ server, including the requesting one even when discovery omitted it; if
 discovery or any snapshot fails, the request fails rather than assuming the
 worktree is unused. Hook advertises
 `worktreeRemove`; both routes are part of the `git` module.
+### Live repository changes
+
+`WS /v1/git/watch` takes the same query as `GET /v1/git/status` (the full
+session target plus optional `child` or `worktree`) and uses the same repository
+resolution. It sends JSON text frames: `{type: "changed", at}` when the working
+tree or index may have changed (at most one per second, trailing), `{type:
+"ping"}` every 20 seconds, and `{type: "error", code, message}` followed by a
+close when the checkout cannot be watched. `code` is `git-not-repository` for a
+folder that is not a repository, `too-many-watchers` when 16 checkouts are
+already being watched, and `git-watch-failed` for a watcher failure.
+
+One watcher serves every subscriber of a resolved checkout root and stops 30
+seconds after its last subscriber leaves. macOS and Windows use a recursive
+`fs.watch` on the root; `.git/index` and `.git/HEAD` changes trigger it. Linux
+polls `git status --porcelain=v2 -z` every 3 seconds with optional locks
+disabled and emits when its hash changes, so the Hook never takes the index
+lock. Advertised as `capabilities.gitWatch`.
 
 ### Repository status, diff and staging
 
@@ -1870,7 +1887,11 @@ clients must accept legacy discovery aliases during upgrades. A typed tmux
 selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 
 Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
-`agentStatus` and `title`. A tab whose turn ended carries `lastReply`: the
+`agentStatus` and `title`. Newer Hooks also send `statusSince`, the ISO-8601
+time that tab's `agentStatus` last changed; older Hooks omit it. Only a status
+change resets it, not a title, label or activity-counter change, and a tab seen
+for the first time gets the current time. The Hook persists it across restarts.
+A tab whose turn ended carries `lastReply`: the
 agent's last message from its Stop hook (Claude and Codex), as one plain line
 of at most 240 characters with markdown dropped. It is absent while a turn or
 its background work runs, and when the Stop carried no message. A session whose main turn ended while background

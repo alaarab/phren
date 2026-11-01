@@ -30,7 +30,7 @@ import { createRouteHandler } from "./server-routes.js";
 async function hookGet(url: string, method = "GET", memoryOn = true, payload?: unknown): Promise<{ status: number; body: any }> {
   const handler = createRouteHandler({ modules: { has: (name: string) => name !== "memory" || memoryOn, store }, info: {}, streams: {},
     agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set() }, journal: { record: async () => {} },
-    tabActivity: { observe: async () => new Map() }, contextUsage: { read: async () => new Map() } } as never);
+    tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() }, contextUsage: { read: async () => new Map() } } as never);
   let result = "";
   const response = { statusCode: 200, setHeader() {}, end(value: string) { result = value; } };
   await handler({ url, method, [Symbol.asyncIterator]: async function* () { if (payload !== undefined) yield Buffer.from(JSON.stringify(payload)); } } as unknown as IncomingMessage, response as unknown as ServerResponse);

@@ -60,7 +60,7 @@ import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDead
 import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
-import type { TabActivityStore } from "./tab-activity.js";
+import { tabActivityKey, type TabActivityStore } from "./tab-activity.js";
 import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
 import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
@@ -165,10 +165,50 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
   return result;
 }
 
+type StatusRow = { workspace: unknown; tab: unknown; status: unknown };
+/** How long activity sampling may spend resolving background work before it
+ * leaves an unresolved row at its last known status. */
+export const STATUS_ENRICH_BUDGET_MS = 2_000;
+async function effectiveStatus(server: string, s: Json, row: StatusRow): Promise<StatusRow> {
+  if (row.status !== "idle" && row.status !== "done") return row;
+  const panes = objects(s.panes).filter(p => p.tab_id === row.tab && p.workspace_id === row.workspace && p.agent);
+  if (panes.length !== 1 || !provider.safeParse(panes[0].agent).success) return row;
+  const pane = panes[0];
+  const chat = await paneChatState(server, pane, { tokenWhenIdentified: false }).catch((): Json => ({}));
+  const session = typeof chat.sessionId === "string" ? chat.sessionId : undefined;
+  if (!session) return row;
+  const record = await paneRecord(server, pane, session);
+  const [background, children] = await Promise.all([
+    liveBackground(record, readFinalTurn),
+    childActivity(pane.agent as Provider, session),
+  ]);
+  const effective: Json = { agentStatus: row.status };
+  markBackground(effective, (background ?? 0) + children.runningChildren);
+  return effective.agentStatus === row.status ? row : { ...row, status: effective.agentStatus };
+}
+/** The status each tab's row sends after the same background-work rules the
+ * overview applies: an idle or done tab whose ended turn still awaits shells or
+ * running children is working. The activity timer uses this while no overview
+ * is open, so its status clock still moves. A row whose background reads do not
+ * finish inside `budgetMs` is left out, which preserves its last known status. */
+export async function effectiveStatusRows(server: string, s: Json, budgetMs = STATUS_ENRICH_BUDGET_MS): Promise<StatusRow[]> {
+  const deadline = Date.now() + budgetMs;
+  const rows = await Promise.all(objects(s.tabs).map(async (tab): Promise<StatusRow | undefined> => {
+    const row = { workspace: tab.workspace_id, tab: tab.tab_id, status: tab.agent_status };
+    if (row.status !== "idle" && row.status !== "done") return row;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())); timer.unref(); });
+    try {
+      return await Promise.race([effectiveStatus(server, s, row).catch(() => row), late]);
+    } finally { clearTimeout(timer); }
+  }));
+  return rows.filter((row): row is StatusRow => row !== undefined);
+}
+
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, worktreeRemove: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -230,7 +270,7 @@ export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean
 export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "agentHooks" | "journal" | "tabActivity" | "contextUsage">): WorkspacesReader {
   const { modules, info, agentHooks, journal, tabActivity, contextUsage } = ctx;
   return async (server, s, watchApprovals) => {
-    const lastChanged = await tabActivity.observe(server, s);
+    const { generation, stamps: lastChanged } = await tabActivity.observe(server, s);
     if (watchApprovals) agentHooks.overview.renew(server);
     const context = await contextUsage.read(server, s);
     await journal.record(server, objects(s.panes));
@@ -345,6 +385,13 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     ]);
     await Promise.race([enrich, budget]);
     expired = true; clearTimeout(timer);
+    // The row's status may have changed above (background work turns idle into
+    // working): stamp what this reply sends, not the raw snapshot.
+    const activity = await tabActivity.recordStatus(server, tabs.map(({ group, tab }) => ({ workspace: group.id, tab: tab.id, status: tab.agentStatus })), generation);
+    for (const { group, tab } of tabs) {
+      const stamp = activity.get(tabActivityKey(group.id, tab.id));
+      if (stamp) { tab.lastChangedAt = stamp.lastChangedAt; tab.statusSince = stamp.statusSince; }
+    }
     const mux = terminalMux(server);
     // A diverged or long-unsynced store, for the computer list (health.ts storeWarning).
     const storeWarnings = cachedStoreWarnings(defaultPhrenPath());

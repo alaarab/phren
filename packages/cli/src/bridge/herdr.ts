@@ -9,9 +9,9 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type OfflineCode, type Target, type StartingTarget } from "./protocol.js";
 import { logger } from "../logger.js";
-import { boundSession, recordedSession } from "./agent-hook-stores.js";
+import { recordedSession } from "./agent-hook-stores.js";
 import { paneRecord, recordTitle } from "./session-activity.js";
-import { tabActivityKey } from "./tab-activity.js";
+import { tabActivityKey, type TabActivityStamp } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -79,7 +79,9 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const client = connect(socket);
     const key = requestID();
     let pending = Buffer.alloc(0);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error, result?: Json) => {
+      if (deadline) clearTimeout(deadline);
       signal?.removeEventListener("abort", abort);
       client.destroy();
       if (error) reject(error); else resolve(result!);
@@ -87,7 +89,7 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const abort = () => finish(new BridgeError(499, "Request cancelled."));
     if (signal?.aborted) { abort(); return; }
     signal?.addEventListener("abort", abort, { once: true });
-    client.setTimeout(timeoutMs, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.", { code: "herdr-timeout" })));
+    deadline = setTimeout(() => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.", { code: "herdr-timeout" })), timeoutMs);
     client.on("error", error => finish(herdrSocketError(error)));
     client.on("end", () => finish(new BridgeError(503, "Herdr closed the request before confirming it.")));
     client.on("connect", () => client.write(JSON.stringify({ id: key, method, params }) + "\n"));
@@ -256,7 +258,7 @@ export function isConductorName(name: string | undefined): boolean {
 
 /** `conductorPane` is the pane the Hook records as the conductor (null for
  * none); left out, the agent's name decides, as before the record. */
-export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, string>,
+export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, TabActivityStamp>,
   conductorPane?: string | null): Json {
   const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
     && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
@@ -271,6 +273,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
     children: objects(s.tabs).filter(t => t.workspace_id === w.workspace_id).map(t => {
       const panes = objects(s.panes).filter(p => p.tab_id === t.tab_id && p.workspace_id === t.workspace_id);
       const agent = panes.find(p => p.agent);
+      const activity = lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id));
       // Herdr's per-pane state_change_seq climbs with every agent status
       // change; the phone orders "just finished" ahead of "finished an hour ago" by it.
       const changed = Math.max(0, ...panes.map(p => Number.isSafeInteger(p.state_change_seq) ? Number(p.state_change_seq) : 0));
@@ -278,7 +281,8 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
         role: (conductorPane === undefined ? isConductorName(paneAgentName(s, agent)) : !!agent && agent.pane_id === conductorPane) ? "conductor" : undefined,
         changedSeq: changed || undefined,
-        lastChangedAt: lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id)),
+        lastChangedAt: activity?.lastChangedAt,
+        statusSince: activity?.statusSince,
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
         contextUsedPercent: agent && panes.filter(p => p.agent).length === 1 ? contextUsedPercent?.get(agent) : undefined,
         agentPaneCount: panes.filter(p => p.agent).length, paneCount: panes.length };
@@ -319,15 +323,23 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
   // A Codex pane on the Hook's own app-server: the registry follows `/new`
   // and `/resume` as they happen, while Herdr's report waits for a hook.
   const owned = pane.agent === "codex" && !!codexServers.forPane(server, String(pane.pane_id))?.threadId;
-  // A `claude -p` run from the pane's shell inherits HERDR_*, and Herdr then
-  // reports that run's session for the pane long after it exits. When the
-  // Hook's own binding names another conversation, the processes decide.
-  if (pane.agent !== "copilot" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success
-    && (pane.agent !== "claude" || [undefined, reported.value].includes(await boundSession(server, pane)))) { countIdentity("reported"); return { sessionId: reported.value, noTranscriptLogs: false }; }
+  // Claude's report and binding can both lag a conversation switch in the
+  // same process, or name a finished nested `claude -p`. The cached foreground
+  // probe decides even when the report and binding agree.
+  if (pane.agent !== "copilot" && pane.agent !== "claude" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value, noTranscriptLogs: false }; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
-  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) { countIdentity("cached"); return { ...await cached.result, pids }; }
+  // Cache process evidence, not the fallback report: a new snapshot can carry
+  // a different report while the terminal and foreground PIDs stay the same.
+  const resolved = (identity: PaneIdentity) => {
+    if (pane.agent === "claude" && !identity.sessionId && identity.noTranscriptLogs
+      && reported.kind === "id" && reported.agent === "claude" && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) {
+      return { sessionId: reported.value, noTranscriptLogs: false, pids };
+    }
+    return { ...identity, pids };
+  };
+  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) { countIdentity("cached"); return resolved(await cached.result); }
   countIdentity(fresh ? "probe-fresh" : "probe");
   const result = identityFromProcesses(server, pane, pids);
   if (identities.size >= 128) identities.delete(identities.keys().next().value!);
@@ -338,7 +350,7 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
   // brand-new conversation it just proved as starting.
   void result.then(() => { entry.at = Date.now(); }, () => {});
   identities.set(key, entry);
-  return { ...await result, pids };
+  return resolved(await result);
 }
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
   return (await resolveIdentity(server, pane, fresh)).sessionId;
