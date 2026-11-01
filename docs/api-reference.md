@@ -1886,6 +1886,24 @@ New clients opt in with `mux=tmux:<server>`. Older Hooks ignore `typed=1`, so
 clients must accept legacy discovery aliases during upgrades. A typed tmux
 selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 
+`GET /v1/terminals/resolve?ref=<token>&from=<pane>` opens a terminal reference
+in chat text. A token is a Herdr pane id (`w2E:p1`) or tab id (`w2E:t1`),
+optionally prefixed by a computer name (`MacBook/w2E:p1`). A bare token
+resolves on this Hook; a prefixed one resolves on this computer (its own name
+or alias) or on a verified `hooks.yaml` peer, whose Hook is asked over its
+pinned SSH pipe. `from` is the pane the text came from and only chooses which
+of this computer's Herdr servers to read first. The answer is
+`{computer, server, pane, tab, workspace, title, agent, status}` for a pane or
+tab that exists now; a tab answers with the pane it shows. A malformed token is
+400, and a missing pane or tab, an unknown computer, or a peer that is not
+linked is 404 `code: "terminal-not-found"`. A server whose snapshot cannot be
+read reports its own error instead of claiming the terminal is absent. The
+answer uses the
+shared pane snapshots the Hook keeps for its streams, so a resolve adds no
+per-pane Herdr call; a miss refreshes the server list once for a server that
+started after discovery was cached. Advertised as
+`capabilities.terminalResolve`; a computer without it predates the route.
+
 Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 `agentStatus` and `title`. Newer Hooks also send `statusSince`, the ISO-8601
 time that tab's `agentStatus` last changed; older Hooks omit it. Only a status
