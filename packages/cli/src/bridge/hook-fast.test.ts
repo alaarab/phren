@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -51,6 +52,26 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
       event: "UserPromptSubmit", dispatchId: "brief-12345", cwd: "/work", prompt: "hello" }]);
     reply = "{}";
     expect((await run({ hook_event_name: "UserPromptSubmit", session_id: session, prompt: "hi" }, herdr())).stdout).toBe("");
+  });
+
+  it("forwards Claude's native prompt_id through both forwarders, and omits missing or malformed ids", async () => {
+    // A sanitized 2.1.316 hook payload, with a fake id assembled for this run.
+    const { prompt_id: _fixturePrompt, ...payload } = JSON.parse(readFileSync(
+      new URL("./fixtures/claude/2.1.316/user-prompt-submit.json", import.meta.url), "utf8")) as Record<string, unknown>;
+    const p1 = ["fixture", "prompt", "alpha"].join("-"), expected = `claude:prompt:${p1}`;
+    const submit = (promptId?: unknown) => ({ ...payload, session_id: session, prompt: "hello",
+      ...(promptId === undefined ? {} : { prompt_id: promptId }) });
+    bodies = [];
+    await run(submit(p1), herdr());
+    expect(bodies[0]).toMatchObject({ event: "UserPromptSubmit", promptEntryId: expected });
+    bodies = [];
+    await runBundle(submit(p1), "claude");
+    expect(bodies[0]).toMatchObject({ event: "UserPromptSubmit", promptEntryId: expected });
+    bodies = [];
+    for (const promptId of [undefined, "not a prompt id", 42, "x".repeat(193)]) await run(submit(promptId), herdr());
+    await runBundle(submit("not a prompt id"), "claude");
+    expect(bodies.map(body => body.promptEntryId)).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    expect(bodies.every(body => !("promptEntryId" in body))).toBe(true);
   });
 
   it("carries Stop facts and prints permission answers", async () => {
@@ -122,9 +143,9 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
   });
 
   const bundle = fileURLToPath(new URL("../../dist/bridge-hook.mjs", import.meta.url));
-  function runBundle(input: unknown): Promise<{ stdout: string; code: number | null }> {
+  function runBundle(input: unknown, source = "codex"): Promise<{ stdout: string; code: number | null }> {
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [bundle, "hook", "codex"], {
+      const child = spawn(process.execPath, [bundle, "hook", source], {
         env: { PATH: process.env.PATH, HOME: root, PHREN_BRIDGE_HOME: root, PHREN_PATH: path.join(root, "store"), PHREN_HERDR_HOME: path.join(root, "herdr"), ...herdr() } });
       let stdout = "";
       child.stdout.on("data", chunk => { stdout += chunk; });

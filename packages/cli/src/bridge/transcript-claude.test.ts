@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { stopFacts } from "./agent-hook-callback.js";
 import { CLAUDE_SKILL_QUIET_MS, CLAUDE_STOP_TRUST_MS, claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
-import { runningChildAgents, TranscriptReader } from "./transcripts.js";
+import { ambiguousPromptIdentities, runningChildAgents, TranscriptReader } from "./transcripts.js";
 import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { noteTurn } from "./turn-records.js";
 import type { Json, Target } from "./protocol.js";
@@ -598,6 +599,66 @@ describe("Claude queue consumption", () => {
       timestamp: "t", message: { role: "user", content: "Another Claude session sent a message:\n<agent-message />" } };
     expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, queueState(peer)))
       .toEqual({ type: "phren_queue_consumed", key: digest("Another Claude session sent a message:\n<agent-message />"), timestamp: "t" });
+  });
+});
+
+describe("Claude prompt identity", () => {
+  it("keeps distinct native ids on identical prompts and never puts one on a tool result", async () => {
+    const fixture = fileURLToPath(new URL("./fixtures/claude/2.1.316/prompt-identity.jsonl", import.meta.url));
+    const { entries } = await new TranscriptReader(fixture, "claude").read();
+    const alpha = ["fixture", "prompt", "alpha"].join("-"), beta = ["fixture", "prompt", "beta"].join("-");
+    const prompts = entries.filter(entry => entry.promptEntryId);
+    expect(prompts.map(entry => ({ line: entry.line, id: entry.promptEntryId, text: (entry.raw as Json).message }))).toEqual([
+      { line: 0, id: `claude:prompt:${alpha}`, text: { role: "user", content: "continue" } },
+      { line: 3, id: `claude:prompt:${beta}`, text: { role: "user", content: "continue" } },
+    ]);
+    expect(prompts[0].promptEntryId).not.toBe(prompts[1].promptEntryId);
+    const tool = entries.find(entry => entry.line === 2)!;
+    expect(tool.raw).toMatchObject({ type: "user", message: { content: [{ type: "tool_result" }] } });
+    expect(tool).not.toHaveProperty("promptEntryId");
+    // The raw native metadata stays private.
+    expect(JSON.stringify(entries.map(entry => entry.raw))).not.toContain('"promptId"');
+  });
+
+  it("omits an identity shared by prompts on different pages and fresh readers", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-prompt-pages-")), file = path.join(root, "claude.jsonl");
+    const shared = ["fixture", "prompt", "shared"].join("-"), unique = ["fixture", "prompt", "unique"].join("-");
+    const user = (uuid: string, promptId: string, text: string) => ({ type: "user", uuid, promptId, timestamp: "2026-01-02T03:04:05.000Z",
+      message: { role: "user", content: text } });
+    const assistant = (uuid: string) => ({ type: "assistant", uuid, timestamp: "2026-01-02T03:04:06.000Z",
+      message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] } });
+    try {
+      await writeFile(file, [user("u1", shared, "continue"), assistant("a1"), assistant("a2"),
+        user("u2", shared, "continue"), user("u3", unique, "carry on")].map(row => JSON.stringify(row)).join("\n") + "\n");
+      const first = await new TranscriptReader(file, "claude").read(2);
+      const second = await new TranscriptReader(file, "claude").readAfter(1);
+      const together = await new TranscriptReader(file, "claude").read();
+      expect(first.entries.find(entry => entry.line === 0)).not.toHaveProperty("promptEntryId");
+      expect(second.entries.find(entry => entry.line === 3)).not.toHaveProperty("promptEntryId");
+      expect(together.entries.find(entry => entry.line === 0)).not.toHaveProperty("promptEntryId");
+      expect(together.entries.find(entry => entry.line === 3)).not.toHaveProperty("promptEntryId");
+      expect(together.entries.find(entry => entry.line === 4)?.promptEntryId).toBe(`claude:prompt:${unique}`);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("keeps unique identities available when an identity scan is interrupted", async () => {
+    const file = path.join(tmpdir(), `phren-prompt-interrupted-${Date.now()}-${Math.random()}.jsonl`);
+    const p1 = ["fixture", "interrupted", "alpha"].join("-"), p2 = ["fixture", "interrupted", "beta"].join("-");
+    const user = (uuid: string, promptId: string) => Buffer.from(JSON.stringify({ type: "user", uuid, promptId,
+      timestamp: "2026-01-02T03:04:05.000Z", message: { role: "user", content: "continue" } }));
+    const rows = [user("u1", p1), user("u2", p2)];
+    const index = (revision: string, lines: number, failAt?: number) => ({ revision, lines,
+      rows: async function* () {
+        for (let i = 0; i < lines; i++) {
+          if (i === failAt) throw new Error("interrupted scan");
+          yield { line: lines - 1 - i, bytes: rows[i] };
+        }
+      } });
+    await expect(ambiguousPromptIdentities(file, {} as never, index("r1", 3, 2), "claude", false))
+      .rejects.toThrow("interrupted scan");
+    // The retry starts from the last published position, not partial counts.
+    expect([...(await ambiguousPromptIdentities(file, {} as never, index("r1", 2), "claude", false))]).toEqual([]);
+    expect([...(await ambiguousPromptIdentities(file, {} as never, index("r1", 2), "claude", false))]).toEqual([]);
   });
 });
 

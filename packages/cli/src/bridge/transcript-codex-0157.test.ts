@@ -25,6 +25,18 @@ it("reads a Codex 0.157.1 rollout's messages and tool calls once each", async ()
   expect(rows.some(row => /^(session_meta|world_state|token_usage_record)|item_completed|developer/.test(row))).toBe(false);
 });
 
+it("never fabricates a prompt identity from two messages in one Codex turn", async () => {
+  const { entries } = await new TranscriptReader(fixture, "codex").read();
+  const users = entries.filter(entry => {
+    const raw = entry.raw as { type: string; payload: Record<string, any> };
+    return raw.type === "response_item" && raw.payload.type === "message" && raw.payload.role === "user";
+  });
+  expect(users.length).toBeGreaterThanOrEqual(2);
+  const turns = users.map(entry => (entry.raw as { payload: Record<string, any> }).payload.internal_chat_message_metadata_passthrough.turn_id);
+  expect(new Set(turns).size).toBe(1);
+  expect(users.every(entry => entry.promptEntryId === undefined)).toBe(true);
+});
+
 // Codex 0.157.1 code mode: each action a script runs is recorded as its own
 // item_completed row, and the `exec` script around them only repeats them.
 // Neutral text, fake paths and ids; one row of each item and script outcome.
