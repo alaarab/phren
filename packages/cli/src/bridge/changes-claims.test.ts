@@ -1,13 +1,14 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtemp, realpath, rm, utimes, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { claimedPaths, ToolChanges } from "./changes.js";
+import { TranscriptReader } from "./transcripts.js";
+
 // /tmp keeps POSIX paths short; Windows has no /tmp.
 const scratchRoot = process.platform === "win32" ? tmpdir() : "/tmp";
-import { promisify } from "node:util";
-import { claimedPaths, ToolChanges } from "./changes.js";
-
 const exec = promisify(execFile);
 let home: string, repo: string, changes: ToolChanges;
 
@@ -107,7 +108,44 @@ it("records an edited, a new untracked and a deleted file in one shell call", as
   expect(found).toEqual([["README.md", "M"], ["gone.txt", "D"], ["new.txt", "A"]]);
 });
 
-it("surfaces a failed post-tool Git read once per conversation instead of recording a clean result", async () => {
+it.each(["corrupt index", "missing Git"])("reports a failed before-read on one Shell card until the repository recovers (%s)", async cause => {
+  const index = path.join(repo, ".git/index"), original = await readFile(index), originalPath = process.env.PATH ?? "";
+  const breakCapture = async () => {
+    if (cause === "corrupt index") await writeFile(index, "corrupt index");
+    else vi.stubEnv("PATH", path.join(home, "no-executables"));
+  };
+  await breakCapture();
+  await changes.before("claude:a", "broken-before", repo, "ls");
+  expect(changes.view("claude:a").pending("broken-before")).toBe(false);
+  const transcript = path.join(home, "claude.jsonl");
+  const output = { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "broken-before", content: "README.md" }] } };
+  await writeFile(transcript, JSON.stringify(output) + "\n");
+  const page = await new TranscriptReader(transcript, "claude", undefined, changes.view("claude:a")).read();
+  expect(page.entries.map(entry => entry.raw.message)).toEqual([output.message]);
+  expect(page.entries[0].raw.phren_change_errors).toMatchObject({ "broken-before": { code: "git-capture-failed" } });
+  expect(page.entries[0].raw.phren_changes).toBeUndefined();
+
+  await changes.before("claude:b", "broken-again", repo, "ls");
+  await expect(changes.view("claude:b").changes("broken-again")).resolves.toBeUndefined();
+
+  await writeFile(index, original);
+  vi.stubEnv("PATH", originalPath);
+  await changes.before("claude:b", "recovered", repo, "format");
+  await writeFile(path.join(repo, "a.txt"), "a\n");
+  await changes.after("claude:b", "recovered");
+  expect(await files("claude:b", "recovered")).toEqual(["a.txt"]);
+
+  await breakCapture();
+  // Refresh discovery too: a missing Git executable fails before roots are
+  // collected, but must still reset suppression on this repository's success.
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6 * 60_000);
+  try { await changes.before("claude:a", "broken-after-recovery", repo, "ls"); }
+  finally { clock.mockRestore(); }
+  await expect(changes.view("claude:a").changes("broken-after-recovery")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+});
+
+it("reports a repository failure once across conversations and reports again after recovery", async () => {
+  const index = path.join(repo, ".git/index"), original = await readFile(index);
   await changes.before("codex:a", "broken", repo, "format");
   await changes.before("codex:a", "broken-again", repo, "format");
   await changes.before("codex:b", "broken", repo, "format");
@@ -117,11 +155,23 @@ it("surfaces a failed post-tool Git read once per conversation instead of record
   // The same breakage on a later call of that conversation is not repeated on its row.
   await changes.after("codex:a", "broken-again");
   await expect(changes.view("codex:a").changes("broken-again")).resolves.toBeUndefined();
-  // Another conversation is told once too.
-  await expect(changes.after("codex:b", "broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+  // The repository failure is already reported, including for other sessions.
+  await expect(changes.after("codex:b", "broken")).resolves.toBeUndefined();
+  await expect(changes.view("codex:b").changes("broken")).resolves.toBeUndefined();
+
+  await writeFile(index, original);
+  await changes.before("codex:b", "recovered", repo, "format");
+  await writeFile(path.join(repo, "a.txt"), "a\n");
+  await changes.after("codex:b", "recovered");
+  expect(await files("codex:b", "recovered")).toEqual(["a.txt"]);
+
+  // A successful capture clears only this repository's suppression mark.
+  await changes.before("codex:a", "broken-after-recovery", repo, "format");
+  await writeFile(index, "corrupt index");
+  await expect(changes.after("codex:a", "broken-after-recovery")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
 });
 
-it("reports a broken repository once per conversation even when a healthy checkout and a shared store are captured with it", async () => {
+it("keeps a broken repository suppressed even when a healthy checkout and a shared store are captured with it", async () => {
   const healthy = path.join(home, "healthy");
   const git = (...args: string[]) => exec("git", ["-c", "user.name=sam", "-c", "user.email=sam@example.com", "-C", healthy, ...args]);
   await exec("git", ["init", "-q", "-b", "main", healthy]);

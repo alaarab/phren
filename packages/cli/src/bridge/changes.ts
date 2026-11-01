@@ -292,7 +292,7 @@ export class ToolChanges {
   private controllers = new Set<AbortController>();
   private claims: Claim[] = [];
   private failures = new Map<string, Error>();
-  /** Conversation and repository root pairs already shown that Git could not capture changes. */
+  /** Repository roots already shown that Git could not capture changes. */
   private reported = new Set<string>();
   private repositories = new Map<string, { at: number; lookup: Lookup }>();
   private scratches = new Map<string, Scratch>();
@@ -301,17 +301,16 @@ export class ToolChanges {
    * time shows no changes rather than an error: a busy machine is not
    * something to act on per call, and repository Changes still has the
    * status. A broken capture (Git missing, a corrupt repository) shows on the
-   * first call it hits in a conversation, not on every later one. A per-call
+   * first call it hits, until capture succeeds in that repository again. A per-call
    * limit (too many files) shows on its own call. */
-  private failed(conversation: string, key: string, error: unknown, roots: readonly string[] = []): Error | undefined {
+  private failed(key: string, error: unknown, roots: readonly string[] = []): Error | undefined {
     if (timedOut(error)) return undefined;
     const failure = error instanceof BridgeError ? error : new BridgeError(503, "Git change capture failed. Refresh repository Changes for the current status.", { code: "git-capture-failed" });
     if (failure.details?.code === "git-capture-failed") {
       // A breakage is news once per repository: a healthy checkout's capture
       // must not let a corrupt sibling repo report its error again.
       const root = failureRoot(error);
-      const marks = root ? [`${conversation}\0${root}`]
-        : roots.length ? [...new Set(roots)].map(entry => `${conversation}\0${entry}`) : [`${conversation}\0`];
+      const marks = root ? [root] : roots.length ? [...new Set(roots)] : ["unknown"];
       if (marks.every(mark => this.reported.has(mark))) return undefined;
       for (const mark of marks) {
         if (this.reported.size >= 512) this.reported.delete(this.reported.keys().next().value!);
@@ -390,7 +389,7 @@ export class ToolChanges {
       if (/not a git repository/.test(String((error as { stderr?: string }).stderr))) return undefined;
       // Asked again next time rather than remembered.
       if (this.repositories.get(checkout)?.lookup === lookup) this.repositories.delete(checkout);
-      throw error;
+      throw failedIn(error, checkout);
     });
     lookup.result = repository;
     repository.catch(() => {});
@@ -460,7 +459,13 @@ export class ToolChanges {
         if (!snapshot.result) { this.snapshots.delete(key); void this.discard(snapshot).catch(() => {}); }
       }, 30 * 60_000);
       snapshot.expiry.unref();
-    } catch (error) { this.failed(conversation, key, error, snapshot.roots); if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
+    } catch (error) {
+      // An abandoned callback may finish after the tool ran. Its late failure
+      // belongs to no card; genuine failures of a live capture still report once.
+      if (!snapshot.dropped) this.failed(key, error, snapshot.roots);
+      if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key);
+      await this.discard(snapshot);
+    }
   }
 
   /** Forget the snapshot of a tool call whose PreToolUse callback gave up
@@ -494,7 +499,7 @@ export class ToolChanges {
     let files: ChangedFile[];
     try { files = await snapshot.result; }
     catch (error) {
-      if (this.snapshots.get(key) === snapshot) { this.snapshots.delete(key); this.failed(conversation, key, error, snapshot.roots); }
+      if (this.snapshots.get(key) === snapshot) { this.snapshots.delete(key); this.failed(key, error, snapshot.roots); }
       const failure = this.failures.get(key);
       if (failure) throw failure;
       return;
@@ -502,7 +507,7 @@ export class ToolChanges {
     if (this.snapshots.get(key) === snapshot) {
       this.snapshots.delete(key); await this.record(conversation, toolUseId, files);
       // Capture works again for these repositories: a later breakage there is news worth one more row.
-      for (const root of snapshot.roots) this.reported.delete(`${conversation}\0${root}`);
+      for (const root of snapshot.roots) this.reported.delete(root);
     }
   }
   private async compute(snapshot: Snapshot): Promise<ChangedFile[]> {
