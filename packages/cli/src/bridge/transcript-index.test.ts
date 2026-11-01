@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { appendFile, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { withTranscriptIndex } from "./transcript-index.js";
 import { TranscriptReader } from "./transcripts.js";
 
 const row = (text: string) => JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: text } });
@@ -117,5 +119,71 @@ describe("indexed transcript pages", () => {
     const abort = new AbortController(); abort.abort();
     await expect(new TranscriptReader(file, "codex").read(undefined, abort.signal)).rejects.toThrow();
     expect((await new TranscriptReader(file, "codex").read()).entries).toHaveLength(1);
+  });
+});
+
+describe("transcript index rows", () => {
+  let root = "";
+  const collect = (target: string, before: number, after: number) =>
+    withTranscriptIndex(target, async (handle, index) => {
+      const rows: Array<{ line: number; bytes?: Buffer }> = [];
+      for await (const entry of index.rows(handle, before, after)) rows.push(entry);
+      return { lines: index.lines, rows };
+    });
+  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), "phren-index-rows-")); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it("looks up an exact newest-first line range and numbers every line from zero", async () => {
+    const target = path.join(root, "transcript.jsonl");
+    writeFileSync(target, "first\nsecond\nthird\nfourth\n");
+    const all = await collect(target, 4, 0);
+    expect(all.lines).toBe(4);
+    expect(all.rows.map(entry => [entry.line, entry.bytes?.toString()]))
+      .toEqual([[3, "fourth"], [2, "third"], [1, "second"], [0, "first"]]);
+    const middle = await collect(target, 3, 1);
+    expect(middle.rows.map(entry => [entry.line, entry.bytes?.toString()])).toEqual([[2, "third"], [1, "second"]]);
+    expect((await collect(target, 2, 2)).rows).toEqual([]);
+  });
+
+  it("indexes an empty file as no lines and no rows", async () => {
+    const target = path.join(root, "transcript.jsonl");
+    writeFileSync(target, "");
+    expect(await collect(target, 0, 0)).toEqual({ lines: 0, rows: [] });
+  });
+
+  it("counts newlines without decoding rows and withholds an unfinished last line", async () => {
+    const target = path.join(root, "transcript.jsonl");
+    const corrupt = Buffer.from([0xff, 0x00]);
+    writeFileSync(target, Buffer.concat([corrupt, Buffer.from("\n"), Buffer.from('{"type":"half')]));
+    const partial = await collect(target, 1, 0);
+    expect(partial.lines).toBe(1);
+    expect(partial.rows.map(entry => entry.line)).toEqual([0]);
+    expect(partial.rows[0].bytes).toEqual(corrupt);
+    writeFileSync(target, Buffer.concat([corrupt, Buffer.from("\n"), Buffer.from('{"type":"half'), Buffer.from("\n")]));
+    const finished = await collect(target, 2, 0);
+    expect(finished.lines).toBe(2);
+    expect(finished.rows.map(entry => entry.line)).toEqual([1, 0]);
+    expect(finished.rows.map(entry => entry.bytes)).toEqual([Buffer.from('{"type":"half'), corrupt]);
+  });
+
+  it("rejects a missing transcript and indexes it once the file exists", async () => {
+    const target = path.join(root, "transcript.jsonl");
+    await expect(withTranscriptIndex(target, async () => "read")).rejects.toMatchObject({ code: "ENOENT" });
+    writeFileSync(target, "now here\n");
+    const rows = await collect(target, 1, 0);
+    expect(rows.lines).toBe(1);
+    expect(rows.rows.map(entry => [entry.line, entry.bytes?.toString()])).toEqual([[0, "now here"]]);
+  });
+
+  it("keeps a file's revision across reads and appends, so live readers only reset on replacement", async () => {
+    const target = path.join(root, "transcript.jsonl");
+    writeFileSync(target, row("First") + "\n");
+    const identity = (pathname: string) => withTranscriptIndex(pathname, async (_handle, index) => ({ revision: index.revision, lines: index.lines }));
+    const first = await identity(target);
+    expect(await identity(target)).toEqual(first);
+    appendFileSync(target, row("Second") + "\n");
+    const appended = await identity(target);
+    expect(appended.lines).toBe(2);
+    expect(appended.revision).toBe(first.revision);
   });
 });
