@@ -486,7 +486,6 @@ export class PromptDeliveries {
         }
         if (raw.operation === "remove" || raw.operation === "popAll") {
           if (bindings.has(offset)) continue;
-          const at = Date.parse(String(raw.timestamp ?? "")), rowAt = Number.isFinite(at) ? at : undefined;
           // Removal uses the exact unwrapped queue content, not the phone's normalized
           // words. A persisted key also identifies an enqueue outside the read tail.
           const record = relevant.filter(candidate => candidate.id && candidate.queueOffset !== undefined
