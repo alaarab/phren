@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { claudeInputEmpty, claudeSubagentView, claudeSuggestion } from "./claude-suggestion.js";
+import { claudeInputEmpty, claudeInputMatches, claudeSubagentView, claudeSuggestion } from "./claude-suggestion.js";
 
 // Screens recorded from Claude Code 2.1.284 with their styles: Herdr's
 // `pane.read --format ansi` (trimmed to the input box) and tmux `capture-pane -e`.
@@ -63,5 +63,20 @@ describe("Claude's suggested next prompt", () => {
     // Keys typed into a subagent's view would go to the subagent.
     expect(claudeInputEmpty(box("Message @researcher…"))).toBe(false);
     expect(claudeInputEmpty("")).toBe(false);
+  });
+});
+
+describe("Claude's recorded composer text", () => {
+  it("recognizes the actual nonbreaking separator without consuming message whitespace", () => {
+    const screen = recorded("owner-typing-tmux.ansi");
+    expect(claudeInputMatches(screen, "x")).toBe(true);
+    for (const draft of [" x", "x ", "x\u00a0", "x  y", "x\ty"]) {
+      const typed = screen.replace("❯\u00a0x", `❯\u00a0${draft}`);
+      expect(claudeInputMatches(typed, draft)).toBe(true);
+      const normalized = draft.trim().replace(/\s+/g, " ");
+      expect(claudeInputMatches(typed, normalized)).toBe(false);
+    }
+    expect(claudeInputMatches(screen.replace("❯\u00a0x", "❯\u00a0 x"), "x")).toBe(false);
+    expect(claudeInputMatches(screen.replace("❯\u00a0x", "❯\u00a0x "), "x")).toBe(false);
   });
 });
