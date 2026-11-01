@@ -15,7 +15,8 @@ export function requestPeer(request: Pick<IncomingMessage, "headers">): PeerIden
   if (typeof encoded !== "string") return undefined;
   try {
     const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-    if (!/^[a-f0-9]{64}$/.test(value.fingerprint) || value.id !== undefined && !/^[a-f0-9-]{36}$/i.test(value.id)) return undefined;
+    if (typeof value.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(value.fingerprint)
+        || value.id !== undefined && (typeof value.id !== "string" || !/^[a-f0-9-]{36}$/i.test(value.id))) return undefined;
     if (value.name !== undefined && (typeof value.name !== "string" || !/^[A-Za-z0-9_.-]{1,253}$/.test(value.name))) return undefined;
     if (value.name === undefined && value.id === undefined) return undefined;
     return { ...(value.name ? { name: value.name } : {}), ...(value.id ? { id: value.id } : {}), fingerprint: value.fingerprint };

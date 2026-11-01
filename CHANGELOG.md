@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - A transcript stream no longer spins re-reading the pane when the phone asks for older history before the agent has written its transcript.
+- The Hook no longer accepts a forwarded peer identity whose fingerprint or id is not a string (an array holding a valid value used to pass the format check).
 
 ## [0.3.67] - 2026-10-31
 
