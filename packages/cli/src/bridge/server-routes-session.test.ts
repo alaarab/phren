@@ -23,6 +23,7 @@ vi.mock("./schedule-watch.js", async importOriginal => ({ ...await importOrigina
 
 const { workspacesReader } = await import("./server-routes.js");
 const { noteTurn } = await import("./turn-records.js");
+const { markSessionSeen } = await import("./session-seen.js");
 const { writeLaunchBrief } = await import("./launch-brief.js");
 const recorded = JSON.parse(readFileSync(new URL("./fixtures/herdr/0.9.1/snapshot.json", import.meta.url), "utf8")).result.snapshot as Json;
 
@@ -97,6 +98,46 @@ describe("session rows on a computer with background work and dispatched workers
     expect(tabOf(await read(snapshot), "w1P:p2", snapshot).lastReply).toBe("Tests pass. Merge it?");
     await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"]]);
     expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("lastReply");
+  });
+
+  it("carries each finished turn's completion, and none while a turn runs", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    const terminal = String(pane.terminal_id), at = Date.parse("2026-10-31T10:00:00Z");
+    await turn("w1P:p2", terminal, [["UserPromptSubmit", { at }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("completion");
+    await turn("w1P:p2", terminal, [["Stop", { at: at + 1_000 }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({ id: `${sessions["w1P:p2"]}:2`, at: new Date(at + 1_000).toISOString() });
+    // A new prompt is unanswered, then the next Stop names a different completion.
+    await turn("w1P:p2", terminal, [["UserPromptSubmit", { at: at + 2_000 }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("completion");
+    await turn("w1P:p2", terminal, [["Stop", { at: at + 3_000 }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({ id: `${sessions["w1P:p2"]}:4`, at: new Date(at + 3_000).toISOString() });
+    // Another conversation in the same pane has its own id.
+    const original = sessions["w1P:p2"], next = "00000005-1111-4111-8111-111111111111";
+    try {
+      sessions["w1P:p2"] = next;
+      await turn("w1P:p2", terminal, [["UserPromptSubmit", { at: at + 4_000 }], ["Stop", { at: at + 5_000 }]]);
+      expect(tabOf(await read(snapshot), "w1P:p2", snapshot).completion).toEqual({ id: `${next}:2`, at: new Date(at + 5_000).toISOString() });
+    } finally { sessions["w1P:p2"] = original; }
+  });
+
+  it("does not carry a completion for a Stop with no prompt before it", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w13:p2")!;
+    await turn("w13:p2", String(pane.terminal_id), [["Stop"]]);
+    expect(tabOf(await read(snapshot), "w13:p2", snapshot)).not.toHaveProperty("completion");
+  });
+
+  it("carries the completion a client marked seen", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"], ["Stop"]]);
+    const completion = tabOf(await read(snapshot), "w1P:p2", snapshot).completion as { id: string; at: string };
+    expect(completion.id).toBe(`${sessions["w1P:p2"]}:2`);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("seenCompletion");
+    await markSessionSeen({ server: "default", pane: "w1P:p2", completion: completion.id }, { snapshot: async () => snapshot });
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).seenCompletion).toBe(completion.id);
   });
 
   it("shows a renamed session under its pane label, ahead of a dispatch label and the harness title", async () => {

@@ -51,7 +51,9 @@ import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
-import { liveBackground, markBackground, paneRecord, recordTitle, replyExcerpt } from "./session-activity.js";
+import { liveBackground, markBackground, ownRecord, paneRecord, recordTitle, replyExcerpt, turnCompletion } from "./session-activity.js";
+import { markSessionSeen, readSessionSeen } from "./session-seen.js";
+import { opencodeTurn, type TurnRecord } from "./turn-records.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -166,7 +168,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 }
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
+  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true };
 
@@ -227,6 +229,15 @@ export function selectedServer(url: URL): string {
  */
 export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean) => Promise<Json>;
 
+/** The pane's turn record for its session row. OpenCode's plugin stamps its
+ * turns per PID instead of writing a lifecycle record. */
+async function paneTurnRecord(server: string, pane: Json, session: string): Promise<TurnRecord | undefined> {
+  if (pane.agent !== "opencode") return paneRecord(server, pane, session);
+  if (typeof pane.terminal_id !== "string") return undefined;
+  const pids = (await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids;
+  return ownRecord(await opencodeTurn(pids, pane.terminal_id), pane, "opencode", session);
+}
+
 export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "agentHooks" | "journal" | "tabActivity" | "contextUsage">): WorkspacesReader {
   const { modules, info, agentHooks, journal, tabActivity, contextUsage } = ctx;
   return async (server, s, watchApprovals) => {
@@ -277,8 +288,12 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     const awaited = new Map<Json, number>();
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
-      const session = agents.length === 1 && object(tab.target).session;
-      const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
+      const pane = agents.length === 1 ? agents[0] : undefined;
+      const session = pane ? object(tab.target).session : undefined;
+      const [record, seen] = await Promise.all([
+        typeof session === "string" && pane ? paneTurnRecord(server, pane, session).catch(() => undefined) : undefined,
+        pane ? readSessionSeen(server, String(pane.pane_id)) : undefined,
+      ]);
       const [title, background] = await Promise.all([
         recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label }),
         liveBackground(record, readFinalTurn),
@@ -286,6 +301,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       if (expired) return;
       if (background) awaited.set(tab, background);
       markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
+      const completion = turnCompletion(record);
+      if (completion) tab.completion = completion;
+      if (seen) tab.seenCompletion = seen;
       const target = targetSchema.safeParse(tab.target);
       const stall = target.success && agents.length === 1
         ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
@@ -901,6 +919,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = { ok: true, ...(allowedPools ? { allowedPools } : {}) };
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
+        } else if (url.pathname === "/v1/sessions/seen") {
+          result = await markSessionSeen(data);
         } else if (url.pathname === "/v1/jobs/cleanup") {
           // Ends only registered worker process groups whose pane is gone.
           result = { ok: true, ...await ctx.resources.cleanupJobs() };

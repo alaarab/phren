@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Unread replies across the phone and the desktop: session rows from `GET /v1/workspaces` and the `/v1/overview` socket carry `completion: {id, at}` for a finished turn and the `seenCompletion` a person last marked seen (capability `sessionSeen`). `POST /v1/sessions/seen` stores that mark per pane beside its turn record, or clears `seenCompletion` with `unread: true` only when the stored mark equals the completion supplied.
+
 ### Fixed
 
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.

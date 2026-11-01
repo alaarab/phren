@@ -1843,7 +1843,14 @@ Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 `agentStatus` and `title`. A tab whose turn ended carries `lastReply`: the
 agent's last message from its Stop hook (Claude and Codex), as one plain line
 of at most 240 characters with markdown dropped. It is absent while a turn or
-its background work runs, and when the Stop carried no message. A session whose main turn ended while background
+its background work runs, and when the Stop carried no message. A finished
+turn also carries `completion: {id, at}`: an opaque id of the latest finished
+turn of the conversation now in the pane (the conversation id and its Stop's
+sequence), and when it stopped. It is absent while a prompt is unanswered, when
+a Stop has no prompt before it, or when the harness has no turn record.
+`seenCompletion` is the completion id a person last marked seen on the phone or
+the desktop, absent until one is. A row is unread while `completion.id` differs
+from `seenCompletion`. A session whose main turn ended while background
 work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
 where Herdr or tmux say idle or done. `n` counts the work the session is
 waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
@@ -1864,6 +1871,18 @@ title, except a title made from the brief launch's first prompt ("Read and
 follow the brief...", a `/briefs/` path, "Brief" and a bare id), which is
 dropped so the client falls back to `label`. `GET /v1/workspaces/panes` gives
 each pane's `title` by the same rule.
+
+#### Unread replies
+
+`POST /v1/sessions/seen` records which finished turn a person has seen. Its body
+is `{ server, pane, completion }`: the computer's terminal source, the pane id
+from the session row, and the row's `completion.id`. Without `unread` it stores
+that completion as the pane's `seenCompletion`, last writer wins. With
+`unread: true` it clears `seenCompletion` only when the stored mark equals the
+completion supplied, so a stale clear cannot remove a newer mark. The reply is
+`{ ok: true }`; a malformed body is 400 and a pane this computer does not list
+is 404. The mark is written atomically in the Hook's bridge folder and survives
+a restart. Hook advertises `capabilities.sessionSeen`.
 
 Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
 after route target validation. This code does not mean every 404 is a missing
