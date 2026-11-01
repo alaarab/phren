@@ -1,5 +1,6 @@
 import { open, stat } from "node:fs/promises";
 import { findPane, paneIdentity, snapshot } from "./herdr.js";
+import { classifyClaudeInput } from "./input-classification.js";
 import { readPaneText } from "./pane-text.js";
 import { object, objects, type Json, type Provider } from "./protocol.js";
 import { transcriptPath } from "./transcripts.js";
@@ -233,8 +234,13 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
       // unless the agent looks at it again.
       if (ownerPrompt(raw)) { for (const id of tail.awaited) tail.earlier.add(id); tail.awaited.clear(); }
     }
+    if (source === "claude" && (raw.type === "assistant" || (raw.type === "system" && raw.subtype === "turn_duration"))
+      && classifyClaudeInput({ text: "execution", origin: raw.origin, isSidechain: raw.isSidechain }).category !== "owner") continue;
     if (turnInterrupted(raw, source)) { interrupted = true; completed = false; continue; }
-    const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && claudeUserText(raw) !== undefined
+    // Only the owner's input opens a new turn. A task notification, a teammate
+    // message or a harness envelope in the same turn never clears the reply or
+    // the completion identity.
+    const userTurn = source === "claude" ? ownerPrompt(raw)
       : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
       : source === "copilot" ? raw.type === "user.message"
       : raw.type === "user/message";
@@ -255,13 +261,15 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
 }
 
 /** A prompt the owner (or a dispatcher) typed, not a task's notification or
- * a teammate's message waking the session. */
+ * a teammate's message waking the session. The shared classifier is the one
+ * answer: provenance first, then a leading harness envelope. */
 function ownerPrompt(raw: Json): boolean {
   // Claude files "[Request interrupted by user]" as a user row too: that is a stop, not the owner moving on.
-  const content = raw.type === "user" && !raw.isMeta && !turnInterrupted(raw, "claude") ? claudeUserText(raw) : undefined;
+  if (raw.type !== "user" || raw.isMeta || turnInterrupted(raw, "claude")) return false;
+  const content = claudeUserText(raw);
   if (content === undefined) return false;
-  const text = content.trimStart();
-  return !text.startsWith("<task-notification>") && !text.startsWith("<teammate-message");
+  return classifyClaudeInput({ text: content, hasImage: objects(object(raw.message).content).some(block => block.type === "image"), origin: raw.origin, commandMode: raw.commandMode,
+    isMeta: raw.isMeta, isSidechain: raw.isSidechain, isCompactSummary: raw.isCompactSummary }).category === "owner";
 }
 
 /** A Claude user row's text when it is a message someone typed: a string, or blocks of text and images (a

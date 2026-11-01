@@ -45,7 +45,12 @@ describe("the turn record", () => {
     // Same millisecond, still after the prompt.
     record = nextTurn(record, event("Stop", { at: Date.parse(record.prompt!.at), background: 2, reply: "  Done.  " }))!;
     expect(turnPhase(record)).toEqual({ phase: "ended", at: record.prompt!.at, background: 2, reply: "Done." });
-    // A task-notification wakes the worker: a new prompt, working again.
+    // A task notification is activity in the ended owner turn, not a new
+    // owner boundary. Only the next genuine owner submission opens a turn.
+    const owner = record.prompt;
+    record = nextTurn(record, event("UserPromptSubmit", { input: "notification" }))!;
+    expect(record.prompt).toEqual(owner);
+    expect(turnPhase(record).phase).toBe("ended");
     record = nextTurn(record, event("UserPromptSubmit"))!;
     expect(turnPhase(record).phase).toBe("working");
     expect(nextTurn(record, event("PreToolUse"))).toBeUndefined();
@@ -544,6 +549,12 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     // One the Hook answered uncertain still turns delivered when its hook takes it.
     const uncertain = hooks.deliveries.expect(target, "Check the logs", 1, undefined, "by-id-0002");
     expect(await uncertain).toBe("pending");
+    const owner = (await readTurn(target.server, target.pane))!.prompt;
+    // Even without a transcript, explicit notification provenance must not
+    // acknowledge these same words as the pending phone delivery.
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "Check the logs", origin: { kind: "task-notification" } })).toBe("{}");
+    expect((await readTurn(target.server, target.pane))!.prompt).toEqual(owner);
+    expect(hooks.deliveries.status("by-id-0002", target).state).toBe("unknown");
     expect(await post({ target, event: "UserPromptSubmit", prompt: "Check the logs" })).toBe("{}");
     expect(hooks.deliveries.status("by-id-0002", target).state).toBe("delivered");
     // A late queue call never moves a settled message back.

@@ -2290,6 +2290,38 @@ phone replaces it in place and keeps the reveal progress, avoiding duplicate
 text. Reconnect history retains existing rows unless Hook explicitly resets
 the conversation.
 
+A background task's notification, a teammate message or a harness envelope
+never becomes the preview and never changes its `turnStartedAt`: it belongs to
+the owner prompt already running. Within a turn the preview is monotonic in
+block identity and accepted content: a redraw may extend the accepted block, but a shorter,
+notice-only or unrelated screen neither replaces it nor clears it, and a block
+that already landed never comes back. `preview: null` is the one explicit
+clear, sent when the accepted block lands or the turn genuinely ends; an
+omitted `preview` field means unchanged. The status stream and the overview
+share one resolved status: an unanswered owner prompt stays `working` even
+while the terminal snapshot briefly says idle, and a notification's Stop does
+not end it. Clients should not derive working/idle from preview presence,
+length or spinner text, and must not let an older overview/status frame
+override a newer one for the same conversation. A real held approval or
+question takes precedence over working, while a genuine foreground Stop ends
+the preview even when awaited background work keeps status working. Replyless
+Stops and interruptions are boundaries too. Opening pages and cursor reconnects
+recover only classified owner anchors from the verified transcript; when no
+anchor is available, preview stays silent. Notification appends do not reset
+history. Clients preserve the visible settled-row anchor when reading history
+and follow growing output only when already following the tail.
+
+Claude assistant entries may carry `phrenExecution: "background"`. This safe
+category excludes them from foreground preview retirement and termination;
+raw execution provenance is not published. Reconnect recovery includes bounded
+landed-block and final evidence with the owner anchor; if continuity cannot be
+established, the preview stays silent. A callback whose provenance is not yet
+readable retains the previous owner anchor and is retried for up to 30 seconds
+(at most 64 pending submissions). A verified owner row promotes that original
+submission in sequence, preserving any later Stop. Foreground and held status
+are applied independently of slow decoration, and optional stream status
+enrichment has a bounded wait.
+
 ### Conversation search
 
 `GET /v1/conversations/search?q=<text>&limit=<1..50>&cursor=<opaque>` searches

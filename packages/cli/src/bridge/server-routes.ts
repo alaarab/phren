@@ -52,9 +52,10 @@ import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
-import { liveBackground, markBackground, ownRecord, paneRecord, recordTitle, replyExcerpt, turnCompletion } from "./session-activity.js";
+import { availablePaneEvidence, childActivity, effectivePaneEvidence } from "./session-evidence.js";
+import { liveWork, markBackground, ownRecord, paneRecord, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
 import { markSessionSeen, readSessionSeen } from "./session-seen.js";
-import { opencodeTurn, type TurnRecord } from "./turn-records.js";
+import { opencodeTurn, turnPhase, type TurnRecord } from "./turn-records.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -64,7 +65,7 @@ import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Js
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
 import { tabActivityKey, type TabActivityStore } from "./tab-activity.js";
-import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath, transcriptPath, TranscriptReader } from "./transcripts.js";
+import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, targetTranscriptPath, transcriptPath, TranscriptReader } from "./transcripts.js";
 import { conversationSearch } from "./conversation-search.js";
 import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
@@ -78,7 +79,6 @@ import type { ResourceMonitor } from "./resources.js";
 import { SCHEDULE_EVENT_BODY_CAP } from "./schedule-events.js";
 import type { Scheduler } from "./schedules.js";
 import { updateScheduleRoute } from "./schedule-update.js";
-import { readFinalTurn } from "./schedule-watch.js";
 import { cachedStoreWarnings, healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
 import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
@@ -150,63 +150,37 @@ export interface RouteContext {
   streams: TranscriptStreams;
 }
 
-const CHILD_ACTIVITY_CACHE_MS = 5_000;
 /** How long the overview waits for per-tab git and transcript reads; the phone gives up at 20 s. */
 export const OVERVIEW_ENRICH_BUDGET_MS = 5_000;
-interface ChildActivity { runningChildren: number; childProviders: Provider[] }
-const childActivityCache = new Map<string, { at: number; pending: boolean; result: Promise<ChildActivity> }>();
-
-async function childActivity(source: Provider, session: string): Promise<ChildActivity> {
-  const key = `${source}\0${session}`, now = Date.now(), cached = childActivityCache.get(key);
-  // A slow tree still belongs to the next overview. Expiring an in-flight
-  // read every five seconds starts it over before any answer can be reused.
-  if (cached && (cached.pending || now - cached.at < CHILD_ACTIVITY_CACHE_MS)) return cached.result;
-  const result = childAgentTree(source, session).then(tree => {
-    const running = runningChildAgents(tree);
-    return { runningChildren: running.length, childProviders: [...new Set(running.map(child => child.provider))].sort() };
-  }).catch(() => ({ runningChildren: 0, childProviders: [] as Provider[] }));
-  const entry = { at: now, pending: true, result };
-  void result.then(() => { entry.at = Date.now(); entry.pending = false; });
-  childActivityCache.set(key, entry);
-  while (childActivityCache.size > 128) childActivityCache.delete(childActivityCache.keys().next().value!);
-  return result;
-}
 
 type StatusRow = { workspace: unknown; tab: unknown; status: unknown };
 /** How long activity sampling may spend resolving background work before it
  * leaves an unresolved row at its last known status. */
 export const STATUS_ENRICH_BUDGET_MS = 2_000;
-async function effectiveStatus(server: string, s: Json, row: StatusRow): Promise<StatusRow> {
-  if (row.status !== "idle" && row.status !== "done") return row;
+async function effectiveStatus(server: string, s: Json, row: StatusRow, hooks?: AgentHooks): Promise<StatusRow> {
   const panes = objects(s.panes).filter(p => p.tab_id === row.tab && p.workspace_id === row.workspace && p.agent);
   if (panes.length !== 1 || !provider.safeParse(panes[0].agent).success) return row;
   const pane = panes[0];
   const chat = await paneChatState(server, pane, { tokenWhenIdentified: false }).catch((): Json => ({}));
   const session = typeof chat.sessionId === "string" ? chat.sessionId : undefined;
   if (!session) return row;
-  const record = await paneRecord(server, pane, session);
-  const [background, children] = await Promise.all([
-    liveBackground(record, readFinalTurn),
-    childActivity(pane.agent as Provider, session),
-  ]);
-  const effective: Json = { agentStatus: row.status };
-  markBackground(effective, (background ?? 0) + children.runningChildren);
-  return effective.agentStatus === row.status ? row : { ...row, status: effective.agentStatus };
+  const evidence = await effectivePaneEvidence(server, { ...pane, agent_status: row.status }, session, hooks);
+  const resolved = resolveEffectiveStatus(evidence);
+  return !resolved || resolved === row.status ? row : { ...row, status: resolved };
 }
 /** The status each tab's row sends after the same background-work rules the
  * overview applies: an idle or done tab whose ended turn still awaits shells or
  * running children is working. The activity timer uses this while no overview
  * is open, so its status clock still moves. A row whose background reads do not
  * finish inside `budgetMs` is left out, which preserves its last known status. */
-export async function effectiveStatusRows(server: string, s: Json, budgetMs = STATUS_ENRICH_BUDGET_MS): Promise<StatusRow[]> {
+export async function effectiveStatusRows(server: string, s: Json, budgetMs = STATUS_ENRICH_BUDGET_MS, hooks?: AgentHooks): Promise<StatusRow[]> {
   const deadline = Date.now() + budgetMs;
   const rows = await Promise.all(objects(s.tabs).map(async (tab): Promise<StatusRow | undefined> => {
     const row = { workspace: tab.workspace_id, tab: tab.tab_id, status: tab.agent_status };
-    if (row.status !== "idle" && row.status !== "done") return row;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())); timer.unref(); });
     try {
-      return await Promise.race([effectiveStatus(server, s, row).catch(() => row), late]);
+      return await Promise.race([effectiveStatus(server, s, row, hooks).catch(() => row), late]);
     } finally { clearTimeout(timer); }
   }));
   return rows.filter((row): row is StatusRow => row !== undefined);
@@ -331,16 +305,21 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // turn still has background work, and which dispatch it is. It runs
     // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
-    const awaited = new Map<Json, number>();
     const recordEnrichment: Array<() => Promise<void>> = [];
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const pane = agents.length === 1 ? agents[0] : undefined;
       const session = pane ? object(tab.target).session : undefined;
-      const [record, seen] = await Promise.all([
-        typeof session === "string" && pane ? paneTurnRecord(server, pane, session).catch(() => undefined) : undefined,
-        pane ? readSessionSeen(server, String(pane.pane_id)) : undefined,
-      ]);
+      const record = typeof session === "string" && pane ? await paneTurnRecord(server, pane, session).catch(() => undefined) : undefined;
+      if (expired) return;
+      if (pane && typeof session === "string") {
+        const available = availablePaneEvidence(server, pane, session, record, agentHooks);
+        if (available.held || ["blocked", "waiting"].includes(String(available.paneStatus)) || (record && turnPhase(record).phase === "working")) {
+          const status = resolveEffectiveStatus(available);
+          if (status) tab.agentStatus = status;
+        }
+      }
+      const seen = pane ? await readSessionSeen(server, String(pane.pane_id)) : undefined;
       if (expired) return;
       const completion = turnCompletion(record);
       if (completion) tab.completion = completion;
@@ -359,10 +338,16 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (!expired && entry !== undefined) completion.entry = entry;
       });
       recordEnrichment.push(async () => {
-        const background = await liveBackground(record, readFinalTurn);
+        const evidence = pane && typeof session === "string" ? await effectivePaneEvidence(server, pane, session, agentHooks, undefined, record) : undefined;
+        const background = evidence ? liveWork(record, evidence.final, evidence.runningChildren) : undefined;
         if (expired) return;
-        if (background) awaited.set(tab, background);
-        markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
+        if (evidence) {
+          Object.assign(tab, evidence.children);
+          const resolved = resolveEffectiveStatus(evidence);
+          if (background && ["idle", "done"].includes(String(tab.agentStatus))) tab.backgroundTasks = background;
+          if (resolved) tab.agentStatus = resolved;
+        }
+        markBackground(tab, background);
         if (tab.agentStatus === "working") delete tab.lastReply;
         const target = targetSchema.safeParse(tab.target);
         const stall = target.success && agents.length === 1
@@ -386,9 +371,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     };
     const identified = (group: Json, tab: Json) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
-      if (agents.length !== 1 || !provider.safeParse(agents[0].agent).success) return undefined;
-      const session = chatStates.get(agents[0])?.sessionId;
-      return typeof session === "string" ? { source: agents[0].agent as Provider, session, pane: agents[0] } : undefined;
+      const session = agents.length === 1 ? chatStates.get(agents[0])?.sessionId : undefined;
+      return agents.length === 1 && provider.safeParse(agents[0].agent).success && typeof session === "string"
+        ? { source: agents[0].agent as Provider, session, pane: agents[0] } : undefined;
     };
     const enrich = Promise.all([
       records.then(() => {
@@ -400,13 +385,16 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         const branch = await repositoryBranch(tab.cwd);
         if (!expired && branch !== undefined) tab.branch = branch;
       }),
+      // Child decoration must not wait for record I/O, final-turn reads or
+      // dialogs. Share the resolver's cached trees, but publish ready counts
+      // independently while the overview still owns this response.
       eachTab(async ({ group, tab }) => {
         const identity = identified(group, tab);
         if (!identity) return;
         const children = await childActivity(identity.source, identity.session);
         if (expired) return;
         Object.assign(tab, children);
-        markBackground(tab, (awaited.get(tab) ?? 0) + children.runningChildren);
+        markBackground(tab, children.runningChildren);
         if (tab.agentStatus === "working") delete tab.lastReply;
       }),
       eachTab(async ({ group, tab }) => {

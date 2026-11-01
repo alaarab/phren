@@ -64,7 +64,7 @@ describe("live reply previews", () => {
     // The text stops at the real entry; Claude's spinner verb carries on.
     expect(await stream.update("working", undefined, 1600)).toEqual({ preview: null });
     expect(stream.verb).toBe("Working");
-    await stream.update("idle", undefined, 2600);
+    await stream.update("idle", undefined, 2600, { ended: true });
     expect(stream.verb).toBeUndefined();
   });
 
@@ -134,7 +134,7 @@ describe("live reply previews", () => {
     expect(await stream.update("working", undefined, 600)).toEqual({ preview: { turnStartedAt: start, text: block } });
     // A short new ending still parts from the landed one, though the landed one ends with its words.
     block = "The configuration for the production deployment is valid.";
-    expect(await stream.update("working", undefined, 1200)).toEqual({ preview: { turnStartedAt: start, text: block } });
+    expect(await stream.update("working", undefined, 1200)).toBeUndefined();
   });
 
   it("knows a landed block again though the pane leaves out a row it takes for chrome and a wrapped number", async () => {
@@ -251,7 +251,7 @@ describe("live reply previews", () => {
     const pane = vi.fn(async () => "❯ Explain this\n⏺ Partial reply\n❯");
     const stream = new TranscriptPreviewStream(target, pane); stream.observe([user]);
     await stream.update("working", undefined, 0);
-    expect(await stream.update("idle", undefined, 10)).toEqual({ preview: null });
+    expect(await stream.update("idle", undefined, 10, { ended: true })).toEqual({ preview: null });
     expect(await stream.update("working", undefined, 1000)).toBeUndefined();
     expect(pane).toHaveBeenCalledTimes(1);
     stream.observe([{ ...user, line: 2, raw: { ...user.raw, timestamp: "2026-09-22T10:01:00Z" } }]);
@@ -335,7 +335,7 @@ describe("live reply previews", () => {
     spinner = "✢ Crunching… (28s · ↓ 1.1k tokens · thinking)";
     expect(await stream.update("working", undefined, 1200)).toEqual({ preview: { turnStartedAt: start, text: "Reading" } });
     expect(stream.activity).toMatchObject({ tokens: { count: 1100 }, thinking: true });
-    await stream.update("idle", undefined, 2000);
+    await stream.update("idle", undefined, 2000, { ended: true });
     expect(stream.activity).toBeUndefined();
   });
 
@@ -719,5 +719,49 @@ describe("Claude Code screen text", () => {
     for (const line of ["The update check passed.", "I will restart the server next.", "Tips are in the README."]) {
       expect(claudeChrome(line)).toBe(false);
     }
+  });
+});
+
+describe("Claude transcript landing and classification", () => {
+  it("clears a landed block inside the scrape throttle and accepts only a later block", async () => {
+    const file = path.join(await scratch(), "session.jsonl");
+    const reader = new TranscriptReader(file, "claude");
+    const stream = new TranscriptPreviewStream(target, async () => screen);
+    let screen = "❯ Explain this\n⏺ Block A is done.\n❯";
+    await writeFile(file, JSON.stringify(user.raw) + "\n");
+    stream.observe((await reader.read()).entries);
+    expect(await stream.update("working", file, 0)).toEqual({ preview: { turnStartedAt: start, text: "Block A is done." } });
+    await appendFile(file, JSON.stringify({ type: "assistant", uuid: "a1", timestamp: start,
+      message: { role: "assistant", content: [{ type: "text", text: "Block A is done." }], stop_reason: "tool_use" } }) + "\n");
+    stream.observe((await reader.read()).entries);
+    // The append at 100 ms must carry its clear, without another pane scrape.
+    expect(await stream.update("working", file, 100)).toEqual({ preview: null });
+    screen = "❯ Explain this\n⏺ Block B begins.\n❯";
+    expect(await stream.update("working", file, 500)).toEqual({ preview: { turnStartedAt: start, text: "Block B begins." } });
+    screen = "❯ Explain this\n⏺ Block A is done.\n❯";
+    expect(await stream.update("working", file, 1000)).toBeUndefined();
+  });
+
+  it("keeps internal origins private while preserving tool results and image-only owner boundaries", async () => {
+    const file = path.join(await scratch(), "session.jsonl"), reader = new TranscriptReader(file, "claude");
+    let screen = "❯ Explain this\n⏺ Accepted reply\n❯";
+    const stream = new TranscriptPreviewStream(target, async () => screen);
+    await writeFile(file, JSON.stringify(user.raw) + "\n"); stream.observe((await reader.read()).entries);
+    expect((await stream.update("working", file, 0))?.preview?.text).toBe("Accepted reply");
+    for (const kind of ["auto-continuation", "scheduled"]) {
+      await appendFile(file, JSON.stringify({ type: "user", timestamp: "2026-11-01T15:00:02.000Z", origin: { kind }, message: { role: "user", content: "PRIVATE automatic instructions" } }) + "\n");
+    }
+    await appendFile(file, JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "tool output" }] } }) + "\n");
+    const page = await reader.read();
+    expect(JSON.stringify(page)).not.toContain("PRIVATE");
+    expect(page.entries.some(entry => JSON.stringify(entry).includes("tool_result"))).toBe(true);
+    stream.observe(page.entries);
+    expect(await stream.update("working", file, 500)).toBeUndefined();
+    await appendFile(file, JSON.stringify({ type: "user", timestamp: "2026-11-01T15:00:03.000Z", message: { role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } }] } }) + "\n");
+    stream.observe((await reader.read()).entries);
+    expect(await stream.update("working", file, 550)).toEqual({ preview: null });
+    // No verified text anchor for the image: an arbitrary pane prompt cannot seed it.
+    screen = "❯ Unrelated prompt\n⏺ Stale reply\n❯";
+    expect(await stream.update("working", file, 1000)).toBeUndefined();
   });
 });

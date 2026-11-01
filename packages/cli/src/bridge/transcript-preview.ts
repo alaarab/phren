@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { codexThreadPreview } from "./codex-threads.js";
+import { classifyClaudeInput } from "./input-classification.js";
 import { readPaneText } from "./pane-text.js";
 import { object, objects, type Json, type Target } from "./protocol.js";
 import { withTranscriptIndex } from "./transcript-index.js";
@@ -38,6 +39,7 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   const lines = raw.map((line, index) => (/[─━═]{3,}/.test(line) && !/^\s*[│┃║]/.test(line))
     || (/[─━═]\s*$/.test(line) && /^\s*[❯>]\s*$/.test(raw[index + 1] ?? "")) ? "❯" : line.replace(/[\u2500-\u257f]/g, "").trimEnd());
   const firstPrompt = prompt.trim().split(/\r?\n/)[0]?.trim();
+  // No verified textual anchor means no pane preview, including reconnects.
   if (!firstPrompt) return "";
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -51,15 +53,17 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   // pasted-text placeholder): the newest prompt row with turn output under it (a block, the spinner, thinking)
   // is this turn's, and everything above it is an older turn. The composer and a permission dialog's
   // options have none under them.
-  if (start < 0 && inTurn && !previous) {
+  const command = /<command-name>([^<]+)<\/command-name>/.exec(prompt)?.[1];
+  if (start < 0 && inTurn && !previous && command) {
     const output = (line: string) => /^\s*[⏺●✻✽✶✢✳✦·∴⠁-⣿]/u.test(line) || !!parseClaudeSpinnerLine(line);
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (!/^\s*[❯>]\s*\S/.test(lines[i]) || !lines.slice(i + 1).some(output)) continue;
+      if (lines[i].replace(/^\s*[❯>]\s*/, "").trim() !== command || !lines.slice(i + 1).some(output)) continue;
       // Nothing written under this turn's prompt yet: no reply to show.
       if (!lines.slice(i + 1).some(line => /^\s*[⏺●]/.test(line))) return "";
       start = i + 1; break;
     }
   }
+  if (start < 0 && !previous && lines.some(line => /^\s*[❯>]\s*\S/.test(line))) return "";
   const scrolled = start < 0;
   if (scrolled && !previous && !inTurn) return "";
   const reply: string[] = [], shown: string[] = [];
@@ -444,6 +448,8 @@ export class TranscriptPreviewStream {
    * showing a landed block until a newer one is drawn, so only a block not among these is previewed. */
   private readonly landedTexts = new Set<string>();
   private ended = false;
+  private lifecycleEnded = false;
+  private retirementComplete = true;
   /** Claude's own spinner word for the running turn, sent beside frames as
    * `activityVerb` for older phones. */
   verb: string | undefined;
@@ -454,6 +460,7 @@ export class TranscriptPreviewStream {
   private lastRead = -Infinity;
   private lastSent = -Infinity;
   private current: TranscriptPreview | null = null;
+  private clearPending = false;
   private observedLine = -1;
   private wasWorking = false;
   /** Replies that already landed as entries: a sidecar or thread a tick
@@ -465,7 +472,7 @@ export class TranscriptPreviewStream {
     private readonly delta: (file?: string) => Promise<TranscriptPreview | null> = file => readDeltaPreview(target, file, this.rollout)) {}
 
   observe(entries: Entry[], reset = false): void {
-    if (reset) { this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.landedTexts.clear(); this.ended = false; this.wasWorking = false; this.completed.clear(); }
+    if (reset) { this.clearPending ||= !!this.current; this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.landedTexts.clear(); this.retirementComplete = true; this.lifecycleEnded = false; this.ended = false; this.wasWorking = false; this.completed.clear(); }
     for (const { raw, line } of entries) {
       if (line <= this.observedLine) continue;
       this.observedLine = line;
@@ -507,13 +514,20 @@ export class TranscriptPreviewStream {
         } else if (["session.idle", "abort"].includes(String(raw.type))) { this.ended = true; this.verb = undefined; this.activity = undefined; }
         continue;
       }
-      if (this.target.source !== "claude") continue;
+      if (this.target.source !== "claude" || raw.phrenExecution === "background") continue;
       const message = object(raw.message), blocks = objects(message.content);
-      if (raw.type === "user" && !raw.phrenQueued && !raw.isMeta && !blocks.some(b => b.type === "tool_result")) {
-        const prompt = typeof message.content === "string" ? message.content : blocks.filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
-        if (prompt.trim() && typeof raw.timestamp === "string" && Number.isFinite(Date.parse(raw.timestamp))) {
-          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.landedTexts.clear(); this.ended = false; this.wasWorking = false; this.verb = undefined; this.activity = undefined;
+      const prompt = typeof message.content === "string" ? message.content : blocks.filter(b => b.type === "text").map(b => String(b.text ?? "")).join("\n");
+      const input = classifyClaudeInput({ text: prompt, hasImage: blocks.some(b => b.type === "image"), origin: raw.origin, commandMode: raw.commandMode,
+        isMeta: raw.isMeta, isSidechain: raw.isSidechain, isCompactSummary: raw.isCompactSummary,
+        toolResult: blocks.some(b => b.type === "tool_result") });
+      if (raw.type === "user" && input.category === "owner" && !raw.phrenQueued) {
+        if ((prompt.trim() || blocks.some(b => b.type === "image")) && typeof raw.timestamp === "string" && Number.isFinite(Date.parse(raw.timestamp))) {
+          this.clearPending ||= !!this.current;
+          this.startedAt = raw.timestamp; this.prompt = prompt; this.landed = false; this.landedTexts.clear(); this.retirementComplete = true; this.lifecycleEnded = false; this.ended = false; this.wasWorking = false; this.verb = undefined; this.activity = undefined;
         }
+      } else if (this.startedAt && raw.type === "user" && blocks.some(b => b.type === "tool_result")) {
+        // A tool result is the turn's own activity, never a new owner prompt.
+        this.landed = true;
       } else if (this.startedAt && ((raw.type === "assistant" && message.stop_reason === "end_turn")
         || (raw.type === "system" && raw.subtype === "turn_duration"))) {
         // The transcript says the turn is over before the shared snapshot
@@ -524,7 +538,7 @@ export class TranscriptPreviewStream {
         if (raw.type === "assistant") {
           const texts = typeof message.content === "string" ? [message.content] : blocks.filter(b => b.type === "text").map(b => String(b.text ?? ""));
           for (const text of texts.map(previewWords).filter(Boolean)) this.landedTexts.add(text);
-          while (this.landedTexts.size > 64) this.landedTexts.delete(this.landedTexts.values().next().value!);
+          while (this.landedTexts.size > 64) { this.retirementComplete = false; this.landedTexts.delete(this.landedTexts.values().next().value!); }
         }
       }
     }
@@ -539,9 +553,55 @@ export class TranscriptPreviewStream {
       !(landed.length < LANDED_MATCH_CHARS && words.length > landed.length) && drawsLanded(words, landed));
   }
 
-  async update(status: unknown, file?: string, now?: number): Promise<{ preview: TranscriptPreview | null } | undefined> {
+  /** Seed a reconnect from a classified owner row in the verified transcript. */
+  seedTurn(turnStartedAt: string, prompt: string): void {
+    if (this.startedAt || !prompt.trim() || !Number.isFinite(Date.parse(turnStartedAt))) return;
+    this.startedAt = turnStartedAt;
+    this.prompt = prompt;
+    // The anchor came from a classified owner row in the verified transcript.
+    this.landed = true;
+    this.ended = false;
+  }
+
+  /**
+   * Accept a pane candidate monotonically. Within one block, only a growing
+   * extension (or a verified overlap) is taken; a shorter or unrelated screen
+   * cannot replace the accepted block. A later block is accepted only once the
+   * previous one landed (which clears `current` first) or the caller observed a
+   * structural boundary.
+   */
+  private acceptClaudeCandidate(candidate: string): string {
+    const current = this.current && this.current.turnStartedAt === this.startedAt ? this.current.text : "";
+    if (!current) return candidate.slice(0, MAX_TEXT);
+    if (candidate === current) return "";
+    if (candidate.startsWith(current)) return candidate.slice(0, MAX_TEXT);
+    // A shorter screen is an incomplete redraw, never a replacement.
+    if (current.startsWith(candidate)) return "";
+    // Verified overlap: a redraw may drop the opening rows but keep a stretch.
+    for (let size = Math.min(current.length, 160); size >= 24; size -= 8) {
+      const overlap = current.slice(-size);
+      const at = candidate.indexOf(overlap);
+      if (at === 0) return (current.slice(0, current.length - size) + candidate.slice(at)).slice(0, MAX_TEXT);
+    }
+    return "";
+  }
+
+  async update(status: unknown, file?: string, now?: number, lifecycle?: { ended?: boolean }): Promise<{ preview: TranscriptPreview | null } | undefined> {
     const readAt = now ?? Date.now();
     let next: TranscriptPreview | null = null;
+    if (this.target.source === "claude" && lifecycle?.ended !== undefined) {
+      this.lifecycleEnded = lifecycle.ended;
+      if (this.lifecycleEnded) { this.verb = undefined; this.activity = undefined; }
+    }
+    // Settled rows and genuine ends clear in the same append, even between
+    // scrape ticks. Only pane reads and growth frames are throttled.
+    if (this.target.source === "claude" && this.current && (this.ended || this.lifecycleEnded || this.clearPending
+      || this.current.turnStartedAt !== this.startedAt || this.hasLanded(this.current.text))) {
+      this.current = null; this.clearPending = false;
+      if (this.ended || this.lifecycleEnded) { this.verb = undefined; this.activity = undefined; this.sentActivity = ""; }
+      return { preview: null };
+    }
+    this.clearPending = false;
     if (status === "working") {
       this.wasWorking = true;
       if (STREAMED_SOURCES.has(this.target.source)) {
@@ -552,17 +612,24 @@ export class TranscriptPreviewStream {
           const text = next.text.trim();
           if (text && [...this.completed].some(completed => completed.startsWith(text))) next = null;
         }
-      } else if (this.target.source === "claude" && this.startedAt && !this.ended) {
+      } else if (this.target.source === "claude" && this.startedAt && !this.ended && !this.lifecycleEnded && this.retirementComplete) {
         if (readAt - this.lastRead < PREVIEW_INTERVAL_MS) return undefined;
         this.lastRead = readAt;
         // A reply block stops once it lands as an entry; the next one written after a tool or thinking
         // previews in turn. Claude's spinner verb keeps naming the work until the turn ends.
         const pane = await this.pane();
-        let text = claudePanePreview(pane, this.prompt, this.current?.turnStartedAt === this.startedAt ? this.current.text : "", this.landed);
-        if (text && this.hasLanded(text)) text = "";
+        const candidate = claudePanePreview(pane, this.prompt, this.current?.turnStartedAt === this.startedAt ? this.current.text : "", this.landed);
         const spinner = claudeSpinner(pane);
         if (spinner) { this.activity = spinner; this.verb = spinner.verb; }
-        if (text) next = { turnStartedAt: this.startedAt, text };
+        if (candidate && !this.hasLanded(candidate)) {
+          const accepted = this.acceptClaudeCandidate(candidate);
+          if (accepted) next = { turnStartedAt: this.startedAt, text: accepted };
+          else if (this.current?.turnStartedAt === this.startedAt) next = this.current;
+        } else if (this.current?.turnStartedAt === this.startedAt) {
+          // An inconclusive scrape (empty, notice-only, transiently incomplete)
+          // never retires an accepted preview while work continues.
+          next = this.current;
+        }
       } else if (this.target.source === "copilot" && this.startedAt && !this.ended) {
         // No reply text from the pane: only whether Copilot is thinking.
         if (readAt - this.lastRead < PREVIEW_INTERVAL_MS) return undefined;
@@ -570,7 +637,15 @@ export class TranscriptPreviewStream {
         const thinking = copilotThinking(await this.pane());
         if (thinking) { this.activity = thinking; this.verb = thinking.verb; }
       }
-    } else if (["claude", "copilot"].includes(this.target.source) && this.wasWorking) { this.landed = true; this.ended = true; this.verb = undefined; this.activity = undefined; }
+    } else if (["claude", "copilot"].includes(this.target.source) && this.wasWorking) {
+      // Only a resolved genuine end terminates. A bare status snapshot can be a
+      // notification-driven idle or a stale terminal report; server-stream
+      // passes the resolver's answer as `lifecycle`. A caller without lifecycle evidence
+      // preserves the accepted Claude preview.
+      const ended = this.target.source === "copilot" || lifecycle?.ended === true;
+      if (ended) { this.landed = true; if (this.target.source === "copilot") this.ended = true; this.verb = undefined; this.activity = undefined; }
+      else if (this.current && this.current.turnStartedAt === this.startedAt) next = this.current;
+    }
     const sentAt = now ?? Date.now();
     // The phone ticks the clock itself: only the verb, tokens and thinking
     // state are worth a frame of their own.

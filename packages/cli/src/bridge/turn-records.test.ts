@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stopFacts } from "./agent-hook-callback.js";
-import { latestStopTasks, noteTurn, opencodeTurn, readTurn, STOP_TASKS_LIMIT } from "./turn-records.js";
+import { latestStopTasks, nextTurn, noteTurn, opencodeTurn, readTurn, STOP_TASKS_LIMIT, turnPhase } from "./turn-records.js";
 
 const session = "00000005-1111-4111-8111-111111111111";
 const turn = (event: string, extra: Partial<Parameters<typeof noteTurn>[2]> = {}) =>
-  ({ event, terminal: "term-1", source: "claude" as const, session, ...extra });
+  ({ event, input: "owner" as const, terminal: "term-1", source: "claude" as const, session, ...extra });
 
 let bridge: string;
 beforeEach(async () => {
@@ -76,5 +76,41 @@ describe("OpenCode's advancing turn sequence", () => {
     const reloaded = await import("./turn-records.js");
     await stamp("2026-09-01T00:00:03Z", "2026-09-01T00:00:04Z");
     expect((await reloaded.opencodeTurn([41], "term-o"))!.stop!.seq).toBe(4);
+  });
+});
+
+describe("automatic input keeps the owner's turn", () => {
+  const at = (ms: number) => new Date(Date.UTC(2026, 10, 1, 15, 0, 0, ms)).toISOString();
+  const prompt = () => turn("UserPromptSubmit", { at: Date.parse(at(0)) });
+
+  it("does not advance the owner prompt, generation or completion identity", () => {
+    const owner = nextTurn(undefined, prompt())!;
+    const notified = nextTurn(owner, turn("UserPromptSubmit", { at: Date.parse(at(1_000)), input: "notification" }))!;
+    expect(notified.prompt).toEqual(owner.prompt);
+    expect(notified.notification).toMatchObject({ at: at(1_000), reason: "input:notification" });
+    expect(turnPhase(notified)).toEqual({ phase: "working", since: owner.prompt!.at });
+    // A genuine final Stop still ends the owner's turn.
+    const stopped = nextTurn(notified, turn("Stop", { at: Date.parse(at(2_000)), reply: "Done." }))!;
+    expect(turnPhase(stopped)).toMatchObject({ phase: "ended", reply: "Done." });
+    expect(stopped.prompt).toEqual(owner.prompt);
+  });
+
+  it("keeps the owner anchor across a reload after a notification", async () => {
+    await noteTurn("default", "w1:p1", prompt());
+    const owner = (await readTurn("default", "w1:p1"))!.prompt;
+    await noteTurn("default", "w1:p1", turn("UserPromptSubmit", { at: Date.parse(at(1_000)), input: "notification" }));
+    const reloaded = await readTurn("default", "w1:p1");
+    expect(reloaded!.prompt).toEqual(owner);
+    expect(reloaded!.notification).toMatchObject({ reason: "input:notification" });
+    expect(turnPhase(reloaded!)).toEqual({ phase: "working", since: owner!.at });
+  });
+
+  it("does not let a notification-associated Stop end a working foreground turn", () => {
+    const owner = nextTurn(undefined, prompt())!;
+    const notified = nextTurn(owner, turn("UserPromptSubmit", { at: Date.parse(at(1_000)), input: "notification" }))!;
+    const stopped = nextTurn(notified, turn("Stop", { at: Date.parse(at(2_000)), notificationStop: true, background: 1 }))!;
+    expect(stopped.stop).toBeUndefined();
+    expect(stopped.notification).toMatchObject({ reason: "stop:notification" });
+    expect(turnPhase(stopped)).toEqual({ phase: "working", since: owner.prompt!.at });
   });
 });

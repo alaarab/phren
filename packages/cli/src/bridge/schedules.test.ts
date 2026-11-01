@@ -605,6 +605,40 @@ describe("a scheduled turn that finished", () => {
       .toMatchObject({ completed: true, error: "Quota exceeded" });
   });
 
+  it("opens a new owner turn for image-only input", () => {
+    const image = JSON.stringify({ type: "user", timestamp: "2026-11-01T15:00:02.000Z", message: { role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } }] } });
+    expect(finalTurnFromLines([...claudeLines(report), image], "claude")).toEqual({ completed: false });
+  });
+
+  it("never clears a finished turn's reply for a task notification", () => {
+    const at = "2026-11-01T15:00:02.000Z";
+    const notification = JSON.stringify({ type: "user", timestamp: at, origin: { kind: "task-notification" },
+      message: { role: "user", content: "<task-notification>\n<task-id>bhook189</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n<summary>Background command \"Run the suite\" completed (exit code 0)</summary>\n</task-notification>" } });
+    const wrapped = JSON.stringify({ type: "user", timestamp: at,
+      message: { role: "user", content: "<system-reminder>\n<task-notification><task-id>bhook189</task-id><status>completed</status></task-notification>\n</system-reminder>" } });
+    const originOnly = JSON.stringify({ type: "user", timestamp: at, origin: { kind: "task-notification" },
+      message: { role: "user", content: "PRIVATE OUTPUT" } });
+    const background = JSON.stringify({ type: "assistant", origin: { kind: "task-notification" },
+      message: { role: "assistant", content: [{ type: "text", text: "Background final output" }], stop_reason: "end_turn" } });
+    for (const extra of [notification, wrapped, originOnly, background]) {
+      expect(finalTurnFromLines([...claudeLines(report), extra], "claude")).toEqual({ completed: true, lastAssistant: report, ...([notification, wrapped].includes(extra) ? { finishedTasks: [at] } : {}) });
+    }
+  });
+
+  it("still records a notification's finished background task without clearing the reply", () => {
+    const at = "2026-11-01T15:00:02.000Z";
+    const launch = [
+      JSON.stringify({ type: "assistant", message: { role: "assistant",
+        content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "run suite" } }] } }),
+      JSON.stringify({ type: "user", toolUseResult: { backgroundTaskId: "bash1" },
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "started" }] } }),
+    ];
+    const notice = JSON.stringify({ type: "user", timestamp: at, origin: { kind: "task-notification" },
+      message: { role: "user", content: "<task-notification>\n<task-id>bash1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n</task-notification>" } });
+    expect(finalTurnFromLines([...launch, ...claudeLines(report), notice], "claude"))
+      .toMatchObject({ completed: true, lastAssistant: report, finishedTasks: [at] });
+  });
+
   it("reads the recorded Copilot session's final answer", async () => {
     const lines = (await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/copilot/1.0.87/events.jsonl"), "utf8")).split("\n");
     // The log ends with a shutdown after the last answered turn.

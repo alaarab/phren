@@ -40,6 +40,9 @@ export function eventStatus(event: unknown): string | undefined {
   return typeof event === "string" && Object.hasOwn(EVENT_STATUS, event) ? EVENT_STATUS[event] : undefined;
 }
 
+/** Statuses a binding may persist as the turn's effective lifecycle state. */
+const PERSISTED_STATUSES = new Set(["idle", "working", "blocked", "waiting", "done"]);
+
 interface Entry { terminal: string; status: string; seq: number; at: number }
 const entries = new Map<string, Entry>();
 /** Climbs with every change, like Herdr's state_change_seq, so the phone can order "just finished" first. */
@@ -79,7 +82,9 @@ export async function paneStatus(server: string, pane: string, terminal: string)
   if (current) return undefined;
   try {
     const value = object(JSON.parse(await readFile(bindingPath(server, pane), "utf8")));
-    const status = eventStatus(value.event);
+    // Prefer the effective status the callback wrote over the bare event map:
+    // a notification-associated Stop leaves the foreground turn working.
+    const status = typeof value.status === "string" && PERSISTED_STATUSES.has(value.status) ? value.status : eventStatus(value.event);
     if (value.terminal !== terminal || !status) return undefined;
     const at = Date.parse(String(value.at));
     return notePaneStatus(server, pane, terminal, status, Number.isFinite(at) ? at : Date.now());

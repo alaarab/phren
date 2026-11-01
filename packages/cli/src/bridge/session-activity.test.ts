@@ -2,13 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, sessionTitle, takesPrompt } from "./session-activity.js";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, resolveEffectiveStatus, sessionTitle, takesPrompt } from "./session-activity.js";
 import { nextTurn, noteTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
 const pane = { pane_id: "w1:p1", terminal_id: "term_a" };
 function record(background?: number, dispatch?: string, at?: number, source: "claude" | "codex" = "claude"): TurnRecord {
-  let value = nextTurn(undefined, { event: "UserPromptSubmit", terminal: "term_a", source, session, dispatch, at })!;
+  let value = nextTurn(undefined, { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source, session, dispatch, at })!;
   value = nextTurn(value, { event: "Stop", terminal: "term_a", source, session, background, at })!;
   return value;
 }
@@ -45,7 +45,7 @@ describe("background work keeps a session working", () => {
     markBackground(idle, 0);
     expect(idle).toEqual({ agentStatus: "idle" });
     // A turn still running has no ended Stop to count.
-    expect(recordedBackground(nextTurn(undefined, { event: "UserPromptSubmit", terminal: "term_a", source: "claude", session }))).toBeUndefined();
+    expect(recordedBackground(nextTurn(undefined, { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source: "claude", session }))).toBeUndefined();
   });
 
   it("lowers the Stop's count as the transcript shows its tasks finishing, and clears it at zero", () => {
@@ -167,7 +167,7 @@ describe("session titles", () => {
 });
 
 describe("last reply on a session row", () => {
-  const ended = (reply: string) => nextTurn(nextTurn(undefined, { event: "UserPromptSubmit", terminal: "term_a", source: "claude", session })!,
+  const ended = (reply: string) => nextTurn(nextTurn(undefined, { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source: "claude", session })!,
     { event: "Stop", terminal: "term_a", source: "claude", session, reply })!;
 
   it("is the ended turn's reply as one plain line", () => {
@@ -181,7 +181,7 @@ describe("last reply on a session row", () => {
   });
 
   it("is absent while a new turn runs or when the Stop had no reply", () => {
-    const working = nextTurn(ended("Done."), { event: "UserPromptSubmit", terminal: "term_a", source: "claude", session });
+    const working = nextTurn(ended("Done."), { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source: "claude", session });
     expect(replyExcerpt(working)).toBeUndefined();
     expect(replyExcerpt(record())).toBeUndefined();
     expect(replyExcerpt(undefined)).toBeUndefined();
@@ -196,7 +196,7 @@ describe("a session that takes a typed prompt", () => {
     try { await run(); } finally { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); }
   }
   const note = (event: "UserPromptSubmit" | "Stop", background?: number, source: "claude" | "codex" = "claude", at = Date.now()) =>
-    noteTurn("default", "w1:p1", { event, terminal: "term_a", source, session, ...(background !== undefined ? { background } : {}), at });
+    noteTurn("default", "w1:p1", { event, input: "owner", terminal: "term_a", source, session, ...(background !== undefined ? { background } : {}), at });
 
   it("is a Claude lead whose turn ended while its background agents run, though Herdr reads it working", () => withBridge(async () => {
     expect(await takesPrompt("default", claudePane("working"), session)).toBe(false);
@@ -253,4 +253,41 @@ describe("a session that takes a typed prompt", () => {
     await note("UserPromptSubmit", undefined, "codex"); await note("Stop", 1, "codex");
     expect(await takesPrompt("default", claudePane("working", "codex"), session)).toBe(false);
   }));
+});
+
+describe("the effective status resolver", () => {
+  const owner = () => nextTurn(undefined, { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source: "claude", session, at: 1_000 })!;
+
+  it("keeps an unanswered owner prompt working though the terminal says idle", () => {
+    const working = owner();
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: working })).toBe("working");
+    expect(resolveEffectiveStatus({ paneStatus: "working", record: working })).toBe("working");
+  });
+
+  it("does not let a notification or its Stop end the running turn", () => {
+    let value = nextTurn(owner(), { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source: "claude", session, at: 2_000, input: "notification" })!;
+    value = nextTurn(value, { event: "Stop", terminal: "term_a", source: "claude", session, at: 3_000, notificationStop: true })!;
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: value })).toBe("working");
+  });
+
+  it("gives a real held ask or confirmed dialog precedence without ending the turn", () => {
+    const working = owner();
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: working, held: true })).toBe("waiting");
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: working, dialog: true })).toBe("blocked");
+  });
+
+  it("applies the bounded background rules after a confirmed end", () => {
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: record(2), final: { completed: true, awaited: 2 } })).toBe("working");
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: record(0) })).toBe("idle");
+    expect(resolveEffectiveStatus({ paneStatus: "done", record: record(0) })).toBe("done");
+    // A replyless Stop remains authoritative despite a stale working snapshot.
+    expect(resolveEffectiveStatus({ paneStatus: "working", record: record(0), final: { completed: false } })).toBe("idle");
+  });
+
+  it("falls back to the terminal snapshot without usable turn evidence", () => {
+    expect(resolveEffectiveStatus({ paneStatus: "working" })).toBe("working");
+    expect(resolveEffectiveStatus({ paneStatus: "idle" })).toBe("idle");
+    expect(resolveEffectiveStatus({ paneStatus: "blocked" })).toBe("blocked");
+    expect(resolveEffectiveStatus({ paneStatus: "working", replaced: true })).toBe("working");
+  });
 });

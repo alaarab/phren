@@ -32,7 +32,10 @@ import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
 import { checkpointBoundary, checkpointActivityArrived } from "./checkpoints.js";
 import { normalizedPromptEntryId } from "./prompt-identity.js";
-import { noteTurn as recordTurn } from "./turn-records.js";
+import { claudeInputState } from "./claude-input-state.js";
+import { targetTranscriptPath } from "./transcripts.js";
+import { classifyClaudeInput, parseInputCategory, type InputClassification } from "./input-classification.js";
+import { noteTurn as recordTurn, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
 import { PromptDeliveries } from "./prompt-deliveries.js";
 import { countTick } from "./metrics.js";
 import { briefId, briefIdInPrompt, briefLabel, recordBriefArrival } from "./launch-brief.js";
@@ -123,6 +126,75 @@ function projectField(cwd: string | undefined): { project?: string } {
 }
 
 export class AgentHooks {
+  private deferredSubmissions = new Map<string, { target: Target; pane: Json; body: Json; pids: number[]; seq: number; at: string; previous: number; until: number; busy: boolean; timer?: ReturnType<typeof setTimeout> }>();
+
+  private deferSubmission(target: Target, pane: Json, body: Json, record: TurnRecord, previous: number, pids: number[]) {
+    const key = `${target.server}:${target.pane}:${record.seq}`;
+    this.deferredSubmissions.set(key, { target, pane: { ...pane }, body: { ...body }, pids: [...pids], seq: record.seq, at: record.at, previous, until: Date.now() + 30_000, busy: false });
+    while (this.deferredSubmissions.size > 64) {
+      const oldest = this.deferredSubmissions.keys().next().value!;
+      clearTimeout(this.deferredSubmissions.get(oldest)?.timer); this.deferredSubmissions.delete(oldest);
+    }
+    this.retrySubmission(key);
+  }
+  private retrySubmission(key: string) {
+    const pending = this.deferredSubmissions.get(key);
+    if (!pending) return;
+    pending.timer = setTimeout(() => { void this.resolveSubmission(key); }, 250);
+    pending.timer.unref();
+  }
+  /** Streams can reconcile a newly landed row before consulting its old Stop. */
+  async reconcileSubmissions(target: Target): Promise<void> {
+    for (const [key, pending] of this.deferredSubmissions) {
+      if (pending.target.server === target.server && pending.target.pane === target.pane && pending.target.session === target.session) await this.resolveSubmission(key);
+    }
+  }
+  private async resolveSubmission(key: string): Promise<void> {
+    const pending = this.deferredSubmissions.get(key);
+    if (!pending || pending.busy) return;
+    if (Date.now() > pending.until) { clearTimeout(pending.timer); this.deferredSubmissions.delete(key); return; }
+    pending.busy = true; clearTimeout(pending.timer);
+    try {
+      const { target, body } = pending;
+      const pane = await validateTarget(target, false, false);
+      const current = await readTurn(target.server, target.pane);
+      if (!pane || pane.terminal_id !== pending.pane.terminal_id || pane.agent !== target.source
+        || !current || current.terminal !== pane.terminal_id || current.session !== target.session
+        || current.source !== target.source || !current.prompt
+        || current.prompt.seq < pending.previous || current.prompt.seq >= pending.seq) {
+        this.deferredSubmissions.delete(key); return;
+      }
+      const processes = await terminalProvider().processes(target.server, target.pane);
+      if (!processes.foregroundPids.some(pid => pending.pids.includes(pid))) { this.deferredSubmissions.delete(key); return; }
+      const evidence = await this.inputState(target, typeof body.prompt === "string" ? body.prompt : undefined);
+      if (!evidence?.input) return;
+      if (evidence.input.category !== "owner") { this.deferredSubmissions.delete(key); return; }
+      const dispatch = briefId.safeParse(body.dispatchId).success ? String(body.dispatchId)
+        : typeof body.prompt === "string" ? briefIdInPrompt(body.prompt) : undefined;
+      if (this.deferredSubmissions.get(key) !== pending) return;
+      const recorded = await this.recordTurn(target, pane, body, dispatch, evidence.input, false,
+        { seq: pending.seq, at: pending.at, previous: pending.previous });
+      this.deferredSubmissions.delete(key);
+      if (!recorded) return;
+      const latest = await readTurn(target.server, target.pane);
+      if (!latest || latest.terminal !== pane.terminal_id || latest.session !== target.session
+        || latest.source !== target.source || latest.prompt?.seq !== recorded.prompt?.seq) return;
+      const status = turnPhase(latest).phase === "working" ? "working" : "idle";
+      const binding = object(JSON.parse(await readFile(bindingPath(target.server, target.pane), "utf8").catch(() => "{}")));
+      if (binding.terminal === pane.terminal_id && binding.session === target.session) {
+        await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ ...binding, status, event: status === "working" ? "UserPromptSubmit" : "Stop" }));
+      }
+      notePaneStatus(target.server, target.pane, String(pane.terminal_id), status);
+      if (typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
+      if (status === "working") { this.settleTerminalAnswered(target, body); this.stopCompacting(target); }
+      if (dispatch) await recordBriefArrival(dispatch, "UserPromptSubmit", target).catch(() => undefined);
+    } catch { /* Retry transient discovery and I/O failures within the bounded window. */ }
+    finally {
+      pending.busy = false;
+      if (this.deferredSubmissions.get(key) === pending) this.retrySubmission(key);
+    }
+  }
+
   /** Wake the Hook-held prompt queue after a recorded Stop. */
   onTurnStopped?: () => void;
   readonly changes = new ToolChanges();
@@ -503,19 +575,39 @@ export class AgentHooks {
   }
   /** The conversation's own turn events, for dispatch returns (turn-records.ts).
    * A failed write never fails the agent's callback. */
-  private async recordTurn(target: Target, pane: Json, body: Json, dispatch?: string) {
+  private async recordTurn(target: Target, pane: Json, body: Json, dispatch?: string, input?: InputClassification,
+    notificationStop = false, resolvePrompt?: { seq: number; at: string; previous: number }) {
     if (typeof pane.terminal_id !== "string") return;
     const recorded = await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
       ...(dispatch ? { dispatch } : {}),
+      ...(input ? { input: input.category } : {}),
+      ...(resolvePrompt ? { resolvePrompt } : {}),
+      ...(notificationStop ? { notificationStop: true } : {}),
       ...(body.event === "SessionStart" && typeof body.startSource === "string" ? { start: body.startSource } : {}),
       ...(typeof body.background === "number" ? { background: body.background } : {}),
       ...(body.event === "Stop" && Array.isArray(body.backgroundTasks) ? { backgroundTasks: body.backgroundTasks } : {}),
       ...(typeof body.reply === "string" ? { reply: body.reply } : {}),
       ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);
     const cwd = typeof body.cwd === "string" ? body.cwd : pane.foreground_cwd || pane.cwd;
-    if (this.modules?.has("git") !== false && recorded && typeof cwd === "string") await checkpointBoundary(cwd, target, String(body.event), recorded.prompt?.seq ?? recorded.seq,
-      typeof body.prompt === "string" ? body.prompt : "",
-      target.source === "claude" && body.event === "UserPromptSubmit" ? normalizedPromptEntryId(body.promptEntryId) : undefined);
+    // A notification's callback is not a prompt checkpoint, and its Stop does
+    // not capture the foreground turn's boundary.
+    const automaticInput = input !== undefined && input.category !== "owner";
+    if (this.modules?.has("git") !== false && recorded && !notificationStop && !automaticInput && typeof cwd === "string") {
+      await checkpointBoundary(cwd, target, String(body.event), recorded.prompt?.seq ?? recorded.seq,
+        input?.category === "owner" || input === undefined ? (typeof body.prompt === "string" ? body.prompt : "") : "",
+        target.source === "claude" && body.event === "UserPromptSubmit" ? normalizedPromptEntryId(body.promptEntryId) : undefined);
+    }
+    return recorded;
+  }
+
+  /** Raw facts come only from the conversation the pane is verified to show. */
+  private async inputState(target: Target, submitted?: string, executionId?: string) {
+    if (target.source !== "claude") return undefined;
+    let file: string;
+    try { file = await targetTranscriptPath(target); } catch { return undefined; }
+    // A verified transcript that cannot yet be read is still a correlation
+    // source: retain the old owner until a bounded deferred read succeeds.
+    return claudeInputState(file, submitted, executionId).catch((): Awaited<ReturnType<typeof claudeInputState>> => ({ recovery: [] }));
   }
   private rememberTerminalPrompt(target: Target, body: Json, dialogSeenAt?: number) {
     const tool = String(body.tool || "action").slice(0, 200);
@@ -1331,6 +1423,9 @@ export class AgentHooks {
         }
         let target = targetSchema.parse(body.target);
         const activity = eventStatus(body.event);
+        // Invalidate an in-flight restore immediately, before process or
+        // transcript I/O. This is a safety fence, not a prompt checkpoint or
+        // an owner-turn transition; classification still gates those below.
         if (activity === "working" || activity === "blocked") checkpointActivityArrived(target);
         // A callback Codex's app-server daemon ran names the pane that started
         // the daemon, not the conversation's. Place it by the conversation the
@@ -1347,18 +1442,51 @@ export class AgentHooks {
         if (!pane || (pane.agent && pane.agent !== target.source)) throw new Error("The pane changed");
         const pids = (await terminalProvider().processes(target.server, target.pane)).foregroundPids;
         if (!pids.length) throw new Error("No foreground process");
-        if (!daemon && target.source === "claude") notePaneTranscript(paneAccountKey(target.server, target.pane), body.transcript, String(pane.terminal_id ?? ""));
-        if (!daemon) await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
-          session: target.session, pids, workspace: target.workspace, tab: target.tab, event: String(body.event).slice(0, 64), at: new Date().toISOString() }));
-        // A terminal that does not watch its agents (tmux) takes the agent's
-        // status from these events.
+        // Classify a submitted prompt before any prompt-boundary side effect. A
+        // notification, teammate message or harness envelope belongs to the
+        // turn already running; the fast forwarder forwards the same category.
+        const promptInput = target.source === "claude" && body.event === "UserPromptSubmit"
+          ? classifyClaudeInput({ text: body.prompt, origin: body.origin, commandMode: body.commandMode, isMeta: body.isMeta,
+            isSidechain: body.isSidechain, isCompactSummary: body.isCompactSummary, toolResult: body.toolResult,
+            notificationDelivery: body.notificationDelivery, hasImage: body.hasImage === true })
+          : undefined;
+        const declaredInput = parseInputCategory(body.inputCategory);
+        // A callback may forward the category it already applied (the fast
+        // forwarder does for automatic input). A validated non-owner category
+        // wins; otherwise the Hook classifies the prompt itself.
+        let unresolvedPrevious: number | undefined;
+        let classifiedInput: InputClassification | undefined = declaredInput && declaredInput !== "owner"
+          ? { category: declaredInput, reason: `callback:${declaredInput}` } : promptInput;
+        if (target.source === "claude" && body.event === "UserPromptSubmit" && classifiedInput?.category === "owner") {
+          const evidence = await this.inputState(target, typeof body.prompt === "string" ? body.prompt : undefined);
+          if (evidence?.input) classifiedInput = evidence.input;
+          else if (evidence || typeof body.transcript === "string") {
+            const known = await readTurn(target.server, target.pane).catch(() => undefined);
+            if (known?.prompt && known.terminal === pane.terminal_id && known.session === target.session && known.source === target.source) {
+              classifiedInput = { category: "internal", reason: "callback:unresolved" };
+              unresolvedPrevious = known.prompt.seq;
+            }
+          }
+        }
+        const automaticPrompt = classifiedInput !== undefined && classifiedInput.category !== "owner";
+        // A Stop tied to background notification traffic must not close a
+        // foreground execution that is still running.
+        const stopInput = classifyClaudeInput({ text: "stop", origin: body.origin, commandMode: body.commandMode });
+        const backgroundStop = target.source === "claude" && body.event === "Stop"
+          && (stopInput.category !== "owner" || (await this.inputState(target, undefined, typeof body.executionId === "string" ? body.executionId : undefined))?.backgroundStop === true);
         // Codex's automatic reviewer decides this request on its own: it is
         // not a question for the owner, so nothing is held, pushed or
         // remembered and the pane is not marked blocked. If Codex hands the
         // request back to the owner it draws its approval dialog, which the
         // waiting-pane dialog read picks up and pushes like any other.
         const autoReview = body.event === "PermissionRequest" && target.source === "codex" && body.autoReview === true;
-        const status = autoReview ? undefined : eventStatus(body.event);
+        const status = autoReview || automaticPrompt || backgroundStop ? undefined : eventStatus(body.event);
+        if (!daemon && target.source === "claude") notePaneTranscript(paneAccountKey(target.server, target.pane), body.transcript, String(pane.terminal_id ?? ""));
+        if (!daemon && !automaticPrompt && !backgroundStop) await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
+          session: target.session, pids, workspace: target.workspace, tab: target.tab, event: String(body.event).slice(0, 64),
+          ...(status ? { status } : {}), ...(classifiedInput ? { inputCategory: classifiedInput.category } : {}), at: new Date().toISOString() }));
+        // A terminal that does not watch its agents (tmux) takes the agent's
+        // status from these events.
         if (status && typeof pane.terminal_id === "string") notePaneStatus(target.server, target.pane, pane.terminal_id, status);
         // Herdr does not watch phren-agent: a pane the Hook reported as running
         // it (a phone launch) takes its status from these events.
@@ -1373,7 +1501,7 @@ export class AgentHooks {
         // id (from its environment, or the brief path in its first prompt when
         // Codex's shared daemon ran the hook with another pane's variables).
         let dispatch: string | undefined;
-        if (body.event === "SessionStart" || body.event === "UserPromptSubmit") {
+        if (body.event === "SessionStart" || (body.event === "UserPromptSubmit" && !automaticPrompt)) {
           const named = !daemon && briefId.safeParse(body.dispatchId).success ? String(body.dispatchId) : undefined;
           dispatch = named ?? (typeof body.prompt === "string" ? briefIdInPrompt(body.prompt) : undefined);
           if (dispatch) await recordBriefArrival(dispatch, String(body.event), target).catch(() => undefined);
@@ -1383,18 +1511,22 @@ export class AgentHooks {
         // A prompt or a turn's end also moves a server a nested `codex exec`
         // had taken (before thread-origin.ts) back to the TUI's thread.
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event)) && target.source === "codex" && !daemon) codexServers.follow(target.server, target.pane, target.session);
-        this.settleTerminalAnswered(target, body);
+        // A notification is not a person answering a held interaction.
+        if (!automaticPrompt && !backgroundStop) this.settleTerminalAnswered(target, body);
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
-        if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
+        if (!automaticPrompt && !backgroundStop && ["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
-          if (typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
-          await this.recordTurn(target, pane, body, dispatch);
+          // A notification callback never settles an unrelated phone delivery.
+          if (!automaticPrompt && typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
+          const recorded = await this.recordTurn(target, pane, body, dispatch, classifiedInput);
+          if (unresolvedPrevious !== undefined && recorded) this.deferSubmission(target, pane, body, recorded, unresolvedPrevious, pids);
+          if (automaticPrompt) { res.end("{}"); return; }
           const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
           res.end(JSON.stringify(context ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } } : {})); return;
         }
-        if (body.event === "Stop") this.deliveries.stopped(target);
-        if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
-        if (body.event === "Stop") this.onTurnStopped?.();
+        if (body.event === "Stop" && !backgroundStop) this.deliveries.stopped(target);
+        if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch, classifiedInput, backgroundStop);
+        if (body.event === "Stop" && !backgroundStop) this.onTurnStopped?.();
         if (body.event === "SessionStart") {
           const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
           res.end(JSON.stringify(context ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } } : {})); return;
@@ -1523,6 +1655,8 @@ export class AgentHooks {
     this.paneServers.tick();
   }
   close() {
+    for (const pending of this.deferredSubmissions.values()) clearTimeout(pending.timer);
+    this.deferredSubmissions.clear();
     this.closed = true;
     this.sudo.close();
     void this.changes.close().catch(() => {});
