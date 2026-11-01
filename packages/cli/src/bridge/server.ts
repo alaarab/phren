@@ -53,7 +53,7 @@ import { ALERT_CHECK_MS, HealthAlerts } from "./machine-health-alerts.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
-import { capabilitiesForModules, createRouteHandler, type HookInfo, requireRoute, selectedServer, workspacesReader } from "./server-routes.js";
+import { capabilitiesForModules, createRouteHandler, effectiveStatusRows, type HookInfo, requireRoute, selectedServer, workspacesReader } from "./server-routes.js";
 import { typedMuxRequest } from "./mux-wire.js";
 import { overviewStream } from "./server-overview.js";
 import { GitWatch } from "./git-watch.js";
@@ -330,7 +330,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       for (const server of live) {
         try {
           const name = String(server.session), current = await sharedSnapshot(name, 4000);
-          await tabActivity.observe(name, current);
+          const { generation } = await tabActivity.observe(name, current);
           await journal.record(name, objects(current.panes));
           // Phone messages a pane still holds: fail loudly when it closed,
           // restarted or finished without them.
@@ -345,6 +345,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
             if (parsed.success) await sessionStalls.observe(parsed.data, pane);
             return parsed.success ? parsed.data : undefined;
           });
+          await tabActivity.recordStatus(name, await effectiveStatusRows(name, current), generation);
         }
         catch { /* A disconnected computer keeps its previous local activity. */ }
       }

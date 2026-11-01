@@ -8,9 +8,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - `WS /v1/git/watch` streams live Changes: a debounced `changed` frame when a pane's checkout, a child's worktree or a listed worktree may have changed, with `ping` heartbeats, one shared watcher per checkout and a 16-checkout cap. Advertised as `capabilities.gitWatch`.
+- Session rows carry `statusSince`, the ISO time the agent status they send last changed, so the phone can say how long a session has been waiting rather than how long ago its tab last changed. It follows background work that turns idle into working, is not reset by a title, label or activity-counter change, survives a Hook restart, and older Hooks omit it.
 
 ### Fixed
 
+- Claude approvals answered in the PC terminal now clear on the phone even when Git change capture is disabled.
+- Tool completion matches the approval's tool-use ID, or inputs regardless of key order when IDs are unavailable, so unrelated calls cannot clear it.
+- A tmux pane blocked by a permission request returns to working after its observed dialog disappears; unreadable screens keep it blocked.
+- Claude approval cards and notification actions clear when their confirmed terminal dialog disappears, even without a later lifecycle callback, after tmux reports the pane working, or after the hold expires.
+
+- A Herdr socket reply that keeps trickling bytes without a newline no longer keeps the phone's terminal spinning forever: the request now has an absolute deadline instead of an inactivity timeout, so it fails with `herdr-timeout` as intended.
+- Claude pane chats follow the foreground conversation after a clear or resume even when Herdr and the Hook's binding still name the old session, using the existing cached process probe.
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.
 - Secret scanning names an AWS secret access key written as `AWS_SECRET_ACCESS_KEY=...` correctly; it was caught before, but only as a generic long base64 secret.
 - A transcript stream no longer spins re-reading the pane when the phone asks for older history before the agent has written its transcript.
