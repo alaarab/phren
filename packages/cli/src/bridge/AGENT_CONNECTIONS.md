@@ -495,9 +495,18 @@ Claude queue messages preserve these phone markers:
   `Attached files on this computer:` footer, no words) reads
   `[Image attachment]`, as a picture-only turn does; its key is still the
   SHA-256 of the original content.
+- `phrenDeliveryId`: the phone delivery the Hook's own records bound to the
+  queue occurrence, when there is one. It rides on the enqueue bubble, its
+  `remove`/`popAll` row and the real user turn that replaced it; it is never
+  Claude's `deliveryId` or `commandUuid`. The binding is by pane, conversation,
+  normalized words and occurrence order, kept in
+  `deliveries.json.queue.json`, so identical sends stay separate and an
+  enqueue alone does not mean delivered.
 - `type: "phren_queue_consumed"`: consumption emits the queue row's SHA-256
   content key and timestamp, never the payload. A `remove` carries its content,
-  so its key is the same as the enqueue's, including internal removals. A
+  so its key is the same as the enqueue's; only `absorbed_mid_turn` and
+  `delivered_to_agent` are consumption, while `cleared_on_cancel` (and internal
+  removals) are a `phren_queue_returned` withdrawal with the same key. A
   `dequeue` carries no content: a newest-first read keys it by the prompt turn
   the queue handed to the model (the same SHA-256 the enqueue exported), and
   sets `scheduled: true` when the agent scheduled that turn for itself (a cron,
@@ -505,9 +514,10 @@ Claude queue messages preserve these phone markers:
   prompt turn is not in the read window is exported without a key. The key
   scheme is unchanged.
 - `type: "phren_queue_returned"`: a `popAll` (queued prompts pulled back into
-  the input) emits its SHA-256 content key and timestamp. The prompt was
-  neither consumed nor scheduled, so the phone can drop its queued caption
-  without drawing a scheduled check.
+  the input), or a `remove` the agent did not take (`cleared_on_cancel`),
+  emits its SHA-256 content key and timestamp. The prompt was neither consumed
+  nor scheduled, so the phone can drop its queued caption without drawing a
+  scheduled check.
 - `phrenBackground: true`: task notifications become system rows whose user-role
   string content is a rebuilt `<task-notification>` block. Only direct
   `task-id`, `tool-use-id`, `status`, and `summary` tags survive; summaries are

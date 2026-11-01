@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,7 @@ async function send(store: PromptDeliveries, id: string, text: string, where = t
 }
 
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-deliveries-")); file = path.join(root, "deliveries.json"); clock = 1_000_000; landed = false; matches = 1; hookRows = false; });
-afterEach(async () => { await Promise.all(stores.map(store => store.flush())); stores = []; await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { await Promise.all(stores.map(store => store.flush())); stores = []; vi.unstubAllEnvs(); clearAccountCaches(); await rm(root, { recursive: true, force: true }); });
 
 describe("phone messages bound to their pane", () => {
   it("reach the conversation that replaced the one they were sent to while queued", async () => {
@@ -930,6 +930,261 @@ describe("the row a phone message landed as", () => {
     expect(Object.keys(records[0]).filter(key => key.startsWith("entry")).sort()).toEqual(["entry", "entryHook"]);
     expect(JSON.parse(await readFile(`${file}.landed.json`, "utf8"))).toEqual({ "beside-001": { line: 2, uuid: "33333333-0000-4000-8000-000000000001" } });
   });
+});
+
+describe("a Claude queue occurrence bound to a phone send", () => {
+  const owner = "[Image #4] [Image #5]These two screens are literally flashing between eachother shits so buggy \nAttached files on this computer:";
+  const phone = "These two screens are literally flashing between eachother shits so buggy \n\nAttached files on this computer:\n/tmp/owner-a.png\n/tmp/owner-b.png";
+  const enqueue = (content = owner, timestamp = "2026-11-01T15:16:56.060Z"): Json => ({ type: "queue-operation", operation: "enqueue", timestamp, sessionId: claudeTarget.session, content });
+  const remove = (reason = "absorbed_mid_turn", content = owner, extra: Json = {}): Json => ({ type: "queue-operation", operation: "remove",
+    timestamp: "2026-11-01T15:17:19.524Z", sessionId: claudeTarget.session, content, reason,
+    commandUuid: "f425bffe-b4b6-4129-b7a4-7c3295a10115", deliveryId: "626aa5af-75f1-40eb-8d0a-dfc176643b04", ...extra });
+  /** Rows with their real byte offsets, as a transcript read gives them. */
+  const rows = (...raw: Json[]) => {
+    let offset = 0;
+    return raw.map(row => { const at = offset; offset += Buffer.byteLength(JSON.stringify(row)) + 1; return { offset: at, raw: row }; });
+  };
+  it("binds repeated identical enqueues to separate sends, and survives a restart", async () => {
+    const store = deliveries();
+    await send(store, "phone-send-0011", phone, claudeTarget);
+    clock += 10; await send(store, "phone-send-0012", phone, claudeTarget);
+    const bound = rows(enqueue(owner, "2026-11-01T15:16:56.060Z"), enqueue(owner, "2026-11-01T15:16:58.060Z"));
+    const ids = await store.bindClaudeQueueRows(claudeTarget, bound);
+    expect([ids.get(bound[0].offset), ids.get(bound[1].offset)]).toEqual(["phone-send-0011", "phone-send-0012"]);
+    // A third identical enqueue has no send of ours to belong to.
+    const third = rows(...bound.map(row => row.raw), enqueue(owner, "2026-11-01T15:16:59.060Z"))[2];
+    expect((await store.bindClaudeQueueRows(claudeTarget, [third])).has(third.offset)).toBe(false);
+    await store.flush();
+    const restarted = deliveries();
+    const again = await restarted.bindClaudeQueueRows(claudeTarget, bound);
+    expect([again.get(bound[0].offset), again.get(bound[1].offset)]).toEqual(["phone-send-0011", "phone-send-0012"]);
+  });
+
+  it("binds nothing from another conversation, and a document without path evidence in the queue", async () => {
+    const store = deliveries();
+    await send(store, "phone-doc-0001", "Review this \nAttached files on this computer:\n/tmp/report.pdf", claudeTarget);
+    const row = rows(enqueue("[Image #4]Review this \nAttached files on this computer:"))[0];
+    expect((await store.bindClaudeQueueRows(claudeTarget, [row])).has(row.offset)).toBe(false);
+    // Matching words, changed only in the conversation: still not this send's occurrence.
+    await send(store, "phone-session-01", phone, claudeTarget);
+    const elsewhere = rows(enqueue())[0];
+    expect((await store.bindClaudeQueueRows({ ...claudeTarget, session: "00000000-ffff-7000-8000-00000000000f" }, [elsewhere])).has(elsewhere.offset)).toBe(false);
+  });
+
+  it("unwraps a pasted enqueue before binding it", async () => {
+    const store = deliveries();
+    await send(store, "phone-paste-01", phone, claudeTarget);
+    const row = rows(enqueue(`<pasted_content id="17">\n${owner}\n</pasted_content id="17">`))[0];
+    expect((await store.bindClaudeQueueRows(claudeTarget, [row])).get(row.offset)).toBe("phone-paste-01");
+  });
+
+  it("binds a delayed enqueue replay after the removal already settled the send, and the same occurrence twice", async () => {
+    const { store, append, reader } = await liveQueue();
+    await send(store, "phone-late-0001", phone, claudeTarget);
+    await append(enqueue(), remove());
+    const first = await reader(store).read();
+    expect(first.entries.find(entry => entry.line === 1)?.raw).toMatchObject({ phrenDeliveryId: "phone-late-0001" });
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("phone-late-0001", claudeTarget).state).toBe("delivered");
+    // An older page replays the enqueue after settlement, then a reconnect replays both.
+    expect((await reader(store).read(1)).entries[0].raw).toMatchObject({ phrenDeliveryId: "phone-late-0001" });
+    expect((await reader(store).read()).entries.map(entry => entry.raw.phrenDeliveryId)).toEqual(["phone-late-0001", "phone-late-0001"]);
+    expect(store.forPane(claudeTarget).filter(item => item.deliveryId === "phone-late-0001")).toHaveLength(1);
+  });
+
+  it.each(["local", "phone"])("leaves an earlier identical %s turn unbound to a queued send", async kind => {
+    const { store, make, append, reader } = await liveQueue();
+    if (kind === "phone") await send(store, "phone-ordinary-01", phone, claudeTarget);
+    else await send(store, "phone-before-01", phone, claudeTarget);
+    await append({ type: "user", timestamp: "2026-11-01T15:16:55.100Z", message: { role: "user", content: phone } });
+    if (kind === "phone") {
+      await store.submitted(claudeTarget, phone);
+      expect(store.status("phone-ordinary-01", claudeTarget).state).toBe("delivered");
+      await send(store, "phone-before-01", phone, claudeTarget);
+    }
+    await append(enqueue());
+    const check = async (readerStore: PromptDeliveries) => {
+      const page = await reader(readerStore).read();
+      expect(page.entries.find(entry => entry.line === 0)?.raw.phrenDeliveryId).toBeUndefined();
+      expect(page.entries.find(entry => entry.line === 1)?.raw).toMatchObject({ phrenDeliveryId: "phone-before-01" });
+    };
+    await check(store);
+    await append({ type: "assistant", message: { role: "assistant", content: "unrelated append" } });
+    await check(store);
+    await store.flush();
+    await check(make());
+  });
+
+  /** The real transcript reader, queue scan, settlement and persisted delivery store share
+   * one append-only log. Register sends before appending what Claude wrote for them. */
+  async function liveQueue(native = false) {
+    clock = Date.parse("2026-11-01T15:16:55.000Z");
+    const log = native ? path.join(root, "claude/projects/-repo", `${claudeTarget.session}.jsonl`) : path.join(root, "claude.jsonl");
+    if (native) {
+      vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(root, "claude")); clearAccountCaches();
+      await mkdir(path.dirname(log), { recursive: true });
+    }
+    await writeFile(log, "");
+    const make = () => {
+      const store = native ? new PromptDeliveries(file, () => clock) : new PromptDeliveries(file, () => clock,
+        async record => matchingOffsets(await readFile(log), 0, record), async () => (await stat(log)).size);
+      stores.push(store); return store;
+    };
+    const append = (...raw: Json[]) => appendFile(log, raw.map(row => JSON.stringify(row)).join("\n") + "\n");
+    const reader = (store: PromptDeliveries) => new TranscriptReader(log, "claude", undefined, undefined, false, undefined,
+      () => store.claudeQueueBindings(claudeTarget, log));
+    return { store: make(), make, append, reader };
+  }
+
+  it.each(["dated", "undated"])("leaves an existing identical %s enqueue and removal unowned", async kind => {
+    const { store, make, append, reader } = await liveQueue();
+    const historical = enqueue(owner, "2026-11-01T15:16:54.000Z");
+    if (kind === "undated") delete historical.timestamp;
+    await append(historical, remove());
+    await send(store, "phone-cursor-01", phone, claudeTarget);
+    let page = await reader(store).read();
+    expect(page.entries.every(entry => entry.raw.phrenDeliveryId === undefined)).toBe(true);
+    await append(enqueue());
+    page = await reader(store).read();
+    expect(page.entries.filter(entry => entry.raw.phrenDeliveryId).map(entry => entry.line)).toEqual([2]);
+    await store.flush();
+    page = await reader(make()).read();
+    expect(page.entries.filter(entry => entry.raw.phrenDeliveryId).map(entry => entry.line)).toEqual([2]);
+  });
+
+  it("keeps a submitted turn's identity across restart and an unrelated append", async () => {
+    const { store, make, append, reader } = await liveQueue();
+    await send(store, "phone-user-0001", phone, claudeTarget);
+    await append(enqueue());
+    expect((await reader(store).read()).entries[0].raw).toMatchObject({ phrenQueued: true, phrenDeliveryId: "phone-user-0001" });
+    await append({ type: "user", uuid: "44444444-0000-4000-8000-000000000001", timestamp: "2026-11-01T15:17:00.000Z",
+      sessionId: claudeTarget.session, message: { role: "user", content: phone } });
+    const submitted = async (readerStore: PromptDeliveries) =>
+      (await reader(readerStore).read()).entries.find(entry => entry.raw.type === "user" && !entry.raw.phrenQueued)?.raw;
+    expect(await submitted(store)).toMatchObject({ phrenDeliveryId: "phone-user-0001" });
+    await store.flush();
+    const restarted = make();
+    expect(await submitted(restarted)).toMatchObject({ phrenDeliveryId: "phone-user-0001" });
+    await append({ type: "assistant", timestamp: "2026-11-01T15:18:00.000Z",
+      message: { role: "assistant", content: [{ type: "text", text: "ok" }] } });
+    expect(await submitted(restarted)).toMatchObject({ phrenDeliveryId: "phone-user-0001" });
+  });
+
+  it("binds a content-free dequeue before its prompt turn exists, across pagination and restart", async () => {
+    const { store, make, append, reader } = await liveQueue();
+    await send(store, "phone-dequeue-01", phone, claudeTarget);
+    // A private harness queue head must take the first dequeue.
+    await append(enqueue("<task-notification>private</task-notification>"), enqueue(),
+      { type: "queue-operation", operation: "dequeue", timestamp: "2026-11-01T15:16:59.000Z" },
+      { type: "queue-operation", operation: "dequeue", timestamp: "2026-11-01T15:17:00.000Z" });
+    const page = await reader(store).read();
+    const dequeues = page.entries.filter(entry => entry.raw.type === "phren_queue_consumed");
+    expect(dequeues.map(entry => entry.raw.phrenDeliveryId)).toEqual([undefined, "phone-dequeue-01"]);
+    await store.flush();
+    const restarted = make();
+    await append({ type: "user", uuid: "55555555-0000-4000-8000-000000000001", timestamp: "2026-11-01T15:17:01.000Z",
+      sessionId: claudeTarget.session, message: { role: "user", content: phone } });
+    const older = await reader(restarted).read(4);
+    expect(older.entries.find(entry => entry.line === 3)?.raw).toMatchObject({ phrenDeliveryId: "phone-dequeue-01" });
+    expect((await reader(restarted).read()).entries.find(entry => entry.line === 4)?.raw).toMatchObject({ phrenDeliveryId: "phone-dequeue-01" });
+  });
+
+  it("does not borrow a later user turn's identity for an unowned dequeue", async () => {
+    const { store, append, reader } = await liveQueue();
+    await send(store, "phone-unowned-01", phone, claudeTarget);
+    await append(enqueue("<task-notification>private</task-notification>"), enqueue(),
+      { type: "queue-operation", operation: "dequeue" },
+      { type: "user", timestamp: "2026-11-01T15:17:01.000Z", message: { role: "user", content: phone } });
+    const page = await reader(store).read();
+    expect(page.entries.find(entry => entry.raw.type === "phren_queue_consumed")?.raw.phrenDeliveryId).toBeUndefined();
+    expect(page.entries.find(entry => entry.line === 3)?.raw).toMatchObject({ phrenDeliveryId: "phone-unowned-01" });
+  });
+
+  it.each(["remove", "popAll"])("matches %s by exact queue content when image labels normalize alike", async operation => {
+    const { store, make, append, reader } = await liveQueue(true);
+    await send(store, "phone-collision-01", "Compare", claudeTarget);
+    await send(store, "phone-collision-02", "Compare", claudeTarget);
+    // Await the pre-send cursor reads before simulating the harness's immediate writes.
+    await store.bindClaudeQueueRows(claudeTarget, []);
+    await append(enqueue("[Image #4]Compare"), enqueue("[Image #5]Compare"));
+    await append({ ...remove("absorbed_mid_turn", '<pasted_content id="17">\n[Image #5]Compare\n</pasted_content id="17">'), operation });
+    // Settlement must discover the occurrence itself, before any client opens a transcript.
+    await store.observe("default", [claudePane("working")]);
+    let page = await reader(store).read();
+    expect(page.entries.find(entry => entry.line === 2)?.raw).toMatchObject({ phrenDeliveryId: "phone-collision-02" });
+    expect(store.status("phone-collision-01", claudeTarget).state).toBe("queued");
+    expect(store.status("phone-collision-02", claudeTarget).state).toBe(operation === "remove" ? "delivered" : "queued");
+    await append({ type: "queue-operation", operation: "dequeue" });
+    page = await reader(store).read();
+    expect(page.entries.find(entry => entry.line === 3)?.raw).toMatchObject({ phrenDeliveryId: "phone-collision-01" });
+    await store.flush();
+    page = await reader(make()).read();
+    expect(page.entries.find(entry => entry.line === 2)?.raw).toMatchObject({ phrenDeliveryId: "phone-collision-02" });
+    expect(page.entries.find(entry => entry.line === 3)?.raw).toMatchObject({ phrenDeliveryId: "phone-collision-01" });
+  });
+
+  it.each(["cleared_on_cancel", "popAll"])("keeps %s withdrawn before and after restart when an ordinary identical turn follows", async reason => {
+    const { store, make, append, reader } = await liveQueue(true);
+    await send(store, "phone-withdrawn-01", phone, claudeTarget);
+    await store.bindClaudeQueueRows(claudeTarget, []);
+    await append(enqueue(), reason === "popAll" ? { ...remove(), operation: "popAll" } : remove(reason));
+    expect((await reader(store).read()).entries.find(entry => entry.line === 1)?.raw)
+      .toMatchObject({ type: "phren_queue_returned", phrenDeliveryId: "phone-withdrawn-01" });
+    await store.flush();
+    const restarted = make();
+    // Both a rescan and a newly loaded store must preserve the withdrawal before
+    // the unrelated matching text arrives; neither can infer a continuation.
+    await reader(restarted).read();
+    await append({ type: "user", timestamp: "2026-11-01T15:17:20.000Z", message: { role: "user", content: phone } });
+    for (const current of [store, restarted]) {
+      expect((await reader(current).read()).entries.find(entry => entry.line === 2)?.raw.phrenDeliveryId).toBeUndefined();
+      await current.submitted(claudeTarget, phone);
+      // A joined prompt is still content-only evidence, not permission to revive
+      // input Claude returned to the composer.
+      await current.submitted(claudeTarget, `${phone}\nAnother unrelated request`);
+      clock += 3_000;
+      await current.observe("default", [claudePane("idle")]);
+      expect(current.status("phone-withdrawn-01", claudeTarget).state).toBe("queued");
+      await current.flush();
+    }
+    expect((await reader(make()).read()).entries.find(entry => entry.line === 2)?.raw.phrenDeliveryId).toBeUndefined();
+    // Push the original enqueue/withdrawal outside the binder's transcript tail.
+    // A restart must retain the terminal state without rediscovering its reason.
+    await append({ type: "assistant", message: { role: "assistant", content: "x".repeat(530_000) } },
+      { type: "user", timestamp: "2026-11-01T15:17:21.000Z", message: { role: "user", content: phone } });
+    const tailOnly = make();
+    await tailOnly.submitted(claudeTarget, phone);
+    expect((await reader(tailOnly).read()).entries.find(entry => entry.line === 4)?.raw.phrenDeliveryId).toBeUndefined();
+    expect(tailOnly.status("phone-withdrawn-01", claudeTarget).state).toBe("queued");
+  });
+
+  it.each([
+    ["absorbed_mid_turn", "phren_queue_consumed", "delivered"],
+    ["delivered_to_agent", "phren_queue_consumed", "delivered"],
+    ["cleared_on_cancel", "phren_queue_returned", "queued"],
+    ["popAll", "phren_queue_returned", "queued"],
+  ])("exports and settles the real queue lifecycle for %s", async (reason, type, state) => {
+    const { store, make, append, reader } = await liveQueue();
+    await send(store, "phone-send-0021", phone, claudeTarget);
+    await append(enqueue());
+    expect((await reader(store).read()).entries[0].raw).toMatchObject({ phrenQueued: true, phrenDeliveryId: "phone-send-0021" });
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("phone-send-0021", claudeTarget).state).toBe("queued");
+    await append(reason === "popAll" ? { ...remove(), operation: "popAll" } : remove(reason));
+    const consumed = (await reader(store).read()).entries.find(entry => entry.raw.type === type)?.raw;
+    expect(consumed).toMatchObject({ phrenDeliveryId: "phone-send-0021" });
+    expect(JSON.stringify(consumed)).not.toContain("626aa5af");
+    clock += 3_000;
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("phone-send-0021", claudeTarget).state).toBe(state);
+    await store.flush();
+    const restarted = make();
+    const reopened = await reader(restarted).read();
+    expect(reopened.entries.find(entry => entry.raw.phrenQueued)?.raw).toMatchObject({ phrenDeliveryId: "phone-send-0021" });
+    expect(reopened.entries.find(entry => entry.raw.type === type)?.raw).toMatchObject({ phrenDeliveryId: "phone-send-0021" });
+    expect(restarted.status("phone-send-0021", claudeTarget).state).toBe(state);
+  });
+
 });
 
 describe("a message held by a Codex thread the pane has left", () => {

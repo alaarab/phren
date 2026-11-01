@@ -352,7 +352,9 @@ export class TranscriptReader {
   private revision?: string;
   private nextLine = 0;
   constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup,
-              private readonly includeSidechain = false, private readonly cwd?: string) {}
+              private readonly includeSidechain = false, private readonly cwd?: string,
+              /** The phone delivery bound to each Claude queue row, by byte offset (PromptDeliveries). */
+              private readonly queueBindings?: () => Promise<Map<number, string> | undefined>) {}
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return this.readPage(before, undefined, signal);
   }
@@ -383,10 +385,16 @@ export class TranscriptReader {
       const byteBudget = opening ? 1_048_576 : 4_194_304;
       let bytes = 0, cursor = end, held: number | undefined;
       // Claude's queue pairing: the row scan is newest-first, so a prompt turn
-      // is seen before the content-free dequeue that delivered it.
-      const queue: ClaudeQueueState = {};
+      // is seen before the content-free dequeue that delivered it. The bindings
+      // name the phone message behind each queue occurrence when the Hook has
+      // tracked the send, so the queue row and its consumption share one id.
+      const bindings = this.imageLine === undefined && this.source === "claude" && this.queueBindings
+        ? await this.queueBindings().catch(() => undefined) : undefined;
+      const queue: ClaudeQueueState = bindings
+        ? { deliveryFor: (_raw, offset) => offset === undefined ? undefined : bindings.get(offset) } : {};
       for await (const row of index.rows(handle, end, lower, signal)) {
         signal?.throwIfAborted();
+        queue.offset = row.offset;
         let rows: Json[] = [];
         try {
           let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain, this.cwd, queue);

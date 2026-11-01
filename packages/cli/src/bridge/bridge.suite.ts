@@ -259,7 +259,7 @@ describe("Phren Hook boundaries", () => {
     // draws it as the person's bubble. Consumption exports only its digest.
     expect(visibleEvent({ type: "queue-operation", operation: "enqueue", timestamp: "now", content: "a queued human prompt" }, "claude"))
       .toMatchObject({ type: "user", phrenQueued: true, timestamp: "now", message: { role: "user", content: "a queued human prompt" } });
-    expect(visibleEvent({ type: "queue-operation", operation: "remove", timestamp: "now", content: "a queued human prompt" }, "claude"))
+    expect(visibleEvent({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", timestamp: "now", content: "a queued human prompt" }, "claude"))
       .toMatchObject({ type: "phren_queue_consumed", timestamp: "now" });
     expect(visibleEvent({ type: "queue-operation", content: "<task-notification>missing id</task-notification>" }, "claude")).toBeUndefined();
     expect(visibleEvent({ type: "queue-operation", operation: "enqueue", content: "<system-reminder>internal</system-reminder>" }, "claude")).toBeUndefined();
@@ -268,7 +268,7 @@ describe("Phren Hook boundaries", () => {
     const pasted = '<pasted_content id="57d2">\nAm I on the latest version?\n</pasted_content id="57d2">';
     const queued = visibleEvent({ type: "queue-operation", operation: "enqueue", timestamp: "now", content: pasted }, "claude") as { phrenQueueKey: string };
     expect(queued).toMatchObject({ type: "user", phrenQueued: true, message: { role: "user", content: "Am I on the latest version?" } });
-    expect(visibleEvent({ type: "queue-operation", operation: "remove", timestamp: "now", content: pasted }, "claude"))
+    expect(visibleEvent({ type: "queue-operation", operation: "remove", reason: "delivered_to_agent", timestamp: "now", content: pasted }, "claude"))
       .toMatchObject({ type: "phren_queue_consumed", key: queued.phrenQueueKey });
     expect(visibleEvent({ type: "queue-operation", operation: "enqueue", content: '<pasted_content id="1">\n<system-reminder>x</system-reminder>\n</pasted_content id="1">' }, "claude")).toBeUndefined();
   });
@@ -3403,6 +3403,11 @@ schedules:
     });
 
     it("launches an agent in a new worktree on its own branch and names it in the worktree listing", async () => {
+      // Account discovery probes auth even with the fake terminal provider. Keep an
+      // installed Claude from rewriting this fixture's config during folder pretrust.
+      await writeFile(path.join(root, "bin/claude"), `#!/bin/sh
+printf '%s\\n' '{"loggedIn":true,"subscriptionType":"max"}'
+`, { mode: 0o755 });
       const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@x", "-C", root, ...args]);
       const launch = (branch: string) => api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "wt", kind: "claude", worktree: { branch } });
       const creates = () => commands.filter(c => c.method === "workspace.create").length;

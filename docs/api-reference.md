@@ -769,6 +769,24 @@ A phone matches its pending send to that row rather than to the row's text.
 The Hook keeps these rows in `deliveries.json.landed.json` beside the delivery
 records, so an older Hook still reads every record.
 
+A Claude queue row also carries an optional `phrenDeliveryId` when the Hook has
+bound that queue occurrence to a phone send: the value is the `deliveryId` the
+send was given, never Claude's own `deliveryId` or `commandUuid`. It appears on
+the queued user event (`phrenQueued`), its `phren_queue_consumed` or
+`phren_queue_returned` row, and the real submitted user turn that replaces it,
+so a client can join the queued and submitted copies into one message and keep
+the owner's original text and attachments. The binding uses the pane, the
+conversation, the normalized words and occurrence order after the transcript
+cursor captured before typing, so repeated identical sends bind to separate occurrences; an enqueue alone means the agent still
+holds the message, and only its accepted removal (`absorbed_mid_turn`,
+`delivered_to_agent`) or a real user turn means it was taken. A
+`cleared_on_cancel` removal is a withdrawal (`phren_queue_returned`), not
+consumption. Removals match exact unwrapped queue content, so different image
+labels remain distinct even when their words normalize alike. A withdrawn
+occurrence cannot lend its identity to a later matching ordinary turn.
+Bindings are kept in `deliveries.json.queue.json` beside the
+records. Older Hooks omit the field.
+
 A `/v1/transcripts` stream opened with `deliveries=1` (capability
 `deliveryFrames`) pushes `{ type: "delivery", source, session, deliveryId,
 state, reason?, landed? }` for every message typed into that conversation's

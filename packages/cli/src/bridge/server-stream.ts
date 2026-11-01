@@ -63,7 +63,11 @@ export function transcriptStreams(ctx: StreamContext) {
    * missing one: `reader` stays undefined until the file appears. */
   async function conversationReader(target: Target): Promise<{ reader?: TranscriptReader; source: Provider; session: string }> {
     try {
-      const reader = new TranscriptReader(await targetTranscriptPath(target), target.source, undefined, modules.has("git") ? agentHooks.changes.view(`${target.source}:${target.session}`) : undefined);
+      const file = await targetTranscriptPath(target);
+      // A Claude queue row crosses with the phone id the Hook bound to it, so a
+      // sent message and its queued transcript copy join by identity, not text.
+      const reader = new TranscriptReader(file, target.source, undefined, modules.has("git") ? agentHooks.changes.view(`${target.source}:${target.session}`) : undefined,
+        false, undefined, target.source === "claude" ? () => agentHooks.deliveries.claudeQueueBindings(target, file) : undefined);
       return { reader, source: target.source, session: target.session };
     } catch (error) {
       if (error instanceof BridgeError && error.status === 404) return { source: target.source, session: target.session };
