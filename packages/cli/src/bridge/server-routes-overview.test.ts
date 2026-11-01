@@ -25,7 +25,7 @@ describe("the overview on a loaded computer", () => {
     const read = workspacesReader({
       modules: { has: (name: string) => name === "git" } as never, info: {} as never,
       agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set<string>() } as never,
-      journal: { record: async () => {} } as never, tabActivity: { observe: async () => new Map() } as never,
+      journal: { record: async () => {} } as never, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() } as never,
       contextUsage: { read: async () => new Map() } as never,
     });
     let answer: Json | undefined;
@@ -50,7 +50,7 @@ describe("the overview on a loaded computer", () => {
     const read = workspacesReader({
       modules: { has: () => false } as never, info: {} as never,
       agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set<string>() } as never,
-      journal: { record: async () => {} } as never, tabActivity: { observe: async () => new Map() } as never,
+      journal: { record: async () => {} } as never, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() } as never,
       contextUsage: { read: async () => new Map() } as never,
     });
     try {
@@ -85,7 +85,7 @@ describe("the overview on a loaded computer", () => {
     const read = workspacesReader({
       modules: { has: () => false } as never, info: {} as never,
       agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set<string>() } as never,
-      journal: { record: async () => {} } as never, tabActivity: { observe: async () => new Map() } as never,
+      journal: { record: async () => {} } as never, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() } as never,
       contextUsage: { read: async () => new Map() } as never,
     });
     const answer = await read("default", snapshot, false);

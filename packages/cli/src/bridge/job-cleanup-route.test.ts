@@ -7,7 +7,7 @@ describe("POST /v1/jobs/cleanup", () => {
     let called = 0;
     const handler = createRouteHandler({ modules: { has: () => true }, info: {}, streams: {},
       agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set() },
-      journal: { record: async () => {} }, tabActivity: { observe: async () => new Map() },
+      journal: { record: async () => {} }, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() },
       contextUsage: { read: async () => new Map() },
       resources: { cleanupJobs: async () => { called++; return { killed: [4242], kept: [{ pgid: 1, reason: "self" }], forgotten: [9] }; } },
     } as never);

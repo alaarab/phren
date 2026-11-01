@@ -4,7 +4,10 @@ import { createHash } from "node:crypto";
 import { atomicInPrivateDir, bridgeRoot, object, objects, type Json } from "./protocol.js";
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-type Stamp = { signature: string; lastChangedAt: string };
+type Stamp = { signature: string; statusSignature?: string; lastChangedAt: string; statusSince: string };
+type StatusRow = { workspace: unknown; tab: unknown; status: unknown };
+export type TabActivityStamp = Pick<Stamp, "lastChangedAt" | "statusSince">;
+export type TabActivityObservation = { generation: number; stamps: ReadonlyMap<string, TabActivityStamp> };
 export const tabActivityKey = (workspace: unknown, tab: unknown): string => JSON.stringify([workspace, tab]);
 
 /** A clock for Herdr's clockless state counters. Only successful snapshots
@@ -15,15 +18,19 @@ export class TabActivityStore {
   private loaded = false;
   private dirty = false;
   private pending: Promise<unknown> = Promise.resolve();
+  private nextGeneration = new Map<string, number>();
+  private committedGeneration = new Map<string, number>();
   constructor(private readonly file = path.join(bridgeRoot(), "tab-activity.json"),
               private readonly now: () => Date = () => new Date()) {}
 
-  observe(server: string, snapshot: Json): Promise<ReadonlyMap<string, string>> {
+  observe(server: string, snapshot: Json): Promise<TabActivityObservation> {
     const at = this.now().toISOString();
     const operation = this.pending.catch(() => {}).then(async () => {
       await this.load();
+      const generation = (this.nextGeneration.get(server) ?? 0) + 1;
+      this.nextGeneration.set(server, generation);
       const prefix = JSON.stringify(server) + ":";
-      const seen = new Set<string>(), times = new Map<string, string>();
+      const seen = new Set<string>(), stamps = new Map<string, TabActivityStamp>();
       let changed = false;
       for (const tab of objects(snapshot.tabs)) {
         const tabKey = tabActivityKey(tab.workspace_id, tab.tab_id), key = prefix + tabKey;
@@ -34,19 +41,57 @@ export class TabActivityStore {
           .map(p => [p.pane_id, p.agent, p.agent_status, p.state_change_seq, p.title || p.terminal_title_stripped])
           .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
         const signature = digest(JSON.stringify([tab.agent_status, tab.state_change_seq, tab.label, tab.title, panes]));
-        let stamp = this.entries.get(key);
-        if (stamp?.signature !== signature) {
-          stamp = { signature, lastChangedAt: at };
-          this.entries.set(key, stamp); changed = true;
+        const stamp = this.entries.get(key);
+        if (!stamp) {
+          this.entries.set(key, { signature, lastChangedAt: at, statusSince: at }); changed = true;
+        } else if (stamp.signature !== signature) {
+          this.entries.set(key, { ...stamp, signature, lastChangedAt: at }); changed = true;
         }
-        times.set(tabKey, stamp!.lastChangedAt);
+        const current = this.entries.get(key)!;
+        stamps.set(tabKey, { lastChangedAt: current.lastChangedAt, statusSince: current.statusSince });
       }
       for (const key of this.entries.keys()) {
         if (key.startsWith(prefix) && !seen.has(key)) { this.entries.delete(key); changed = true; }
       }
       this.dirty ||= changed;
       await this.persist();
-      return times;
+      return { generation, stamps };
+    });
+    this.pending = operation;
+    return operation;
+  }
+  /** The status clock follows the final `agentStatus` the overview sends, after
+   * background work and other decoration change it. Keep this off `observe`:
+   * the background activity timer polls raw snapshots and must not reset it.
+   * `generation` comes from the observation that started this enrichment, so an
+   * older snapshot that finishes later cannot overwrite a newer one. */
+  recordStatus(server: string, rows: readonly StatusRow[], generation: number): Promise<ReadonlyMap<string, TabActivityStamp>> {
+    const at = this.now().toISOString();
+    const operation = this.pending.catch(() => {}).then(async () => {
+      await this.load();
+      const prefix = JSON.stringify(server) + ":";
+      const stamps = new Map<string, TabActivityStamp>();
+      const committed = this.committedGeneration.get(server) ?? 0, stale = generation < committed;
+      if (!stale) this.committedGeneration.set(server, generation);
+      let changed = false;
+      for (const row of rows) {
+        const tabKey = tabActivityKey(row.workspace, row.tab), key = prefix + tabKey;
+        const stamp = this.entries.get(key);
+        if (!stamp) continue;
+        const statusSignature = digest(JSON.stringify([row.status]));
+        if (!stale) {
+          if (stamp.statusSignature === undefined) {
+            this.entries.set(key, { ...stamp, statusSignature }); changed = true;
+          } else if (stamp.statusSignature !== statusSignature) {
+            this.entries.set(key, { ...stamp, statusSignature, statusSince: at }); changed = true;
+          }
+        }
+        const current = this.entries.get(key)!;
+        stamps.set(tabKey, { lastChangedAt: current.lastChangedAt, statusSince: current.statusSince });
+      }
+      this.dirty ||= changed;
+      await this.persist();
+      return stamps;
     });
     this.pending = operation;
     return operation;
@@ -59,8 +104,14 @@ export class TabActivityStore {
           if (typeof stamp.signature === "string" && typeof stamp.lastChangedAt === "string"
               && Number.isFinite(Date.parse(stamp.lastChangedAt))) {
             const hashed = /^[a-f0-9]{64}$/.test(stamp.signature);
-            this.entries.set(key, { signature: hashed ? stamp.signature : digest(stamp.signature), lastChangedAt: stamp.lastChangedAt });
-            this.dirty ||= !hashed;
+            const savedStatus = typeof stamp.statusSignature === "string" ? stamp.statusSignature : undefined;
+            const statusHashed = savedStatus !== undefined && /^[a-f0-9]{64}$/.test(savedStatus);
+            const statusSince = typeof stamp.statusSince === "string" && Number.isFinite(Date.parse(stamp.statusSince))
+              ? stamp.statusSince : stamp.lastChangedAt;
+            this.entries.set(key, { signature: hashed ? stamp.signature : digest(stamp.signature),
+              statusSignature: savedStatus === undefined ? undefined : statusHashed ? savedStatus : digest(savedStatus),
+              lastChangedAt: stamp.lastChangedAt, statusSince });
+            this.dirty ||= !hashed || savedStatus === undefined || !statusHashed || statusSince !== stamp.statusSince;
           }
         }
         this.loaded = true;

@@ -27,7 +27,7 @@ describe("typed terminal sources", () => {
   it("identifies each overview source without changing group identity", async () => {
     const read = workspacesReader({ modules: { has: () => false } as never, info: {} as never,
       agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set() } as never,
-      journal: { record: async () => {} } as never, tabActivity: { observe: async () => new Map() } as never,
+      journal: { record: async () => {} } as never, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() } as never,
       contextUsage: { read: async () => new Map() } as never });
     const snapshot = { workspaces: [{ workspace_id: "s1", label: "atlas" }], tabs: [], panes: [] };
     const [herdr, tmux] = await Promise.all([read("default", snapshot, false), read("tmux", snapshot, false)]);
