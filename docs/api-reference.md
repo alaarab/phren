@@ -1621,6 +1621,53 @@ resolved only against that listing. The bounded repository cache is keyed by HEA
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.
 
+`POST /v1/git/worktrees/remove/preview` takes `worktree` (a `/v1/git/worktrees`
+id) and optional `server` and `pane`, or the full session target. It resolves
+the id exactly as the listing does, against the requesting pane's repository,
+and only a linked worktree qualifies: the main checkout and the pane's own
+checkout answer 409 `worktree-not-removable`. The reply is `{token, path,
+branch, dirty, untracked, submodules, sessions, removable, reason?}`. `dirty`
+lists up to 50 changed paths (rename pairs count once), `untracked` counts the
+untracked paths Git reports (a collapsed directory once), and `submodules` is `[{path, unpushedCommits}]` for
+nested submodules whose HEAD commit is on no remote branch. `sessions` is
+`[{pane, title}]` for live panes on every running terminal server whose folder
+is inside the worktree; any session makes `removable` false with `reason:
+"sessions-open"`. A locked worktree is `removable: false` with `reason:
+"locked"`, and a clean worktree with initialized submodules is `removable:
+false` with `reason: "initialized-submodules"` because Git refuses that removal
+without force, which a clean worktree never gets. `token` is an opaque digest
+of that exact preview state.
+
+`POST /v1/git/worktrees/remove` takes the same `worktree` plus `token`. Hook
+recomputes the preview: a different token answers 409 `worktree-changed` with
+`preview: {…new preview}` and removes nothing. A matching token runs `git
+worktree remove`, with `--force` only when the preview showed dirty or
+untracked files, and answers `{removed: true, branch}`. It never deletes the
+branch. A live session in the worktree, a locked worktree, or a clean worktree
+with initialized submodules blocks removal with 409 `worktree-not-removable`
+and the preview's `reason`. Session discovery reads every running terminal
+server, including the requesting one even when discovery omitted it; if
+discovery or any snapshot fails, the request fails rather than assuming the
+worktree is unused. Hook advertises
+`worktreeRemove`; both routes are part of the `git` module.
+### Live repository changes
+
+`WS /v1/git/watch` takes the same query as `GET /v1/git/status` (the full
+session target plus optional `child` or `worktree`) and uses the same repository
+resolution. It sends JSON text frames: `{type: "changed", at}` when the working
+tree or index may have changed (at most one per second, trailing), `{type:
+"ping"}` every 20 seconds, and `{type: "error", code, message}` followed by a
+close when the checkout cannot be watched. `code` is `git-not-repository` for a
+folder that is not a repository, `too-many-watchers` when 16 checkouts are
+already being watched, and `git-watch-failed` for a watcher failure.
+
+One watcher serves every subscriber of a resolved checkout root and stops 30
+seconds after its last subscriber leaves. macOS and Windows use a recursive
+`fs.watch` on the root; `.git/index` and `.git/HEAD` changes trigger it. Linux
+polls `git status --porcelain=v2 -z` every 3 seconds with optional locks
+disabled and emits when its hash changes, so the Hook never takes the index
+lock. Advertised as `capabilities.gitWatch`.
+
 ### Repository status, diff and staging
 
 `GET /v1/git/status` takes the full session target in the query; the existing
@@ -1839,11 +1886,50 @@ New clients opt in with `mux=tmux:<server>`. Older Hooks ignore `typed=1`, so
 clients must accept legacy discovery aliases during upgrades. A typed tmux
 selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 
+`GET /v1/terminals/resolve?ref=<token>&from=<pane>` opens a terminal reference
+in chat text. A token is a Herdr pane id (`w2E:p1`) or tab id (`w2E:t1`),
+optionally prefixed by a computer name (`MacBook/w2E:p1`). A bare token
+resolves on this Hook; a prefixed one resolves on this computer (its own name
+or alias) or on a verified `hooks.yaml` peer, whose Hook is asked over its
+pinned SSH pipe. `from` is the pane the text came from and only chooses which
+of this computer's Herdr servers to read first. The answer is
+`{computer, server, pane, tab, workspace, title, agent, status}` for a pane or
+tab that exists now; a tab answers with the pane it shows. A malformed token is
+400, and a missing pane or tab, an unknown computer, or a peer that is not
+linked is 404 `code: "terminal-not-found"`. A server whose snapshot cannot be
+read reports its own error instead of claiming the terminal is absent. The
+answer uses the
+shared pane snapshots the Hook keeps for its streams, so a resolve adds no
+per-pane Herdr call; a miss refreshes the server list once for a server that
+started after discovery was cached. Advertised as
+`capabilities.terminalResolve`; a computer without it predates the route.
+
 Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
-`agentStatus` and `title`. A tab whose turn ended carries `lastReply`: the
+`agentStatus` and `title`. Newer Hooks also send `statusSince`, the ISO-8601
+time that tab's `agentStatus` last changed; older Hooks omit it. Only a status
+change resets it, not a title, label or activity-counter change, and a tab seen
+for the first time gets the current time. The Hook persists it across restarts.
+A tab whose turn ended carries `lastReply`: the
 agent's last message from its Stop hook (Claude and Codex), as one plain line
 of at most 240 characters with markdown dropped. It is absent while a turn or
-its background work runs, and when the Stop carried no message. A session whose main turn ended while background
+its background work runs, and when the Stop carried no message. A finished
+turn also carries `completion: {id, at, entry?}`: an opaque id of the latest finished
+turn of the conversation now in the pane (the conversation id and its Stop's
+sequence), and when it stopped. It is absent while a prompt is unanswered, when
+a Stop has no prompt before it, or when the harness has no turn record.
+`completion.entry`, when resolved, is the decimal string of the last transcript
+entry's zero-based `line` key, exactly as WS transcript frames and history pages
+identify and order rows. For Claude it names the turn's final assistant message;
+for Codex and OpenCode it names the last public row written before the Stop.
+It is absent when the Hook cannot resolve that row from the indexed recent tail.
+Claude requires a transcript `stop_reason: "end_turn"` marker and, when both
+the Stop and the row contain reply text, a match to the Stop’s complete final
+reply. Matching progress text alone never identifies the completion.
+Codex uses the stream’s projection, excluding
+covered code-mode wrapper results.
+`seenCompletion` is the completion id a person last marked seen on the phone or
+the desktop, absent until one is. A row is unread while `completion.id` differs
+from `seenCompletion`. A session whose main turn ended while background
 work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
 where Herdr or tmux say idle or done. `n` counts the work the session is
 waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
@@ -1864,6 +1950,24 @@ title, except a title made from the brief launch's first prompt ("Read and
 follow the brief...", a `/briefs/` path, "Brief" and a bare id), which is
 dropped so the client falls back to `label`. `GET /v1/workspaces/panes` gives
 each pane's `title` by the same rule.
+
+#### Unread replies
+
+Auto-mark a completion seen only when the open chat is bound to that pane's
+conversation, the app is active and following the end, and it has displayed
+`completion.entry` or a row ordered after it. Compare numeric line order, not
+lexicographic string order. If `entry` is absent (an older Hook or an unresolved
+row), never auto-mark; Mark seen/unread remains manual in the session menu.
+
+`POST /v1/sessions/seen` records which finished turn a person has seen. Its body
+is `{ server, pane, completion }`: the computer's terminal source, the pane id
+from the session row, and the row's `completion.id`. Without `unread` it stores
+that completion as the pane's `seenCompletion`, last writer wins. With
+`unread: true` it clears `seenCompletion` only when the stored mark equals the
+completion supplied, so a stale clear cannot remove a newer mark. The reply is
+`{ ok: true }`; a malformed body is 400 and a pane this computer does not list
+is 404. The mark is written atomically in the Hook's bridge folder and survives
+a restart. Hook advertises `capabilities.sessionSeen`.
 
 Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
 after route target validation. This code does not mean every 404 is a missing

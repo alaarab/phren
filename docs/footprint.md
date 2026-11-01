@@ -120,6 +120,10 @@ companions and transient `conversation-search-rows/` pieces for rows still being
 read), derived `codex-threads/` projections and their state files (with resumable
 `.building` files while upgrading old projections to retain turn identities), bounded
 `activity.jsonl` and `activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
+dispatch returns; a pane's `<pane>.seen.json` beside its record is the
+completion a person last marked seen, and `opencode-turns/<session>.json` is
+an OpenCode conversation's advancing Stop sequence), bounded `activity.jsonl` and
+`activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
 Uploads are limited to 8 MiB each and 256 MiB total; uploads older than 14 days
 are removed on the next upload. Activity stores status and project metadata,
 not conversation text. See [Phren Hook](phren-hook.md).

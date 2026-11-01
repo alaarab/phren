@@ -42,6 +42,7 @@ for (const mux of [{ kind: "Herdr", server: "default" }, { kind: "tmux", server:
     restore = setTerminalProvider({
       kind: "fake",
       snapshot: async () => structuredClone(state),
+      processes: async () => ({ foregroundPids: [] }),
       create: async (_server: string, placement: PanePlacement) => {
         const n = objects(state.workspaces).length + 1;
         state.workspaces.push({ workspace_id: `w${n}`, label: placement.label });
