@@ -56,6 +56,7 @@ import { defaultPhrenPath } from "../shared.js";
 import { capabilitiesForModules, createRouteHandler, type HookInfo, requireRoute, selectedServer, workspacesReader } from "./server-routes.js";
 import { typedMuxRequest } from "./mux-wire.js";
 import { overviewStream } from "./server-overview.js";
+import { GitWatch } from "./git-watch.js";
 import { transcriptStreams } from "./server-stream.js";
 import { launchSession } from "./server-launch.js";
 import { copyClaudeConversation, SessionMover, transcriptTail } from "./session-move.js";
@@ -256,6 +257,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     resources: () => resources.read(),
     sudo: agentHooks.sudo,
   });
+  const gitWatch = new GitWatch();
   // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
   const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
@@ -266,7 +268,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   http.on("upgrade", (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
-      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
+      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/git/watch", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
       requireRoute(modules, "WS", url.pathname);
       // Parsed before the upgrade: an invalid server name is refused as the other routes refuse it.
       const overviewServer = url.pathname === "/v1/overview" ? selectedServer(url) : undefined;
@@ -280,6 +282,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           ws.clients.delete(oldest);
         }
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1"); return; }
+        if (url.pathname === "/v1/git/watch") { void gitWatch.stream(client, url); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => failRelay(client)); return; }
         if (url.pathname === "/v1/simulators/stream") { void streamSimulator(client, url.searchParams).catch(() => client.close(1011, "Simulator stream unavailable")); return; }
         if (url.pathname === "/v1/speech/live") { void relayLiveSpeech(client, url.searchParams).catch(() => client.close(1011, "Spoken replies unavailable")); return; }
@@ -356,7 +359,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

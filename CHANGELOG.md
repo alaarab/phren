@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `WS /v1/git/watch` streams live Changes: a debounced `changed` frame when a pane's checkout, a child's worktree or a listed worktree may have changed, with `ping` heartbeats, one shared watcher per checkout and a 16-checkout cap. Advertised as `capabilities.gitWatch`.
+
 ### Fixed
 
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.

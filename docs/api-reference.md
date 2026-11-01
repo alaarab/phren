@@ -1621,6 +1621,24 @@ resolved only against that listing. The bounded repository cache is keyed by HEA
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.
 
+### Live repository changes
+
+`WS /v1/git/watch` takes the same query as `GET /v1/git/status` (the full
+session target plus optional `child` or `worktree`) and uses the same repository
+resolution. It sends JSON text frames: `{type: "changed", at}` when the working
+tree or index may have changed (at most one per second, trailing), `{type:
+"ping"}` every 20 seconds, and `{type: "error", code, message}` followed by a
+close when the checkout cannot be watched. `code` is `git-not-repository` for a
+folder that is not a repository, `too-many-watchers` when 16 checkouts are
+already being watched, and `git-watch-failed` for a watcher failure.
+
+One watcher serves every subscriber of a resolved checkout root and stops 30
+seconds after its last subscriber leaves. macOS and Windows use a recursive
+`fs.watch` on the root; `.git/index` and `.git/HEAD` changes trigger it. Linux
+polls `git status --porcelain=v2 -z` every 3 seconds with optional locks
+disabled and emits when its hash changes, so the Hook never takes the index
+lock. Advertised as `capabilities.gitWatch`.
+
 ### Repository status, diff and staging
 
 `GET /v1/git/status` takes the full session target in the query; the existing
