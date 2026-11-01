@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Isolated-worktree turn checkpoints with preview-token guarded file restore and recovery checkpoints for undo, advertised by the Hook’s `turnCheckpoints` capability.
 - Event-triggered schedules: version 2 definitions with payload equality filters, capped prompt templates, coalescing and persistent delivery dedupe; authenticated schedule event ingestion and signed GitHub workflow/check completions, bounded decision history, and the `scheduleEvents` Hook capability. A file with an event schedule requires this event-capable Hook version on every computer that reads it; upgrade all of them before adding events, because older Hooks skip the entire version 2 file, including timed schedules.
 - Hook-held “After this turn” prompts: a persisted, conversation-bound FIFO queue that sends one item per confirmed turn boundary while the phone sleeps, with edit/cancel routes, delivery settlement, safe restart handling, `afterTurnQueue` capability and `queuedPrompts` session counts.
 

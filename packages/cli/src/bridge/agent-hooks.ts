@@ -30,6 +30,7 @@ import { allowOpencodeToolEverywhere } from "./opencode-permissions.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
 import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
+import { checkpointBoundary, checkpointActivityArrived } from "./checkpoints.js";
 import { noteTurn as recordTurn } from "./turn-records.js";
 import { PromptDeliveries } from "./prompt-deliveries.js";
 import { countTick } from "./metrics.js";
@@ -503,13 +504,16 @@ export class AgentHooks {
    * A failed write never fails the agent's callback. */
   private async recordTurn(target: Target, pane: Json, body: Json, dispatch?: string) {
     if (typeof pane.terminal_id !== "string") return;
-    await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
+    const recorded = await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
       ...(dispatch ? { dispatch } : {}),
       ...(body.event === "SessionStart" && typeof body.startSource === "string" ? { start: body.startSource } : {}),
       ...(typeof body.background === "number" ? { background: body.background } : {}),
       ...(body.event === "Stop" && Array.isArray(body.backgroundTasks) ? { backgroundTasks: body.backgroundTasks } : {}),
       ...(typeof body.reply === "string" ? { reply: body.reply } : {}),
       ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);
+    const cwd = typeof body.cwd === "string" ? body.cwd : pane.foreground_cwd || pane.cwd;
+    if (this.modules?.has("git") !== false && recorded && typeof cwd === "string") await checkpointBoundary(cwd, target, String(body.event), recorded.prompt?.seq ?? recorded.seq,
+      typeof body.prompt === "string" ? body.prompt : "");
   }
   private rememberTerminalPrompt(target: Target, body: Json, dialogSeenAt?: number) {
     const tool = String(body.tool || "action").slice(0, 200);
@@ -1324,6 +1328,8 @@ export class AgentHooks {
           res.end(JSON.stringify(context ? { context: pane.agent === "phren" ? `${context}\n\n${await conductorBrief()}` : context } : {})); return;
         }
         let target = targetSchema.parse(body.target);
+        const activity = eventStatus(body.event);
+        if (activity === "working" || activity === "blocked") checkpointActivityArrived(target);
         // A callback Codex's app-server daemon ran names the pane that started
         // the daemon, not the conversation's. Place it by the conversation the
         // Hook proves each pane shows, and never record a binding from it.
