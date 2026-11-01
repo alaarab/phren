@@ -76,7 +76,7 @@ export function scanForSecrets(text: string): string | null {
   // AWS Access Key
   if (/AKIA[0-9A-Z]{16}/.test(text)) return 'AWS access key';
   // AWS Secret Access Key (variable assignment pattern)
-  if (/(?:aws[_-]?secret|AWS_SECRET)[_-]?(?:access[_-]?)?key[_-]?(?:id)?['":\s]+[A-Za-z0-9/+=]{40}/i.test(text)) return 'AWS secret access key';
+  if (/(?:aws[_-]?secret|AWS_SECRET)[_-]?(?:access[_-]?)?key[_-]?(?:id)?['":=\s]+[A-Za-z0-9/+=]{40}/i.test(text)) return 'AWS secret access key';
   // JWT token
   if (/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(text)) return 'JWT token';
   // Fixed-prefix, fixed-shape credentials. These sit above the generic base64
