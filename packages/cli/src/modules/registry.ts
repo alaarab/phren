@@ -87,6 +87,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/workspaces/layout", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
+        "/v1/conversations/search",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages", "/v1/sessions/move", "/v1/sessions/moves", "/v1/sessions/move/computers", "/v1/sessions/move/availability", "/v1/sessions/move/intent", "/v1/sessions/move/launch", "/v1/dispatch/relocation", "/v1/dispatch/arrival",
       ]),
       ...routes("POST", [
@@ -101,10 +102,10 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "paneLayout", "deskPresence", "herdr", "terminalResolve",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "simulatorStream", "simulatorDevices", "simulatorDrag", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "queuedMessageActions", "deliveryFrames", "resources", "sessionRename", "sessionSeen", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer", "moveResume", "moveSummaryByTarget", "moveConversationCopy", "claudeAccountAdd", "accountPools", "workerRelocation",
+      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "simulatorStream", "simulatorDevices", "simulatorDrag", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "queuedMessageActions", "deliveryFrames", "resources", "sessionRename", "sessionSeen", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer", "moveResume", "moveSummaryByTarget", "moveConversationCopy", "claudeAccountAdd", "accountPools", "workerRelocation", "conversationSearch",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
-    localFiles: ["<bridge>/gitboy-webhooks.json", "<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/move-intents/*.json", "<bridge>/move-intents/*.conversation.md", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json", "<bridge>/move-launches/*.json"],
+    localFiles: ["<bridge>/gitboy-webhooks.json", "<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/move-intents/*.json", "<bridge>/move-intents/*.conversation.md", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json", "<bridge>/move-launches/*.json", "<bridge>/conversation-search.sqlite", "<bridge>/conversation-search-rows/**"],
     phoneScreens: [{ screen: "LiveSessionsView", capability: "hook" }, { screen: "AgentChatView", capability: "transcript" }],
     skills: [],
   },

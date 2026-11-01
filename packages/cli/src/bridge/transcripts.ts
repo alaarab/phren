@@ -223,6 +223,18 @@ export function targetTranscriptPath(target: { server: string; pane: string; sou
   return transcriptPath(target.source, target.session, account);
 }
 
+/** Shared ambiguity rule for chat reads and the search index. A session ID
+ * alone cannot select between Claude account copies. Codex's caller falls
+ * back to its materialized store when no unique rollout can be chosen. */
+export function selectTranscriptMatch<T extends { id?: string | undefined }>(source: Provider, found: T[], account?: string): T | undefined {
+  let chosen = found;
+  if (source === "claude" && found.length > 1 && account) {
+    const preferred = found.filter(item => item.id === account);
+    if (preferred.length) chosen = preferred;
+  }
+  return chosen.length === 1 ? chosen[0] : undefined;
+}
+
 /** `account` (a Claude home id) settles a session id found in more than one home. */
 export async function transcriptPath(source: Provider, session: string, account?: string): Promise<string> {
   if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
@@ -241,20 +253,16 @@ export async function transcriptPath(source: Provider, session: string, account?
     const matches = await findPatternMatches(root, pattern).catch(() => [] as string[]);
     for (const match of matches) found.push({ id: entry.id, root, match });
   }
-  let chosen = found;
-  if (source === "claude" && found.length > 1 && account) {
-    const preferred = found.filter(item => item.id === account);
-    if (preferred.length) chosen = preferred;
-  }
-  if (chosen.length !== 1) {
+  const chosen = selectTranscriptMatch(source, found, account);
+  if (!chosen) {
     // Codex 0.155 keeps new threads only in its sqlite store; the Hook
     // materializes those into a rollout-shaped file of its own.
     const materialized = source === "codex" ? await materializeCodexThread(session) : undefined;
     if (materialized) return materialized;
     throw new BridgeError(404, "The transcript is not available for this conversation.", { code: "transcript-unavailable" });
   }
-  const file = await realpath(chosen[0].match);
-  if (!file.startsWith(chosen[0].root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");
+  const file = await realpath(chosen.match);
+  if (!file.startsWith(chosen.root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");
   return file;
 }
 

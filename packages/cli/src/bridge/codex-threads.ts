@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, stat } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { codexHome } from "../home-paths.js";
 import path from "node:path";
 import { atomic, bridgeRoot, object, objects, sessionId, type Json } from "./protocol.js";
@@ -8,13 +8,36 @@ import { atomic, bridgeRoot, object, objects, sessionId, type Json } from "./pro
  * longer writes the rollout file its `state_5.sqlite` still names. The Hook
  * materializes such a thread into a rollout-shaped JSONL of its own, append
  * only, so every reader of Codex transcripts keeps working unchanged. */
-const MAX_ITEMS = 20_000, OUTPUT_TAIL = 4_000;
+const OUTPUT_TAIL = 4_000;
 const STALLED_AFTER_MS = 10 * 60 * 1_000;
 
-interface Emitted { lastOrdinal: number; maxUpdated: number; count: number; turnSignature?: string; done: Record<string, "call" | "queued" | "done"> }
+interface Emitted { version?: 2; upgrading?: boolean; forwardDone?: boolean; updateTarget?: number; updateAt?: number; updateOrdinal?: number; updateItem?: string; deferred?: Record<string, string>; lastOrdinal: number; maxUpdated: number; count: number; turnSignature?: string; scanOrdinal?: number; scanItem?: string; done: Record<string, "call" | "queued" | "done"> }
 
 export function materializedRoot(): string { return path.join(bridgeRoot(), "codex-threads"); }
 export function materializedPath(session: string): string { return path.join(materializedRoot(), `${session}.jsonl`); }
+
+/** Codex 0.155 threads the SQLite store knows, by stable thread identity. Search
+ * uses this to discover threads that have no rollout file to glob. */
+export async function codexThreadSessions(limit = 5_000, after = ""): Promise<string[]> {
+  const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
+  if (!history) return [];
+  try {
+    return objects(history.prepare(`select distinct thread_id from thread_items
+      where thread_id > ? order by thread_id limit ?`).all(after, limit))
+      .map(row => String(row.thread_id));
+  } catch { return []; } finally { history.close(); }
+}
+
+/** The materialized row retains its original turn, independently of whichever
+ * turn happens to be active when search catches up. */
+export async function codexTurnSettled(session: string, turn: string | null): Promise<boolean | undefined> {
+  const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
+  if (!history || !turn) { history?.close(); return undefined; }
+  try {
+    const row = object(history.prepare("select status from thread_turns where thread_id = ? and turn_id = ?").get(session, turn));
+    return typeof row.status === "string" ? row.status !== "inProgress" : undefined;
+  } catch { return undefined; } finally { history.close(); }
+}
 
 type Db = { prepare(sql: string): { all(...args: unknown[]): unknown[]; get(...args: unknown[]): unknown }; close(): void };
 async function openReadOnly(file: string): Promise<Db | undefined> {
@@ -83,17 +106,17 @@ export async function codexThreadPreview(session: string): Promise<{ turnStarted
 /** Bring the materialized file up to date with the store. Returns the file
  * when the thread exists there, undefined otherwise. Safe to call often:
  * an unchanged thread costs one aggregate query. */
-export async function materializeCodexThread(session: string): Promise<string | undefined> {
+export async function materializeCodexThread(session: string, deadline = Infinity, maxItems = Infinity): Promise<string | undefined> {
   if (!sessionId.safeParse(session).success) return undefined;
   const key = materializedPath(session);
   const pending = materializations.get(key);
   if (pending) return pending;
-  const work = materializeThread(session);
+  const work = materializeThread(session, deadline, maxItems);
   materializations.set(key, work);
   try { return await work; } finally { materializations.delete(key); }
 }
 
-async function materializeThread(session: string): Promise<string | undefined> {
+async function materializeThread(session: string, deadline: number, maxItems: number): Promise<string | undefined> {
   if (!sessionId.safeParse(session).success) return undefined;
   const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
   if (!history) return undefined;
@@ -104,35 +127,59 @@ async function materializeThread(session: string): Promise<string | undefined> {
     await mkdir(materializedRoot(), { recursive: true, mode: 0o700 });
     let state: Emitted = { lastOrdinal: -1, maxUpdated: -1, count: 0, done: {} };
     try { state = { ...state, ...object(JSON.parse(await readFile(stateFile, "utf8"))) as Partial<Emitted> }; } catch { /* first time */ }
-    const fresh = state.count === 0;
-    const turn = object(history.prepare("select turn_id, status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1").get(session));
+    // Older projections lack complete turn identities or update cursors. Rebuild the cache
+    // beside the live file, then replace it atomically; the transcript reader
+    // observes the new inode and resets its revision and row numbers together.
+    const upgrading = state.version !== 2 && (state.count > 0 || state.scanOrdinal !== undefined);
+    const outputFile = upgrading ? file + ".building" : file;
+    const progressFile = upgrading ? outputFile + ".state.json" : stateFile;
+    if (upgrading) {
+      if (!state.upgrading) await atomic(stateFile, JSON.stringify({ ...state, upgrading: true }));
+      state = { lastOrdinal: -1, maxUpdated: -1, count: 0, done: {} };
+      try { state = { ...state, ...object(JSON.parse(await readFile(progressFile, "utf8"))) as Partial<Emitted> }; } catch { /* first upgrade batch */ }
+      if (state.version !== 2) {
+        state = { lastOrdinal: -1, maxUpdated: -1, count: 0, done: {} };
+        await rm(outputFile, { force: true });
+      }
+    }
+    state.version = 2;
+    const fresh = state.count === 0 && state.scanOrdinal === undefined;
+    let turn: Json = {};
+    try { turn = object(history.prepare("select turn_id, status from thread_turns where thread_id = ? order by rollout_ordinal desc limit 1").get(session)); } catch { /* legacy store without turn metadata */ }
     const turnSignature = JSON.stringify(turn);
-    if (!fresh && state.count === Number(summary.n) && state.lastOrdinal === Number(summary.last) && state.maxUpdated === Number(summary.updated)
-        && state.turnSignature === turnSignature) return file;
-    const pending = pendingMessage(history, session);
-    const rows = itemRows(history, session);
-    const stamps = turnStarts(history, session);
+    if (Number(summary.last) > (state.scanOrdinal ?? -1)) state.forwardDone = false;
+    if (!upgrading && !Object.keys(state.deferred ?? {}).length && state.forwardDone && state.updateTarget === undefined && !fresh && state.count === Number(summary.n)
+      && state.lastOrdinal === Number(summary.last) && state.maxUpdated === Number(summary.updated) && state.turnSignature === turnSignature) return file;
+    let pending: ReturnType<typeof pendingMessage>;
+    try { pending = pendingMessage(history, session); } catch { /* legacy store without item turn identities */ }
+    state.deferred ??= {};
+    const columns = new Set(objects(history.prepare("PRAGMA table_info(thread_items)").all()).map(row => String(row.name)));
+    const stamps = new Map<string, number>();
     const lines: string[] = [];
     if (fresh) {
       const meta = await threadMeta(session);
-      // A child thread's row names its parent inside `source`; the child
-      // agent tree verifies that link from the first line, so it rides along.
       lines.push(JSON.stringify({ type: "session_meta", payload: { id: session, ...(meta.cwd ? { cwd: meta.cwd } : {}),
         source: meta.spawn ? { subagent: { thread_spawn: meta.spawn } } : "codex-thread-store" } }));
       if (meta.model) lines.push(JSON.stringify({ type: "turn_context", payload: { model: meta.model } }));
     }
-    for (const row of rows) {
-      let item: Json; try { item = object(JSON.parse(String(row.item_json))); } catch { continue; }
+    const emit = (row: Json): void => {
+      if (typeof row.turn_id === "string" && !stamps.has(String(row.turn_id))) {
+        let turn: Json = {};
+        try { turn = object(history.prepare("select started_at from thread_turns where thread_id = ? and turn_id = ?").get(session, row.turn_id)); } catch { /* unavailable in legacy stores */ }
+        stamps.set(String(row.turn_id), epochMs(turn.started_at) ?? 0);
+      }
+      let item: Json; try { item = object(JSON.parse(String(row.item_json))); } catch { return; }
       const id = String(item.id ?? `ordinal-${row.rollout_ordinal}`), emitted = state.done[id];
-      if (item.type === "agentMessage" && id === pending?.id) continue;
+      if (item.type === "agentMessage" && id === pending?.id) { state.deferred![id] = String(row.item_id); return; }
+      delete state.deferred![id];
       const calls = callRows(item), output = outputRow(item);
       // Preserve only queue state actually recorded by the harness. The
       // append-only transcript pairs the queued user row with a content-free
       // consumption marker when that same item leaves the queue.
       if (emitted === "queued" && item.type === "userMessage" && item.status !== "queued") {
-        lines.push(JSON.stringify({ type: "phren_queue_consumed", key: queueKey(session, id) }));
+        lines.push(JSON.stringify({ type: "phren_queue_consumed", key: queueKey(session, id), phrenTurnId: row.turn_id }));
         state.done[id] = "done";
-        continue;
+        return;
       }
       if (!emitted) {
         if (calls) { for (const call of calls) lines.push(JSON.stringify(call)); state.done[id] = "call"; }
@@ -141,65 +188,107 @@ async function materializeThread(session: string): Promise<string | undefined> {
           // as the event the rollout carried before 0.155, so the child
           // agent tree keeps finding native subagents.
           lines.push(JSON.stringify(subAgentRow(item)));
-          state.done[id] = "done"; continue;
+          state.done[id] = "done"; return;
         }
         else if (messageRow(item)) {
           const at = rowTime(row, item, stamps);
-          const message = { ...messageRow(item)!, ...(at ? { timestamp: at } : {}) };
+          const message = { ...messageRow(item)!, phrenTurnId: row.turn_id, ...(at ? { timestamp: at } : {}) };
           const queued = item.type === "userMessage" && item.status === "queued";
           lines.push(JSON.stringify(queued ? { ...message, phrenQueued: true, phrenQueueKey: queueKey(session, id) } : message));
           // A question the agent asked (delivered async) rides along as the
           // same event the rollout would carry, so the pending scan sees it.
           const asked = questionEvent(item);
           if (asked) lines.push(JSON.stringify(asked));
-          state.done[id] = queued ? "queued" : "done"; continue;
+          state.done[id] = queued ? "queued" : "done"; return;
         }
         else if (isQueuedQuestionItem(item)) {
           // The queued follow-up question reads in the transcript as the
           // asking sentence; the Hook answers it from the store, not by
           // quoting a reply, so no async event rides along here.
           const title = questionTitle(objects(item.questions));
-          if (title) lines.push(JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: title }] } }));
-          state.done[id] = "done"; continue;
+          if (title) lines.push(JSON.stringify({ type: "response_item", phrenTurnId: row.turn_id, timestamp: rowTime(row, item, stamps), payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: title }] } }));
+          state.done[id] = "done"; return;
         }
-        else continue;
+        else return;
       }
       if (state.done[id] === "call" && output) { lines.push(JSON.stringify(output)); state.done[id] = "done"; }
+    };
+    let processed = 0;
+    // Skipped streaming replies are retried independently of forward progress,
+    // including completion signalled only in thread_turns (no item update).
+    for (const [id, item] of Object.entries(state.deferred)) {
+      if (processed >= Math.min(16, maxItems) || Date.now() >= deadline) break;
+      processed++;
+      const row = itemById(history, session, columns, item);
+      if (row) emit(row); else delete state.deferred[id];
     }
+    // Freeze each update pass at its own high watermark. Ongoing writes start
+    // another pass afterward; they never rewind the historical forward cursor.
+    if (state.updateTarget === undefined && Number(summary.updated) > state.maxUpdated) state.updateTarget = Number(summary.updated);
+    const updateLimit = maxItems === Infinity ? Infinity : Math.min(maxItems, processed + 32);
+    while (state.updateTarget !== undefined && processed < updateLimit && Date.now() < deadline) {
+      const rows = itemRows(history, session, columns, state, true);
+      if (!rows.length) {
+        state.maxUpdated = state.updateTarget;
+        delete state.updateTarget; delete state.updateAt; delete state.updateOrdinal; delete state.updateItem;
+        break;
+      }
+      for (const row of rows) {
+        if (processed >= updateLimit || Date.now() >= deadline) break;
+        processed++;
+        emit(row);
+        state.updateAt = Number(row.updated_at_ordinal); state.updateOrdinal = Number(row.rollout_ordinal); state.updateItem = String(row.item_id);
+      }
+    }
+    while (processed < maxItems && Date.now() < deadline) {
+      const rows = itemRows(history, session, columns, state, false);
+      if (!rows.length) { state.forwardDone = true; state.count = Number(summary.n); state.lastOrdinal = Number(summary.last); break; }
+      state.forwardDone = false;
+      for (const row of rows) {
+        if (processed >= maxItems || Date.now() >= deadline) break;
+        processed++;
+        emit(row);
+        state.scanOrdinal = Number(row.rollout_ordinal); state.scanItem = String(row.item_id);
+      }
+    }
+    state.turnSignature = turnSignature;
     if (lines.length) {
-      const handle = await open(file, "a", 0o600);
+      const handle = await open(outputFile, "a", 0o600);
       try { await handle.appendFile(lines.join("\n") + "\n"); } finally { await handle.close(); }
     }
-    state.count = Number(summary.n); state.lastOrdinal = Number(summary.last); state.maxUpdated = Number(summary.updated); state.turnSignature = turnSignature;
-    await atomic(stateFile, JSON.stringify(state));
+    await atomic(progressFile, JSON.stringify(state));
+    if (upgrading && state.forwardDone && state.updateTarget === undefined) {
+      await rename(outputFile, file);
+      await atomic(stateFile, JSON.stringify(state));
+      await rm(progressFile, { force: true });
+    }
     return file;
   } catch { return undefined; } finally { history.close(); }
 }
 
 /** The thread's items in order, with when each was created where the store records it (`created_at_ms`, absent
  * from some stores) and its turn. */
-function itemRows(history: Db, session: string): Json[] {
-  try {
-    return objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal, turn_id, created_at_ms from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
-  } catch {
-    try {
-      return objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal, turn_id from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
-    } catch {
-      return objects(history.prepare("select rollout_ordinal, item_type, item_json, updated_at_ordinal from thread_items where thread_id = ? order by rollout_ordinal limit ?").all(session, MAX_ITEMS));
-    }
-  }
+function itemProjection(columns: Set<string>): { fields: string; key: string } {
+  const key = columns.has("item_id") ? "item_id" : "CAST(rollout_ordinal AS TEXT)";
+  return { key, fields: `rollout_ordinal, ${key} AS item_id, item_type, item_json, updated_at_ordinal,
+    ${columns.has("turn_id") ? "turn_id" : "NULL AS turn_id"}, ${columns.has("created_at_ms") ? "created_at_ms" : "NULL AS created_at_ms"}` };
 }
 
-/** When each of the thread's turns started, in milliseconds; empty when the store cannot say. */
-function turnStarts(history: Db, session: string): Map<string, number> {
-  const starts = new Map<string, number>();
-  try {
-    for (const turn of objects(history.prepare("select turn_id, started_at from thread_turns where thread_id = ?").all(session))) {
-      const started = epochMs(turn.started_at);
-      if (started) starts.set(String(turn.turn_id), started);
-    }
-  } catch { /* no turns table */ }
-  return starts;
+function itemRows(history: Db, session: string, columns: Set<string>, state: Emitted, updates: boolean): Json[] {
+  const { key, fields } = itemProjection(columns);
+  return objects(updates
+    ? history.prepare(`SELECT ${fields} FROM thread_items WHERE thread_id = ? AND updated_at_ordinal > ? AND updated_at_ordinal <= ?
+        AND (updated_at_ordinal, rollout_ordinal, ${key}) > (?, ?, ?)
+        ORDER BY updated_at_ordinal, rollout_ordinal, ${key} LIMIT 128`)
+      .all(session, state.maxUpdated, state.updateTarget, state.updateAt ?? -1, state.updateOrdinal ?? -1, state.updateItem ?? "")
+    : history.prepare(`SELECT ${fields} FROM thread_items WHERE thread_id = ? AND (rollout_ordinal, ${key}) > (?, ?)
+        ORDER BY rollout_ordinal, ${key} LIMIT 128`).all(session, state.scanOrdinal ?? -1, state.scanItem ?? ""));
+}
+
+function itemById(history: Db, session: string, columns: Set<string>, item: string): Json | undefined {
+  const { key, fields } = itemProjection(columns);
+  const row = history.prepare(`SELECT ${fields} FROM thread_items WHERE thread_id = ? AND ${key} = ? LIMIT 1`).get(session, item);
+  return row ? object(row) : undefined;
 }
 
 /** Seconds or milliseconds since the epoch, as milliseconds; undefined for anything else. */

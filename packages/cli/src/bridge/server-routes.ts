@@ -59,11 +59,12 @@ import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitStatus } from "./git.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDeadline } from "./projects.js";
-import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema } from "./protocol.js";
+import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema, sessionId } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
 import { tabActivityKey, type TabActivityStore } from "./tab-activity.js";
-import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
+import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath, transcriptPath, TranscriptReader } from "./transcripts.js";
+import { conversationSearch } from "./conversation-search.js";
 import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
@@ -211,7 +212,7 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -661,6 +662,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }
           case "/v1/muxes": result = { muxes: muxListForClient(await servers(), url.searchParams.get("typed") === "1") }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
+          case "/v1/conversations/search": result = await conversationSearch(
+            url.searchParams.get("q"), url.searchParams.get("limit"), url.searchParams.get("cursor")); break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
           // `all=1` (capability simulatorDevices): every available device with its state, for the phone's picker.
           case "/v1/simulators": result = { simulators: url.searchParams.get("all") === "1" ? await simulatorDevices() : await bootedSimulators() }; break;
@@ -780,6 +783,22 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             response.setHeader("Content-Type", "application/octet-stream"); response.end(bytes); return;
           }
           case "/v1/transcripts/history": {
+            // Finished conversations use the same bounded history reader, but
+            // have no live pane to validate. Only the owner's gateway may read
+            // by identity; transcriptPath validates IDs and resolves known roots.
+            if (url.searchParams.get("historical") === "1") {
+              if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner can read historical conversations.");
+              if (["server", "workspace", "tab", "pane", "child"].some(key => url.searchParams.has(key))) throw new BridgeError(400, "Historical reads cannot name a live target.");
+              const source = provider.parse(url.searchParams.get("source"));
+              const session = sessionId.parse(url.searchParams.get("session"));
+              const before = z.coerce.number().int().positive().safe().parse(url.searchParams.get("beforeLine"));
+              const abort = new AbortController();
+              response.once("close", () => { if (!response.writableEnded) abort.abort(); });
+              const reader = new TranscriptReader(await transcriptPath(source, session), source);
+              await refreshTranscript(reader.file, source, session);
+              result = { ...await reader.read(before, abort.signal), type: "older", source, session };
+              break;
+            }
             const target = targetFromURL(url);
             const before = z.coerce.number().int().positive().parse(url.searchParams.get("beforeLine"));
             const abort = new AbortController();
