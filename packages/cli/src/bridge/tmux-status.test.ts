@@ -3,7 +3,7 @@
 // dialogs without a hook behind them. Plus the tmux follow-ups around them:
 // socket discovery, the pane a process runs in, health and the canary's server.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import { copilotProcessStatus, copilotStatusFromEvents, opencodeProcessStatus, opencodeTurnStamps } from "./harness-status.js";
 import { opencodeTurn, turnPhase } from "./turn-records.js";
 import { codexStartupStatus, dialogStatus, notePaneStatus, resetPaneStatus, screenDialog, settleBlockedPane, startupStatus } from "./pane-status.js";
-import { resetTmuxBinary, setTmuxDeps, tmuxHealth, tmuxServers, tmuxSnapshot, tmuxSocketsIn } from "./terminal-tmux.js";
+import { resetTmuxBinary, setTmuxDeps, tmuxHealth, tmuxServers, tmuxServersStrict, tmuxSnapshot, tmuxSocketsIn } from "./terminal-tmux.js";
+import { BridgeError } from "./protocol.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { canaryServer } from "./canary.js";
 import { describeTerminal, terminalHealth } from "./health.js";
@@ -301,6 +302,59 @@ describe("tmux sockets, the pane a process runs in, health and the canary", () =
   it("lists every socket that answers, not only default and phren", async () => {
     ({ restore } = fakeTmux({ sockets: ["default", "work", "phren", "stale"], answering: ["default", "work"] }));
     expect((await tmuxServers()).map(server => server.session)).toEqual(["tmux", "tmux-work", "tmux-phren"]);
+  });
+
+  it("strict discovery skips a stopped server but fails on a timeout", async () => {
+    let slow = "timeout";
+    const undo = setTmuxDeps({
+      binary: () => "/usr/bin/tmux",
+      sockets: async () => ["default", "work", "slow"],
+      run: async (socket, args) => {
+        if (args[0] !== "list-sessions") return "";
+        if (socket === "work" || socket === "phren") throw new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+        if (socket === "slow" && slow === "timeout") throw new BridgeError(504, "tmux did not answer. Refresh before trying again.");
+        if (socket === "slow") throw new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+        return "/home/me/repo\n";
+      },
+    });
+    try {
+      await expect(tmuxServersStrict()).rejects.toThrow("did not answer");
+      slow = "stopped";
+      expect((await tmuxServersStrict()).map(server => server.session)).toEqual(["tmux"]);
+    } finally { undo(); }
+  });
+
+  // tmux and a shebang script need a Unix-like host.
+  it.skipIf(process.platform === "win32")("strict discovery propagates a permission failure instead of calling the server stopped", async () => {
+    const bin = await mkdtemp(path.join(tmpdir(), "phren-tmux-permission-"));
+    const tmux = path.join(bin, "tmux");
+    await writeFile(tmux, "#!/bin/sh\necho 'error connecting to /tmp/tmux-501/default (Permission denied)' >&2\nexit 1\n");
+    await chmod(tmux, 0o755);
+    const undo = setTmuxDeps({ binary: () => tmux, sockets: async () => ["default"] });
+    try {
+      vi.stubEnv("PHREN_TMUX", "on");
+      vi.stubEnv("PATH", bin);
+      resetTmuxBinary();
+      // The default runner translates tmux's stderr itself; a permission
+      // problem must not become the not_running code that discovery skips.
+      await expect(tmuxServersStrict()).rejects.toThrow(/Permission denied/);
+    } finally { undo(); await rm(bin, { recursive: true, force: true }); }
+  });
+
+  it("strict discovery checks every candidate, including one past the display cap", async () => {
+    const sockets = Array.from({ length: 20 }, (_, index) => `w${index}`);
+    const undo = setTmuxDeps({
+      binary: () => "/usr/bin/tmux",
+      sockets: async () => sockets,
+      run: async (socket, args) => {
+        if (args[0] !== "list-sessions") return "";
+        if (socket === "phren") throw new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+        return "/home/me/repo\n";
+      },
+    });
+    try {
+      expect((await tmuxServersStrict()).map(server => server.session)).toEqual(["tmux", ...sockets.map(socket => `tmux-${socket}`)]);
+    } finally { undo(); }
   });
 
   it("never lists a test's private server, by its socket's name or its sessions in a test's temp folder", async () => {

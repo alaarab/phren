@@ -50,8 +50,9 @@ interface TmuxDeps {
   processes: () => Promise<string>;
   /** `tmux -V`. */
   version: () => Promise<string>;
-  /** The names of the tmux sockets this user has, whether or not they answer. */
-  sockets: () => Promise<string[]>;
+  /** The names of the tmux sockets this user has, whether or not they answer.
+   * In strict mode a discovery failure other than a missing folder is thrown. */
+  sockets: (strict?: boolean) => Promise<string[]>;
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
@@ -84,7 +85,10 @@ function tmuxError(stderr: string, error: { name: string; code?: string | number
   if (error.name === "AbortError") return new BridgeError(499, "Request cancelled.");
   if (error.killed || error.signal === "SIGTERM") return new BridgeError(504, "tmux did not answer. Refresh before trying again.");
   if (error.code === "ENOENT") return new BridgeError(503, "tmux is not installed on this computer.");
-  if (/no server running|error connecting to|No such file or directory/i.test(said)) return new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+  if (/no server running/i.test(said)
+    || /error connecting to .*\((?:no such file or directory|connection refused)\)/i.test(said)) {
+    return new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+  }
   return new BridgeError(409, said ? `tmux: ${said}` : "tmux could not perform this action. Refresh the session before trying again.");
 }
 
@@ -109,21 +113,31 @@ function socketFlags(socket: string): string[] {
  * first, so a live server sorts ahead of stale socket files left by killed
  * runs. A socket outside the first folder of `tmuxSocketFolders` is remembered
  * by path. */
-export async function tmuxSocketsIn(folder: string): Promise<string[]> {
+export async function tmuxSocketsIn(folder: string, strict = false): Promise<string[]> {
   const uid = process.getuid?.(), primary = tmuxSocketFolders()[0];
-  const names = (await readdir(folder).catch(() => [] as string[])).slice(0, 256);
+  let names: string[];
+  try { names = await readdir(folder); }
+  catch (error) {
+    if (!strict || (error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new BridgeError(503, "Could not list this computer's tmux servers.", { code: "tmux-discovery-failed" });
+  }
+  if (!strict) names = names.slice(0, 256);
   const found: { name: string; at: number }[] = [];
   for (const name of names) {
     if (!tmuxServerName(name)) continue;
-    const info = await lstat(path.join(folder, name)).catch(() => undefined);
+    const info = await lstat(path.join(folder, name)).catch(error => {
+      if (!strict || (error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw new BridgeError(503, "Could not inspect this computer's tmux servers.", { code: "tmux-discovery-failed" });
+    });
     if (!info?.isSocket() || (uid !== undefined && info.uid !== uid)) continue;
     found.push({ name, at: info.mtimeMs });
     if (folder !== primary && !socketPaths.has(name) && !existsSync(path.join(primary ?? folder, name))) socketPaths.set(name, path.join(folder, name));
   }
   found.sort((a, b) => b.at - a.at);
   // Most recent first, then capped: each candidate costs a tmux process
-  // per snapshot, and stale files from killed runs sort to the end.
-  return found.slice(0, 32).map(entry => entry.name);
+  // per snapshot, and stale files from killed runs sort to the end. A removal
+  // check reads every candidate: a hidden live server must never be skipped.
+  return (strict ? found : found.slice(0, 32)).map(entry => entry.name);
 }
 
 const defaultDeps: TmuxDeps = {
@@ -146,7 +160,7 @@ const defaultDeps: TmuxDeps = {
     if (!binary) { resolve(""); return; }
     execFile(binary, ["-V"], { timeout: 3_000 }, (error, stdout) => resolve(error ? "" : String(stdout)));
   }),
-  sockets: async () => (await Promise.all(tmuxSocketFolders().map(tmuxSocketsIn))).flat(),
+  sockets: async (strict = false) => (await Promise.all(tmuxSocketFolders().map(folder => tmuxSocketsIn(folder, strict)))).flat(),
   sleep: (ms, signal) => new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new BridgeError(499, "Request cancelled.")); return; }
     const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, ms);
@@ -508,6 +522,35 @@ export async function tmuxServers(options: { hidden?: boolean } = {}): Promise<J
   const hiddenRunning = includeHidden || await tmux(TMUX_HIDDEN, ["list-sessions", "-F", "#{session_id}"], { timeoutMs: 3_000 }).then(() => true, () => false);
   return [...await ownerServers(), ...(hiddenRunning ? [TMUX_HIDDEN] : [])]
     .map(name => ({ id: `tmux:${name}`, kind: "tmux", terminal: "tmux", session: name, running: true }));
+}
+
+function tmuxServerStopped(error: unknown): boolean {
+  return error instanceof BridgeError && (error.details?.code === "not_running" || /is not running/.test(error.message));
+}
+
+/** The tmux servers that are actually running, for a safety check. Unlike
+ * `tmuxServers`, a timeout, permission or discovery failure fails the call
+ * instead of quietly dropping that server; a stopped one is simply absent. */
+export async function tmuxServersStrict(): Promise<Json[]> {
+  if (!deps.binary()) return [];
+  const sockets = [...new Set(["default", ...await deps.sockets(true)])]
+    .filter(socket => socket !== "phren" && !isTestName(socket));
+  const names = sockets.flatMap(socket => tmuxServerName(socket) ?? []);
+  const running = await Promise.all(names.map(async name => {
+    try {
+      const text = await tmux(name, ["list-sessions", "-F", "#{session_path}"], { timeoutMs: 3_000 });
+      return !isTestServer(text.split("\n").filter(Boolean));
+    } catch (error) {
+      if (tmuxServerStopped(error)) return false;
+      throw error;
+    }
+  }));
+  const found = names.filter((_, index) => running[index]);
+  try {
+    await tmux(TMUX_HIDDEN, ["list-sessions", "-F", "#{session_id}"], { timeoutMs: 3_000 });
+    if (!found.includes(TMUX_HIDDEN)) found.push(TMUX_HIDDEN);
+  } catch (error) { if (!tmuxServerStopped(error)) throw error; }
+  return found.map(name => ({ id: `tmux:${name}`, kind: "tmux", terminal: "tmux", session: name, running: true }));
 }
 
 /** What `phren bridge doctor` and the health details say about tmux. */

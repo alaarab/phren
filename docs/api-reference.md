@@ -1621,6 +1621,36 @@ resolved only against that listing. The bounded repository cache is keyed by HEA
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.
 
+`POST /v1/git/worktrees/remove/preview` takes `worktree` (a `/v1/git/worktrees`
+id) and optional `server` and `pane`, or the full session target. It resolves
+the id exactly as the listing does, against the requesting pane's repository,
+and only a linked worktree qualifies: the main checkout and the pane's own
+checkout answer 409 `worktree-not-removable`. The reply is `{token, path,
+branch, dirty, untracked, submodules, sessions, removable, reason?}`. `dirty`
+lists up to 50 changed paths (rename pairs count once), `untracked` counts the
+untracked paths Git reports (a collapsed directory once), and `submodules` is `[{path, unpushedCommits}]` for
+nested submodules whose HEAD commit is on no remote branch. `sessions` is
+`[{pane, title}]` for live panes on every running terminal server whose folder
+is inside the worktree; any session makes `removable` false with `reason:
+"sessions-open"`. A locked worktree is `removable: false` with `reason:
+"locked"`, and a clean worktree with initialized submodules is `removable:
+false` with `reason: "initialized-submodules"` because Git refuses that removal
+without force, which a clean worktree never gets. `token` is an opaque digest
+of that exact preview state.
+
+`POST /v1/git/worktrees/remove` takes the same `worktree` plus `token`. Hook
+recomputes the preview: a different token answers 409 `worktree-changed` with
+`preview: {…new preview}` and removes nothing. A matching token runs `git
+worktree remove`, with `--force` only when the preview showed dirty or
+untracked files, and answers `{removed: true, branch}`. It never deletes the
+branch. A live session in the worktree, a locked worktree, or a clean worktree
+with initialized submodules blocks removal with 409 `worktree-not-removable`
+and the preview's `reason`. Session discovery reads every running terminal
+server, including the requesting one even when discovery omitted it; if
+discovery or any snapshot fails, the request fails rather than assuming the
+worktree is unused. Hook advertises
+`worktreeRemove`; both routes are part of the `git` module.
+
 ### Repository status, diff and staging
 
 `GET /v1/git/status` takes the full session target in the query; the existing

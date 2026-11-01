@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Safe worktree removal: `POST /v1/git/worktrees/remove/preview` describes a linked worktree's dirty and untracked files, submodule commits no remote branch contains, and live sessions on every running terminal server, and returns a token for that exact state; `POST /v1/git/worktrees/remove` removes it only when the recomputed token matches, using `--force` solely for changes the preview showed. The main checkout and the requesting pane's own checkout are refused, live sessions block removal, as do locked worktrees and clean worktrees with initialized submodules, failed or incomplete session discovery refuses the request, and the branch is never deleted. Hook advertises `worktreeRemove`.
+
 ### Fixed
 
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.
