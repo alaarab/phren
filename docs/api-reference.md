@@ -1026,6 +1026,8 @@ The `updates` object accepts:
 | `priority` | string | New priority tag: `high`, `medium`, or `low`. |
 | `context` | string | Text to append to the Context line below the item. |
 | `replace_context` | boolean | Replace the existing `Context:` value instead of appending. |
+| `branches` | array | Replace private merge links: `{repo, name}`; `[]` clears. |
+| `prs` | array | Replace private PR links: `{repo, number}`; `[]` clears. |
 | `section` | string | Move item to this section: `Queue`, `Active`, or `Done`. |
 | `github_issue` | number or string | GitHub issue number (for example `14` or `#14`). |
 | `github_url` | string | GitHub issue URL to associate with the item. |
@@ -2469,6 +2471,11 @@ Worker tool, full profile or `phren_admin(action:"dispatch_report",prs)` in core
 terminal and submitted turn. HTTPS URLs only, at most 16 rows and 24000 UTF-8
 bytes. The done return carries the report and the Hook queues it to the
 configured integrator. CLI: `phren dispatch report --prs '<JSON array>'`.
+Optional `task:{storeId,project,stableId}` links the report to a private task;
+otherwise the Hook uses the association carried with the launch. Dispatch accepts
+the same optional `task` field. `taskLinks:{linked,error?}` reports the save result
+independently of report persistence. Nothing is written to GitHub. See
+[merge reconciliation](task-responsibility.md#complete-tasks-from-merged-prs).
 
 ### `owner_inbox`
 

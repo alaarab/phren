@@ -1,3 +1,4 @@
+import { branchLinkSchema, prLinkSchema } from "../task/merge-links.js";
 import { taskView, taskCounts, filterTaskDoc } from "../data/task-contract.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
@@ -505,6 +506,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           text: z.string().optional().describe("Replacement text for the task line."),
           priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
           context: z.string().optional().describe("Text to set on the Context: line below the task."),
+          branches: z.array(branchLinkSchema).max(32).optional().describe("Replace private repository-qualified branch links ({repo, name}); [] clears."),
+          prs: z.array(prLinkSchema).max(32).optional().describe("Replace private PR links ({repo, number}); [] clears. Never publish task IDs or backlinks to GitHub."),
           replace_context: z.boolean().optional().describe("If true, replace the existing Context: value instead of appending."),
           responsibility: z.enum(["human", "agent"]).optional().describe("Who must act; independent of task section. Legacy tasks default to agent."),
           dependencies: z.array(z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/), stableId: z.string().regex(/^[a-f0-9]{8}$/) }).strict()).max(100).optional().describe("Replace prerequisites with immutable store/project/task identities; [] clears. Rejects self-links, cycles and missing targets."),
@@ -640,7 +643,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Handle github issue linking via update_task when github_issue or github_url is set (and no other field updates)
-        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section && updates.responsibility === undefined && updates.dependencies === undefined) {
+        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section && updates.responsibility === undefined && updates.dependencies === undefined && updates.branches === undefined && updates.prs === undefined) {
           if (updates.unlink_github && (updates.github_issue !== undefined || updates.github_url)) {
             return mcpResponse({ ok: false, error: "Use either unlink_github=true or github_issue/github_url, not both." });
           }

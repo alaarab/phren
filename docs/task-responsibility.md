@@ -75,3 +75,60 @@ A stale or already claimed task returns 409 `task-launch-conflict`. After reserv
 Phones should preserve unknown metadata when writing older tasks, use stable identities for links, show prerequisite titles, and keep responsibility controls separate from section controls. Integrator owns native iOS implementation; the Android lead owns Android. This core change does not modify either app repository or installed Hooks.
 
 Development CI builds and lints this source. Prepared regression tests, cross-machine sync and native runtime acceptance remain deferred to the consolidated release candidate.
+
+## Complete tasks from merged PRs
+
+`phren tasks reconcile [project] [--dry-run | --apply]` reads linked PRs through
+an authenticated `gh` installation. The first run previews changes. `--apply`
+opts this store into updates on subsequent runs; `--dry-run` always previews.
+The summary reports checked tasks, completions, reviews, imported links, errors
+and GitHub reads. Run this command nightly through your scheduler, for example:
+
+```cron
+0 2 * * * /absolute/path/to/phren tasks reconcile
+```
+
+Run a preview interactively before enabling unattended updates. No scheduler is
+installed automatically. The command scans writable attached stores, respects
+project subscriptions and update/completion permissions, and never writes to
+GitHub or a checkout. Task identities, context and backlinks stay in the private
+store; do not put them in commits, PRs, issues or GitHub comments.
+
+Set `updates.branches: [{repo:"example/library",name:"feat/parser"}]` and
+`updates.prs: [{repo:"example/library",number:7}]` through `manage_task` action
+`update`. Each supplied array replaces that field; `[]` clears it. Links appear
+under the task as versioned metadata:
+
+```text
+  Links: {"version":1,"branches":[{"repo":"example/library","name":"feat/parser"}],"prs":[{"repo":"example/library","number":7}]}
+```
+
+A `dispatch` may carry a private `task:{storeId,project,stableId}`. Its launch
+carries that association to the worker's Hook, where `dispatch_report` saves the
+reported PR and branch links. Task-bound phone launches carry it automatically.
+A report can also supply `task` explicitly. The response's `taskLinks` says
+whether linking succeeded; the PR report remains saved if linking fails.
+Existing tasks without structured links are imported best-effort from `Context:`:
+GitHub PR URLs, `owner/repo#N`, `branch owner/repo@name`, or `branch name` when the
+project's store documentation identifies its GitHub repository. A bare `#N`
+cannot identify a repository. Quote branch names with backticks when adjacent to
+prose punctuation or containing commas, semicolons or parentheses; ambiguous bare
+tokens are skipped rather than shortened. Explicit structured links take precedence; PR links are authoritative when present,
+while branch links discover PRs for branch-only tasks.
+
+All linked PRs must have merged, with a merge SHA and timestamp, before a task
+moves to Done. Evidence is retained in `Links.evidence`. Closed, unmerged PRs set
+`Links.review` to `closed, review`. Tasks marked `[needs owner]` are skipped.
+Human tasks, tasks with dependencies or unsupported task contracts, acceptance
+criteria beyond the merge, and deployment/device/manual verification work remain
+open with `merged, verify`. Arbitrary acceptance prose is treated conservatively;
+`Acceptance: PR merged` explicitly needs only the merge. Unlinked tasks stay
+untouched. Branch-only links require exactly one matching PR from the linked repository's own branch; a deleted branch
+or reused branch name does not prove completion.
+
+Reads are cached for 15 minutes and capped at 100 requests per sweep. A local
+progress cursor resumes at the next task when a sweep reaches the cap. A query
+failure stops further network reads and backs off for 15 minutes; cached errors
+never count as completion evidence. Tasks are re-read before each decision and
+updated under their normal locks with revision checks, so concurrent edits win.
+Repeated sweeps preserve existing decisions without appending duplicate evidence.

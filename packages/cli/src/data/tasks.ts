@@ -1,3 +1,4 @@
+import { taskLinksSchema, type TaskLinks } from "../task/merge-links.js";
 import { parseTaskMetadata } from "./task-metadata.js";
 import { taskFormatStatus, taskFormatMigrationHint } from "./task-format.js";
 import { moduleEnabled } from "../modules/runtime.js";
@@ -42,6 +43,7 @@ export interface TaskItem {
   checked: boolean;
   priority?: "high" | "medium" | "low";
   context?: string;
+  links?: TaskLinks;
   pinned?: boolean;
   githubIssue?: number;
   githubUrl?: string;
@@ -163,6 +165,7 @@ function formatGitHubIssueReference(item: TaskItem): string | undefined {
 
 function parseContinuation(lines: string[], idx: number): {
   context?: string;
+  links?: TaskLinks;
   githubIssue?: number;
   githubUrl?: string;
   claim?: TaskClaim;
@@ -179,6 +182,7 @@ function parseContinuation(lines: string[], idx: number): {
   const taskContractLines: string[] = [];
   const opaqueContinuationLines: string[] = [];
   let context: string | undefined;
+  let links: TaskLinks | undefined;
   let claim: TaskClaim | undefined;
   let githubIssue: number | undefined;
   let githubUrl: string | undefined;
@@ -196,6 +200,13 @@ function parseContinuation(lines: string[], idx: number): {
       taskContractRecords.push(trimmed.slice(5).trim());
       taskContractLines.push(raw);
       linesToSkip++; continue;
+    }
+    if (trimmed.startsWith("Links:")) {
+      // Duplicate or unsupported records stay opaque and block reconciliation.
+      try {
+        const parsed = taskLinksSchema.safeParse(JSON.parse(trimmed.slice(6).trim()));
+        if (parsed.success && !links) { links = parsed.data; linesToSkip++; continue; }
+      } catch { /* Preserve unknown metadata verbatim. */ }
     }
     if (trimmed.startsWith("Context:")) {
       context = trimmed.slice("Context:".length).trim();
@@ -223,7 +234,7 @@ function parseContinuation(lines: string[], idx: number): {
     contract = parseTaskMetadata(taskContractRecords[0]);
     if (!contract) taskContractRaw = taskContractRecords[0];
   } else if (taskContractRecords.length > 1) taskContractRaw = taskContractRecords[0];
-  return { context, githubIssue, githubUrl, claim, contract, taskContractRaw,
+  return { context, links, githubIssue, githubUrl, claim, contract, taskContractRaw,
     ...(taskContractRaw !== undefined ? { taskContractLines } : {}),
     ...(taskContractRecords.length > 1 ? { taskContractRecords } : {}),
     ...(opaqueContinuationLines.length ? { opaqueContinuationLines } : {}), linesToSkip };
@@ -374,6 +385,7 @@ export function parseTaskContent(project: string, taskPath: string, content: str
       parentFinding,
       speculative,
       context: continuation.context,
+      links: continuation.links,
       pinned: pinned || undefined,
       githubIssue: continuation.githubIssue,
       githubUrl: continuation.githubUrl,
@@ -414,6 +426,7 @@ function renderTask(doc: TaskDoc): string {
       else if (item.taskContractRecords?.length) out.push(...item.taskContractRecords.map(raw => `  Task: ${raw}`));
       else if (item.taskContractRaw !== undefined) out.push(`  Task: ${item.taskContractRaw}`);
       else if (item.responsibility !== undefined || item.dependencies?.length || item.history?.length) out.push(`  Task: ${JSON.stringify({ version: 1, responsibility: item.responsibility ?? "agent", dependencies: item.dependencies ?? [], history: item.history ?? [] })}`);
+      if (item.links) out.push(`  Links: ${JSON.stringify(item.links)}`);
       if (item.context) out.push(`  Context: ${item.context}`);
       const githubRef = formatGitHubIssueReference(item);
       if (githubRef) out.push(`  GitHub: ${githubRef}`);
@@ -782,6 +795,9 @@ export function updateTask(
   match: string,
   updates: {
     text?: string;
+    links?: TaskLinks;
+    branches?: TaskLinks["branches"];
+    prs?: TaskLinks["prs"];
     priority?: string;
     context?: string;
     replace_context?: boolean;
@@ -812,11 +828,18 @@ export function updateTask(
     if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
-    if (expectedRevision !== undefined && (!taskFormatStatus(phrenPath).enabled
+    if (expectedRevision !== undefined && updates.links === undefined && (!taskFormatStatus(phrenPath).enabled
       || !taskIdentity(graphRoot, parsed.data, item) || item.taskContractRaw !== undefined || item.taskContractRecords !== undefined)) {
       return phrenErr("Task metadata is disabled, unsupported or ambiguous; preserve your draft.", PhrenError.VALIDATION_ERROR);
     }
     const changes: string[] = [];
+    if (updates.links !== undefined || updates.branches !== undefined || updates.prs !== undefined) {
+      if (item.identityAmbiguous || item.opaqueContinuationLines?.some(line => line.trim().startsWith("Links:"))) return phrenErr("Ambiguous or unsupported task links; repair before editing.", PhrenError.VALIDATION_ERROR);
+      const links = taskLinksSchema.safeParse(updates.links ?? { version: 1, branches: updates.branches ?? item.links?.branches ?? [], prs: updates.prs ?? item.links?.prs ?? [] });
+      if (!links.success) return phrenErr("Invalid repository-qualified branch or PR links.", PhrenError.VALIDATION_ERROR);
+      item.links = links.data;
+      changes.push("private merge links updated");
+    }
     if (updates.responsibility !== undefined || updates.dependencies !== undefined) {
       const storeRoot = path.dirname(path.dirname(parsed.data.path));
       if (!taskFormatStatus(storeRoot).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);

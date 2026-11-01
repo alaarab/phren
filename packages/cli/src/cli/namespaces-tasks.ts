@@ -9,6 +9,7 @@ import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, reso
 
 function printTaskUsage() {
   console.log("Usage:");
+  console.log("  phren tasks reconcile [project] [--dry-run | --apply]");
   console.log('  phren task list [profile|project] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]');
   console.log('  phren task format [--json | enable --all-writers-compatible]');
   console.log('  phren task add <project> "<text>"');
@@ -37,10 +38,20 @@ function taskFormatStore(phrenPath: string): Pick<StoreEntry, "name" | "path" | 
   return inside ?? stores.find(s => s.role === "primary") ?? { name: "primary", path: phrenPath, role: "primary" };
 }
 
-export async function handleTaskNamespace(args: string[]) {
+export async function handleTaskNamespace(args: string[]): Promise<void> {
   const subcommand = args[0];
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
     printTaskUsage();
+    return;
+  }
+
+  if (subcommand === "reconcile") {
+    const argsRest = args.slice(1);
+    if (argsRest.some(arg => arg.startsWith("--") && !["--dry-run", "--apply"].includes(arg)) || argsRest.filter(arg => !arg.startsWith("--")).length > 1 || (argsRest.includes("--dry-run") && argsRest.includes("--apply"))) throw new Error("Usage: phren tasks reconcile [project] [--dry-run | --apply]");
+    const { reconcileTasks } = await import("../task/reconcile.js");
+    const result = await reconcileTasks(getPhrenPath(), { project: argsRest.find(arg => !arg.startsWith("--")), dryRun: argsRest.includes("--dry-run"), apply: argsRest.includes("--apply") });
+    console.log(`${result.dryRun ? "Dry run" : "Reconciled"}: ${result.checked} linked tasks checked, ${result.done} done, ${result.review} for review, ${result.linked} links imported, ${result.errors} errors (${result.requests} GitHub reads).`);
+    if (result.dryRun) console.log("No tasks changed. Use --apply to enable updates for future sweeps; --dry-run always previews.");
     return;
   }
 
@@ -420,7 +431,8 @@ export async function handleTaskNamespace(args: string[]) {
   process.exit(1);
 }
 
-export async function handleTaskListArgs(args: string[], defaultProfile: string) {
+export async function handleTaskListArgs(args: string[], defaultProfile: string): Promise<void> {
+  if (args[0] === "reconcile") return handleTaskNamespace(args);
   const { handleTaskView } = await import("./ops.js");
   const { z } = await import("zod");
   const filter = z.object({ responsibility: z.enum(["human", "agent"]).optional(), readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional() }).strict().safeParse(Object.fromEntries(args.filter(a => a.startsWith("--")).map(a => a.slice(2).split("="))));

@@ -1,3 +1,6 @@
+import { mergeTaskIdentitySchema } from "../task/merge-links.js";
+import { recordTaskPrs } from "../task/report-links.js";
+import { phrenStoreRoot } from "./transcripts.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -6,7 +9,7 @@ import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json, type Target, ta
 import { paneIdentity, findPane, snapshot, validateTarget } from "./herdr.js";
 import { originPaneSchema } from "./dispatch.js";
 import { paneTurn } from "./dispatch-returns.js";
-import { briefArrival, briefId } from "./launch-brief.js";
+import { briefArrival, briefId, briefTask } from "./launch-brief.js";
 import type { TurnRecord } from "./turn-records.js";
 
 import { integratorSchema, prsSchema, reportText as text, type Integrator, type PullRequest } from "./return-contract.js";
@@ -26,7 +29,7 @@ const reportFile = (target: Target) => path.join(bridgeRoot(), "worker-reports",
  * still reports; the evidence binds to its current turn, the one the next
  * Stop ends, and never to a prompt submitted after the report. */
 export async function reportWorker(input: unknown): Promise<Json> {
-  const data = z.object({ origin: originPaneSchema, prs: prsSchema, dispatch: briefId.optional() }).strict().parse(input);
+  const data = z.object({ origin: originPaneSchema, prs: prsSchema, task: mergeTaskIdentitySchema.optional(), dispatch: briefId.optional() }).strict().parse(input);
   const pane = findPane(await snapshot(data.origin.server), data.origin);
   if (!pane) throw new BridgeError(409, "The worker pane changed.");
   const session = await paneIdentity(data.origin.server, pane, true);
@@ -37,7 +40,12 @@ export async function reportWorker(input: unknown): Promise<Json> {
   if (promptSeq === undefined && !(typeof pane.terminal_id === "string" && await arrivedHere(data.dispatch ?? (record && record.session === session ? record.dispatch : undefined), target)))
     throw new BridgeError(409, "The Hook has not recorded this worker's submitted turn yet, and no dispatch it launched arrived in this pane.");
   await atomicInPrivateDir(reportFile(target), reportSchema.parse({ target, terminal: pane.terminal_id, ...(promptSeq !== undefined ? { promptSeq } : {}), prs: data.prs, at: new Date().toISOString() }));
-  return { ok: true, target, prs: data.prs };
+  const dispatch = data.dispatch ?? record?.dispatch;
+  const task = data.task ?? (dispatch ? await briefTask(dispatch) : undefined);
+  let taskLinks: { linked: boolean; error?: string };
+  try { taskLinks = recordTaskPrs(phrenStoreRoot(), data.prs, task, dispatch); }
+  catch { taskLinks = { linked: false, error: "PR report saved, but the private task link could not be saved. Retry the report." }; }
+  return { ok: true, target, prs: data.prs, taskLinks };
 }
 /** Whether this Hook launched dispatch `id` and its brief arrived in exactly this pane and conversation. */
 async function arrivedHere(id: string | undefined, target: Target): Promise<boolean> {
