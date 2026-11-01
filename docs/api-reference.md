@@ -410,12 +410,78 @@ anything. A failed Herdr create removes the new worktree and branch.
 ## Scheduled prompts
 
 A project's `schedules.yaml` names an assigned computer, a harness, and one of
-five timing forms (interval, daily, weekly, once, cron) that the assigned
-computer's Phren Hook evaluates in its local time. Manage them with
+six timing forms (interval, daily, weekly, once, cron, event). Time forms are evaluated by the assigned
+computer's Phren Hook in its local time. Manage them with
 `phren schedule list|add|remove|enable|disable|run|history`; `run` and `history`
 call the local Hook, the other commands edit the store file directly. See
 [Scheduled prompts](schedules.md) for the store format, timing forms and run
 history.
+
+### Event schedules
+
+When the schedules module is enabled, `capabilities.scheduleEvents: true`
+advertises event definitions, ingestion and history decisions. Require this
+capability before offering event schedules; `nextRun` is always null for them.
+
+An event definition uses `version: 2` in `schedules.yaml`, `every: event`, and
+`event: <name>`, with optional `filters: [{ path: "workflow_run.conclusion",
+equals: "failure" }]` and `coalesceSeconds: 120`. Filters are ANDed exact,
+type-sensitive scalar equalities on dotted payload paths (max 16); the window
+is an integer from 0 to 86400 seconds (default 0). Prompts substitute
+`{{payload.a.b}}` once, missing/non-scalar paths become empty, each value is
+credential-redacted and capped at 1024 characters, and the prompt is capped at
+8000. Version 1 timed files remain supported; older Hooks skip the whole
+version 2 file and older phones must not edit it.
+
+`POST /v1/schedules/events` uses the same authenticated connection and module
+gate as other schedule writes. Body (no extra keys):
+
+```json
+{"event":"deploy.failed","deliveryId":"deploy-123","payload":{"environment":"production"}}
+```
+
+`event` matches `[A-Za-z][A-Za-z0-9_.:-]{0,127}`, `deliveryId` matches
+`[A-Za-z0-9_.:-]{1,200}`, and `payload` is a JSON object. The UTF-8 request cap
+is 262144 bytes (413); malformed bodies return 400 without consuming identity.
+HTTP 200 returns `{ ok: true, duplicate: boolean, runs: [...] }`; `ok` means
+ingested, not worker success. No matching local schedule means `runs: []`.
+Acknowledgement waits for durable reservations, not worker startup; accepted
+rows initially have `status: launched`. Poll history for startup results.
+Preparation failures are recorded per schedule as accepted failed attempts
+with a capped, credential-redacted `reason`, without stopping healthy schedules.
+The receiving computer alone runs its assigned schedules; there is no forwarding.
+
+The existing signed `/gitboy/push` listener also admits GitHub `workflow_run`
+and `check_run` deliveries with `action: completed`, emitting respectively
+`github.workflow_run.completed` and `github.check_run.completed`. It validates
+the raw-body HMAC and repository against configured private store secrets.
+It uses `X-GitHub-Event`, `X-GitHub-Delivery`, and `X-Hub-Signature-256`.
+
+History rows and schedule `lastRun`/`lastRuns` add optional
+`trigger: { event, deliveryId }`, `outcome: accepted|ignored|duplicate|coalesced`,
+and `fields: { "workflow_run.conclusion": "failure" }` (keys are paths relative
+to payload, without a `payload.` prefix). Accepted child rows use normal run
+statuses; other decisions use `status: skipped` and a placeholder headless
+launch, with at most 50 non-accepted rows per schedule. `fields` contains only
+referenced template/filter fields, at most 64, each capped at 1024 characters
+and credential-redacted. Raw payloads and rendered prompts are not written to
+schedule history. Timed/manual runs omit these fields.
+
+Admission prioritizes duplicate delivery ID, disabled/filter mismatch (ignored),
+coalescing, then overlap (ignored), else accepted. Coalescing drops events
+strictly inside the window from the last accepted event without extending it.
+The receipt timestamp is captured before admission queues and supplies both
+coalescing comparisons and event rows' `startedAt`. External launches do not
+hold the admission queue.
+Delivery identity is Hook-wide and persisted as hashes of the newest 1000 IDs;
+replays do not renew retention. Admission records identity before processing,
+and records runs before launch: a crash can lose an attempt, never replay it
+automatically. Run now uses the literal stored prompt and bypasses event rules.
+
+`POST /v1/schedules/update` accepts `event`, `filters`, `coalesceSeconds` in
+`changes`; changing to an event form requires `event` and upgrades the file.
+See [the event schedule contract](schedules.md#event-schedules-hook-capability-scheduleevents)
+for full validation, compatibility, webhook setup, retention and crash semantics.
 
 ---
 

@@ -193,3 +193,21 @@ it("pulls each store when the same push body arrives once per store secret", asy
   await vi.waitFor(() => expect(pull.mock.calls.map(call => call[0]).sort()).toEqual(["1234abcd", "5678ef90"]));
   expect(await send(body, sign(body, "other-secret"), "delivery-c")).toBe(200);
 });
+
+it.each(["workflow_run", "check_run"])("forwards signed GitHub %s completions only after repository authorization", async kind => {
+  const events: unknown[] = [];
+  receiver = new GitboyWebhooks(root, pull, undefined, async event => { events.push(event); });
+  await configure();
+  const payload = { action: "completed", repository: { full_name: "alice/memory" }, [kind]: { conclusion: "failure" } };
+  const raw = Buffer.from(JSON.stringify(payload));
+  const headers = { "X-GitHub-Event": kind, "X-GitHub-Delivery": "github-one" };
+  expect(await send(raw, sign(raw, ["wrong", "secret"].join("-")), "unused", "/gitboy/push", "POST", headers)).toBe(401);
+  const foreign = Buffer.from(JSON.stringify({ ...payload, repository: { full_name: "other/repo" } }));
+  expect(await send(foreign, sign(foreign), "unused", "/gitboy/push", "POST", headers)).toBe(401);
+  const pending = Buffer.from(JSON.stringify({ ...payload, action: "requested" }));
+  expect(await send(pending, sign(pending), "unused", "/gitboy/push", "POST", headers)).toBe(200);
+  expect(events).toEqual([]);
+  expect(await send(raw, sign(raw), "unused", "/gitboy/push", "POST", headers)).toBe(202);
+  expect(events).toEqual([{ event: `github.${kind}.completed`, deliveryId: "github-one", payload }]);
+  expect(pull).not.toHaveBeenCalled();
+});

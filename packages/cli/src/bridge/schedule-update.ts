@@ -4,7 +4,7 @@ import { getProjectDirs } from "../shared.js";
 import { BridgeError } from "./protocol.js";
 import {
   SCHEDULE_EVERY, SCHEDULE_HARNESSES, SCHEDULE_NOTIFY, SCHEDULE_SESSIONS, WEEKDAYS,
-  parseSchedule, readScheduleDocumentSync, withScheduleLock, writeScheduleDocumentSync, type Schedule,
+  eventNameSchema, eventFiltersSchema, parseSchedule, readScheduleDocumentSync, withScheduleLock, writeScheduleDocumentSync, type Schedule,
 } from "./schedule-format.js";
 
 const optional = <T extends z.ZodType>(schema: T) => schema.nullable().optional();
@@ -21,6 +21,7 @@ const updateSchema = z.object({
     session: optional(z.enum(SCHEDULE_SESSIONS)), at: optional(z.string()),
     days: optional(z.array(z.enum(WEEKDAYS))), interval: optional(z.string()),
     once: optional(z.string()), cron: optional(z.string()),
+    event: optional(eventNameSchema), filters: optional(eventFiltersSchema), coalesceSeconds: optional(z.number().int().min(0).max(86400)),
   }).strict(),
 }).strict();
 

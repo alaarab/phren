@@ -126,9 +126,9 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
   {
     schemaVersion: 1, name: "schedules", version: VERSION, defaultEnabled: false, requires: ["memory"],
     tools: [], cliCommands: ["schedule"], agentHooks: [],
-    hookRoutes: routes("POST", ["/v1/schedules", "/v1/schedules/run", "/v1/schedules/history", "/v1/schedules/update"]),
-    capabilities: ["schedules", "scheduleProjects", "scheduleUpdate"], storeFiles: ["<project>/schedules.yaml", ".runtime/agent-fanouts/<run-id>/**"],
-    localFiles: ["<bridge>/schedule-runs.jsonl"],
+    hookRoutes: routes("POST", ["/v1/schedules", "/v1/schedules/run", "/v1/schedules/history", "/v1/schedules/update", "/v1/schedules/events"]),
+    capabilities: ["schedules", "scheduleProjects", "scheduleUpdate", "scheduleEvents"], storeFiles: ["<project>/schedules.yaml", ".runtime/agent-fanouts/<run-id>/**"],
+    localFiles: ["<bridge>/schedule-runs.jsonl", "<bridge>/schedule-runs.jsonl.deliveries.json"],
     phoneScreens: [{ screen: "SchedulesView", capability: "schedules" }], skills: [],
   },
   {

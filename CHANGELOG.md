@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Event-triggered schedules: version 2 definitions with payload equality filters, capped prompt templates, coalescing and persistent delivery dedupe; authenticated schedule event ingestion and signed GitHub workflow/check completions, bounded decision history, and the `scheduleEvents` Hook capability. A file with an event schedule requires this event-capable Hook version on every computer that reads it; upgrade all of them before adding events, because older Hooks skip the entire version 2 file, including timed schedules.
+
 - Session rows carry `statusSince`, the ISO time the agent status they send last changed, so the phone can say how long a session has been waiting rather than how long ago its tab last changed. It follows background work that turns idle into working, is not reset by a title, label or activity-counter change, survives a Hook restart, and older Hooks omit it.
 
 ### Fixed

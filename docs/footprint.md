@@ -122,7 +122,13 @@ not conversation text. See [Phren Hook](phren-hook.md).
 
 The optional `<bridge>/gitboy-webhooks.json` and its referenced secret files are
 private (0600), local configuration for loopback-only gitboy push sync. No file
-means no receiver. Delivery IDs and health outcomes are held in memory only.
+means no receiver. Push-sync delivery IDs and listener health outcomes are held
+in memory only. The same listener can accept signed GitHub workflow/check
+completions for event schedules. The scheduler writes private local
+`<bridge>/schedule-runs.jsonl` (bounded runs/decisions and capped, credential-redacted
+referenced payload fields) and `<bridge>/schedule-runs.jsonl.deliveries.json`
+(hashes of the newest 1000 event delivery IDs). Raw event payloads are not saved.
+See [event schedules](schedules.md#event-schedules-hook-capability-scheduleevents).
 
 The Hook keeps the shipped conductor instructions at
 `<bridge>/conductor/brief.md` (0600). Its agent-only socket returns a bounded
