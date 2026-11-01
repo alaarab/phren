@@ -3,15 +3,16 @@
 // dialogs without a hook behind them. Plus the tmux follow-ups around them:
 // socket discovery, the pane a process runs in, health and the canary's server.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { copilotProcessStatus, copilotStatusFromEvents, opencodeProcessStatus, opencodeTurnStamps } from "./harness-status.js";
 import { opencodeTurn, turnPhase } from "./turn-records.js";
-import { codexStartupStatus, dialogStatus, notePaneStatus, resetPaneStatus, screenDialog, settleBlockedPane, startupStatus } from "./pane-status.js";
-import { resetTmuxBinary, setTmuxDeps, tmuxHealth, tmuxServers, tmuxSnapshot, tmuxSocketsIn } from "./terminal-tmux.js";
+import { codexStartupStatus, dialogStatus, notePaneStatus, paneStatus, resetPaneStatus, screenDialog, settleBlockedPane, startupStatus } from "./pane-status.js";
+import { resetTmuxBinary, setTmuxDeps, tmuxHealth, tmuxServers, tmuxServersStrict, tmuxSnapshot, tmuxSocketsIn } from "./terminal-tmux.js";
+import { BridgeError } from "./protocol.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { canaryServer } from "./canary.js";
 import { describeTerminal, terminalHealth } from "./health.js";
@@ -101,6 +102,30 @@ describe("dialogs on a working pane's screen", () => {
     expect(after).toMatchObject({ status: "working" });
     expect(after!.seq).toBeGreaterThan(first!.seq);
     expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("settles a lifecycle-blocked pane only after observing its dialog disappear, preserving failed reads", async () => {
+    let now = 4_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let screen = "Still drawing";
+    const read = vi.fn(async () => screen);
+    const base = notePaneStatus("tmux", "p6", "p6:1", "blocked");
+    const status = () => dialogStatus("tmux", "p6", "p6:1", "claude", base, read);
+    // A lifecycle request alone is not evidence that its dialog has gone.
+    expect(await status()).toEqual(base);
+    now += 3_000; screen = CLAUDE_DIALOG;
+    const blocked = await status();
+    expect(blocked).toMatchObject({ status: "blocked" });
+    now += 1_000; screen = "Working";
+    expect(await status()).toEqual(blocked);
+    now += 2_000;
+    read.mockRejectedValueOnce(new Error("terminal unavailable"));
+    expect(await status()).toEqual(blocked);
+    now += 3_000; screen = "Working";
+    const settled = await status();
+    expect(settled).toMatchObject({ status: "working" });
+    expect(settled!.seq).toBeGreaterThan(blocked!.seq);
+    expect(await paneStatus("tmux", "p6", "p6:1")).toMatchObject({ status: "working" });
   });
 
   it("never reads an idle pane, and clears when the phone answers", async () => {
@@ -209,9 +234,32 @@ describe("OpenCode's status from phren's plugin", () => {
     await writeFile(path.join(folder, "opencode-status-23.json"), JSON.stringify({ status: "working", session: "ses_abc", at: "2026-09-01T00:00:04Z",
       busyAt: "2026-09-01T00:00:04Z" }));
     vi.stubEnv("PHREN_PATH", home);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
     expect(turnPhase((await opencodeTurn([21, 22], "term-o"))!)).toEqual({ phase: "ended", at: "2026-09-01T00:00:02Z" });
     expect(turnPhase((await opencodeTurn([21, 23], "term-o"))!)).toEqual({ phase: "working", since: "2026-09-01T00:00:04Z" });
     expect(await opencodeTurn([22], "term-o")).toBeUndefined();
+  });
+
+  it("advances a conversation's Stop sequence across turns and suppresses an older observation", async () => {
+    const folder = path.join(home, ".runtime", "sessions");
+    await mkdir(folder, { recursive: true });
+    vi.stubEnv("PHREN_PATH", home);
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
+    const file = path.join(folder, "opencode-status-31.json");
+    const stamp = (busyAt: string, idleAt: string) =>
+      writeFile(file, JSON.stringify({ status: "idle", session: "ses_turn", at: idleAt, busyAt, idleAt }));
+    await stamp("2026-09-01T00:00:01Z", "2026-09-01T00:00:02Z");
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(2);
+    // The same idle stamp is the same finished turn, not a new one.
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(2);
+    await stamp("2026-09-01T00:00:03Z", "2026-09-01T00:00:04Z");
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(4);
+    // An older stamp arriving after the newer one is the same finished turn, not another.
+    await stamp("2026-09-01T00:00:01Z", "2026-09-01T00:00:02Z");
+    expect(await opencodeTurn([31], "term-o")).toBeUndefined();
+    // The newer stamp still names the same completion.
+    await stamp("2026-09-01T00:00:03Z", "2026-09-01T00:00:04Z");
+    expect((await opencodeTurn([31], "term-o"))!.stop!.seq).toBe(4);
   });
 
   it("takes the newest record among a pane's processes", async () => {
@@ -301,6 +349,59 @@ describe("tmux sockets, the pane a process runs in, health and the canary", () =
   it("lists every socket that answers, not only default and phren", async () => {
     ({ restore } = fakeTmux({ sockets: ["default", "work", "phren", "stale"], answering: ["default", "work"] }));
     expect((await tmuxServers()).map(server => server.session)).toEqual(["tmux", "tmux-work", "tmux-phren"]);
+  });
+
+  it("strict discovery skips a stopped server but fails on a timeout", async () => {
+    let slow = "timeout";
+    const undo = setTmuxDeps({
+      binary: () => "/usr/bin/tmux",
+      sockets: async () => ["default", "work", "slow"],
+      run: async (socket, args) => {
+        if (args[0] !== "list-sessions") return "";
+        if (socket === "work" || socket === "phren") throw new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+        if (socket === "slow" && slow === "timeout") throw new BridgeError(504, "tmux did not answer. Refresh before trying again.");
+        if (socket === "slow") throw new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+        return "/home/me/repo\n";
+      },
+    });
+    try {
+      await expect(tmuxServersStrict()).rejects.toThrow("did not answer");
+      slow = "stopped";
+      expect((await tmuxServersStrict()).map(server => server.session)).toEqual(["tmux"]);
+    } finally { undo(); }
+  });
+
+  // tmux and a shebang script need a Unix-like host.
+  it.skipIf(process.platform === "win32")("strict discovery propagates a permission failure instead of calling the server stopped", async () => {
+    const bin = await mkdtemp(path.join(tmpdir(), "phren-tmux-permission-"));
+    const tmux = path.join(bin, "tmux");
+    await writeFile(tmux, "#!/bin/sh\necho 'error connecting to /tmp/tmux-501/default (Permission denied)' >&2\nexit 1\n");
+    await chmod(tmux, 0o755);
+    const undo = setTmuxDeps({ binary: () => tmux, sockets: async () => ["default"] });
+    try {
+      vi.stubEnv("PHREN_TMUX", "on");
+      vi.stubEnv("PATH", bin);
+      resetTmuxBinary();
+      // The default runner translates tmux's stderr itself; a permission
+      // problem must not become the not_running code that discovery skips.
+      await expect(tmuxServersStrict()).rejects.toThrow(/Permission denied/);
+    } finally { undo(); await rm(bin, { recursive: true, force: true }); }
+  });
+
+  it("strict discovery checks every candidate, including one past the display cap", async () => {
+    const sockets = Array.from({ length: 20 }, (_, index) => `w${index}`);
+    const undo = setTmuxDeps({
+      binary: () => "/usr/bin/tmux",
+      sockets: async () => sockets,
+      run: async (socket, args) => {
+        if (args[0] !== "list-sessions") return "";
+        if (socket === "phren") throw new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
+        return "/home/me/repo\n";
+      },
+    });
+    try {
+      expect((await tmuxServersStrict()).map(server => server.session)).toEqual(["tmux", ...sockets.map(socket => `tmux-${socket}`)]);
+    } finally { undo(); }
   });
 
   it("never lists a test's private server, by its socket's name or its sessions in a test's temp folder", async () => {

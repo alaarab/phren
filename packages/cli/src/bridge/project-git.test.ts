@@ -12,7 +12,7 @@ let store: string, work: string, cleanups: (() => void)[] = [];
 async function hookGet(url: string, { git = true, activity = [] as unknown[], data = undefined as unknown } = {}): Promise<{ status: number; body: any }> {
   const handler = createRouteHandler({ modules: { has: (name: string) => name !== "git" || git, store }, info: {}, streams: {},
     agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set() }, journal: { record: async () => {}, recent: async () => activity },
-    tabActivity: { observe: async () => new Map() }, contextUsage: { read: async () => new Map() } } as never);
+    tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() }, contextUsage: { read: async () => new Map() } } as never);
   let result = "";
   const response = { statusCode: 200, setHeader() {}, end(value: string) { result = value; } };
   await handler({ url, method: data === undefined ? "GET" : "POST", headers: {}, [Symbol.asyncIterator]: async function* () { if (data !== undefined) yield Buffer.from(JSON.stringify(data)); } } as unknown as IncomingMessage, response as unknown as ServerResponse);

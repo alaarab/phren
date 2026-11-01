@@ -116,13 +116,41 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
     expect(keys()).toEqual([["2"]]);
   });
 
-  it("a released ask answered in the terminal leaves the notification powerless", async () => {
+  it.each(["held", "released", "released-after-observation"].flatMap(state =>
+    ["blocked", "working"].map(status => ({ state, status }))))("clears a $state Claude ask on a $status pane only after a confirmed dialog disappears", async ({ state, status }) => {
     const answer = ask();
     await vi.waitFor(() => expect(sent).toHaveLength(1));
-    await answer;
-    await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: "working" }], async () => target);
-    expect(hooks.pushTarget(sent[0].binding)).toBeUndefined();
-    await expect(hooks.answerPush(sent[0].binding, "approve")).rejects.toThrow(/no longer pending/);
-    expect(keys()).toEqual([]);
+    if (state === "released") await answer;
+    const start = Date.now(), clock = vi.spyOn(Date, "now");
+    try {
+      clock.mockReturnValue(start);
+      // An empty screen before the first observation cannot dismiss the request.
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "Working" } }));
+      await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
+      expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
+      clock.mockReturnValue(start + 4_000);
+      await hooks.observeWaitingPanes("default", [pane], async () => target);
+      expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
+      // The only visible-dialog observation happened while this ask was held.
+      if (state === "released-after-observation") {
+        expect(hooks.approval(target)).toBeDefined();
+        expect(await answer).toBe("{}");
+        expect(hooks.approval(target)).toBeUndefined();
+      }
+      clock.mockReturnValue(start + 8_000);
+      vi.mocked(rpc).mockRejectedValueOnce(new Error("terminal unavailable"));
+      await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
+      expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
+      clock.mockReturnValue(start + 12_000);
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "Working" } }));
+      await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
+      expect(hooks.approval(target)).toBeUndefined();
+      expect(hooks.terminalPrompt(target)).toBeUndefined();
+      expect(hooks.workerApproval(target)).toBeUndefined();
+      expect(hooks.pushTarget(sent[0].binding)).toBeUndefined();
+      expect(await answer).toBe("{}");
+      await expect(hooks.answerPush(sent[0].binding, "approve")).rejects.toThrow(/no longer pending/);
+      expect(keys()).toEqual([]);
+    } finally { clock.mockRestore(); }
   });
 });

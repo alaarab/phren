@@ -92,7 +92,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("POST", [
         "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
-        "/v1/workspaces/close", "/v1/sessions/rename", "/v1/sessions/move", "/v1/accounts/claude/add", "/v1/accounts/claude/settings", "/v1/accounts/allowed-pools", "/v1/sessions/move/abort", "/v1/sessions/move/launch", "/v1/prompt", "/v1/prompt/status", "/v1/prompt/queue", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
+        "/v1/workspaces/close", "/v1/sessions/rename", "/v1/sessions/seen", "/v1/sessions/move", "/v1/accounts/claude/add", "/v1/accounts/claude/settings", "/v1/accounts/allowed-pools", "/v1/sessions/move/abort", "/v1/sessions/move/launch", "/v1/prompt", "/v1/prompt/status", "/v1/prompt/queue", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
         "/v1/speech", "/v1/sudo/answer", "/v1/jobs/cleanup",
       ]),
@@ -101,7 +101,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "paneLayout", "deskPresence", "herdr", "terminalResolve",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "simulatorStream", "simulatorDevices", "simulatorDrag", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "queuedMessageActions", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer", "moveResume", "moveSummaryByTarget", "moveConversationCopy", "claudeAccountAdd", "accountPools", "workerRelocation",
+      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "simulatorStream", "simulatorDevices", "simulatorDrag", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "queuedMessageActions", "deliveryFrames", "resources", "sessionRename", "sessionSeen", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer", "moveResume", "moveSummaryByTarget", "moveConversationCopy", "claudeAccountAdd", "accountPools", "workerRelocation",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
     localFiles: ["<bridge>/gitboy-webhooks.json", "<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/move-intents/*.json", "<bridge>/move-intents/*.conversation.md", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json", "<bridge>/move-launches/*.json"],
@@ -117,10 +117,10 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     ],
     hookRoutes: [...routes("GET", ["/v1/git/status"]), ...routes("POST", [
       "/v1/diff", "/v1/web-servers/session", "/v1/git/status", "/v1/git/log", "/v1/git/branches", "/v1/git/pulls",
-      "/v1/git/tree", "/v1/git/worktrees", "/v1/git/stage", "/v1/git/unstage", "/v1/git/discard",
+      "/v1/git/tree", "/v1/git/worktrees", "/v1/git/worktrees/remove/preview", "/v1/git/worktrees/remove", "/v1/git/stage", "/v1/git/unstage", "/v1/git/discard",
       "/v1/git/commit", "/v1/git/push", "/v1/git/pr", "/v1/git/pr/merge", "/v1/git/host-token", "/v1/git/show", "/v1/git/checkout", "/v1/git/fetch", "/v1/git/pull", "/v1/git/file", "/v1/git/apply", "/v1/git/session-changes", "/v1/files/write", "/v1/files/search", "/v1/files/list",
-    ])],
-    capabilities: ["git", "diff", "fileWrite", "fileSearch", "gitReview", "gitHosts", "projectHostToken", "gitRemoteIdentity"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
+    ]), ...routes("WS", ["/v1/git/watch"])],
+    capabilities: ["git", "diff", "fileWrite", "fileSearch", "gitReview", "gitHosts", "projectHostToken", "gitRemoteIdentity", "gitWatch", "worktreeRemove"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
     phoneScreens: [{ screen: "AgentChangesView", capability: "git" }], skills: [],
   },
   {

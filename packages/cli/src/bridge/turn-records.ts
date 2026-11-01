@@ -236,9 +236,55 @@ export async function opencodeTurn(pids: number[], terminal: string): Promise<Tu
   const stamps = await opencodeTurnStamps(pids);
   if (!stamps) return undefined;
   const busy = stamps.busyAt ? Date.parse(stamps.busyAt) : NaN, idle = stamps.idleAt ? Date.parse(stamps.idleAt) : NaN;
-  const parsed = turnRecordSchema.safeParse({ terminal, source: "opencode", session: stamps.session, seq: 2, at: stamps.at,
-    ...(Number.isFinite(busy) ? { prompt: { seq: 1, at: stamps.busyAt } } : {}),
+  const idleAt = stamps.idleAt;
+  let stopSeq: number | undefined;
+  if (typeof idleAt === "string" && Number.isFinite(idle) && !(idle < busy)) {
+    stopSeq = await opencodeStopSeq(stamps.session, idleAt);
+    // An older stamp describes a turn already recorded: do not turn it into a working prompt.
+    if (stopSeq === undefined) return undefined;
+  }
+  const parsed = turnRecordSchema.safeParse({ terminal, source: "opencode", session: stamps.session, seq: stopSeq ?? 2, at: stamps.at,
+    ...(Number.isFinite(busy) ? { prompt: { seq: stopSeq !== undefined ? stopSeq - 1 : 1, at: stamps.busyAt } } : {}),
     // The plugin stamps idle after busy; an idle stamp older than the busy one belongs to an earlier turn.
-    ...(Number.isFinite(idle) && !(idle < busy) ? { stop: { seq: 2, at: stamps.idleAt } } : {}) });
+    ...(stopSeq !== undefined ? { stop: { seq: stopSeq, at: idleAt } } : {}) });
   return parsed.success ? parsed.data : undefined;
+}
+
+const OPENCODE_SEQ_START = 2;
+const opencodeSeqSchema = z.object({ session: sessionId, idleAt: z.string().datetime(), seq: z.number().int().min(OPENCODE_SEQ_START) });
+type OpencodeSeq = z.infer<typeof opencodeSeqSchema>;
+
+/** The advancing Stop sequence for OpenCode conversation `session`, keyed by
+ * its latest idle stamp: a new idle stamp is a new turn, and the sequence is
+ * persisted so a Hook restart keeps the same completion ids. */
+const opencodeSeqPath = (session: string) => path.join(bridgeRoot(), "opencode-turns", encodeURIComponent(session) + ".json");
+
+async function readOpencodeSeq(file: string): Promise<OpencodeSeq | undefined> {
+  try {
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > 1_024) return undefined;
+    const parsed = opencodeSeqSchema.safeParse(JSON.parse(await readFile(file, "utf8")));
+    return parsed.success ? parsed.data : undefined;
+  } catch { return undefined; }
+}
+
+let opencodeWrites: Promise<unknown> = Promise.resolve();
+
+function opencodeStopSeq(session: string, idleAt: string): Promise<number | undefined> {
+  const run = opencodeWrites.then(async () => {
+    const file = opencodeSeqPath(session), previous = await readOpencodeSeq(file);
+    if (previous?.session !== session) {
+      await atomicInPrivateDir(file, { session, idleAt, seq: OPENCODE_SEQ_START });
+      return OPENCODE_SEQ_START;
+    }
+    const previousAt = Date.parse(previous.idleAt), incomingAt = Date.parse(idleAt);
+    if (incomingAt === previousAt) return previous.seq;
+    // An overlapping read can enqueue an older stamp after a newer one: it is not a new turn.
+    if (incomingAt < previousAt) return undefined;
+    const seq = previous.seq + 2;
+    await atomicInPrivateDir(file, { session, idleAt, seq });
+    return seq;
+  });
+  opencodeWrites = run.catch(() => undefined);
+  return run;
 }

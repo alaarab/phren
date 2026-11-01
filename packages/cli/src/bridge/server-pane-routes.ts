@@ -10,10 +10,11 @@ import type { DialogAnswer, DialogQuestion } from "./claude-question-dialog.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitShow, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
+import { previewWorktreeRemoval, removeWorktree, type WorktreeRemovalLiveSession } from "./git-worktree-remove.js";
 import { gitCommit, gitHostToken, gitMergeRequest, gitPullRequest, gitPush } from "./git-publish.js";
 import { gitCheckout, gitFetch, gitPull } from "./git-sync.js";
 import { gitApply, gitFile, sessionChanges } from "./git-review.js";
-import { findPane, paneAgentName, paneChatState, paneIdentity, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
+import { findPane, paneAgentName, paneChatState, paneIdentity, serversStrict, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
 import { agentNotReady, terminalProvider } from "./terminal.js";
 import { AppServerRpcError } from "./codex-app-server.js";
 import { CodexServerUnavailable, codexServers } from "./codex-servers.js";
@@ -23,7 +24,7 @@ import type { SettingsSwitcher } from "./settings-switch.js";
 import { sessionWebServers } from "./session-servers.js";
 import { type PromptGuards, takesPrompt } from "./session-activity.js";
 import { gitRoot, repositoryDiff, withGitReadDeadline } from "./projects.js";
-import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
+import { BridgeError, type Json, MAX_FRAME, object, objects, serverName, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { childAgent, childAgentTree, conversationNamedPaths, targetTranscriptPath, type ChildAgentRelation } from "./transcripts.js";
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
@@ -108,6 +109,68 @@ export function herdrWorktreeWorkers(s: Json): WorktreeWorker[] {
       ...(typeof pane.agent_status === "string" ? { state: pane.agent_status } : {}) });
   }
   return workers;
+}
+
+/** Every live pane on a server with the folder it is running in, for a
+ * worktree-removal preview's session check. */
+function paneSessions(s: Json): WorktreeRemovalLiveSession[] {
+  const sessions: WorktreeRemovalLiveSession[] = [];
+  for (const pane of objects(s.panes)) {
+    const cwd = typeof pane.foreground_cwd === "string" ? pane.foreground_cwd : pane.cwd;
+    if (typeof cwd !== "string" || !cwd) {
+      throw new BridgeError(503, "Could not determine a live pane's directory.", { code: "worktree-session-check-failed" });
+    }
+    const label = [pane.title, pane.label, paneAgentName(s, pane)].find(value => typeof value === "string" && value) as string | undefined;
+    sessions.push({ pane: String(pane.pane_id), title: label || String(pane.pane_id), cwd });
+  }
+  return sessions;
+}
+
+/** A snapshot of a server that has stopped since discovery has no panes; any
+ * other failure leaves session discovery incomplete and must fail the request. */
+function stoppedServer(error: unknown): boolean {
+  if (!(error instanceof BridgeError)) return false;
+  const code = String(error.details?.code ?? "");
+  return code === "herdr-not-running" || code === "herdr-stale-socket" || code === "not_running";
+}
+
+/** Every live pane on every running terminal server, including the requesting
+ * one even when discovery left it out. A server that cannot be read, or any
+ * discovery failure, fails the request: removal is never allowed on an
+ * incomplete session check. */
+async function allPaneSessions(requested: string[] = []): Promise<WorktreeRemovalLiveSession[]> {
+  const running = await serversStrict();
+  const names = [...new Set([...requested, ...running.map(server => String(server.session)).filter(Boolean)])];
+  const snapshots = await Promise.all(names.map(async (name): Promise<Json> => {
+    try { return await snapshot(name); }
+    catch (error) { if (stoppedServer(error)) return { panes: [] }; throw error; }
+  }));
+  return snapshots.flatMap(paneSessions);
+}
+
+/** The pane a worktree-removal request names: the full target when the app
+ * sends one, else the contract's optional server/pane pair. With no pane the
+ * Hook's own folder stands in. */
+async function worktreeRemovalContext(data: Json): Promise<{ cwd: string; paneRoot?: string; sessions: WorktreeRemovalLiveSession[] }> {
+  const target = targetSchema.safeParse(data.target);
+  if (target.success) {
+    const pane = await validateTarget(target.data);
+    const cwd = await trustedDirectory(pane);
+    return { cwd, paneRoot: await gitRoot(cwd), sessions: await allPaneSessions([target.data.server]) };
+  }
+  const server = serverName.parse(typeof data.server === "string" && data.server ? data.server : "default");
+  const paneId = z.string().min(1).max(200).optional().parse(data.pane);
+  if (paneId === undefined) {
+    // No pane names the repository, so the Hook's own folder does; every
+    // session on every running server is still checked for one inside it.
+    const cwd = process.cwd();
+    return { cwd, paneRoot: await gitRoot(cwd), sessions: await allPaneSessions([server]) };
+  }
+  const s = await snapshot(server);
+  const pane = objects(s.panes).find(item => item.pane_id === paneId);
+  if (!pane) throw new BridgeError(404, "That pane is not running on this computer.");
+  const cwd = await trustedDirectory(pane);
+  return { cwd, paneRoot: await gitRoot(cwd), sessions: await allPaneSessions([server]) };
 }
 
 /** The phone can press these and nothing else; never a typed string.
@@ -374,7 +437,12 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
 export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void | Promise<void>): Promise<unknown> {
   const { agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions } = ctx;
   let result: unknown;
-  if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
+  if (url.pathname === "/v1/git/worktrees/remove/preview" || url.pathname === "/v1/git/worktrees/remove") {
+    const worktree = z.string().max(64).parse(data.worktree);
+    const { cwd, paneRoot, sessions } = await worktreeRemovalContext(data);
+    if (url.pathname.endsWith("/preview")) result = await previewWorktreeRemoval(cwd, worktree, { paneRoot, sessions });
+    else result = await removeWorktree(cwd, worktree, z.string().min(1).max(128).parse(data.token), { paneRoot, sessions });
+  } else if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
     // A folder-trust or login prompt comes before the agent has a
     // conversation; the phone answers it on the starting binding.
     const target = startingTargetSchema.parse(data.target);
