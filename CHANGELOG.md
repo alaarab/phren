@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Hook-held “After this turn” prompts: a persisted, conversation-bound FIFO queue that sends one item per confirmed turn boundary while the phone sleeps, with edit/cancel routes, delivery settlement, safe restart handling, `afterTurnQueue` capability and `queuedPrompts` session counts.
+
 - Session rows carry `statusSince`, the ISO time the agent status they send last changed, so the phone can say how long a session has been waiting rather than how long ago its tab last changed. It follows background work that turns idle into working, is not reset by a title, label or activity-counter change, survives a Hook restart, and older Hooks omit it.
 
 ### Fixed

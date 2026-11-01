@@ -1,3 +1,4 @@
+import { turnQueueRoute, type TurnQueue } from "./turn-queue.js";
 import type { IncomingHttpHeaders, ServerResponse } from "node:http";
 import { EXPECTED_REPOSITORY_REQUIRED, isGitWriteRoute, type GitWriteDiagnostics } from "./git-write-policy.js";
 import path from "node:path";
@@ -41,6 +42,7 @@ import { claudeQueueAction, transcriptTail } from "./claude-queue.js";
  * conversation yet) takes keys, a secret or a first prompt. */
 
 export interface PaneRouteContext {
+  turnQueue?: TurnQueue;
   gitWrites?: GitWriteDiagnostics;
   agentHooks: AgentHooks;
   modelSwitcher: ModelSwitcher;
@@ -350,6 +352,10 @@ function deliveryReply(agentHooks: AgentHooks, id: string, target: Json, text: s
 }
 
 export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, headers: IncomingHttpHeaders = {}): Promise<unknown> {
+  if (url.pathname === "/v1/prompt/after-turn" || url.pathname.startsWith("/v1/prompt/after-turn/")) {
+    if (!ctx.turnQueue) throw new BridgeError(404, "This Hook has no after-turn queue.");
+    return turnQueueRoute(ctx.turnQueue, url.pathname, data);
+  }
   if (isGitWriteRoute(url.pathname) && data.expectedRepository === undefined) {
     ctx.gitWrites?.record(url.pathname, headers);
     if (EXPECTED_REPOSITORY_REQUIRED) throw new BridgeError(400, "This app is too old to change Git safely. Update it.", { code: "expected-repository-required" });
@@ -497,7 +503,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
         if (id) agentHooks.deliveries.queue(id, target);
         return { ok: true, queued: true, ...(id ? { state: "queued" } : {}), turnId };
       } catch (error) {
-        if (error instanceof AppServerRpcError) { refused.abort(); throw new BridgeError(409, `Codex refused the message: ${error.message}`); }
+        if (error instanceof AppServerRpcError) { refused.abort(); throw new BridgeError(409, `Codex refused the message: ${error.message}`, { promptNotSent: true }); }
         if (error instanceof CodexServerUnavailable) refused.abort();
         else { if (id) agentHooks.deliveries.queue(id, target); return { ok: true, deliveryUncertain: true, ...(id ? { state: "queued" } : {}) }; }
       }
@@ -517,6 +523,10 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
         // Nothing reached the pane: the reservation failed first, the agent was not ready, or Herdr refused the
         // request (its `agent.prompt` is one call). The record goes, or it would hold the pane's hand-offs.
         if (!typed || agentNotReady(error) || herdrRefused(error)) refused.abort();
+        if (agentNotReady(error) || herdrRefused(error)) {
+          const refusal = error as BridgeError;
+          throw new BridgeError(refusal.status, refusal.message, { ...refusal.details, promptNotSent: true });
+        }
         throw error;
       }
       return expected;

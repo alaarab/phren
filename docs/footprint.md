@@ -114,7 +114,8 @@ and `installed.json` rollback record.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for
-dispatch returns), bounded `activity.jsonl` and
+dispatch returns), `turn-queue.json` (the Hook-held after-turn queue, including
+unsent prompt text; finished items retained for 24 hours), bounded `activity.jsonl` and
 `activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
 Uploads are limited to 8 MiB each and 256 MiB total; uploads older than 14 days
 are removed on the next upload. Activity stores status and project metadata,

@@ -121,6 +121,8 @@ function projectField(cwd: string | undefined): { project?: string } {
 }
 
 export class AgentHooks {
+  /** Wake the Hook-held prompt queue after a recorded Stop. */
+  onTurnStopped?: () => void;
   readonly changes = new ToolChanges();
   private pending = new Map<string, Pending>();
   /** Phone messages Phren typed into a pane, until a conversation there
@@ -1358,6 +1360,7 @@ export class AgentHooks {
         }
         if (body.event === "Stop") this.deliveries.stopped(target);
         if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
+        if (body.event === "Stop") this.onTurnStopped?.();
         if (body.event === "SessionStart") {
           const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
           res.end(JSON.stringify(context ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } } : {})); return;

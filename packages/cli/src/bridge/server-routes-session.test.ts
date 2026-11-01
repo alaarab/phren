@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { objects, type Json } from "./protocol.js";
+import { TurnQueue } from "./turn-queue.js";
+import { objects, type Json, type Target } from "./protocol.js";
 
 const sessions: Record<string, string> = {
   "w13:p2": "00000001-1111-4111-8111-111111111111", "w1P:p1": "00000002-1111-4111-8111-111111111111",
@@ -34,7 +35,8 @@ beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-session
 afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 
 const dispatchId = "40000000-0000-4000-8000-000000000001";
-const read = (snapshot: Json) => workspacesReader({
+const read = (snapshot: Json, turnQueue?: TurnQueue) => workspacesReader({
+  turnQueue,
   modules: { has: () => false } as never, info: {} as never,
   agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set<string>() } as never,
   journal: { record: async () => {} } as never, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() } as never,
@@ -245,4 +247,19 @@ describe("session rows on a computer with background work and dispatched workers
     await writeLaunchBrief({ id: dispatchId, text: "Do it" }, Date.now(), "parser checks");
     expect(tabOf(await read(other), "w1P:p2", other).title).toBe("app");
   });
+});
+
+it("puts only unsent Hook queue items on session rows", async () => {
+  const pane = objects(recorded.panes).find(p => p.pane_id === "w13:p2")!;
+  const target: Target = { server: "default", workspace: String(pane.workspace_id), tab: String(pane.tab_id), pane: String(pane.pane_id), source: "claude", session: sessions["w13:p2"] };
+  const queue = new TurnQueue(path.join(root, "turn-queue.json"), {
+    current: async () => ({ terminal: String(pane.terminal_id), source: "claude", session: target.session, held: false, background: 0, ready: false }),
+    holding: () => false,
+    send: async () => { throw new Error("No turn boundary"); }, delivery: () => ({ state: "unknown" }),
+  });
+  await queue.enqueue(target, "overview-item-1", "Review");
+  await queue.enqueue(target, "overview-item-2", "Check docs");
+  expect(tabOf(await read(recorded, queue), target.pane, recorded).queuedPrompts).toBe(2);
+  await queue.change(target, "overview-item-1");
+  expect(tabOf(await read(recorded, queue), target.pane, recorded).queuedPrompts).toBe(1);
 });
