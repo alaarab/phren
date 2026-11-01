@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A transcript stream no longer spins re-reading the pane when the phone asks for older history before the agent has written its transcript.
+
 ## [0.3.67] - 2026-10-31
 
 ### Added
