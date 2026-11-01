@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { createServer, type Server } from "node:net";
+import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
-import { knownPanes, paneChatState, recentServers, resetSharedHerdrState, sharedSnapshot, validateTarget } from "./herdr.js";
+import { knownPanes, paneChatState, recentServers, resetSharedHerdrState, rpc, sharedSnapshot, validateTarget } from "./herdr.js";
 import { hookMetrics } from "./metrics.js";
 import { repositoryBranch } from "./projects.js";
 
@@ -113,6 +113,38 @@ it.skipIf(process.platform === "win32")("reuses the server list and knows the pa
   expect(knownPanes(15_000)).toHaveLength(2);
   now += 15_000;
   expect(knownPanes(15_000)).toBeUndefined();
+});
+
+it.skipIf(process.platform === "win32")("rejects a Herdr reply that keeps trickling bytes without a newline at the deadline", async () => {
+  const trickleRoot = await mkdtemp(path.join(tmpdir(), "phren-rpc-trickle-"));
+  const sockets: Socket[] = [];
+  const server = createServer(socket => {
+    sockets.push(socket);
+    socket.on("data", bytes => {
+      if (!String(bytes).includes("\n")) return;
+      const timer = setInterval(() => { if (!socket.destroyed) socket.write('{"id":'); }, 5);
+      socket.on("close", () => clearInterval(timer));
+      socket.on("error", () => clearInterval(timer));
+    });
+  });
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await new Promise<void>(resolve => server.listen(path.join(trickleRoot, "herdr.sock"), resolve));
+    vi.stubEnv("PHREN_HERDR_HOME", trickleRoot);
+    const guarded = Promise.race([
+      rpc("default", "test.trickle", {}, undefined, 100).then(() => { throw new Error("Herdr answered instead of timing out"); }),
+      new Promise<never>((_, reject) => {
+        guard = setTimeout(() => reject(new Error("Herdr did not reject within the deadline")), 2_000);
+      }),
+    ]);
+    await expect(guarded).rejects.toMatchObject({ status: 504, details: { code: "herdr-timeout" } });
+  } finally {
+    if (guard) clearTimeout(guard);
+    vi.stubEnv("PHREN_HERDR_HOME", root);
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(trickleRoot, { recursive: true, force: true });
+  }
 });
 
 it.skipIf(process.platform === "win32")("keeps a branch while HEAD is unchanged and rereads it after a checkout", async () => {

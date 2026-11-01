@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A Herdr socket reply that keeps trickling bytes without a newline no longer keeps the phone's terminal spinning forever: the request now has an absolute deadline instead of an inactivity timeout, so it fails with `herdr-timeout` as intended.
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.
 - Secret scanning names an AWS secret access key written as `AWS_SECRET_ACCESS_KEY=...` correctly; it was caught before, but only as a generic long base64 secret.
 - A transcript stream no longer spins re-reading the pane when the phone asks for older history before the agent has written its transcript.
