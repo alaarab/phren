@@ -234,6 +234,9 @@ export function transcriptStreams(ctx: StreamContext) {
           const page = await reader.read(before, abort.signal);
           send(client, { ...page, type: "older", ...conversation });
         }
+        // A transcript the agent has not written yet has no older pages; a
+        // queued request must not keep rescheduling the tick.
+        if (!reader) pending.length = 0;
       } catch (error) {
         const reason = streamCloseReason(error);
         if (!(error instanceof BridgeError && error.status === 409)) logger.warn("stream", `${url.pathname} closed: ${reason}`);
