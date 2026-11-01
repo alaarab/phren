@@ -79,7 +79,9 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const client = connect(socket);
     const key = requestID();
     let pending = Buffer.alloc(0);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error, result?: Json) => {
+      if (deadline) clearTimeout(deadline);
       signal?.removeEventListener("abort", abort);
       client.destroy();
       if (error) reject(error); else resolve(result!);
@@ -87,7 +89,7 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const abort = () => finish(new BridgeError(499, "Request cancelled."));
     if (signal?.aborted) { abort(); return; }
     signal?.addEventListener("abort", abort, { once: true });
-    client.setTimeout(timeoutMs, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.", { code: "herdr-timeout" })));
+    deadline = setTimeout(() => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.", { code: "herdr-timeout" })), timeoutMs);
     client.on("error", error => finish(herdrSocketError(error)));
     client.on("end", () => finish(new BridgeError(503, "Herdr closed the request before confirming it.")));
     client.on("connect", () => client.write(JSON.stringify({ id: key, method, params }) + "\n"));
