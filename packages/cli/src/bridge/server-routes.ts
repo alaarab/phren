@@ -326,7 +326,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
     const awaited = new Map<Json, number>();
-    const entryReads: Promise<void>[] = [];
+    const recordEnrichment: Array<() => Promise<void>> = [];
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const pane = agents.length === 1 ? agents[0] : undefined;
@@ -339,33 +339,36 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const completion = turnCompletion(record);
       if (completion) tab.completion = completion;
       if (seen) tab.seenCompletion = seen;
-      if (completion && record && pane) entryReads.push((async () => {
+      const title = await recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
+      if (expired) return;
+      tab.title = title;
+      const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
+      if (reply) tab.lastReply = reply;
+      // Apply every row's small-file metadata before starting transcript reads.
+      // A stalled lookup must not hide another row's completion or pane label.
+      if (completion && record && pane) recordEnrichment.push(async () => {
         const file = await targetTranscriptPath({ server, pane: String(pane.pane_id), source: record.source, session: record.session });
         await refreshTranscript(file, record.source, record.session);
         const entry = await completionEntry(file, record.source, record.prompt!.at, completion.at, record.stop);
         if (!expired && entry !== undefined) completion.entry = entry;
-      })().catch(() => {}));
-      const [title, background] = await Promise.all([
-        recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label }),
-        liveBackground(record, readFinalTurn),
-      ]);
-      if (expired) return;
-      if (background) awaited.set(tab, background);
-      markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
-      tab.title = title;
-      // A finished turn's metadata does not wait for transcript or move lookups.
-      const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
-      if (reply) tab.lastReply = reply;
-      const target = targetSchema.safeParse(tab.target);
-      const stall = target.success && agents.length === 1
-        ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
-      if (expired) return;
-      Object.assign(tab, stall);
-      if (target.success) {
-        const moves = await movesRead;
+      });
+      recordEnrichment.push(async () => {
+        const background = await liveBackground(record, readFinalTurn);
         if (expired) return;
-        Object.assign(tab, moveSessionFields(moves, target.data, title));
-      }
+        if (background) awaited.set(tab, background);
+        markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
+        if (tab.agentStatus === "working") delete tab.lastReply;
+        const target = targetSchema.safeParse(tab.target);
+        const stall = target.success && agents.length === 1
+          ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
+        if (expired) return;
+        Object.assign(tab, stall);
+        if (target.success) {
+          const moves = await movesRead;
+          if (expired) return;
+          Object.assign(tab, moveSessionFields(moves, target.data, title));
+        }
+      });
     }));
     // Separate bounded queues: a stalled git/model/step read cannot prevent
     // the child tree from reaching the phone. Apply each answer as it arrives.
@@ -382,8 +385,10 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       return typeof session === "string" ? { source: agents[0].agent as Provider, session, pane: agents[0] } : undefined;
     };
     const enrich = Promise.all([
-      records,
-      records.then(() => Promise.all(entryReads)),
+      records.then(() => {
+        if (expired) return;
+        return Promise.all(recordEnrichment.map(read => read().catch(() => {})));
+      }),
       eachTab(async ({ tab }) => {
         if (!modules.has("git") || typeof tab.cwd !== "string" || !tab.agent) return;
         const branch = await repositoryBranch(tab.cwd);
@@ -396,6 +401,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (expired) return;
         Object.assign(tab, children);
         markBackground(tab, (awaited.get(tab) ?? 0) + children.runningChildren);
+        if (tab.agentStatus === "working") delete tab.lastReply;
       }),
       eachTab(async ({ group, tab }) => {
         const identity = identified(group, tab);
