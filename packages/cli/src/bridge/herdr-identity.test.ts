@@ -143,10 +143,86 @@ it("names a Claude pane by the Hook's binding when Herdr still reports a finishe
   try {
     await mkdir(path.join(root, "bindings", "default"), { recursive: true });
     await bind(nested);
-    // While both agree, Herdr's report is taken as is.
+    // With no open transcript, the PID-verified binding names the pane.
     expect(await paneIdentity("default", pane, true)).toBe(nested);
     // The pane's own conversation kept running after the nested run exited.
     await bind(own);
     expect(await paneIdentity("default", pane, true)).toBe(own);
+  } finally { restore(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.each([
+  { binding: "stale", refresh: "expiry" },
+  { binding: "absent", refresh: "expiry" },
+  { binding: "stale", refresh: "fresh" },
+  { binding: "absent", refresh: "fresh" },
+])("follows Claude's foreground transcript with a $binding binding and stale Herdr report after $refresh", async ({ binding, refresh }) => {
+  const scratch = path.resolve(".scratch");
+  await mkdir(scratch, { recursive: true });
+  const root = await mkdtemp(path.join(scratch, "phren-claude-switch-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+  let now = 0;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const old = "aaaaaaaa-1111-4111-8111-111111111111", current = "bbbbbbbb-1111-4111-8111-111111111111";
+  let transcript = old;
+  state.exec.mockReset().mockImplementation(async () => ({ stdout: `n${root}/${transcript}.jsonl\n` }));
+  const { setTerminalProvider } = await import("./terminal.js");
+  const restore = setTerminalProvider({ processes: async () => ({ foregroundPids: [4242] }) } as unknown as import("./terminal.js").TerminalProvider);
+  const pane = { pane_id: "claude-switch", terminal_id: root, agent: "claude",
+    agent_session: { kind: "id", agent: "claude", value: old } };
+  try {
+    if (binding === "stale") {
+      await mkdir(path.join(root, "bindings", "default"), { recursive: true });
+      await writeFile(path.join(root, "bindings", "default", "claude-switch.json"),
+        JSON.stringify({ terminal: root, source: "claude", session: old, pids: [4242] }));
+    }
+    expect(await paneIdentity("default", pane)).toBe(old);
+    // A clear/resume changes the transcript held by the same foreground PID;
+    // neither the reported session nor the lifecycle binding has caught up.
+    transcript = current; now = 1999;
+    expect(await paneIdentity("default", pane)).toBe(old);
+    if (refresh === "expiry") now = 2000;
+    expect(await paneIdentity("default", pane, refresh === "fresh")).toBe(current);
+    expect(state.exec).toHaveBeenCalledTimes(2);
+    expect(await paneIdentity("default", pane)).toBe(current);
+    expect(state.exec).toHaveBeenCalledTimes(2);
+  } finally { restore(); await rm(root, { recursive: true, force: true }); }
+});
+
+it.each([
+  { label: "no transcript or binding", transcripts: [], binding: undefined, bindingPid: 4242, report: "valid", expected: "report" },
+  { label: "an unverified binding", transcripts: [], binding: "binding", bindingPid: 4243, report: "valid", expected: "report" },
+  { label: "contradictory ambiguous transcripts", transcripts: ["binding", "other"], binding: undefined, bindingPid: 4242, report: "valid", expected: undefined },
+  { label: "a verified binding among ambiguous transcripts", transcripts: ["binding", "other"], binding: "binding", bindingPid: 4242, report: "valid", expected: "binding" },
+  { label: "a binding contradicted by ambiguous transcripts", transcripts: ["binding", "other"], binding: "report", bindingPid: 4242, report: "valid", expected: undefined },
+  { label: "an invalid report", transcripts: [], binding: undefined, bindingPid: 4242, report: "invalid", expected: undefined },
+  { label: "a report for another agent", transcripts: [], binding: undefined, bindingPid: 4242, report: "other-agent", expected: undefined },
+])("resolves Claude's report fallback with $label", async ({ transcripts, binding, bindingPid, report, expected }) => {
+  const scratch = path.resolve(".scratch");
+  await mkdir(scratch, { recursive: true });
+  const root = await mkdtemp(path.join(scratch, "phren-claude-fallback-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+  const sessions: Record<string, string> = { report: "aaaaaaaa-1111-4111-8111-111111111111",
+    binding: "bbbbbbbb-1111-4111-8111-111111111111", other: "cccccccc-1111-4111-8111-111111111111" };
+  state.exec.mockReset().mockResolvedValue({ stdout: transcripts.map(name => `n${root}/${sessions[name]}.jsonl\n`).join("") });
+  const { setTerminalProvider } = await import("./terminal.js");
+  const restore = setTerminalProvider({ processes: async () => ({ foregroundPids: [4242] }) } as unknown as import("./terminal.js").TerminalProvider);
+  const pane = { pane_id: "claude-fallback", terminal_id: root, agent: "claude",
+    agent_session: { kind: "id", agent: report === "other-agent" ? "codex" : "claude", value: report === "invalid" ? "invalid" : sessions.report } };
+  try {
+    if (binding) {
+      await mkdir(path.join(root, "bindings", "default"), { recursive: true });
+      await writeFile(path.join(root, "bindings", "default", "claude-fallback.json"),
+        JSON.stringify({ terminal: root, source: "claude", session: sessions[binding], pids: [bindingPid] }));
+    }
+    expect(await paneIdentity("default", pane, true)).toBe(expected ? sessions[expected] : undefined);
+    if (!binding && transcripts.length === 0 && report === "valid") {
+      // A report can change before the cached empty process evidence expires.
+      const changed = { ...pane, agent_session: { ...pane.agent_session, value: sessions.other } };
+      expect(await paneIdentity("default", changed)).toBe(sessions.other);
+      expect(state.exec).toHaveBeenCalledTimes(1);
+    }
   } finally { restore(); await rm(root, { recursive: true, force: true }); }
 });
