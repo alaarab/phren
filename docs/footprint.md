@@ -114,8 +114,12 @@ and `installed.json` rollback record.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for
-dispatch returns), bounded `activity.jsonl` and
-`activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
+dispatch returns), a bounded `conversation-search.sqlite` index of settled
+conversation text for `/v1/conversations/search` (with SQLite `-wal`/`-shm`
+companions and transient `conversation-search-rows/` pieces for rows still being
+read), derived `codex-threads/` projections and their state files (with resumable
+`.building` files while upgrading old projections to retain turn identities), bounded
+`activity.jsonl` and `activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
 Uploads are limited to 8 MiB each and 256 MiB total; uploads older than 14 days
 are removed on the next upload. Activity stores status and project metadata,
 not conversation text. See [Phren Hook](phren-hook.md).

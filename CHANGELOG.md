@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `GET /v1/conversations/search` searches the settled user and assistant text of Claude, Codex, Copilot and OpenCode conversations this Hook can read. It matches all query words case-insensitively, returns the newest conversations first with a 200-character snippet, the transcript row the chat stream numbers, the live pane (or null) and the source, and pages with an opaque cursor. The Hook keeps a bounded SQLite index beside its other state, advances it from each transcript's size and mtime within a shared request deadline and per-request file and byte budget, publishes only messages from finished turns (queued prompts retain their entry IDs and wait for consumption and completion), and marks a first search `partial: true` until indexing catches up. Codex threads that exist only in its SQLite store are discovered with a resumable cursor and materialized fairly alongside ordinary transcripts; completed history stays searchable while a newer turn runs. Capability `conversationSearch`.
+
 ### Fixed
 
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.

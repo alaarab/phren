@@ -1908,6 +1908,70 @@ phone replaces it in place and keeps the reveal progress, avoiding duplicate
 text. Reconnect history retains existing rows unless Hook explicitly resets
 the conversation.
 
+### Conversation search
+
+`GET /v1/conversations/search?q=<text>&limit=<1..50>&cursor=<opaque>` searches
+the settled user and assistant message text of the conversations this Hook can
+read transcripts for: Claude Code, Codex, Copilot and OpenCode, through the same
+readers the chat stream uses. Only messages whose harness wrote its turn end
+are published; a partial reply and a prompt still queued for delivery stay out
+of search until that turn settles. It answers `{results, cursor, partial?}` with the
+newest conversations first. Each result is
+`{conversation, source, title, cwd, pane, entry, at, role, snippet}`:
+
+- `q` is 2 to 200 characters after trimming. Every query word must appear in
+  the message (AND), case-insensitively; words are never silently dropped.
+  Queries outside the character limits return 400.
+- `limit` defaults to 20 and is 1 to 50.
+- `cursor` is opaque; pass the previous answer's cursor for the next page. The
+  last page answers `cursor: null`. A bounded scan may return fewer results
+  than `limit`, including an empty page with a continuation cursor; keep paging
+  until the cursor is null. Eviction or transcript replacement invalidates an
+  older snapshot cursor with 400; start a fresh search.
+- `conversation` is the harness session id, `source` is `claude`, `codex`,
+  `copilot` or `opencode`, and `title` is the conversation's first user message.
+  Search selects the same transcript as identity-based chat reads: a unique
+  Codex rollout takes precedence over its materialized copy; ambiguous Claude
+  account copies are omitted until a single transcript can be resolved.
+- `entry` is the row id the `/v1/transcripts` stream gives that message (`line`
+  as a string), so the phone can open the conversation at it.
+- `at` is the message's ISO-8601 timestamp and `role` is `user` or
+  `assistant`.
+- `snippet` is at most 200 characters around the first match. After selecting
+  the window, the Hook checks the complete original message for credentials
+  and withholds the snippet if any are detected, even outside that window.
+- `pane` is the pane that currently runs that conversation, checked against the terminal provider's live panes and terminal instance; a closed or reused pane, or a different conversation there, is null.
+- `partial: true` means indexing, eviction recovery, or the bounded search
+  scan has more work. Start a fresh search to advance indexing; follow the
+  cursor to continue the current snapshot. All transcript sources rotate fairly
+  by last check, with a separate bounded queue for SQLite materialization.
+  The two queues alternate first position to prevent either from starving,
+  with stat slots reserved for new materialized tails when that queue runs second.
+  Legacy SQLite rows whose turn metadata is unavailable remain withheld and
+  explicitly keep coverage partial; they do not block other completed rows.
+
+The index lives at `<bridge>/conversation-search.sqlite`. It is advanced from
+each transcript's size and mtime, discovers Codex threads that exist only in
+its SQLite store by materializing them, and holds a stable snapshot watermark
+in each cursor so growth and partial indexing cannot duplicate or skip pages.
+An incompatible index layout is rebuilt from the original transcripts.
+Directory enumeration, SQLite thread discovery, message publication (including
+individual tokens), eviction, and result traversal share one 1.5-second work
+deadline. Directory handles and SQLite identity cursors resume interrupted
+discovery; SQLite discovery restarts periodically to find new identities.
+Conversation activity is indexed independently of the matching words, and the
+cursor freezes activity at its publication watermark. Completed SQLite turns
+remain searchable while a newer turn runs. Forward materialization retains its
+position while a separate cursored update pass and deferred-reply queue reconcile
+changes. Queued text keeps its original entry and becomes searchable only after
+consumption and completion of its delivery turn. Older materialized caches are
+rebuilt beside their live file and replaced atomically to add turn identities
+without exposing a partially rebuilt transcript. If storage pruning evicts a file's
+index rows, it resets that file's scan offsets and reports incomplete coverage
+until reindexing catches up. Long individual filesystem or SQLite operations
+can still take longer than their surrounding budget check.
+Capability `conversationSearch`.
+
 ### Computer memory
 
 `GET /v1/store/head` returns the working-tree `sha`. When the store has a
@@ -2011,3 +2075,7 @@ verified finished pane after reading its done return; false keeps it open.
 Optional `integrator:{computer?,target}` overrides the configured default.
 Done returns can carry `prs` and `integratorDelivery`; receipts also retain
 `closedAt` and pending closes. CLI dispatch `--keep-open` opts out of closure.
+
+### Finished conversation search results
+
+`GET /v1/transcripts/history?historical=1&source=<provider>&session=<conversation>&beforeLine=<positive integer>` reads a bounded older page through the existing transcript reader. This owner-only variant has no live pane; do not send server, workspace, tab, pane or child. The reply includes `type: "older"`, `source`, `session`, `entries`, `startLine`, `totalLines` and `hasMore`. Files resolve from the provider's known transcript roots, never a caller-supplied path. Search `entry` is retained as returned; numeric entries identify the transcript row's `line`.
