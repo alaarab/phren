@@ -409,7 +409,7 @@ export const REGISTRY: Command[] = [
   {
     name: "tasks",
     topic: "core",
-    usage: "phren tasks [profile] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]",
+    usage: "phren tasks [profile|reconcile [project] [--dry-run | --apply]] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]",
     summary: "Cross-project task view",
     featured: true,
     run: async (args, ctx) => {

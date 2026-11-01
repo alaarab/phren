@@ -1185,3 +1185,16 @@ A security review found same-user self-enrollment, policy rollback, arbitrary co
 behind allowed commands, coverage gaps and erasable audit. Auto-allow is deferred
 until a protected OS user enforces rollback-protected policy and durable audit.
 Tampering can remove restrictions back to today's behavior, never grant beyond it.
+
+### Private task links and merge reconciliation
+
+Dispatch can carry `task:{storeId,project,stableId}` privately with its launch.
+`dispatch_report` uses it to save repository-qualified PR and branch links in
+`tasks.md`; the worker can also supply `task` explicitly. Read `taskLinks` in the
+report response to confirm the link was saved. Keep task identities and context
+out of all commits, PRs and GitHub comments.
+
+Use `phren tasks reconcile --dry-run` to preview merge completion, then `--apply`
+to enable subsequent sweeps. Schedule the command nightly if desired. Tasks
+needing acceptance beyond a merge remain open as `merged, verify`; `[needs owner]`
+tasks are skipped. See [task reconciliation](task-responsibility.md#complete-tasks-from-merged-prs).

@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Private repository-qualified task links and `phren tasks reconcile`: preview merge completion before opting in, retain merge evidence, flag closed PRs and work needing verification, and capture links from dispatch reports without publishing task identities to GitHub.
+
 ## [0.3.68] - 2026-11-01
 
 ### Added

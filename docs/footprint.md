@@ -371,3 +371,13 @@ It writes model metadata only to `~/.phren-agent/model-catalog.json` and stores
 the last provider/model/effort per checkout in `~/.phren-agent/settings.json`.
 Existing Codex model cache and OpenCode API-key connections are read in place;
 no credentials are copied to the model cache. See [provider config](agent-providers.md).
+
+Task merge reconciliation writes private `Links:` continuations in `tasks.md`,
+including repository-qualified PR/branch links, review status and merge evidence.
+`<store>/.config/task-reconcile.json` records explicit `--apply` opt-in;
+`<store>/.runtime/task-reconcile.json` holds a bounded 15-minute GitHub read cache
+and failure backoff; `.runtime/task-reconcile-progress.json` retains the next
+task to check after the request cap, and `.runtime/task-reconcile.lock` serializes sweeps. Dry
+runs may refresh the runtime cache but never task files or the opt-in setting.
+Task-associated worker briefs also contain a private `task.json` sidecar, pruned
+with the existing brief directory. No GitHub metadata or checkout files are written.
