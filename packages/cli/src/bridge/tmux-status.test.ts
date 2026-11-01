@@ -10,7 +10,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import { copilotProcessStatus, copilotStatusFromEvents, opencodeProcessStatus, opencodeTurnStamps } from "./harness-status.js";
 import { opencodeTurn, turnPhase } from "./turn-records.js";
-import { codexStartupStatus, dialogStatus, notePaneStatus, resetPaneStatus, screenDialog, settleBlockedPane, startupStatus } from "./pane-status.js";
+import { codexStartupStatus, dialogStatus, notePaneStatus, paneStatus, resetPaneStatus, screenDialog, settleBlockedPane, startupStatus } from "./pane-status.js";
 import { resetTmuxBinary, setTmuxDeps, tmuxHealth, tmuxServers, tmuxSnapshot, tmuxSocketsIn } from "./terminal-tmux.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { canaryServer } from "./canary.js";
@@ -101,6 +101,30 @@ describe("dialogs on a working pane's screen", () => {
     expect(after).toMatchObject({ status: "working" });
     expect(after!.seq).toBeGreaterThan(first!.seq);
     expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("settles a lifecycle-blocked pane only after observing its dialog disappear, preserving failed reads", async () => {
+    let now = 4_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let screen = "Still drawing";
+    const read = vi.fn(async () => screen);
+    const base = notePaneStatus("tmux", "p6", "p6:1", "blocked");
+    const status = () => dialogStatus("tmux", "p6", "p6:1", "claude", base, read);
+    // A lifecycle request alone is not evidence that its dialog has gone.
+    expect(await status()).toEqual(base);
+    now += 3_000; screen = CLAUDE_DIALOG;
+    const blocked = await status();
+    expect(blocked).toMatchObject({ status: "blocked" });
+    now += 1_000; screen = "Working";
+    expect(await status()).toEqual(blocked);
+    now += 2_000;
+    read.mockRejectedValueOnce(new Error("terminal unavailable"));
+    expect(await status()).toEqual(blocked);
+    now += 3_000; screen = "Working";
+    const settled = await status();
+    expect(settled).toMatchObject({ status: "working" });
+    expect(settled!.seq).toBeGreaterThan(blocked!.seq);
+    expect(await paneStatus("tmux", "p6", "p6:1")).toMatchObject({ status: "working" });
   });
 
   it("never reads an idle pane, and clears when the phone answers", async () => {
