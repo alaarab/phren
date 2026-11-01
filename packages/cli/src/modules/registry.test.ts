@@ -165,7 +165,7 @@ describe("built-in registration declarations", () => {
     // Routed before the per-method blocks, beside the other /v1/store/ prefix routes.
     currentPosts.add("/v1/store/pull-now");
     expect(declared.filter(route => route.method === "POST").map(route => route.path).sort()).toEqual([...currentPosts].sort());
-    expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream"]);
+    expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/git/watch"]);
   });
 
   it("can feed only memory into the existing gate without exposing task or dispatch actions", async () => {

@@ -144,6 +144,32 @@ export async function servers(): Promise<Json[]> {
   return running;
 }
 
+/** The running terminal servers for a safety check. Unlike `servers()`, a
+ * server that cannot be read (timeout, permission, unreachable) or a discovery
+ * failure fails the call; only a server that is actually stopped is left out. */
+export async function serversStrict(): Promise<Json[]> {
+  const folder = path.join(herdrRoot(), "sessions");
+  let sessions: string[];
+  try { sessions = (await readdir(folder)).filter(name => serverName.safeParse(name).success); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") sessions = [];
+    else throw new BridgeError(503, "Could not list this computer's Herdr servers.", { code: "herdr-discovery-failed" });
+  }
+  const names = ["default", ...sessions];
+  const results = await Promise.all(names.map(async name => {
+    try { await rpc(name, "ping"); return { id: `herdr:${name}`, kind: "herdr", session: name, running: true } as Json; }
+    catch (error) {
+      const code = error instanceof BridgeError ? error.details?.code : undefined;
+      if (code === "herdr-not-running" || code === "herdr-stale-socket") return null;
+      throw error;
+    }
+  }));
+  const running = results.filter((value): value is Json => value !== null);
+  running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServersStrict()));
+  knownServers = running.map(server => String(server.session));
+  return running;
+}
+
 /** How old a shared `session.snapshot` may be for readers that poll: open
  * chat and status streams and the activity timer. The overview and every
  * action take a fresh one, which the pollers then reuse. */

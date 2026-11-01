@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stopFacts } from "./agent-hook-callback.js";
-import { latestStopTasks, noteTurn, readTurn, STOP_TASKS_LIMIT } from "./turn-records.js";
+import { latestStopTasks, noteTurn, opencodeTurn, readTurn, STOP_TASKS_LIMIT } from "./turn-records.js";
 
 const session = "00000005-1111-4111-8111-111111111111";
 const turn = (event: string, extra: Partial<Parameters<typeof noteTurn>[2]> = {}) =>
@@ -59,5 +59,22 @@ describe("the conversation's newest record", () => {
       vi.useRealTimers();
       await rm(path.join(bridge, "turns", "default", encodeURIComponent(pane) + ".json"));
     }
+  });
+});
+
+describe("OpenCode's advancing turn sequence", () => {
+  it("keeps a conversation's Stop sequence across a reload", async () => {
+    const store = path.join(bridge, "store"), folder = path.join(store, ".runtime", "sessions");
+    await mkdir(folder, { recursive: true });
+    vi.stubEnv("PHREN_PATH", store);
+    const file = path.join(folder, "opencode-status-41.json");
+    const stamp = (busyAt: string, idleAt: string) =>
+      writeFile(file, JSON.stringify({ status: "idle", session: "ses_reload", at: idleAt, busyAt, idleAt }));
+    await stamp("2026-09-01T00:00:01Z", "2026-09-01T00:00:02Z");
+    expect((await opencodeTurn([41], "term-o"))!.stop!.seq).toBe(2);
+    vi.resetModules();
+    const reloaded = await import("./turn-records.js");
+    await stamp("2026-09-01T00:00:03Z", "2026-09-01T00:00:04Z");
+    expect((await reloaded.opencodeTurn([41], "term-o"))!.stop!.seq).toBe(4);
   });
 });

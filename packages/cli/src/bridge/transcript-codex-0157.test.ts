@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { historicalImage, TranscriptReader } from "./transcripts.js";
+import { completionEntry, historicalImage, TranscriptReader } from "./transcripts.js";
 
 // A Codex 0.157.1 rollout written by its app-server daemon, reduced to one or
 // two rows of each kind with neutral text. Beside the rows older readers knew,
@@ -34,6 +34,15 @@ const describeRow = (raw: Raw) => [raw.type, raw.payload.type, raw.payload.role 
 const payloads = (entries: { line: number; raw: unknown }[], line: number) => entries.filter(entry => entry.line === line).map(entry => (entry.raw as Raw).payload);
 
 describe("Codex 0.157.1 code-mode items", () => {
+  it.each([
+    { stop: "12", entry: "11" },
+    { stop: "16", entry: "15" },
+    { stop: "19", entry: "18" },
+    { stop: "24", entry: "22" },
+  ])("completion before 10:00:$stop names emitted entry $entry rather than a covered wrapper", async ({ stop, entry }) => {
+    expect(await completionEntry(codeMode, "codex", "2026-09-26T10:00:02.000Z", `2026-09-26T10:00:${stop}.000Z`)).toBe(entry);
+  });
+
   it("lists each recorded action as the call the phone draws, in rollout order", async () => {
     const { entries } = await new TranscriptReader(codeMode, "codex").read();
     expect(entries.map(entry => `${entry.line} ${describeRow(entry.raw as Raw)}`)).toEqual([
