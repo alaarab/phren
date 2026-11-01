@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.68] - 2026-11-01
+
 ### Added
 
 - Claude queued phone messages carry `phrenDeliveryId`, the Hook’s own delivery id bound to that individual enqueue occurrence after the send’s transcript cursor (never Claude’s `deliveryId`/`commandUuid`), on the enqueue, its accepted removal, `popAll`/cancellation withdrawal, dequeue, and the submitted turn that replaces it, so a client can join the queued and sent copies of one message without retiring an earlier identical turn; bindings are kept beside the delivery records in `deliveries.json.queue.json`.
