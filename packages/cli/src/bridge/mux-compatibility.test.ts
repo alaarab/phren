@@ -27,7 +27,7 @@ afterEach(async () => { restore(); vi.unstubAllEnvs(); await rm(root, { recursiv
 async function get(route: string): Promise<Json> {
   const handler = createRouteHandler({ modules: { has: () => true }, info: {}, streams: {},
     agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set() },
-    journal: { record: async () => {} }, tabActivity: { observe: async () => new Map() },
+    journal: { record: async () => {} }, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() },
     contextUsage: { read: async () => new Map() },
   } as never);
   let result = "";

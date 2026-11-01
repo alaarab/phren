@@ -11,7 +11,7 @@
 //
 // A harness that draws a permission dialog in its terminal with no hook
 // behind it (Codex, OpenCode, Copilot, Claude's auto-mode fallback) still
-// looks "working" to all of that. While a pane is working its screen is read,
+// looks "working" to all of that. While a pane is working or blocked its screen is read,
 // at most once per DIALOG_READ_MS, and a dialog there makes the pane blocked
 // until the dialog is gone.
 //
@@ -27,7 +27,7 @@ import { intervalFromEnv } from "./limits.js";
 import { object } from "./protocol.js";
 import { numberedDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
 
-/** A working pane's screen is read for a dialog at most once per this window. */
+/** A working or blocked pane's screen is read for a dialog at most once per this window. */
 const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
 
 const EVENT_STATUS: Record<string, string> = {
@@ -107,14 +107,14 @@ export function screenDialog(agent: string, screen: string): boolean {
 interface Dialog { terminal: string; readAt: number; shown?: { at: number; seq: number }; cleared?: number }
 const dialogs = new Map<string, Dialog>();
 
-/** The status of a pane after a look at its screen: blocked while a working
- * agent shows a dialog there (`screenDialog`), else `base` unchanged. `read`
- * answers the pane's visible lines; it runs only for a working pane, at most
+/** The status of a pane after a look at its screen: blocked while its agent
+ * shows a dialog there (`screenDialog`), working after a confirmed dialog disappears.
+ * `read` answers the pane's visible lines for working or blocked panes, at most
  * once per DIALOG_READ_MS per pane. */
 export async function dialogStatus(server: string, pane: string, terminal: string, agent: string,
   base: { status: string; seq: number } | undefined, read: () => Promise<string>): Promise<{ status: string; seq: number } | undefined> {
   const id = key(server, pane);
-  if (base?.status !== "working") { dialogs.delete(id); return base; }
+  if (base?.status !== "working" && base?.status !== "blocked") { dialogs.delete(id); return base; }
   let entry = dialogs.get(id);
   if (!entry || entry.terminal !== terminal) {
     entry = { terminal, readAt: 0 };
@@ -128,7 +128,13 @@ export async function dialogStatus(server: string, pane: string, terminal: strin
     // A failed read says nothing: the pane keeps what it had.
     const shown = await read().then(screen => screenDialog(agent, screen), () => undefined);
     if (shown === true && !entry.shown) entry.shown = { at: now, seq: ++sequence };
-    else if (shown === false && entry.shown) { entry.shown = undefined; entry.cleared = ++sequence; }
+    else if (shown === false && entry.shown && now - entry.shown.at >= 3_000) {
+      if (base.status === "blocked") {
+        settleBlockedPane(server, pane);
+        base = await paneStatus(server, pane, terminal) ?? base;
+      }
+      entry.shown = undefined; entry.cleared = ++sequence;
+    }
   }
   if (entry.shown) return { status: "blocked", seq: entry.shown.seq };
   return { status: base.status, seq: Math.max(base.seq, entry.cleared ?? 0) };
