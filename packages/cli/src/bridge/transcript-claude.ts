@@ -503,9 +503,18 @@ const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message
 
 /** State one newest-first pass over a Claude transcript keeps so a
  * content-free `dequeue` can name the prompt turn it delivered: the queue key
- * of that turn and whether the agent's own schedule (a cron, /loop or
- * ScheduleWakeup fire, or an auto-continuation) injected it. */
-export interface ClaudeQueueState { key?: string; scheduled?: boolean }
+ * of that turn, whether the agent's own schedule (a cron, /loop or
+ * ScheduleWakeup fire, or an auto-continuation) injected it, and the phone
+ * delivery the Hook's records bound to that turn. `offset` is the raw row's
+ * byte offset, so a queue occurrence can be named exactly (`deliveryFor`). */
+export interface ClaudeQueueState {
+  key?: string;
+  scheduled?: boolean;
+  delivery?: string;
+  offset?: number;
+  /** The phone delivery a queue row was bound to, from the Hook's delivery records. */
+  deliveryFor?: (raw: Json, offset: number | undefined) => string | undefined;
+}
 
 /** The `phrenQueueKey` of the prompt turn a queued message was delivered as:
  * the same SHA-256 of the unwrapped content the enqueue row exports. Undefined
@@ -649,19 +658,33 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
   // own schedule fired it.
   if (raw.type === "queue-operation" && raw.operation === "dequeue") {
     const key = queue?.key, scheduled = queue?.scheduled;
+    // The Hook's binding names the phone message this occurrence delivered, even
+    // though the row itself is content-free.
+    // When occurrence bindings are available they are authoritative. A nearby
+    // user turn must not lend its verified identity to an unowned queue head.
+    const delivery = queue?.deliveryFor?.(raw, queue.offset);
     // One prompt turn answers one dequeue: an older dequeue must not reuse
     // this key and mark a different queued message consumed.
-    if (queue) { queue.key = undefined; queue.scheduled = undefined; }
-    return { type: "phren_queue_consumed", ...(key ? { key } : {}), ...(key && scheduled ? { scheduled: true } : {}), timestamp: raw.timestamp };
+    if (queue) { queue.key = undefined; queue.scheduled = undefined; queue.delivery = undefined; }
+    return { type: "phren_queue_consumed", ...(key ? { key } : {}), ...(key && scheduled ? { scheduled: true } : {}),
+      ...(delivery ? { phrenDeliveryId: delivery } : {}), timestamp: raw.timestamp };
   }
   // popAll pulls queued prompts back into the input: they were neither
   // consumed nor scheduled, so the phone must not draw the leftovers as a
   // "Scheduled check" after the next reply.
   if (raw.type === "queue-operation" && raw.operation === "popAll" && typeof raw.content === "string") {
-    return { type: "phren_queue_returned", key: createHash("sha256").update(raw.content).digest("hex"), timestamp: raw.timestamp };
+    const delivery = queue?.deliveryFor?.(raw, queue.offset);
+    return { type: "phren_queue_returned", key: createHash("sha256").update(raw.content).digest("hex"),
+      ...(delivery ? { phrenDeliveryId: delivery } : {}), timestamp: raw.timestamp };
   }
   if (raw.type === "queue-operation" && raw.operation === "remove" && typeof raw.content === "string") {
-    return { type: "phren_queue_consumed", key: createHash("sha256").update(raw.content).digest("hex"), timestamp: raw.timestamp };
+    const delivery = queue?.deliveryFor?.(raw, queue.offset), key = createHash("sha256").update(raw.content).digest("hex");
+    // Only a removal the running turn took is consumption. A cancellation drops the input
+    // without the agent seeing it, so the phone keeps the message as withdrawn, not sent.
+    const taken = raw.reason === "absorbed_mid_turn" || raw.reason === "delivered_to_agent";
+    return taken
+      ? { type: "phren_queue_consumed", key, ...(delivery ? { phrenDeliveryId: delivery } : {}), timestamp: raw.timestamp }
+      : { type: "phren_queue_returned", key, ...(delivery ? { phrenDeliveryId: delivery } : {}), timestamp: raw.timestamp };
   }
   // Claude Code records background completion as an internal queue row,
   // outside the ordinary user/assistant transcript. Export only the small
@@ -677,7 +700,7 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
   // Claude Code hands it to the model inside a later tool result and never
   // writes a user turn for it. Export the enqueue as the person's message so
   // the phone can draw the bubble it sent. Consumption exposes only a digest.
-  if (raw.type === "queue-operation" && ["enqueue", "remove"].includes(String(raw.operation))
+  if (raw.type === "queue-operation" && raw.operation === "enqueue"
       && !raw.isMeta && !raw.isSidechain && typeof raw.content === "string"
       && raw.content.length <= 65_536 && !raw.content.includes("<task-notification>")) {
     // The paste wrapper was removed above; any envelope still starting
@@ -685,15 +708,15 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
     if (raw.content.trimStart().startsWith("<")) return undefined;
     const text = raw.content;
     const key = createHash("sha256").update(raw.content).digest("hex");
-    // Only the identity crosses the wire on consumption: no queue payload,
-    // tool envelope, private metadata, or reasoning is exported.
-    if (raw.operation === "remove") return { type: "phren_queue_consumed", key, timestamp: raw.timestamp };
     // A picture sent mid-turn queues as "[Image #7]Attached files on this
     // computer:": the pixels never reach this row. Words-free, it matched no
     // receipt, and the phone warned "Not confirmed in chat" about a picture
     // the agent had taken. Name it the way a picture-only turn reads.
     const pictureOnly = QUEUED_IMAGE_LABEL.test(text) && !text.replace(QUEUED_IMAGE_LABELS, "").replace(ATTACHED_FILES_FOOTER, "").trim();
-    return { type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: raw.timestamp,
+    // The phone id comes from the Hook's own delivery record, never from the
+    // row's Claude `deliveryId`/`commandUuid`, which are the harness's.
+    const delivery = queue?.deliveryFor?.(raw, queue.offset);
+    return { type: "user", phrenQueued: true, phrenQueueKey: key, ...(delivery ? { phrenDeliveryId: delivery } : {}), timestamp: raw.timestamp,
       message: { role: "user", content: pictureOnly ? "[Image attachment]" : text } };
   }
   // Claude Code appends a boundary marker and then the summary it hands the
@@ -741,22 +764,27 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
     }
   }
   // Remember the prompt turn a queued message was delivered as, so the
-  // content-free dequeue written before it can be keyed and flagged scheduled.
+  // content-free dequeue written before it can be keyed and flagged scheduled,
+  // and the phone id the Hook's records bound to that occurrence, so a real
+  // submitted turn replaces the queued row with the same identity.
   if (queue && raw.type === "user") {
+    queue.delivery = undefined;
     const key = queuePromptKey(raw);
-    if (key !== undefined) { queue.key = key; queue.scheduled = scheduledPromptTurn(raw); }
+    if (key !== undefined) { queue.key = key; queue.scheduled = scheduledPromptTurn(raw); queue.delivery = queue.deliveryFor?.(raw, queue.offset); }
   }
   if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
   raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
   const message = unwrapUserText(object(raw.message));
+  const delivery = raw.type === "user" ? queue?.delivery : undefined;
   // Keep indexes for historical images while removing thinking contents.
   // The one exception is narration: short progress notes the model writes
   // for the person watching (the lines Claude Code's terminal shows between
   // tool calls). They arrive as thinking blocks whose signature declares
   // them narration and whose text is present; private reasoning is stored
   // with empty text and a "thinking" signature and stays redacted.
-  if (typeof message.content === "string") return raw.type === "user" && harnessPreamble(message.content) ? undefined : { ...raw, message };
-  if (Array.isArray(message.content)) return { ...raw, message: { ...message, content: objects(message.content).map(b =>
+  if (typeof message.content === "string") return raw.type === "user" && harnessPreamble(message.content) ? undefined
+    : { ...raw, ...(delivery ? { phrenDeliveryId: delivery } : {}), message };
+  if (Array.isArray(message.content)) return { ...raw, ...(delivery ? { phrenDeliveryId: delivery } : {}), message: { ...message, content: objects(message.content).map(b =>
     ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b
       : isNarration(b) ? { type: "text", text: String(b.thinking), narration: true } : { type: "redacted" }) } };
   return undefined;

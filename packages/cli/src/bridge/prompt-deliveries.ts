@@ -77,7 +77,7 @@ const recordSchema = z.object({
   /** From a joined prompt (`settleJoined`): "part", a message settled inside it, claims no row of its own (the turn's
    * row carries other words); "turn", the joined words themselves, no message of anyone's, claims that row. */
   joined: z.enum(["part", "turn"]).optional(),
-  /** Codex: the transcript's size in bytes when the message was registered. Only a row at or past it is
+  /** Claude/Codex: the transcript's size in bytes when the message was registered. Only a row at or past it is
    * the message's own: position, not the clock, orders rows, and a row without a timestamp too. */
   cursor: z.number().int().nonnegative().optional(),
 }).strict();
@@ -92,10 +92,22 @@ const recordSchema = z.object({
  * `entryUuid` (Claude's row id) and `entryShown`, the offset of the row the stream shows for it when that is not
  * the claimed entry (a Codex rollout's user item, written beside the event that is the turn). */
 type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number; hookClaim?: boolean; seenRow?: number; awaitingRow?: boolean;
-  entryLate?: boolean; entryLine?: number; entryUuid?: string; entryShown?: number };
+  entryLate?: boolean; entryLine?: number; entryUuid?: string; entryShown?: number;
+  /** The Claude queue enqueue occurrence this phone message was typed as, and the queue rows that
+   * took it: the byte offset of each. The transcript's own queue rows carry no phone id, so the
+   * binding is what gives the enqueue, its removal and its submitted turn one identity. */
+  queueOffset?: number; queueAt?: number; queueKey?: string; queueEnd?: "consumed" | "returned"; queueRemoveOffset?: number; queueUserOffset?: number; queueDequeueOffset?: number };
 const landedFile = (file: string) => `${file}.landed.json`;
 const landedSchema = z.object({ line: z.number().int().nonnegative().optional(), uuid: z.string().min(1).max(100).optional(),
   shown: z.number().int().nonnegative().optional(), late: z.literal(true).optional() }).strict();
+const queueBindingsFile = (file: string) => `${file}.queue.json`;
+const queueBindingSchema = z.object({ offset: z.number().int().nonnegative().optional(), at: z.number().optional(),
+  key: z.string().regex(/^[0-9a-f]{64}$/).optional(), end: z.enum(["consumed", "returned"]).optional(),
+  remove: z.number().int().nonnegative().optional(), user: z.number().int().nonnegative().optional(),
+  dequeue: z.number().int().nonnegative().optional() }).strict();
+/** One raw Claude transcript row and the byte offset it starts at: the queue rows a phone message's
+ * identity is read from. */
+export interface ClaudeQueueRow { offset: number; raw: Json }
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
 
 /** One message per record, bound to the pane it was typed into (server, pane,
@@ -117,7 +129,10 @@ export class PromptDeliveries {
   /** Open, or failed with its own hook's claim still waiting for its row (a late delivery). */
   private static claimable(record: Record) { return PromptDeliveries.open(record) || (record.state === "failed" && !!record.hookClaim); }
 
-  /** Codex messages whose `cursor` is still being read. */
+  /** The queue bindings last read from each Claude conversation, and the transcript revision they describe. */
+  private queueCache = new Map<string, { signature: string; size: number; mtimeMs: number; bindings: Map<number, string> }>();
+
+  /** Messages whose `cursor` is still being read. */
   private cursors = new Map<Record, Promise<void>>();
   /** The size of a conversation's transcript: 0 before it has one, undefined when it cannot be read. */
   private size: (record: { source: Provider; session: string }) => Promise<number | undefined>;
@@ -152,6 +167,21 @@ export class PromptDeliveries {
         if (parsed.data.late) record.entryLate = true;
       }
     } catch { /* None yet: rows found before this version, or none. */ }
+    try {
+      // The queue occurrence each phone message was bound to, apart from the records an older Hook
+      // reads strictly. Keyed by phone id, so a record it no longer keeps is simply not found.
+      for (const [id, row] of Object.entries(object(JSON.parse(readFileSync(queueBindingsFile(file), "utf8"))))) {
+        const parsed = queueBindingSchema.safeParse(row), record = this.byId(id);
+        if (!parsed.success || !record) continue;
+        if (parsed.data.offset !== undefined) record.queueOffset = parsed.data.offset;
+        if (parsed.data.at !== undefined) record.queueAt = parsed.data.at;
+        if (parsed.data.key !== undefined) record.queueKey = parsed.data.key;
+        if (parsed.data.end !== undefined) record.queueEnd = parsed.data.end;
+        if (parsed.data.remove !== undefined) record.queueRemoveOffset = parsed.data.remove;
+        if (parsed.data.user !== undefined) record.queueUserOffset = parsed.data.user;
+        if (parsed.data.dequeue !== undefined) record.queueDequeueOffset = parsed.data.dequeue;
+      }
+    } catch { /* None yet: no message of this Hook's has been bound to a queue row. */ }
     this.prune();
   }
 
@@ -163,20 +193,35 @@ export class PromptDeliveries {
     const cutoff = this.now() - DELIVERY_RETENTION_MS;
     this.records = this.records.filter(record => record.at >= cutoff || this.waiters.has(record));
     while (this.records.length > MAX_RECORDS) this.records.shift();
+    while (this.queueCache.size > 64) this.queueCache.delete(this.queueCache.keys().next().value!);
   }
   private save() {
     if (!this.file) return;
     // A record without a phone id is kept once it claimed a transcript row, so after a restart that row is not offered to another message.
     const kept = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn");
-    const rows = kept.map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, awaitingRow: _____, entryLate: _a, entryLine: _b, entryUuid: _c, entryShown: _d, ...row }) => row);
+    const rows = kept.map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, awaitingRow: _____, entryLate: _a, entryLine: _b, entryUuid: _c, entryShown: _d,
+      queueOffset: _e, queueAt: _f, queueRemoveOffset: _g, queueUserOffset: _h, queueDequeueOffset: _i, queueKey: _j, queueEnd: _k, ...row }) => row);
     // The rows phone messages landed as, apart from the records an older Hook reads strictly.
     const landed: Json = {};
     for (const record of kept) if (record.id && record.entry !== undefined && (record.entryLine !== undefined || record.entryUuid || record.entryShown !== undefined || record.entryLate)) {
       landed[record.id] = { ...(record.entryLine !== undefined ? { line: record.entryLine } : {}), ...(record.entryUuid ? { uuid: record.entryUuid } : {}),
         ...(record.entryShown !== undefined ? { shown: record.entryShown } : {}), ...(record.entryLate ? { late: true } : {}) };
     }
+    // The Claude queue occurrence each phone message was typed as, beside the records for the same reason.
+    const queue: Json = {};
+    for (const record of kept) if (record.id && (record.queueOffset !== undefined || record.queueRemoveOffset !== undefined)) {
+      queue[record.id] = { ...(record.queueOffset !== undefined ? { offset: record.queueOffset } : {}), ...(record.queueAt !== undefined ? { at: record.queueAt } : {}),
+        ...(record.queueKey !== undefined ? { key: record.queueKey } : {}), ...(record.queueEnd !== undefined ? { end: record.queueEnd } : {}),
+        ...(record.queueRemoveOffset !== undefined ? { remove: record.queueRemoveOffset } : {}),
+        ...(record.queueUserOffset !== undefined ? { user: record.queueUserOffset } : {}),
+        ...(record.queueDequeueOffset !== undefined ? { dequeue: record.queueDequeueOffset } : {}) };
+    }
     const file = this.file;
-    this.writing = this.writing.then(async () => { await atomicInPrivateDir(file, { records: rows }); await atomicInPrivateDir(landedFile(file), landed); }).catch(() => undefined);
+    this.writing = this.writing.then(async () => {
+      await atomicInPrivateDir(file, { records: rows });
+      await atomicInPrivateDir(landedFile(file), landed);
+      await atomicInPrivateDir(queueBindingsFile(file), queue);
+    }).catch(() => undefined);
   }
   /** Settled writes, for tests and an orderly shutdown. */
   flush(): Promise<void> { return this.writing; }
@@ -196,7 +241,10 @@ export class PromptDeliveries {
     this.save();
     // Started before the caller types the message (a stat, against typing, then the agent's own write), so
     // the row it makes lands past the cursor; a row stamped after registration counts too (`codexRowIsOwn`).
-    if (record.source === "codex") {
+    if (record.source === "codex" || record.source === "claude") {
+      // The cursor is this conversation's size before anything is typed. A queued row (an
+      // enqueue, or a removal whose enqueue scrolled out of the tail) must start at or past
+      // it to be this message's; an identical row already there is an earlier turn's.
       const session = record.session;
       this.cursors.set(record, this.size(record).then(size => { if (size !== undefined && record.session === session) { record.cursor = size; this.save(); } }, () => undefined)
         .finally(() => this.cursors.delete(record)));
@@ -304,6 +352,177 @@ export class PromptDeliveries {
       .filter(item => item.state !== "unknown");
   }
 
+  /** The phone delivery each of a Claude conversation's queue rows belongs to, by byte offset: the
+   * enqueue a message was typed as, the `remove`/`popAll` that took it back, the prompt turn that
+   * delivered it, and the `dequeue` that handed it to the model. Reads the transcript tail, binds
+   * any occurrence not bound yet, and keeps the binding in `<file>.queue.json`, so a reopened chat,
+   * a reconnect snapshot or a Hook restart gives the same row the same phone id. */
+  async claudeQueueBindings(target: Pick<Target, "server" | "pane" | "source" | "session">, file: string): Promise<Map<number, string> | undefined> {
+    if (target.source !== "claude") return undefined;
+    const signature = () => this.records.filter(record => record.id && this.samePane(record, target) && record.session === target.session)
+      .map(record => `${record.id}:${record.queueKey ?? ""}:${record.queueEnd ?? ""}:${record.cursor ?? ""}:${record.entry ?? ""}:${record.queueOffset ?? ""}:${record.queueRemoveOffset ?? ""}:${record.queueUserOffset ?? ""}:${record.queueDequeueOffset ?? ""}`).join(",");
+    if (!signature()) return undefined;
+    let info;
+    try { info = await stat(file); } catch { return undefined; }
+    const key = `${this.paneKey(target)}\0${target.session}\0${file}`, before = signature();
+    const cached = this.queueCache.get(key);
+    if (cached && cached.size === info.size && cached.mtimeMs === info.mtimeMs && cached.signature === before) return cached.bindings;
+    const rows = await claudeQueueRows(file);
+    const bindings = await this.bindClaudeQueueRows(target, rows);
+    this.queueCache.set(key, { signature: signature(), size: info.size, mtimeMs: info.mtimeMs, bindings });
+    return bindings;
+  }
+
+  /** Bind parsed Claude queue rows (with their byte offsets) to the phone messages tracked in
+   * `target`, oldest occurrence first, per pane and conversation. A message binds at most one
+   * enqueue, one removal, one submitted turn and one dequeue; a repeated identical enqueue takes
+   * the next unbound message, never the same occurrence twice. Only rows after the cursor captured
+   * before the send was typed can be its own, so an earlier identical turn keeps its own identity.
+   * Only bindings are recorded here: an enqueue is still held, never taken, and a cancellation or
+   * `popAll` is not a delivery. */
+  async bindClaudeQueueRows(target: Pick<Target, "server" | "pane" | "source" | "session">, rows: ClaudeQueueRow[]): Promise<Map<number, string>> {
+    const bindings = new Map<number, string>();
+    const relevant = this.records.filter(record => record.id && this.samePane(record, target) && record.session === target.session);
+    if (target.source !== "claude" || !relevant.length) return bindings;
+    // A Claude cursor is this conversation's size when the message was registered. Wait for it
+    // before deciding which occurrence is new: a row already in the transcript is an earlier turn's.
+    await Promise.all(relevant.map(record => this.cursors.get(record)).filter((promise): promise is Promise<void> => !!promise));
+    let changed = false;
+    const ordered = [...rows].sort((a, b) => a.offset - b.offset);
+    const byOffset = new Map(ordered.map(({ offset, raw }): [number, Json] => [offset, raw]));
+    const queueKey = (content: string) => createHash("sha256").update(unwrapPastedContent(content)).digest("hex");
+    const consumed = (row: Json) => row.operation === "remove" && (row.reason === "absorbed_mid_turn" || row.reason === "delivered_to_agent");
+    const canReplace = (record: Record, offset: number) => (record.queueEnd !== "returned" && (record.queueRemoveOffset === undefined || record.queueEnd === "consumed"))
+      || (record.entryHook === true && record.entry === offset);
+    const eligible = (row: Json | undefined) => row === undefined || (row.isSidechain !== true && row.isMeta !== true
+      && (typeof row.sessionId !== "string" || row.sessionId === target.session));
+    const exclusive = (record: Record, offset: number) => !this.records.some(other => other !== record && this.samePane(other, target)
+      && other.session === target.session && (other.queueUserOffset === offset || other.entry === offset));
+    // Reconstruct every association already recorded, validating a row still at that offset and,
+    // for the submitted turn, that it follows the enqueue. An append or restart must not lose it.
+    for (const record of relevant) {
+      if (record.queueOffset !== undefined) {
+        const row = byOffset.get(record.queueOffset);
+        const still = eligible(row) && (row === undefined || (row.type === "queue-operation" && row.operation === "enqueue"
+          && typeof row.content === "string" && promptHash(row.content) === record.hash
+          && (record.queueKey === undefined || queueKey(row.content) === record.queueKey)
+          && (record.cursor === undefined || record.queueOffset >= record.cursor)));
+        if (still) {
+          bindings.set(record.queueOffset, record.id!);
+          if (row && record.queueKey === undefined) { record.queueKey = queueKey(String(row.content)); changed = true; }
+        } else { delete record.queueOffset; delete record.queueAt; delete record.queueKey; delete record.queueEnd; delete record.queueRemoveOffset; delete record.queueUserOffset; delete record.queueDequeueOffset; changed = true; }
+      }
+      if (record.queueRemoveOffset !== undefined) {
+        const row = byOffset.get(record.queueRemoveOffset);
+        const still = eligible(row) && (row === undefined || (row.type === "queue-operation" && (row.operation === "remove" || row.operation === "popAll")
+          && typeof row.content === "string" && (record.queueKey === undefined || queueKey(row.content) === record.queueKey)
+          && (record.cursor === undefined || record.queueRemoveOffset >= record.cursor)));
+        if (still) {
+          bindings.set(record.queueRemoveOffset, record.id!);
+          if (row) {
+            const end = consumed(row) ? "consumed" : "returned";
+            if (record.queueEnd !== end) { record.queueEnd = end; changed = true; }
+          }
+        } else { delete record.queueRemoveOffset; if (record.queueDequeueOffset === undefined) delete record.queueEnd; changed = true; }
+      }
+      if (record.queueUserOffset !== undefined) {
+        const row = byOffset.get(record.queueUserOffset);
+        const text = row === undefined ? undefined : claudeUserText(row);
+        const still = eligible(row) && canReplace(record, record.queueUserOffset) && exclusive(record, record.queueUserOffset)
+          && (!record.entryHook || record.entry === undefined || record.entry === record.queueUserOffset)
+          && (row === undefined || (text !== undefined && promptHash(text) === record.hash
+          && record.queueOffset !== undefined && record.queueUserOffset > record.queueOffset));
+        if (still) bindings.set(record.queueUserOffset, record.id!);
+        else { delete record.queueUserOffset; changed = true; }
+      }
+      if (record.queueDequeueOffset !== undefined) {
+        const row = byOffset.get(record.queueDequeueOffset);
+        const still = eligible(row) && (row === undefined || (row.type === "queue-operation" && row.operation === "dequeue" && row.isSidechain !== true));
+        if (still) bindings.set(record.queueDequeueOffset, record.id!);
+        else { delete record.queueDequeueOffset; changed = true; }
+      }
+    }
+    // Replay every occurrence, including unowned messages: an ordinary queue head must
+    // consume its own dequeue rather than handing it to a later phone send.
+    const pending: { offset: number; key: string }[] = [];
+    for (const { offset, raw } of ordered) {
+      if (raw.isSidechain === true || (typeof raw.sessionId === "string" && raw.sessionId !== target.session)) continue;
+      if (raw.type === "queue-operation" && raw.isSidechain !== true) {
+        // A content-free dequeue is the queue head handed to a turn. Its own line names the
+        // occurrence even when a page does not also carry the prompt turn it delivered.
+        if (raw.operation === "dequeue") {
+          const head = pending.shift();
+          const record = head && relevant.find(candidate => candidate.queueOffset === head.offset);
+          if (record && record.queueDequeueOffset === undefined && !bindings.has(offset)) {
+            record.queueDequeueOffset = offset; record.queueEnd = "consumed";
+            bindings.set(offset, record.id!); changed = true;
+          }
+          continue;
+        }
+        if (typeof raw.content !== "string") continue;
+        const hash = promptHash(raw.content), key = queueKey(raw.content);
+        // Private harness entries still occupy the queue. Count them for FIFO without
+        // ever binding their payload to a phone message.
+        if (raw.operation === "enqueue") pending.push({ offset, key });
+        const index = raw.operation === "remove" || raw.operation === "popAll" ? pending.findIndex(item => item.key === key) : -1;
+        const occurrence = index < 0 ? undefined : pending.splice(index, 1)[0];
+        const unwrapped = unwrapPastedContent(raw.content);
+        if (raw.isMeta === true || !unwrapped.trim() || unwrapped.trimStart().startsWith("<")) continue;
+        if (raw.operation === "enqueue") {
+          if (bindings.has(offset)) continue;
+          const at = Date.parse(String(raw.timestamp ?? "")), rowAt = Number.isFinite(at) ? at : undefined;
+          const record = relevant.filter(candidate => candidate.id && candidate.hash === hash && candidate.queueOffset === undefined
+            && candidate.cursor !== undefined && offset >= candidate.cursor
+            && (!candidate.entryHook || candidate.entry === undefined || candidate.entry > offset)
+            && (rowAt === undefined || candidate.at <= rowAt + ENTRY_SLACK_MS)
+            && (rowAt === undefined || rowAt >= candidate.at - ENTRY_SLACK_MS))
+            .sort((a, b) => a.at - b.at)[0];
+          if (!record) continue;
+          record.queueOffset = offset; record.queueKey = key;
+          if (rowAt !== undefined) record.queueAt = rowAt;
+          if (record.state === "typed") record.state = "queued";
+          bindings.set(offset, record.id!); changed = true;
+          continue;
+        }
+        if (raw.operation === "remove" || raw.operation === "popAll") {
+          if (bindings.has(offset)) continue;
+          const at = Date.parse(String(raw.timestamp ?? "")), rowAt = Number.isFinite(at) ? at : undefined;
+          // Removal uses the exact unwrapped queue content, not the phone's normalized
+          // words. A persisted key also identifies an enqueue outside the read tail.
+          const record = relevant.filter(candidate => candidate.id && candidate.queueOffset !== undefined
+            && candidate.cursor !== undefined && offset >= candidate.cursor
+            && (occurrence ? candidate.queueOffset === occurrence.offset : candidate.queueKey === key)
+            && candidate.queueDequeueOffset === undefined
+            && candidate.queueOffset < offset && (candidate.queueRemoveOffset === undefined || candidate.queueRemoveOffset === offset))
+            .sort((a, b) => a.queueOffset! - b.queueOffset!)[0];
+          if (!record) continue;
+          if (record.queueRemoveOffset === undefined) { record.queueRemoveOffset = offset; changed = true; }
+          record.queueEnd = consumed(raw) ? "consumed" : "returned";
+          bindings.set(offset, record.id!);
+        }
+        continue;
+      }
+      const text = claudeUserText(raw);
+      if (text === undefined || bindings.has(offset)) continue;
+      const hash = promptHash(text);
+      const at = Date.parse(String(raw.timestamp ?? "")), rowAt = Number.isFinite(at) ? at : undefined;
+      // A submitted turn replaces the enqueue only when it follows it, and never when another
+      // message already landed as that row. The delivery's own landed reference wins.
+      const record = relevant.filter(candidate => candidate.id && candidate.hash === hash && candidate.queueOffset !== undefined
+        && canReplace(candidate, offset) && candidate.queueUserOffset === undefined && (candidate.cursor === undefined || offset >= candidate.cursor)
+        && offset > candidate.queueOffset
+        && (!candidate.entryHook || candidate.entry === undefined || candidate.entry === offset)
+        && (rowAt === undefined || rowAt >= candidate.at - ENTRY_SLACK_MS) && exclusive(candidate, offset))
+        .sort((a, b) => (a.entry === offset ? 0 : 1) - (b.entry === offset ? 0 : 1) || a.queueOffset! - b.queueOffset!)[0];
+      if (!record) continue;
+      record.queueUserOffset = offset;
+      bindings.set(offset, record.id!);
+      changed = true;
+    }
+    if (changed) this.save();
+    return bindings;
+  }
+
   /** Conversation `target` just submitted `prompt`. Its own record wins, then
    * the oldest open one in the same pane: the agent kept the text across a
    * conversation change, and the conversation now in the pane is where it
@@ -314,13 +533,14 @@ export class PromptDeliveries {
    * callback for a row already claimed (the idle check settled it, the hook
    * came late) settles nothing more. */
   async submitted(target: Target, prompt: string): Promise<void> {
+    await this.refreshClaudeQueue(target);
     const hash = promptHash(prompt);
     this.hookPanes.add(this.paneKey(target));
     // A failed message stays matchable for a late take only until the pane's next Stop: a turn that ended
     // without it means a later identical prompt is a new one.
     const stop = this.lastStop.get(this.paneKey(target)) ?? -Infinity;
     const pick = () => {
-      const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered"
+      const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered" && record.queueEnd !== "returned"
         && (record.state !== "failed" || (record.settledAt ?? record.at) >= stop));
       return open.find(entry => entry.session === target.session) ?? open[0];
     };
@@ -381,7 +601,7 @@ export class PromptDeliveries {
    * (typed or queued) are matched: a failed one could take the lines of messages that are held, and a late
    * take of a failed message stays its own hook's to report. */
   private settleJoined(target: Target, prompt: string): boolean {
-    const candidates = this.records.filter(record => this.samePane(record, target) && PromptDeliveries.open(record))
+    const candidates = this.records.filter(record => this.samePane(record, target) && record.queueEnd !== "returned" && PromptDeliveries.open(record))
       .sort((a, b) => a.at - b.at).slice(0, JOINED_MAX_OPEN);
     if (!candidates.length) return false;
     const lines = unwrapPastedContent(prompt).split("\n").filter(line => !PICTURE_PATH_LINE.test(line));
@@ -440,6 +660,12 @@ export class PromptDeliveries {
     if (session) record.session = session;
     this.release(record, "delivered");
   }
+  /** Settlement needs the same occurrence ownership as a transcript read, even if no
+   * client has opened that conversation. Custom transcript readers supply their own bindings. */
+  private async refreshClaudeQueue(target: Pick<Target, "server" | "pane" | "source" | "session">): Promise<void> {
+    if (target.source !== "claude" || this.landed !== transcriptEntries) return;
+    try { await this.claudeQueueBindings(target, await transcriptPath("claude", target.session)); } catch { /* Transcript not readable yet. */ }
+  }
   /** Whether the transcript shows the agent took `record`'s message, claiming the entry it settled with.
    * An entry settles one message: the table of records' `entry` offsets (per conversation) is the only
    * state, so neither this path nor the hook's can settle two messages with one turn. A user row is a
@@ -449,9 +675,11 @@ export class PromptDeliveries {
    * messages the oldest take the entries. `pass` carries the entries still unclaimed within one observe. */
   private async taken(record: Record, pass: Map<string, TranscriptEntry[]>, working = false): Promise<boolean> {
     if (record.source !== "claude") return this.takenCodex(record);
+    await this.refreshClaudeQueue(record);
+    if (record.queueEnd === "returned") return false;
     const same = (other: Record) => other.hash === record.hash && other.server === record.server && other.pane === record.pane && other.session === record.session;
-    const open = this.records.filter(other => same(other) && PromptDeliveries.claimable(other)).sort((a, b) => a.at - b.at);
-    if (open[0] !== record) return false;
+    const open = this.records.filter(other => same(other) && other.queueEnd !== "returned" && PromptDeliveries.claimable(other)).sort((a, b) => a.at - b.at);
+    if (open[0] !== record && record.queueOffset === undefined && record.queueRemoveOffset === undefined) return false;
     const key = [record.hash, record.server, record.pane, record.session, working].join("|");
     let free = pass.get(key);
     if (!free) {
@@ -486,7 +714,14 @@ export class PromptDeliveries {
     }
     // The record may have settled (its hook claimed a row) while the transcript was read.
     if (!PromptDeliveries.claimable(record)) return false;
-    const entry = free.shift();
+    const index = free.findIndex(row => {
+      const owner = this.records.find(other => this.samePane(other, record) && other.session === record.session
+        && (row.hook ? other.queueUserOffset === row.offset : other.queueRemoveOffset === row.offset));
+      if (owner && owner !== record) return false;
+      if (record.queueOffset === undefined && record.queueRemoveOffset === undefined) return true;
+      return row.hook ? record.queueUserOffset === row.offset : record.queueRemoveOffset === row.offset;
+    });
+    const entry = index < 0 ? undefined : free.splice(index, 1)[0];
     pass.set(key, free);
     if (entry === undefined) return false;
     this.claim(record, entry);
@@ -736,6 +971,45 @@ export async function transcriptLine(record: { source: Provider; session: string
     }
     return line;
   } finally { await file.close(); }
+}
+
+/** The last `TRANSCRIPT_TAIL_BYTES` of a Claude transcript, parsed into the queue and user rows a
+ * phone message's identity can be read from, each with the byte offset it starts at. */
+async function claudeQueueRows(file: string): Promise<ClaudeQueueRow[]> {
+  const handle = await open(file, "r");
+  try {
+    const size = (await handle.stat()).size, start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES);
+    if (size === start) return [];
+    const buffer = Buffer.alloc(size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    let base = start, text = buffer.toString("utf8");
+    // Read from the first whole line: a byte split would decode as another character.
+    if (start > 0) {
+      const newline = buffer.indexOf(10);
+      if (newline < 0) return [];
+      base = start + newline + 1;
+      text = buffer.subarray(newline + 1).toString("utf8");
+    }
+    const rows: ClaudeQueueRow[] = [];
+    let offset = base;
+    for (const line of text.split("\n")) {
+      const bytes = Buffer.byteLength(line);
+      if (line && (line.includes('"queue-operation"') || line.includes('"user"'))) {
+        try { rows.push({ offset, raw: object(JSON.parse(line)) }); } catch { /* malformed or cut row */ }
+      }
+      offset += bytes + 1;
+    }
+    return rows;
+  } finally { await handle.close(); }
+}
+
+/** The words of a user turn: what a phone message submitted as that turn matches by. */
+function claudeUserText(raw: Json): string | undefined {
+  if (raw.type !== "user" || raw.isMeta === true || raw.isSidechain === true) return undefined;
+  const content = object(raw.message).content;
+  const text = typeof content === "string" ? content
+    : objects(content).filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)).join("\n");
+  return promptKey(text) ? text : undefined;
 }
 
 async function transcriptEntries(record: { source: Provider; session: string; hash: string; at: number }): Promise<TranscriptEntry[]> {

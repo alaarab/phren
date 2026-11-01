@@ -501,7 +501,7 @@ describe("phren prompt-hook context", () => {
     const queued = (operation: string, text = content) => ({ type: "queue-operation", operation, timestamp: "t", sessionId: "s", content: text });
     expect(visibleClaudeEvent(queued("enqueue"))).toEqual({ type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: "t",
       message: { role: "user", content: "[Image attachment]" } });
-    expect(visibleClaudeEvent(queued("remove"))).toEqual({ type: "phren_queue_consumed", key, timestamp: "t" });
+    expect(visibleClaudeEvent({ ...queued("remove"), reason: "absorbed_mid_turn" })).toEqual({ type: "phren_queue_consumed", key, timestamp: "t" });
     // Words, or a file that is not a picture, still cross as written.
     const worded = "[Image #6]I had to approve these..\nAttached files on this computer:";
     expect(visibleClaudeEvent(queued("enqueue", worded))).toMatchObject({ message: { content: worded } });
@@ -547,9 +547,12 @@ describe("Claude queue consumption", () => {
     scheduledFireId: "41d141b3-0e28-454f-9946-b7093d045570", turnOrigin: "scheduled", timestamp: "2026-09-16T08:55:00.192Z",
     message: { role: "user", content: "Check CI on PR #256 (gh pr checks 256)" } };
 
-  it("keys a remove by its content", () => {
-    expect(visibleClaudeEvent({ type: "queue-operation", operation: "remove", timestamp: "t", content: "absorbed mid-turn" }))
+  it("keys an accepted remove by its content and draws a cancellation as withdrawal", () => {
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", timestamp: "t", content: "absorbed mid-turn" }))
       .toEqual({ type: "phren_queue_consumed", key: digest("absorbed mid-turn"), timestamp: "t" });
+    // A cancellation never reached the agent: it is withdrawn, not sent.
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "remove", reason: "cleared_on_cancel", timestamp: "t", content: "absorbed mid-turn" }))
+      .toEqual({ type: "phren_queue_returned", key: digest("absorbed mid-turn"), timestamp: "t" });
   });
 
   it("marks a dequeue as consumption, keyless when the prompt turn is not in view", () => {
@@ -599,6 +602,35 @@ describe("Claude queue consumption", () => {
       timestamp: "t", message: { role: "user", content: "Another Claude session sent a message:\n<agent-message />" } };
     expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, queueState(peer)))
       .toEqual({ type: "phren_queue_consumed", key: digest("Another Claude session sent a message:\n<agent-message />"), timestamp: "t" });
+  });
+
+  // The owner fixture: two pictures queued mid-turn. Claude's row carries its
+  // own deliveryId/commandUuid; only the Hook's binding may name the phone send.
+  const ownerContent = "[Image #4] [Image #5]These two screens are literally flashing between eachother shits so buggy \nAttached files on this computer:";
+  const withBinding = (offset: number): ClaudeQueueState => ({ offset, deliveryFor: (_raw, at) => at === 0 || at === 3 ? "phone-send-0001" : undefined });
+
+  it("names a bound enqueue and its removal with the phone id, never Claude's", () => {
+    const enqueue = visibleClaudeEvent({ type: "queue-operation", operation: "enqueue", timestamp: "t", sessionId: "s", content: ownerContent }, false, withBinding(0));
+    expect(enqueue).toEqual({ type: "user", phrenQueued: true, phrenQueueKey: digest(ownerContent), phrenDeliveryId: "phone-send-0001",
+      timestamp: "t", message: { role: "user", content: ownerContent } });
+    const remove = visibleClaudeEvent({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", deliveryId: "626aa5af-75f1-40eb-8d0a-dfc176643b04",
+      commandUuid: "f425bffe-b4b6-4129-b7a4-7c3295a10115", timestamp: "t2", sessionId: "s", content: ownerContent }, false, withBinding(3));
+    expect(remove).toEqual({ type: "phren_queue_consumed", key: digest(ownerContent), phrenDeliveryId: "phone-send-0001", timestamp: "t2" });
+    expect(JSON.stringify(remove)).not.toContain("626aa5af");
+    const cancelled = visibleClaudeEvent({ type: "queue-operation", operation: "remove", reason: "cleared_on_cancel", timestamp: "t3", sessionId: "s", content: ownerContent }, false, withBinding(3));
+    expect(cancelled).toEqual({ type: "phren_queue_returned", key: digest(ownerContent), phrenDeliveryId: "phone-send-0001", timestamp: "t3" });
+  });
+
+  it("names a returned queue occurrence, and a submitted turn that replaced it", () => {
+    const popAll = visibleClaudeEvent({ type: "queue-operation", operation: "popAll", timestamp: "t", content: ownerContent }, false, withBinding(3));
+    expect(popAll).toEqual({ type: "phren_queue_returned", key: digest(ownerContent), phrenDeliveryId: "phone-send-0001", timestamp: "t" });
+    const turn = visibleClaudeEvent({ type: "user", uuid: "u1", timestamp: "t", message: { role: "user", content: "Ship it" } }, false,
+      { offset: 9, deliveryFor: (_raw, at) => at === 9 ? "phone-send-0001" : undefined });
+    expect(turn).toMatchObject({ type: "user", phrenDeliveryId: "phone-send-0001", message: { content: "Ship it" } });
+    // The binding belongs to one occurrence: a tool result with no prompt turn gets no id.
+    const tool = visibleClaudeEvent({ type: "user", timestamp: "t", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "x", content: "ok" }] } }, false,
+      { deliveryFor: () => "phone-send-0001" });
+    expect(tool).not.toMatchObject({ phrenDeliveryId: "phone-send-0001" });
   });
 });
 

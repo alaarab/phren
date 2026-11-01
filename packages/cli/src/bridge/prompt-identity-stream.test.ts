@@ -12,6 +12,7 @@ import { transcriptStreams, type StreamContext } from "./server-stream.js";
 import type { SideQuestions } from "./side-questions.js";
 import { setTerminalProvider } from "./terminal.js";
 import type { Json } from "./protocol.js";
+import { PromptDeliveries } from "./prompt-deliveries.js";
 
 class FakeClient extends EventEmitter {
   readyState: number = WebSocket.OPEN;
@@ -57,13 +58,13 @@ afterEach(async () => {
   root = "";
 });
 
-it("carries prompt identities through backlog, a live append and an older page", async () => {
+function streamContext(deliveries = new PromptDeliveries()): StreamContext {
   const hooks = {
     approval: () => undefined, passwordPrompt: () => false, compacting: () => false,
     watch: () => () => {}, syncTerminalDialog: async () => {}, servedQuestion: () => undefined, terminalPrompt: () => undefined,
-    deliveries: { forPane: () => [] }, changes: { view: () => undefined },
+    deliveries, changes: { view: () => undefined },
   };
-  const ctx: StreamContext = {
+  return {
     modules: { store: "", profile: "", modules: [], generation: "test", has: (name: string) => name === "hook" } as never,
     agentHooks: hooks as unknown as AgentHooks,
     codexQuestions: { pending: async () => [], availableFor: () => false } as unknown as CodexQuestions,
@@ -71,6 +72,10 @@ it("carries prompt identities through backlog, a live append and an older page",
     info: { modules: {}, store: "store", profile: "profile", generation: "test" } as unknown as HookInfo,
     activeCapabilities: {},
   };
+}
+
+it("carries prompt identities through backlog, a live append and an older page", async () => {
+  const ctx = streamContext();
   const streams = transcriptStreams(ctx);
   const client = new FakeClient(); openClient = client;
   const query = new URLSearchParams({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane,
@@ -100,19 +105,7 @@ it("carries prompt identities through backlog, a live append and an older page",
 });
 
 it.each([false, true])("resets a delivered prompt identity when a later append makes it ambiguous (disconnected: %s)", async disconnected => {
-  const hooks = {
-    approval: () => undefined, passwordPrompt: () => false, compacting: () => false,
-    watch: () => () => {}, syncTerminalDialog: async () => {}, servedQuestion: () => undefined, terminalPrompt: () => undefined,
-    deliveries: { forPane: () => [] }, changes: { view: () => undefined },
-  };
-  const ctx: StreamContext = {
-    modules: { store: "", profile: "", modules: [], generation: "test", has: (name: string) => name === "hook" } as never,
-    agentHooks: hooks as unknown as AgentHooks,
-    codexQuestions: { pending: async () => [], availableFor: () => false } as unknown as CodexQuestions,
-    sideQuestions: { list: () => [] } as unknown as SideQuestions,
-    info: { modules: {}, store: "store", profile: "profile", generation: "test" } as unknown as HookInfo,
-    activeCapabilities: {},
-  };
+  const ctx = streamContext();
   const streams = transcriptStreams(ctx), client = new FakeClient(); openClient = client;
   const query = new URLSearchParams({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane,
     source: target.source, session: target.session });
@@ -149,4 +142,53 @@ it.each([false, true])("resets a delivered prompt identity when a later append m
   }
   expect([...state.values()]).not.toContain(shared);
   receiving.close(1000);
+});
+
+it.each([false, true])("preserves queue bindings and independent prompt identities through an ambiguity reset (disconnected: %s)", async disconnected => {
+  const deliveries = new PromptDeliveries(undefined, () => Date.parse("2026-01-02T03:04:09.000Z"));
+  await deliveries.expect(target, "Queued request", 1, undefined, "phone-prompt-identity-01");
+  deliveries.queue("phone-prompt-identity-01", target);
+  await deliveries.bindClaudeQueueRows(target, []);
+  const transcript = path.join(root, "projects", "test", `${fixture.session}.jsonl`);
+  // A queue placeholder's promptId is not an eligible prompt identity and must
+  // neither export one nor make the ordinary prompt with that id ambiguous.
+  await appendFile(transcript, JSON.stringify({ type: "queue-operation", operation: "enqueue", content: "Queued request",
+    timestamp: "2026-01-02T03:04:09.000Z", sessionId: target.session, promptId: fixture.rows[0].promptId }) + "\n");
+  const streams = transcriptStreams(streamContext(deliveries)), client = new FakeClient(); openClient = client;
+  const query = new URLSearchParams(target);
+  const url = () => new URL(`http://phren.local/v1/transcripts?${query}`);
+  await streams.stream(client, url());
+  expect(client.closed).toBeUndefined();
+  const initial = client.frames()[0].entries as { line: number; promptEntryId?: string; raw: Json }[];
+  expect(initial.find(entry => entry.line === 0)?.promptEntryId).toBe("claude:prompt:fixture-prompt-alpha");
+  expect(initial.find(entry => entry.line === 2)).not.toHaveProperty("promptEntryId");
+  expect(initial.find(entry => entry.line === 2)?.raw.phrenDeliveryId).toBe("phone-prompt-identity-01");
+  if (disconnected) client.close(1000);
+  const rows = fixture.rows.slice(2).map(row => ({ ...row }));
+  rows[1].promptId = fixture.rows[0].promptId;
+  await appendFile(transcript, [...rows,
+    { type: "queue-operation", operation: "dequeue", sessionId: target.session },
+    { type: "user", promptId: "fixture-queue-submitted", timestamp: "2026-01-02T03:04:10.000Z", sessionId: target.session,
+      message: { role: "user", content: "Queued request" } },
+  ].map(row => JSON.stringify(row)).join("\n") + "\n");
+  let receiving = client;
+  if (disconnected) {
+    receiving = new FakeClient(); openClient = receiving;
+    query.set("afterLine", "2");
+    await streams.stream(receiving, url());
+  }
+  const frames = () => receiving.frames().filter(frame => frame.type === "backlog" && frame.reset === true && frame.totalLines === 8);
+  await vi.waitFor(() => expect(frames()).toHaveLength(1), { timeout: 3_000 });
+  const entries = frames()[0].entries as { line: number; promptEntryId?: string; raw: Json }[];
+  for (const line of [0, 4]) expect(entries.find(entry => entry.line === line)).not.toHaveProperty("promptEntryId");
+  for (const line of [2, 6, 7]) expect(entries.find(entry => entry.line === line)?.raw.phrenDeliveryId).toBe("phone-prompt-identity-01");
+  expect(entries.find(entry => entry.line === 7)?.promptEntryId).toBe("claude:prompt:fixture-queue-submitted");
+  expect(entries.find(entry => entry.line === 5)?.promptEntryId).toBe("claude:prompt:fixture-prompt-gamma");
+  receiving.emit("message", Buffer.from(JSON.stringify({ type: "older", beforeLine: 3 })));
+  await vi.waitFor(() => expect(receiving.frames().some(frame => frame.type === "older")).toBe(true), { timeout: 3_000 });
+  const older = receiving.frames().find(frame => frame.type === "older")!.entries as { line: number; promptEntryId?: string; raw: Json }[];
+  expect(older.find(entry => entry.line === 0)).not.toHaveProperty("promptEntryId");
+  expect(older.find(entry => entry.line === 2)?.raw.phrenDeliveryId).toBe("phone-prompt-identity-01");
+  receiving.close(1000);
+  await deliveries.flush();
 });

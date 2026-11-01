@@ -392,13 +392,15 @@ export class TranscriptReader {
   private nextLine = 0;
   private ambiguous = new Set<string>();
   constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup,
-              private readonly includeSidechain = false, private readonly cwd?: string) {}
+              private readonly includeSidechain = false, private readonly cwd?: string,
+              /** The phone delivery bound to each Claude queue row, by byte offset (PromptDeliveries). */
+              private readonly queueBindings?: () => Promise<Map<number, string> | undefined>) {}
   /** Prompt ids the latest page found ambiguous across the conversation. */
   get ambiguousPromptIds(): ReadonlySet<string> { return this.ambiguous; }
   /** A fresh opening page with the same reader options, for a reset after an
    * identity already delivered by this stream became ambiguous. */
   snapshot(signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
-    return new TranscriptReader(this.file, this.source, this.imageLine, this.changes, this.includeSidechain, this.cwd).read(undefined, signal);
+    return new TranscriptReader(this.file, this.source, this.imageLine, this.changes, this.includeSidechain, this.cwd, this.queueBindings).read(undefined, signal);
   }
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return this.readPage(before, undefined, signal);
@@ -430,10 +432,16 @@ export class TranscriptReader {
       const byteBudget = opening ? 1_048_576 : 4_194_304;
       let bytes = 0, cursor = end, held: number | undefined;
       // Claude's queue pairing: the row scan is newest-first, so a prompt turn
-      // is seen before the content-free dequeue that delivered it.
-      const queue: ClaudeQueueState = {};
+      // is seen before the content-free dequeue that delivered it. The bindings
+      // name the phone message behind each queue occurrence when the Hook has
+      // tracked the send, so the queue row and its consumption share one id.
+      const bindings = this.imageLine === undefined && this.source === "claude" && this.queueBindings
+        ? await this.queueBindings().catch(() => undefined) : undefined;
+      const queue: ClaudeQueueState = bindings
+        ? { deliveryFor: (_raw, offset) => offset === undefined ? undefined : bindings.get(offset) } : {};
       for await (const row of index.rows(handle, end, lower, signal)) {
         signal?.throwIfAborted();
+        queue.offset = row.offset;
         let rows: Json[] = [];
         let promptEntryId: string | undefined;
         try {

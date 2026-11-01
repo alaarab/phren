@@ -35,6 +35,15 @@ describe("Claude's queued messages", () => {
     expect(claudeQueued([row("enqueue", "back"), row("popAll", "back")].join("\n"))).toEqual([]);
   });
 
+  it("keeps identical occurrences separate and matches a wrapped enqueue to its plain removal", () => {
+    const rows = [row("enqueue", "same"), row("enqueue", '<pasted_content id="1">\nsame\n</pasted_content id="1">'),
+      row("remove", "same", { reason: "absorbed_mid_turn" })];
+    // One removal takes one of two identical messages, not both.
+    expect(claudeQueued(rows.join("\n"))).toEqual(["same"]);
+    const popped = [row("enqueue", "a"), row("enqueue", "a"), row("popAll", "a")];
+    expect(claudeQueued(popped.join("\n"))).toEqual(["a"]);
+  });
+
   it("sends the queue to the running turn with Claude's send-now chord", async () => {
     const { deps, sent } = pane(["check the build", "then open the PR"]);
     await expect(claudeQueueAction("send-now", "working", deps)).resolves.toEqual({ ok: true, messages: ["check the build", "then open the PR"] });

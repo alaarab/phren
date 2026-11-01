@@ -62,10 +62,10 @@ describe("transcript export hardening", () => {
       content: `<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>u1</tool-use-id>\n<status>completed</status>\n<summary>${"a".repeat(500)}</summary>\n</task-notification>` } });
     expect(JSON.stringify(raw)).not.toContain("SECRET");
   });
-  it.each(["<cross-session-message session='other'>SECRET</cross-session-message>", "<unknown>SECRET</unknown>", "<task-notification><tool-use-id>t</tool-use-id></task-notification>"])("consumes internal queues without human bubbles: %s", content => {
+  it.each(["<cross-session-message session='other'>SECRET</cross-session-message>", "<unknown>SECRET</unknown>", "<task-notification><tool-use-id>t</tool-use-id></task-notification>"])("withdraws internal queues without human bubbles: %s", content => {
     const raw = { type: "queue-operation", content: "  " + content };
     expect(visibleEvent({ ...raw, operation: "enqueue" }, "claude")?.phrenQueued).toBeUndefined();
-    expect(visibleEvent({ ...raw, operation: "remove" }, "claude")).toMatchObject({ type: "phren_queue_consumed", key: createHash("sha256").update(raw.content).digest("hex") });
+    expect(visibleEvent({ ...raw, operation: "remove" }, "claude")).toMatchObject({ type: "phren_queue_returned", key: createHash("sha256").update(raw.content).digest("hex") });
   });
   it.each(["<environment_context>", "<user_instructions>", "<permission_profile type='managed'>", "<system-reminder>", "<turn_context>"])("drops harness prefix %s in user turns only", prefix => {
     for (const source of ["codex", "claude"] as const) {

@@ -58,7 +58,10 @@ export function claudeQueued(transcript: string): string[] {
     let row: Record<string, unknown>;
     try { row = JSON.parse(line); } catch { continue; }
     if (row.type !== "queue-operation" || row.isSidechain) continue;
-    const content = typeof row.content === "string" ? row.content : undefined;
+    // Unwrap before matching so a pasted enqueue and its plain removal name the
+    // same occurrence. Occurrences stay separate entries: two identical sends
+    // are two messages, and one removal takes only one of them.
+    const content = typeof row.content === "string" ? unwrapPastedContent(row.content) : undefined;
     if (row.operation === "enqueue" && content !== undefined) queue.push(content);
     else if (row.operation === "dequeue") queue.shift();
     else if ((row.operation === "remove" || row.operation === "popAll") && content !== undefined) {
@@ -66,7 +69,7 @@ export function claudeQueued(transcript: string): string[] {
       if (index >= 0) queue.splice(index, 1);
     }
   }
-  return queue.map(unwrapPastedContent).filter(text => !text.trimStart().startsWith("<"));
+  return queue.filter(text => !text.trimStart().startsWith("<"));
 }
 
 /** Send Claude's queued messages to the running turn now, or withdraw them
