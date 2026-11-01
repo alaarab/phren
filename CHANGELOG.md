@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The Hook no longer accepts a forwarded peer identity whose fingerprint or id is not a string (an array holding a valid value used to pass the format check).
+
 ## [0.3.67] - 2026-10-31
 
 ### Added
