@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Claude approvals answered in the PC terminal now clear on the phone even when Git change capture is disabled.
+- Tool completion matches the approval's tool-use ID, or inputs regardless of key order when IDs are unavailable, so unrelated calls cannot clear it.
+- A tmux pane blocked by a permission request returns to working after its observed dialog disappears; unreadable screens keep it blocked.
+- Claude approval cards and notification actions clear when their confirmed terminal dialog disappears, even without a later lifecycle callback, after tmux reports the pane working, or after the hold expires.
+
 - Shell cards no longer show Git capture errors from abandoned before-snapshots. A repository’s capture error appears on only the first affected card across conversations, until capture succeeds again.
 - Secret scanning names an AWS secret access key written as `AWS_SECRET_ACCESS_KEY=...` correctly; it was caught before, but only as a generic long base64 secret.
 - A transcript stream no longer spins re-reading the pane when the phone asks for older history before the agent has written its transcript.
