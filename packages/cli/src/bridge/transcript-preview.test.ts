@@ -356,6 +356,137 @@ describe("live reply previews", () => {
       .toBe("New reply\nwith another line");
   });
 
+  const backgroundNotices = ["", "● ", "⏺ ", "  ⎿ "].flatMap(prefix =>
+    ["completed", "failed with exit code 1", "failed with exit code 137", "was killed", "stopped"]
+      .map(status => ({ prefix, status })));
+  it.each(backgroundNotices)("keeps a background-command notice out of the reply: $prefix / $status", ({ prefix, status }) => {
+    const pane = [
+      "❯ Explain this",
+      "● Checking CI.",
+      `${prefix}Background command "Merge #689 once CI is green" ${status}`,
+      "❯",
+    ].join("\n");
+    expect(claudePanePreview(pane, "Explain this")).toBe("Checking CI.");
+  });
+
+  it("treats a background-command notification alone as no reply", () => {
+    expect(claudePanePreview([
+      "❯ Explain this",
+      '● Background command "Merge #689 once CI is green" failed with exit code 1',
+      "❯",
+    ].join("\n"), "Explain this")).toBe("");
+  });
+
+  it("does not leak a wrapped background-command title into the reply", () => {
+    expect(claudePanePreview([
+      "❯ Explain this",
+      "● Checking CI.",
+      'Background command "Merge #689 once CI',
+      '  is green" failed with exit code 1',
+      "❯",
+    ].join("\n"), "Explain this")).toBe("Checking CI.");
+  });
+
+  it("suppresses every notice payload until a fresh reply marker, keeping the reply before it", () => {
+    const screen = (header: string, reply: boolean) => [
+      "❯ Explain this",
+      "● Checking CI.",
+      header,
+      "  private-or-status-payload",
+      ...(reply ? ["● The parser fix is ready.", "  It preserves real reply text."] : []),
+      "❯",
+    ].join("\n");
+    for (const header of [
+      "● Monitor event: CI changed",
+      "● Agent review-worker completed",
+      "● SessionStart hook succeeded",
+      "Hook output:",
+      "Interrupted by user",
+      "Conversation compacted",
+      "accept edits on (shift+tab to cycle)",
+    ]) {
+      const noticeOnly = claudePanePreview(screen(header, false), "Explain this");
+      expect(noticeOnly).toBe("Checking CI.");
+      expect(noticeOnly).not.toContain("private-or-status-payload");
+      expect(claudePanePreview(screen(header, true), "Explain this"))
+        .toBe("The parser fix is ready.\nIt preserves real reply text.");
+    }
+    // A task-notification XML echo and its delivery instructions are a notice block.
+    expect(claudePanePreview([
+      "❯ Explain this",
+      "● Checking CI.",
+      "● <task-notification>",
+      "  <task-id>merge-689</task-id>",
+      "  <status>failed</status>",
+      "  <summary>CI failed</summary>",
+      "  </task-notification>",
+      "  Read the output file to retrieve the result.",
+      "❯",
+    ].join("\n"), "Explain this")).toBe("Checking CI.");
+  });
+
+  // Reconstructed fixtures, 2026-11-01: the owner screenshot (06:25) emitted the
+  // wrapped background-command line as the streaming reply under a cursor bar;
+  // the Monitor/compaction/hook lines are Claude Code 2.1.316 session
+  // 6344b61f's JSONL rows (14:18-14:24 and its compact_boundary at 02:54),
+  // with paths and task names redacted to their public shape. These are not
+  // raw pane bytes; the real ANSI capture follows in its own test.
+  it("keeps reconstructed background, Monitor, compaction and hook screens out of the reply", () => {
+    expect(claudePanePreview([
+      "❯ Explain this",
+      'Background command "Merge #689 once CI',
+      'is green" failed with exit code 1',
+      "❯",
+    ].join("\n"), "Explain this")).toBe("");
+    expect(claudePanePreview([
+      "❯ Explain this",
+      "● Checking CI.",
+      '● Monitor event: "Worker exits (680/681/682 Hook + iOS)"',
+      "  <event>bug-longchat exited: 0</event>",
+      "  If this event is something the user would act on now, send a PushNotification.",
+      "❯",
+    ].join("\n"), "Explain this")).toBe("Checking CI.");
+    expect(claudePanePreview([
+      "❯ Explain this",
+      "● Checking CI.",
+      "Conversation compacted",
+      "  (auto) 310504 tokens → 14569 tokens",
+      "❯",
+    ].join("\n"), "Explain this")).toBe("Checking CI.");
+    expect(claudePanePreview([
+      "❯ Explain this",
+      "● Checking CI.",
+      "UserPromptSubmit hook success: ◆ phren · phren · 3 results",
+      "  <phren-context>",
+      "  1 finding",
+      "  </phren-context>",
+      "❯",
+    ].join("\n"), "Explain this")).toBe("Checking CI.");
+  });
+
+  // Real Claude Code pane capture, 2026-11-01 06:48
+  // (.scratch/real-pane-ansi.txt), trimmed to one reply block and its two
+  // adjacent Monitor notices; intervening turns were removed and a neutral
+  // prompt line added to anchor the block. The SGR styling, the ⏺ markers and
+  // indentation are verbatim.
+  it("keeps real Claude pane Monitor notices out of the reply (ANSI capture)", () => {
+    const R = "\x1b[0m", W = "\x1b[38;2;255;255;255m", G = "\x1b[38;2;153;153;153m";
+    const pane = [
+      "❯ Review the stray-text fix",
+      `${R}${W}⏺ ${R}The stray-text fix now passes my checks: typecheck is clean and all 230 transcript tests pass. That's the one where Claude's notices showed up as the reply being written. It's back with\r`,
+      "  Codex for a second review.\r",
+      `${R}${W}⏺ ${R}Monitor event: review-hook-checkpointturn exited: 0${R}${G} · Worker exits (diagnoses, cleanups, reviews)${R}\r`,
+      `${R}${W}⏺ ${R}Monitor event: rereview-hook-previewchrome exited: 0${R}${G} · Worker exits (diagnoses, cleanups, reviews)${R}\r`,
+      "❯",
+    ].join("\n");
+    const text = claudePanePreview(pane, "Review the stray-text fix");
+    expect(text).toContain("The stray-text fix now passes my checks");
+    expect(text).toContain("Codex for a second review.");
+    expect(text).not.toContain("Monitor event");
+    expect(text).not.toContain("review-hook-checkpointturn");
+    expect(text).not.toContain("rereview-hook-previewchrome");
+  });
+
   it("prefers Codex deltas and never reads the pane, including an empty delta stream", async () => {
     const pane = vi.fn(async () => "terminal text");
     const delta = vi.fn().mockResolvedValueOnce({ turnStartedAt: start, text: "Delta one" })
