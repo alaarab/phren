@@ -58,6 +58,9 @@ jobs:
             exit 1
           }
 
+      # Only a manually dispatched "RC validation" run counts. The scheduled
+      # nightly has the display title "Nightly RC" and event "schedule", so it
+      # can never satisfy this evidence check.
       - name: Require successful full release candidate validation of this exact commit
         env:
           GH_TOKEN: ${{ github.token }}

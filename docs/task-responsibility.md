@@ -74,4 +74,4 @@ A stale or already claimed task returns 409 `task-launch-conflict`. After reserv
 
 Phones should preserve unknown metadata when writing older tasks, use stable identities for links, show prerequisite titles, and keep responsibility controls separate from section controls. Integrator owns native iOS implementation; the Android lead owns Android. This core change does not modify either app repository or installed Hooks.
 
-Development CI builds and lints this source. Prepared regression tests, cross-machine sync and native runtime acceptance remain deferred to the consolidated release candidate.
+Development CI builds and lints this source. Prepared regression tests, cross-machine sync and native runtime acceptance remain deferred to the consolidated release candidate. A nightly release candidate on main runs that full suite, but only a manually dispatched `RC validation` run counts as release evidence.
