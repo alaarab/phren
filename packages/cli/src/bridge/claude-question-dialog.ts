@@ -54,11 +54,36 @@ const GUTTER = /^(\s*)│(?: |$)/;
  * with its "Esc to cancel" footer or the review's Submit/Cancel rows. */
 export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefined {
   const lines = joinDialogFooters(text.split(/\r?\n/));
-  let bar = -1;
-  for (let index = lines.length - 1; index >= 0; index--) if (TAB_BAR.test(lines[index]) && /[☐☒]/.test(lines[index])) { bar = index; break; }
+  let bar = -1, barEnd = -1, tabBar = "";
+  // A narrow pane soft-wraps the tab bar. Reading only its last physical
+  // row either loses tabs (a false set mismatch) or misses the dialog when
+  // that row contains only Submit. Keep the complete last bar and start
+  // the body after all of its physical rows.
+  for (let end = lines.length - 1; end >= 0 && bar < 0; end--) {
+    let candidates: string[] = [];
+    for (let start = end; start >= 0; start--) {
+      const line = lines[start];
+      if (!line.trim() || /^─+$/.test(line.trim())) break;
+      // Terminal cell counts cannot reliably recover a wrap boundary (emoji
+      // sequences vary by terminal), and a capture drops the space a row
+      // wrapped after. Keep both joins of each wrap, no space first, while
+      // they still end in the Submit suffix; a complete bar wins over one
+      // that only has the suffix.
+      const joins = candidates.length ? candidates.flatMap(value => [line + value, line + " " + value]) : [line];
+      const viable = joins.filter(value => TAB_BAR.test(value) || /✔\s+Submit\s*(?:→\s*)?$/.test(value));
+      candidates = (viable.length ? viable : joins.slice(0, 1)).slice(0, 16);
+      const complete = candidates.find(value => TAB_BAR.test(value) && /[☐☒]/.test(value));
+      if (complete) {
+        bar = start; barEnd = end; tabBar = complete;
+      }
+      // The leading arrow is the start of this bar. A checkbox in earlier
+      // output belongs to that output, even when there is no blank row.
+      if (/^\s*←/.test(line)) break;
+    }
+  }
   if (bar < 0) return undefined;
-  const tabs = [...lines[bar].matchAll(/[☐☒]\s+([^☐☒✔→]+?)(?=\s{2,}|\s*[☐☒✔→]|\s*$)/g)].map(match => match[1].trim());
-  const body = lines.slice(bar + 1);
+  const tabs = [...tabBar.matchAll(/[☐☒]\s+([^☐☒✔→]+?)(?=\s{2,}|\s*[☐☒✔→]|\s*$)/g)].map(match => match[1].trim());
+  const body = lines.slice(barEnd + 1);
   const tail = body.map(line => line.trim()).filter(line => line && !/^─+$/.test(line));
   if (!/^(?:Enter to .*Esc to cancel|2\. Cancel)$/.test(tail.at(-1) ?? "")) return undefined;
   if (lines.slice(0, bar).filter(line => /^\s*```/.test(line)).length % 2) return undefined;
