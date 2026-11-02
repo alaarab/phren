@@ -1835,10 +1835,22 @@ schedules:
       // The phone sends the option's own key, not its row number.
       expect((await api("/v1/keys", { target, keys: ["p"] })).status).toBe(200);
       expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["p"]]);
-      // Answered: the prompt is gone, and stays gone once the pane works.
-      expect((await status()).terminalPrompt).toBeUndefined();
+      // Answered: Codex draws its working line, and the prompt stays gone
+      // through later screen reads and confirmations, then once the pane works.
+      paneLines = "• Working (1s • esc to interrupt)\n";
+      const watched = async () => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        await sleep(DIALOG_THROTTLE_MS + 1_200);
+        socket.terminate();
+        return frames.map(f => f.agentStatus);
+      };
+      const after = await watched();
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.filter(s => s?.terminalPrompt)).toEqual([]);
       agentStatus = "working";
-      expect((await status()).terminalPrompt).toBeUndefined();
+      expect((await watched()).filter(s => s?.terminalPrompt)).toEqual([]);
     });
 
     describe("Codex keyless terminal menus", () => {
