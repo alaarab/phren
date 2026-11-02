@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.70] - 2026-11-02
+
 ### Fixed
 
 - Recognize every supported Claude permission-mode footer when clearing resolved dialogs, including accept-edits and bypass-permissions, so question cards, tmux blocked status and permission holds retire at the empty composer.
