@@ -146,6 +146,11 @@ export function transcriptStreams(ctx: StreamContext) {
           if (awaitingTranscript) {
             if (first) send(client, { ...emptyPage, type: "backlog", ...conversation });
           } else if (reader) {
+            if (child === null && target.source === "claude") {
+              const boundary = Math.max(agentHooks.questionResolution?.(target) ?? 0,
+                Date.parse(evidence.record?.prompt?.at ?? "") || 0, Date.parse(evidence.record?.stop?.at ?? "") || 0);
+              reader.resolveClaudeQuestionsThrough(boundary || undefined);
+            }
             await refreshTranscript(reader.file, conversation.source, conversation.session);
             const resumingClaude = first && conversation.source === "claude" && resumeAfterLine !== undefined;
             let page = resumeAfterLine === undefined
@@ -187,21 +192,13 @@ export function transcriptStreams(ctx: StreamContext) {
               send(client, { ...page, ...preview, ...activity, type: first || page.reset ? "backlog" : "append", ...conversation });
             } else if (preview) send(client, { type: "preview", ...conversation, ...preview, ...activity });
           } else {
-            let pendingApproval = agentHooks.approval(target);
+            const pendingApproval = agentHooks.approval(target);
             const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = modules.has("git") && cwd ? await repositoryBranch(cwd) : undefined;
             const waiting = !pendingApproval && ["blocked", "waiting"].includes(String(resolvedStatus));
-            // Claude Code's auto-mode fallback, opencode and Codex draw a
-            // numbered dialog in the pane with no PermissionRequest hook
-            // behind it: read the pane (at most once per three seconds) and
-            // publish the dialog as the same terminal choice shape the phone
-            // answers. Codex also resolves the real terminal choices for a held
-            // approval; a structured question keeps its own answer channel.
-            if (["claude", "opencode", "codex"].includes(target.source)) {
-              await agentHooks.syncTerminalDialog(target, waiting && !pendingQuestions?.length);
-              pendingApproval = agentHooks.approval(target);
-            }
+            // effectivePaneEvidence already reconciled this tick's dialog.
+            // Reusing that observation keeps status and prompt in agreement.
             // A served OpenCode pane's question comes from its own API, whatever
             // status its terminal reports.
             const servedQuestion = agentHooks.servedQuestion(target);
@@ -306,7 +303,7 @@ export function transcriptStreams(ctx: StreamContext) {
       }
       if (abort.signal.aborted) { stop(); return; }
       ready = true;
-      timer = setInterval(() => { countTick(url.pathname === "/v1/transcripts" ? "stream-transcripts" : "stream-status"); void tick(); }, reader || awaitingTranscript ? 500 : 1500);
+      timer = setInterval(() => { countTick(url.pathname === "/v1/transcripts" ? "stream-transcripts" : "stream-status"); void tick(); }, 500);
       await tick();
     } catch (error) { stop(); throw error; }
   }

@@ -26,6 +26,7 @@ vi.mock("./transcripts.js", async importOriginal => {
     },
     refreshTranscript: async () => undefined,
     TranscriptReader: class {
+      resolveClaudeQuestionsThrough() {}
       get ambiguousPromptIds() { return new Set<string>(); }
       async read(before?: number) {
         transcript.reads.push(before ?? -1);
@@ -118,7 +119,7 @@ afterEach(() => {
 });
 
 describe("status stream", () => {
-  it("streams the pane's status on open, then re-reads the pane on the 1.5s status clock", async () => {
+  it("streams the pane's status on open, then re-reads the pane every 500ms", async () => {
     const h = harness(), client = new FakeClient();
     await open(h.streams, client, target);
     expect(client.frames()).toHaveLength(1);
@@ -128,10 +129,10 @@ describe("status stream", () => {
     });
     expect(vi.mocked(validateTarget)).toHaveBeenCalledTimes(1);
 
-    // No transcript means the slower clock: nothing at 1s, a fresh read at 1.5s.
-    await tickBy(1_000);
+    // Status polling must not add a 1.5s delay to a newly confirmed dialog.
+    await tickBy(499);
     expect(client.frames()).toHaveLength(1);
-    await tickBy(500);
+    await tickBy(1);
     expect(client.frames()).toHaveLength(2);
     expect(client.frames()[1]).toMatchObject({ agentStatus: { status: "idle" } });
     expect(vi.mocked(validateTarget)).toHaveBeenCalledTimes(2);

@@ -1,3 +1,4 @@
+import { claudeQuestionResolutions, projectClaudeQuestionResolutions } from "./claude-question-lifecycle.js";
 import { readdir, realpath, lstat, type FileHandle } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
@@ -391,6 +392,9 @@ export class TranscriptReader {
   private revision?: string;
   private nextLine = 0;
   private ambiguous = new Set<string>();
+  private questionBoundary?: number;
+  private resolvedQuestionIds = "";
+  resolveClaudeQuestionsThrough(at: number | undefined): void { this.questionBoundary = at; }
   constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup,
               private readonly includeSidechain = false, private readonly cwd?: string,
               /** The phone delivery bound to each Claude queue row, by byte offset (PromptDeliveries). */
@@ -400,7 +404,9 @@ export class TranscriptReader {
   /** A fresh opening page with the same reader options, for a reset after an
    * identity already delivered by this stream became ambiguous. */
   snapshot(signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
-    return new TranscriptReader(this.file, this.source, this.imageLine, this.changes, this.includeSidechain, this.cwd, this.queueBindings).read(undefined, signal);
+    const reader = new TranscriptReader(this.file, this.source, this.imageLine, this.changes, this.includeSidechain, this.cwd, this.queueBindings);
+    reader.resolveClaudeQuestionsThrough(this.questionBoundary);
+    return reader.read(undefined, signal);
   }
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return this.readPage(before, undefined, signal);
@@ -411,6 +417,15 @@ export class TranscriptReader {
     return this.readPage(undefined, afterLine, signal);
   }
   private async readPage(before?: number, afterLine?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
+    const resolvedQuestions = this.source === "claude" && !this.includeSidechain
+      ? await claudeQuestionResolutions(this.file, this.questionBoundary, signal) : new Set<string>();
+    const identities = JSON.stringify([...resolvedQuestions]);
+    if (identities !== this.resolvedQuestionIds) {
+      // A question can resolve without a transcript append (Stop/owner hook).
+      // Replace the tail so a client that already saw its call sees its resolution.
+      if (this.resolvedQuestionIds) this.revision = undefined;
+      this.resolvedQuestionIds = identities;
+    }
     return withTranscriptIndex(this.file, async (handle, index) => {
       const reset = this.revision !== index.revision;
       const end = Math.min(before ?? index.lines, index.lines);
@@ -479,6 +494,7 @@ export class TranscriptReader {
               // write or patch) keeps it; the shell lookup only fills in the rest.
               if (Object.keys(attached).length) raw = { ...raw, phren_changes: { ...attached, ...object(raw.phren_changes) } };
             }
+            if (this.source === "claude") raw = projectClaudeQuestionResolutions(raw, resolvedQuestions);
             const projected = projectTranscriptRows(raw, this.source);
             rows = this.imageLine === row.line ? projected.rows : projected.rows.map(r => chatFrame(r, this.source));
             if (projected.base) rewriteProjectedOutput(entries, projected.base);

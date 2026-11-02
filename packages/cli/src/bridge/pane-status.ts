@@ -23,12 +23,10 @@ import { readFile } from "node:fs/promises";
 import { stripTerminal } from "../terminal-text.js";
 import { bindingPath } from "./agent-hook-stores.js";
 import { claudeQuestionDialog } from "./claude-question-dialog.js";
-import { intervalFromEnv } from "./limits.js";
+import { confirmDialogRead, DIALOG_READ_MS } from "./dialog-observation.js";
 import { object } from "./protocol.js";
-import { numberedDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
-
-/** A working or blocked pane's screen is read for a dialog at most once per this window. */
-const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
+import { claudeFooterMode } from "./claude-footer-mode.js";
+import { claudePermissionDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
 
 const EVENT_STATUS: Record<string, string> = {
   SessionStart: "idle", UserPromptSubmit: "working", PreToolUse: "working", PostToolUse: "working",
@@ -53,6 +51,7 @@ const key = (server: string, pane: string) => `${server}\0${pane}`;
  * `terminal`, and answers it with its sequence number. */
 export function notePaneStatus(server: string, pane: string, terminal: string, status: string, at = Date.now()): { status: string; seq: number } {
   const id = key(server, pane), current = entries.get(id);
+  if (status === "idle" || status === "done") dialogs.delete(id);
   if (current && current.terminal === terminal && current.status === status) { current.at = at; return { status, seq: current.seq }; }
   entries.delete(id);
   while (entries.size >= 512) entries.delete(entries.keys().next().value!);
@@ -67,9 +66,10 @@ export function notePaneStatus(server: string, pane: string, terminal: string, s
 export function settleBlockedPane(server: string, pane: string, minimumMs = 3_000): void {
   const id = key(server, pane), current = entries.get(id), dialog = dialogs.get(id);
   if (current?.status === "blocked" && Date.now() - current.at >= minimumMs) notePaneStatus(server, pane, current.terminal, "working");
-  if (dialog?.shown && Date.now() - dialog.shown.at >= minimumMs) {
+  if (dialog && (minimumMs === 0 || (dialog.shown && Date.now() - dialog.shown.at >= minimumMs))) {
     // The screen can show the answered dialog a moment longer: the next read
     // waits a whole window.
+    dialog.generation = {};
     dialog.shown = undefined; dialog.cleared = ++sequence; dialog.readAt = Date.now();
   }
 }
@@ -93,7 +93,7 @@ export async function paneStatus(server: string, pane: string, terminal: string)
 
 /** Claude's optional "Teach auto mode about your environment?" dialog. */
 export function claudeTeachAutoModeDialog(screen: string): boolean {
-  return /Teach auto mode about your environment/i.test(stripTerminal(screen));
+  return /^Teach auto mode about your environment\?$/i.test(claudePermissionDialog(screen)?.title ?? "");
 }
 
 /** Whether `screen` (a pane's visible lines, with or without colors) shows a
@@ -106,10 +106,30 @@ export function screenDialog(agent: string, screen: string): boolean {
   if (agent === "opencode") return !!opencodePermissionDialog(screen);
   if (agent === "codex" || agent === "copilot") return !!visibleTerminalChoice(text);
   if (agent === "claude" && (claudeQuestionDialog(text) || claudeTeachAutoModeDialog(text))) return true;
-  return /Esc to cancel/i.test(text) && !!numberedDialog(text);
+  return !!claudePermissionDialog(text);
 }
 
-interface Dialog { terminal: string; readAt: number; shown?: { at: number; seq: number }; cleared?: number }
+/** Failure to parse a resize/redraw is not evidence that a dialog was answered.
+ * Only a newer composer or the harness's working hint proves disappearance. */
+export function screenDialogState(agent: string, screen: string): "shown" | "gone" | "unknown" {
+  if (screenDialog(agent, screen)) return "shown";
+  const lines = stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const composer = (line: string) => /^[❯›](?!\s*\d+[.)])(?:\s|$)/.test(line);
+  const chrome = (line: string) => /^[─━═]+$/.test(line) || claudeFooterMode(line) !== undefined
+    || /^(?:[←→?].*(?:agents|shortcuts)|(?:gpt-|GPT-|claude-|Claude ).*)/i.test(line);
+  const liveTail = (index: number) => lines.slice(index + 1).every(line => composer(line) || chrome(line));
+  let cue = -1;
+  for (let index = 0; index < lines.length; index++) {
+    if (/^(?:[>❯›]?\s*\d+[.)]|Do you want|Would you like|Ready to code|Allow\b|Trust\b|Teach auto|△\s*Permission|[☐☒]|.*Esc to cancel)/i.test(lines[index])) cue = index;
+  }
+  for (let index = lines.length - 1; index > cue; index--) {
+    if (/\besc to interrupt\b/i.test(lines[index]) && liveTail(index)) return "gone";
+    if (index >= lines.length - 3 && composer(lines[index]) && liveTail(index)) return "gone";
+  }
+  return "unknown";
+}
+
+interface Dialog { terminal: string; generation?: object; readAt: number; reading?: Promise<void>; shown?: { at: number; seq: number }; cleared?: number }
 const dialogs = new Map<string, Dialog>();
 
 /** The status of a pane after a look at its screen: blocked while its agent
@@ -128,19 +148,34 @@ export async function dialogStatus(server: string, pane: string, terminal: strin
     dialogs.set(id, entry);
   }
   const now = Date.now();
-  if (now - entry.readAt >= DIALOG_READ_MS) {
+  if (!entry.reading && now - entry.readAt >= DIALOG_READ_MS) {
     entry.readAt = now;
-    // A failed read says nothing: the pane keeps what it had.
-    const shown = await read().then(screen => screenDialog(agent, screen), () => undefined);
-    if (shown === true && !entry.shown) entry.shown = { at: now, seq: ++sequence };
-    else if (shown === false && entry.shown && now - entry.shown.at >= 3_000) {
-      if (base.status === "blocked") {
-        settleBlockedPane(server, pane);
-        base = await paneStatus(server, pane, terminal) ?? base;
+    const observed = entry;
+    const generation = observed.generation;
+    const current = () => dialogs.get(id) === observed && observed.generation === generation;
+    const work = async () => {
+      let state = await read().then(screen => screenDialogState(agent, screen), () => "unknown" as const);
+      if (state === "shown" && !observed.shown && base?.status !== "blocked") {
+        const confirmation = await confirmDialogRead(read, current);
+        state = confirmation === undefined ? "unknown" : screenDialogState(agent, confirmation);
       }
-      entry.shown = undefined; entry.cleared = ++sequence;
-    }
+      if (!current()) return;
+      if (state === "shown" && !observed.shown) observed.shown = { at: now, seq: ++sequence };
+      if (state === "gone" && observed.shown) {
+        if (base?.status === "blocked") {
+          settleBlockedPane(server, pane, 0);
+          base = await paneStatus(server, pane, terminal) ?? base;
+        }
+        observed.shown = undefined; observed.cleared = ++sequence;
+      }
+    };
+    observed.reading = work();
   }
+  if (entry.reading) {
+    const work = entry.reading;
+    try { await work; } finally { if (entry.reading === work) entry.reading = undefined; }
+  }
+  if (dialogs.get(id) !== entry) return await paneStatus(server, pane, terminal) ?? base;
   if (entry.shown) return { status: "blocked", seq: entry.shown.seq };
   return { status: base.status, seq: Math.max(base.seq, entry.cleared ?? 0) };
 }

@@ -320,20 +320,42 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
     expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "idle" });
     await writeFile("/tmp/previewflap-replay.json", JSON.stringify({ reconstructed: true, frames: trace }, null, 2));
   });
-  it("holds a real dialog without retiring an accepted preview", async () => {
+  it("shows a confirmed dialog within a second while preserving previews and ignoring numbered output", async () => {
     await forward("full", { hook_event_name: "UserPromptSubmit", prompt });
     const transcript = await open();
+    screen = "Here is the plan:\n1. Read the tests\n2. Fix the bug";
+    const status = await open("/v1/status");
+    await new Promise(resolve => setTimeout(resolve, 550));
+    expect(status.frames.every(frame => !(frame.agentStatus as Json)?.terminalPrompt)).toBe(true);
     screen = "Bash command\n\n  ls\n\nDo you want to proceed?\n ❯ 1. Yes\n   2. No\nEsc to cancel · Tab to amend";
-    // The dialog reader's bounded cache expires independently of stream ticks.
-    const now = Date.now(); const clock = vi.spyOn(Date, "now").mockReturnValue(now + 4000);
-    try {
-      expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "blocked" });
-      expect(await overview()).toMatchObject({ agentStatus: "blocked" });
-    } finally { clock.mockRestore(); }
+    const appeared = performance.now();
+    await vi.waitFor(() => expect(status.frames.at(-1)?.agentStatus).toMatchObject({ status: "blocked", terminalPrompt: { toolName: "Question" } }), { timeout: 1300, interval: 10 });
+    expect(performance.now() - appeared).toBeLessThan(1100);
+    expect(await overview()).toMatchObject({ agentStatus: "blocked" });
+    screen = "✻ Working (esc to interrupt)\n❯ ";
+    await vi.waitFor(() => expect(status.frames.at(-1)?.agentStatus).toMatchObject({ status: "working" }), { timeout: 1100 });
+    expect(status.frames.at(-1)?.agentStatus).not.toHaveProperty("terminalPrompt");
     await append({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", id: "dialog-tool", input: { command: "ls" } }] } });
     await vi.waitFor(() => expect(transcript.frames.length).toBeGreaterThan(1));
     expect(transcript.frames.slice(1).some(frame => frame.preview === null)).toBe(false);
   });
+  it.each(["Stop", "UserPromptSubmit"])("streams an exact question resolution after %s without a tool result", async event => {
+    await forward("full", { hook_event_name: "UserPromptSubmit", prompt });
+    await append({ type: "assistant", timestamp: new Date().toISOString(), message: { id: "question-turn", role: "assistant", content: [
+      { type: "tool_use", id: "question-1", name: "AskUserQuestion", input: { questions: [{ question: "Pick one?", header: "Choice", multiSelect: false,
+        options: [{ label: "A", description: "First" }, { label: "B", description: "Second" }] }] } },
+    ] } });
+    const stream = await open();
+    const resolved = (frame: Json) => objects(frame.entries).flatMap(entry => objects((entry.raw as Json)?.message && ((entry.raw as Json).message as Json).content))
+      .some(block => block.type === "tool_result" && block.tool_use_id === "question-1" && block.phren_resolution === true);
+    expect(stream.frames.some(resolved)).toBe(false);
+    if (event === "UserPromptSubmit") await append({ type: "user", uuid: "cancel-question", timestamp: new Date().toISOString(),
+      message: { role: "user", content: "Cancel that question." } });
+    await forward("full", { hook_event_name: event, ...(event === "UserPromptSubmit" ? { prompt: "Cancel that question." } : {}) });
+    await vi.waitFor(() => expect(stream.frames.some(frame => frame.reset === true && resolved(frame))).toBe(true), { timeout: 2500 });
+    expect((await open()).frames.some(resolved)).toBe(true);
+  });
+
   it("uses running children for stream and overview after the foreground Stop", async () => {
     await forward("full", { hook_event_name: "UserPromptSubmit", prompt });
     await append({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "launch1", name: "Agent", input: { description: "review", prompt: "Review", run_in_background: true } }] } });
