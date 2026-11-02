@@ -411,7 +411,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   // Checked before anything is created, so a refusal leaves no pane, worktree or brief file behind.
-  // A Claude launch that names no account runs under the signed-in one with the most room left.
+  // Share the unnamed-account decision with headless schedules, including when usage is unavailable.
   // Pools and roles apply as in dispatch: a 409 account_pool when no account may do this project's work.
   const project = typeof data.project === "string" && data.project ? data.project : undefined;
   const choice = kind === "claude" && named === undefined ? await pickClaudeAccount(`Launch "${label}"`, { project, cwd: projectDirectory }) : undefined;

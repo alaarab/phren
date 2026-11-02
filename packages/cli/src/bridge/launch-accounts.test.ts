@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setAccountSettings, setComputerAllowedPools } from "./account-pools.js";
 import { clearAccountCaches } from "./claude-accounts.js";
 import { setChoiceReaders } from "./account-choice.js";
 import type { AccountUsage } from "./usage.js";
@@ -22,7 +23,7 @@ const inventory = (over: Partial<Record<string, unknown>> = {}): HarnessInventor
 ] });
 
 describe("launching under a Claude account", () => {
-  let home: string, cwd: string, restore: () => void, placements: PanePlacement[], starts: AgentStart[], state: Json;
+  let home: string, cwd: string, restore: () => void, placements: PanePlacement[], starts: AgentStart[], state: Json & { workspaces: Json[]; tabs: Json[]; panes: Json[] };
   beforeEach(() => {
     home = mkdtempSync(path.join(tmpdir(), "phren-launch-accounts-"));
     cwd = path.join(home, "project"); mkdirSync(cwd);
@@ -44,7 +45,7 @@ describe("launching under a Claude account", () => {
       startAgent: async (_server: string, _pane: string, agent: AgentStart) => { starts.push(agent); },
     } as unknown as TerminalProvider);
   });
-  afterEach(() => { restore(); setLaunchInventory(undefined); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
+  afterEach(() => { restore(); setChoiceReaders({}); setLaunchInventory(undefined); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
 
   it("sets CLAUDE_CONFIG_DIR for the pane and the agent, trusts the folder in that home, and remembers the pane's account", async () => {
     const launched = await launchSession("default", { cwd, label: "Worker", kind: "claude", account: "work" }, { trustFolder: true });
@@ -83,6 +84,20 @@ describe("launching under a Claude account", () => {
       await expect(launchSession("default", { cwd, label: "B", kind: "claude", project: "client-a" })).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
       expect(placements).toHaveLength(1);
     } finally { setChoiceReaders({}); }
+  });
+
+  it.each(["off", "console", "last-resort"] as const)("an unnamed phone launch skips a %s default even without a usage reader", async role => {
+    await setAccountSettings("default", { pool: "client-a", ...(role === "console" ? {} : { role }) });
+    await setAccountSettings("work", { pool: "client-a", role: "helpers" });
+    await setComputerAllowedPools(["client-a"]);
+    const listed = inventory();
+    if (role === "console") listed.harnesses[0].accounts![0].console = true;
+    setChoiceReaders({ inventory: async () => listed });
+    expect(await launchSession("default", { cwd, label: "Policy", kind: "claude" })).toMatchObject({ account: "work" });
+    expect(starts[0].env).toEqual({ CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") });
+    await setComputerAllowedPools(["other"]);
+    await expect(launchSession("default", { cwd, label: "Refused", kind: "claude" })).rejects.toMatchObject({ status: 409, details: { code: "account_pool" } });
+    expect(placements).toHaveLength(1);
   });
 
   it("launches unchanged without an account, and for the default account", async () => {

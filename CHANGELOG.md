@@ -9,6 +9,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Unnamed Claude phone launches and schedules enforce account pools and roles even without a usage reader. Headless schedules use their owning store for project pool rules. Helper runs require the owner’s explicit `role: helpers`, including accounts named by a team project.
+
 - Hook delivery follow-up observes legitimate working turns without expiring at 30 seconds, then waits up to 30 seconds after the pane finishes for confirmation. It never sends delayed Enter keys: tmux and Herdr cannot atomically verify Claude's full composer and submit it. Unconfirmed messages remain reviewable with a reason and may still settle from a late submission hook. Recorded Claude nonbreaking prompt separators are recognized without normalizing message whitespace; wrapped or collapsed inputs are reported as unverifiable rather than submitted. Starting panes receive no blind recovery keys.
 
 ## [0.3.68] - 2026-11-01
