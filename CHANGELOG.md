@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Recognize every supported Claude permission-mode footer when clearing resolved dialogs, including accept-edits and bypass-permissions, so question cards, tmux blocked status and permission holds retire at the empty composer.
+
 - Restore Claude plan confirmations and wrapped Claude/Codex dialogs in narrow panes, including AskUserQuestion footers. Resize and incomplete screen reads preserve pending permissions. Screen confirmation now takes a separate 300 ms second read with a 400 ms read budget; default discovery is 350 ms and phone status updates every 500 ms.
 
 - Hook question cards require an active harness dialog at the bottom of the live screen. Screen-only blocking requires two consecutive observations and clears on disappearance; ordinary numbered output, quoted dialogs and stale rows no longer become questions. Released Claude permissions that disappear between reads retire after their initial draw grace. Transcript questions resolve by identity on their result, the next assistant turn, Stop or an owner prompt, even when the result never arrives.

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { request } from "node:http";
@@ -198,7 +199,8 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
       await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
       expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
       clock.mockReturnValue(start + 12_000);
-      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "✻ Working (esc to interrupt)\n❯ " } }));
+      const composer = readFileSync(new URL("./fixtures/claude/2.1.284/permission-mode-accept-edits-herdr.ansi", import.meta.url), "utf8");
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: composer } }));
       await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
       expect(hooks.approval(target)).toBeUndefined();
       expect(hooks.terminalPrompt(target)).toBeUndefined();

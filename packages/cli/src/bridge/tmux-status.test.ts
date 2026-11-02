@@ -82,6 +82,25 @@ describe("dialogs on a working pane's screen", () => {
     expect(screenDialog("phren", CLAUDE_DIALOG)).toBe(true);
   });
 
+  it.each(["default", "accept-edits", "plan", "auto", "bypass"])("clears a confirmed blocked pane at the %s permission-mode footer", async mode => {
+    let now = 6_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let screen = CLAUDE_DIALOG;
+    const read = async () => screen;
+    const base = notePaneStatus("tmux", "p-footer", "terminal-footer", "blocked");
+    const blocked = await dialogStatus("tmux", "p-footer", "terminal-footer", "claude", base, read);
+    expect(blocked).toMatchObject({ status: "blocked" });
+    const file = mode === "bypass" ? "accept-edits" : mode;
+    screen = readFileSync(new URL(`./fixtures/claude/2.1.284/permission-mode-${file}-herdr.ansi`, import.meta.url), "utf8");
+    // Bypass uses Claude's supported footer string; the other modes are captured screens.
+    if (mode === "bypass") screen = screen.replace("accept edits on", "bypass permissions on");
+    now += 350;
+    const cleared = await dialogStatus("tmux", "p-footer", "terminal-footer", "claude", base, read);
+    expect(cleared).toMatchObject({ status: "working" });
+    expect(cleared!.seq).toBeGreaterThan(blocked!.seq);
+    expect(await paneStatus("tmux", "p-footer", "terminal-footer")).toMatchObject({ status: "working" });
+  });
+
   it("marks a working pane blocked while its dialog shows, reading at most once per window", async () => {
     let now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);

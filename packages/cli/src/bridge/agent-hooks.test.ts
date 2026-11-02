@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { availablePaneEvidence } from "./session-evidence.js";
 import { resolveEffectiveStatus } from "./session-activity.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -279,7 +280,7 @@ describe("Claude's current screen at the status evidence boundary", () => {
     expect(status()).toBe("blocked");
     expect(vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.read")).toHaveLength(2);
     expect(hooks.terminalPrompt(claude)?.choice).toMatchObject({ title: "Do you want to proceed?" });
-    screen = "✻ Working (esc to interrupt)\n❯ "; now += 350;
+    screen = readFileSync(new URL("./fixtures/claude/2.1.284/permission-mode-accept-edits-herdr.ansi", import.meta.url), "utf8"); now += 350;
     await hooks.syncTerminalDialog(claude, true);
     expect(hooks.terminalPrompt(claude)).toBeUndefined();
     expect(status()).toBe("working");

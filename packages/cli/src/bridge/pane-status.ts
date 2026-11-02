@@ -25,6 +25,7 @@ import { bindingPath } from "./agent-hook-stores.js";
 import { claudeQuestionDialog } from "./claude-question-dialog.js";
 import { confirmDialogRead, DIALOG_READ_MS } from "./dialog-observation.js";
 import { object } from "./protocol.js";
+import { claudeFooterMode } from "./claude-footer-mode.js";
 import { claudePermissionDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
 
 const EVENT_STATUS: Record<string, string> = {
@@ -114,7 +115,8 @@ export function screenDialogState(agent: string, screen: string): "shown" | "gon
   if (screenDialog(agent, screen)) return "shown";
   const lines = stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   const composer = (line: string) => /^[❯›](?!\s*\d+[.)])(?:\s|$)/.test(line);
-  const chrome = (line: string) => /^[─━═]+$/.test(line) || /^(?:[←→?].*(?:agents|shortcuts)|(?:gpt-|GPT-|claude-|Claude ).*|[⏵⏸].*mode)/i.test(line);
+  const chrome = (line: string) => /^[─━═]+$/.test(line) || claudeFooterMode(line) !== undefined
+    || /^(?:[←→?].*(?:agents|shortcuts)|(?:gpt-|GPT-|claude-|Claude ).*)/i.test(line);
   const liveTail = (index: number) => lines.slice(index + 1).every(line => composer(line) || chrome(line));
   let cue = -1;
   for (let index = 0; index < lines.length; index++) {
