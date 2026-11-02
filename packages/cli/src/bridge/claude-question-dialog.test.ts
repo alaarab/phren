@@ -20,6 +20,8 @@ describe("reading Claude's question dialog", () => {
     ["Submit after VS16 emoji output", "☕️".repeat(8) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
     ["Submit after ZWJ emoji output", "👨‍👩‍👧‍👦".repeat(3) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
     ["a label before a spaced Submit suffix", "← ☐ Color ☐ Too\nls ✔\nSubmit →", ["Color", "Tools"]],
+    ["a tab whose separating space the capture trimmed", "← ☐ Color theme ☐ Size ☐\nTools ✔ Submit →", ["Color theme", "Size", "Tools"]],
+    ["three rows with a trimmed space", "← ☐ Color ☐\nSize ☐ Too\nls ✔ Submit →", ["Color", "Size", "Tools"]],
   ] as const)("preserves characters when a tab bar wraps inside %s", (_name, bar, tabs) => {
     expect(claudeQuestionDialog(shortDialog(bar))).toMatchObject({ kind: "question", title: "Pick?", tabs });
   });

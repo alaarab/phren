@@ -60,18 +60,21 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
   // that row contains only Submit. Keep the complete last bar and start
   // the body after all of its physical rows.
   for (let end = lines.length - 1; end >= 0 && bar < 0; end--) {
-    let candidate = "";
+    let candidates: string[] = [];
     for (let start = end; start >= 0; start--) {
       const line = lines[start];
       if (!line.trim() || /^─+$/.test(line.trim())) break;
       // Terminal cell counts cannot reliably recover a wrap boundary (emoji
-      // sequences vary by terminal). Prefer preserving the characters; add
-      // a space only when the bar grammar needs it. Recognize the Submit
-      // suffix too, while the upward scan has yet to reach the question tabs.
-      const joins = candidate ? [line + candidate, line + " " + candidate] : [line];
-      candidate = joins.find(value => TAB_BAR.test(value) || /✔\s+Submit\s*(?:→\s*)?$/.test(value)) ?? joins[0];
-      if (TAB_BAR.test(candidate) && /[☐☒]/.test(candidate)) {
-        bar = start; barEnd = end; tabBar = candidate;
+      // sequences vary by terminal), and a capture drops the space a row
+      // wrapped after. Keep both joins of each wrap, no space first, while
+      // they still end in the Submit suffix; a complete bar wins over one
+      // that only has the suffix.
+      const joins = candidates.length ? candidates.flatMap(value => [line + value, line + " " + value]) : [line];
+      const viable = joins.filter(value => TAB_BAR.test(value) || /✔\s+Submit\s*(?:→\s*)?$/.test(value));
+      candidates = (viable.length ? viable : joins.slice(0, 1)).slice(0, 16);
+      const complete = candidates.find(value => TAB_BAR.test(value) && /[☐☒]/.test(value));
+      if (complete) {
+        bar = start; barEnd = end; tabBar = complete;
       }
       // The leading arrow is the start of this bar. A checkbox in earlier
       // output belongs to that output, even when there is no blank row.
