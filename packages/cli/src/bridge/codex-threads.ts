@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { codexHome } from "../home-paths.js";
 import path from "node:path";
@@ -26,29 +27,53 @@ async function openReadOnly(file: string): Promise<Db | undefined> {
   } catch { return undefined; }
 }
 
+interface OpenConnection { identity: string | undefined; db: Db | undefined }
+
+/** A replaced store has a new inode; Windows does not always report a usable
+ * inode, so its mtime also identifies the file there. */
+function fileIdentity(file: string): string | undefined {
+  try {
+    const info = statSync(file);
+    return `${info.dev}:${info.ino}${process.platform === "win32" ? `:${info.mtimeMs}` : ""}`;
+  } catch { return undefined; }
+}
+
 /** The read-only Codex stores one request shares across every thread it
  * discovers or materializes. Opening the same SQLite file per thread is a real
- * per-item cost, especially on Windows. */
+ * per-item cost, especially on Windows. A replaced or rotated file is
+ * detected once per get() and reopened rather than read through the old handle. */
 class ReadOnlyConnections {
-  private readonly connections = new Map<string, Db | undefined>();
-  private readonly opening = new Map<string, Promise<Db | undefined>>();
+  private readonly connections = new Map<string, OpenConnection>();
+  private readonly opening = new Map<string, Promise<OpenConnection>>();
 
   async get(file: string): Promise<Db | undefined> {
-    if (this.connections.has(file)) return this.connections.get(file);
+    const identity = fileIdentity(file);
+    const cached = this.connections.get(file);
+    if (cached && cached.identity === identity) return cached.db;
+    if (cached) {
+      cached.db?.close();
+      this.connections.delete(file);
+    }
     let opening = this.opening.get(file);
-    if (!opening) { opening = openReadOnly(file); this.opening.set(file, opening); }
-    const connection = await opening;
+    if (!opening) {
+      opening = openReadOnly(file).then(db => ({ identity, db }));
+      this.opening.set(file, opening);
+    }
+    const opened = await opening;
     this.opening.delete(file);
-    this.connections.set(file, connection);
-    return connection;
+    const current = this.connections.get(file);
+    if (current && current.identity === identity) return current.db;
+    current?.db?.close();
+    this.connections.set(file, opened);
+    return opened.db;
   }
 
   async close(): Promise<void> {
     const opening = [...this.opening.values()];
     this.opening.clear();
-    for (const connection of this.connections.values()) connection?.close();
+    for (const { db } of this.connections.values()) db?.close();
     this.connections.clear();
-    for (const connection of await Promise.all(opening)) connection?.close();
+    for (const { db } of await Promise.all(opening)) db?.close();
   }
 }
 
