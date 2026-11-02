@@ -250,7 +250,7 @@ describe("Claude's current screen at the status evidence boundary", () => {
       throw new Error(`Unexpected RPC ${method}`);
     });
   });
-  afterEach(() => { hooks.close(); vi.restoreAllMocks(); });
+  afterEach(() => { hooks.close(); vi.useRealTimers(); vi.restoreAllMocks(); });
   it.each([
     "Here is the plan:\n1. Read the tests\n2. Fix the bug",
     "│ Here is the plan: │\n│ 1. Read the tests │\n│ 2. Fix the bug │",
@@ -268,14 +268,18 @@ describe("Claude's current screen at the status evidence boundary", () => {
       expect(status()).toBe("working");
     }
   });
-  it("requires consecutive reads to block, and clears on the first negative read", async () => {
-    await hooks.syncTerminalDialog(claude, true);
+  it("confirms in 300ms, and clears on the first confirmed negative read", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reading = hooks.syncTerminalDialog(claude, true);
+    await vi.advanceTimersByTimeAsync(299);
     expect(status()).toBe("working");
-    now += 3_000;
-    await hooks.syncTerminalDialog(claude, true);
+    expect(hooks.terminalPrompt(claude)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await reading;
     expect(status()).toBe("blocked");
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.read")).toHaveLength(2);
     expect(hooks.terminalPrompt(claude)?.choice).toMatchObject({ title: "Do you want to proceed?" });
-    screen = "Working…"; now += 3_000;
+    screen = "✻ Working (esc to interrupt)\n❯ "; now += 350;
     await hooks.syncTerminalDialog(claude, true);
     expect(hooks.terminalPrompt(claude)).toBeUndefined();
     expect(status()).toBe("working");

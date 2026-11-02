@@ -303,7 +303,7 @@ export function transcriptStreams(ctx: StreamContext) {
       }
       if (abort.signal.aborted) { stop(); return; }
       ready = true;
-      timer = setInterval(() => { countTick(url.pathname === "/v1/transcripts" ? "stream-transcripts" : "stream-status"); void tick(); }, reader || awaitingTranscript ? 500 : 1500);
+      timer = setInterval(() => { countTick(url.pathname === "/v1/transcripts" ? "stream-transcripts" : "stream-status"); void tick(); }, 500);
       await tick();
     } catch (error) { stop(); throw error; }
   }

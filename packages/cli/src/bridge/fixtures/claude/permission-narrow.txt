@@ -1,0 +1,12 @@
+ Bash command
+
+   git status --short
+
+ Do you want to allow this command to
+ access the files in this directory?
+ ❯ 1. Yes, and don't ask again for
+      this command in this directory
+   2. No, and tell Claude what to do
+      differently
+
+ Esc to cancel · Tab to amend

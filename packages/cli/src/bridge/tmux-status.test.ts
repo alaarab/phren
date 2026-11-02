@@ -88,14 +88,12 @@ describe("dialogs on a working pane's screen", () => {
     let screen = CLAUDE_DIALOG;
     const read = vi.fn(async () => screen);
     const base = notePaneStatus("tmux", "p1", "p1:1", "working");
-    expect(await dialogStatus("tmux", "p1", "p1:1", "claude", base, read)).toEqual(base);
-    now += 3_000;
     const first = await dialogStatus("tmux", "p1", "p1:1", "claude", base, read);
     expect(first).toMatchObject({ status: "blocked" });
     expect(first!.seq).toBeGreaterThan(base.seq);
     // Within the window the screen is not read again.
-    now += 1_000;
-    screen = "done";
+    now += 100;
+    screen = "❯ ";
     expect(await dialogStatus("tmux", "p1", "p1:1", "claude", base, read)).toMatchObject({ status: "blocked" });
     expect(read).toHaveBeenCalledTimes(2);
     // The dialog went away: working again, with a newer sequence.
@@ -118,12 +116,12 @@ describe("dialogs on a working pane's screen", () => {
     now += 3_000; screen = CLAUDE_DIALOG;
     const blocked = await status();
     expect(blocked).toMatchObject({ status: "blocked" });
-    now += 1_000; screen = "Working";
+    now += 100; screen = "✻ Working (esc to interrupt)\n❯ ";
     expect(await status()).toEqual(blocked);
     now += 2_000;
     read.mockRejectedValueOnce(new Error("terminal unavailable"));
     expect(await status()).toEqual(blocked);
-    now += 3_000; screen = "Working";
+    now += 3_000; screen = "✻ Working (esc to interrupt)\n❯ ";
     const settled = await status();
     expect(settled).toMatchObject({ status: "working" });
     expect(settled!.seq).toBeGreaterThan(blocked!.seq);
@@ -139,12 +137,10 @@ describe("dialogs on a working pane's screen", () => {
     expect(await dialogStatus("tmux", "p2", "p2:1", "codex", undefined, read)).toBeUndefined();
     expect(read).not.toHaveBeenCalled();
     const working = notePaneStatus("tmux", "p2", "p2:1", "working");
-    expect(await dialogStatus("tmux", "p2", "p2:1", "codex", working, read)).toMatchObject({ status: "working" });
-    now += 3_000;
     expect(await dialogStatus("tmux", "p2", "p2:1", "codex", working, read)).toMatchObject({ status: "blocked" });
     // Answered from the phone: settled at once, and not read again for a window.
     settleBlockedPane("tmux", "p2", 0);
-    now += 1_000;
+    now += 100;
     expect(await dialogStatus("tmux", "p2", "p2:1", "codex", working, read)).toMatchObject({ status: "working" });
     expect(read).toHaveBeenCalledTimes(2);
   });
@@ -331,16 +327,11 @@ describe("the tmux snapshot's status for every harness", () => {
     notePaneStatus("tmux", "p3", "p3:300", "working");
     const fake = fakeTmux({ panes: PANES, ps: PS, screens: { "%3": CODEX_DIALOG } });
     restore = fake.restore;
-    const start = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
-    const initial = await tmuxSnapshot("tmux");
-    expect((initial.panes as { pane_id: string; agent_status?: string }[]).find(p => p.pane_id === "p3")?.agent_status).toBe("working");
-    clock.mockReturnValue(start + 3_000);
     const s = await tmuxSnapshot("tmux");
     const statuses = Object.fromEntries((s.panes as { pane_id: string; agent?: string; agent_status?: string }[]).map(p => [p.pane_id, [p.agent, p.agent_status]]));
     expect(statuses).toEqual({ p1: ["opencode", "working"], p2: ["copilot", "idle"], p3: ["codex", "blocked"], p4: ["phren", "idle"] });
     // Only the working panes' screens were read.
-    expect(fake.calls.filter(call => call.args[0] === "capture-pane").map(call => call.args[call.args.indexOf("-t") + 1]).sort()).toEqual(["%1", "%1", "%3", "%3"]);
+    expect(fake.calls.filter(call => call.args[0] === "capture-pane").map(call => call.args[call.args.indexOf("-t") + 1]).sort()).toEqual(["%1", "%3", "%3"]);
     // phren-agent reports turns through its lifecycle events.
     notePaneStatus("tmux", "p4", "p4:400", "working");
     expect(((await tmuxSnapshot("tmux")).panes as { agent_status?: string }[])[3].agent_status).toBe("working");

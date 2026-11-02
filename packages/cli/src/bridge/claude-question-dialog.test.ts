@@ -29,6 +29,15 @@ describe("reading Claude's question dialog", () => {
     expect(claudeQuestionDialog(pane(name).split("\n").map(line => "> " + line).join("\n"))).toBeUndefined();
   });
 
+  it("reads and answers a question whose footer wraps before Esc to cancel", async () => {
+    expect(claudeQuestionDialog(pane("single").replace(" · Esc to cancel", " ·\nEsc to cancel"))).toMatchObject({ kind: "question", title: "Pick one?", cursor: 1 });
+    const claude = new FakeClaude([{ question: "Pick one?", options: [{ label: "A" }, { label: "B" }] }]);
+    const io = claude.io();
+    await answerClaudeQuestionDialog({ ...io, read: async () => (await io.read()).replace(" · Esc to cancel", " ·\nEsc to cancel") },
+      [{ question: "Pick one?", options: [{ label: "A" }, { label: "B" }] }], [{ options: [1] }]);
+    expect(claude.result).toEqual({ "Pick one?": "B" });
+  });
+
   it("reads multi-select boxes, a typed answer and the Next row", () => {
     const checked = claudeQuestionDialog(pane("q2-checked"));
     expect(checked).toMatchObject({ kind: "question", title: "Which tools do you use?", multiSelect: true, cursor: 1 });

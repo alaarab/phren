@@ -797,12 +797,16 @@ What works:
     turn that ends with the final answer (or `session.idle`, an abort) idle.
 - Dialogs without a callback: Claude's auto-mode fallback and Codex, OpenCode
   and Copilot terminal dialogs have no PermissionRequest behind them. While a
-  pane is working, the Hook reads its screen at most once every 3 seconds
-  (`PHREN_DIALOG_THROTTLE_MS`); a dialog there marks the pane blocked, which
-  puts the question on the phone, and the pane goes back to working when the
-  dialog is gone. Only a harness's own dialog counts: Claude's and phren-agent's
-  numbered rows with their "Esc to cancel" footer, Codex's and Copilot's
-  choice rows, OpenCode's "Permission required" prompt.
+  pane is working, the Hook checks its screen every 350 ms by default
+  (`PHREN_DIALOG_THROTTLE_MS`). A positive read gets a separate confirmation
+  after 300 ms, with a 400 ms read budget independent of polling. Phone status
+  updates every 500 ms. Only the harness's active dialog counts: Claude's
+  permissions and plan confirmations (including "Ready to code?") with their
+  numbered options, selection marker and cancel footer; Codex's and Copilot's
+  choice rows; OpenCode's "Permission required" prompt. Wrapped prompts, option
+  labels and question footers are joined into logical lines before matching.
+  A newer composer or working hint clears the blocked state; an empty, partial
+  or unparseable screen preserves it and any live hold.
 - A fresh Codex: Codex runs its SessionStart hook only with its first turn, so
   a Codex that has just opened has sent no lifecycle event. Until it does, the
   Hook reads its screen on the same throttle: a startup menu (folder trust,

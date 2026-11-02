@@ -320,33 +320,21 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
     expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "idle" });
     await writeFile("/tmp/previewflap-replay.json", JSON.stringify({ reconstructed: true, frames: trace }, null, 2));
   });
-  it("holds a real dialog without retiring an accepted preview", async () => {
+  it("shows a confirmed dialog within a second while preserving previews and ignoring numbered output", async () => {
     await forward("full", { hook_event_name: "UserPromptSubmit", prompt });
     const transcript = await open();
-    screen = "Bash command\n\n  ls\n\nDo you want to proceed?\n ❯ 1. Yes\n   2. No\nEsc to cancel · Tab to amend";
-    const real = screen;
-    // A normal numbered plan never produces a terminal question, even over
-    // successive status windows. Real dialogs need two independent reads.
     screen = "Here is the plan:\n1. Read the tests\n2. Fix the bug";
-    const now = Date.now(); const clock = vi.spyOn(Date, "now");
-    try {
-      for (const elapsed of [4_000, 8_000]) {
-        clock.mockReturnValue(now + elapsed);
-        expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "working" });
-        expect((await open("/v1/status")).frames[0].agentStatus).not.toHaveProperty("terminalPrompt");
-      }
-      screen = real;
-      clock.mockReturnValue(now + 12_000);
-      expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "working" });
-      clock.mockReturnValue(now + 16_000);
-      expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "blocked", terminalPrompt: { toolName: "Question" } });
-      expect(await overview()).toMatchObject({ agentStatus: "blocked" });
-      screen = "Working…";
-      clock.mockReturnValue(now + 20_000);
-      const cleared = (await open("/v1/status")).frames[0].agentStatus;
-      expect(cleared).toMatchObject({ status: "working" });
-      expect(cleared).not.toHaveProperty("terminalPrompt");
-    } finally { clock.mockRestore(); }
+    const status = await open("/v1/status");
+    await new Promise(resolve => setTimeout(resolve, 550));
+    expect(status.frames.every(frame => !(frame.agentStatus as Json)?.terminalPrompt)).toBe(true);
+    screen = "Bash command\n\n  ls\n\nDo you want to proceed?\n ❯ 1. Yes\n   2. No\nEsc to cancel · Tab to amend";
+    const appeared = performance.now();
+    await vi.waitFor(() => expect(status.frames.at(-1)?.agentStatus).toMatchObject({ status: "blocked", terminalPrompt: { toolName: "Question" } }), { timeout: 1300, interval: 10 });
+    expect(performance.now() - appeared).toBeLessThan(1100);
+    expect(await overview()).toMatchObject({ agentStatus: "blocked" });
+    screen = "✻ Working (esc to interrupt)\n❯ ";
+    await vi.waitFor(() => expect(status.frames.at(-1)?.agentStatus).toMatchObject({ status: "working" }), { timeout: 1100 });
+    expect(status.frames.at(-1)?.agentStatus).not.toHaveProperty("terminalPrompt");
     await append({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", id: "dialog-tool", input: { command: "ls" } }] } });
     await vi.waitFor(() => expect(transcript.frames.length).toBeGreaterThan(1));
     expect(transcript.frames.slice(1).some(frame => frame.preview === null)).toBe(false);

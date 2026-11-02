@@ -21,7 +21,7 @@ import { ensureGrant, findGrant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
 import { approvalSummary, paneProject, type RequestKind } from "./approval-summary.js";
 import { computerDisplayName } from "./pair.js";
-import { intervalFromEnv } from "./limits.js";
+import { confirmDialogRead, DIALOG_READ_MS } from "./dialog-observation.js";
 import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogAnswer, type DialogQuestion } from "./claude-question-dialog.js";
 import { answeredQuestionInput, claudePermissionDialog, opencodePermissionDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
@@ -29,7 +29,7 @@ import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequ
 import { allowOpencodeToolEverywhere } from "./opencode-permissions.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
 import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
-import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
+import { eventStatus, notePaneStatus, screenDialogState, settleBlockedPane } from "./pane-status.js";
 import { checkpointBoundary, checkpointActivityArrived } from "./checkpoints.js";
 import { normalizedPromptEntryId } from "./prompt-identity.js";
 import { claudeInputState } from "./claude-input-state.js";
@@ -65,10 +65,8 @@ const APPROVAL_HOLD_MS = (() => {
   const value = Number(process.env.PHREN_APPROVAL_HOLD_MS);
   return Number.isFinite(value) && value >= 50 && value <= 60_000 ? Math.floor(value) : 55_000;
 })();
-/** A pane's terminal dialog is read at most once per this window. */
 /** Lines read to find Claude's question dialog: its tab bar sits above the whole question. */
 const QUESTION_READ_LINES = 120;
-const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
 /** How long a pushed terminal dialog can be answered from its notification. */
 const DIALOG_PUSH_MS = 10 * 60_000;
 const FANOUT_SWEEP_MS = 5_000;
@@ -213,8 +211,7 @@ export class AgentHooks {
    * `questions` carries a released AskUserQuestion's normalized question set
    * with the index currently being answered. */
   private terminalPrompts = new Map<string, { tool: string; input?: unknown; toolUseId?: string; dialogSeenAt?: number; message: string; request?: string; requestKind?: RequestKind; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
-  /** The last time each pane's terminal lines were read for a dialog, so a
-   * status tick reads them at most once per three seconds per pane. */
+  /** Shared confirmed observations for the card and status readers. */
   private dialogObservations = new Map<string, { signature: string; confirmed: boolean }>();
   private dialogFlights = new Map<string, Promise<void>>();
   private dialogEpochs = new Map<string, object>();
@@ -653,7 +650,7 @@ export class AgentHooks {
   /** Claude Code's auto-mode fallback, opencode and Codex draw a numbered
    * dialog in the pane with no PermissionRequest hook behind it. While the pane
    * waits with nothing else to ask, read its last lines (at most once per
-   * three seconds per pane) and publish the dialog as a terminal choice; drop
+   * discovery window per pane) and publish the dialog as a terminal choice; drop
    * it when the pane leaves waiting or the dialog lines vanish. A remembered
    * Claude request keeps its initial draw grace, then follows the current screen. The same
    * read notes whether the terminal is reading a password. */
@@ -732,12 +729,24 @@ export class AgentHooks {
       if (entry && !question) this.terminalPrompts.delete(key);
       return;
     }
-    if (question) { this.terminalPrompts.delete(key); return; }
-    const dialog = await this.screenDialog(target, text);
+    if (question) {
+      if (screenDialogState(target.source, text) === "gone") this.terminalPrompts.delete(key);
+      return;
+    }
+    let dialog = await this.screenDialog(target, text);
+    if (dialog && !held && (!entry || entry.dialog) && this.dialogObservations.get(key)?.signature !== JSON.stringify(dialog)) {
+      const confirmation = await confirmDialogRead(async () => {
+        const screen = await terminalProvider().readScreen(target.server, target.pane,
+          { scope: "agent", source: "visible", lines: 40, stripAnsi: true, timeoutMs: 400 });
+        return { screen, dialog: await this.screenDialog(target, screen) };
+      }, () => this.dialogEpochs.get(key) === epoch);
+      if (confirmation === undefined) return;
+      dialog = confirmation.dialog;
+      if (!dialog && screenDialogState(target.source, confirmation.screen) !== "gone") return;
+    } else if (!dialog && screenDialogState(target.source, text) !== "gone") return;
     if (this.dialogEpochs.get(key) !== epoch) return;
     const signature = JSON.stringify(dialog);
-    const prior = this.dialogObservations.get(key);
-    if (dialog) this.dialogObservations.set(key, { signature, confirmed: prior?.signature === signature });
+    if (dialog) this.dialogObservations.set(key, { signature, confirmed: true });
     else this.dialogObservations.delete(key);
     while (this.dialogObservations.size > 128) this.dialogObservations.delete(this.dialogObservations.keys().next().value!);
     if (target.source === "claude") {

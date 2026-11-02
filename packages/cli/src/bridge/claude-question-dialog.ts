@@ -1,3 +1,4 @@
+import { joinDialogFooters } from "./terminal-dialog-text.js";
 import { BridgeError } from "./protocol.js";
 
 /** Claude Code's AskUserQuestion dialog as the pane draws it, and a walk that
@@ -52,7 +53,7 @@ const GUTTER = /^(\s*)│(?: |$)/;
  * lines are not one: the last tab bar anchors it, and an active dialog ends
  * with its "Esc to cancel" footer or the review's Submit/Cancel rows. */
 export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefined {
-  const lines = text.split(/\r?\n/);
+  const lines = joinDialogFooters(text.split(/\r?\n/));
   let bar = -1;
   for (let index = lines.length - 1; index >= 0; index--) if (TAB_BAR.test(lines[index]) && /[☐☒]/.test(lines[index])) { bar = index; break; }
   if (bar < 0) return undefined;

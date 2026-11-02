@@ -1,5 +1,5 @@
 import { briefLabel } from "./launch-brief.js";
-import { screenDialog } from "./pane-status.js";
+import { screenDialogState } from "./pane-status.js";
 import { type Json, provider } from "./protocol.js";
 import type { FinalTurn } from "./schedule-watch.js";
 import { backgroundLeft, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
@@ -63,7 +63,7 @@ export function recordedBackground(record: TurnRecord | undefined, finishedTasks
 export interface PromptGuards {
   /** An approval the Hook holds, a terminal prompt or a question it serves for this pane. */
   held?: () => boolean;
-  /** The pane's visible screen; a dialog there (pane-status.ts `screenDialog`) or a failed read refuses. */
+  /** The pane's visible screen; a dialog, uncertain screen or failed read refuses. */
   screen?: () => Promise<string>;
 }
 
@@ -90,7 +90,7 @@ export async function takesPrompt(server: string, pane: Json, session: string | 
   if (!recordedBackground(await paneRecord(server, pane, session), [], now) || guards.held?.()) return false;
   if (!guards.screen) return true;
   const screen = await guards.screen().catch(() => undefined);
-  return screen !== undefined && !screenDialog("claude", screen);
+  return screen !== undefined && screenDialogState("claude", screen) === "gone";
 }
 
 /** The background shells and monitors a turn still awaits, from its transcript

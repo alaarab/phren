@@ -1,3 +1,4 @@
+import { logicalDialogLines } from "./terminal-dialog-text.js";
 import { z } from "zod";
 import { BridgeError, object, objects, type Json } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
@@ -115,7 +116,8 @@ export function unframed(text: string): string {
 }
 export function visibleTerminalChoice(text: string): TerminalChoice | undefined {
   text = unframed(text);
-  const screenLines = text.split(/\r?\n/);
+  const screenLines = logicalDialogLines(text);
+  text = screenLines.join("\n");
   const optionRow = /^\s*[>❯›▸▶»•*]?\s*\d+[.)]\s+/;
   let last = screenLines.length - 1;
   while (last >= 0 && !optionRow.test(screenLines[last])) last--;
@@ -229,7 +231,7 @@ export function numberedDialog(text: string): TerminalChoice | undefined {
 /** Claude's live permission UI, rather than numbered prose in its output.
  * The prompt, contiguous options, selection and final hint belong to one block. */
 export function claudePermissionDialog(text: string): TerminalChoice | undefined {
-  const lines = stripTerminal(text).split(/\r?\n/).map(line => line.trimEnd());
+  const lines = logicalDialogLines(stripTerminal(text));
   while (lines.length && !lines.at(-1)!.trim()) lines.pop();
   if (!/^\s*(?:Enter to (?:select|confirm).*?·\s*)?Esc to cancel(?:\s*·.*)?$/i.test(lines.at(-1) ?? "")) return;
   const footer = lines.length - 1;
@@ -244,7 +246,7 @@ export function claudePermissionDialog(text: string): TerminalChoice | undefined
   while (start >= 0 && !lines[start].trim()) start--;
   // Claude's permission prompt is a question on its own line. Quoted/fenced
   // examples and composer text are not the harness's prompt.
-  if (!/^\s*(?:Do you want to |Would you like to |Allow |Trust |Teach auto mode about your environment).*\?\s*$/i.test(lines[start] ?? "")) return;
+  if (!/^\s*(?:Do you want to |Would you like to |Allow |Trust |Teach auto mode about your environment|Ready to code).*\?\s*$/i.test(lines[start] ?? "")) return;
   if (lines.slice(0, start + 1).filter(line => /^\s*```/.test(line)).length % 2) return;
   return numberedDialog(lines.slice(start).join("\n"));
 }

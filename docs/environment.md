@@ -190,8 +190,10 @@ real-Hook tests set `PHREN_SUDO_TEST_PARENT=1`, honored only with
 `PHREN_IDENTITY_CACHE_MS` (how long a pane's process-based conversation probe
 is reused, default `2000`) and `PHREN_DIALOG_THROTTLE_MS` (how often a waiting
 pane's terminal dialog is read, and on tmux how often a working pane's screen is
-checked for one and a fresh Codex's screen is read for its status, default `3000`); the Hook reads all three once
-at startup. `PHREN_SHELL_READY_MS` is how long a launch keeps asking Herdr to
+checked for one and a fresh Codex's screen is read for its status, default `350`).
+Screen-only dialogs get a separate confirmation read after `300` ms, with a
+`400` ms read budget independent of this polling interval. Phone status frames
+poll every `500` ms. The Hook reads these environment settings once at startup. `PHREN_SHELL_READY_MS` is how long a launch keeps asking Herdr to
 start the agent while the new pane's shell is still starting (default `15000`).
 A worker the Hook launched with its brief runs with `PHREN_DISPATCH_ID` set to
 its dispatch or scheduled-run ID; its hooks echo it back as the delivery receipt.

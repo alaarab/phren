@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { numberedDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
+import { claudePermissionDialog, numberedDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
 
 const recorded = (file: string) => readFileSync(new URL(`./fixtures/${file}`, import.meta.url), "utf8");
 
@@ -91,5 +91,30 @@ describe("OpenCode's permission prompt", () => {
   it("is nothing without the prompt", () => {
     expect(opencodePermissionDialog("  ┃   Allow once   Allow always   Reject")).toBeUndefined();
     expect(opencodePermissionDialog(screen(0).replace("Reject", "Deny"))).toBeUndefined();
+  });
+});
+
+describe("live dialogs in narrow panes", () => {
+  it("recognizes Claude's plan confirmation", () => {
+    expect(claudePermissionDialog(recorded("claude/plan-confirmation.txt"))).toMatchObject({ title: "Ready to code?", options: [
+      { label: "Yes, proceed", key: "1" }, { label: "No, keep planning", key: "2" }, { key: "Escape" },
+    ] });
+  });
+  it("joins Claude's wrapped question and option labels", () => {
+    expect(claudePermissionDialog(recorded("claude/permission-narrow.txt"))).toMatchObject({
+      title: "Do you want to allow this command to access the files in this directory?",
+      options: [{ label: "Yes, and don't ask again for this command in this directory" }, { label: "No, and tell Claude what to do differently" }, { key: "Escape" }],
+    });
+  });
+  it.each(["intermediate", "last", "both"])("joins a wrapped %s Codex option before checking for stale output", which => {
+    let screen = recorded("codex/approval-narrow.txt");
+    if (which === "intermediate") screen = screen.replace("what to do\n     differently", "what to do differently");
+    if (which === "last") screen = screen.replace("again for\n     this command", "again for this command");
+    expect(visibleTerminalChoice(screen)).toMatchObject({ highlightedIndex: 0, options: [
+      { label: "Yes, proceed", key: "y", hasKey: true },
+      { label: "Yes, and don't ask again for this command", key: "p", hasKey: true },
+      { label: "No, and tell Codex what to do differently", key: "Escape", hasKey: true },
+    ] });
+    expect(visibleTerminalChoice(screen + "\n› Continue\nWorking…")).toBeUndefined();
   });
 });

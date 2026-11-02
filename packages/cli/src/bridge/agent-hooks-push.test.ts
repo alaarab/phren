@@ -116,6 +116,30 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
     expect(keys()).toEqual([["2"]]);
   });
 
+  it("preserves a pending permission through wrapping and an unparseable resize", async () => {
+    const releaseWatch = hooks.watch(target);
+    const answer = ask();
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    const clock = vi.spyOn(Date, "now"), start = Date.now();
+    try {
+      clock.mockReturnValue(start);
+      await hooks.syncTerminalDialog(target, true);
+      const approval = hooks.approval(target)!;
+      clock.mockReturnValue(start + 4_000);
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "Do you want to allow this\n command?\n ❯ 1. Yes, and remember\n      this command\n   2. No\nEsc to cancel" } }));
+      await hooks.syncTerminalDialog(target, true);
+      expect(hooks.approval(target)?.actionId).toBe(approval.actionId);
+      for (const [index, partial] of [" Do you want to allow\n ❯ 1.", "", "partial redraw", "❯ Previous prompt\nDo you", "✻ Working (esc to interrupt)\npartial redraw"].entries()) {
+        clock.mockReturnValue(start + 8_000 + index * 4_000);
+        vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: partial } }));
+        await hooks.syncTerminalDialog(target, true);
+        expect(hooks.approval(target)?.actionId).toBe(approval.actionId);
+      }
+      await hooks.answerPush(sent[0].binding, "deny");
+      expect(JSON.parse(await answer)).toMatchObject({ hookSpecificOutput: { decision: { behavior: "deny" } } });
+    } finally { clock.mockRestore(); releaseWatch(); }
+  });
+
   it.each(["held", "released"])("reconciles an unseen %s permission while preserving a live hook hold", async state => {
     const answer = ask();
     await vi.waitFor(() => expect(sent).toHaveLength(1));
@@ -124,7 +148,7 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
     try {
       clock.mockReturnValue(start);
       vi.mocked(rpc).mockImplementation(async (_server, method) => {
-        if (method === "agent.read") return { read: { text: "Working" } };
+        if (method === "agent.read") return { read: { text: "✻ Working (esc to interrupt)\n❯ " } };
         return {};
       });
       await hooks.syncTerminalDialog(target, true);
@@ -157,7 +181,7 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
     try {
       clock.mockReturnValue(start);
       // An empty screen before the first observation cannot dismiss the request.
-      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "Working" } }));
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "✻ Working (esc to interrupt)\n❯ " } }));
       await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
       expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
       clock.mockReturnValue(start + 4_000);
@@ -174,7 +198,7 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
       await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
       expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
       clock.mockReturnValue(start + 12_000);
-      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "Working" } }));
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "✻ Working (esc to interrupt)\n❯ " } }));
       await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: status }], async () => target);
       expect(hooks.approval(target)).toBeUndefined();
       expect(hooks.terminalPrompt(target)).toBeUndefined();
