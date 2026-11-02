@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { availablePaneEvidence } from "./session-evidence.js";
+import { resolveEffectiveStatus } from "./session-activity.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { AgentHooks, watchHangUp } from "./agent-hooks.js";
@@ -231,5 +233,64 @@ describe("a tool callback that hung up", () => {
       await vi.waitFor(() => expect(seen["/gave-up"]).toBeDefined(), { timeout: 2000 });
       expect(seen).toEqual({ "/answered": false, "/gave-up": true });
     } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+  });
+});
+
+describe("Claude's current screen at the status evidence boundary", () => {
+  const claude: Target = { ...target, source: "claude" };
+  const pane = { pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: "claude", agent_status: "working" };
+  const real = "Bash command\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n\nEsc to cancel · Tab to amend";
+  let hooks: AgentHooks, screen: string, now: number;
+  const status = () => resolveEffectiveStatus(availablePaneEvidence(target.server, pane, target.session, undefined, hooks));
+  beforeEach(() => {
+    hooks = new AgentHooks(); screen = real; now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.mocked(rpc).mockReset().mockImplementation(async (_server, method) => {
+      if (method === "agent.read") return { read: { text: screen } };
+      throw new Error(`Unexpected RPC ${method}`);
+    });
+  });
+  afterEach(() => { hooks.close(); vi.restoreAllMocks(); });
+  it.each([
+    "Here is the plan:\n1. Read the tests\n2. Fix the bug",
+    "│ Here is the plan: │\n│ 1. Read the tests │\n│ 2. Fix the bug │",
+    "❯ Here is my plan:\n1. Read the tests\n2. Fix the bug",
+    real + "\n❯ Continue\nWorking…",
+    "```text\n" + real + "\n```",
+    "Esc to cancel\n\nPlan?\n❯ 1. Read tests\n2. Fix bug",
+    "Teach auto mode about your environment?",
+    "Plan?\n❯ 1. Read tests\n  2. Fix bug\nEsc to cancel",
+  ])("does not publish a question or block on ordinary/stale output: %s", async value => {
+    screen = value;
+    for (let read = 0; read < 2; read++, now += 3_000) {
+      await hooks.syncTerminalDialog(claude, true);
+      expect(hooks.terminalPrompt(claude)).toBeUndefined();
+      expect(status()).toBe("working");
+    }
+  });
+  it("requires consecutive reads to block, and clears on the first negative read", async () => {
+    await hooks.syncTerminalDialog(claude, true);
+    expect(status()).toBe("working");
+    now += 3_000;
+    await hooks.syncTerminalDialog(claude, true);
+    expect(status()).toBe("blocked");
+    expect(hooks.terminalPrompt(claude)?.choice).toMatchObject({ title: "Do you want to proceed?" });
+    screen = "Working…"; now += 3_000;
+    await hooks.syncTerminalDialog(claude, true);
+    expect(hooks.terminalPrompt(claude)).toBeUndefined();
+    expect(status()).toBe("working");
+  });
+  it("does not resurrect a question from a screen read completed after clearing", async () => {
+    let finish!: (value: unknown) => void;
+    vi.mocked(rpc).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const read = hooks.syncTerminalDialog(claude, true);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    const concurrent = hooks.syncTerminalDialog(claude, true);
+    hooks.clearTerminalPrompt(claude);
+    finish({ read: { text: real } });
+    await Promise.all([read, concurrent]);
+    expect(hooks.terminalPrompt(claude)).toBeUndefined();
+    expect(status()).toBe("working");
+    expect(vi.mocked(rpc)).toHaveBeenCalledTimes(1);
   });
 });

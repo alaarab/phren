@@ -19,6 +19,13 @@ describe("terminal choices inside a drawn frame", () => {
     ] });
   });
 
+  it("rejects Copilot choices left above newer output or quoted in documentation", () => {
+    expect(visibleTerminalChoice("> Would you like to run this?\n> 1. Yes (y)\n> 2. No (n)")).toBeUndefined();
+    expect(visibleTerminalChoice("Here is the plan:\n› 1. Read tests\n  2. Fix bug")).toBeUndefined();
+    expect(visibleTerminalChoice(trust + "\n❯ Continue\nWorking…")).toBeUndefined();
+    expect(visibleTerminalChoice("```text\n" + trust + "\n```")).toBeUndefined();
+  });
+
   it("reads a boxed shell permission the same way, command in the question", () => {
     const shell = trust
       .replace("Confirm folder trust        ", "Run shell command           ")
@@ -77,6 +84,9 @@ describe("OpenCode's permission prompt", () => {
     const plain = screen(1).replace(/\x1b\[[0-9;]*m/g, "");
     expect(opencodePermissionDialog(plain)?.selected).toBeUndefined();
     expect(opencodePermissionDialog(plain)?.choice.title).toContain("Access external directory ~/apps");
+  });
+  it("rejects a permission left above new output", () => {
+    expect(opencodePermissionDialog(screen(0) + "\nWorking…")).toBeUndefined();
   });
   it("is nothing without the prompt", () => {
     expect(opencodePermissionDialog("  ┃   Allow once   Allow always   Reject")).toBeUndefined();

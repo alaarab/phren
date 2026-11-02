@@ -116,6 +116,38 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
     expect(keys()).toEqual([["2"]]);
   });
 
+  it.each(["held", "released"])("reconciles an unseen %s permission while preserving a live hook hold", async state => {
+    const answer = ask();
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    if (state === "released") await answer;
+    const start = Date.now(), clock = vi.spyOn(Date, "now");
+    try {
+      clock.mockReturnValue(start);
+      vi.mocked(rpc).mockImplementation(async (_server, method) => {
+        if (method === "agent.read") return { read: { text: "Working" } };
+        return {};
+      });
+      await hooks.syncTerminalDialog(target, true);
+      expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
+      clock.mockReturnValue(start + 4_000);
+      await hooks.syncTerminalDialog(target, true);
+      if (state === "held") {
+        // While the hook is held the native dialog may not be drawn at all.
+        expect(hooks.approval(target)).toBeDefined();
+        expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
+        await hooks.answerPush(sent[0].binding, "deny");
+        expect(JSON.parse(await answer)).toMatchObject({ hookSpecificOutput: { decision: { behavior: "deny" } } });
+        expect(keys()).toEqual([]);
+        return;
+      }
+      expect(hooks.approval(target)).toBeUndefined();
+      expect(hooks.terminalPrompt(target)).toBeUndefined();
+      expect(hooks.pushTarget(sent[0].binding)).toBeUndefined();
+      expect(await answer).toBe("{}");
+      expect(keys()).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
   it.each(["held", "released", "released-after-observation"].flatMap(state =>
     ["blocked", "working"].map(status => ({ state, status }))))("clears a $state Claude ask on a $status pane only after a confirmed dialog disappears", async ({ state, status }) => {
     const answer = ask();

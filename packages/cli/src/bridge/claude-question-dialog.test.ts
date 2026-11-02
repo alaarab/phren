@@ -22,6 +22,13 @@ describe("reading Claude's question dialog", () => {
     });
   });
 
+  it.each(["q1", "review", "long-single"])("rejects a stale or quoted %s dialog", name => {
+    expect(claudeQuestionDialog(pane(name).replace(/❯/g, " "))).toBeUndefined();
+    expect(claudeQuestionDialog(pane(name) + "\n❯ Continue\nWorking…")).toBeUndefined();
+    expect(claudeQuestionDialog("```text\n" + pane(name) + "\n```")).toBeUndefined();
+    expect(claudeQuestionDialog(pane(name).split("\n").map(line => "> " + line).join("\n"))).toBeUndefined();
+  });
+
   it("reads multi-select boxes, a typed answer and the Next row", () => {
     const checked = claudeQuestionDialog(pane("q2-checked"));
     expect(checked).toMatchObject({ kind: "question", title: "Which tools do you use?", multiSelect: true, cursor: 1 });

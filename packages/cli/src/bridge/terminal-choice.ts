@@ -115,14 +115,23 @@ export function unframed(text: string): string {
 }
 export function visibleTerminalChoice(text: string): TerminalChoice | undefined {
   text = unframed(text);
-  const parsed = numberedOptions(text);
+  const screenLines = text.split(/\r?\n/);
+  const optionRow = /^\s*[>❯›▸▶»•*]?\s*\d+[.)]\s+/;
+  let last = screenLines.length - 1;
+  while (last >= 0 && !optionRow.test(screenLines[last])) last--;
+  if (last < 0 || screenLines.slice(last + 1).some(line => line.trim()
+    && !/^\s*(?:press |enter\b|esc\b|[↑↓←→]|tab\b)/i.test(line))) return undefined;
+  let first = last;
+  while (first > 0 && optionRow.test(screenLines[first - 1])) first--;
+  if (screenLines.slice(0, first).filter(line => /^\s*```/.test(line)).length % 2) return undefined;
+  const parsed = numberedOptions(screenLines.slice(first, last + 1).join("\n"));
   const highlights = parsed.flatMap((option, index) => option.highlighted ? [index] : []);
   const highlightedIndex = highlights.length === 1 ? highlights[0] : undefined;
   if (parsed.some(option => !option.hasKey) && highlightedIndex === undefined) return undefined;
   const options = parsed.map(({ highlighted: _highlighted, ...option }) => option);
   if (options.length < 2 || new Set(options.map(option => option.key)).size !== options.length) return undefined;
   const lines = text.split(/\r?\n/);
-  const firstOption = lines.findIndex(line => /^\s*[>❯›▸▶»•*]?\s*\d+[.)]\s+/.test(line));
+  const firstOption = lines.findIndex((line, index) => index === first && /^\s*[>❯›▸▶»•*]?\s*\d+[.)]\s+/.test(line));
   const above = firstOption < 0 ? lines.slice(0, 1) : lines.slice(0, firstOption);
   // Only the question's own block: everything above the last blank line is
   // whatever the agent printed before it asked, and reading a pane of
@@ -134,7 +143,9 @@ export function visibleTerminalChoice(text: string): TerminalChoice | undefined 
     && /^\s*(?:select|choose) (?:model|reasoning (?:level|effort))\b/i.test(line));
   const question = above.slice(menuStart >= 0 ? menuStart : Math.max(start, above.length - QUESTION_LINES));
   const title = question.map(line => line.trim()).filter(line => line && !/^press enter\b/i.test(line)).join("\n").trim();
-  if (!title) return undefined;
+  if (!title || question.some(line => /^\s*>/.test(line))) return undefined;
+  if (!parsed.some(option => option.hasKey) && !screenLines.slice(last + 1).some(line => /^\s*(?:press |enter\b|esc\b|[↑↓←→]|tab\b)/i.test(line)) && !/[?]/.test(title)
+    && !/^(?:select|choose) (?:model|reasoning|permissions)\b/im.test(title)) return undefined;
   return { title: title.slice(0, 4_000), options: options.slice(0, 12),
     ...(highlightedIndex !== undefined ? { highlightedIndex } : {}) };
 }
@@ -155,6 +166,11 @@ export function opencodePermissionDialog(ansi: string): { choice: TerminalChoice
   if (header < 0) return undefined;
   const row = plain.findIndex((line, index) => index > header && OPENCODE_OPTIONS.every(label => line.includes(label)));
   if (row < 0 || row - header > 24) return undefined;
+  if (plain.slice(row + 1).some(line => {
+    const tail = content(line);
+    return tail.trim() && !/^\s{24,}/.test(tail) && !/^\s*(?:ctrl\+|enter\b|[←→⇆])/.test(tail);
+  })) return undefined;
+  if (plain.slice(0, header).filter(line => /^\s*```/.test(line)).length % 2) return undefined;
   // Lines pushed far right are OpenCode's status column, not the question.
   const body = plain.slice(header + 1, row).map(content)
     .filter(line => line.trim() && !/^\s{24,}/.test(line)).map(line => line.trim());
@@ -210,6 +226,29 @@ export function numberedDialog(text: string): TerminalChoice | undefined {
   if (lines.some(line => line.includes("Esc to cancel"))) options.push({ label: "Cancel", key: "Escape" });
   return { title: title.slice(0, 4_000), options: options.slice(0, 12) };
 }
+/** Claude's live permission UI, rather than numbered prose in its output.
+ * The prompt, contiguous options, selection and final hint belong to one block. */
+export function claudePermissionDialog(text: string): TerminalChoice | undefined {
+  const lines = stripTerminal(text).split(/\r?\n/).map(line => line.trimEnd());
+  while (lines.length && !lines.at(-1)!.trim()) lines.pop();
+  if (!/^\s*(?:Enter to (?:select|confirm).*?·\s*)?Esc to cancel(?:\s*·.*)?$/i.test(lines.at(-1) ?? "")) return;
+  const footer = lines.length - 1;
+  let end = footer - 1;
+  while (end >= 0 && !lines[end].trim()) end--;
+  const row = /^\s*(❯)?\s*(\d+)\.\s+(.+)$/;
+  let start = end;
+  while (start >= 0 && row.test(lines[start])) start--;
+  const rows = lines.slice(start + 1, end + 1);
+  if (rows.length < 2 || rows.filter(line => row.exec(line)?.[1]).length !== 1) return;
+  if (rows.some((line, index) => Number(row.exec(line)![2]) !== index + 1)) return;
+  while (start >= 0 && !lines[start].trim()) start--;
+  // Claude's permission prompt is a question on its own line. Quoted/fenced
+  // examples and composer text are not the harness's prompt.
+  if (!/^\s*(?:Do you want to |Would you like to |Allow |Trust |Teach auto mode about your environment).*\?\s*$/i.test(lines[start] ?? "")) return;
+  if (lines.slice(0, start + 1).filter(line => /^\s*```/.test(line)).length % 2) return;
+  return numberedDialog(lines.slice(start).join("\n"));
+}
+
 /** Read the question a terminal dialog is asking from the request it carries:
  * an explicit options list, or numbered lines inside its text. Undefined when
  * there are not at least two answerable choices. */

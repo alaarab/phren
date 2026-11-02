@@ -1024,7 +1024,7 @@ describe("a schedule that continues its session", () => {
   });
 
   it("dismisses Claude's auto mode dialog with Esc before typing the prompt", async () => {
-    const screens = ["Teach auto mode about your environment?\n1. Yes", "❯ "], pressed: string[][] = [];
+    const screens = ["Teach auto mode about your environment?\n❯ 1. Yes\n  2. No\nEsc to cancel", "❯ "], pressed: string[][] = [];
     const run = await fire([[at(1, "idle", "claude")]], undefined, { earlier: [ranIn(1, 20)], harness: "claude", env: { ...open,
       screen: async () => screens.shift() ?? "❯ ", keys: async (_server, _pane, keys) => { pressed.push(keys); } } });
     expect(pressed).toEqual([["esc"]]);
@@ -1034,7 +1034,7 @@ describe("a schedule that continues its session", () => {
 
   it("starts a new session when the dialog will not dismiss and no other pane can take the firing", async () => {
     const run = await fire([[at(1, "idle", "claude")]], undefined, { earlier: [ranIn(1, 20)], harness: "claude", env: { ...open,
-      screen: async () => "Teach auto mode about your environment?" } });
+      screen: async () => "Teach auto mode about your environment?\n❯ 1. Yes\n  2. No\nEsc to cancel" } });
     expect(run.deliveries).toEqual([]);
     expect(run.fresh).toHaveLength(1);
   });

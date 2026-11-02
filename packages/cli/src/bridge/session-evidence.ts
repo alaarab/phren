@@ -36,7 +36,7 @@ async function bounded<T>(work: Promise<T>, ms = 100): Promise<T | undefined> {
 export function availablePaneEvidence(server: string, pane: Json, session: string, record?: TurnRecord, hooks?: AgentHooks): EffectiveStatusInput {
   const target: Target = { server, pane: String(pane.pane_id), workspace: String(pane.workspace_id), tab: String(pane.tab_id), source: pane.agent as Provider, session };
   const held = !!(hooks?.approval?.(target) || hooks?.servedQuestion?.(target));
-  return { paneStatus: pane.agent_status, record, held, dialog: !!hooks?.terminalPrompt?.(target) };
+  return { paneStatus: pane.agent_status, record, held, dialog: !!hooks?.confirmedTerminalDialog?.(target) };
 }
 
 const finalReads = new Map<string, ReturnType<typeof readFinalTurn>>();

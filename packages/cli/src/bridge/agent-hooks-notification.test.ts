@@ -324,16 +324,50 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
     await forward("full", { hook_event_name: "UserPromptSubmit", prompt });
     const transcript = await open();
     screen = "Bash command\n\n  ls\n\nDo you want to proceed?\n ❯ 1. Yes\n   2. No\nEsc to cancel · Tab to amend";
-    // The dialog reader's bounded cache expires independently of stream ticks.
-    const now = Date.now(); const clock = vi.spyOn(Date, "now").mockReturnValue(now + 4000);
+    const real = screen;
+    // A normal numbered plan never produces a terminal question, even over
+    // successive status windows. Real dialogs need two independent reads.
+    screen = "Here is the plan:\n1. Read the tests\n2. Fix the bug";
+    const now = Date.now(); const clock = vi.spyOn(Date, "now");
     try {
-      expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "blocked" });
+      for (const elapsed of [4_000, 8_000]) {
+        clock.mockReturnValue(now + elapsed);
+        expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "working" });
+        expect((await open("/v1/status")).frames[0].agentStatus).not.toHaveProperty("terminalPrompt");
+      }
+      screen = real;
+      clock.mockReturnValue(now + 12_000);
+      expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "working" });
+      clock.mockReturnValue(now + 16_000);
+      expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "blocked", terminalPrompt: { toolName: "Question" } });
       expect(await overview()).toMatchObject({ agentStatus: "blocked" });
+      screen = "Working…";
+      clock.mockReturnValue(now + 20_000);
+      const cleared = (await open("/v1/status")).frames[0].agentStatus;
+      expect(cleared).toMatchObject({ status: "working" });
+      expect(cleared).not.toHaveProperty("terminalPrompt");
     } finally { clock.mockRestore(); }
     await append({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", id: "dialog-tool", input: { command: "ls" } }] } });
     await vi.waitFor(() => expect(transcript.frames.length).toBeGreaterThan(1));
     expect(transcript.frames.slice(1).some(frame => frame.preview === null)).toBe(false);
   });
+  it.each(["Stop", "UserPromptSubmit"])("streams an exact question resolution after %s without a tool result", async event => {
+    await forward("full", { hook_event_name: "UserPromptSubmit", prompt });
+    await append({ type: "assistant", timestamp: new Date().toISOString(), message: { id: "question-turn", role: "assistant", content: [
+      { type: "tool_use", id: "question-1", name: "AskUserQuestion", input: { questions: [{ question: "Pick one?", header: "Choice", multiSelect: false,
+        options: [{ label: "A", description: "First" }, { label: "B", description: "Second" }] }] } },
+    ] } });
+    const stream = await open();
+    const resolved = (frame: Json) => objects(frame.entries).flatMap(entry => objects((entry.raw as Json)?.message && ((entry.raw as Json).message as Json).content))
+      .some(block => block.type === "tool_result" && block.tool_use_id === "question-1" && block.phren_resolution === true);
+    expect(stream.frames.some(resolved)).toBe(false);
+    if (event === "UserPromptSubmit") await append({ type: "user", uuid: "cancel-question", timestamp: new Date().toISOString(),
+      message: { role: "user", content: "Cancel that question." } });
+    await forward("full", { hook_event_name: event, ...(event === "UserPromptSubmit" ? { prompt: "Cancel that question." } : {}) });
+    await vi.waitFor(() => expect(stream.frames.some(frame => frame.reset === true && resolved(frame))).toBe(true), { timeout: 2500 });
+    expect((await open()).frames.some(resolved)).toBe(true);
+  });
+
   it("uses running children for stream and overview after the foreground Stop", async () => {
     await forward("full", { hook_event_name: "UserPromptSubmit", prompt });
     await append({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "launch1", name: "Agent", input: { description: "review", prompt: "Review", run_in_background: true } }] } });

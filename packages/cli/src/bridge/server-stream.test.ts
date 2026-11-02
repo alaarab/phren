@@ -26,6 +26,7 @@ vi.mock("./transcripts.js", async importOriginal => {
     },
     refreshTranscript: async () => undefined,
     TranscriptReader: class {
+      resolveClaudeQuestionsThrough() {}
       get ambiguousPromptIds() { return new Set<string>(); }
       async read(before?: number) {
         transcript.reads.push(before ?? -1);

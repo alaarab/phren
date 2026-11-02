@@ -25,7 +25,7 @@ import { bindingPath } from "./agent-hook-stores.js";
 import { claudeQuestionDialog } from "./claude-question-dialog.js";
 import { intervalFromEnv } from "./limits.js";
 import { object } from "./protocol.js";
-import { numberedDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
+import { claudePermissionDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
 
 /** A working or blocked pane's screen is read for a dialog at most once per this window. */
 const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
@@ -93,7 +93,7 @@ export async function paneStatus(server: string, pane: string, terminal: string)
 
 /** Claude's optional "Teach auto mode about your environment?" dialog. */
 export function claudeTeachAutoModeDialog(screen: string): boolean {
-  return /Teach auto mode about your environment/i.test(stripTerminal(screen));
+  return /^Teach auto mode about your environment\?$/i.test(claudePermissionDialog(screen)?.title ?? "");
 }
 
 /** Whether `screen` (a pane's visible lines, with or without colors) shows a
@@ -106,10 +106,10 @@ export function screenDialog(agent: string, screen: string): boolean {
   if (agent === "opencode") return !!opencodePermissionDialog(screen);
   if (agent === "codex" || agent === "copilot") return !!visibleTerminalChoice(text);
   if (agent === "claude" && (claudeQuestionDialog(text) || claudeTeachAutoModeDialog(text))) return true;
-  return /Esc to cancel/i.test(text) && !!numberedDialog(text);
+  return !!claudePermissionDialog(text);
 }
 
-interface Dialog { terminal: string; readAt: number; shown?: { at: number; seq: number }; cleared?: number }
+interface Dialog { terminal: string; readAt: number; candidate?: boolean; shown?: { at: number; seq: number }; cleared?: number }
 const dialogs = new Map<string, Dialog>();
 
 /** The status of a pane after a look at its screen: blocked while its agent
@@ -132,14 +132,16 @@ export async function dialogStatus(server: string, pane: string, terminal: strin
     entry.readAt = now;
     // A failed read says nothing: the pane keeps what it had.
     const shown = await read().then(screen => screenDialog(agent, screen), () => undefined);
-    if (shown === true && !entry.shown) entry.shown = { at: now, seq: ++sequence };
-    else if (shown === false && entry.shown && now - entry.shown.at >= 3_000) {
+    if (dialogs.get(id) !== entry) return base;
+    if (shown === true && !entry.shown && (entry.candidate || base.status === "blocked")) entry.shown = { at: now, seq: ++sequence };
+    if (shown === false && entry.shown) {
       if (base.status === "blocked") {
-        settleBlockedPane(server, pane);
+        settleBlockedPane(server, pane, 0);
         base = await paneStatus(server, pane, terminal) ?? base;
       }
       entry.shown = undefined; entry.cleared = ++sequence;
     }
+    entry.candidate = shown === true;
   }
   if (entry.shown) return { status: "blocked", seq: entry.shown.seq };
   return { status: base.status, seq: Math.max(base.seq, entry.cleared ?? 0) };

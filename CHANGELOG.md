@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook question cards require an active harness dialog at the bottom of the live screen. Screen-only blocking requires two consecutive observations and clears on disappearance; ordinary numbered output, quoted dialogs and stale rows no longer become questions. Released Claude permissions that disappear between reads retire after their initial draw grace. Transcript questions resolve by identity on their result, the next assistant turn, Stop or an owner prompt, even when the result never arrives.
+
 ## [0.3.69] - 2026-11-01
 
 ### Fixed

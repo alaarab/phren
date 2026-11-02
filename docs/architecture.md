@@ -332,6 +332,10 @@ package opens a pinned SSH session and executes only `phren-hook v1 pipe`,
 `phren-hook v1 terminal <Herdr server>`, `phren-hook v1 pane <server> <pane>` (one
 pane's own terminal), or `phren-hook v1 shell <folder> [agent]`
 (agent `codex`, `claude`, `copilot`, `opencode` or `phren`, which runs `phren agent -i`).
+The Hook recognizes terminal interactions from the harness's current dialog structure at the bottom of the visible screen. A screen-only observation must repeat before it promotes a working pane to blocked; a readable disappearance clears it. Released Claude permissions retain a short initial draw grace, then reconcile against that current screen even if the dialog appeared and disappeared between reads. A live hook hold remains pending until resolved or its observed dialog disappears.
+
+Claude transcript question rows retain their native line and tool-use identities. When a matching result, a subsequent assistant message, or a foreground Stop/owner prompt resolves an `AskUserQuestion`, the Hook projects an explicit `tool_result` resolution marker (`phren_resolution: true`) beside that call, without writing to the transcript or inventing an answer. Live transcript readers replace their tail when a resolution changes, so existing clients, reconnects and history pages see the same resolved state. Queued prompts, background notifications, sidechains and chunks of the same assistant message do not resolve a foreground question. Codex asynchronous questions keep their separate reply-based lifetime.
+
 HTTP/WebSocket requests travel over a private Unix socket; terminals use an SSH
 PTY attached to the existing Herdr server, or, when Herdr is not running, a
 shell or agent started directly on the PTY in a validated project folder (no

@@ -23,7 +23,7 @@ import { approvalSummary, paneProject, type RequestKind } from "./approval-summa
 import { computerDisplayName } from "./pair.js";
 import { intervalFromEnv } from "./limits.js";
 import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogAnswer, type DialogQuestion } from "./claude-question-dialog.js";
-import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
+import { answeredQuestionInput, claudePermissionDialog, opencodePermissionDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
 import { allowOpencodeToolEverywhere } from "./opencode-permissions.js";
@@ -50,6 +50,10 @@ export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalC
 export { appServerApproval, appServerDecision, conductorCall, OPENCODE_APPROVAL_OPTIONS, opencodePermissionReply } from "./agent-hook-asks.js";
 export { agentHook, stopFacts, withinToolBudget } from "./agent-hook-callback.js";
 export { ApprovalWatchLeases, PushBindingStore, recordedSession } from "./agent-hook-stores.js";
+
+// Target objects arrive through several readers with different property order.
+const targetKey = (target: Target | undefined): string => target ? JSON.stringify({ server: target.server,
+  workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source, session: target.session }) : "";
 
 const APPROVAL_SWEEP_MS = 2_000;
 /** How recent the Herdr snapshots must be for the poll to trust "no opencode pane". */
@@ -211,6 +215,15 @@ export class AgentHooks {
   private terminalPrompts = new Map<string, { tool: string; input?: unknown; toolUseId?: string; dialogSeenAt?: number; message: string; request?: string; requestKind?: RequestKind; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
   /** The last time each pane's terminal lines were read for a dialog, so a
    * status tick reads them at most once per three seconds per pane. */
+  private dialogObservations = new Map<string, { signature: string; confirmed: boolean }>();
+  private dialogFlights = new Map<string, Promise<void>>();
+  private dialogEpochs = new Map<string, object>();
+  private questionBoundaries = new Map<string, number>();
+  questionResolution(target: Target): number | undefined { return this.questionBoundaries.get(targetKey(target)); }
+  confirmedTerminalDialog(target: Target): boolean {
+    const key = targetKey(target), entry = this.terminalPrompts.get(key);
+    return !!entry && (entry.dialog ? this.dialogObservations.get(key)?.confirmed === true : entry.dialogSeenAt !== undefined);
+  }
   private dialogReads = new Map<string, number>();
   /** Panes whose last read terminal line is a password prompt, so the status
    * frame can offer the phone's secret sheet only when one is really asking. */
@@ -425,8 +438,8 @@ export class AgentHooks {
    * answers Claude's AskUserQuestion with (`/v1/questions/answer`). */
   servedQuestion(target: Target): Json | undefined {
     if (target.source !== "opencode") return undefined;
-    const key = JSON.stringify(target);
-    const held = [...this.servedQuestions.values()].find(value => value.target && JSON.stringify(value.target) === key);
+    const key = targetKey(target);
+    const held = [...this.servedQuestions.values()].find(value => value.target && targetKey(value.target) === key);
     if (!held) return undefined;
     const title = held.questions[0].question;
     return { toolName: "AskUserQuestion", actionId: held.question.id, message: title,
@@ -454,8 +467,8 @@ export class AgentHooks {
   /** The phone's answers to a served pane's question: the labels it chose
    * (and a typed answer) per question, for exactly the questions it shows. */
   async answerServedQuestion(target: Target, questions: DialogQuestion[], answers: DialogAnswer[]): Promise<void> {
-    const key = JSON.stringify(target);
-    const found = [...this.servedQuestions.entries()].find(([, value]) => value.target && JSON.stringify(value.target) === key);
+    const key = targetKey(target);
+    const found = [...this.servedQuestions.entries()].find(([, value]) => value.target && targetKey(value.target) === key);
     if (!found) throw new BridgeError(409, "This question is no longer pending.");
     const [id, held] = found;
     const same = held.questions.length === questions.length && held.questions.every((question, index) =>
@@ -479,8 +492,8 @@ export class AgentHooks {
     if (target.source !== "opencode") return false;
     const entry = servedPane(target.server, target.pane);
     if (!entry) return false;
-    const client = paneClient(entry), key = JSON.stringify(target);
-    const question = [...this.servedQuestions.entries()].find(([, value]) => value.target && JSON.stringify(value.target) === key);
+    const client = paneClient(entry), key = targetKey(target);
+    const question = [...this.servedQuestions.entries()].find(([, value]) => value.target && targetKey(value.target) === key);
     const escape = keys.length > 0 && keys.every(value => value === "Escape");
     if (question && escape) {
       await client.rejectQuestion(question[0]).catch(() => { throw new BridgeError(409, "This question is no longer pending."); });
@@ -569,7 +582,7 @@ export class AgentHooks {
     } catch { /* The archive sweep must never break the Hook. */ }
   }
   watch(target: Target): () => void {
-    const key = JSON.stringify(target);
+    const key = targetKey(target);
     this.watching.set(key, (this.watching.get(key) || 0) + 1);
     return () => { const n = (this.watching.get(key) || 1) - 1; if (n) this.watching.set(key, n); else this.watching.delete(key); };
   }
@@ -615,7 +628,7 @@ export class AgentHooks {
     const questions = tool === "AskUserQuestion" ? terminalQuestions(body.input) : undefined;
     const choice = questions ? questionChoice(questions, 0) : terminalChoice(body.input);
     const summary = approvalSummary({ tool, input: body.input, question: tool === "AskUserQuestion" });
-    this.terminalPrompts.set(JSON.stringify(target), { tool, input: body.input, dialogSeenAt, toolUseId: typeof body.toolUseId === "string" ? body.toolUseId : undefined,
+    this.terminalPrompts.set(targetKey(target), { tool, input: body.input, dialogSeenAt, toolUseId: typeof body.toolUseId === "string" ? body.toolUseId : undefined,
       message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}),
       ...summary,
       ...(questions ? { questions, questionIndex: 0 } : {}), at: Date.now() });
@@ -624,27 +637,42 @@ export class AgentHooks {
   /** The request the agent is showing in its terminal, if one fell through
    * in the last fifteen minutes; the caller only asks while the pane waits. */
   terminalPrompt(target: Target): Json | undefined {
-    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    const key = targetKey(target), entry = this.terminalPrompts.get(key);
     if (!entry) return undefined;
     if (Date.now() - entry.at > 900_000) { this.terminalPrompts.delete(key); return undefined; }
     return { toolName: entry.tool, message: entry.message, ...(entry.request ? { request: entry.request } : {}), ...(entry.choice ? { choice: entry.choice } : {}),
       ...(entry.questions?.length ? { questions: entry.questions, questionIndex: entry.questionIndex ?? 0 } : {}), at: new Date(entry.at).toISOString() };
   }
-  clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
+  clearTerminalPrompt(target: Target) {
+    const key = targetKey(target);
+    this.terminalPrompts.delete(key); this.dialogObservations.delete(key);
+    this.dialogEpochs.delete(key);
+  }
   /** True while the pane's own terminal is reading a password. */
-  passwordPrompt(target: Target): boolean { return this.passwords.get(JSON.stringify(target)) === true; }
+  passwordPrompt(target: Target): boolean { return this.passwords.get(targetKey(target)) === true; }
   /** Claude Code's auto-mode fallback, opencode and Codex draw a numbered
    * dialog in the pane with no PermissionRequest hook behind it. While the pane
    * waits with nothing else to ask, read its last lines (at most once per
    * three seconds per pane) and publish the dialog as a terminal choice; drop
    * it when the pane leaves waiting or the dialog lines vanish. A remembered
-   * Claude request is retired only after its dialog was seen and disappeared. The same
+   * Claude request keeps its initial draw grace, then follows the current screen. The same
    * read notes whether the terminal is reading a password. */
   async syncTerminalDialog(target: Target, active: boolean): Promise<void> {
-    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    const key = targetKey(target);
+    if (!active) this.clearTerminalPrompt(target);
+    const running = this.dialogFlights.get(key);
+    if (running) return running;
+    const work = this.readTerminalDialog(target, active);
+    this.dialogFlights.set(key, work);
+    try { await work; } finally { if (this.dialogFlights.get(key) === work) this.dialogFlights.delete(key); }
+  }
+  private async readTerminalDialog(target: Target, active: boolean): Promise<void> {
+    const key = targetKey(target), entry = this.terminalPrompts.get(key), epoch = {};
+    this.dialogEpochs.set(key, epoch);
+    while (this.dialogEpochs.size > 128) this.dialogEpochs.delete(this.dialogEpochs.keys().next().value!);
     // A served OpenCode pane lists its asks over its API; its screen is not read.
     if (target.source === "opencode" && servedPane(target.server, target.pane)) { if (entry) this.terminalPrompts.delete(key); return; }
-    const held = [...this.pending.values()].find(p => JSON.stringify(p.target) === key);
+    const held = [...this.pending.values()].find(p => targetKey(p.target) === key);
     // A held Codex permission can already have real choices in its pane.
     // Refresh those before publishing the approval, even while it is held.
     // One the Hook's own app-server asked is answered over RPC, not in the pane.
@@ -683,10 +711,15 @@ export class AgentHooks {
     // Unlike optional display text, a failed read cannot prove a dialog is gone.
     const text = await terminalProvider().readScreen(target.server, target.pane,
       { scope: "agent", source: "visible", lines: 40, stripAnsi: true, timeoutMs: 2_000 }).catch(() => undefined);
-    if (text === undefined) return;
+    if (text === undefined) {
+      if (!this.dialogObservations.get(key)?.confirmed) this.dialogObservations.delete(key);
+      return;
+    }
+    if (this.dialogEpochs.get(key) !== epoch) return;
     // A tall question has its tab bar above the 40 lines: look further up, for it only.
     const tall = target.source === "claude" && /Chat about this/.test(text) && !claudeQuestionDialog(text)
       ? await this.paneLines(target, true, QUESTION_READ_LINES).catch(() => "") : "";
+    if (this.dialogEpochs.get(key) !== epoch) return;
     const asking = target.source === "claude" && !!(claudeQuestionDialog(text) || (tall && claudeQuestionDialog(tall)));
     this.passwords.set(key, passwordLine(text));
     while (this.passwords.size > 128) this.passwords.delete(this.passwords.keys().next().value!);
@@ -695,17 +728,24 @@ export class AgentHooks {
     // a numbered dialog: its digits advance on their own and a trailing
     // Enter would land on the next tab.
     if (asking) {
+      this.dialogObservations.delete(key);
       if (entry && !question) this.terminalPrompts.delete(key);
       return;
     }
     if (question) { this.terminalPrompts.delete(key); return; }
     const dialog = await this.screenDialog(target, text);
+    if (this.dialogEpochs.get(key) !== epoch) return;
+    const signature = JSON.stringify(dialog);
+    const prior = this.dialogObservations.get(key);
+    if (dialog) this.dialogObservations.set(key, { signature, confirmed: prior?.signature === signature });
+    else this.dialogObservations.delete(key);
+    while (this.dialogObservations.size > 128) this.dialogObservations.delete(this.dialogObservations.keys().next().value!);
     if (target.source === "claude") {
       // A callback or a new ask may have replaced this request during the read.
       if ((held && ![...this.pending.values()].includes(held)) || this.terminalPrompts.get(key) !== entry) return;
       const observed = held ?? entry;
       if (dialog?.title && observed) observed.dialogSeenAt ??= now;
-      if (!dialog?.title && observed?.dialogSeenAt !== undefined && now - observed.dialogSeenAt >= 3_000) {
+      if (!dialog?.title && observed && (observed.dialogSeenAt !== undefined || (!held && now - entry!.at >= 3_000))) {
         for (const [action, pending] of this.pending) {
           if (pending !== held) continue;
           clearTimeout(pending.timer); this.pending.delete(action); this.pushedHolds.delete(action); this.dropPushBindings(action);
@@ -714,10 +754,10 @@ export class AgentHooks {
         const released = this.releasedHolds.get(key);
         if (released) { this.dropPushBindings(released.action); this.releasedHolds.delete(key); }
         this.terminalPrompts.delete(key); this.dropDialogPush(key); this.dropForwardedDialog(key);
-        settleBlockedPane(target.server, target.pane);
+        settleBlockedPane(target.server, target.pane, 0);
         return;
       }
-      // Never settle a held or remembered ask before its dialog was observed.
+      // A live hook hold is authoritative until resolved; released asks get a draw grace.
       if (held || (!dialog?.title && observed)) return;
     }
     if (entry && !entry.dialog) {
@@ -743,7 +783,7 @@ export class AgentHooks {
   /** Resolve a phone option identifier. Real shortcuts retain their key path;
    * keyless rows are reached and verified before returning Enter to the route. */
   async dialogAnswerKeys<K extends string>(target: Target, keys: readonly K[]): Promise<(K | "Enter")[]> {
-    const entry = this.terminalPrompts.get(JSON.stringify(target));
+    const entry = this.terminalPrompts.get(targetKey(target));
     const choice = entry?.choice;
     const option = choice?.options.find(option => keys.includes(option.key as K));
     if (choice && option?.hasKey === false) {
@@ -810,7 +850,7 @@ export class AgentHooks {
    * tab, a changed question or a missed key stops it with nothing stray
    * typed. A finished set clears the remembered question. */
   async answerClaudeQuestions(target: Target, questions: DialogQuestion[], answers: DialogAnswer[], options: { from?: number; submit?: boolean } = {}): Promise<void> {
-    const key = JSON.stringify(target);
+    const key = targetKey(target);
     await answerClaudeQuestionDialog({
       // A tall question (long text, many options) pushes its tab bar out of 40 lines.
       read: () => this.paneLines(target, true, QUESTION_READ_LINES),
@@ -828,7 +868,7 @@ export class AgentHooks {
    * the same verified steps and submit after the last. False when the
    * prompt is not a remembered question, so the keys take the usual path. */
   async answerReleasedQuestion(target: Target, keys: readonly string[]): Promise<boolean> {
-    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    const key = targetKey(target), entry = this.terminalPrompts.get(key);
     if (target.source !== "claude" || !entry?.questions?.length) return false;
     const digits = keys.filter(value => /^[1-9]$/.test(value));
     if (!digits.length) return false;
@@ -838,32 +878,32 @@ export class AgentHooks {
     return true;
   }
   private startCompacting(target: Target) {
-    this.compactingSince.set(JSON.stringify(target), Date.now());
+    this.compactingSince.set(targetKey(target), Date.now());
     while (this.compactingSince.size > 64) this.compactingSince.delete(this.compactingSince.keys().next().value!);
   }
-  private stopCompacting(target: Target) { this.compactingSince.delete(JSON.stringify(target)); }
+  private stopCompacting(target: Target) { this.compactingSince.delete(targetKey(target)); }
   /** True while Claude Code is compacting `target`; a boundary older than ten
    * minutes is stale, so a missed SessionStart cannot pin the state forever. */
   compacting(target: Target): boolean {
-    const key = JSON.stringify(target), at = this.compactingSince.get(key);
+    const key = targetKey(target), at = this.compactingSince.get(key);
     if (at === undefined) return false;
     if (Date.now() - at > 600_000) { this.compactingSince.delete(key); return false; }
     return true;
   }
   menuOpened(target: Target, command?: string) {
-    this.menus.set(JSON.stringify(target), { at: Date.now(), ...(command ? { command } : {}) });
+    this.menus.set(targetKey(target), { at: Date.now(), ...(command ? { command } : {}) });
     while (this.menus.size > 64) this.menus.delete(this.menus.keys().next().value!);
   }
   menuOpen(target: Target): boolean {
-    const entry = this.menus.get(JSON.stringify(target));
+    const entry = this.menus.get(targetKey(target));
     return entry !== undefined && Date.now() - entry.at < 30_000;
   }
   /** The bare slash command that opened this pane's current menu window. */
   menuCommand(target: Target): string | undefined {
-    const entry = this.menus.get(JSON.stringify(target));
+    const entry = this.menus.get(targetKey(target));
     return entry && Date.now() - entry.at < 30_000 ? entry.command : undefined;
   }
-  menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
+  menuClosed(target: Target) { this.menus.delete(targetKey(target)); }
   /** The pane with its colors, for dialogs whose cursor is only a color. */
   paneAnsi(target: Target): Promise<string> {
     return readPaneText(target.server, target.pane, { scope: "agent", source: "visible", lines: 40, stripAnsi: false, format: "ansi", timeoutMs: 2_000 });
@@ -879,7 +919,7 @@ export class AgentHooks {
    * seconds is left open as the visible prompt, published as the terminal
    * choice the phone draws as a question card. Runs at most once per window. */
   async walkMenuConfirmation(target: Target): Promise<{ menuClosed: boolean; waiting?: { message: string; choice?: TerminalChoice } }> {
-    const key = JSON.stringify(target), entry = this.menus.get(key);
+    const key = targetKey(target), entry = this.menus.get(key);
     if (!entry || entry.confirmationAttempted) return entry ? { menuClosed: false } : { menuClosed: true };
     entry.confirmationAttempted = true;
     const deadline = Date.now() + 3_000;
@@ -905,7 +945,7 @@ export class AgentHooks {
     }
   }
   approval(target: Target): Json | undefined {
-    const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
+    const pending = [...this.pending.entries()].find(([, p]) => targetKey(p.target) === targetKey(target));
     if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: pending[1].choice?.title ?? pending[1].title, message: pending[1].message,
       request: pending[1].request,
       details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice && !pending[1].appServer,
@@ -921,7 +961,7 @@ export class AgentHooks {
       message: worker.request.message, request: worker.requestLine, expiresAt: worker.request.expiresAt, options: OPENCODE_APPROVAL_OPTIONS } : undefined;
   }
   private opencodeApproval(target: Target): Json | undefined {
-    const held = [...this.opencode.values()].find(value => !value.fanout && JSON.stringify(value.target) === JSON.stringify(target));
+    const held = [...this.opencode.values()].find(value => !value.fanout && targetKey(value.target) === targetKey(target));
     if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, request: held.requestLine, expiresAt: held.request.expiresAt, options: OPENCODE_APPROVAL_OPTIONS };
     const request = opencodeRequest(target.session);
     return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message,
@@ -930,8 +970,8 @@ export class AgentHooks {
   }
   /** Live fan-out worker asks shown on this parent conversation, oldest first. */
   private fanoutHeld(target: Target): OpencodeHeld[] {
-    const key = JSON.stringify(target);
-    return [...this.opencode.values()].filter(value => value.fanout && value.target && JSON.stringify(value.target) === key
+    const key = targetKey(target);
+    return [...this.opencode.values()].filter(value => value.fanout && value.target && targetKey(value.target) === key
       && value.expiresAt > Date.now() && opencodeRequest(value.fanout.session)?.id === value.request.id);
   }
   pendingPanes(server: string, state: Json): Set<string> {
@@ -987,13 +1027,13 @@ export class AgentHooks {
     // answered with the pane's own keys.
     if (id.startsWith("dialog-") || (!this.pending.has(id) && await this.releasedHoldDialog(id))) {
       const dialog = this.dialogActions.get(id);
-      if (!dialog || JSON.stringify(dialog.target) !== JSON.stringify(target)) throw new BridgeError(409, "This approval is no longer pending.");
+      if (!dialog || targetKey(dialog.target) !== targetKey(target)) throw new BridgeError(409, "This approval is no longer pending.");
       if (updatedInput !== undefined || !["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
       await this.answerDialog(id, decision as "approve" | "deny");
-      this.dropForwardedDialog(JSON.stringify(target));
+      this.dropForwardedDialog(targetKey(target));
       return;
     }
-    const worker = [...this.opencode.entries()].find(([, held]) => held.fanout?.actionId === id && JSON.stringify(held.target) === JSON.stringify(target));
+    const worker = [...this.opencode.entries()].find(([, held]) => held.fanout?.actionId === id && targetKey(held.target) === targetKey(target));
     if (worker) {
       if (updatedInput !== undefined) throw new BridgeError(400, "Answers go with an approval.");
       await validateTarget(target);
@@ -1003,7 +1043,7 @@ export class AgentHooks {
     const served = target.source === "opencode" ? this.opencode.get(id) : undefined;
     if (served?.served) {
       if (updatedInput !== undefined) throw new BridgeError(400, "Answers go with an approval.");
-      if (!served.target || JSON.stringify(served.target) !== JSON.stringify(target)) throw new BridgeError(409, "This approval is no longer pending.");
+      if (!served.target || targetKey(served.target) !== targetKey(target)) throw new BridgeError(409, "This approval is no longer pending.");
       await validateTarget(target);
       await this.answerServed(id, served, decision);
       return;
@@ -1024,7 +1064,7 @@ export class AgentHooks {
       return;
     }
     const entry = this.pending.get(id);
-    if (!entry || JSON.stringify(entry.target) !== JSON.stringify(target)) throw new BridgeError(409, "This approval is no longer pending.");
+    if (!entry || targetKey(entry.target) !== targetKey(target)) throw new BridgeError(409, "This approval is no longer pending.");
     const grantAnswer = entry.conductor && (decision === "allow-project" || decision === "allow-everywhere") ? decision : undefined;
     if (grantAnswer && !entry.conductor) throw new BridgeError(400, "Only a conductor dispatch or hand-off can write a grant.");
     const effective = grantAnswer ? "approve" : decision;
@@ -1055,7 +1095,7 @@ export class AgentHooks {
    * once instead of leaving the card up until the 55-second timer. */
   releaseChoice(target: Target) {
     for (const [id, entry] of this.pending) {
-      if (!entry.choice || JSON.stringify(entry.target) !== JSON.stringify(target)) continue;
+      if (!entry.choice || targetKey(entry.target) !== targetKey(target)) continue;
       this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
       if (!entry.response.destroyed) entry.response.end("{}");
     }
@@ -1067,7 +1107,7 @@ export class AgentHooks {
   cancelHeldQuestion(target: Target): boolean {
     let cancelled = false;
     for (const [id, entry] of this.pending) {
-      if (entry.tool !== "AskUserQuestion" || JSON.stringify(entry.target) !== JSON.stringify(target)) continue;
+      if (entry.tool !== "AskUserQuestion" || targetKey(entry.target) !== targetKey(target)) continue;
       this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
       if (!entry.response.destroyed) entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest",
         decision: { behavior: "deny", message: "The user cancelled this question in Phren without answering." } } }));
@@ -1129,20 +1169,20 @@ export class AgentHooks {
       if (!pane.agent || (!isWaiting && pane.agent !== "claude")) continue;
       const target = await resolve(pane).catch(() => undefined);
       if (!target) continue;
-      const key = JSON.stringify(target);
+      const key = targetKey(target);
       // tmux can already report working after its own dialog read. Keep
       // reconciling tracked Claude asks until our read confirms disappearance.
       if (!isWaiting && !this.terminalPrompts.has(key) && !this.releasedHolds.has(key)
-        && ![...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
+        && ![...this.pending.values()].some(held => targetKey(held.target) === key)) continue;
       waiting.add(key);
       // A served OpenCode pane's asks were pushed as its server listed them.
       if (target.source === "opencode" && servedPane(target.server, target.pane)) continue;
       // Held asks were pushed on arrival; Claude still needs its dialog reconciled.
-      if (target.source !== "claude" && [...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
+      if (target.source !== "claude" && [...this.pending.values()].some(held => targetKey(held.target) === key)) continue;
       // Read the dialog even with no push device: the overview marks the
       // tab as needing permission from it, and the phone answers it there.
       await this.syncTerminalDialog(target, true).catch(() => {});
-      if (!this.push.available || [...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
+      if (!this.push.available || [...this.pending.values()].some(held => targetKey(held.target) === key)) continue;
       const entry = this.terminalPrompts.get(key);
       const title = entry?.dialog || entry?.released ? entry.choice?.title : undefined;
       if (!entry?.choice || !title) { this.dropDialogPush(key); continue; }
@@ -1220,7 +1260,7 @@ export class AgentHooks {
       return { actionId, tool: clip(held.toolName, 200) ?? "action", ...(title ? { title } : {}), ...(request ? { request } : {}),
         ...(pending ? { requestKind: pending.requestKind } : {}), ...(expiresAt ? { expiresAt } : {}), ...(conductor ? { conductor } : {}), ...(pushed ? { pushed: true as const } : {}) };
     }
-    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    const key = targetKey(target), entry = this.terminalPrompts.get(key);
     const title = entry && (entry.dialog || entry.released) ? entry.choice?.title : undefined;
     if (!entry?.choice || !title) return undefined;
     // The ask was offered while held: keep offering it under the same id.
@@ -1293,8 +1333,8 @@ export class AgentHooks {
    * color; the other fallbacks number rows without a key in the label. */
   private async screenDialog(target: Target, text: string) {
     return ["codex", "copilot"].includes(target.source) ? visibleTerminalChoice(text)
-      : target.source === "opencode" ? opencodePermissionDialog(await this.paneAnsi(target))?.choice ?? numberedDialog(text)
-      : numberedDialog(text);
+      : target.source === "opencode" ? opencodePermissionDialog(await this.paneAnsi(target))?.choice
+      : claudePermissionDialog(text);
   }
   /** Approve picks the dialog's yes/allow row (else its first), Deny its
    * no/deny row (else Escape), typed as the pane's own keys. */
@@ -1303,7 +1343,7 @@ export class AgentHooks {
     if (!dialog || dialog.expiresAt <= Date.now()) throw new BridgeError(409, "This approval is no longer pending.");
     // Claimed before any await: a second answer for the same dialog gets a 409 instead of typing the keys twice.
     this.dialogActions.delete(action);
-    const key = JSON.stringify(dialog.target);
+    const key = targetKey(dialog.target);
     try { await validateTarget(dialog.target, false, true); } catch (error) {
       if (!this.dialogActions.has(action)) this.dialogActions.set(action, dialog);
       throw error;
@@ -1327,19 +1367,25 @@ export class AgentHooks {
    * dialog is gone: the call it held ran (its PostToolUse), the turn ended or
    * took a new prompt, or the agent asked something else. */
   private settleTerminalAnswered(target: Target, body: Json) {
-    const event = String(body.event), key = JSON.stringify(target);
+    const event = String(body.event), key = targetKey(target);
+    this.dialogEpochs.delete(key);
+    this.dialogObservations.delete(key);
+    if (["Stop", "UserPromptSubmit"].includes(event)) {
+      this.questionBoundaries.set(key, Date.now());
+      while (this.questionBoundaries.size > 128) this.questionBoundaries.delete(this.questionBoundaries.keys().next().value!);
+    }
     const matches = (held: { tool: string; input: unknown; toolUseId?: string }) => held.toolUseId && typeof body.toolUseId === "string" && body.toolUseId
       ? held.toolUseId === body.toolUseId : held.tool === body.tool && isDeepStrictEqual(held.input, body.input);
     const settled = (held: { tool: string; input: unknown; toolUseId?: string }) => ["Stop", "UserPromptSubmit"].includes(event)
       || (event === "PermissionRequest" && !matches(held))
       || (event === "PostToolUse" && matches(held));
     for (const [action, held] of this.pending) {
-      if (held.appServer || JSON.stringify(held.target) !== key || !settled(held)) continue;
+      if (held.appServer || targetKey(held.target) !== key || !settled(held)) continue;
       clearTimeout(held.timer); this.pending.delete(action); this.pushedHolds.delete(action); this.dropPushBindings(action);
       if (!held.response.destroyed) held.response.end("{}");
     }
     const hold = this.releasedHolds.get(key), remembered = this.terminalPrompts.get(key);
-    if (remembered && !remembered.questions?.length && settled({ tool: remembered.tool, input: remembered.input, toolUseId: remembered.toolUseId })) {
+    if (remembered && settled({ tool: remembered.tool, input: remembered.input, toolUseId: remembered.toolUseId })) {
       this.terminalPrompts.delete(key);
       if (hold) { this.dropPushBindings(hold.action); this.releasedHolds.delete(key); }
     }
@@ -1355,7 +1401,7 @@ export class AgentHooks {
     const shown = appServerApproval(request);
     if (!shown || this.closed) return;
     // Replayed after a reconnect: the card stays, answered through the new connection.
-    const known = [...this.pending.values()].find(entry => entry.appServer?.requestId === request.requestId && JSON.stringify(entry.target) === JSON.stringify(target));
+    const known = [...this.pending.values()].find(entry => entry.appServer?.requestId === request.requestId && targetKey(entry.target) === targetKey(target));
     if (known?.appServer) { known.appServer.answer = answer; return; }
     const action = randomUUID();
     const held = { requestId: request.requestId, answer };
@@ -1382,7 +1428,7 @@ export class AgentHooks {
   /** Another client (the pane's TUI) answered the request, or this one declined it. */
   codexResolved(target: Target, requestId: AppServerRequestId): void {
     for (const [action, entry] of this.pending) {
-      if (entry.appServer?.requestId !== requestId || JSON.stringify(entry.target) !== JSON.stringify(target)) continue;
+      if (entry.appServer?.requestId !== requestId || targetKey(entry.target) !== targetKey(target)) continue;
       this.pending.delete(action); this.dropPushBindings(action);
       (entry.response as { destroyed: boolean }).destroyed = true;
       settleBlockedPane(target.server, target.pane, 0);
@@ -1556,7 +1602,7 @@ export class AgentHooks {
           res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "Denied by an owner approval rule." } } }));
           return;
         }
-        if (body.event === "PermissionRequest") this.terminalPrompts.delete(JSON.stringify(target));
+        if (body.event === "PermissionRequest") this.terminalPrompts.delete(targetKey(target));
         if (body.event === "PermissionRequest" && ruleEffect !== "always-ask") {
           const conductor = conductorCall(String(body.tool || "action"), body.input);
           if (conductor) {
@@ -1576,7 +1622,7 @@ export class AgentHooks {
         // lets Codex ask for it at once instead of holding a second card.
         if (body.event === "PermissionRequest" && target.source === "codex" && codexServers.forThread(target.session)) { res.end("{}"); return; }
         if (body.event !== "PermissionRequest" || target.source === "copilot"
-          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available && !this.dispatchLeased(target))) {
+          || (!this.watching.has(targetKey(target)) && !this.overview.has(target.server) && !this.push.available && !this.dispatchLeased(target))) {
           if (body.event === "PermissionRequest") this.rememberTerminalPrompt(target, body);
           res.end("{}"); return;
         }
@@ -1584,9 +1630,9 @@ export class AgentHooks {
         // Timeouts always return control to the ordinary terminal prompt.
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
-        this.dialogReads.delete(JSON.stringify(target));
+        this.dialogReads.delete(targetKey(target));
         const conductor = body.event === "PermissionRequest" ? conductorCall(String(body.tool || "action"), body.input) : undefined;
-        const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server) || this.dispatchLeased(target);
+        const locallyWatched = this.watching.has(targetKey(target)) || this.overview.has(target.server) || this.dispatchLeased(target);
         const cwd = typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane).catch(() => undefined);
         // When the hold ends the request stays in the terminal. A pushed
         // notification keeps working: its binding waits for the pane's dialog
@@ -1597,7 +1643,7 @@ export class AgentHooks {
           released = true; this.pending.delete(action); this.rememberTerminalPrompt(target, body, dialogSeenAt);
           // The id was already handed out (phone card, push, dispatcher): it keeps answering the dialog.
           const pushed = this.pushedHolds.get(action);
-          this.releasedHolds.set(JSON.stringify(target), { action, expiresAt: pushed ?? Date.now() + DIALOG_PUSH_MS, pushed: pushed !== undefined });
+          this.releasedHolds.set(targetKey(target), { action, expiresAt: pushed ?? Date.now() + DIALOG_PUSH_MS, pushed: pushed !== undefined });
           this.pushedHolds.delete(action);
           res.end("{}");
         }, APPROVAL_HOLD_MS);

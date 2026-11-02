@@ -485,3 +485,57 @@ describe("Claude narration", () => {
     expect((visibleEvent(row, "claude") as any).message.content).toEqual([{ type: "redacted" }, { type: "redacted" }]);
   });
 });
+
+describe("Claude question resolution in streamed transcript pages", () => {
+  let root: string, file: string;
+  const ask = (id = "ask-1", assistant = "assistant-1", timestamp = "2026-11-02T01:00:00Z") => ({ type: "assistant", timestamp,
+    message: { id: assistant, role: "assistant", content: [{ type: "tool_use", id, name: "AskUserQuestion", input: {
+      questions: [{ question: "Pick one?", header: "Choice", options: [{ label: "A" }, { label: "B" }] }] } }] } });
+  const resolutions = (page: Awaited<ReturnType<TranscriptReader["read"]>>) => page.entries.flatMap(entry => {
+    const content = (entry.raw.message as Json)?.content;
+    return Array.isArray(content) ? (content as Json[]).filter(block => block.type === "tool_result").map(block => block.tool_use_id) : [];
+  });
+  beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-question-lifecycle-")); file = path.join(root, "transcript.jsonl"); });
+  afterEach(async () => { await rm(root, { recursive: true }); });
+  it.each([
+    { name: "matching result", event: { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "ask-1", content: "Cancelled", is_error: true }] } } },
+    { name: "next assistant turn without a result", event: { type: "assistant", message: { id: "assistant-2", role: "assistant", content: [{ type: "text", text: "Continuing after the terminal answer." }] } } },
+    { name: "next owner prompt without a result", event: { type: "user", message: { role: "user", content: "Cancel that and continue." } } },
+  ])("resolves on $name across live reads and reconnects", async ({ event }) => {
+    await writeFile(file, JSON.stringify(ask()) + "\n");
+    const reader = new TranscriptReader(file, "claude");
+    expect(resolutions(await reader.read())).toEqual([]);
+    await appendFile(file, JSON.stringify(event) + "\n");
+    const page = await reader.read();
+    expect(page.reset).toBe(true);
+    expect(resolutions(page)).toContain("ask-1");
+    expect(resolutions(await new TranscriptReader(file, "claude").read())).toContain("ask-1");
+    // A delayed real result cannot reopen the question.
+    await appendFile(file, JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "ask-1", content: "A" }] } }) + "\n");
+    expect(resolutions(await new TranscriptReader(file, "claude").read())).toContain("ask-1");
+  });
+  it("replaces the transcript tail on a lifecycle boundary without a new row", async () => {
+    const original = JSON.stringify(ask()) + "\n";
+    await writeFile(file, original);
+    const reader = new TranscriptReader(file, "claude");
+    await reader.read();
+    reader.resolveClaudeQuestionsThrough(Date.parse("2026-11-02T01:00:01Z"));
+    const page = await reader.read();
+    expect(page.reset).toBe(true);
+    expect(resolutions(page)).toEqual(["ask-1"]);
+    expect(await readFile(file, "utf8")).toBe(original);
+    // A new question belongs to the next turn, after that boundary.
+    await appendFile(file, JSON.stringify(ask("ask-2", "assistant-2", "2026-11-02T01:00:02Z")) + "\n");
+    expect(resolutions(await reader.read())).not.toContain("ask-2");
+  });
+  it("retains a question through same-message chunks, unrelated results and background notices", async () => {
+    const events = [ask(), { type: "assistant", message: { id: "assistant-1", content: [{ type: "text", text: "Same turn chunk" }] } },
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "other", content: "Done" }] } },
+      { type: "user", isMeta: true, message: { content: "Background" } },
+      { type: "assistant", isSidechain: true, message: { id: "child", content: [{ type: "text", text: "Child done" }] } },
+      { type: "assistant", origin: { kind: "task-notification" }, message: { id: "background", content: [{ type: "text", text: "Background done" }] } },
+      { type: "queue-operation", operation: "enqueue", content: "Queued owner message" }];
+    await writeFile(file, events.map(event => JSON.stringify(event)).join("\n") + "\n");
+    expect(resolutions(await new TranscriptReader(file, "claude").read())).not.toContain("ask-1");
+  });
+});
