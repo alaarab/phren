@@ -53,7 +53,10 @@ const GUTTER = /^(\s*)│(?: |$)/;
  * lines are not one: the last tab bar anchors it, and an active dialog ends
  * with its "Esc to cancel" footer or the review's Submit/Cancel rows. */
 export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefined {
-  const lines = joinDialogFooters(text.split(/\r?\n/));
+  const physicalLines = text.split(/\r?\n/);
+  // Measure before folding footers: their logical length can exceed the pane.
+  const width = Math.max(...physicalLines.map(line => line.length));
+  const lines = joinDialogFooters(physicalLines);
   let bar = -1, barEnd = -1, tabBar = "";
   // A narrow pane soft-wraps the tab bar. Reading only its last physical
   // row either loses tabs (a false set mismatch) or misses the dialog when
@@ -62,12 +65,17 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
   for (let end = lines.length - 1; end >= 0 && bar < 0; end--) {
     let candidate = "";
     for (let start = end; start >= 0; start--) {
-      const line = lines[start].trim();
-      if (!line || /^─+$/.test(line)) break;
-      candidate = line + (candidate ? " " + candidate : "");
+      const line = lines[start];
+      if (!line.trim() || /^─+$/.test(line.trim())) break;
+      // A full-width row wraps in place, possibly inside a word. Preserve
+      // its characters, including any space already at the row boundary.
+      candidate = line + (candidate ? (line.length >= width ? "" : " ") + candidate : "");
       if (TAB_BAR.test(candidate) && /[☐☒]/.test(candidate)) {
         bar = start; barEnd = end; tabBar = candidate;
       }
+      // The leading arrow is the start of this bar. A checkbox in earlier
+      // output belongs to that output, even when there is no blank row.
+      if (/^\s*←/.test(line)) break;
     }
   }
   if (bar < 0) return undefined;

@@ -9,6 +9,21 @@ import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 const pane = (name: string) => readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "claude-questions", `${name}.txt`), "utf8");
 
 describe("reading Claude's question dialog", () => {
+  const shortDialog = (bar: string) => [bar, "", "Pick?", "", "❯ 1. A", "  2. B", "  3. Type something.",
+    "  4. Chat about this", "", "Enter to select", "Esc to cancel"].join("\n");
+
+  it.each([
+    ["Submit", "← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["a tab label", "← ☐ Color theme ☐ Too\nls ✔ Submit →", ["Color theme", "Tools"]],
+  ] as const)("preserves characters when a full-width tab bar wraps inside %s", (_name, bar, tabs) => {
+    expect(claudeQuestionDialog(shortDialog(bar))).toMatchObject({ kind: "question", title: "Pick?", tabs });
+  });
+
+  it("starts the tab bar at its leading arrow, excluding a preceding checkbox row", () => {
+    expect(claudeQuestionDialog(shortDialog("☐ Previous task\n← ☐ Color ☐ Tools ✔ Submit →")))
+      .toMatchObject({ kind: "question", title: "Pick?", tabs: ["Color", "Tools"] });
+  });
+
   it("reads the first of three questions under its tab bar, not the prompt above it", () => {
     expect(claudeQuestionDialog(pane("q1"))).toEqual({
       kind: "question", tabs: ["Color", "Tools", "Size"], multiSelect: false, cursor: 1,
