@@ -208,9 +208,9 @@ export function headlessEnv(schedule: Schedule, env: NodeJS.ProcessEnv = process
 }
 
 async function launchHeadless(context: ScheduleLaunchContext, store: string, started: (child: ChildProcess) => void): Promise<ScheduleLaunchResult> {
-  // A Claude schedule that names no account runs under the one with the most room, as a Herdr launch does.
+  // Use the same pool and role decision as a phone or Herdr launch, in this launcher's store.
   const choice = context.schedule.harness === "claude" && !context.schedule.account
-    ? await pickClaudeAccount(`Schedule "${context.schedule.name}"`, { project: context.project, cwd: context.cwd }) : undefined;
+    ? await pickClaudeAccount(`Schedule "${context.schedule.name}"`, { project: context.project, cwd: context.cwd, phrenPath: store }) : undefined;
   const env = headlessEnv(choice ? { ...context.schedule, account: choice.account } : context.schedule);
   const root = fanoutRoot({ ...process.env, PHREN_PATH: store }), jobDir = path.join(root, context.runId);
   await mkdir(jobDir, { recursive: true, mode: 0o700 });

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearProjectConfigCache } from "../project-config.js";
+import { writeStoreRegistry } from "../store-registry.js";
 import { register } from "../tools/helper.js";
 import { setAccountSettings, setComputerAllowedPools, setProjectAllowedPools } from "./account-pools.js";
 import { claudeHome, clearAccountCaches } from "./claude-accounts.js";
@@ -137,6 +138,28 @@ describe.skipIf(process.platform === "win32")("helper runs", () => {
     const target = claudeHome("api")!;
     await Promise.all(Array.from({ length: 8 }, (_, index) => recordSessionCost(target, { session_id: `s-${index}`, cost: { total_cost_usd: index + 1 } })));
     expect(Object.keys(homeSessionCosts(target)).filter(id => id.startsWith("s-")).sort()).toEqual(Array.from({ length: 8 }, (_, index) => `s-${index}`));
+  });
+
+  it("requires the owner's explicit helpers role for an account named by a team project's MCP call", async () => {
+    const primary = path.join(home, "personal-store"); mkdirSync(primary);
+    config(`sourcePath: ${work}\nhelper: { account: api }\n`);
+    writeStoreRegistry(primary, { version: 1, stores: [
+      { id: "11111111", name: "personal", path: primary, role: "primary", sync: "managed-git" },
+      { id: "22222222", name: "team", path: store, role: "team", sync: "managed-git", projects: ["client-a"] },
+    ] });
+    let handler: ((input: Record<string, unknown>, extra?: unknown) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    register({ registerTool: (_name: string, _config: unknown, fn: typeof handler) => { handler = fn; } } as never, { phrenPath: primary, profile: "" } as never);
+    vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH ?? ""}`);
+    for (const role of [null, "off", "last-resort"] as const) {
+      await setAccountSettings("api", { role });
+      const answer = JSON.parse((await handler!({ prompt: "hello", project: "client-a", cwd: work }, {})).content[0].text);
+      expect(answer).toMatchObject({ ok: false, error: expect.stringContaining(`role is ${role ?? "not set"}`) });
+      expect(existsSync(helperRunsFile())).toBe(false);
+    }
+    await setAccountSettings("api", { role: "helpers" });
+    const answer = JSON.parse((await handler!({ prompt: "hello", project: "client-a", cwd: work }, {})).content[0].text);
+    expect(answer).toMatchObject({ ok: true, data: { account: "api", model: "haiku" } });
+    expect(seen(answer.data.output)).toMatchObject({ input: "hello", configDir: path.join(home, ".claude-api") });
   });
 
   it("answers through the MCP tool only in the project's own folder, refusing with the reason", async () => {
