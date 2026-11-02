@@ -17,7 +17,10 @@ describe("reading Claude's question dialog", () => {
     ["a tab label", "← ☐ Color theme ☐ Too\nls ✔ Submit →", ["Color theme", "Tools"]],
     ["Submit after combining-mark output", "e\u0301".repeat(22) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
     ["Submit with a wide tab label", "─".repeat(24) + "\n← ☐ 色彩🎨 ☐ Tools ✔ Sub\nmit →", ["色彩🎨", "Tools"]],
-  ] as const)("preserves characters when a full-width tab bar wraps inside %s", (_name, bar, tabs) => {
+    ["Submit after VS16 emoji output", "☕️".repeat(8) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["Submit after ZWJ emoji output", "👨‍👩‍👧‍👦".repeat(3) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["a label before a spaced Submit suffix", "← ☐ Color ☐ Too\nls ✔\nSubmit →", ["Color", "Tools"]],
+  ] as const)("preserves characters when a tab bar wraps inside %s", (_name, bar, tabs) => {
     expect(claudeQuestionDialog(shortDialog(bar))).toMatchObject({ kind: "question", title: "Pick?", tabs });
   });
 
