@@ -16,36 +16,92 @@ interface Emitted { version?: 2; upgrading?: boolean; forwardDone?: boolean; upd
 export function materializedRoot(): string { return path.join(bridgeRoot(), "codex-threads"); }
 export function materializedPath(session: string): string { return path.join(materializedRoot(), `${session}.jsonl`); }
 
-/** Codex 0.155 threads the SQLite store knows, by stable thread identity. Search
- * uses this to discover threads that have no rollout file to glob. */
-export async function codexThreadSessions(limit = 5_000, after = ""): Promise<string[]> {
-  const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
+type Db = { prepare(sql: string): { all(...args: unknown[]): unknown[]; get(...args: unknown[]): unknown }; close(): void };
+const historyFile = (): string => path.join(codexHome(), "thread_history_1.sqlite");
+
+async function openReadOnly(file: string): Promise<Db | undefined> {
+  try {
+    const sqlite = await import("node:sqlite");
+    return new sqlite.DatabaseSync(file, { readOnly: true }) as unknown as Db;
+  } catch { return undefined; }
+}
+
+/** The read-only Codex stores one request shares across every thread it
+ * discovers or materializes. Opening the same SQLite file per thread is a real
+ * per-item cost, especially on Windows. */
+class ReadOnlyConnections {
+  private readonly connections = new Map<string, Db | undefined>();
+  private readonly opening = new Map<string, Promise<Db | undefined>>();
+
+  async get(file: string): Promise<Db | undefined> {
+    if (this.connections.has(file)) return this.connections.get(file);
+    let opening = this.opening.get(file);
+    if (!opening) { opening = openReadOnly(file); this.opening.set(file, opening); }
+    const connection = await opening;
+    this.opening.delete(file);
+    this.connections.set(file, connection);
+    return connection;
+  }
+
+  async close(): Promise<void> {
+    const opening = [...this.opening.values()];
+    this.opening.clear();
+    for (const connection of this.connections.values()) connection?.close();
+    this.connections.clear();
+    for (const connection of await Promise.all(opening)) connection?.close();
+  }
+}
+
+async function sessionsFrom(history: Db | undefined, limit: number, after: string): Promise<string[]> {
   if (!history) return [];
   try {
     return objects(history.prepare(`select distinct thread_id from thread_items
       where thread_id > ? order by thread_id limit ?`).all(after, limit))
       .map(row => String(row.thread_id));
-  } catch { return []; } finally { history.close(); }
+  } catch { return []; }
+}
+
+/** Codex 0.155 threads the SQLite store knows, by stable thread identity. Search
+ * uses this to discover threads that have no rollout file to glob. */
+export async function codexThreadSessions(limit = 5_000, after = ""): Promise<string[]> {
+  const connections = new ReadOnlyConnections();
+  try { return await sessionsFrom(await connections.get(historyFile()), limit, after); }
+  finally { await connections.close(); }
+}
+
+async function turnSettledFrom(history: Db | undefined, session: string, turn: string | null): Promise<boolean | undefined> {
+  if (!history || !turn) return undefined;
+  try {
+    const row = object(history.prepare("select status from thread_turns where thread_id = ? and turn_id = ?").get(session, turn));
+    return typeof row.status === "string" ? row.status !== "inProgress" : undefined;
+  } catch { return undefined; }
 }
 
 /** The materialized row retains its original turn, independently of whichever
  * turn happens to be active when search catches up. */
 export async function codexTurnSettled(session: string, turn: string | null): Promise<boolean | undefined> {
-  const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
-  if (!history || !turn) { history?.close(); return undefined; }
-  try {
-    const row = object(history.prepare("select status from thread_turns where thread_id = ? and turn_id = ?").get(session, turn));
-    return typeof row.status === "string" ? row.status !== "inProgress" : undefined;
-  } catch { return undefined; } finally { history.close(); }
+  const connections = new ReadOnlyConnections();
+  try { return await turnSettledFrom(await connections.get(historyFile()), session, turn); }
+  finally { await connections.close(); }
 }
 
-type Db = { prepare(sql: string): { all(...args: unknown[]): unknown[]; get(...args: unknown[]): unknown }; close(): void };
-async function openReadOnly(file: string): Promise<Db | undefined> {
-  try {
-    await stat(file);
-    const sqlite = await import("node:sqlite");
-    return new sqlite.DatabaseSync(file, { readOnly: true }) as unknown as Db;
-  } catch { return undefined; }
+/** One request's view of Codex's SQLite stores. Reusing the connections is what
+ * keeps discovery of hundreds of threads from paying an open/close per item. */
+export interface CodexThreadStore {
+  sessions(limit?: number, after?: string): Promise<string[]>;
+  turnSettled(session: string, turn: string | null): Promise<boolean | undefined>;
+  materialize(session: string, deadline?: number, maxItems?: number): Promise<string | undefined>;
+  close(): Promise<void>;
+}
+
+export function openCodexThreadStore(): CodexThreadStore {
+  const connections = new ReadOnlyConnections();
+  return {
+    sessions: async (limit = 5_000, after = "") => sessionsFrom(await connections.get(historyFile()), limit, after),
+    turnSettled: async (session, turn) => turnSettledFrom(await connections.get(historyFile()), session, turn),
+    materialize: (session, deadline = Infinity, maxItems = Infinity) => runMaterialization(session, deadline, maxItems, connections),
+    close: () => connections.close(),
+  };
 }
 
 /** A working pane whose projection cursor stopped at an unfinished turn can
@@ -103,22 +159,28 @@ export async function codexThreadPreview(session: string): Promise<{ turnStarted
   } catch { return undefined; } finally { history.close(); }
 }
 
-/** Bring the materialized file up to date with the store. Returns the file
- * when the thread exists there, undefined otherwise. Safe to call often:
- * an unchanged thread costs one aggregate query. */
-export async function materializeCodexThread(session: string, deadline = Infinity, maxItems = Infinity): Promise<string | undefined> {
+async function runMaterialization(session: string, deadline: number, maxItems: number, shared?: ReadOnlyConnections): Promise<string | undefined> {
   if (!sessionId.safeParse(session).success) return undefined;
   const key = materializedPath(session);
   const pending = materializations.get(key);
   if (pending) return pending;
-  const work = materializeThread(session, deadline, maxItems);
+  const connections = shared ?? new ReadOnlyConnections();
+  const work = materializeThread(session, deadline, maxItems, connections)
+    .finally(() => shared ? undefined : connections.close());
   materializations.set(key, work);
   try { return await work; } finally { materializations.delete(key); }
 }
 
-async function materializeThread(session: string, deadline: number, maxItems: number): Promise<string | undefined> {
+/** Bring the materialized file up to date with the store. Returns the file
+ * when the thread exists there, undefined otherwise. Safe to call often:
+ * an unchanged thread costs one aggregate query. */
+export async function materializeCodexThread(session: string, deadline = Infinity, maxItems = Infinity): Promise<string | undefined> {
+  return runMaterialization(session, deadline, maxItems);
+}
+
+async function materializeThread(session: string, deadline: number, maxItems: number, connections: ReadOnlyConnections): Promise<string | undefined> {
   if (!sessionId.safeParse(session).success) return undefined;
-  const history = await openReadOnly(path.join(codexHome(), "thread_history_1.sqlite"));
+  const history = await connections.get(historyFile());
   if (!history) return undefined;
   try {
     const summary = object(history.prepare("select count(*) as n, max(rollout_ordinal) as last, max(updated_at_ordinal) as updated from thread_items where thread_id = ?").get(session));
@@ -157,7 +219,7 @@ async function materializeThread(session: string, deadline: number, maxItems: nu
     const stamps = new Map<string, number>();
     const lines: string[] = [];
     if (fresh) {
-      const meta = await threadMeta(session);
+      const meta = await threadMeta(session, connections);
       lines.push(JSON.stringify({ type: "session_meta", payload: { id: session, ...(meta.cwd ? { cwd: meta.cwd } : {}),
         source: meta.spawn ? { subagent: { thread_spawn: meta.spawn } } : "codex-thread-store" } }));
       if (meta.model) lines.push(JSON.stringify({ type: "turn_context", payload: { model: meta.model } }));
@@ -263,7 +325,7 @@ async function materializeThread(session: string, deadline: number, maxItems: nu
       await rm(progressFile, { force: true });
     }
     return file;
-  } catch { return undefined; } finally { history.close(); }
+  } catch { return undefined; }
 }
 
 /** The thread's items in order, with when each was created where the store records it (`created_at_ms`, absent
@@ -323,8 +385,8 @@ function subAgentRow(item: Json): Json | undefined {
   } } };
 }
 
-async function threadMeta(session: string): Promise<{ model?: string; cwd?: string; spawn?: Json }> {
-  const db = await openReadOnly(path.join(codexHome(), "state_5.sqlite"));
+async function threadMeta(session: string, connections: ReadOnlyConnections): Promise<{ model?: string; cwd?: string; spawn?: Json }> {
+  const db = await connections.get(path.join(codexHome(), "state_5.sqlite"));
   if (!db) return {};
   try {
     const row = object(db.prepare("select model, cwd from threads where id = ?").get(session));
@@ -338,7 +400,7 @@ async function threadMeta(session: string): Promise<{ model?: string; cwd?: stri
       }
     } catch { /* no source column or plain text */ }
     return { ...(typeof row.model === "string" && row.model ? { model: row.model } : {}), ...(typeof row.cwd === "string" && row.cwd ? { cwd: row.cwd } : {}), ...(spawn ? { spawn } : {}) };
-  } catch { return {}; } finally { db.close(); }
+  } catch { return {}; }
 }
 
 function finished(item: Json): boolean { return ["completed", "failed", "declined", "error"].includes(String(item.status)) || item.exitCode !== undefined && item.exitCode !== null; }

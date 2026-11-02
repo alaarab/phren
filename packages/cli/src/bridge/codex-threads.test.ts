@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { codexThreadPreview, materializeCodexThread, materializedPath, queuedQuestion, threadHealth } from "./codex-threads.js";
+import { codexThreadPreview, materializeCodexThread, materializedPath, openCodexThreadStore, queuedQuestion, threadHealth } from "./codex-threads.js";
 import { childAgentTree, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { currentStep } from "./steps.js";
 import { matchingOffsets, promptHash, PromptDeliveries } from "./prompt-deliveries.js";
@@ -44,6 +44,18 @@ describe.skipIf(!hasNodeSqlite)("Codex thread store", () => {
     await utimes(materializedPath(thread) + ".state.json", date, date);
     return date;
   };
+
+  it("reads the threads and turns a request's shared store discovers after it opened", async () => {
+    const store = openCodexThreadStore();
+    try {
+      expect(await store.sessions(10, "")).toEqual([]);
+      turn("completed", 1);
+      insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "shared connection question" }] });
+      expect(await store.sessions(10, "")).toEqual([thread]);
+      expect(await store.turnSettled(thread, "turn-1")).toBe(true);
+      expect(await store.materialize(thread)).toBe(materializedPath(thread));
+    } finally { await store.close(); }
+  });
 
   it("keeps growing agent-message deltas out of history until the turn finishes", async () => {
     turn("inProgress");
