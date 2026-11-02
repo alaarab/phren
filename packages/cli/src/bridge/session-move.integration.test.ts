@@ -173,8 +173,10 @@ describe.skipIf(!binary || process.platform === "win32")("moving a session on a 
     expect(typed).toEqual(["/exit"]);
     // The same conversation, in the work account's home.
     expect(await readFile(path.join(home, ".claude-work", "projects", key, `${SESSION}.jsonl`), "utf8")).toBe(await readFile(source, "utf8"));
-    const starts = (await until(() => readFile(path.join(folder, "claude-starts.jsonl"), "utf8").catch(() => ""), text => text.trim().split("\n").length >= 2))
-      .trim().split("\n").map(line => JSON.parse(line) as { args: string[]; config: string | null });
+    // Account checks (`--version`, `auth status`) run the same binary; only sessions count.
+    const sessions = (text: string) => text.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { args: string[]; config: string | null })
+      .filter(start => start.args[0] !== "--version" && start.args[0] !== "auth");
+    const starts = sessions(await until(() => readFile(path.join(folder, "claude-starts.jsonl"), "utf8").catch(() => ""), text => sessions(text).length >= 2));
     expect(starts).toHaveLength(2);
     expect(starts[1]).toEqual({ args: ["--resume", SESSION], config: claudeHome("work")!.dir });
   }, 90_000);

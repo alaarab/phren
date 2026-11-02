@@ -1752,21 +1752,24 @@ schedules:
       paneAgent = "claude"; agentStatus = "blocked";
       paneLines = "Parser aborted (timeout, resource limit, or over-length)\n"
         + "Do you want to proceed?\n"
-        + "> 1. Yes\n"
+        + "❯ 1. Yes\n"
         + "2. Yes, and switch to auto mode · auto mode handles these prompts for you\n"
         + "3. No\n"
         + "Esc to cancel · Tab to amend\n";
       const claude = { ...target, source: "claude" as const };
-      const status = async () => {
+      const status = async (published = false) => {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(claude)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
         await waitFor(() => frames.length, 2_000);
+        // A dialog the Hook has not seen before is published once a second
+        // read confirms it, a tick after the first frame.
+        if (published) await waitFor(() => frames.some(f => f.agentStatus?.terminalPrompt), 2_000);
         socket.terminate();
-        return frames[0].agentStatus;
+        return ((published && frames.find(f => f.agentStatus?.terminalPrompt)) || frames[0]).agentStatus;
       };
       // No PermissionRequest fired: the Hook reads the pane and finds the dialog.
-      expect(await status()).toMatchObject({ status: "blocked", terminalPrompt: {
+      expect(await status(true)).toMatchObject({ status: "blocked", terminalPrompt: {
         toolName: "Question", message: "Do you want to proceed?",
         choice: { title: "Do you want to proceed?",
           options: [{ label: "Yes", key: "1" },
@@ -1779,7 +1782,7 @@ schedules:
       // Still drawn, still waiting: the dialog is read again past the throttle window.
       agentStatus = "blocked";
       await sleep(DIALOG_THROTTLE_MS + 50);
-      expect((await status()).terminalPrompt).toMatchObject({ choice: { title: "Do you want to proceed?" } });
+      expect((await status(true)).terminalPrompt).toMatchObject({ choice: { title: "Do you want to proceed?" } });
       // The phone sends the option's digit; the Hook appends Enter to submit it.
       expect((await api("/v1/keys", { target: claude, keys: ["1"] })).status).toBe(200);
       expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["1", "enter"]]);
@@ -1802,17 +1805,20 @@ schedules:
         + "  2. Yes, and don't ask again for commands that start with 'bun /tmp/atlas-shell-review.ts' (p)\n"
         + "  3. No, and tell Codex what to do differently (esc)\n"
         + "Press enter to confirm or esc to cancel\n";
-      const status = async () => {
+      const status = async (published = false) => {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
         await waitFor(() => frames.length, 2_000);
+        // A dialog the Hook has not seen before is published once a second
+        // read confirms it, a tick after the first frame.
+        if (published) await waitFor(() => frames.some(f => f.agentStatus?.terminalPrompt), 2_000);
         socket.terminate();
-        return frames[0].agentStatus;
+        return ((published && frames.find(f => f.agentStatus?.terminalPrompt)) || frames[0]).agentStatus;
       };
       // No PermissionRequest fired and no structured question: the Hook reads
       // the pane's own numbered rows and keys them by their trailing letters.
-      const first = await status();
+      const first = await status(true);
       expect(first.terminalPrompt).toMatchObject({ toolName: "Question", choice: {
         title: "Would you like to run the following command?\nEnvironment: local\n"
           + "Reason: Allow final headless rendering of the revised terminal hint hierarchy?\n"
@@ -1829,22 +1835,35 @@ schedules:
       // The phone sends the option's own key, not its row number.
       expect((await api("/v1/keys", { target, keys: ["p"] })).status).toBe(200);
       expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["p"]]);
-      // Answered: the prompt is gone, and stays gone once the pane works.
-      expect((await status()).terminalPrompt).toBeUndefined();
+      // Answered: Codex draws its working line, and the prompt stays gone
+      // through later screen reads and confirmations, then once the pane works.
+      paneLines = "• Working (1s • esc to interrupt)\n";
+      const watched = async () => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        await sleep(DIALOG_THROTTLE_MS + 1_200);
+        socket.terminate();
+        return frames.map(f => f.agentStatus);
+      };
+      const after = await watched();
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.filter(s => s?.terminalPrompt)).toEqual([]);
       agentStatus = "working";
-      expect((await status()).terminalPrompt).toBeUndefined();
+      expect((await watched()).filter(s => s?.terminalPrompt)).toEqual([]);
     });
 
     describe("Codex keyless terminal menus", () => {
       beforeEach(startFixture, HOOK_START_MS + 8_000);
 
+      // A new menu is published once a second read confirms it, a tick after the first frame.
       async function status() {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        await waitFor(() => frames.length, 2_000);
+        await waitFor(() => frames.some(f => f.agentStatus?.terminalPrompt), 2_000);
         socket.terminate();
-        return frames[0].agentStatus;
+        return (frames.find(f => f.agentStatus?.terminalPrompt) ?? frames[0]).agentStatus;
       }
 
       it.each([
