@@ -280,3 +280,5 @@ This convention applies to all `PHREN_FEATURE_*` variables. `PHREN_FEATURE_HYBRI
 ### Citation freshness
 
 `PHREN_CITATION_FRESHNESS=off` disables gitboy citation freshness checks and annotations. MCP search refreshes selected findings within 1.5 seconds; Hook memory routes refresh in the background, and prompt injection uses the cache only.
+
+Checks run for repositories whose origin is a gitboy host. For a repository on another host that has a gitboy mirror at the same owner/repo path, point Phren at the mirror with `git config --global phren.github.com.mirror gitboy.example` (any domain in place of `github.com`); citations of commits the mirror hasn't fetched yet stay `unknown`.
