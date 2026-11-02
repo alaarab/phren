@@ -186,13 +186,15 @@ jobs:
           done
 
           find_issue() {
-            gh issue list --state all --search "\"$ISSUE_TITLE\" in:title" \
+            gh issue list --state all --limit 200 --search "\"$ISSUE_TITLE\" in:title" \
               --json number,title,state \
               --jq "[.[] | select(.title == \"$ISSUE_TITLE\")] | sort_by(.number) | last | select(. != null) | [(.number | tostring), .state] | join(\" \")"
           }
 
           body="$RUNNER_TEMP/nightly-body.md"
-          read -r number state <<<"$(find_issue)" || true
+          found="$(find_issue)"  # a failed lookup stops the job instead of acting on a guess
+          number=""; state=""
+          if [ -n "$found" ]; then read -r number state <<<"$found"; fi
           if [ -n "$failed" ]; then
             {
               printf 'Nightly phren tests failed on main.\n\n'
