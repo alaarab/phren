@@ -4,7 +4,7 @@ import path from "node:path";
 import { claudeHomes } from "./claude-accounts.js";
 import { codexHome, copilotHome } from "../home-paths.js";
 import { redactSecretsForLog } from "../content/secrets.js";
-import { codexThreadSessions, codexTurnSettled, materializeCodexThread, materializedPath, materializedRoot } from "./codex-threads.js";
+import { openCodexThreadStore, type CodexThreadStore, materializedPath, materializedRoot } from "./codex-threads.js";
 import { paneIdentity, snapshot, recentServers } from "./herdr.js";
 import { BridgeError, bridgeRoot, object, objects, sessionId, type Json, type Provider } from "./protocol.js";
 import { phrenStoreRoot, selectTranscriptMatch, visibleEvent } from "./transcripts.js";
@@ -225,8 +225,13 @@ async function openIndex(): Promise<Db> {
   db.exec("PRAGMA busy_timeout = 50");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
-  db.exec(SCHEMA);
-  db.exec("PRAGMA user_version = 2");
+  // The schema only changes with the version above. Re-running every CREATE
+  // TABLE/INDEX on each search is avoidable SQLite parse work, noticeable on
+  // Windows where the index is opened once per request.
+  if (version !== 2) {
+    db.exec(SCHEMA);
+    db.exec("PRAGMA user_version = 2");
+  }
   return db;
 }
 
@@ -296,7 +301,7 @@ async function deleteFile(db: Db, file: string, deadline: number): Promise<void>
 
 /** Publication is a durable job: neither a large turn nor a large vocabulary
  * must finish in the request that discovers its end marker. */
-async function commitPending(db: Db, row: FileRow, state: ScanState, deadline: number): Promise<void> {
+async function commitPending(db: Db, row: FileRow, state: ScanState, deadline: number, codex: CodexThreadStore): Promise<void> {
   db.exec("BEGIN");
   try {
     db.prepare("UPDATE files SET publishing = 1 WHERE path = ?").run(row.path);
@@ -308,7 +313,7 @@ async function commitPending(db: Db, row: FileRow, state: ScanState, deadline: n
         db.prepare("UPDATE files SET publishing = 0, publication_seq = -1 WHERE path = ?").run(row.path);
         return;
       }
-      const settled = materializedFile(row.path) && !item.queued ? await codexTurnSettled(row.session, item.turn_id) : false;
+      const settled = materializedFile(row.path) && !item.queued ? await codex.turnSettled(row.session, item.turn_id) : false;
       if (item.queued || (materializedFile(row.path) ? settled !== true : item.settle_after > (rowFor(db, row.path)?.ready_until ?? -1))) {
         if (materializedFile(row.path) && !item.queued && settled === undefined) db.prepare("UPDATE files SET unresolved = 1 WHERE path = ?").run(row.path);
         after = item.seq;
@@ -453,10 +458,10 @@ async function discoverDirectories(db: Db, deadline: number): Promise<boolean> {
   return !!db.prepare("SELECT 1 FROM dirs LIMIT 1").get();
 }
 
-async function discoverSqliteThreads(db: Db, deadline: number): Promise<boolean> {
+async function discoverSqliteThreads(db: Db, deadline: number, codex: CodexThreadStore): Promise<boolean> {
   let after = metaValue(db, "sqlite_after") ?? "";
   if (!after && Date.now() - Number(metaValue(db, "sqlite_cycle") ?? "0") < DISCOVERY_RESCAN_MS) return false;
-  const threads = await codexThreadSessions(128, after).catch(() => [] as string[]);
+  const threads = await codex.sessions(128, after).catch(() => [] as string[]);
   for (const thread of threads) {
     if (Date.now() >= deadline) return true;
     if (sessionId.safeParse(thread).success) insertFile(db, materializedRoot(), "codex", materializedPath(thread), 1);
@@ -475,7 +480,7 @@ function updateChecked(db: Db, file: string): void {
   db.prepare("UPDATE files SET checked_at = ? WHERE path = ?").run(tick, file);
 }
 
-async function processRow(db: Db, row: FileRow, line: string, lineNumber: number, state: ScanState, fallbackAt: string, deadline: number): Promise<void> {
+async function processRow(db: Db, row: FileRow, line: string, lineNumber: number, state: ScanState, fallbackAt: string, deadline: number, codex: CodexThreadStore): Promise<void> {
   if (!line.trim()) return;
   let raw: Json;
   try { raw = object(JSON.parse(line)); } catch { return; }
@@ -495,12 +500,12 @@ async function processRow(db: Db, row: FileRow, line: string, lineNumber: number
   }
   if (turnEnded(raw, row.source, state.copilotFinal)) {
     db.prepare("UPDATE files SET ready_until = ? WHERE path = ?").run(lineNumber, row.path);
-    await commitPending(db, row, state, deadline);
+    await commitPending(db, row, state, deadline, codex);
     state.copilotFinal = false;
   }
 }
 
-async function scanFile(db: Db, row: FileRow, info: { size: number; mtimeMs: number; dev: number; ino: number }, budget: number, deadline: number): Promise<{ bytes: number; complete: boolean }> {
+async function scanFile(db: Db, row: FileRow, info: { size: number; mtimeMs: number; dev: number; ino: number }, budget: number, deadline: number, codex: CodexThreadStore): Promise<{ bytes: number; complete: boolean }> {
   const sidecar = sidecarPath(row.path), sidecarInfo = await stat(sidecar).catch(() => undefined);
   let replacement = row.size === null || row.dev !== String(info.dev) || row.ino !== String(info.ino)
     || info.size < Math.max(row.offset, row.scan_offset ?? 0)
@@ -559,7 +564,7 @@ async function scanFile(db: Db, row: FileRow, info: { size: number; mtimeMs: num
           if (rowBytes.length) await appendFile(sidecar, rowBytes, { mode: 0o600 });
           const line = await readFile(sidecar, "utf8").catch(() => "");
           if (Date.now() >= deadline) { position += newline; break; }
-          await processRow(db, row, line, lines, state, fallbackAt, deadline);
+          await processRow(db, row, line, lines, state, fallbackAt, deadline, codex);
         }
         lines++;
         chunkStart = position + newline + 1;
@@ -571,7 +576,7 @@ async function scanFile(db: Db, row: FileRow, info: { size: number; mtimeMs: num
       }
       let newline: number;
       while (Date.now() < deadline && (newline = chunk.indexOf(10, begin)) >= 0) {
-        await processRow(db, row, chunk.subarray(begin, newline).toString("utf8"), lines, state, fallbackAt, deadline);
+        await processRow(db, row, chunk.subarray(begin, newline).toString("utf8"), lines, state, fallbackAt, deadline, codex);
         lines++;
         chunkStart += newline + 1 - begin;
         offset = chunkStart;
@@ -594,7 +599,7 @@ async function scanFile(db: Db, row: FileRow, info: { size: number; mtimeMs: num
     sidecarBytes = pending.length;
     scanningRow = 1;
   }
-  await commitPending(db, row, state, deadline);
+  await commitPending(db, row, state, deadline, codex);
   const complete = offset >= info.size && scanningRow === 0;
   db.prepare(`UPDATE files SET size = ?, mtime_ms = ?, dev = ?, ino = ?, offset = ?, scan_offset = ?,
     scanning_row = ?, lines = ?, title = ?, cwd = ?, last_at = ?, copilot_final = ? WHERE path = ?`)
@@ -606,7 +611,7 @@ async function scanFile(db: Db, row: FileRow, info: { size: number; mtimeMs: num
 
 interface RefreshBudget { partial: boolean; checked: number; scanned: number; bytes: number }
 
-async function refreshFile(db: Db, row: FileRow, budget: RefreshBudget, deadline: number): Promise<void> {
+async function refreshFile(db: Db, row: FileRow, budget: RefreshBudget, deadline: number, codex: CodexThreadStore): Promise<void> {
   if (Date.now() >= deadline || budget.checked >= MAX_STAT_FILES || budget.scanned >= MAX_SCAN_FILES || budget.bytes >= MAX_BYTES_PER_REQUEST) {
     budget.partial = true;
     return;
@@ -626,14 +631,14 @@ async function refreshFile(db: Db, row: FileRow, budget: RefreshBudget, deadline
     && row.ino === String(info.ino) && row.offset >= info.size && row.scanning_row === 0;
   try {
     if (!unchanged) {
-      const result = await scanFile(db, row, info, MAX_BYTES_PER_REQUEST - budget.bytes, deadline);
+      const result = await scanFile(db, row, info, MAX_BYTES_PER_REQUEST - budget.bytes, deadline, codex);
       budget.bytes += result.bytes; budget.scanned++;
       if (!result.complete) budget.partial = true;
-    } else await commitPending(db, row, { title: row.title, cwd: row.cwd, lastAt: row.last_at, copilotFinal: false }, deadline);
+    } else await commitPending(db, row, { title: row.title, cwd: row.cwd, lastAt: row.last_at, copilotFinal: false }, deadline, codex);
   } catch { budget.partial = true; }
 }
 
-async function refreshFiles(db: Db, deadline: number): Promise<boolean> {
+async function refreshFiles(db: Db, deadline: number, codex: CodexThreadStore): Promise<boolean> {
   const budget: RefreshBudget = { partial: false, checked: 0, scanned: 0, bytes: 0 };
   const first = metaValue(db, "refresh_first") ?? "materialize";
   setMeta(db, "refresh_first", first === "materialize" ? "files" : "materialize");
@@ -646,7 +651,7 @@ async function refreshFiles(db: Db, deadline: number): Promise<boolean> {
         .all(MAX_MATERIALIZE_PER_REQUEST) as unknown as FileRow[];
       for (const row of rows) {
         if (Date.now() >= deadline) { budget.partial = true; break; }
-        const file = await materializeCodexThread(row.session, deadline, 128).catch(() => undefined);
+        const file = await codex.materialize(row.session, deadline, 128).catch(() => undefined);
         const tick = Number(metaValue(db, "materialize_clock") ?? "0") + 1;
         setMeta(db, "materialize_clock", String(tick));
         db.prepare("UPDATE files SET materialized_at = ? WHERE path = ?").run(tick, row.path);
@@ -655,7 +660,7 @@ async function refreshFiles(db: Db, deadline: number): Promise<boolean> {
         if (state.forwardDone !== true || state.updateTarget !== undefined || state.upgrading === true) budget.partial = true;
         // If materialization ran second, index its new tail in this request
         // too, using the same total file/byte allowance as ordinary refresh.
-        await refreshFile(db, rowFor(db, row.path) ?? row, budget, deadline);
+        await refreshFile(db, rowFor(db, row.path) ?? row, budget, deadline, codex);
       }
     } else {
       // Leave room for all eight materialized tails when that queue runs
@@ -664,7 +669,7 @@ async function refreshFiles(db: Db, deadline: number): Promise<boolean> {
         .all(Math.max(0, MAX_STAT_FILES - budget.checked - (first === "files" ? MAX_MATERIALIZE_PER_REQUEST : 0))) as unknown as FileRow[];
       for (const row of rows) {
         if (Date.now() >= deadline || budget.scanned >= MAX_SCAN_FILES || budget.bytes >= MAX_BYTES_PER_REQUEST) { budget.partial = true; break; }
-        await refreshFile(db, row, budget, deadline);
+        await refreshFile(db, row, budget, deadline, codex);
       }
     }
   }
@@ -768,11 +773,12 @@ async function search(q: string | null | undefined, limit: string | null | undef
   const tokens = textTokens(query);
   const deadline = Date.now() + MAX_REQUEST_MS;
   const db = await openIndex();
+  const codex = openCodexThreadStore();
   try {
     const discoveryPartial = await discoverDirectories(db, deadline);
-    const sqlitePartial = Date.now() < deadline ? await discoverSqliteThreads(db, deadline) : true;
+    const sqlitePartial = Date.now() < deadline ? await discoverSqliteThreads(db, deadline, codex) : true;
     const pruningPartial = Date.now() < deadline ? await pruneIndex(db, deadline) : true;
-    const indexingPartial = Date.now() < deadline ? await refreshFiles(db, deadline) : true;
+    const indexingPartial = Date.now() < deadline ? await refreshFiles(db, deadline, codex) : true;
     let partial = discoveryPartial || sqlitePartial || indexingPartial || pruningPartial;
     if (!tokens.length) return { results: [], cursor: null, ...(partial ? { partial: true as const } : {}) };
 
@@ -844,7 +850,7 @@ async function search(q: string | null | undefined, limit: string | null | undef
       cursor: next,
       ...(partial ? { partial: true as const } : {}),
     };
-  } finally { db.close(); }
+  } finally { await codex.close(); db.close(); }
 }
 
 let tail: Promise<unknown> = Promise.resolve();

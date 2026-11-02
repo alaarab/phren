@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { codexThreadPreview, materializeCodexThread, materializedPath, queuedQuestion, threadHealth } from "./codex-threads.js";
+import { codexThreadPreview, materializeCodexThread, materializedPath, openCodexThreadStore, queuedQuestion, threadHealth } from "./codex-threads.js";
 import { childAgentTree, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { currentStep } from "./steps.js";
 import { matchingOffsets, promptHash, PromptDeliveries } from "./prompt-deliveries.js";
@@ -44,6 +44,45 @@ describe.skipIf(!hasNodeSqlite)("Codex thread store", () => {
     await utimes(materializedPath(thread) + ".state.json", date, date);
     return date;
   };
+
+  it("reads the threads and turns a request's shared store discovers after it opened", async () => {
+    const store = openCodexThreadStore();
+    try {
+      expect(await store.sessions(10, "")).toEqual([]);
+      turn("completed", 1);
+      insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "shared connection question" }] });
+      expect(await store.sessions(10, "")).toEqual([thread]);
+      expect(await store.turnSettled(thread, "turn-1")).toBe(true);
+      expect(await store.materialize(thread)).toBe(materializedPath(thread));
+    } finally { await store.close(); }
+  });
+
+  it.skipIf(process.platform === "win32")("reopens a store replaced while the request holds it open", async () => {
+    const store = openCodexThreadStore();
+    try {
+      turn("completed", 1);
+      insert(1, { type: "userMessage", id: "u1", content: [{ type: "text", text: "before replacement" }] });
+      expect(await store.sessions(10, "")).toEqual([thread]);
+
+      db.close();
+      db = undefined;
+      const replacementThread = "01a0bbbb-1111-7222-8333-444444444444";
+      const replacementFile = path.join(root, "replacement.sqlite");
+      const sqlite = await import("node:sqlite");
+      const replacement = new sqlite.DatabaseSync(replacementFile);
+      replacement.exec("create table thread_items (thread_id text, turn_id text, item_id text, rollout_ordinal integer, created_at_ms integer, item_json text, item_type text, updated_at_ordinal integer, primary key (thread_id, turn_id, item_id))");
+      replacement.exec("create table thread_turns (thread_id text, turn_id text, rollout_ordinal integer, status text, started_at integer, rollout_end_ordinal integer, primary key (thread_id, turn_id))");
+      replacement.prepare("insert into thread_turns values (?, 'turn-1', 1, 'completed', 1, 1)").run(replacementThread);
+      replacement.prepare("insert into thread_items values (?, 'turn-1', 'u1', 1, 1000, ?, 'userMessage', 1)")
+        .run(replacementThread, JSON.stringify({ type: "userMessage", id: "u1", content: [{ type: "text", text: "after replacement" }] }));
+      replacement.close();
+      await rename(replacementFile, path.join(process.env.CODEX_HOME!, "thread_history_1.sqlite"));
+
+      expect(await store.sessions(10, "")).toEqual([replacementThread]);
+      expect(await store.turnSettled(replacementThread, "turn-1")).toBe(true);
+      expect(await store.turnSettled(thread, "turn-1")).toBeUndefined();
+    } finally { await store.close(); }
+  });
 
   it("keeps growing agent-message deltas out of history until the turn finishes", async () => {
     turn("inProgress");
