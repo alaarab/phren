@@ -79,6 +79,22 @@ const set: DialogQuestion[] = [
 ];
 
 describe("answering Claude's question dialog", () => {
+  it.each([false, true])("submits four questions with a wrapped tab bar and a final multi-select (Other: %s)", async typed => {
+    const questions: DialogQuestion[] = [set[0], set[2],
+      { question: "Which environment?", options: [{ label: "Staging" }, { label: "Production" }] }, set[1]];
+    const claude = new FakeClaude(questions), io = claude.io();
+    // The owner may already be on question four in the terminal. Reflow the
+    // real dialog layout at two tab boundaries, including Submit on its own
+    // physical row; the existing fake always draws a single wide tab bar.
+    claude.tab = 3;
+    await answerClaudeQuestionDialog({ ...io, read: async () => (await io.read())
+      .replace(/(←[^\n]*?[☐☒] \S+  [☐☒] \S+)  /, "$1\n")
+      .replace(/  ✔ Submit  →/, "\n✔ Submit  →") }, questions,
+    [{ options: [1] }, { options: [0] }, { options: [0] }, { options: [0, 1, 2], ...(typed ? { text: "Nano editor" } : {}) }]);
+    expect(claude.result).toEqual({ "Which color?": "Green", "Which size?": "Small", "Which environment?": "Staging",
+      "Which tools?": ["Vim", "Emacs", "VSCode", ...(typed ? ["Nano editor"] : [])] });
+  });
+
   it("the old blind digits-then-Tab walk skips the next question and never submits", async () => {
     const claude = new FakeClaude(set);
     for (const keys of [["2", "tab"], ["1", "3", "tab"], ["2", "enter"]]) await claude.io().keys(keys);
