@@ -252,7 +252,9 @@ smoke tests against a fake Hook with
 `pnpm exec playwright test -c packages/desktop/playwright.config.ts`.
 
 The RC-only `browser-test` job in `.github/workflows/ci.yml` runs both the CLI
-and desktop Playwright suites when dispatched with `release_candidate=true`.
+and desktop Playwright suites when dispatched with `release_candidate=true`, and
+a scheduled nightly on main runs the same suite without counting as release
+evidence.
 Before the desktop suite, it builds `@phren/desktop-kit`, `@phren/desktop` and
 `@phren/desktop-editor` (including the Monaco host) with
 `pnpm --filter <package> build` from the repo root. On failure, the desktop HTML
