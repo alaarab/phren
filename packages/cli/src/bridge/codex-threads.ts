@@ -29,12 +29,11 @@ async function openReadOnly(file: string): Promise<Db | undefined> {
 
 interface OpenConnection { identity: string | undefined; db: Db | undefined }
 
-/** A replaced store has a new inode; Windows does not always report a usable
- * inode, so its mtime also identifies the file there. */
+// Windows reports no usable inode and opens without FILE_SHARE_DELETE, so the file cannot be replaced while cached.
 function fileIdentity(file: string): string | undefined {
   try {
     const info = statSync(file);
-    return `${info.dev}:${info.ino}${process.platform === "win32" ? `:${info.mtimeMs}` : ""}`;
+    return info.ino === 0 ? undefined : `${info.dev}:${info.ino}`;
   } catch { return undefined; }
 }
 
@@ -49,7 +48,7 @@ class ReadOnlyConnections {
   async get(file: string): Promise<Db | undefined> {
     const identity = fileIdentity(file);
     const cached = this.connections.get(file);
-    if (cached && cached.identity === identity) return cached.db;
+    if (cached && (identity === undefined || cached.identity === identity)) return cached.db;
     if (cached) {
       cached.db?.close();
       this.connections.delete(file);
@@ -62,7 +61,7 @@ class ReadOnlyConnections {
     const opened = await opening;
     this.opening.delete(file);
     const current = this.connections.get(file);
-    if (current && current.identity === identity) return current.db;
+    if (current && (identity === undefined || current.identity === identity)) return current.db;
     current?.db?.close();
     this.connections.set(file, opened);
     return opened.db;

@@ -57,7 +57,7 @@ describe.skipIf(!hasNodeSqlite)("Codex thread store", () => {
     } finally { await store.close(); }
   });
 
-  it("reopens a store replaced while the request holds it open", async () => {
+  it.skipIf(process.platform === "win32")("reopens a store replaced while the request holds it open", async () => {
     const store = openCodexThreadStore();
     try {
       turn("completed", 1);
