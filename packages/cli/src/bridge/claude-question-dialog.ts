@@ -1,5 +1,6 @@
 import { joinDialogFooters } from "./terminal-dialog-text.js";
 import { BridgeError } from "./protocol.js";
+import { displayWidth } from "../shell/render.js";
 
 /** Claude Code's AskUserQuestion dialog as the pane draws it, and a walk that
  * answers it one verified key at a time. Claude's keys are not uniform: a
@@ -55,7 +56,7 @@ const GUTTER = /^(\s*)│(?: |$)/;
 export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefined {
   const physicalLines = text.split(/\r?\n/);
   // Measure before folding footers: their logical length can exceed the pane.
-  const width = Math.max(...physicalLines.map(line => line.length));
+  const width = Math.max(...physicalLines.map(displayWidth));
   const lines = joinDialogFooters(physicalLines);
   let bar = -1, barEnd = -1, tabBar = "";
   // A narrow pane soft-wraps the tab bar. Reading only its last physical
@@ -69,7 +70,7 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
       if (!line.trim() || /^─+$/.test(line.trim())) break;
       // A full-width row wraps in place, possibly inside a word. Preserve
       // its characters, including any space already at the row boundary.
-      candidate = line + (candidate ? (line.length >= width ? "" : " ") + candidate : "");
+      candidate = line + (candidate ? (displayWidth(line) >= width ? "" : " ") + candidate : "");
       if (TAB_BAR.test(candidate) && /[☐☒]/.test(candidate)) {
         bar = start; barEnd = end; tabBar = candidate;
       }

@@ -15,6 +15,8 @@ describe("reading Claude's question dialog", () => {
   it.each([
     ["Submit", "← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
     ["a tab label", "← ☐ Color theme ☐ Too\nls ✔ Submit →", ["Color theme", "Tools"]],
+    ["Submit after combining-mark output", "e\u0301".repeat(22) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["Submit with a wide tab label", "─".repeat(24) + "\n← ☐ 色彩🎨 ☐ Tools ✔ Sub\nmit →", ["色彩🎨", "Tools"]],
   ] as const)("preserves characters when a full-width tab bar wraps inside %s", (_name, bar, tabs) => {
     expect(claudeQuestionDialog(shortDialog(bar))).toMatchObject({ kind: "question", title: "Pick?", tabs });
   });
