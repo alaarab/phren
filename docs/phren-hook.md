@@ -1511,7 +1511,7 @@ Without `moveToComputer`, existing clients and local moves are unchanged.
 ### Session moves
 
 With capability `sessionMove`, `POST /v1/sessions/move` takes
-`{target, to: {harness, account?, model?, effort?}, mode?: "replace" | "new-chat", id?, handoffTimeoutMs?}`
+`{target, to: {harness, account?, model?, effort?}, mode?: "replace" | "new-chat", continuation?, id?, handoffTimeoutMs?}`
 and answers once the move is checked and recorded, with `{ok, move}`. The
 hand-off, exit and relaunch continue after the answer. `GET
 /v1/sessions/move?id=<uuid>` returns `{move}`, and `GET /v1/sessions/moves`
@@ -1520,6 +1520,24 @@ usable here is refused with 409 `harness_unavailable` or `account_unavailable`;
 a pane already moving with 409 `move_in_progress`. The phone and desktop offer
 only harnesses `/v1/harnesses` reports as usable, and follow a move by polling
 its id. The record's fields and the steps are in docs/conductor.md.
+
+`continuation` accepts `"saved-history"` for immediate continuation without an
+outgoing-model call, or `"agent-summary"` to request an optional summary from a
+healthy source. Omitted or `"handoff"` chooses automatically: an exhausted
+source (account usage state or a quota error in its transcript) is skipped,
+on this computer as well as a peer. Summary delivery failures, a session ending,
+and timeouts fall back to saved history. Existing `"resume"` (Claude account
+resume) and `"summary-by-target"` (peer continuation) retain their meanings.
+
+Every cross-harness move saves a durable `conversation.md` beside its hand-off
+before exiting the source. The Hook reads the full transcript (at most 64 MiB,
+with a truncation notice), preserves the original request and recent exchanges,
+and gives the destination a bounded excerpt with branch/HEAD, dirty files and
+observed processes. The destination is told to read more history from the file
+as needed and inspect its checkout before continuing. The conversation copy
+keeps at most 2,000,000 characters, with omitted messages marked. A healthy
+source's summary supplements this history. Failure to save context prevents
+the source from being exited. Phones that omit `continuation` need no changes.
 
 While a move is `handing-off`, its hand-off request waits for the agent's step
 to end. The phone's "Stop <agent> and hand off now" sends the owner-only

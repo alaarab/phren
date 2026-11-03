@@ -700,6 +700,18 @@ The old chat stays open, including on failure. The record has `to.computer`,
 404; offline peers, missing checkouts and unusable harnesses/accounts return
 409 before the hand-off request. Peer calls have bounded timeouts.
 
+Cross-harness moves on this computer and peers save history before the source
+exits. `continuation: "saved-history"` skips asking the source immediately;
+`"agent-summary"` requests an optional summary while healthy. Omitted or
+`"handoff"` automatically uses saved history when the Hook's account-limit
+state or the transcript reports exhaustion. Any summary failure or timeout,
+including an ended source session, uses the saved-history fallback.
+The full route contract is in [Session moves](phren-hook.md#session-moves).
+The destination receives a durable `conversation.md` beside its brief even
+when a healthy source writes a summary, plus instructions to read further
+history as needed and inspect its checkout. Native Claude account `resume`
+is unchanged.
+
 A source agent whose Claude account is out of usage cannot write a hand-off.
 When the source transcript ends on Claude's usage-limit reply, or the request
 says `continuation: "summary-by-target"`, the Hook skips the hand-off request.
