@@ -10,6 +10,17 @@ export type TabActivityStamp = Pick<Stamp, "lastChangedAt" | "statusSince">;
 export type TabActivityObservation = { generation: number; stamps: ReadonlyMap<string, TabActivityStamp> };
 export const tabActivityKey = (workspace: unknown, tab: unknown): string => JSON.stringify([workspace, tab]);
 
+/** Panes grouped once per snapshot, preserving terminal order and workspace scope. */
+export function panesByTab(snapshot: Json): Map<string, Json[]> {
+  const groups = new Map<string, Json[]>();
+  for (const pane of objects(snapshot.panes)) {
+    const key = tabActivityKey(pane.workspace_id, pane.tab_id);
+    const panes = groups.get(key);
+    if (panes) panes.push(pane); else groups.set(key, [pane]);
+  }
+  return groups;
+}
+
 /** A clock for Herdr's clockless state counters. Only successful snapshots
  * prune tabs; each activity pass also prunes missing servers. Writes are ordered
  * and atomic, and an unchanged poll never rewrites the file. */
@@ -32,13 +43,13 @@ export class TabActivityStore {
       const prefix = JSON.stringify(server) + ":";
       const seen = new Set<string>(), stamps = new Map<string, TabActivityStamp>();
       let changed = false;
+      const grouped = panesByTab(snapshot);
       for (const tab of objects(snapshot.tabs)) {
         const tabKey = tabActivityKey(tab.workspace_id, tab.tab_id), key = prefix + tabKey;
         seen.add(key);
         // Include every pane: a lower counter changing must count even when
         // another pane still has the tab's maximum state_change_seq.
-        const panes = objects(snapshot.panes).filter(p => p.workspace_id === tab.workspace_id && p.tab_id === tab.tab_id)
-          .map(p => [p.pane_id, p.agent, p.agent_status, p.state_change_seq, p.title || p.terminal_title_stripped])
+        const panes = (grouped.get(tabKey) ?? []).map(p => [p.pane_id, p.agent, p.agent_status, p.state_change_seq, p.title || p.terminal_title_stripped])
           .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
         const signature = digest(JSON.stringify([tab.agent_status, tab.state_change_seq, tab.label, tab.title, panes]));
         const stamp = this.entries.get(key);
