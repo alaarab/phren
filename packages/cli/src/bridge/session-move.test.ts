@@ -394,9 +394,10 @@ describe("moving a session to another agent", () => {
     expect(await recordedConductor()).toEqual(old);
   });
 
-  it.each([undefined, "replace"])("saves the hand-off and replaces the agent in place (mode %s)", async mode => {
+  it.each([[undefined, undefined], ["replace", undefined], ["replace", "agent-summary"]])("saves the hand-off and replaces the healthy agent in place (mode %s, continuation %s)", async (mode, continuation) => {
     const { deps, typed, launches, closed } = world({ reply: writes });
-    const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" }, mode ? { mode } : {});
+    deps.usage = async () => [{ source: "claude", windows: [{ id: "five-hour", name: "5 hour", usedPercent: 99 }] }];
+    const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" }, { ...(mode ? { mode } : {}), ...(continuation ? { continuation } : {}) });
 
     expect(record).toMatchObject({ state: "moved", placement: "same-pane", exit: "clean", dispatch: DISPATCH,
       handoff: { source: "agent" }, target: { pane: "w1:p1", source: "codex", session: NEXT } });
@@ -414,6 +415,10 @@ describe("moving a session to another agent", () => {
     // The first prompt is the whole hand-off plus the instruction to continue.
     expect(String(object(launches[0].data.brief).text)).toMatch(/Continue from here[\s\S]*## Goal\nFix the parser\./);
     expect(closed).toEqual([]);
+    const history = path.join(path.dirname(record.handoff!.path), "conversation.md");
+    expect(await readFile(history, "utf8")).toContain("Fix the parser and open a PR");
+    expect(handoff).toContain("Saved history: conversation.md, beside this hand-off file.");
+    expect(String(object(launches[0].data.brief).text)).toContain(record.handoff!.path);
   });
 
   it.each([
@@ -570,6 +575,54 @@ describe("moving a session to another agent", () => {
     expect(handoff).toContain(" M src/parser.ts");
     // The move's own request is not part of the work it hands over.
     expect(handoff).not.toContain("Do not commit, stash");
+  });
+
+  it.each(["usage", "transcript", "saved-history"])("continues locally from saved history without asking the source (%s)", async signal => {
+    const { deps, typed, launches } = world({ reply: writes });
+    const recent = [user("Now finish the parser"), agent("The parser is edited; verification remains.")];
+    const earlier = [user("Original request: preserve parser compatibility"), agent("Earlier decision outside the transcript tail")];
+    deps.transcript = async () => signal === "transcript" ? [...recent, JSON.stringify({ type: "assistant", isApiErrorMessage: true, error: "rate_limit",
+      message: { role: "assistant", content: [{ type: "text", text: "You've hit your session limit · resets 3pm" }] } })] : recent;
+    deps.conversation = async () => ({ lines: [...earlier, ...recent], complete: true });
+    deps.usage = async () => [{ source: "claude", windows: [{ id: "five-hour", name: "5 hour", usedPercent: signal === "usage" ? 100 : 20 }] }];
+    const deliver = vi.spyOn(deps, "deliver");
+    const prompt = deps.terminal.prompt;
+    deps.terminal.prompt = async (...args) => {
+      // The source stays alive until both the hand-off and history have been saved.
+      const folders = await readdir(path.join(root, "briefs"));
+      const folder = path.join(root, "briefs", folders[0]);
+      expect(await readFile(path.join(folder, "conversation.md"), "utf8")).toContain("Earlier decision outside the transcript tail");
+      expect(await readFile(path.join(folder, "handoff.md"), "utf8")).toContain("abc123 Start parser fix");
+      return prompt(...args);
+    };
+    const record = await move(deps, { harness: "codex" }, signal === "saved-history" ? { continuation: "saved-history" } : {});
+    expect(record).toMatchObject({ state: "moved", continuation: "saved-history", handoff: { source: "fallback" } });
+    expect(deliver).not.toHaveBeenCalled();
+    expect(typed).toEqual(["/exit"]);
+    expect(launches).toHaveLength(1);
+    const document = await readFile(record.handoff!.path, "utf8");
+    expect(document).toContain("Original brief: fix the parser");
+    expect(document).toContain("Now finish the parser");
+    expect(document).toContain(" M src/parser.ts");
+    expect(document).toContain("12 pnpm dev");
+    expect(document).toContain("Read more history from this file as needed");
+    expect(document).toContain("Inspect the checkout before continuing");
+    expect(String(object(launches[0].data.brief).text).length).toBeLessThanOrEqual(32_768);
+  });
+
+  it("falls back and launches when the source session ends while waiting for its summary", async () => {
+    const { deps, pane, launches } = world();
+    const deliver = deps.deliver;
+    deps.deliver = async (...args) => {
+      const result = await deliver(...args);
+      delete pane.agent;
+      return result;
+    };
+    const record = await move(deps, { harness: "codex" });
+    expect(record).toMatchObject({ state: "moved", handoff: { source: "fallback", reason: expect.stringContaining("session ended") } });
+    expect(await readFile(record.handoff!.path, "utf8")).toContain("Fix the parser and open a PR");
+    expect(await readFile(path.join(path.dirname(record.handoff!.path), "conversation.md"), "utf8")).toContain("edited src/parser.ts");
+    expect(launches).toHaveLength(1);
   });
 
   it.each([

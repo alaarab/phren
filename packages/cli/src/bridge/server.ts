@@ -185,6 +185,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     launch: (server, data, options) => launches.run(() => launchSession(server, data, { trustFolder: true, ...options })),
     inventory: () => launchCheckOff() ? Promise.resolve(undefined) : harnessInventoryWithin(2_500),
     transcript: async target => transcriptTail(await targetTranscriptPath(target)),
+    usage: () => accountUsage.limits(true),
     copyConversation: async (target, home, check) => copyClaudeConversation(await targetTranscriptPath(target), home, process.env, check),
     paneAccount: (server, pane) => paneAccount(paneAccountKey(server, pane.pane_id), typeof pane.terminal_id === "string" ? pane.terminal_id : undefined)?.id,
     paneDispatch: async (server, pane) => {
