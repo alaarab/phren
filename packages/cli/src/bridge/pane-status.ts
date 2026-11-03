@@ -105,7 +105,7 @@ export function screenDialog(agent: string, screen: string): boolean {
   const text = stripTerminal(screen);
   if (agent === "opencode") return !!opencodePermissionDialog(screen);
   if (agent === "codex" || agent === "copilot") return !!visibleTerminalChoice(text);
-  if (agent === "claude" && (claudeQuestionDialog(text) || claudeTeachAutoModeDialog(text))) return true;
+  if (agent === "claude" && claudeQuestionDialog(text)) return true;
   return !!claudePermissionDialog(text);
 }
 

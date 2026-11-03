@@ -119,7 +119,7 @@ afterEach(() => {
 });
 
 describe("status stream", () => {
-  it("streams the pane's status on open, then re-reads the pane every 500ms", async () => {
+  it("polls every 500ms but sends only status changes and a 20-second refresh", async () => {
     const h = harness(), client = new FakeClient();
     await open(h.streams, client, target);
     expect(client.frames()).toHaveLength(1);
@@ -133,9 +133,24 @@ describe("status stream", () => {
     await tickBy(499);
     expect(client.frames()).toHaveLength(1);
     await tickBy(1);
-    expect(client.frames()).toHaveLength(2);
-    expect(client.frames()[1]).toMatchObject({ agentStatus: { status: "idle" } });
+    expect(client.frames()).toHaveLength(1);
     expect(vi.mocked(validateTarget)).toHaveBeenCalledTimes(2);
+
+    // A newly confirmed dialog reaches the phone on the very next poll.
+    h.hooks.approval.mockReturnValue({ toolName: "Bash", message: "Allow?" } as never);
+    await tickBy(500);
+    expect(client.frames()).toHaveLength(2);
+    expect(client.frames()[1]).toMatchObject({ agentStatus: { status: "waiting", pendingApproval: { message: "Allow?" } } });
+    h.hooks.approval.mockReturnValue(undefined);
+    await tickBy(500);
+    expect(client.frames()).toHaveLength(3);
+    expect(client.frames()[2]).toMatchObject({ agentStatus: { status: "idle" } });
+
+    await tickBy(19_500);
+    expect(client.frames()).toHaveLength(3);
+    await tickBy(500);
+    expect(client.frames()).toHaveLength(4);
+    expect(client.frames()[3]).toEqual(client.frames()[2]);
     client.close(1000);
   });
 

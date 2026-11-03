@@ -64,7 +64,7 @@ import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDead
 import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema, sessionId } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
-import { tabActivityKey, type TabActivityStore } from "./tab-activity.js";
+import { panesByTab, tabActivityKey, type TabActivityStore } from "./tab-activity.js";
 import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, targetTranscriptPath, transcriptPath, TranscriptReader } from "./transcripts.js";
 import { conversationSearch } from "./conversation-search.js";
 import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
@@ -157,8 +157,8 @@ type StatusRow = { workspace: unknown; tab: unknown; status: unknown };
 /** How long activity sampling may spend resolving background work before it
  * leaves an unresolved row at its last known status. */
 export const STATUS_ENRICH_BUDGET_MS = 2_000;
-async function effectiveStatus(server: string, s: Json, row: StatusRow, hooks?: AgentHooks): Promise<StatusRow> {
-  const panes = objects(s.panes).filter(p => p.tab_id === row.tab && p.workspace_id === row.workspace && p.agent);
+async function effectiveStatus(server: string, tabPanes: Json[], row: StatusRow, hooks?: AgentHooks): Promise<StatusRow> {
+  const panes = tabPanes.filter(p => p.agent);
   if (panes.length !== 1 || !provider.safeParse(panes[0].agent).success) return row;
   const pane = panes[0];
   const chat = await paneChatState(server, pane, { tokenWhenIdentified: false }).catch((): Json => ({}));
@@ -175,12 +175,13 @@ async function effectiveStatus(server: string, s: Json, row: StatusRow, hooks?: 
  * finish inside `budgetMs` is left out, which preserves its last known status. */
 export async function effectiveStatusRows(server: string, s: Json, budgetMs = STATUS_ENRICH_BUDGET_MS, hooks?: AgentHooks): Promise<StatusRow[]> {
   const deadline = Date.now() + budgetMs;
+  const grouped = panesByTab(s);
   const rows = await Promise.all(objects(s.tabs).map(async (tab): Promise<StatusRow | undefined> => {
     const row = { workspace: tab.workspace_id, tab: tab.tab_id, status: tab.agent_status };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())); timer.unref(); });
     try {
-      return await Promise.race([effectiveStatus(server, s, row, hooks).catch(() => row), late]);
+      return await Promise.race([effectiveStatus(server, grouped.get(tabActivityKey(row.workspace, row.tab)) ?? [], row, hooks).catch(() => row), late]);
     } finally { clearTimeout(timer); }
   }));
   return rows.filter((row): row is StatusRow => row !== undefined);
@@ -270,13 +271,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     const conductor = await conductorPane(server, s).catch(() => undefined);
     const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged, conductor ? String(conductor.pane_id) : null);
     // The branch each tab's agent is on, for the session cards.
-    const agentsByTab = new Map<string, Json[]>();
-    for (const pane of objects(s.panes)) {
-      if (!pane.agent) continue;
-      const key = JSON.stringify([pane.workspace_id, pane.tab_id]);
-      const agents = agentsByTab.get(key) ?? [];
-      agents.push(pane); agentsByTab.set(key, agents);
-    }
+    const agentsByTab = panesByTab(s);
+    for (const [key, panes] of agentsByTab) agentsByTab.set(key, panes.filter(pane => pane.agent));
     // Move records are decoration: read alongside the rest, inside the budget.
     const movesRead = listMoves().catch(() => []);
     const tabs = objects(workspaces.groups).flatMap(group => objects(group.children).map(tab => ({ group, tab })));

@@ -95,7 +95,7 @@ export function transcriptStreams(ctx: StreamContext) {
     let busy = false, ready = false, first = true;
     let awaitingTranscript = false, lastTranscriptLookup = 0;
     let initialPane: Json;
-    let busyAt = 0;
+    let busyAt = 0, statusSentAt = 0, statusKey = "";
     const pending: number[] = [];
     const stop = () => { abort.abort(); clearInterval(timer); unwatch?.(); pending.length = 0; };
     client.once("close", stop); client.once("error", stop);
@@ -226,7 +226,7 @@ export function transcriptStreams(ctx: StreamContext) {
             if (!between) busyAt = Date.now();
             const nextPrompt = between && suggestion && suggestion.readAt > busyAt ? suggestion.text : undefined;
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
-            send(client, { agentStatus: { source: target.source, session: target.session,
+            const frame = { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval || servedQuestion ? "waiting" : resolvedStatus, pendingApproval, pendingQuestions, terminalPrompt,
               ...(waiting && agentHooks.passwordPrompt(target) ? { passwordPrompt: true } : {}),
               compacting: agentHooks.compacting(target),
@@ -243,7 +243,14 @@ export function transcriptStreams(ctx: StreamContext) {
                 // through /v1/questions/answer, whether or not a hold caught it.
                 ...(target.source === "claude" || servedQuestion ? { questions: true } : {}),
                 // What the composer's permission, plan and fast chips can change here.
-                ...(settings ? { settings } : {}) }, ...(settingsState ? { settingsState } : {}), branch } });
+                ...(settings ? { settings } : {}) }, ...(settingsState ? { settingsState } : {}), branch } };
+            // Keep polling for dialogs at 500 ms, but send idle sockets only
+            // a periodic full status refresh (also usable by older phones).
+            const key = JSON.stringify(frame), at = Date.now();
+            if (key !== statusKey || at - statusSentAt >= 20_000) {
+              send(client, frame);
+              statusKey = key; statusSentAt = at;
+            }
           }
           if (sideAnswers && sideQuestions) {
             for (const { revision, ...side } of sideQuestions.list(target)) {
