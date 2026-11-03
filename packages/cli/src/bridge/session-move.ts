@@ -515,7 +515,7 @@ export function handoffDocument(record: MoveRecord, body: string, observed: stri
 
 /** The new agent's first prompt: the whole hand-off when it fits the brief, else where to read it. */
 export function continuePrompt(document: string, file: string): string {
-  const lead = "Phren moved this session to you. The hand-off from the previous agent follows. Continue from here: check the current state first, keep its uncommitted changes, and do not start over.";
+  const lead = `Phren moved this session to you. The hand-off from the previous agent follows (saved at ${file}; resolve its history file beside it). Continue from here: check the current state first, keep its uncommitted changes, and do not start over.`;
   const whole = `${lead}\n\n${document}`;
   if (whole.length <= PROMPT_LIMIT) return whole;
   return `Phren moved this session to you. The previous agent's hand-off is ${document.length} characters, too long for this prompt: read all of ${file} before anything else. Then continue from here: check the current state first, keep its uncommitted changes, and do not start over.`;
@@ -788,6 +788,10 @@ export class SessionMover {
           ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
           : fallback!;
       }
+      if (portable && !peer && record.mode === "new-chat" && !("text" in written)) {
+        body = `## Goal and current state\n\n${body}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`;
+      }
+      let savedHistory: string | undefined;
       if (portable) {
         const prepare = (text: string) => briefText(peer ? redactPeerHandoff(text.replaceAll(record.cwd, "<source checkout>")) : text);
         const first = entries.find(entry => entry.role === "owner")?.text;
@@ -796,13 +800,13 @@ export class SessionMover {
           first ? `Original owner request:\n${prepare(first).slice(0, ORIGINAL_RESERVE)}` : ""].filter(Boolean).join("\n\n");
         const copy = `${prefix}\n\n${conversationCopy(entries, prepare, CONVERSATION_LIMIT - prefix.length - 2, whole?.complete ?? false)}`;
         // Save before exiting the source. This durable local copy outlives intent-copy cleanup.
-        const history = path.join(briefRoot(), record.id, "conversation.md");
-        await mkdir(path.dirname(history), { recursive: true, mode: 0o700 });
-        await atomic(history, copy);
+        // writeLaunchBrief publishes its folder atomically and owns the launch id.
+        // Fill in the history only after that publication, still before source exit.
+        savedHistory = copy;
         if (peer) {
           await saveContinuationConversation(record.id, copy);
           if (!body.includes(CONVERSATION_MARKER)) body += `\n\n${CONVERSATION_MARKER}. Read more history from the conversation file supplied beside this brief as needed; inspect the checkout before continuing.`;
-        } else body += `\n\nSaved history: ${history}. Read more history from this file as needed, including the original request and earlier decisions. Inspect the checkout before continuing; preserve the owner's uncommitted changes.`;
+        } else body += "\n\nSaved history: conversation.md, beside this hand-off file. Read more history from this file as needed, including the original request and earlier decisions. Inspect the checkout before continuing; preserve the owner's uncommitted changes.";
       }
       const document = handoffDocument(record, body, observed, at, !!conductor);
       await this.assertNotAborted(record);
@@ -810,6 +814,7 @@ export class SessionMover {
       const prompt = briefText(continuePrompt(document, file));
       // The folder is the new agent's brief folder; the hand-off is written into it, whole.
       await writeLaunchBrief({ id: record.id, text: prompt }, this.now, record.from.label);
+      if (savedHistory !== undefined) await atomic(path.join(path.dirname(file), "conversation.md"), savedHistory);
       await atomic(file, document);
       await this.update(record, { state: record.mode === "new-chat" ? "launching" : "exiting", handoff: { path: file, source: "text" in written ? "agent" : "fallback",
         ...("reason" in written ? { reason: written.reason.slice(0, 300) } : {}), chars: document.length } });

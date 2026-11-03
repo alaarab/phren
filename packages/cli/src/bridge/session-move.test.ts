@@ -417,7 +417,8 @@ describe("moving a session to another agent", () => {
     expect(closed).toEqual([]);
     const history = path.join(path.dirname(record.handoff!.path), "conversation.md");
     expect(await readFile(history, "utf8")).toContain("Fix the parser and open a PR");
-    expect(handoff).toContain(history);
+    expect(handoff).toContain("Saved history: conversation.md, beside this hand-off file.");
+    expect(String(object(launches[0].data.brief).text)).toContain(record.handoff!.path);
   });
 
   it.each([
