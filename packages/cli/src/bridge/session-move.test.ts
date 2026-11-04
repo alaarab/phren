@@ -799,20 +799,25 @@ describe("stopping the agent so a held hand-off goes in", () => {
       await Promise.race([Promise.resolve(mover.settled(from.server, from.pane)).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 2_000))]);
     }
   });
-  async function held(deliver?: MoverDeps["deliver"]) {
+  async function held(deliver?: MoverDeps["deliver"], phase: "delivering" | "waiting" = "waiting") {
     const w = world({ reply: writes });
     // The agent is on a step; the request waits behind it.
     w.pane.agent_status = "working";
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    w.deps.sleep = () => gate;
-    if (deliver) w.deps.deliver = deliver;
-    else w.deps.deliver = async () => ({ ok: true, queued: true });
+    let delivering!: () => void, waiting!: () => void;
+    const deliveryStarted = new Promise<void>(resolve => { delivering = resolve; });
+    const handoffWaiting = new Promise<void>(resolve => { waiting = resolve; });
+    w.deps.sleep = () => { waiting(); return gate; };
+    const send = deliver ?? (async () => ({ ok: true, queued: true }));
+    w.deps.deliver = (...args) => { delivering(); return send(...args); };
     const mover = new SessionMover(w.deps);
     const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
     running.push({ mover, release, id: record.id });
-    await new Promise(resolve => setImmediate(resolve));
-    return { ...w, mover, record, release };
+    // History reads before delivery may outlast an event-loop turn. Wait for the
+    // hand-off poll to reach its gate, unless the test deliberately holds delivery.
+    await (phase === "delivering" ? deliveryStarted : handoffWaiting);
+    return { ...w, mover, record, release, handoffWaiting };
   }
   /** A queue whose row for the move's request is in `state` (queued for the pane's terminal and conversation). */
   const answering = (state: "queued" | "attempting" | "uncertain" | "delivered" | "failed", row: { terminal: string; session?: string } = { terminal: "term-1", session: SESSION }) => {
@@ -878,7 +883,6 @@ describe("stopping the agent so a held hand-off goes in", () => {
       send: async (_target, text, _id, typing) => { await typing(); sent.push(text); return { delivered: true }; } });
     const f = await held((target, text, deliveryId) => queue.enqueue({ target, text, deliveryId }));
     // The request is on the queue, held behind the agent's step.
-    for (let i = 0; i < 50 && !await queue.status(`move-${f.record.id}`, from).then(() => true, () => false); i++) await new Promise(resolve => setTimeout(resolve, 5));
     expect(await queue.status(`move-${f.record.id}`, from)).toMatchObject({ queued: true });
     // Both arrive while it waits: one Escape lands, before any typing, and both say so.
     const both = await Promise.all([f.mover.interrupt(f.record.id, queue), f.mover.interrupt(f.record.id, queue)]);
@@ -921,10 +925,10 @@ describe("stopping the agent so a held hand-off goes in", () => {
   it("sends nothing before the request is queued, or for a move this Hook no longer runs", async () => {
     // The request is still on its way to the queue.
     let queued!: () => void;
-    const f = await held(() => new Promise(resolve => { queued = () => resolve({ ok: true, queued: true }); }));
+    const f = await held(() => new Promise(resolve => { queued = () => resolve({ ok: true, queued: true }); }), "delivering");
     expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
     queued();
-    await new Promise(resolve => setImmediate(resolve));
+    await f.handoffWaiting;
     // No row made yet: nothing an Escape would let in.
     const empty = { whileQueued: async (_id: string, _target: Target, action: (row?: { terminal: string }) => Promise<void>) => { await action(); return { ran: true as const }; } };
     expect(await f.mover.interrupt(f.record.id, empty)).toEqual({ interrupted: false, state: "idle" });
