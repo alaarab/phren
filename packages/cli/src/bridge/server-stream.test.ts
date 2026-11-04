@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { AgentHooks } from "./agent-hooks.js";
@@ -10,10 +13,11 @@ import type { CodexQuestions } from "./questions.js";
 import type { HookInfo } from "./server-routes.js";
 import { transcriptStreams, type StreamContext, type TranscriptStreams } from "./server-stream.js";
 import type { SideQuestions } from "./side-questions.js";
+import type { LocalChildAgentRelation } from "./transcripts.js";
 
 type Page = { entries: { line: number; raw: Json; promptEntryId?: string }[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean };
 
-const transcript = vi.hoisted(() => ({ found: true, pages: [] as Page[], reads: [] as number[] }));
+const transcript = vi.hoisted(() => ({ found: true, pages: [] as Page[], reads: [] as number[], child: undefined as LocalChildAgentRelation | undefined }));
 
 vi.mock("./transcripts.js", async importOriginal => {
   const original = await importOriginal<typeof import("./transcripts.js")>();
@@ -26,6 +30,9 @@ vi.mock("./transcripts.js", async importOriginal => {
     },
     refreshTranscript: async () => undefined,
     TranscriptReader: class {
+      constructor(...args: ConstructorParameters<typeof original.TranscriptReader>) {
+        if (args[0] === transcript.child?.transcript) return new original.TranscriptReader(...args);
+      }
       resolveClaudeQuestionsThrough() {}
       get ambiguousPromptIds() { return new Set<string>(); }
       async read(before?: number) {
@@ -39,8 +46,8 @@ vi.mock("./transcripts.js", async importOriginal => {
         return transcript.pages.shift() ?? { entries: [], totalLines: 0, startLine: 0, hasMore: false, reset: true };
       }
     },
-    childAgent: () => undefined,
-    childAgentTree: async () => [],
+    childAgent: original.childAgent,
+    childAgentTree: async () => transcript.child ? [transcript.child] : [],
   };
 });
 
@@ -92,6 +99,7 @@ function harness(options: { found?: boolean; capabilities?: Json } = {}) {
     info: { modules: {}, store: "store-x", profile: "profile-x", generation: "gen-1" } as unknown as HookInfo,
     activeCapabilities: options.capabilities ?? {},
   };
+  transcript.child = undefined;
   transcript.found = options.found ?? true;
   transcript.pages.length = 0; transcript.reads.length = 0;
   return { ctx, hooks, unwatch, side, deliveries, sideQuestions, streams: transcriptStreams(ctx) };
@@ -253,6 +261,40 @@ describe("transcript stream requests", () => {
     expect(client.frames()).toHaveLength(2);
     expect(client.frames()[1]).toMatchObject({ type: "backlog", entries: [{ line: 0 }], totalLines: 1 });
     client.close(1000);
+  });
+
+  it("waits for a child transcript file and sends its backlog once it appears", async () => {
+    const h = harness(), client = new FakeClient();
+    const root = await mkdtemp(path.join(tmpdir(), "phren-child-stream-"));
+    const child = { id: "c".repeat(32), session: "bbbbbbbb-1111-4111-8111-111111111111",
+      provider: "codex" as const, transcript: path.join(root, "child.jsonl"),
+      path: "/root/reviewer", callId: "spawn-child", state: "running" as const, children: [] };
+    transcript.child = child;
+    // The parent is readable throughout; retries must never select its rows.
+    transcript.pages.push({ entries: [{ line: 0, raw: { type: "message", content: "Parent message" } }],
+      totalLines: 1, startLine: 0, hasMore: false, reset: true });
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      await open(h.streams, client, { ...target, child: child.id }, "/v1/transcripts");
+      expect(client.closed).toBeUndefined();
+      expect(client.frames()).toEqual([expect.objectContaining({ type: "backlog", source: child.provider,
+        session: child.id, entries: [], totalLines: 0 })]);
+      await tickBy(2_500);
+      expect(client.closed).toBeUndefined();
+      expect(client.frames()).toHaveLength(1);
+      await writeFile(child.transcript, JSON.stringify({ type: "response_item", payload: {
+        type: "message", role: "assistant", content: "Child message" } }) + "\n");
+      await tickBy(1_500);
+      await vi.waitFor(() => expect(client.frames()).toHaveLength(2));
+      expect(client.closed).toBeUndefined();
+      expect(client.frames()[1]).toMatchObject({ type: "backlog", source: child.provider,
+        session: child.id, totalLines: 1, entries: [{ line: 0 }] });
+      expect(JSON.stringify(client.frames()[1])).toContain("Child message");
+      expect(JSON.stringify(client.frames())).not.toContain("Parent message");
+    } finally {
+      client.close(1000); warn.mockRestore();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("caps queued history requests at eight and refuses the next with 1008", async () => {
