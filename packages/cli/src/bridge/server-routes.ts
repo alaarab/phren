@@ -827,7 +827,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/subagents/transcript": {
             const target = targetFromURL(url); await validateTarget(target);
             const { reader, source, session } = await childConversationReader(target, z.string().parse(url.searchParams.get("child")));
-            const page = await reader.read();
+            const page = reader ? await reader.read() : emptyPage;
             result = { ...page, type: "backlog", source, session }; break;
           }
           case "/v1/code/tree": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).tree(url.searchParams.get("project"), url.searchParams.get("directory")); break;

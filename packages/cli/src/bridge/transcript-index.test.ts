@@ -80,6 +80,12 @@ describe("indexed transcript pages", () => {
     const burst = await live.read();
     expect(burst.reset).toBe(true);
     expect(burst.startLine).toBeGreaterThan(2709);
+    // The bounded window is replaced once; subsequent polls and output resume.
+    expect(await live.read()).toMatchObject({ entries: [], reset: false });
+    await appendFile(file, row("After burst") + "\n");
+    const following = await live.read();
+    expect(following.reset).toBe(false);
+    expect(following.entries.map(entry => entry.line)).toEqual([3009]);
   });
 
   it("invalidates cached indexes on replacement, truncation, and same-size rewrite", async () => {

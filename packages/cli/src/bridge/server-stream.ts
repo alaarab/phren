@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { logger } from "../logger.js";
@@ -85,6 +86,13 @@ export function transcriptStreams(ctx: StreamContext) {
   async function childConversationReader(target: Target, child: string) {
     const relation = childAgent(await childAgentTree(target.source, target.session), child);
     if (!relation) throw new BridgeError(404, "This child agent does not belong to the selected conversation.");
+    // A verified child can be listed before its first transcript write.
+    // Keep its public identity while waiting, rather than reading the parent.
+    try { await stat(relation.transcript); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { source: relation.provider, session: relation.id };
+      throw error;
+    }
     const reader = new TranscriptReader(relation.transcript, relation.provider, undefined, undefined, relation.provider === "claude", relation.cwd);
     return { reader, source: relation.provider, session: relation.id };
   }
@@ -129,7 +137,7 @@ export function transcriptStreams(ctx: StreamContext) {
     const findTranscript = async () => {
       if (Date.now() - lastTranscriptLookup < 2_000) return;
       lastTranscriptLookup = Date.now();
-      const opened = await conversationReader(target);
+      const opened = child === null ? await conversationReader(target) : await childConversationReader(target, child);
       if (opened.reader) { reader = opened.reader; conversation = { source: opened.source, session: opened.session }; awaitingTranscript = false; }
     };
     const tick = async () => {
@@ -306,7 +314,7 @@ export function transcriptStreams(ctx: StreamContext) {
       if (url.pathname === "/v1/transcripts") {
         const opened = child === null ? await conversationReader(target) : await childConversationReader(target, child);
         reader = opened.reader; conversation = { source: opened.source, session: opened.session };
-        awaitingTranscript = child === null && !reader; lastTranscriptLookup = Date.now();
+        awaitingTranscript = !reader; lastTranscriptLookup = Date.now();
       }
       if (abort.signal.aborted) { stop(); return; }
       ready = true;

@@ -40,6 +40,7 @@ beforeEach(async () => {
   vi.stubEnv("CLAUDE_CONFIG_DIR", root);
   vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "bridge"));
   pane.cwd = pane.foreground_cwd = root;
+  pane.agent_status = "idle";
   const project = path.join(root, "projects", "test");
   await mkdir(project, { recursive: true });
   await writeFile(path.join(project, `${fixture.session}.jsonl`), fixture.rows.slice(0, 2).map(row => JSON.stringify(row)).join("\n") + "\n");
@@ -105,6 +106,7 @@ it("carries prompt identities through backlog, a live append and an older page",
 });
 
 it.each([false, true])("resets a delivered prompt identity when a later append makes it ambiguous (disconnected: %s)", async disconnected => {
+  pane.agent_status = "working";
   const ctx = streamContext();
   const streams = transcriptStreams(ctx), client = new FakeClient(); openClient = client;
   const query = new URLSearchParams({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane,
@@ -141,6 +143,23 @@ it.each([false, true])("resets a delivered prompt identity when a later append m
     for (const entry of (frame.entries ?? []) as { line: number; promptEntryId?: string }[]) state.set(entry.line, entry.promptEntryId);
   }
   expect([...state.values()]).not.toContain(shared);
+  // Keep the agent working after reconciliation: each new row must append,
+  // and idle polls must not replace the same conversation again.
+  for (let step = 0; step < 3; step++) {
+    await appendFile(transcript, JSON.stringify({ type: "assistant", uuid: `working-${step}`,
+      message: { role: "assistant", content: [{ type: "text", text: `Working ${step}` }] } }) + "\n");
+    await vi.waitFor(() => expect(receiving.frames().some(frame => frame.totalLines === 6 + step)).toBe(true), { timeout: 3_000 });
+    const latest = receiving.frames().find(frame => frame.totalLines === 6 + step)!;
+    expect(latest).toMatchObject({ type: "append", reset: false });
+  }
+  await new Promise(resolve => setTimeout(resolve, 1_100));
+  expect(frames().filter((frame, index) => index > 0 && frame.type === "backlog" && frame.reset === true)).toHaveLength(1);
+  // A different identity becoming ambiguous still requires a new replacement.
+  await appendFile(transcript, JSON.stringify({ ...fixture.rows[4], uuid: "duplicate-gamma" }) + "\n");
+  await vi.waitFor(() => expect(frames().filter((frame, index) => index > 0 && frame.type === "backlog" && frame.reset === true)).toHaveLength(2), { timeout: 3_000 });
+  await appendFile(transcript, JSON.stringify({ type: "assistant", uuid: "after-gamma",
+    message: { role: "assistant", content: [{ type: "text", text: "Still working" }] } }) + "\n");
+  await vi.waitFor(() => expect(receiving.frames().at(-1)).toMatchObject({ type: "append", reset: false, totalLines: 10 }), { timeout: 3_000 });
   receiving.close(1000);
 });
 
