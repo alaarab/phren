@@ -37,8 +37,12 @@ export class BrowserRecordings {
     const previous = state.meta.navigations.filter(n => n.pageId === page.pageId).at(-1);
     if (previous?.url === page.url && previous.title === page.title) return;
     const existing = state.meta.pages.find(p => p.pageId === page.pageId);
-    if (existing) Object.assign(existing, { url: nav.url, title: nav.title }); else state.meta.pages.push(nav);
-    state.meta.navigations.push(nav); this.save(state.meta);
+    // A copy: the page entry follows the latest navigation, the timeline keeps each one as it was.
+    if (existing) Object.assign(existing, { url: nav.url, title: nav.title }); else state.meta.pages.push({ ...nav });
+    // The shim announces a navigation before its title loads; the title then completes that entry.
+    if (previous?.url === page.url && !previous.title) previous.title = page.title;
+    else state.meta.navigations.push(nav);
+    this.save(state.meta);
   }
   frame(info: FrameInfo, jpeg: Buffer): void {
     const state = this.active.get(info.browserId); if (!state) return;

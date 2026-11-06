@@ -75,7 +75,7 @@ export class BrowserRegistry extends EventEmitter {
     this.server = createServer(socket => {
       if (this.sockets.size >= 128) { socket.destroy(); return; }
       this.sockets.add(socket); const reader = new BrowserMessageReader();
-      socket.on("data", chunk => { try { for (const message of reader.push(chunk)) this.accept(socket, message); } catch { socket.destroy(); } });
+      socket.on("data", (chunk: Buffer) => { try { for (const message of reader.push(chunk)) this.accept(socket, message); } catch { socket.destroy(); } });
       socket.on("error", () => {});
       socket.on("close", () => { this.sockets.delete(socket); this.disconnect(socket); });
     });

@@ -73,6 +73,17 @@ it("records at most four changed frames per second with seekable offsets and a n
   const reopened = new BrowserRecordings(recordings.root); expect(reopened.frameAt(hello.browserId, 0)).toEqual(jpeg);
 });
 
+it("keeps each navigation as it was and completes an entry when its title arrives", () => {
+  const recordings = new BrowserRecordings(root()); recordings.start(hello, 0);
+  recordings.page({ ...page, url: "https://a.test/", title: "" }, 1);
+  recordings.page({ ...page, url: "https://a.test/", title: "A" }, 2);
+  recordings.page({ ...page, url: "https://b.test/", title: "" }, 3);
+  recordings.page({ ...page, url: "https://b.test/", title: "B" }, 4);
+  const meta = JSON.parse(fs.readFileSync(path.join(recordings.root, hello.browserId, "meta.json"), "utf8"));
+  expect(meta.navigations.map((n: { url: string; title: string }) => [n.url, n.title])).toEqual([["https://a.test/", "A"], ["https://b.test/", "B"]]);
+  expect(meta.pages).toHaveLength(1); expect(meta.pages[0]).toMatchObject({ url: "https://b.test/", title: "B" });
+});
+
 it("retains newest recordings within the byte budget and removes recordings after 24 hours", () => {
   const recordings = new BrowserRecordings(root());
   for (const [id, t] of [["browser_old", 0], ["browser_new", 1000]] as const) {

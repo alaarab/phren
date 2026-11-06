@@ -16,14 +16,16 @@ try {
       const id = () => randomUUID();
       function watchBrowser(browser, headless = false, playwright = '') {
         if (!browser || browsers.has(browser)) return browsers.get(browser);
-        const state = { browserId: id(), socket: null, ended: false, ready: false, cleanup: new Set() };
+        const state = { browserId: id(), socket: null, ended: false, ready: false, queued: [], cleanup: new Set() };
         browsers.set(browser, state);
         const socket = net.createConnection(socketPath); state.socket = socket; socket.unref();
         const stop = () => { if (state.ended) return; state.ended = true; for (const cleanup of state.cleanup) cleanup(); state.cleanup.clear(); socket.destroy(); };
         state.stop = stop;
         state.send = (type, data, jpeg) => {
           try {
-            if (state.ended || !state.ready || socket.destroyed) return;
+            if (state.ended || socket.destroyed) return;
+            // Pages usually open before the socket connects: keep their announcements (not frames) until it does.
+            if (!state.ready) { if (type !== 3 && state.queued.length < 64) state.queued.push([type, data]); return; }
             if (socket.writableLength > 4 * 1024 * 1024) { if (type !== 3) stop(); return; }
             const json = Buffer.from(JSON.stringify({ browserId: state.browserId, ...data }));
             const body = jpeg ? Buffer.concat([Buffer.from([type]), Buffer.alloc(4), json, jpeg]) : Buffer.concat([Buffer.from([type]), json]);
@@ -38,13 +40,15 @@ try {
           if (state.ended) return;
           state.ready = true;
           state.send(1, { v: 1, pid: process.pid, session: process.env.PHREN_BROWSER_SESSION || '', cwd: process.cwd(), engine: 'chromium', headless: !!headless, playwright });
-          for (const context of browser.contexts ? browser.contexts() : [browser]) watchContext(context, state);
-          // A normal browser's future contexts are created through this method.
-          if (typeof browser.newContext === 'function') {
-            const original = browser.newContext;
-            browser.newContext = async function (...args) { const context = await original.apply(this, args); safe(() => watchContext(context, state))(); return context; };
-          }
+          const queued = state.queued; state.queued = [];
+          for (const [type, data] of queued) state.send(type, data);
         }));
+        // Wrapped before the socket connects: browser.newPage() runs right after launch() and creates its context through this method.
+        for (const context of browser.contexts ? browser.contexts() : [browser]) watchContext(context, state);
+        if (typeof browser.newContext === 'function') {
+          const original = browser.newContext;
+          browser.newContext = async function (...args) { const context = await original.apply(this, args); safe(() => watchContext(context, state))(); return context; };
+        }
         if (browser.on) browser.on(browser.contexts ? 'disconnected' : 'close', safe(() => { state.send(4, {}); stop(); }));
         return state;
       }
@@ -78,18 +82,26 @@ try {
         });
         const cleanup = () => close(); state.cleanup.add(cleanup);
         page.on('framenavigated', nav); page.on('close', close); context.on('close', close); announce();
-        try {
-          cdp = await context.newCDPSession(page);
-          if (closed || state.ended) { awaitStop(cdp); return; }
-          cdp.on('Page.screencastFrame', safe(event => {
-            // CDP acknowledgements never wait for the Hook or phone.
-            Promise.resolve(cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId })).catch(() => {});
-            if (closed || state.ended) return;
-            pending = event;
-            if (!timer) { const delay = Math.max(0, 100 - (Date.now() - last)); if (!delay) flush(); else { timer = setTimeout(safe(flush), delay); timer.unref?.(); } }
-          }));
-          await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 1280 });
-        } catch { close(); }
+        // The 'page' event fires while newPage() is still setting the page up, and CDP then answers
+        // "Not attached to an active page"; retry briefly with a fresh session.
+        for (const delay of [0, 100, 250, 500, 1000, 2000]) {
+          if (delay) await new Promise(resolve => { const t = setTimeout(resolve, delay); t.unref?.(); });
+          if (closed || state.ended) return;
+          try {
+            cdp = await context.newCDPSession(page);
+            if (closed || state.ended) { awaitStop(cdp); return; }
+            cdp.on('Page.screencastFrame', safe(event => {
+              // CDP acknowledgements never wait for the Hook or phone.
+              Promise.resolve(cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId })).catch(() => {});
+              if (closed || state.ended) return;
+              pending = event;
+              if (!timer) { const delay = Math.max(0, 100 - (Date.now() - last)); if (!delay) flush(); else { timer = setTimeout(safe(flush), delay); timer.unref?.(); } }
+            }));
+            await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 1280 });
+            return;
+          } catch { if (cdp) awaitStop(cdp); cdp = undefined; }
+        }
+        close();
       }
       function awaitStop(cdp) { try { Promise.resolve(cdp.send('Page.stopScreencast')).catch(() => {}); Promise.resolve(cdp.detach()).catch(() => {}); } catch {} }
       function instrument(exports, parent) {
