@@ -203,6 +203,9 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 export const REGISTRY: Command[] = [
+  { name: "browser", topic: "setup", usage: "phren browser env", summary: "Print browser watching environment", standalone: true,
+    run: async args => { if (args.length !== 1 || args[0] !== "env") { console.error("Usage: phren browser env"); return 1; }
+      const { printBrowserEnv } = await import("./bridge/browser-env.js"); printBrowserEnv(); } },
   {
     name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read|gitboy-write --key <public-key-file|->",
     summary: "Connect your phone with a pairing QR code, or authorize a scoped key for gitboy (gitboy-read: project memory; gitboy-write: save findings)",

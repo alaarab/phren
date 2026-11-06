@@ -1,3 +1,5 @@
+import type { BrowserRegistry } from "./browser-registry.js";
+import { browserRoute } from "./browser-routes.js";
 import type { TurnQueue } from "./turn-queue.js";
 import { terminalProvider } from "./terminal.js";
 import { peerFingerprint } from "./dispatch-hosts.js";
@@ -116,6 +118,7 @@ export interface HookInfo {
 }
 
 export interface RouteContext {
+  browsers?: BrowserRegistry;
   turnQueue?: TurnQueue;
   version: string;
   modules: ModuleSnapshot;
@@ -187,7 +190,7 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
   return rows.filter((row): row is StatusRow => row !== undefined);
 }
 
-export const capabilities = { turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
+export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true };
@@ -472,6 +475,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       const url = new URL(request.url || "/", "http://phren.local");
       if (url.origin !== "http://phren.local") throw new BridgeError(400, "Invalid request origin.");
       requireRoute(modules, request.method ?? "", url.pathname);
+      if (url.pathname === "/v1/browsers" || url.pathname.startsWith("/v1/browsers/")) { browserRoute(ctx.browsers, request.method ?? "", url, response); return; }
       let result: unknown;
       if (url.pathname.startsWith("/v1/conductor/move/")) {
         if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
