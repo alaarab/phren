@@ -283,6 +283,10 @@ function claudeUserText(raw: Json): string | undefined {
   return blocks.filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)).join("\n");
 }
 
+/** The last answer per transcript, kept while the file is unchanged: every overview asks for each pane
+ * that finished a turn, and parsing a 512 KiB tail each time was a steady cost. */
+const finalTurnCache = new Map<string, { stamp: string; turn: FinalTurn | undefined }>();
+
 /** The final turn of a conversation, read from the tail of its transcript. */
 export async function readFinalTurn(source: ScheduleHarness, sessionId: string | undefined): Promise<FinalTurn | undefined> {
   if (!sessionId) return undefined;
@@ -291,11 +295,16 @@ export async function readFinalTurn(source: ScheduleHarness, sessionId: string |
   const handle = await open(file, "r").catch(() => undefined);
   if (!handle) return undefined;
   try {
-    const { size } = await handle.stat();
+    const { size, dev, ino, mtimeMs } = await handle.stat();
+    const key = `${source}\0${file}`, stamp = `${dev}:${ino}:${size}:${mtimeMs}`, cached = finalTurnCache.get(key);
+    if (cached?.stamp === stamp) return cached.turn;
     const start = Math.max(0, size - FINAL_TURN_TAIL_BYTES), buffer = Buffer.alloc(size - start);
     await handle.read(buffer, 0, buffer.length, start);
     const lines = buffer.toString("utf8").split("\n");
-    return finalTurnFromLines(start > 0 ? lines.slice(1) : lines, source);
+    const turn = finalTurnFromLines(start > 0 ? lines.slice(1) : lines, source);
+    finalTurnCache.delete(key); finalTurnCache.set(key, { stamp, turn });
+    while (finalTurnCache.size > 128) finalTurnCache.delete(finalTurnCache.keys().next().value!);
+    return turn;
   } catch { return undefined; } finally { await handle.close().catch(() => undefined); }
 }
 

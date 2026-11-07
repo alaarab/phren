@@ -152,14 +152,30 @@ export async function containedFanoutRoot(env: NodeJS.ProcessEnv): Promise<strin
 }
 
 async function regularContainedFile(root: string, candidate: string, maxBytes: number): Promise<string | undefined> {
+  return (await containedFileStat(root, candidate, maxBytes))?.resolved;
+}
+
+async function containedFileStat(root: string, candidate: string, maxBytes: number): Promise<{ resolved: string; stamp: string } | undefined> {
   try {
     const link = await lstat(candidate);
     if (!link.isFile() || link.isSymbolicLink() || link.size > maxBytes) return;
     const resolved = await realpath(candidate);
     if (!resolved.startsWith(root + path.sep)) return;
     const metadata = await stat(resolved);
-    return metadata.isFile() && metadata.size <= maxBytes ? resolved : undefined;
+    return metadata.isFile() && metadata.size <= maxBytes ? { resolved, stamp: `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}` } : undefined;
   } catch { return; }
+}
+
+/** Parsed manifests by file, while unchanged: every conversation's child tree reads every job's manifest
+ * to find its own, so parsing them each time cost the Hook per session per overview. */
+const manifestCache = new Map<string, { stamp: string; manifest: FanoutManifest }>();
+async function readManifest(file: { resolved: string; stamp: string }): Promise<FanoutManifest> {
+  const cached = manifestCache.get(file.resolved);
+  if (cached?.stamp === file.stamp) return cached.manifest;
+  const manifest = manifestSchema.parse(JSON.parse(await readFile(file.resolved, "utf8")));
+  manifestCache.delete(file.resolved); manifestCache.set(file.resolved, { stamp: file.stamp, manifest });
+  while (manifestCache.size > MAX_JOBS * 2) manifestCache.delete(manifestCache.keys().next().value!);
+  return manifest;
 }
 
 export async function nativeClaudeTranscript(candidate: string, session: string): Promise<string | undefined> {
@@ -231,10 +247,10 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
   const children: FanoutChild[] = [];
   for (const name of names) {
     const directory = path.join(root, name);
-    const manifestFile = await regularContainedFile(root, path.join(directory, "manifest.json"), MAX_MANIFEST_BYTES);
+    const manifestFile = await containedFileStat(root, path.join(directory, "manifest.json"), MAX_MANIFEST_BYTES);
     if (!manifestFile) continue;
     try {
-      const manifest = manifestSchema.parse(JSON.parse(await readFile(manifestFile, "utf8")));
+      const manifest = await readManifest(manifestFile);
       if (manifest.id !== name || manifest.parent?.provider !== parentProvider || manifest.parent.session !== parentSession
           || (manifest.parent.computer !== undefined && parentComputer !== undefined && manifest.parent.computer !== parentComputer)) continue;
       const jobRoot = await realpath(directory);

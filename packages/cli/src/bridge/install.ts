@@ -17,6 +17,7 @@ import { bridgeRoot, object, objects, atomic, socketPath } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
+import { FAST_STATUS_LINE_SOURCE, fastStatusLinePath } from "./status-line-fast.js";
 import { installAskpass, removeAskpass } from "./sudo.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 import { carryCodexHookTrust } from "./codex-hook-trust.js";
@@ -287,6 +288,7 @@ export async function install(version: string, noService = false, force = false)
   await mkdir(shimDirectory, { recursive: true, mode: 0o700 });
   await atomic(path.join(shimDirectory, "phren-playwright.cjs"), typeof BROWSER_SHIM_SOURCE !== "undefined" ? BROWSER_SHIM_SOURCE : await readFile(browserShimPath(), "utf8"), 0o600);
   await atomic(fastHookPath(destination), FAST_HOOK_SOURCE);
+  await atomic(fastStatusLinePath(destination), FAST_STATUS_LINE_SOURCE);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
   const gateway = await detectGateway();
   await atomic(path.join(root, "dispatch"), gatewayScript(gateway, {
@@ -400,8 +402,10 @@ async function missingFile<T>(operation: Promise<T>): Promise<T | undefined> {
 /** Whether the version `current/` points at ships the Claude forwarder; one
  * from before it does not, and its Claude callbacks run the bundle. */
 const currentHasFastHook = (root: string) => access(fastHookPath(path.join(root, "current"))).then(() => true, () => false);
+/** Whether that version ships the status line forwarder; before it, the status line runs the bundle. */
+const currentHasFastStatusLine = (root: string) => access(fastStatusLinePath(path.join(root, "current"))).then(() => true, () => false);
 
-export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot, fastClaude = true): Promise<SettingsEdit[]> {
+export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot, fastClaude = true, fastStatusLine = fastClaude): Promise<SettingsEdit[]> {
   const edits: SettingsEdit[] = [];
   // Extra Claude homes (one per account) get the same hooks; a symlinked settings.json shares another home's, so it is skipped.
   const extraClaude = claudeHomes().slice(1).map(home => ["claude", path.join(home.dir, "settings.json")] as const);
@@ -458,7 +462,7 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
     }
     config.hooks = hooks;
     if (source === "claude") {
-      const statusLine = usageStatusLine(config.statusLine, program, remove || modules?.has("hook") === false);
+      const statusLine = usageStatusLine(config.statusLine, fastStatusLine ? fastStatusLinePath(path.dirname(program)) : program, remove || modules?.has("hook") === false);
       if (statusLine === undefined) delete config.statusLine; else config.statusLine = statusLine;
     }
     const after = JSON.stringify(config, null, 2) + "\n";
@@ -533,7 +537,7 @@ export async function rollback() {
   // forwarder or, from before the forwarder, its bundle.
   const root = bridgeRoot();
   const program = path.join(root, "current/bridge-hook.mjs");
-  const edits = await planAgentHooks(program, false, moduleSnapshot(defaultPhrenPath(), undefined, true), await currentHasFastHook(root));
+  const edits = await planAgentHooks(program, false, moduleSnapshot(defaultPhrenPath(), undefined, true), await currentHasFastHook(root), await currentHasFastStatusLine(root));
   await applyAgentHooks(edits);
   await carryCodexHookTrust(program, codexHooksBefore(edits));
   await atomic(path.join(bridgeRoot(), "installed.json"), JSON.stringify({ version: config.previous, previous: config.version, ...(config.store ? { store: config.store } : {}) }) + "\n");
@@ -551,7 +555,7 @@ export async function reconcileModuleHooks(store: string, profile?: string): Pro
   const served = (() => { try { return object(JSON.parse(installed)).store; } catch { return undefined; } })();
   if (typeof served === "string" && path.resolve(served) !== path.resolve(store)) return;
   const program = path.join(root, "current/bridge-hook.mjs");
-  const edits = await planAgentHooks(program, false, modules, await currentHasFastHook(root));
+  const edits = await planAgentHooks(program, false, modules, await currentHasFastHook(root), await currentHasFastStatusLine(root));
   await applyAgentHooks(edits);
   await carryCodexHookTrust(program, codexHooksBefore(edits));
   await applyOpencodePlugin(!modules.has("hook"));

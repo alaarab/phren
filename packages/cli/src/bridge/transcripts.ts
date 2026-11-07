@@ -1,5 +1,6 @@
 import { claudeQuestionResolutions, projectClaudeQuestionResolutions } from "./claude-question-lifecycle.js";
-import { readdir, realpath, lstat, type FileHandle } from "node:fs/promises";
+import { readdir, realpath, type FileHandle } from "node:fs/promises";
+import { lstatSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { codexHome } from "../home-paths.js";
@@ -184,16 +185,18 @@ async function findPatternMatches(root: string, pattern: string): Promise<string
     const last = index === segments.length - 1;
     if (!segment.includes("*") && !segment.includes("?")) {
       const next = path.join(dir, segment);
-      try {
-        const info = await lstat(next);
-        if (last) {
-          // glob returns a symlink to a file here too; the caller's realpath
-          // check is what rejects one pointing outside the provider folder.
-          if (info.isFile() || info.isSymbolicLink()) matches.push(next);
-        } else if (info.isDirectory()) {
-          await walk(next, index + 1);
-        }
-      } catch { /* no match */ }
+      // A Claude session is looked for in every project folder, and nearly all
+      // miss: a throwing lstat built an error for each one, the Hook's top cost.
+      let info;
+      try { info = lstatSync(next, { throwIfNoEntry: false }); } catch { /* no match */ }
+      if (!info) return;
+      if (last) {
+        // glob returns a symlink to a file here too; the caller's realpath
+        // check is what rejects one pointing outside the provider folder.
+        if (info.isFile() || info.isSymbolicLink()) matches.push(next);
+      } else if (info.isDirectory()) {
+        await walk(next, index + 1);
+      }
       return;
     }
     let entries;
