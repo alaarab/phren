@@ -13,6 +13,7 @@ import { mountProjects } from "./sections/projects.js";
 import { mountTasks } from "./sections/tasks.js";
 import { mountSchedules } from "./sections/schedules.js";
 import { mountPreviews } from "./sections/previews.js";
+import { mountBrowsers } from "./sections/browsers.js";
 import { mountMemory } from "./sections/memory.js";
 import { mountConductor } from "./sections/conductor.js";
 import { mountReview } from "./sections/review.js";
@@ -66,6 +67,7 @@ registerSection("memory", { label: "Memory", order: 45, group: "work", readAhead
 registerSection("code", { label: "Code", order: 47, group: "work", readAhead: true, mount: (el) => mountCode(el) });
 registerSection("schedules", { label: "Schedules", order: 72, group: "fleet", readAhead: true, mount: (el) => mountSchedules(el) });
 registerSection("previews", { label: "Previews", order: 74, group: "fleet", mount: (el) => mountPreviews(el) });
+registerSection("browsers", { label: "Browsers", order: 75, group: "fleet", mount: (el) => mountBrowsers(el) });
 registerSection("settings", { label: "Settings", order: 90, icon: GEAR, mount: (el) => mountSettings(el) });
 
 installSections(document.getElementById("section-pills"), document.getElementById("sections"), {

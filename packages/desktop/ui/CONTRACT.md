@@ -888,3 +888,42 @@ outside that scrollport; the sheet is bounded by the dynamic viewport minus its
 backdrop padding. At scroll end the complete single-login hint and its unique,
 full-width add action stay above the footer. The account usage line never wraps;
 long identity text can wrap independently.
+
+### D1 — Fleet Browsers
+
+`sections/browsers.js` registers the Browsers palette command and mounts the Fleet
+page next to Previews. It follows the shared overview store for online computers,
+gates reads on each Hook's `browsers` capability, and polls only while shown (15 s).
+Live rows show page title/URL, session, age, help and control hints. Recordings show
+date, duration and navigation count. Older Hooks show a newer-Phren message.
+Documents use `shell/tabs.js`, without persisting browser IDs between launches.
+
+`browsers/live.js` watches binary JPEG frames and JSON start/page/control/error
+messages through `WS /hosts/<computer>/v1/browsers/stream?browser=<id>&ack=1`.
+Every received frame is acknowledged, after image decoding or immediately if a
+frame must be skipped. The Hook confirms control ownership; clicking Take control
+or Take over never grants local ownership. The help card offers the same action.
+Done, two Escapes within 700 ms, document/section hide, window blur, page visibility
+loss and close release control and discard queued wheel input. Hidden views close
+their socket; showing reconnects without retaking control. A disconnected active
+view offers Reconnect. The image retains its aspect ratio. Keyboard input is scoped
+to the focused frame; printable characters and paste send text, and the protocol's
+allowlisted keys send key events. `browsers/logic.js` owns fitted-image hit testing,
+34 ms wheel batches (frame fractions), control-state transitions and timeline seek.
+
+`browsers/replay.js` reads recording metadata/frame indexes, supports timed playback
+and frame scrubbing, and renders navigation and optional `meta.handoffs` markers
+as keyboard-accessible seek buttons. Hiding pauses playback; closing aborts reads.
+All HTTP uses the daemon proxy via `hookGet` or same-origin image URLs:
+`GET /hosts/<computer>/v1/browsers`, `/v1/browsers/recordings`,
+`/v1/browsers/recordings/index?id=…`, `/v1/browsers/recordings/frame?id=…&n=…`.
+`browsers/browsers.css` uses only theme variables, with no animated transitions.
+
+Coverage: `src/ui-browsers.test.ts` owns pure geometry, batching/cancellation,
+authority and marker seeking. `e2e/browsers.spec.ts` uses the existing fake Hook
+for HTTP through the real daemon and Playwright's browser-side fake WebSocket
+for screencast/ack/control/input; it does not verify daemon WS forwarding.
+Home's needs-you count remains session-based: browser help is absent from the
+current overview contract and would require a shared browser attention feed.
+The named phone browser reference files were absent in this read-only checkout;
+the Hook browser modules and D1 brief define the port's contract.
