@@ -1,3 +1,4 @@
+import { browserHint } from "./browser-hint.js";
 import { moduleEnabled } from "../modules/runtime.js";
 // cli-hooks.ts — Thin orchestrator. Delegates to focused modules:
 //   shared-retrieval.ts     — shared search, scoring, ranking, snippet selection
@@ -36,7 +37,7 @@ import { isToolHookEnabled, runPrePromptHooks } from "../hooks.js";
 import { handleExtractMemories } from "./extract.js";
 import { appendAuditLog } from "../shared.js";
 import { updateRuntimeHealth } from "../shared/governance.js";
-import { getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
+import { getProactivityLevel, getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
 import { FINDING_SENSITIVITY_CONFIG } from "./config.js";
 import * as fs from "fs";
 
@@ -178,6 +179,19 @@ export async function handleHookPrompt() {
 
   updateRuntimeHealth(getPhrenPath(), { lastPromptAt: new Date().toISOString() });
 
+  const detectedProject = cwd ? detectProject(getPhrenPath(), cwd, profile) : null;
+  if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
+
+  if (!isProjectHookEnabled(getPhrenPath(), detectedProject, "UserPromptSubmit")) {
+    appendAuditLog(getPhrenPath(), "hook_prompt", `status=project_disabled project=${detectedProject}`);
+    process.exit(0);
+  }
+
+  const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
+  const watchHint = browserHint(getPhrenPath(), prompt, sessionId,
+    resolvedConfig.proactivity.base ?? getProactivityLevel(getPhrenPath()));
+  if (watchHint) console.log(watchHint);
+
   const keywordEntries = extractKeywordEntries(prompt);
   const keywords = keywordEntries.join(" ");
   if (!keywords) process.exit(0);
@@ -214,19 +228,9 @@ export async function handleHookPrompt() {
   stage.indexMs = Date.now() - tIndex0;
 
   const intent = detectTaskIntent(prompt);
-  const detectedProject = cwd ? detectProject(getPhrenPath(), cwd, profile) : null;
-  if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
-
-  if (!isProjectHookEnabled(getPhrenPath(), detectedProject, "UserPromptSubmit")) {
-    appendAuditLog(getPhrenPath(), "hook_prompt", `status=project_disabled project=${detectedProject}`);
-    process.exit(0);
-  }
-
   // Resolve git context AFTER the enabled check — it spawns 3 git processes and is
   // wasted work when the project has hooks disabled.
   const gitCtx = moduleEnabled(getPhrenPath(), "git") ? getGitContext(cwd) : null;
-
-  const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
 
   const safeQuery = buildRobustFtsQuery(keywords, detectedProject, getPhrenPath());
   if (!safeQuery) process.exit(0);

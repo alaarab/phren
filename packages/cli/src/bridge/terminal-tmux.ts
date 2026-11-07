@@ -295,7 +295,7 @@ export async function tmuxSnapshot(server: string): Promise<Json> {
     const title = row.pane_title && row.pane_title !== host && row.pane_title !== short ? plainTitle(row.pane_title) : undefined;
     panes.push({ pane_id: pane, tab_id: tab, workspace_id: workspace, terminal_id: terminal, cwd: row.pane_current_path || undefined,
       foreground_cwd: row.pane_current_path || undefined, title, ...(row["@phren_label"] ? { label: row["@phren_label"] } : {}),
-      ...(agent ? { agent, agent_status: status?.status ?? (hooked ? "unknown" : "idle"), ...(status?.seq ? { state_change_seq: status.seq } : {}) } : {}),
+      ...(agent ? { agent, agent_pid: running.find(p => agentFromCommand(p.args) === agent)?.pid, agent_status: status?.status ?? (hooked ? "unknown" : "idle"), ...(status?.seq ? { state_change_seq: status.seq } : {}) } : {}),
       ...(agent && name ? { agent_name: name } : {}) });
     if (agent && name) agents.push({ name, pane_id: pane });
     if (Number(row.session_attached) > 0 && row.window_active === "1" && row.pane_active === "1"

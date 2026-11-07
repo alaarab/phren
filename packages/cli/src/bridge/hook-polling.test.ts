@@ -1,7 +1,7 @@
+import { noteBrowserLaunch } from "./browser-watch.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { knownPanes, paneChatState, recentServers, resetSharedHerdrState, rpc, sharedSnapshot, validateTarget } from "./herdr.js";
@@ -21,7 +21,8 @@ let now = 1_000_000;
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude" as const, session };
 
 beforeAll(async () => {
-  root = await mkdtemp(path.join(tmpdir(), "phren-polling-"));
+  await mkdir(path.resolve(".scratch"), { recursive: true });
+  root = await mkdtemp(path.resolve(".scratch/phren-polling-"));
   for (const name of ["", "sessions/work"]) {
     await mkdir(path.join(root, name), { recursive: true });
     const server = createServer(socket => {
@@ -85,7 +86,10 @@ it.skipIf(process.platform === "win32")("never keeps a failed snapshot", async (
 
 it.skipIf(process.platform === "win32")("skips the process probe when Herdr reports an OpenCode session", async () => {
   const opencode = { ...pane(), agent: "opencode", agent_session: { ...reported(session), agent: "opencode" } };
-  expect(await paneChatState("default", opencode, { tokenWhenIdentified: false })).toEqual({ sessionId: session });
+  expect(await paneChatState("default", opencode, { tokenWhenIdentified: false })).toEqual({ sessionId: session, browserWatch: "unknown" });
+  expect(calls.get("pane.process_info")).toBeUndefined();
+  noteBrowserLaunch([process.pid], { PHREN_BROWSER_SOCKET: "/browser.sock", PHREN_BROWSER_SESSION: "w1:p1", NODE_OPTIONS: "--require=/shim" }, { server: "default", pane: opencode });
+  expect(await paneChatState("default", opencode, { tokenWhenIdentified: false })).toEqual({ sessionId: session, browserWatch: "on" });
   expect(calls.get("pane.process_info")).toBeUndefined();
   // Other callers still get the starting token, from one probe.
   const state = await paneChatState("default", opencode);
@@ -117,7 +121,7 @@ it.skipIf(process.platform === "win32")("reuses the server list and knows the pa
 });
 
 it.skipIf(process.platform === "win32")("rejects a Herdr reply that keeps trickling bytes without a newline at the deadline", async () => {
-  const trickleRoot = await mkdtemp(path.join(tmpdir(), "phren-rpc-trickle-"));
+  const trickleRoot = await mkdtemp(path.resolve(".scratch/phren-rpc-trickle-"));
   const sockets: Socket[] = [];
   const server = createServer(socket => {
     sockets.push(socket);

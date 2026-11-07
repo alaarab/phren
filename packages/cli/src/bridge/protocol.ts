@@ -31,6 +31,11 @@ export const startingTargetSchema = targetSchema.omit({ session: true }).extend(
   starting: z.literal(true), startingToken: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type StartingTarget = z.infer<typeof startingTargetSchema>;
+/** Optional live-session field: environment readiness, not a connected browser.
+ * On records a Hook launch or readable socket/session/preload environment;
+ * off requires a readable agent environment; unknown includes pending probes. */
+export type BrowserWatch = "on" | "off" | "unknown";
+export interface BrowserWatchField { browserWatch?: BrowserWatch }
 export type Json = Record<string, unknown>;
 /** The decisions an approval answer may carry. An OpenCode permission ask
  * accepts both grant scopes; every other provider approves or denies only. */
