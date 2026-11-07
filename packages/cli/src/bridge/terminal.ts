@@ -95,7 +95,7 @@ export interface TerminalProvider {
    * (`tab_id`, `workspace_id`, `label`, `agent_status`) and `panes`
    * (`pane_id`, `tab_id`, `workspace_id`, `terminal_id`, `cwd`,
    * `foreground_cwd`, `title`, `label`, `agent`, `agent_status`,
-   * `agent_name`, `state_change_seq`), plus `focused_workspace_id` /
+   * `agent_name`, `state_change_seq`, optional already-resolved `agent_pid`), plus `focused_workspace_id` /
    * `focused_tab_id` / `focused_pane_id`. `terminal_id` names the terminal
    * instance, so a pane reused by a new shell is a different terminal.
    */

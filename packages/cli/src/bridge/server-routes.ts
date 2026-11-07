@@ -286,6 +286,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       tab.queuedPrompts = agents.reduce((count, pane) => count + (ctx.turnQueue?.count(server, String(pane.pane_id)) ?? 0), 0);
       if (agents.length !== 1) continue;
       const chat = chatStates.get(agents[0]);
+      tab.browserWatch = chat?.browserWatch ?? "unknown";
       if (chat?.starting === true) tab.starting = true;
       // After the identity probe above, which is what learns a pane's transcript.
       Object.assign(tab, paneAccountField(server, agents[0]));

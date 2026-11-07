@@ -1,3 +1,4 @@
+import { noteBrowserLaunch } from "./browser-watch.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, mkdtemp, readFile, realpath, rmdir } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -215,7 +216,18 @@ const SHELL_READY_MS = intervalFromEnv("PHREN_SHELL_READY_MS", 15_000);
 async function startWhenShellReady(server: string, pane: string, agent: AgentStart): Promise<void> {
   const deadline = Date.now() + SHELL_READY_MS;
   for (;;) {
-    try { await terminalProvider().startAgent(server, pane, agent); return; } catch (error) {
+    try {
+      await terminalProvider().startAgent(server, pane, agent);
+      if (agent.env?.PHREN_BROWSER_SOCKET) {
+        const processes = await terminalProvider().processes(server, pane).catch(() => undefined);
+        if (processes) {
+          const s = await terminalProvider().snapshot(server).catch(() => undefined);
+          const current = s ? objects(s.panes).find(p => p.pane_id === pane) : undefined;
+          noteBrowserLaunch(processes.foregroundPids, agent.env, current ? { server, pane: current } : undefined);
+        }
+      }
+      return;
+    } catch (error) {
       const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_pane_busy";
       if (!starting || Date.now() >= deadline) throw error;
       await new Promise(resolve => setTimeout(resolve, 250));

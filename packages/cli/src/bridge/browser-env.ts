@@ -10,21 +10,44 @@ export function browserShimPath(): string {
   const local = fileURLToPath(new URL("./browser-shim/phren-playwright.cjs", import.meta.url));
   return existsSync(local) ? local : fileURLToPath(new URL("./bridge/browser-shim/phren-playwright.cjs", import.meta.url));
 }
-export function browserEnv(session: string, existing = process.env.NODE_OPTIONS ?? ""): Record<string, string> {
+function installedBrowserShimPath(): string {
   const installed = path.join(bridgeRoot(), "current/bridge/browser-shim/phren-playwright.cjs");
-  const shim = realpathSync(existsSync(installed) ? installed : browserShimPath());
-  const requireOption = `--require=${JSON.stringify(shim)}`;
-  return { NODE_OPTIONS: `${existing}${existing ? " " : ""}${requireOption}`, PHREN_BROWSER_SOCKET: path.join(bridgeRoot(), "browser.sock"), PHREN_BROWSER_SESSION: session };
+  return realpathSync(existsSync(installed) ? installed : browserShimPath());
 }
-export function printBrowserEnv(session = process.env.PHREN_BROWSER_SESSION ?? process.env.HERDR_PANE_ID ?? process.env.TMUX_PANE ?? "shell"): void {
-  for (const [key, value] of Object.entries(browserEnv(session))) console.log(`export ${key}='${value.replace(/'/g, "'\\''")}'`);
+export function browserEnv(session: string, existing = process.env.NODE_OPTIONS ?? ""): Record<string, string> {
+  const shim = installedBrowserShimPath();
+  const requireOption = `--require=${JSON.stringify(shim)}`;
+  const bunOptions = process.env.BUN_OPTIONS ?? "";
+  // Bun 1.4.2 splits BUN_OPTIONS on whitespace without shell unquoting and
+  // does not accept file: URLs here. For spaced paths print the CLI fallback.
+  const bun: Record<string, string> = /\s/.test(shim) ? {} : { BUN_OPTIONS: `${bunOptions}${bunOptions ? " " : ""}--preload=${shim}` };
+  return { ...bun, NODE_OPTIONS: `${existing}${existing ? " " : ""}${requireOption}`, PHREN_BROWSER_SOCKET: path.join(bridgeRoot(), "browser.sock"), PHREN_BROWSER_SESSION: session };
+}
+export function printBrowserEnv(session = process.env.PHREN_BROWSER_SESSION || process.env.HERDR_PANE_ID || process.env.TMUX_PANE || `manual-${process.ppid}`, format: "shell" | "json" | "fish" = "shell"): void {
+  const env = browserEnv(session);
+  if (format === "json") { console.log(JSON.stringify(env)); return; }
+  for (const [key, value] of Object.entries(env)) {
+    const quoted = format === "fish" ? "'" + value.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'" : "'" + value.replace(/'/g, "'\\''") + "'";
+    console.log(format === "fish" ? `set -gx ${key} ${quoted};` : `export ${key}=${quoted}`);
+  }
+  // A comment remains shell-evaluable, including paths containing newlines.
+  const bun = `Bun 1.4.2: bun --preload '${installedBrowserShimPath().replace(/'/g, "'\\''")}' run.mjs; also call the shim's initPage({ page }) after newPage(): Bun bypasses automatic interception. Use this CLI form if the shim path contains spaces (BUN_OPTIONS cannot quote them).`;
+  console.log(bun.split("\n").map(line => `# ${line}`).join("\n"));
 }
 
 /** Ask sockets are independent of producer sockets; closing one cancels its help request. */
 export async function runBrowser(args: string[]): Promise<number> {
-  if (args.length === 1 && args[0] === "env") { printBrowserEnv(); return 0; }
-  const usage = 'Usage: phren browser env | phren browser ask "<reason>" [--browser <id>] [--timeout <seconds, default 900>]';
-  if (args.length === 0 || args.includes("--help")) { console.log(usage); return 0; }
+  const usage = 'Usage: phren browser env [--session <name>] [--json | --fish] | phren browser ask "<reason>" [--browser <id>] [--timeout <seconds, default 900>]';
+  if (args.length === 0 || args.includes("--help")) { console.log(usage + '\nStart Playwright after: eval "$(phren browser env)" (preserves NODE_OPTIONS).\nFish: phren browser env --fish | source\nBun: bun --preload <shim> run.mjs (also call shim.initPage({ page }); see env output).'); return 0; }
+  if (args[0] === "env") {
+    let session: string | undefined, format: "shell" | "json" | "fish" = "shell";
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === "--session" && args[i + 1] && !args[i + 1].startsWith("--")) session = args[++i];
+      else if ((args[i] === "--json" || args[i] === "--fish") && format === "shell") format = args[i] === "--json" ? "json" : "fish";
+      else { console.error(usage); return 1; }
+    }
+    printBrowserEnv(session, format); return 0;
+  }
   let browserId: string | undefined, timeout = 900;
   const reason = args[1];
   if (args[0] !== "ask" || !reason?.trim() || reason.length > 16_384) { console.error(usage); return 1; }

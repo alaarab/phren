@@ -1813,6 +1813,22 @@ port, and last delivery time/outcome, without secrets or payloads.
 
 ### Browser watching and owner help
 
-Run `eval "$(phren browser env)"` before launching Playwright Chromium to watch it from the phone. Use `phren browser ask "Log in" [--browser <id>] [--timeout <seconds>]` to request owner help and wait (default 900 seconds); it prints one outcome line and exits 0 after take + release, or 1 on timeout, browser end, cancellation, or no live browser.
+Run `eval "$(phren browser env)"` in bash or zsh before launching Playwright Chromium to watch it from the phone, including in sessions started before the Hook update or outside the Hook. The command prints quoted exports and appends to existing `NODE_OPTIONS` and `BUN_OPTIONS`. `--session <name>` overrides the inherited `PHREN_BROWSER_SESSION`, Herdr pane id, tmux pane id, or `manual-<parent-pid>` fallback, in that order. `--json` prints only the environment object; for fish use `phren browser env --fish | source`.
+
+Bun 1.4.2 was checked locally: it ignores `NODE_OPTIONS --require`, accepts [`BUN_OPTIONS --preload`](https://bun.sh/docs/runtime/environment-variables), and loads this CommonJS shim, but bypasses the shim's `Module._load` interception. The exports include `BUN_OPTIONS` when the shim path has no whitespace. Bun does not unquote paths in `BUN_OPTIONS`; for a path containing spaces, use `bun --preload '<shim>' scripts/page-review/run.mjs` with the path printed by `phren browser env`. In either case, Bun runners must explicitly attach each page after creating it:
+
+```js
+import shim from "<shim>"; // The absolute phren-playwright.cjs path in env output.
+const page = await browser.newPage();
+await shim.initPage({ page });
+```
+
+The Bun probe verified preload handling and `initPage` instrumentation against a browser fixture; real Chromium streaming under Bun remains unverified. Newer Bun versions may behave differently. Preloading alone does not enable automatic watching on the verified version.
+
+The prompt hook offers the eval command once per session when a prompt mentions Playwright, browser, UI walk or screenshot, the Hook's `browser.sock` exists, and the session has no `PHREN_BROWSER_SOCKET`. Low/off proactivity or `PHREN_BROWSER_WATCH=0` suppresses it. Bun prompts also receive the explicit attach hint. Running eval affects subsequent commands and their children; it cannot change an already running agent or sibling subagent's environment.
+
+Live session rows in `GET /v1/workspaces` (single-agent tabs), `WS /v1/overview` and the pane list include optional `browserWatch: "on" | "off" | "unknown"`. This reports environment readiness, not a connected browser. Successful Hook launches are remembered by PID, terminal, harness and conversation; replacement retires that evidence. Otherwise Linux reads an already resolved agent PID's `/proc/<pid>/environ` asynchronously and caches it for 30 seconds. Missing socket/session/preload or an explicit watch opt-out is `off`; unreadable environments, pending probes and sessions without a cheap PID are `unknown`. macOS adds no `ps` subprocess to the list path, so pre-existing sessions generally remain `unknown`. No environment contents are returned.
+
+Use `phren browser ask "Log in" [--browser <id>] [--timeout <seconds>]` to request owner help and wait (default 900 seconds); it prints one outcome line and exits 0 after take + release, or 1 on timeout, browser end, cancellation, or no live browser.
 
 The phone explicitly takes control, can take over from another device, and releases with Done; disconnect or 120 seconds without input also releases it. Hook browser rows include `control: {held, since}` and `help: {reason, t} | null`. Recordings retain take, release, and help handoffs in `meta.handoffs`. Input applies to the streamed page, is limited to 60 messages per second and 1000 characters per text message, and uses normalized frame coordinates. Only Chromium supports input. A new help request for the same browser supersedes the previous request with a timeout outcome.
