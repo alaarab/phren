@@ -5,7 +5,7 @@ module.exports.initPage = noop;
 try {
   const fs = require('node:fs');
   const socketPath = process.env.PHREN_BROWSER_SOCKET;
-  if (process.env.PHREN_BROWSER_WATCH !== '0' && socketPath && fs.existsSync(socketPath)) {
+  if (process.env.PHREN_BROWSER_WATCH !== '0' && socketPath && (socketPath.startsWith('\\\\.\\pipe\\') || fs.existsSync(socketPath))) {
     const Module = require('node:module');
     const net = require('node:net');
     const { randomUUID } = require('node:crypto');
