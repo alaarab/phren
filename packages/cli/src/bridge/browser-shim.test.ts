@@ -7,7 +7,7 @@ import { BrowserMessageReader, browserWire, type BrowserMessage } from "./browse
 const source = readFileSync(new URL("./browser-shim/phren-playwright.cjs", import.meta.url), "utf8");
 afterEach(() => vi.useRealTimers());
 const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
-async function shimFixture() {
+async function shimFixture(socketPath = "/fake/browser.sock", exists = true) {
   vi.useFakeTimers(); vi.setSystemTime(1000);
   const messages: BrowserMessage[] = [], reader = new BrowserMessageReader();
   class Socket extends EventEmitter {
@@ -25,8 +25,8 @@ async function shimFixture() {
   const playwright = { chromium: { launch: originalLaunch, launchPersistentContext: async () => context, connectOverCDP: async () => browser } };
   const loader = { _load: (_name: string) => playwright };
   let nextId = 0; const exported = { exports: {} as { initPage: (options: { page: unknown }) => Promise<void> } };
-  runInNewContext(source, { module: exported, Buffer, Date, setTimeout, clearTimeout, process: { env: { PHREN_BROWSER_SOCKET: "/fake/browser.sock", PHREN_BROWSER_SESSION: "pane1" }, pid: 42, cwd: () => "/project" }, require: (name: string) => {
-    if (name === "node:fs") return { existsSync: () => true };
+  runInNewContext(source, { module: exported, Buffer, Date, setTimeout, clearTimeout, process: { env: { PHREN_BROWSER_SOCKET: socketPath, PHREN_BROWSER_SESSION: "pane1" }, pid: 42, cwd: () => "/project" }, require: (name: string) => {
+    if (name === "node:fs") return { existsSync: () => exists };
     if (name === "node:module") return loader;
     if (name === "node:net") return { createConnection: () => socket };
     if (name === "node:crypto") return { randomUUID: () => `identity_${++nextId}` };
@@ -36,8 +36,11 @@ async function shimFixture() {
   socket.emit("connect"); await settle();
   return { socket, cdp, messages, page, browser, exported, context, main, navigate: (value: string) => { url = value; } };
 }
-it("preloads a fake playwright-core, immediately acks CDP, throttles latest frames, and observes navigation/close", async () => {
-  const { socket, cdp, messages, page, browser, exported, context, main, navigate } = await shimFixture();
+it.each([
+  { socketPath: "/fake/browser.sock", exists: true },
+  { socketPath: String.raw`\\.\pipe\phren-browser-test`, exists: false },
+])("preloads playwright-core, acks CDP, throttles frames, and observes lifecycle over $socketPath", async ({ socketPath, exists }) => {
+  const { socket, cdp, messages, page, browser, exported, context, main, navigate } = await shimFixture(socketPath, exists);
   expect(messages[0]).toMatchObject({ type: 1, data: { session: "pane1", engine: "chromium", pid: 42 } });
   expect(cdp.send).toHaveBeenCalledWith("Page.startScreencast", { format: "jpeg", quality: 60, maxWidth: 1280, maxHeight: 1280 });
   for (let n = 0; n < 3; n++) cdp.emit("Page.screencastFrame", { sessionId: n, data: Buffer.from([255, 216, n, 255, 217]).toString("base64"), metadata: { deviceWidth: 800, deviceHeight: 600 } });

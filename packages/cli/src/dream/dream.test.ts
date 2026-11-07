@@ -430,7 +430,7 @@ describe("review regressions", () => {
     const rename = (await vi.importActual<typeof fs>("fs")).renameSync;
     vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
       rename(from, to);
-      if (String(to).includes("/reference/topics/")) fs.appendFileSync(findingsFile(), "\n- Concurrent edit\n");
+      if (path.dirname(String(to)) === path.join(store, PROJECT, "reference", "topics")) fs.appendFileSync(findingsFile(), "\n- Concurrent edit\n");
     });
     const [outcome] = await applyChangeset(store, changeset([{ op: "move_topic", findingId: "dddd4444", topic }]), { mode: "apply", injectBudgetKB: 8 });
     expect(outcome.status).toBe("failed");

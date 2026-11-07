@@ -1813,6 +1813,8 @@ port, and last delivery time/outcome, without secrets or payloads.
 
 ### Browser watching and owner help
 
+Browser producers and `phren browser ask` connect over a private Unix socket on macOS/Linux and a named pipe scoped to the Hook root on Windows.
+
 Run `eval "$(phren browser env)"` before launching Playwright Chromium to watch it from the phone. Use `phren browser ask "Log in" [--browser <id>] [--timeout <seconds>]` to request owner help and wait (default 900 seconds); it prints one outcome line and exits 0 after take + release, or 1 on timeout, browser end, cancellation, or no live browser.
 
 The phone explicitly takes control, can take over from another device, and releases with Done; disconnect or 120 seconds without input also releases it. Hook browser rows include `control: {held, since}` and `help: {reason, t} | null`. Recordings retain take, release, and help handoffs in `meta.handoffs`. Input applies to the streamed page, is limited to 60 messages per second and 1000 characters per text message, and uses normalized frame coordinates. Only Chromium supports input. A new help request for the same browser supersedes the previous request with a timeout outcome.
