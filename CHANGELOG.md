@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Dreaming: an offline pass, off by default, that reads a project's recent transcripts and corrects, merges, captures and reorganizes its memory with evidence for every change. Configured as the `dreaming` domain (store-wide or per project), it proposes changes to the review queue or applies and logs them, writes one page per subject under `reference/pages/`, keeps truths and always-injected context under `injectBudgetKB`, and ships an eval (`phren dream eval`) scored against a fixture project. See `docs/dreaming.md`.
+
 ## [0.3.71] - 2026-11-02
 
 ### Fixed
