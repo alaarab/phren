@@ -11,7 +11,7 @@ import { materializedRoot } from "../bridge/codex-threads.js";
 import { phrenStoreRoot } from "../bridge/transcripts.js";
 import { redactSecretsForLog } from "../content/secrets.js";
 import { readFindings } from "../data/access.js";
-import { codexHome, copilotHome } from "../home-paths.js";
+import { codexHome, copilotHome, homeDir } from "../home-paths.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { readProjectTopics } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
@@ -58,6 +58,8 @@ export interface DreamInputs {
   transcriptChars: number;
   /** Sessions in the window left out entirely for budget. */
   transcriptsDropped: number;
+  /** Unattributed OpenCode sessions hold the watermark back. */
+  unresolvedTranscripts?: number;
   findings: DreamFindingInput[];
   truths: string[];
   topics: Array<{ slug: string; label: string }>;
@@ -214,7 +216,7 @@ export function underDirs(cwd: string, dirs: string[]): boolean {
 }
 
 /** One transcript trimmed to the window, or undefined when it is not the project's or has nothing in the window. */
-export function readTranscript(source: DreamTranscriptSource, file: string, dirs: string[], from: number, to: number): DreamTranscript | undefined {
+export function readTranscript(source: DreamTranscriptSource, file: string, dirs: string[], from: number, to: number, metadataCwd?: string): DreamTranscript | undefined {
   let size: number;
   try { size = fs.statSync(file).size; } catch { return undefined; }
   if (size === 0) return undefined;
@@ -226,6 +228,7 @@ export function readTranscript(source: DreamTranscriptSource, file: string, dirs
     if (cwd) break;
   }
   if (!cwd) for (const row of tailRows) { cwd = cwdOf(row, source); if (cwd) break; }
+  cwd ??= metadataCwd;
   if (!cwd || !underDirs(cwd, dirs)) return undefined;
 
   const lines: string[] = [];
@@ -358,13 +361,32 @@ function readJournalTail(phrenPath: string, project: string): string[] {
 
 const ACTIVE_STATUSES = new Set(["active", "contradicted", "stale", "invalid_citation"]);
 
+/** OpenCode's existing session metadata supplies the directory absent from plugin rows.
+ * Never infer ownership from the transcript's filename or current process cwd. */
+function opencodeDirectory(session: string): string | undefined {
+  if (!/^ses_[a-zA-Z0-9]+$/.test(session)) return undefined;
+  const storage = path.join(process.env.XDG_DATA_HOME || path.join(homeDir(), ".local", "share"), "opencode", "storage", "session");
+  let projects: string[];
+  try { projects = fs.readdirSync(storage).slice(0, 400); } catch { return undefined; }
+  for (const project of projects) {
+    try {
+      const meta = obj(JSON.parse(fs.readFileSync(path.join(storage, project, `${session}.json`), "utf8")));
+      if (meta.id === session && absolute(meta.directory)) return meta.directory as string;
+    } catch { /* A different project or unreadable metadata. */ }
+  }
+  return undefined;
+}
+
 export async function collect(phrenPath: string, project: string, options: CollectOptions): Promise<DreamInputs> {
   const from = options.from.getTime(), to = options.to.getTime();
   const dirs = (options.projectDirs ?? projectDirsFor(phrenPath, project)).map(dir => path.resolve(dir));
   const transcripts: DreamTranscript[] = [];
+  let unresolvedTranscripts = 0;
   if (dirs.length) {
     for (const { source, file } of transcriptFiles(options.roots ?? defaultTranscriptRoots(), from)) {
-      const transcript = readTranscript(source, file, dirs, from, to);
+      const metadataCwd = source === "opencode" ? opencodeDirectory(sessionOf(source, file)) : undefined;
+      const transcript = readTranscript(source, file, dirs, from, to, metadataCwd);
+      if (source === "opencode" && !metadataCwd && !transcript) unresolvedTranscripts++;
       if (transcript) transcripts.push(transcript);
     }
   }
@@ -391,6 +413,7 @@ export async function collect(phrenPath: string, project: string, options: Colle
     transcripts: fitted.kept,
     transcriptChars: fitted.chars,
     transcriptsDropped: fitted.dropped,
+    unresolvedTranscripts,
     findings,
     truths: readTruths(phrenPath, project),
     topics,

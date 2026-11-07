@@ -1,6 +1,8 @@
 // The dreaming prompt. It tells the model what this memory is for and what makes it
 // useful, then hands it the evidence and the current memory, and asks for a changeset.
 // Purpose-led on purpose: procedural rules ("record only failures") make worse memory.
+import { sanitizeDream } from "./privacy.js";
+import { scanForSecrets } from "../content/secrets.js";
 import type { DreamInputs } from "./collect.js";
 import type { DreamOp } from "./types.js";
 
@@ -53,6 +55,7 @@ function section(title: string, body: string): string {
 }
 
 export function buildDreamPrompt(inputs: DreamInputs, options: DreamPromptOptions): string {
+  inputs = sanitizeDream(inputs);
   const phases = options.phases.length ? options.phases : [...DREAM_PHASES];
   const allowed = [...new Set(phases.flatMap(phase => PHASE_OPS[phase]))];
   const budget = inputs.budget;
@@ -66,7 +69,7 @@ export function buildDreamPrompt(inputs: DreamInputs, options: DreamPromptOption
   const findings = inputs.findings.map(f =>
     `- fid:${f.fid} [${f.date}${f.status !== "active" ? `, ${f.status}` : ""}] ${f.text}${f.citation ? ` (cites ${f.citation})` : ""}`).join("\n");
 
-  return [
+  const prompt = [
     `You are dreaming for the Phren project "${inputs.project}": an offline pass between sessions that reorganizes the project's memory. It is ${options.now.toISOString()}.`,
     "",
     section("What this memory is for", `
@@ -94,4 +97,6 @@ ${budgetLine}`),
     section(`Recent commits${inputs.repoDir ? ` (${inputs.repoDir})` : ""}`, inputs.gitLog.join("\n")),
     section("Answer", `Reply with one JSON object and nothing else (no prose, no code fence), in this shape:\n\n${CHANGESET_SCHEMA.replace("MAX_CHANGES", String(options.maxChanges))}`),
   ].join("\n");
+  if (scanForSecrets(prompt)) throw new Error("Dream prompt withheld: secret detected.");
+  return prompt;
 }

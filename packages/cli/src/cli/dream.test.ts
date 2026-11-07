@@ -49,11 +49,15 @@ describe("phren dream run and log", () => {
   });
   afterEach(() => store.cleanup());
 
-  it("passes the options to the engine and records a real run", async () => {
-    const outcome = await runDream(store.path, "demo", { mode: "apply", force: true });
-    expect(engine.calls[0]).toMatchObject({ project: "demo", opts: { mode: "apply", force: true, phrenPath: store.path } });
+  it("passes trigger to the engine and preserves its newer marker", async () => {
+    fs.mkdirSync(path.join(store.path, "demo", "dreams"));
+    const file = path.join(store.path, "demo", "dreams", "last-run.json");
+    const newer = JSON.stringify({ runId: "newer", at: "2026-11-07T00:00:00Z", to: "2026-11-07T00:00:00Z", status: "ok" });
+    fs.writeFileSync(file, newer);
+    const outcome = await runDream(store.path, "demo", { mode: "apply", force: true, trigger: "scheduled" });
+    expect(engine.calls[0]).toMatchObject({ project: "demo", opts: { mode: "apply", force: true, trigger: "scheduled", phrenPath: store.path } });
     expect(outcome).toMatchObject({ status: "ok", counts: { applied: 3 } });
-    expect(readLastRun(store.path, "demo")).toMatchObject({ runId: "r1", status: "ok", trigger: "manual", counts: { applied: 3 } });
+    expect(fs.readFileSync(file, "utf8")).toBe(newer);
   });
 
   it("leaves the marker alone for a dry run", async () => {

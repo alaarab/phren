@@ -17,13 +17,17 @@
  */
 
 import { spawn } from "node:child_process";
-import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DEFAULT_DREAMING_CONFIG, getDreamingConfig, insideDreamWindow, parseDreamWindow, type DreamingConfig } from "../config/dreaming.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { getProjectDirs } from "../phren-paths.js";
 import { detectProject } from "../shared/index.js";
+import { effectivePaneEvidence } from "./session-evidence.js";
+import { resolveEffectiveStatus } from "./session-activity.js";
+import { paneChatState } from "./herdr.js";
+import type { AgentHooks } from "./agent-hooks.js";
+import type { CodexQuestions } from "./questions.js";
 import { paneProject } from "./approval-summary.js";
 
 export const DREAM_TICK_MS = 10 * 60_000;
@@ -33,39 +37,17 @@ export const DREAM_RETRY_MS = 60 * 60_000;
 export const DREAM_CHILD_TIMEOUT_MS = 45 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
-/** The statuses that mean an agent is mid-turn in a project; a dream never starts beside one. */
-const BUSY_STATUSES = new Set(["working", "blocked"]);
+/** Only confirmed resting states permit a dream beside an open session. */
+const SAFE_STATUSES = new Set(["idle", "done"]);
 
 /** One live agent session as the Hook sees it. */
 export interface DreamSession { project?: string; status?: string }
 
-/** `<store>/<project>/dreams/last-run.json`. Written by `phren dream run`; other fields from the engine are kept. */
-export interface DreamLastRun {
-  runId?: string;
-  /** When the run finished (ISO). */
-  at: string;
-  status: string;
-  trigger?: "manual" | "scheduled";
-  mode?: string;
-  counts?: Record<string, number>;
-  [key: string]: unknown;
-}
+export { readLastRun, type DreamLastRun } from "../dream/apply.js";
+import { pendingDreamProposals, readLastRun, type DreamLastRun } from "../dream/apply.js";
 
 export function dreamsDir(phrenPath: string, project: string): string | null {
   return storeAwareProjectPath(phrenPath, project, "dreams");
-}
-
-export function readLastRun(phrenPath: string, project: string): DreamLastRun | undefined {
-  const dir = dreamsDir(phrenPath, project);
-  if (!dir) return undefined;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(dir, "last-run.json"), "utf8")) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    const at = (parsed as Record<string, unknown>).at;
-    return typeof at === "string" && Number.isFinite(Date.parse(at)) ? parsed as DreamLastRun : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -89,37 +71,6 @@ export function dreamOutcomeCounts(result: unknown): Record<string, number> | un
     counts[key] = (counts[key] ?? 0) + 1;
   }
   return counts;
-}
-
-/**
- * Record a finished run in `last-run.json`, keeping fields the engine wrote
- * there. Busy, disabled and dry runs are not runs and leave the marker alone.
- */
-export function recordLastRun(phrenPath: string, project: string, result: unknown, opts: { trigger: "manual" | "scheduled"; mode?: string; now?: Date }): DreamLastRun | undefined {
-  const record = result && typeof result === "object" ? result as Record<string, unknown> : {};
-  const status = typeof record.status === "string" ? record.status : "error";
-  if (status === "busy" || status === "disabled" || record.dryRun === true) return undefined;
-  const dir = dreamsDir(phrenPath, project);
-  if (!dir) return undefined;
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "last-run.json");
-  let existing: Record<string, unknown> = {};
-  try { const parsed = JSON.parse(fs.readFileSync(file, "utf8")); if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) existing = parsed; } catch { /* first run */ }
-  const counts = dreamOutcomeCounts(result);
-  const next: DreamLastRun = {
-    ...existing,
-    ...(typeof record.runId === "string" ? { runId: record.runId } : {}),
-    at: (opts.now ?? new Date()).toISOString(),
-    status,
-    trigger: opts.trigger,
-    ...(opts.mode ? { mode: opts.mode } : {}),
-    ...(counts ? { counts } : {}),
-  };
-  if (!counts) delete next.counts;
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + "\n");
-  fs.renameSync(tmp, file);
-  return next;
 }
 
 // ── Eligibility ──────────────────────────────────────────────────────────────
@@ -206,7 +157,7 @@ export function dreamEligibility(input: DreamEligibilityInput): DreamEligibility
     }
   }
   if (!timing.eligible) return timing;
-  if (sessions?.some((session) => BUSY_STATUSES.has(String(session.status)))) {
+  if (sessions?.some((session) => !SAFE_STATUSES.has(String(session.status)))) {
     return { eligible: false, reason: "An agent is working in the project; a dream never runs beside one." };
   }
   return timing.eligible && !timing.nextEligibleAt ? { ...timing, nextEligibleAt: now } : timing;
@@ -226,6 +177,7 @@ export interface DreamStatus {
   lastOutcome?: Record<string, number>;
   /** The helper account and model a dream would use, or why there is none. */
   runsOn?: string;
+  pendingProposals: number;
 }
 
 /**
@@ -245,13 +197,14 @@ export function dreamStatus(phrenPath: string, project: string, now = new Date()
   return {
     project,
     enabled: config.enabled,
+    pendingProposals: pendingDreamProposals(phrenPath, project),
     mode: config.mode,
     cadence: config.cadence,
     window: config.window,
     ...(lastRun ? { lastRun } : {}),
     nextEligibleAt: !config.enabled || config.cadence === "manual" || idle ? null : (decision.nextEligibleAt ?? now).toISOString(),
     reason: decision.reason,
-    ...(lastRun?.counts ? { lastOutcome: lastRun.counts } : {}),
+    ...(lastRun?.counts ? { lastOutcome: { ...lastRun.counts } } : {}),
   };
 }
 
@@ -290,7 +243,7 @@ export class DreamScheduler {
       return { eligible: false, reason: "A dream started for this project within the last hour." };
     }
     return dreamEligibility({ config, now, lastRunAt: lastRun ? new Date(lastRun.at) : undefined,
-      sessions: sessions.filter((session) => session.project === project), lastSeenAt: this.lastSeen.get(project) });
+      sessions: sessions.filter((session) => !session.project || session.project === project), lastSeenAt: this.lastSeen.get(project) });
   }
 
   /** Projects whose dream would start now, given these sessions. Exposed for tests and diagnostics. */
@@ -391,4 +344,18 @@ export function runDreamChild(store: string, project: string, env: NodeJS.Proces
     child.once("error", done);
     child.once("exit", done);
   });
+}
+
+/** Resolve the same evidence used by the live overview before deciding a project is idle. */
+export async function effectiveDreamSessions(server: string, snapshot: unknown, projectOf: (cwd: string | undefined) => string | undefined,
+  hooks?: AgentHooks, questions?: CodexQuestions): Promise<DreamSession[]> {
+  const record = snapshot && typeof snapshot === "object" ? snapshot as Record<string, unknown> : {};
+  const panes = (Array.isArray(record.panes) ? record.panes : []).filter((p): p is Record<string, unknown> => !!p && typeof p === "object" && !!p.agent);
+  const resolved = await Promise.all(panes.map(async pane => {
+    const chat = await paneChatState(server, pane, { tokenWhenIdentified: false });
+    const session = typeof chat.sessionId === "string" ? chat.sessionId : undefined;
+    const evidence = session ? await effectivePaneEvidence(server, pane, session, hooks, questions) : undefined;
+    return { ...pane, agent_status: evidence ? resolveEffectiveStatus(evidence) ?? "unknown" : "unknown" };
+  }));
+  return dreamSessionsFromSnapshot({ ...record, panes: resolved }, projectOf);
 }

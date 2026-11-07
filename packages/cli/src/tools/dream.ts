@@ -1,12 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { applyDreamProposals, pendingDreamProposals } from "../dream/apply.js";
+import { redactSecretsForLog } from "../content/secrets.js";
 import { z } from "zod";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { DREAM_LOG_DEFAULT_LIMIT, DREAM_LOG_MAX_LIMIT, dreamStatuses, readDreamJournal, runDream } from "../cli/dream.js";
 
 /**
- * Dreaming over MCP: `dream_run`, `dream_status` and `dream_log`, with the
- * parameters of `phren dream run|status|log`. They are full-profile tools, so
+ * Dreaming over MCP: `dream_run`, `dream_apply`, `dream_status` and `dream_log`, with the
+ * parameters of `phren dream run|apply|status|log`. They are full-profile tools, so
  * the core profile reaches them as phren_admin actions.
  */
 
@@ -14,20 +16,36 @@ function target(ctx: McpContext, project: string, mode: "read" | "write") {
   try {
     return { ok: true as const, value: resolveStoreForProject(ctx, project, mode) };
   } catch (err: unknown) {
-    return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false as const, error: redactSecretsForLog(err instanceof Error ? err.message : String(err)) };
   }
 }
 
 const projectParam = z.string().describe("Project name, optionally store-qualified.");
 
 export function register(server: McpServer, ctx: McpContext): void {
+  server.registerTool("dream_apply", {
+    title: "◆ phren · dream apply",
+    description: "Apply pending structured proposals from a stored dream, refusing missing or changed target findings. Indices are zero-based; adds are approved through the review queue.",
+    inputSchema: z.object({ project: projectParam, runId: z.string(), only: z.array(z.number().int().nonnegative()).optional() }),
+  }, async ({ project: projectInput, runId, only }) => {
+    const resolved = target(ctx, projectInput, "write");
+    if (!resolved.ok) return mcpResponse({ ok: false, error: resolved.error });
+    const { phrenPath, project } = resolved.value;
+    const denied = permissionDeniedError(phrenPath, "edit_finding", project);
+    if (denied) return mcpResponse({ ok: false, error: denied });
+    try {
+      const record = await applyDreamProposals(phrenPath, project, runId, only);
+      await ctx.rebuildIndex().catch(() => {});
+      return mcpResponse({ ok: true, data: record });
+    } catch (err) { return mcpResponse({ ok: false, error: redactSecretsForLog(err instanceof Error ? err.message : String(err)) }); }
+  });
   server.registerTool(
     "dream_run",
     {
       title: "◆ phren · dream run",
       description:
         "Run a dream now for one project: an offline pass that reads recent transcripts, findings, truths, pages and git, " +
-        "then corrects, merges and reorganizes memory. Propose mode files one review-queue item per change; apply mode makes " +
+        "then corrects, merges and reorganizes memory. Propose mode queues adds and stores other operations for dream_apply; apply mode makes " +
         "the changes and logs them in dreams/journal.md. Refused while dreaming is off unless force; returns busy while another " +
         "dream for the project runs. Uses the project's helper account; can take minutes.",
       inputSchema: z.object({
@@ -56,7 +74,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           ...(outcome.status === "error" ? { error: typeof outcome.result.error === "string" ? outcome.result.error : "The dream failed." } : {}),
         });
       } catch (err: unknown) {
-        return mcpResponse({ ok: false, error: err instanceof Error ? err.message : "The dream failed." });
+        return mcpResponse({ ok: false, error: redactSecretsForLog(err instanceof Error ? err.message : "The dream failed.") });
       }
     },
   );
@@ -107,7 +125,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return mcpResponse({
         ok: true,
         message: entries.length ? `${entries.length} dream journal entries for ${project}.` : `No dreams recorded for ${project} yet.`,
-        data: { project, entries },
+        data: { project, entries, pendingProposals: pendingDreamProposals(phrenPath, project) },
       });
     },
   );

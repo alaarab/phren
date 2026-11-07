@@ -25,7 +25,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "list_skills", "read_skill", "write_skill", "remove_skill", "toggle_skill",
         "list_hooks", "toggle_hooks", "add_custom_hook", "remove_custom_hook", "get_config", "set_config",
         "get_notes", "add_note", "edit_note", "remove_note", "promote_note", "get_topic_summaries", "set_topic_summary",
-        "dream_run", "dream_status", "dream_log",
+        "dream_run", "dream_status", "dream_log", "dream_apply",
       ]),
     ],
     cliCommands: [

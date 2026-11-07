@@ -14,7 +14,8 @@ import { clearProjectConfigCache } from "../project-config.js";
 import type { McpContext } from "./types.js";
 
 const engine = vi.hoisted(() => ({ calls: [] as string[] }));
-vi.mock("../dream/run.js", () => ({
+vi.mock("../dream/run.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../dream/run.js")>(),
   dream: async (project: string) => { engine.calls.push(project); return { status: "ok", runId: "r9", counts: { proposed: 2 } }; },
 }));
 
@@ -49,7 +50,7 @@ describe("dream MCP actions", () => {
   it("are phren_admin actions in the core profile", async () => {
     const listing = parse(await admin()({ action: "list_actions" }));
     const names = JSON.stringify(listing);
-    for (const action of ["dream_run", "dream_status", "dream_log"]) expect(names).toContain(action);
+    for (const action of ["dream_run", "dream_status", "dream_log", "dream_apply"]) expect(names).toContain(action);
   });
 
   it("dream_status reports config and the last run", async () => {
@@ -63,8 +64,19 @@ describe("dream MCP actions", () => {
     const run = parse(await call({ action: "dream_run", project: "demo", force: true }));
     expect(run).toMatchObject({ ok: true, data: { status: "ok", counts: { proposed: 2 } } });
     expect(engine.calls).toEqual(["demo"]);
-    expect(parse(await call({ action: "dream_status", project: "demo" })).data.lastRun).toMatchObject({ runId: "r9", trigger: "manual" });
+    expect(parse(await call({ action: "dream_status", project: "demo" })).data.lastRun).toBeUndefined();
     expect(parse(await call({ action: "dream_log", project: "demo", limit: 5 })).data.entries).toEqual(["- r1 proposed 2 changes"]);
+  });
+
+  it("dream_apply executes selected structured proposals through the admin action", async () => {
+    fs.writeFileSync(path.join(store.path, "demo", "dreams", "r1.json"), JSON.stringify({
+      changeset: { project: "demo", runId: "r1", changes: [{ op: "write_page", page: "reference/pages/cache.md", markdown: "---\ntitle: Cache\nsummary: Cache policy\n---\nCache policy", links: [] }] },
+      outcomes: [{ index: 0, op: "write_page", status: "proposed" }], dropped: [],
+    }));
+    const result = parse(await admin()({ action: "dream_apply", project: "demo", runId: "r1", only: [0] }));
+    expect(result).toMatchObject({ ok: true, data: { outcomes: [{ index: 0, status: "applied" }] } });
+    expect(fs.readFileSync(path.join(store.path, "demo", "reference", "pages", "cache.md"), "utf8")).toContain("Cache policy");
+    expect(parse(await admin()({ action: "dream_status", project: "demo" })).data.pendingProposals).toBe(0);
   });
 
   it("set_config and get_config handle the dreaming domain per project", async () => {

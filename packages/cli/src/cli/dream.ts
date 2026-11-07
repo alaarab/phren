@@ -6,10 +6,12 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { redactSecretsForLog } from "../content/secrets.js";
+import { applyDreamProposals, pendingDreamProposals } from "../dream/apply.js";
 import { detectProject } from "../shared/index.js";
 import { isValidProjectName } from "../utils.js";
 import type { DreamMode } from "../config/dreaming.js";
-import { dreamStatus, dreamStoreProjects, dreamsDir, recordLastRun, dreamOutcomeCounts, type DreamStatus } from "../bridge/dream-schedule.js";
+import { dreamStatus, dreamStoreProjects, dreamsDir, dreamOutcomeCounts, type DreamStatus } from "../bridge/dream-schedule.js";
 import { helperFor } from "../bridge/helper.js";
 import { readDreamConfig } from "../dream/run.js";
 
@@ -18,6 +20,8 @@ export const DREAM_USAGE = `phren dream - reorganize a project's memory offline 
   phren dream run [--project <p>] [--dry-run] [--apply|--propose] [--force] [--json]
         Run a dream now. --dry-run shows the changeset without writing; --apply/--propose
         override dreaming.mode; --force runs even when dreaming is off.
+  phren dream apply <runId> [--project <p>] [--only <n,m,...>] [--json]
+        Apply pending structured proposals by zero-based index; refuse changed targets.
   phren dream status [--project <p>] [--json]
         Enabled, cadence, last run, next eligible time and last outcome counts
         (every project when --project is omitted and the folder is not a project).
@@ -121,18 +125,14 @@ export interface DreamRunOutcome {
   counts?: Record<string, number>;
 }
 
-/** Run one dream through the engine and record the last-run marker for a real (not dry) run. */
+/** Run one dream; the engine owns the marker inside its project lock. */
 export async function runDream(phrenPath: string, project: string, opts: { dryRun?: boolean; mode?: DreamMode; force?: boolean; trigger?: "manual" | "scheduled" }): Promise<DreamRunOutcome> {
   const { dream } = await import("../dream/run.js");
   // The store travels along for an engine that takes it; one that reads PHREN_PATH ignores it.
   const store = { phrenPath };
-  const result = await dream(project, { ...store, dryRun: opts.dryRun, mode: opts.mode, force: opts.force, now: new Date() }) as unknown;
+  const result = await dream(project, { ...store, dryRun: opts.dryRun, mode: opts.mode, force: opts.force, trigger: opts.trigger ?? "manual", now: new Date() }) as unknown;
   const record = result && typeof result === "object" ? result as Record<string, unknown> : { status: "error", error: "The dream engine returned nothing." };
   const status = typeof record.status === "string" ? record.status : "error";
-  if (!opts.dryRun) {
-    try { recordLastRun(phrenPath, project, record, { trigger: opts.trigger ?? "manual", mode: opts.mode }); }
-    catch { /* The run happened; a marker it could not write only delays the next scheduled one. */ }
-  }
   const counts = dreamOutcomeCounts(record);
   return { project, status, result: record, ...(counts ? { counts } : {}) };
 }
@@ -143,7 +143,7 @@ export function readDreamJournal(phrenPath: string, project: string, limit = DRE
   if (!dir) return [];
   let text: string;
   try { text = fs.readFileSync(path.join(dir, "journal.md"), "utf8"); } catch { return []; }
-  return text.split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => line.trim() && !line.startsWith("#")).slice(-limit).reverse();
+  return text.split(/\r?\n/).map((line) => line.trimEnd()).filter((line) => line.trim() && !line.startsWith("#")).slice(-limit).reverse().map(redactSecretsForLog);
 }
 
 /** Status for one project or, with none named or detected, for every project in the profile. */
@@ -170,18 +170,41 @@ function formatStatus(status: DreamStatus): string {
     lines.push(`  last run: ${status.lastRun.at} ${status.lastRun.status}${status.lastRun.trigger ? `, ${status.lastRun.trigger}` : ""}${counts}`);
   } else lines.push("  last run: never");
   lines.push(`  next: ${status.nextEligibleAt ?? "—"} · ${status.reason}`);
+  lines.push(`  pending proposals: ${status.pendingProposals}`);
   if (status.runsOn) lines.push(`  runs on: ${status.runsOn}`);
   return lines.join("\n");
 }
 
 function fail(message: string): void {
-  console.error(message);
+  console.error(redactSecretsForLog(message));
   process.exitCode = 1;
 }
 
 export async function handleDreamCommand(args: string[], phrenPath: string, profile?: string): Promise<void> {
   const [verb, ...rest] = args;
   switch (verb) {
+    case "apply": {
+      const [runId, ...flags] = rest;
+      if (!runId) return fail("Name the dream run ID.");
+      let only: number[] | undefined;
+      const listFlags: string[] = [];
+      for (let i = 0; i < flags.length; i++) {
+        if (flags[i] === "--only" || flags[i].startsWith("--only=")) {
+          const taken = takeValue(flags, i, "--only");
+          if (taken.error || !/^\d+(,\d+)*$/.test(taken.value ?? "")) return fail("--only takes comma-separated nonnegative proposal indices.");
+          only = taken.value!.split(",").map(Number); i += taken.skip;
+        } else listFlags.push(flags[i]);
+      }
+      const parsed = parseDreamListArgs(listFlags, "status");
+      if (!parsed.ok) return fail(parsed.error);
+      const project = resolveDreamProject(phrenPath, parsed.value.project, profile);
+      if (!project) return fail("Name the project with --project <name>.");
+      try {
+        const record = await applyDreamProposals(phrenPath, project, runId, only);
+        console.log(parsed.value.json ? JSON.stringify(record, null, 2) : record.outcomes.map(o => `${o.index}: ${o.op} ${o.status} — ${o.detail}`).join("\n"));
+      } catch (err) { fail(err instanceof Error ? err.message : String(err)); }
+      return;
+    }
     case "run": {
       const parsed = parseDreamRunArgs(rest);
       if (!parsed.ok) return fail(`${parsed.error}\n\n${DREAM_USAGE}`);
@@ -194,6 +217,7 @@ export async function handleDreamCommand(args: string[], phrenPath: string, prof
         const counts = outcome.counts && Object.keys(outcome.counts).length ? ` · ${Object.entries(outcome.counts).map(([k, n]) => `${k} ${n}`).join(", ")}` : "";
         const runId = typeof outcome.result.runId === "string" ? ` ${outcome.result.runId}` : "";
         console.log(`Dream${runId} for ${project}: ${outcome.status}${parsed.value.dryRun ? " (dry run)" : ""}${counts}`);
+        if (Array.isArray(outcome.result.warnings)) for (const warning of outcome.result.warnings) console.log(redactSecretsForLog(String(warning)));
         if (outcome.status === "disabled") console.log("Dreaming is off for this project. `phren config dreaming set enabled=true` turns it on; --force runs once anyway.");
         if (outcome.status === "busy") console.log("Another dream for this project is running.");
         if (typeof outcome.result.error === "string") console.error(outcome.result.error);
@@ -218,8 +242,8 @@ export async function handleDreamCommand(args: string[], phrenPath: string, prof
       const project = resolveDreamProject(phrenPath, parsed.value.project, profile);
       if (!project) return fail("Name the project with --project <name>; this folder is not one of your projects.");
       const entries = readDreamJournal(phrenPath, project, parsed.value.limit);
-      if (parsed.value.json) console.log(JSON.stringify({ project, entries }, null, 2));
-      else console.log(entries.length ? entries.join("\n") : `No dreams recorded for ${project} yet.`);
+      if (parsed.value.json) console.log(JSON.stringify({ project, entries, pendingProposals: pendingDreamProposals(phrenPath, project) }, null, 2));
+      else console.log((entries.length ? entries.join("\n") : `No dreams recorded for ${project} yet.`) + `\nPending proposals: ${pendingDreamProposals(phrenPath, project)}`);
       return;
     }
     case "eval": {

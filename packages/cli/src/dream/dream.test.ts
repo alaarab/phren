@@ -1,15 +1,17 @@
 import * as fs from "fs";
 import * as path from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFindings } from "../data/access.js";
 import { tryFileLock } from "../governance/locks.js";
 import { readProjectTopics } from "../project-topics.js";
 import { grantAdmin, makeTempDir } from "../test-helpers.js";
-import { applyChangeset } from "./apply.js";
+import { applyChangeset, applyDreamProposals, pendingDreamProposals } from "./apply.js";
 import { budgetTranscripts, collect, type DreamInputs, type DreamTranscript, type DreamTranscriptRoot } from "./collect.js";
 import { buildDreamPrompt } from "./prompt.js";
 import { dream, dreamLockPath, validateChanges, type DreamRunner } from "./run.js";
 import type { DreamChange, DreamChangeset } from "./types.js";
+
+vi.mock("fs", { spy: true });
 
 const PROJECT = "proj";
 const NOW = new Date("2026-11-06T12:00:00Z");
@@ -70,7 +72,7 @@ beforeEach(() => {
   fs.writeFileSync(truthsFile(), `# ${PROJECT} Truths\n\n## Truths\n\n- Always use UTC _(added 2026-10-01)_\n`);
 });
 
-afterEach(() => tmp.cleanup());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); tmp.cleanup(); });
 
 describe("collect", () => {
   it("keeps user/assistant text and tool names, drops tool bodies, and stays inside the budget newest first", async () => {
@@ -133,6 +135,10 @@ describe("prompt", () => {
     expect(prompt).toContain('{ "op": "demote_truth", "truth": string, "reason": string }');
     expect(prompt).toContain("fid:aaaa1111");
     expect(prompt).toContain("What this memory is for");
+  });
+
+  it("scans the assembled prompt for credentials split across input rows", () => {
+    expect(() => buildDreamPrompt({ ...inputs, journal: ["Authorization: Bearer", "a1".repeat(20)] }, { phases: ["capture"], maxChanges: 1, now: NOW })).toThrow(/secret/);
   });
 
   it("tells the model when the injected layer is over budget", () => {
@@ -260,7 +266,7 @@ describe("applyChangeset (apply mode)", () => {
 });
 
 describe("applyChangeset (propose mode)", () => {
-  it("queues one review item per change with its evidence and leaves memory untouched", async () => {
+  it("queues only additions and keeps structured proposals out of the queue with its evidence and leaves memory untouched", async () => {
     const before = fs.readFileSync(findingsFile(), "utf8");
     const outcomes = await applyChangeset(store, changeset([
       { op: "add_finding", text: "Deploys need the VPN", evidence: EVIDENCE },
@@ -271,7 +277,7 @@ describe("applyChangeset (propose mode)", () => {
     const review = fs.readFileSync(path.join(store, PROJECT, "review.md"), "utf8");
     expect(review).toContain("Deploys need the VPN");
     expect(review).toContain("evidence: transcript:s1#t1");
-    expect(review).toContain("Dream: retract fid:dddd4444: cache moved (evidence: git abc1234)");
+    expect(review).not.toContain("Dream: retract");
   });
 });
 
@@ -318,7 +324,7 @@ describe("dream", () => {
     const journal = fs.readFileSync(path.join(store, PROJECT, "dreams", "journal.md"), "utf8");
     expect(journal).toContain(`${result.runId} apply: 1 applied`);
     const last = JSON.parse(fs.readFileSync(path.join(store, PROJECT, "dreams", "last-run.json"), "utf8"));
-    expect(last).toMatchObject({ runId: result.runId, to: NOW.toISOString(), status: "ok" });
+    expect(last).toMatchObject({ runId: result.runId, to: NOW.toISOString(), status: "ok", at: last.finishedAt, trigger: "manual" });
     // The next run starts where this one ended: nothing new, so it is empty and doesn't call the model.
     const again = await run({ now: new Date(NOW.getTime() + 60_000) });
     expect(again.status).toBe("empty");
@@ -338,5 +344,149 @@ describe("dream", () => {
     expect(result.status).toBe("failed");
     expect(result.message).toContain("no JSON");
     expect(finding("aaaa1111")?.status).toBe("active");
+  });
+});
+
+
+describe("review regressions", () => {
+  const secret = "ghp_" + "a1".repeat(18);
+  const run = (extra: Parameters<typeof dream>[1] = {}) => dream(PROJECT, {
+    phrenPath: store, now: NOW, force: true, config: { enabled: true, mode: "propose" },
+    collect: { roots, projectDirs: [repo], gitLog: false }, ...extra,
+  });
+  const answer: DreamRunner = async () => ({ ok: true, output: JSON.stringify({ notes: "ready", changes: [
+    { op: "retract", findingId: "aaaa1111", reason: "obsolete", evidence: EVIDENCE },
+    { op: "edit", findingId: "dddd4444", newText: "Cache in ~/.cache", evidence: EVIDENCE },
+  ] }) });
+
+  it("applies selected stored proposals once, journals outcomes and refuses an edited target", async () => {
+    const result = await run({ runner: answer });
+    expect(pendingDreamProposals(store, PROJECT)).toBe(2);
+    expect(fs.existsSync(path.join(store, PROJECT, "review.md"))).toBe(false);
+    const applied = await applyDreamProposals(store, PROJECT, result.runId!, [0]);
+    expect(applied.outcomes.map(o => o.status)).toEqual(["applied", "proposed"]);
+    expect(finding("aaaa1111")?.status).toBe("retracted");
+    expect(pendingDreamProposals(store, PROJECT)).toBe(1);
+    fs.writeFileSync(findingsFile(), fs.readFileSync(findingsFile(), "utf8").replace("The cache lives in /tmp/cache", "Concurrent cache edit"));
+    const refused = await applyDreamProposals(store, PROJECT, result.runId!, [1]);
+    expect(refused.outcomes[1]).toMatchObject({ status: "failed", detail: expect.stringMatching(/changed/) });
+    expect(finding("dddd4444")?.text).toBe("Concurrent cache edit");
+    const before = fs.readFileSync(findingsFile(), "utf8");
+    await applyDreamProposals(store, PROJECT, result.runId!, [0]);
+    expect(fs.readFileSync(findingsFile(), "utf8")).toBe(before);
+    expect(fs.readFileSync(path.join(store, PROJECT, "dreams", "journal.md"), "utf8")).toContain(`${result.runId}#0 applied`);
+  });
+
+  it("checks target versions after acquiring the findings lock", async () => {
+    const result = await run({ runner: answer });
+    const actualWrite = (await vi.importActual<typeof fs>("fs")).writeFileSync;
+    const original = fs.readFileSync(findingsFile(), "utf8");
+    vi.spyOn(fs, "writeFileSync").mockImplementation((file, data, opts) => {
+      if (String(file) === findingsFile() + ".lock") actualWrite(findingsFile(), original.replace("Builds use npm", "Concurrent builds edit"));
+      return actualWrite(file, data, opts);
+    });
+    try {
+      const record = await applyDreamProposals(store, PROJECT, result.runId!, [0]);
+      expect(record.outcomes[0].status).toBe("failed");
+      expect(finding("aaaa1111")).toMatchObject({ text: "Concurrent builds edit", status: "active" });
+    } finally { vi.mocked(fs.writeFileSync).mockImplementation(actualWrite); }
+  });
+
+  it("refuses a deleted proposal target and rejects indices outside the run", async () => {
+    const result = await run({ runner: answer });
+    fs.writeFileSync(findingsFile(), fs.readFileSync(findingsFile(), "utf8").split("\n").filter(l => !l.includes("fid:aaaa1111")).join("\n"));
+    expect((await applyDreamProposals(store, PROJECT, result.runId!, [0])).outcomes[0].status).toBe("failed");
+    await expect(applyDreamProposals(store, PROJECT, result.runId!, [20])).rejects.toThrow("Unknown proposal");
+  });
+
+  it("leaves a truth intact when saving the replacement finding times out", async () => {
+    vi.stubEnv("PHREN_FILE_LOCK_MAX_WAIT_MS", "10");
+    vi.stubEnv("PHREN_FILE_LOCK_POLL_MS", "1");
+    const release = tryFileLock(findingsFile());
+    try {
+      const before = fs.readFileSync(truthsFile(), "utf8");
+      const [outcome] = await applyChangeset(store, changeset([{ op: "demote_truth", truth: "Always use UTC", reason: "not needed" }]), { mode: "apply", injectBudgetKB: 8 });
+      expect(outcome.status).toBe("failed");
+      expect(fs.readFileSync(truthsFile(), "utf8")).toBe(before);
+    } finally { release?.(); }
+  });
+
+  it("archives lifecycle, confidence, scope, provenance and citation intact after a retraction", async () => {
+    const metadata = ' <!-- scope:shared --> <!-- source:consolidation tool:dream --> [confidence 0.7]';
+    const citation = '  <!-- phren:cite {"file":"src/cache.ts","line":4,"created_at":"2026-11-01"} -->';
+    fs.writeFileSync(findingsFile(), fs.readFileSync(findingsFile(), "utf8").replace("<!-- fid:dddd4444 -->", `<!-- fid:dddd4444 -->${metadata}\n${citation}`));
+    const topic = readProjectTopics(store, PROJECT).topics[0].slug;
+    await applyChangeset(store, changeset([{ op: "retract", findingId: "dddd4444", reason: "wrong", evidence: EVIDENCE }]), { mode: "apply", injectBudgetKB: 8 });
+    const before = fs.readFileSync(findingsFile(), "utf8").split("\n");
+    const bullet = before.find(l => l.startsWith("- ") && l.includes("fid:dddd4444"))!;
+    const [moved] = await applyChangeset(store, changeset([{ op: "move_topic", findingId: "dddd4444", topic }]), { mode: "apply", injectBudgetKB: 8 });
+    expect(moved.status).toBe("applied");
+    expect(fs.readFileSync(path.join(store, PROJECT, "reference", "topics", `${topic}.md`), "utf8")).toContain(bullet + "\n" + citation);
+    expect(fs.readFileSync(findingsFile(), "utf8")).not.toContain("fid:dddd4444");
+  });
+
+  it("does not remove a source edited by an uncooperative writer during archiving", async () => {
+    const topic = readProjectTopics(store, PROJECT).topics[0].slug;
+    const rename = (await vi.importActual<typeof fs>("fs")).renameSync;
+    vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      rename(from, to);
+      if (String(to).includes("/reference/topics/")) fs.appendFileSync(findingsFile(), "\n- Concurrent edit\n");
+    });
+    const [outcome] = await applyChangeset(store, changeset([{ op: "move_topic", findingId: "dddd4444", topic }]), { mode: "apply", injectBudgetKB: 8 });
+    expect(outcome.status).toBe("failed");
+    expect(fs.readFileSync(findingsFile(), "utf8")).toContain("fid:dddd4444");
+    expect(fs.readFileSync(findingsFile(), "utf8")).toContain("Concurrent edit");
+    vi.mocked(fs.renameSync).mockImplementation(rename);
+  });
+
+  it("redacts every memory input before helper invocation", async () => {
+    fs.appendFileSync(truthsFile(), `- token ${secret}\n`);
+    fs.appendFileSync(findingsFile(), `- leaked ${secret} <!-- fid:eeee5555 -->\n`);
+    const dir = path.join(store, PROJECT, "reference", "pages"); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "page.md"), `---\ntitle: ${secret}\nsummary: ${secret}\n---\n`);
+    fs.mkdirSync(path.join(store, PROJECT, "dreams"), { recursive: true });
+    fs.writeFileSync(path.join(store, PROJECT, "dreams", "journal.md"), `- ${secret}\n`);
+    let prompt = "";
+    const result = await run({ collect: { roots, projectDirs: [repo], gitLog: () => [`abc123 ${secret}`] }, runner: async req => {
+      prompt = req.prompt; return { ok: true, output: '{"changes":[],"notes":"ok"}' };
+    } });
+    expect(result.status).toBe("ok");
+    expect(prompt).not.toContain(secret);
+    expect(prompt).toContain("[redacted:");
+  });
+
+  it("sanitizes model notes, dropped values and failure diagnostics before returning or saving", async () => {
+    const result = await run({ runner: async () => ({ ok: true, model: secret, output: JSON.stringify({ notes: secret, changes: [
+      { op: "retract", findingId: secret, reason: "invalid", evidence: EVIDENCE },
+    ] }) }) });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(fs.readFileSync(result.record!, "utf8")).not.toContain(secret);
+    expect(fs.readFileSync(path.join(store, PROJECT, "dreams", "journal.md"), "utf8")).not.toContain(secret);
+    const failed = await run({ runner: async () => ({ ok: false, output: secret }) });
+    expect(failed.message).not.toContain(secret);
+    expect(failed.message).toContain("redacted");
+  });
+
+  it("holds the watermark and reports OpenCode sessions whose directory metadata is missing", async () => {
+    const oc = path.join(tmp.path, "oc");
+    writeJsonl(path.join(oc, "opencode-ses_unresolved.events.jsonl"), [{ seq: 0, time: "2026-11-06T11:00:00Z", type: "user/message", data: { message: { role: "user", content: [{ type: "text", text: "remember this" }] } } }]);
+    const result = await run({ force: false, collect: { roots: [{ source: "opencode", root: oc, maxDepth: 0 }], projectDirs: [repo], gitLog: false } });
+    expect(result.status).toBe("empty");
+    expect(result.message).toContain("watermark unchanged");
+    const marker = JSON.parse(fs.readFileSync(path.join(store, PROJECT, "dreams", "last-run.json"), "utf8"));
+    expect(marker.to).toBe(new Date(NOW.getTime() - 86_400_000).toISOString());
+  });
+
+  it("collects plugin rows using indexed OpenCode session metadata", async () => {
+    vi.stubEnv("XDG_DATA_HOME", path.join(tmp.path, "data"));
+    const meta = path.join(tmp.path, "data", "opencode", "storage", "session", "project");
+    fs.mkdirSync(meta, { recursive: true });
+    fs.writeFileSync(path.join(meta, "ses_known.json"), JSON.stringify({ id: "ses_known", directory: repo }));
+    const oc = path.join(tmp.path, "oc");
+    writeJsonl(path.join(oc, "opencode-ses_known.events.jsonl"), [{ seq: 0, time: "2026-11-06T11:00:00Z", type: "user/message", data: { message: { role: "user", content: [{ type: "text", text: "remember this" }] } } }]);
+    const inputs = await collect(store, PROJECT, { from: new Date("2026-11-06T00:00:00Z"), to: NOW, roots: [{ source: "opencode", root: oc, maxDepth: 0 }], projectDirs: [repo], gitLog: false });
+    expect(inputs.transcripts).toHaveLength(1);
+    expect(inputs.transcripts[0]).toMatchObject({ session: "ses_known", cwd: repo, text: "[t1] user: remember this" });
+    expect(inputs.unresolvedTranscripts).toBe(0);
   });
 });

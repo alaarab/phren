@@ -3,13 +3,15 @@
 // apply or propose them and record the run. One dream per project at a time.
 import * as crypto from "crypto";
 import * as path from "path";
+import { redactSecretsForLog } from "../content/secrets.js";
+import { sanitizeDream } from "./privacy.js";
 import { helperFor, runHelper } from "../bridge/helper.js";
 import { buildConfigView } from "../config/resolve.js";
 import { scanForSecrets } from "../content/secrets.js";
 import { tryFileLock } from "../governance/locks.js";
 import { findPhrenPath, runtimeDir } from "../phren-paths.js";
 import { isValidProjectName } from "../utils-paths.js";
-import { applyChangeset, countOutcomes, PAGE_PATH, readLastRun, recordDream, writeLastRun,
+import { applyChangeset, countOutcomes, findingVersions, PAGE_PATH, readLastRun, recordDream, writeLastRun,
   type DreamCounts, type DreamDrop, type DreamMode, type DreamOutcome } from "./apply.js";
 import { collect, projectStoreDir, type CollectOptions, type DreamInputs } from "./collect.js";
 import { buildDreamPrompt, DREAM_PHASES, PHASE_OPS, type DreamPhase } from "./prompt.js";
@@ -86,8 +88,8 @@ export function parseChangesetJson(output: string): { ok: true; value: { changes
   const start = text.indexOf("{"), end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return { ok: false, error: "The model's reply has no JSON object." };
   let parsed: unknown;
-  try { parsed = JSON.parse(text.slice(start, end + 1)); } catch (err: unknown) {
-    return { ok: false, error: `The model's reply is not valid JSON: ${err instanceof Error ? err.message : String(err)}` };
+  try { parsed = JSON.parse(text.slice(start, end + 1)); } catch {
+    return { ok: false, error: "The model's reply is not valid JSON." };
   }
   const value = parsed as Record<string, unknown>;
   if (!value || typeof value !== "object" || !Array.isArray(value.changes)) return { ok: false, error: "The model's JSON has no changes array." };
@@ -207,7 +209,7 @@ export function validateChanges(rawChanges: unknown[], ctx: ValidationContext): 
   rawChanges.forEach((value, index) => {
     const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
     const op = typeof raw.op === "string" ? raw.op : String(raw.op);
-    const drop = (reason: string) => dropped.push({ index, op, reason });
+    const drop = (reason: string) => dropped.push(sanitizeDream({ index, op, reason }));
     if (!KNOWN_OPS.includes(op as DreamOp)) return drop("unknown op");
     if (!allowed.has(op as DreamOp)) return drop("op not allowed by the enabled phases");
     const shaped = shapeChange(raw, ctx);
@@ -231,6 +233,7 @@ export type DreamRunner = (request: DreamRunnerRequest, project: string, phrenPa
 export type DreamStatus = "ok" | "disabled" | "busy" | "empty" | "failed";
 
 export interface DreamOptions {
+  trigger?: "manual" | "scheduled";
   dryRun?: boolean;
   mode?: DreamMode;
   now?: Date;
@@ -253,6 +256,7 @@ export interface DreamResult {
   dryRun: boolean;
   runId?: string;
   message: string;
+  warnings?: string[];
   changeset?: DreamChangeset;
   outcomes: DreamOutcome[];
   dropped: DreamDrop[];
@@ -301,9 +305,13 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
     const last = readLastRun(phrenPath, project);
     const fromMs = last ? Date.parse(last.to) : now.getTime() - config.lookbackHours * 3_600_000;
     const from = new Date(Math.min(fromMs, now.getTime()));
+    const versions = findingVersions(phrenPath, project);
     const inputs: DreamInputs = await collect(phrenPath, project, {
       ...opts.collect, from, to: now, injectBudgetKB: config.injectBudgetKB,
     });
+    const watermark = inputs.unresolvedTranscripts ? inputs.from : inputs.to;
+    const collectionNotice = inputs.unresolvedTranscripts ? ` Skipped ${inputs.unresolvedTranscripts} OpenCode transcripts without directory metadata; watermark unchanged.` : "";
+    const report = collectionNotice ? { warnings: [collectionNotice.trim()] } : {};
     const runId = newRunId(now);
     const changesetBase = {
       project, runId, startedAt: now.toISOString(), lookback: { from: inputs.from, to: inputs.to },
@@ -311,8 +319,8 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
     };
 
     if (!inputs.transcripts.length && !inputs.budget.over && !opts.force) {
-      if (!dryRun) writeLastRun(phrenPath, project, { runId, startedAt: changesetBase.startedAt, finishedAt: new Date().toISOString(), to: inputs.to, mode, status: "empty" });
-      return { ...base, status: "empty", mode, runId, message: `No sessions in ${project} since ${inputs.from}; nothing to dream about.` };
+      if (!dryRun) writeLastRun(phrenPath, project, { runId, startedAt: changesetBase.startedAt, finishedAt: new Date().toISOString(), to: watermark, mode, status: "empty", trigger: opts.trigger ?? "manual" });
+      return { ...base, status: "empty", mode, runId, ...report, message: `No sessions in ${project} since ${inputs.from}; nothing to dream about.${collectionNotice}` };
     }
 
     const phases = config.phases;
@@ -324,12 +332,12 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
     } catch (err: unknown) {
       reply = { ok: false, output: err instanceof Error ? err.message : String(err) };
     }
-    const spend = { ...(reply.model ? { model: reply.model } : {}), ...(reply.costUSD !== undefined ? { costUSD: reply.costUSD } : {}) };
+    const spend = sanitizeDream({ ...(reply.model ? { model: reply.model } : {}), ...(reply.costUSD !== undefined ? { costUSD: reply.costUSD } : {}) });
     const fail = (message: string): DreamResult => {
-      if (!dryRun) writeLastRun(phrenPath, project, { runId, startedAt: changesetBase.startedAt, finishedAt: new Date().toISOString(), to: last?.to ?? inputs.from, mode, status: "failed" });
-      return { ...base, status: "failed", mode, runId, message, ...spend };
+      if (!dryRun) writeLastRun(phrenPath, project, { runId, startedAt: changesetBase.startedAt, finishedAt: new Date().toISOString(), to: last?.to ?? inputs.from, mode, status: "failed", trigger: opts.trigger ?? "manual" });
+      return { ...base, status: "failed", mode, runId, ...report, message: redactSecretsForLog(message), ...spend };
     };
-    if (!reply.ok) return fail(`The dreaming model failed: ${reply.output.slice(0, 500)}`);
+    if (!reply.ok) return fail(`The dreaming model failed: ${redactSecretsForLog(reply.output).slice(0, 500)}`);
     const parsed = parseChangesetJson(reply.output);
     if (!parsed.ok) return fail(parsed.error);
 
@@ -337,19 +345,19 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
       fids: new Set(inputs.findings.map(f => f.fid)), truths: inputs.truths, topics: new Set(inputs.topics.map(t => t.slug)),
       phases, maxChanges: config.maxChanges,
     });
-    const changeset: DreamChangeset = { ...changesetBase, changes, notes: parsed.value.notes.slice(0, 2_000) };
+    const changeset: DreamChangeset = { ...changesetBase, changes, notes: redactSecretsForLog(parsed.value.notes).slice(0, 2_000) };
     if (dryRun) {
-      return { ...base, status: "ok", mode, runId, changeset, dropped, counts: countOutcomes([], dropped), ...spend,
+      return { ...base, status: "ok", mode, runId, ...report, changeset, dropped, counts: countOutcomes([], dropped), ...spend,
         message: `Dry run: ${changes.length} changes would be ${mode === "apply" ? "applied" : "proposed"}, ${dropped.length} dropped.` };
     }
 
-    const outcomes = await applyChangeset(phrenPath, changeset, { mode, injectBudgetKB: config.injectBudgetKB, ...(reply.model ? { model: reply.model } : {}) });
+    const outcomes = await applyChangeset(phrenPath, changeset, { mode, injectBudgetKB: config.injectBudgetKB, ...(spend.model ? { model: spend.model } : {}) });
     const finishedAt = new Date().toISOString();
-    const record = recordDream(phrenPath, project, { changeset, mode, ...spend, finishedAt, outcomes, dropped });
+    const record = recordDream(phrenPath, project, { changeset, findingVersions: versions, ...report, mode, ...spend, finishedAt, outcomes, dropped });
     const counts = countOutcomes(outcomes, dropped);
-    writeLastRun(phrenPath, project, { runId, startedAt: changeset.startedAt, finishedAt, to: inputs.to, mode, status: "ok", counts });
-    return { ...base, status: "ok", mode, runId, changeset, outcomes, dropped, counts, record, ...spend,
-      message: `${project}: ${counts.applied} applied, ${counts.proposed} proposed, ${counts.skipped} skipped, ${counts.failed} failed, ${counts.dropped} dropped.` };
+    writeLastRun(phrenPath, project, { runId, startedAt: changeset.startedAt, finishedAt, to: watermark, mode, status: "ok", counts, trigger: opts.trigger ?? "manual" });
+    return { ...base, status: "ok", mode, runId, ...report, changeset, outcomes, dropped, counts, record, ...spend,
+      message: `${project}: ${counts.applied} applied, ${counts.proposed} proposed, ${counts.skipped} skipped, ${counts.failed} failed, ${counts.dropped} dropped.${collectionNotice}` };
   } finally {
     release();
   }

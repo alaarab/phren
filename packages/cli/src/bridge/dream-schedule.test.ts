@@ -8,8 +8,6 @@ import {
   DreamScheduler,
   dreamEligibility,
   dreamSessionsFromSnapshot,
-  readLastRun,
-  recordLastRun,
   type DreamSession,
 } from "./dream-schedule.js";
 
@@ -62,6 +60,9 @@ describe("dream eligibility", () => {
     const busy = dreamEligibility({ config: config(), now: at(3), sessions: [{ project: "demo", status: "working" }] });
     expect(busy).toMatchObject({ eligible: false, reason: expect.stringMatching(/working/) });
     expect(dreamEligibility({ config: config(), now: at(3), sessions: [{ project: "demo", status: "idle" }] }).eligible).toBe(true);
+    for (const status of [undefined, "unknown", "waiting", "blocked"]) {
+      expect(dreamEligibility({ config: config(), now: at(3), sessions: [{ project: "demo", status }] }).eligible).toBe(false);
+    }
   });
 });
 
@@ -127,16 +128,6 @@ describe("last-run marker and sessions", () => {
   let store: { path: string; cleanup: () => void };
   beforeEach(() => { store = makeTempDir("phren-dream-schedule-"); fs.mkdirSync(path.join(store.path, "demo")); });
   afterEach(() => store.cleanup());
-
-  it("records finished runs, keeps the engine's own fields and ignores busy or disabled ones", () => {
-    fs.mkdirSync(path.join(store.path, "demo", "dreams"));
-    fs.writeFileSync(path.join(store.path, "demo", "dreams", "last-run.json"), JSON.stringify({ to: "2026-11-06T01:00:00.000Z", at: "2026-11-05T02:00:00.000Z", status: "ok" }));
-    expect(recordLastRun(store.path, "demo", { status: "busy" }, { trigger: "scheduled" })).toBeUndefined();
-    const written = recordLastRun(store.path, "demo", { status: "ok", runId: "r1", outcomes: [{ status: "applied" }, { status: "applied" }, { status: "dropped" }] },
-      { trigger: "scheduled", now: at(3) });
-    expect(written).toMatchObject({ runId: "r1", status: "ok", trigger: "scheduled", counts: { applied: 2, dropped: 1 }, to: "2026-11-06T01:00:00.000Z" });
-    expect(readLastRun(store.path, "demo")).toMatchObject({ runId: "r1", at: at(3).toISOString() });
-  });
 
   it("maps a terminal snapshot's agent panes to projects and statuses", () => {
     const snapshot = {

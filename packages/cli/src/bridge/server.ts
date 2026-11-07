@@ -55,7 +55,7 @@ import { AccountUsageReader } from "./usage.js";
 import { ResourceMonitor } from "./resources.js";
 import { ALERT_CHECK_MS, HealthAlerts } from "./machine-health-alerts.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
-import { DREAM_TICK_MS, DreamScheduler, dreamProjectOf, dreamSessionsFromSnapshot, dreamStoreProjects, dreamTickerEnabled, readLastRun, runDreamChild } from "./dream-schedule.js";
+import { DREAM_TICK_MS, DreamScheduler, dreamProjectOf, effectiveDreamSessions, dreamStoreProjects, dreamTickerEnabled, readLastRun, runDreamChild } from "./dream-schedule.js";
 import { getDreamingConfig } from "../config/dreaming.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -328,7 +328,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     config: project => getDreamingConfig(scheduleStore, project),
     lastRun: project => readLastRun(scheduleStore, project),
     liveSessions: async () => (await Promise.all((await recentServers()).map(async server =>
-      dreamSessionsFromSnapshot(await sharedSnapshot(String(server.session), 4000), dreamProject)))).flat(),
+      effectiveDreamSessions(String(server.session), await sharedSnapshot(String(server.session), 4000), dreamProject, agentHooks, codexQuestions)))).flat(),
     run: project => runDreamChild(scheduleStore, project) }) : undefined;
   const dreamTimer = dreams ? setInterval(() => { countTick("dreams"); void dreams.tick().catch(() => {}); }, DREAM_TICK_MS) : undefined;
   // Off unless PHREN_CANARY_DAILY=1 or `phren canary --daily on`.

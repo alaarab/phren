@@ -1,14 +1,17 @@
 // Applying a dream: each change goes through the same finding, truth, topic and review
 // APIs an agent's own MCP calls use, so lifecycle history, fids, locks and citations are
-// kept. Propose mode queues one review item per change instead. Either way the run is
-// recorded in dreams/<runId>.json and one line of dreams/journal.md.
+// kept. Propose mode queues additions and stores other operations for dream apply.
+// Either way the run is recorded in dreams/<runId>.json and dreams/journal.md.
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { assertFindingVersions, readFindingVersions } from "../finding/versions.js";
+import { sanitizeDream } from "./privacy.js";
+import { isCitationLine } from "../content/metadata.js";
 import { addFindingToFile, upsertCanonical } from "../content/learning.js";
 import type { FindingProvenance } from "../content/citation.js";
 import { applyFindingTypePrefix } from "../core/finding.js";
-import { editFinding, readFindings, removeFinding } from "../data/access.js";
+import { editFinding, readFindings } from "../data/access.js";
 import { retractFinding, supersedeFinding } from "../finding/lifecycle.js";
 import { withFileLock } from "../governance/locks.js";
 import { appendReviewQueue } from "../governance/policy.js";
@@ -32,6 +35,7 @@ export interface ApplyOptions {
   injectBudgetKB: number;
   /** The model that dreamed, for provenance. */
   model?: string;
+  expectedFindings?: Record<string, string>;
 }
 
 export const PAGE_PATH = /^reference\/pages\/([a-z0-9][a-z0-9-]{0,63})\.md$/;
@@ -46,6 +50,12 @@ function findingText(phrenPath: string, project: string, id: string): string | u
   const fid = id.replace(/^fid:/, "");
   return read.data.find(item => item.stableId === fid)?.text;
 }
+
+export function findingVersions(phrenPath: string, project: string): Record<string, string> {
+  return readFindingVersions(path.join(projectStoreDir(phrenPath, project), "FINDINGS.md"));
+}
+
+const targetIds = (change: DreamChange): string[] => change.op === "merge" ? change.findingIds : "findingId" in change ? [change.findingId] : [];
 
 function provenance(model?: string): FindingProvenance {
   return { source: "consolidation", tool: "dream", ...(model ? { model } : {}) };
@@ -62,17 +72,17 @@ function addText(phrenPath: string, project: string, text: string, model?: strin
  * `supersedes` citation, which keeps the old one out of dedup), then supersede the rest by fid.
  * If the new text is still a near-duplicate of a saved finding, rewrite the first in place.
  */
-function replaceWith(phrenPath: string, project: string, ids: string[], newText: string, model?: string): { status: DreamOutcomeStatus; detail: string } {
+function replaceWith(phrenPath: string, project: string, ids: string[], newText: string, model?: string, expectedFindings?: Record<string, string>): { status: DreamOutcomeStatus; detail: string } {
   const read = readFindings(phrenPath, project);
   const items = ids.map(id => read.ok ? read.data.find(f => f.stableId === id.replace(/^fid:/, "")) : undefined);
   const missing = ids.filter((_, i) => !items[i]);
   if (missing.length) return { status: "failed", detail: `no finding ${missing.map(fidRef).join(", ")}` };
-  const added = addFindingToFile(phrenPath, project, newText, { supersedes: items[0]!.text }, { provenance: provenance(model) });
+  const added = addFindingToFile(phrenPath, project, newText, { supersedes: items[0]!.text }, { provenance: provenance(model), expectedFindings });
   if (!added.ok) return { status: "failed", detail: added.error };
   let rest = ids;
   let detail = `replaced ${ids.map(fidRef).join(", ")}`;
   if (added.data.status === "skipped") {
-    const edited = editFinding(phrenPath, project, fidRef(ids[0]), newText);
+    const edited = editFinding(phrenPath, project, fidRef(ids[0]), newText, expectedFindings);
     if (!edited.ok) return { status: "failed", detail: `near-duplicate of a saved finding, and editing ${fidRef(ids[0])} failed: ${edited.error}` };
     rest = ids.slice(1);
     detail = `edited ${fidRef(ids[0])} in place (the new text was a near-duplicate)${rest.length ? `; superseded ${rest.map(fidRef).join(", ")}` : ""}`;
@@ -82,7 +92,7 @@ function replaceWith(phrenPath: string, project: string, ids: string[], newText:
   for (const id of rest) {
     const current = after.ok ? after.data.find(f => f.stableId === id.replace(/^fid:/, "")) : undefined;
     if (current?.status === "superseded") continue;
-    const result = supersedeFinding(phrenPath, project, fidRef(id), newText);
+    const result = supersedeFinding(phrenPath, project, fidRef(id), newText, expectedFindings ? { [id.replace(/^fid:/, "")]: expectedFindings[id.replace(/^fid:/, "")] } : undefined);
     if (!result.ok) errors.push(`${fidRef(id)}: ${result.error}`);
   }
   return errors.length ? { status: "failed", detail: `${detail}; ${errors.join("; ")}` } : { status: "applied", detail };
@@ -90,23 +100,6 @@ function replaceWith(phrenPath: string, project: string, ids: string[], newText:
 
 function truthsPath(phrenPath: string, project: string): string {
   return storeAwareProjectPath(phrenPath, project, "truths.md") ?? path.join(phrenPath, project, "truths.md");
-}
-
-/** Remove one truth line. There is no removal API beside upsertCanonical, so this uses its lock and atomic rename. */
-function removeTruth(phrenPath: string, project: string, truth: string): boolean {
-  const file = truthsPath(phrenPath, project);
-  if (!fs.existsSync(file)) return false;
-  const wanted = truth.trim().replace(/^- /, "");
-  return withFileLock(file, () => {
-    const lines = fs.readFileSync(file, "utf8").split("\n");
-    const index = lines.findIndex(line => line.startsWith("- ") && line.slice(2).replace(TRUTH_DATE, "").trim() === wanted);
-    if (index < 0) return false;
-    lines.splice(index, 1);
-    const tmp = `${file}.tmp-${crypto.randomUUID()}`;
-    fs.writeFileSync(tmp, lines.join("\n").replace(/\n{3,}/g, "\n\n"));
-    renameOverSync(tmp, file);
-    return true;
-  });
 }
 
 /** Persist a manual fragment link the way the link_findings tool does, so an index rebuild keeps it. */
@@ -134,30 +127,41 @@ async function applyOne(phrenPath: string, project: string, change: DreamChange,
       return added.skipped ? { status: "skipped", detail: added.detail } : ok(added.detail);
     }
     case "supersede":
-      return replaceWith(phrenPath, project, [change.findingId], change.newText, options.model);
+      return replaceWith(phrenPath, project, [change.findingId], change.newText, options.model, options.expectedFindings);
     case "retract": {
-      const result = retractFinding(phrenPath, project, fidRef(change.findingId), change.reason);
+      const result = retractFinding(phrenPath, project, fidRef(change.findingId), change.reason, options.expectedFindings);
       return result.ok ? ok(`retracted ${fidRef(change.findingId)}`) : fail(result.error);
     }
     case "edit": {
-      const result = editFinding(phrenPath, project, fidRef(change.findingId), change.newText);
+      const result = editFinding(phrenPath, project, fidRef(change.findingId), change.newText, options.expectedFindings);
       return result.ok ? ok(`edited ${fidRef(change.findingId)}`) : fail(result.error);
     }
     case "merge":
-      return replaceWith(phrenPath, project, change.findingIds, change.newText, options.model);
+      return replaceWith(phrenPath, project, change.findingIds, change.newText, options.model, options.expectedFindings);
     case "move_topic": {
       const topic = readProjectTopics(phrenPath, project).topics.find(t => t.slug === change.topic);
       if (!topic) return fail(`unknown topic "${change.topic}"`);
       const file = topicReferencePath(phrenPath, project, topic.slug);
       if (!file) return fail(`no topic file for "${topic.slug}"`);
-      const read = readFindings(phrenPath, project);
-      const fid = change.findingId.replace(/^fid:/, "");
-      const item = read.ok ? read.data.find(f => f.stableId === fid) : undefined;
-      if (!item) return fail(`no finding ${fidRef(fid)}`);
-      // Archive first: a failed removal leaves a duplicate, never a lost finding.
-      appendArchivedEntriesToTopicDoc(file, project, topic, [{ date: item.date, bullet: `- ${item.text} <!-- fid:${fid} -->`, ...(item.citation ? { citation: item.citation } : {}) }]);
-      const removed = removeFinding(phrenPath, project, fidRef(fid));
-      return removed.ok ? ok(`moved ${fidRef(fid)} to ${topic.slug}`) : fail(`archived to ${topic.slug} but not removed: ${removed.error}`);
+      const source = path.join(projectStoreDir(phrenPath, project), "FINDINGS.md");
+      const expected = findingVersions(phrenPath, project)[change.findingId.replace(/^fid:/, "")];
+      return withFileLock(source, () => {
+        assertFindingVersions(source, options.expectedFindings);
+        const fid = change.findingId.replace(/^fid:/, "");
+        const read = readFindings(phrenPath, project);
+        const item = read.ok ? read.data.find(f => f.stableId === fid) : undefined;
+        if (!item || !expected || findingVersions(phrenPath, project)[fid] !== expected) return fail(`finding ${fidRef(fid)} is missing or changed`);
+        const before = fs.readFileSync(source, "utf8");
+        const lines = before.split("\n");
+        const index = lines.findIndex(line => line.startsWith("- ") && new RegExp(`<!--\\s*fid:${fid}\\s*-->`).test(line));
+        if (index < 0) return fail(`no stored bullet ${fidRef(fid)}`);
+        const citation = isCitationLine(lines[index + 1] ?? "") ? lines[index + 1] : undefined;
+        appendArchivedEntriesToTopicDoc(file, project, topic, [{ date: item.date, bullet: lines[index], ...(citation ? { citation } : {}) }]);
+        if (fs.readFileSync(source, "utf8") !== before) return fail("source changed while archiving; kept source");
+        lines.splice(index, citation ? 2 : 1);
+        writeAtomic(source, lines.join("\n"));
+        return ok(`moved ${fidRef(fid)} to ${topic.slug}`);
+      });
     }
     case "promote_truth": {
       const demoted = all.flatMap(other => other.op === "demote_truth" ? [other.truth] : []);
@@ -165,14 +169,27 @@ async function applyOne(phrenPath: string, project: string, change: DreamChange,
       if (!check.fits) {
         return fail(`would put the injected layer at ${check.bytesAfter} bytes, over its ${check.budgetBytes}-byte budget, without enough demotions in this changeset`);
       }
-      const result = upsertCanonical(phrenPath, project, change.text);
-      return result.ok ? ok(result.data) : fail(result.error);
+      return withFileLock(path.join(projectStoreDir(phrenPath, project), "FINDINGS.md"), () => {
+        assertFindingVersions(path.join(projectStoreDir(phrenPath, project), "FINDINGS.md"), options.expectedFindings);
+        const result = upsertCanonical(phrenPath, project, change.text);
+        return result.ok ? ok(result.data) : fail(result.error);
+      });
     }
     case "demote_truth": {
-      if (!removeTruth(phrenPath, project, change.truth)) return fail("no such truth");
-      // Demoted, not deleted: it stays findable as an ordinary finding.
+      const file = truthsPath(phrenPath, project);
+      if (!fs.existsSync(file)) return fail("no such truth");
+      const before = fs.readFileSync(file, "utf8");
+      const lines = before.split("\n");
+      const index = lines.findIndex(line => line.startsWith("- ") && line.slice(2).replace(TRUTH_DATE, "").trim() === change.truth);
+      if (index < 0) return fail("no such truth");
       const added = addText(phrenPath, project, change.truth, options.model);
-      return added.ok ? ok("demoted to a finding") : fail(`removed from truths, not re-added: ${added.detail}`);
+      if (!added.ok) return fail(`truth kept: ${added.detail}`);
+      return withFileLock(file, () => {
+        if (fs.readFileSync(file, "utf8") !== before) return fail("truth changed while saving finding; kept truth");
+        lines.splice(index, 1);
+        writeAtomic(file, lines.join("\n"));
+        return ok("demoted to a finding");
+      });
     }
     case "write_page": {
       const slug = PAGE_PATH.exec(change.page)?.[1];
@@ -182,7 +199,10 @@ async function applyOne(phrenPath: string, project: string, change: DreamChange,
     }
     case "link": {
       if (!findingText(phrenPath, project, change.findingId)) return fail(`no finding ${fidRef(change.findingId)}`);
-      persistLink(phrenPath, project, change.entity);
+      withFileLock(path.join(projectStoreDir(phrenPath, project), "FINDINGS.md"), () => {
+        assertFindingVersions(path.join(projectStoreDir(phrenPath, project), "FINDINGS.md"), options.expectedFindings);
+        persistLink(phrenPath, project, change.entity);
+      });
       return ok(`linked ${fidRef(change.findingId)} to ${change.entity.toLowerCase()}`);
     }
   }
@@ -210,6 +230,7 @@ export function proposalText(change: DreamChange): string {
 }
 
 function proposeOne(phrenPath: string, project: string, runId: string, index: number, change: DreamChange): { status: DreamOutcomeStatus; detail: string } {
+  if (change.op !== "add_finding") return { status: "proposed", detail: `pending dream apply ${runId} --only ${index}` };
   const refs = evidenceOf(change).map(e => clean(`${e.kind}:${e.ref}`, 80)).join("; ");
   const meta = `<!-- dream:${clean(runId, 64)}#${index} op:${change.op} -->${refs ? ` <!-- evidence: ${refs} -->` : ""}`;
   const result = appendReviewQueue(phrenPath, project, "Review", [{ text: proposalText(change), meta }]);
@@ -229,7 +250,7 @@ export async function applyChangeset(phrenPath: string, changeset: DreamChangese
     } catch (err: unknown) {
       result = { status: "failed", detail: errorText(err) };
     }
-    outcomes.push({ index, op: change.op, ...result });
+    outcomes.push(sanitizeDream({ index, op: change.op, ...result }));
   }
   return outcomes;
 }
@@ -238,6 +259,8 @@ export async function applyChangeset(phrenPath: string, changeset: DreamChangese
 
 export interface DreamRecord {
   changeset: DreamChangeset;
+  findingVersions?: Record<string, string>;
+  warnings?: string[];
   mode: DreamMode;
   model?: string;
   finishedAt: string;
@@ -271,18 +294,20 @@ function writeAtomic(file: string, content: string): void {
 
 /** dreams/<runId>.json plus one journal line. Returns the record's path. */
 export function recordDream(phrenPath: string, project: string, record: DreamRecord): string {
+  record = sanitizeDream(record);
   const dir = dreamsDir(phrenPath, project);
   const file = path.join(dir, `${record.changeset.runId}.json`);
   writeAtomic(file, `${JSON.stringify(record, null, 2)}\n`);
   const counts = countOutcomes(record.outcomes, record.dropped);
   const notes = clean(record.changeset.notes, 160);
   const line = `- ${record.changeset.startedAt} ${record.changeset.runId} ${record.mode}: ${counts.applied} applied, ${counts.proposed} proposed, `
-    + `${counts.skipped} skipped, ${counts.failed} failed, ${counts.dropped} dropped (${record.changeset.inputs.transcripts} sessions)${notes ? ` — ${notes}` : ""}\n`;
+    + `${counts.skipped} skipped, ${counts.failed} failed, ${counts.dropped} dropped (${record.changeset.inputs.transcripts} sessions)${notes ? ` — ${notes}` : ""}${record.warnings?.length ? ` — ${record.warnings.join("; ")}` : ""}\n`;
   appendJournal(phrenPath, project, line);
   return file;
 }
 
 export function appendJournal(phrenPath: string, project: string, line: string): void {
+  line = sanitizeDream(line);
   const journal = journalFile(phrenPath, project);
   fs.mkdirSync(path.dirname(journal), { recursive: true });
   withFileLock(journal, () => {
@@ -291,10 +316,10 @@ export function appendJournal(phrenPath: string, project: string, line: string):
   });
 }
 
-export interface DreamLastRun { runId: string; startedAt: string; finishedAt: string; to: string; mode: DreamMode; status: string; counts?: DreamCounts }
+export interface DreamLastRun { at: string; trigger: "manual" | "scheduled"; runId: string; startedAt: string; finishedAt: string; to: string; mode: DreamMode; status: string; counts?: DreamCounts }
 
-export function writeLastRun(phrenPath: string, project: string, marker: DreamLastRun): void {
-  writeAtomic(lastRunFile(phrenPath, project), `${JSON.stringify(marker, null, 2)}\n`);
+export function writeLastRun(phrenPath: string, project: string, marker: Omit<DreamLastRun, "at">): void {
+  writeAtomic(lastRunFile(phrenPath, project), `${JSON.stringify({ ...marker, at: marker.finishedAt }, null, 2)}\n`);
 }
 
 export function readLastRun(phrenPath: string, project: string): DreamLastRun | undefined {
@@ -302,4 +327,62 @@ export function readLastRun(phrenPath: string, project: string): DreamLastRun | 
     const value = JSON.parse(fs.readFileSync(lastRunFile(phrenPath, project), "utf8"));
     return value && typeof value.to === "string" && Number.isFinite(Date.parse(value.to)) ? value as DreamLastRun : undefined;
   } catch { return undefined; }
+}
+
+/** Pending structured operations; add proposals are owned by the review queue. */
+export function pendingDreamProposals(phrenPath: string, project: string): number {
+  let names: string[];
+  try { names = fs.readdirSync(dreamsDir(phrenPath, project)); } catch { return 0; }
+  let count = 0;
+  for (const name of names.filter(n => n.endsWith(".json") && n !== "last-run.json")) {
+    try {
+      const record = JSON.parse(fs.readFileSync(path.join(dreamsDir(phrenPath, project), name), "utf8")) as DreamRecord;
+      count += record.outcomes.filter(o => o.status === "proposed" && o.op !== "add_finding").length;
+    } catch { /* Not a run record. */ }
+  }
+  return count;
+}
+
+/** Apply selected zero-based indices from a stored run, never replay completed changes. */
+export async function applyDreamProposals(phrenPath: string, project: string, runId: string, only?: number[]): Promise<DreamRecord> {
+  if (!/^[a-zA-Z0-9_-]+$/.test(runId)) throw new Error("Invalid dream run ID.");
+  if (only?.some(n => !Number.isSafeInteger(n) || n < 0)) throw new Error("Proposal indices must be nonnegative integers.");
+  const { dreamLockPath, readDreamConfig } = await import("./run.js");
+  return withFileLock(dreamLockPath(phrenPath, project), async () => {
+    const file = path.join(dreamsDir(phrenPath, project), `${runId}.json`);
+    const record = JSON.parse(fs.readFileSync(file, "utf8")) as DreamRecord;
+    if (record.changeset.project !== project || record.changeset.runId !== runId) throw new Error("Dream record identity mismatch.");
+    if (only?.some(n => !record.changeset.changes[n])) throw new Error("Unknown proposal index.");
+    const config = readDreamConfig(phrenPath, project);
+    // Validate all targets before our own earlier operations can modify them.
+    const current = findingVersions(phrenPath, project);
+    const eligible = new Set(record.outcomes.filter(o => o.status === "proposed" && o.op !== "add_finding" && (!only || only.includes(o.index))).map(o => o.index));
+    const stale = new Set([...eligible].filter(index => targetIds(record.changeset.changes[index]).some(id => {
+      const fid = id.replace(/^fid:/, "");
+      return !current[fid] || !record.findingVersions?.[fid] || current[fid] !== record.findingVersions[fid];
+    })));
+    for (const index of eligible) {
+      const change = record.changeset.changes[index];
+      let result: { status: DreamOutcomeStatus; detail: string };
+      if (stale.has(index)) result = { status: "failed", detail: "target finding missing or changed since the run" };
+      else {
+        const ids = targetIds(change).map(id => id.replace(/^fid:/, ""));
+        const selected = [...eligible].filter(i => !stale.has(i)).map(i => record.changeset.changes[i]);
+        try {
+          result = await applyOne(phrenPath, project, change, selected, {
+            mode: "apply", injectBudgetKB: config.injectBudgetKB, model: record.model,
+            expectedFindings: Object.fromEntries(ids.map(fid => [fid, current[fid]])),
+          });
+          const after = findingVersions(phrenPath, project);
+          for (const fid of ids) current[fid] = after[fid];
+        } catch (err) { result = { status: "failed", detail: errorText(err) }; }
+      }
+      const outcome = sanitizeDream({ index, op: change.op, ...result });
+      record.outcomes = record.outcomes.map(o => o.index === index ? outcome : o);
+      // Checkpoint each outcome before proceeding to the next proposal.
+      writeAtomic(file, `${JSON.stringify(sanitizeDream(record), null, 2)}\n`);
+      appendJournal(phrenPath, project, `- ${new Date().toISOString()} ${runId}#${index} ${outcome.status}: ${outcome.detail}\n`);
+    }
+    return sanitizeDream(record);
+  });
 }
