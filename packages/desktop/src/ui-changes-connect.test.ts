@@ -64,6 +64,11 @@ it("submits the host shown by the visible Connect card while a refresh has newer
     await vi.advanceTimersByTimeAsync(0);
     expect(hooks.post.mock.calls.find(([, route]) => route === "/v1/git/host-token")?.[2])
       .toMatchObject({ token: "private-token", expectedHost: "api-a.example" });
+    expect(root.all().some(node => node.textContent === "Sends the token to api-a.example")).toBe(true);
+    expect(root.all().some(node => node.textContent === "Sends the token to api-b.example")).toBe(false);
     finishStatus!(status); await refreshing;
+    // Completion of the refresh must not rebind the retained token either.
+    expect(root.all().some(node => node.textContent === "Sends the token to api-a.example")).toBe(true);
+    expect(root.all().some(node => node.textContent === "Sends the token to api-b.example")).toBe(false);
   } finally { view.close(); }
 });

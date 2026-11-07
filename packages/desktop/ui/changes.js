@@ -21,7 +21,7 @@ import { armMerge, disarmMerge, isArmed, onArmedChange } from "./shell/merge-whe
 import { createStaging } from "./changes/stage.js";
 import { age } from "./time.js";
 import { CHANGES_CSS } from "./changes/styles.js";
-import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, span, tileClass } from "./changes/util.js";
+import { basename, button as makeButton, dirname, div as makeDiv, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, span, tileClass } from "./changes/util.js";
 import { countOf } from "./text.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
@@ -84,13 +84,31 @@ export function openChanges(el, ctx) {
   const canPoll = () => visible && document.visibilityState === "visible" && isShown(el) && !state.confirm && !state.sheet && !state.removing && !typing()
     && !(state.connect && state.connect.token) && !(state.merge && state.merge.confirm);
 
+  // Retain the elements we draw instead of rediscovering the pane's DOM.
+  // This also lets lightweight hosts render Changes without selector APIs.
+  const newRenderRefs = () => ({ scroll: [], rows: [], lines: [], buttons: [], commit: null });
+  let renderRefs = newRenderRefs();
+  function div(cls, text) {
+    const node = makeDiv(cls, text);
+    const classes = (cls || '').split(' ');
+    if (classes.includes('chg-body') || classes.includes('chg-diff')) renderRefs.scroll.push(node);
+    if (classes.includes('chg-row')) renderRefs.rows.push(node);
+    if (classes.includes('chg-line')) renderRefs.lines.push(node);
+    return node;
+  }
+  function button(label, cls, onclick) {
+    const node = makeButton(label, cls, onclick);
+    renderRefs.buttons.push(node);
+    return node;
+  }
+
   function render() {
     if (!visible || state.removing) return;
-    const scroll = [...el.querySelectorAll('.chg-body,.chg-diff')].map(n => [n.scrollTop,n.scrollLeft]);
+    const scroll = renderRefs.scroll.map(n => [n.scrollTop,n.scrollLeft]);
     const focused = el.contains(document.activeElement) ? document.activeElement : null;
-    const focusLabel = focused?.getAttribute('aria-label');
+    const focusLabel = focused?.getAttribute?.('aria-label');
     const focusRow = focused?.closest('[data-review-row]')?.dataset.reviewRow;
-    const selection = window.getSelection();
+    const selection = window.getSelection?.();
     let selected = null;
     if (selection?.rangeCount && el.contains(selection.anchorNode) && el.contains(selection.focusNode)) {
       const range = selection.getRangeAt(0), before = range.cloneRange();
@@ -107,6 +125,7 @@ export function openChanges(el, ctx) {
     };
     const endpoints = selection?.rangeCount ? [endpoint(anchorRow,selection.anchorNode,selection.anchorOffset),endpoint(focusTextRow,selection.focusNode,selection.focusOffset)] : [];
     el.innerHTML = "";
+    renderRefs = newRenderRefs();
     const root = div("chg");
     root.appendChild(renderTop());
     root.appendChild(renderBody());
@@ -116,16 +135,16 @@ export function openChanges(el, ctx) {
     if (state.copyToast) root.appendChild(renderToast());
     if (state.sheet) root.appendChild(renderSheet());
     el.appendChild(root);
-    const ta = root.querySelector(".chg-msg");
+    const ta = renderRefs.commit;
     if (ta) autosize(ta);
-    [...el.querySelectorAll('.chg-body,.chg-diff')].forEach((n,i) => { if (scroll[i]) { n.scrollTop=scroll[i][0]; n.scrollLeft=scroll[i][1]; } });
+    renderRefs.scroll.forEach((n,i) => { if (scroll[i]) { n.scrollTop=scroll[i][0]; n.scrollLeft=scroll[i][1]; } });
     if (focusLabel) {
-      const scope = focusRow ? [...el.querySelectorAll('[data-review-row]')].find(n => n.dataset.reviewRow === focusRow) : el;
-      [...(scope?.querySelectorAll('[aria-label]') || [])].find(n => n.getAttribute('aria-label') === focusLabel)?.focus({preventScroll:true});
+      const row = focusRow ? renderRefs.rows.find(n => n.dataset.reviewRow === focusRow) : null;
+      renderRefs.buttons.find(n => n.getAttribute?.('aria-label') === focusLabel && (!focusRow || row?.contains(n)))?.focus?.({preventScroll:true});
     }
     const resolveEndpoint = value => {
       if (!value) return null;
-      const row = [...el.querySelectorAll('[data-diff-line]')].find(n => n.dataset.diffLine === value[0]);
+      const row = renderRefs.lines.find(n => n.dataset.diffLine === value[0]);
       if (!row) return null;
       const walker = document.createTreeWalker(row,NodeFilter.SHOW_TEXT); let left=value[1], n;
       while ((n=walker.nextNode())) { if (left<=n.length) return [n,left]; left-=n.length; }
@@ -786,6 +805,7 @@ export function openChanges(el, ctx) {
     if (plan.commit) {
       const row = div("chg-commit");
       const ta = document.createElement("textarea");
+      renderRefs.commit = ta;
       ta.className = "chg-msg"; ta.placeholder = "Commit message"; ta.rows = 1; ta.value = state.draft;
       ta.addEventListener("input", () => { state.draft = ta.value; autosize(ta); updateCommitBtn(); });
       ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && state.draft.trim()) { e.preventDefault(); doCommit(); } });
@@ -1135,8 +1155,11 @@ export function openChanges(el, ctx) {
   }
 
   function renderConnect(res) {
-    const host = { ...res.host };
-    const c = state.connect || (state.connect = { token: "", error: "" });
+    const c = state.connect || (state.connect = { token: "", error: "", host: { ...res.host } });
+    // A refresh may replace state.pulls before it finishes. Keep a typed token
+    // bound to the destination the visible card told the owner about.
+    if (!c.token && state.busy !== "connect") c.host = { ...res.host };
+    const host = { ...(c.host || res.host) };
     const card = div("chg-connect");
     const head = div("chg-connect-h");
     head.appendChild(hostMark(host.kind, 30));
