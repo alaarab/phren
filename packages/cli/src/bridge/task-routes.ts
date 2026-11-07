@@ -139,7 +139,7 @@ export async function launchTaskRoute(base: string, server: string, input: unkno
   try {
     const launched = await launchSession(server, { kind: data.kind, model: data.model, effort: data.effort, account: data.account,
       permissionMode: data.permissionMode, role: "agent", cwd, label: task.text.slice(0, 200),
-      launchId: task.launchId, brief: { id: task.launchId, text } }, { trustFolder: true });
+      launchId: task.launchId, brief: { id: task.launchId, text, task: task.identity } }, { trustFolder: true });
     return { ...launched, task: task.identity, taskRevision: task.revision, launchId: task.launchId, claimPreserved: true,
       state: launched.briefState === "sent" ? "started" : "uncertain" };
   } catch (error) {

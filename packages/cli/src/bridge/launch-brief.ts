@@ -1,3 +1,4 @@
+import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -25,6 +26,7 @@ import { atomic, BridgeError, bridgeRoot, targetSchema, type Target } from "./pr
 export const briefId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 export const launchBriefSchema = z.object({
   id: briefId,
+  task: mergeTaskIdentitySchema.optional(),
   text: z.string().min(1).max(32768).refine(value => !!value.trim() && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)),
 }).strict();
 export type LaunchBrief = z.infer<typeof launchBriefSchema>;
@@ -116,11 +118,14 @@ export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), lab
   const named = label ? cleanLabel(label) : "";
   const fill = async (folder: string) => {
     await atomic(path.join(folder, "brief.md"), text);
+    if (brief.task) await atomic(path.join(folder, "task.json"), JSON.stringify(brief.task));
     if (named) await atomic(path.join(folder, LABEL_FILE), named);
   };
   // A retry may reuse identical bytes; it must never replace another launch.
   const existing = async () => {
     if (await readFile(file, "utf8").catch(() => undefined) !== text) throw new BridgeError(409, "This brief id already belongs to another launch.");
+    const task = await readFile(path.join(directory, "task.json"), "utf8").catch(() => undefined);
+    if (task !== (brief.task ? JSON.stringify(brief.task) : undefined)) throw new BridgeError(409, "This brief id belongs to another task.");
     return file;
   };
   if (await stat(directory).catch(() => undefined)) return existing();
@@ -190,4 +195,15 @@ export function recordBriefArrival(id: string, event: string, target: Target, no
   });
   arrivals = run.catch(() => undefined);
   return run;
+}
+
+/** Private association carried with the launch, never included in GitHub data. */
+export async function briefTask(id: string) {
+  if (!briefId.safeParse(id).success) return undefined;
+  try {
+    const file = path.join(briefDirectory(id), "task.json");
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024) return undefined;
+    return mergeTaskIdentitySchema.parse(JSON.parse(await readFile(file, "utf8")));
+  } catch { return undefined; }
 }

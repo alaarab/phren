@@ -1,3 +1,4 @@
+import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { prsSchema } from "../bridge/return-contract.js";
 import { ownerInboxSchema } from "../bridge/owner-inbox.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -32,7 +33,7 @@ export function register(server: McpServer): void {
   server.registerTool("dispatch_report", {
     title: "◆ phren · report PRs",
     description: "Report PR evidence to this worker's own Hook before finishing the turn. The done return carries prs (url, repo, branch, tests summary, notes), and the Hook queues it to the configured integrator. No direct worker messaging or GitHub comment is needed. Does not claim tests passed or complete a task.",
-    inputSchema: { prs: prsSchema },
+    inputSchema: { prs: prsSchema, task: mergeTaskIdentitySchema.optional().describe("Private task to link; otherwise use the launch association. Never publish this identity to GitHub.") },
   }, async input => {
     try {
       const origin = await terminalPaneFromEnv();

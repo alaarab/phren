@@ -1,3 +1,4 @@
+import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { integratorSchema, prsSchema } from "./return-contract.js";
 import { randomUUID } from "node:crypto";
@@ -33,6 +34,7 @@ export const PEER_COPILOT_REASON = "Copilot cannot continue on another computer:
 export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
 export const dispatchSchema = z.object({
   computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, or anywhere for the least busy connected computer."),
+  task: mergeTaskIdentitySchema.optional().describe("Private task identity for merge reconciliation. Never put it in commits or GitHub."),
   project: projectName.describe("Project slug registered on the receiving computer."),
   harness: z.enum(DISPATCH_HARNESSES).describe("Agent harness on the receiving computer."),
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
@@ -695,7 +697,7 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
         if (policyChoice?.account) {
