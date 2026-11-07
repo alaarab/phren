@@ -39,14 +39,34 @@ function defaultHome(env: NodeJS.ProcessEnv): ClaudeHome {
   return { id: DEFAULT_ACCOUNT, dir, configFile: path.join(configured ? dir : homeDir(env), ".claude.json"), isDefault: true };
 }
 
-/** Every Claude home on this computer, default first, then by slug. */
+const mtimeOf = (dir: string) => { try { return statSync(dir).mtimeMs; } catch { return -1; } };
+const homesCache = new Map<string, { at: number; home: number; candidates: { dir: string; mtime: number }[]; homes: ClaudeHome[] }>();
+/** How long a listing stands even when its folders changed: Claude rewrites each `.claude.json` through
+ * temp files beside it every few seconds, so their mtimes alone would rarely let a listing be reused. */
+const HOMES_REUSE_MS = 2_000;
+
+/** Every Claude home on this computer, default first, then by slug. The Hook asks several times per pane
+ * per overview, so a listing is reused for HOMES_REUSE_MS, and after that while the home folder and
+ * every `.claude-*` folder in it are unchanged. */
 export function claudeHomes(env: NodeJS.ProcessEnv = process.env): ClaudeHome[] {
-  const homes = [defaultHome(env)];
-  const home = homeDir(env);
+  const first = defaultHome(env), home = homeDir(env), key = `${home}\0${first.dir}\0${first.configFile}`;
+  const cached = homesCache.get(key), now = Date.now();
+  if (cached && (now - cached.at < HOMES_REUSE_MS
+      || (mtimeOf(home) === cached.home && cached.candidates.every(candidate => mtimeOf(candidate.dir) === candidate.mtime)))) return [...cached.homes];
+  const homeMtime = mtimeOf(home);
+  const homes = listClaudeHomes(first, home);
+  homesCache.set(key, { at: now, home: homeMtime, candidates: homes.candidates, homes: homes.homes });
+  while (homesCache.size > 16) homesCache.delete(homesCache.keys().next().value!);
+  return [...homes.homes];
+}
+
+function listClaudeHomes(first: ClaudeHome, home: string): { homes: ClaudeHome[]; candidates: { dir: string; mtime: number }[] } {
+  const homes = [first], candidates: { dir: string; mtime: number }[] = [];
   let names: string[] = [];
-  try { names = readdirSync(home); } catch { return homes; }
+  try { names = readdirSync(home); } catch { return { homes, candidates }; }
   for (const name of names.sort()) {
     if (!name.startsWith(".claude-")) continue;
+    candidates.push({ dir: path.join(home, name), mtime: mtimeOf(path.join(home, name)) });
     const id = name.slice(".claude-".length);
     if (!SLUG.test(id) || id === DEFAULT_ACCOUNT) continue;
     const dir = path.join(home, name);
@@ -56,7 +76,7 @@ export function claudeHomes(env: NodeJS.ProcessEnv = process.env): ClaudeHome[] 
     } catch { continue; }
     homes.push({ id, dir, configFile: path.join(dir, ".claude.json"), isDefault: false });
   }
-  return homes;
+  return { homes, candidates };
 }
 
 export function claudeHome(id: string | undefined, env: NodeJS.ProcessEnv = process.env): ClaudeHome | undefined {
@@ -233,7 +253,7 @@ export function claudeLoginFingerprint(home: ClaudeHome): string | undefined {
 export const CODEX_ACCOUNT: AccountRef = { id: DEFAULT_ACCOUNT, label: "Codex", key: "codex" };
 
 /** Only for tests. */
-export function clearAccountCaches(): void { identityCache.clear(); authCache.clear(); }
+export function clearAccountCaches(): void { identityCache.clear(); authCache.clear(); homesCache.clear(); }
 
 // ── sign-in state (`claude auth status --json`, cached) ─────────────────────
 

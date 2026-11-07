@@ -12,6 +12,7 @@ import { codexExecutable } from "./codex-binary.js";
 import { readSpeechKey } from "./speech-key.js";
 import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
 import { accountWindows } from "./account-choice.js";
+import { unwrapStatusLine } from "./status-line-fast.js";
 import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeAuthStatus, claudeHomeOfEnv, claudeHomes, claudePlanUnknown, type AccountRef, type AuthStatus, type ClaudeHome } from "./claude-accounts.js";
 import { claudeCredits, creditSummary, creditWindows, homeSessionCosts, recordSessionCost } from "./claude-credits.js";
 
@@ -904,41 +905,55 @@ export class AccountUsageReader {
 }
 
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
-/** Wrap an existing status line, preserving its input, output and options. */
+/** Wrap the owner's status line, preserving its input, output and options. A status line already wrapped,
+ * by any node or Hook folder and any number of times over, is unwrapped to the owner's first, so one
+ * refresh never runs a chain of wrappers. */
 export function usageStatusLine(current: unknown, program: string, remove: boolean): unknown {
-  const prefix = `${quote(process.execPath)} ${quote(program)} usage-statusline `;
-  const command = object(current).command;
-  if (typeof command === "string" && command.startsWith(prefix)) {
-    if (!remove) return current;
-    const encoded = command.slice(prefix.length);
-    if (!/^[A-Za-z0-9+/=]+$/.test(encoded)) throw new Error("Invalid Phren status line");
-    return JSON.parse(Buffer.from(encoded, "base64").toString()) ?? undefined;
-  }
-  if (remove) return current;
-  if (current !== undefined && (object(current).type !== "command" || typeof command !== "string")) return current;
-  const original = Buffer.from(JSON.stringify(current ?? null)).toString("base64");
-  if (original.length > 32_768) return current;
-  return { ...object(current), type: "command", command: prefix + original };
+  const original = unwrapStatusLine(current) ?? undefined;
+  if (remove) return original;
+  if (original !== undefined && (object(original).type !== "command" || typeof object(original).command !== "string")) return original;
+  const encoded = Buffer.from(JSON.stringify(original ?? null)).toString("base64");
+  if (encoded.length > 32_768) return original;
+  return { ...object(original), type: "command", command: `${quote(process.execPath)} ${quote(program)} usage-statusline ${encoded}` };
 }
 
+/** Last snapshot written per usage file, so a burst of refreshes with the same windows writes once. */
+const statusLineWrites = new Map<string, { limits: string; at: number }>();
+/** How long an unchanged snapshot goes unwritten; its `updatedAt` is how fresh the phone says it is. */
+const STATUS_LINE_REWRITE_MS = 15_000;
+const statusLineCosts = new Map<string, unknown>();
+
+/** One status line report from Claude Code running in `configDir`: its normalized windows into that
+ * home's usage file and its session's cost into the home's ledger. Never session content. */
+export async function recordClaudeStatusLine(payload: unknown, configDir: string | undefined, now = Date.now()): Promise<void> {
+  // Homes are resolved without this process's CLAUDE_CONFIG_DIR: the reporter's own is `configDir`.
+  const home = claudeHomeOfEnv(configDir, { ...process.env, CLAUDE_CONFIG_DIR: undefined });
+  if (!home) throw new Error("Unknown Claude home");
+  const snapshot = claudeUsage(payload, new Date(now));
+  const rate_limits = Object.fromEntries(snapshot.windows.map(w => [w.id, {
+    used_percentage: w.usedPercent, resets_at: w.resetsAt ? Date.parse(w.resetsAt) / 1000 : undefined,
+  }]));
+  const file = claudeFile(home), limits = JSON.stringify(rate_limits), last = statusLineWrites.get(file);
+  if (!last || last.limits !== limits || now - last.at >= STATUS_LINE_REWRITE_MS) {
+    await atomicInPrivateDir(file, JSON.stringify({ rate_limits, updatedAt: snapshot.updatedAt }));
+    statusLineWrites.set(file, { limits, at: now });
+  }
+  const value = object(payload), session = `${home.id}\0${String(value.session_id)}`, cost = object(value.cost).total_cost_usd;
+  if (statusLineCosts.get(session) === cost) return;
+  await recordSessionCost(home, payload).catch(() => undefined);
+  statusLineCosts.delete(session); statusLineCosts.set(session, cost);
+  while (statusLineCosts.size > 256) statusLineCosts.delete(statusLineCosts.keys().next().value!);
+}
+
+/** `bridge-hook.mjs usage-statusline`: the status line a version before the forwarder installed. */
 export async function captureClaudeUsage(original: string): Promise<void> {
   if (!/^[A-Za-z0-9+/=]{1,32768}$/.test(original)) return;
   let input = "";
   for await (const chunk of process.stdin) { input += chunk.toString(); if (Buffer.byteLength(input) > 1_048_576) return; }
-  try {
-    // The home Claude runs in names the file; an unknown CLAUDE_CONFIG_DIR records nothing.
-    // Homes are resolved without this process's CLAUDE_CONFIG_DIR: that is the account's own dir here, not the default.
-    const home = claudeHomeOfEnv(process.env.CLAUDE_CONFIG_DIR, { ...process.env, CLAUDE_CONFIG_DIR: undefined });
-    if (!home) throw new Error("Unknown Claude home");
-    const snapshot = claudeUsage(JSON.parse(input));
-    // Persist only normalized percentages/reset times; never session content.
-    const rate_limits = Object.fromEntries(snapshot.windows.map(w => [w.id, {
-      used_percentage: w.usedPercent, resets_at: w.resetsAt ? Date.parse(w.resetsAt) / 1000 : undefined,
-    }]));
-    await atomicInPrivateDir(claudeFile(home), JSON.stringify({ rate_limits, updatedAt: snapshot.updatedAt }));
-    await recordSessionCost(home, JSON.parse(input)).catch(() => undefined);
-  } catch { /* Status line rendering must survive unavailable usage storage. */ }
-  const previous = object(JSON.parse(Buffer.from(original, "base64").toString()));
+  // The home Claude runs in names the file; an unknown CLAUDE_CONFIG_DIR records nothing.
+  try { await recordClaudeStatusLine(JSON.parse(input), process.env.CLAUDE_CONFIG_DIR); } catch { /* Status line rendering must survive unavailable usage storage. */ }
+  // A wrapper of a wrapper (an install under another node) runs the owner's status line once, not the chain.
+  const previous = object(unwrapStatusLine(JSON.parse(Buffer.from(original, "base64").toString())));
   if (typeof previous.command === "string") {
     await new Promise<void>(resolve => {
       // This is the user's original status-line command, invoked just as

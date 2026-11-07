@@ -72,6 +72,21 @@ describe("Claude child completion", () => {
     expect(await states(f)).toEqual(running);
   });
 
+  it("reads a grown parent from where it left off, waits out a part-written row, and starts over on a rewrite", async () => {
+    const f = await fixture();
+    expect(await states(f)).toEqual(running);
+    const file = path.join(path.dirname(path.dirname(f.directory)), `${session}.jsonl`), row = JSON.stringify(stop()) + "\n" + JSON.stringify(stopped());
+    // Claude Code is mid-write: half of the result row is on disk.
+    await appendFile(file, row.slice(0, -20));
+    expect(await states(f)).toEqual(running);
+    await appendFile(file, row.slice(-20) + "\n");
+    expect(await states(f)).toEqual(finished);
+    // A shorter file in its place is read again from the start.
+    const original = (await readFile(file, "utf8")).split("\n").slice(0, 4).join("\n") + "\n";
+    await writeFile(file, original);
+    expect(await states(f)).toEqual(running);
+  });
+
   it("does not treat a result without its TaskStop call as evidence of completion", async () => {
     const f = await fixture();
     await f.append(stopped());

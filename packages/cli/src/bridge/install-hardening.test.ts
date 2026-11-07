@@ -78,7 +78,7 @@ it.skipIf(process.platform === "win32")("reconciles Hook and Git owners independ
   const own = { hooks: [{ type: "command", command: "user-callback" }] };
   await writeFile(settings, JSON.stringify({ hooks: { SessionStart: [own], PostToolUse: [own] } }));
   await install("0.2.14", true);
-  expect(await readFile(settings, "utf8")).toContain("bridge-hook.mjs");
+  expect(await readFile(settings, "utf8")).toContain("claude-statusline.mjs");
   setModuleEnabled(store, "git", false);
   await reconcileModuleHooks(store);
   let config = JSON.parse(await readFile(settings, "utf8"));

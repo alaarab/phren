@@ -111,7 +111,7 @@ describe("the tmux snapshot", () => {
     expect(s.tabs).toEqual([{ tab_id: "w1", workspace_id: "s1", label: "claude", agent_status: "unknown" }, { tab_id: "w2", workspace_id: "s1", label: "zsh" }]);
     expect(s.panes).toEqual([
       { pane_id: "p1", tab_id: "w1", workspace_id: "s1", terminal_id: "p1:500", cwd: "/repo", foreground_cwd: "/repo", title: "Fix the tests",
-        agent: "claude", agent_status: "unknown" },
+        agent: "claude", agent_pid: 510, agent_status: "unknown" },
       { pane_id: "p2", tab_id: "w2", workspace_id: "s1", terminal_id: "p2:600", cwd: "/home", foreground_cwd: "/home", title: undefined },
     ]);
     expect([s.focused_workspace_id, s.focused_tab_id, s.focused_pane_id]).toEqual(["s1", "w1", "p1"]);

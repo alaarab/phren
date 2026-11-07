@@ -38,6 +38,7 @@ import { classifyClaudeInput, parseInputCategory, type InputClassification } fro
 import { noteTurn as recordTurn, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
 import { PromptDeliveries } from "./prompt-deliveries.js";
 import { countTick } from "./metrics.js";
+import { recordClaudeStatusLine } from "./usage.js";
 import { briefId, briefIdInPrompt, briefLabel, recordBriefArrival } from "./launch-brief.js";
 import { appServerApproval, appServerDecision, conductorCall, OPENCODE_APPROVAL_OPTIONS, opencodePermissionReply, type ConductorCall } from "./agent-hook-asks.js";
 import { SudoBroker } from "./sudo.js";
@@ -1455,10 +1456,17 @@ export class AgentHooks {
       res.setHeader("Content-Type", "application/json");
       try {
         if (req.method === "POST" && req.url === "/sudo") { await this.sudo.handle(req, res); return; }
-        if (req.method !== "POST" || !["/hook", "/conductor-context"].includes(req.url ?? "")) throw new Error("Invalid callback");
+        if (req.method !== "POST" || !["/hook", "/conductor-context", "/usage-statusline"].includes(req.url ?? "")) throw new Error("Invalid callback");
         let size = 0; const chunks: Buffer[] = [];
         for await (const bytes of req) { size += bytes.length; if (size > 1_048_576) throw new Error("Oversized hook"); chunks.push(bytes); }
         const body = object(JSON.parse(Buffer.concat(chunks).toString()));
+        // Claude Code's status line, from the forwarder (status-line-fast.ts): usage recorded here, in the
+        // running Hook, rather than by a bundle started for every refresh.
+        if (req.url === "/usage-statusline") {
+          if (typeof body.input !== "string" || (body.configDir !== undefined && typeof body.configDir !== "string")) throw new Error("Invalid status line");
+          await recordClaudeStatusLine(JSON.parse(body.input), body.configDir as string | undefined);
+          res.end("{}"); return;
+        }
         // OpenCode and phren-agent ask when building the root session's system prompt. Resolve
         // its process against the current conductor; no inherited pane env or
         // plugin callback may create a session binding or a turn record here.

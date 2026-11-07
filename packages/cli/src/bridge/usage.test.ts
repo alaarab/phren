@@ -31,8 +31,11 @@ import {
   usageForCaller,
   readOpenCodeUsage,
   usageStatusLine,
+  recordClaudeStatusLine,
 } from "./usage.js";
 import { CODEX_ACCOUNT, clearAccountCaches, claudeHomes } from "./claude-accounts.js";
+import { FAST_STATUS_LINE_FILE, FAST_STATUS_LINE_SOURCE } from "./status-line-fast.js";
+import { createServer } from "node:http";
 
 const now = new Date("2026-09-12T08:00:00Z");
 const reset = now.getTime() / 1000 + 3600;
@@ -133,6 +136,19 @@ describe("account usage", () => {
     expect(usageStatusLine(wrapped, program, false)).toEqual(wrapped);
     expect(usageStatusLine(wrapped, program, true)).toEqual(previous);
     expect(usageStatusLine(usageStatusLine(undefined, program, false), program, true)).toBeUndefined();
+  });
+  it("collapses wrappers written under other nodes into one, and restores the owner's status line", () => {
+    const previous = { type: "command", command: "printf 'custom status'; cat", padding: 2 };
+    const wrap = (value: unknown, node: string, program: string) => ({ ...(value as object), type: "command",
+      command: `'${node}' '${program}' usage-statusline ${Buffer.from(JSON.stringify(value ?? null)).toString("base64")}` });
+    // The chain an install under node 22 and then node 26 left behind (2026-11-07): each refresh ran three bundles.
+    const chained = wrap(wrap(wrap(previous, "/n/26/bin/node", "/h/current/bridge-hook.mjs"), "/n/22/bin/node", "/h/current/bridge-hook.mjs"), "/n/26/bin/node", "/h/current/claude-statusline.mjs");
+    const program = "/h/current/claude-statusline.mjs";
+    const single = usageStatusLine(chained, program, false) as { command: string; padding: number };
+    expect(single).toEqual(usageStatusLine(previous, program, false));
+    expect(single.padding).toBe(2);
+    expect(usageStatusLine(chained, program, true)).toEqual(previous);
+    expect(usageStatusLine(wrap(wrap(undefined, "/n/22/bin/node", "/h/b/bridge-hook.mjs"), "/n/26/bin/node", "/h/b/bridge-hook.mjs"), program, true)).toBeUndefined();
   });
   it("lifts per-model weekly windows out of Claude Code's own usage snapshot, dated", () => {
     const config = { oauthAccount: { emailAddress: "private@example.com" }, cachedUsageUtilization: {
@@ -419,6 +435,49 @@ rl.on('line', line => {
     const stored = await readFile(path.join(root, "usage/claude.json"), "utf8");
     expect(JSON.parse(stored).rate_limits.five_hour.used_percentage).toBe(52);
     expect(stored).not.toContain("do-not-persist");
+  });
+  it.skipIf(process.platform === "win32")("the forwarder posts the status line to the running Hook and runs the owner's once", async () => {
+    const input = JSON.stringify({ session_id: "s", rate_limits: { five_hour: { used_percentage: 52, resets_at: reset } } });
+    const wrapped = { type: "command", command: `'/n/22/bin/node' '/h/current/bridge-hook.mjs' usage-statusline ${Buffer.from(JSON.stringify({ type: "command", command: "cat" })).toString("base64")}` };
+    // A Unix socket path must stay short.
+    const hook = await mkdtemp("/tmp/phren-sl-"), script = path.join(hook, FAST_STATUS_LINE_FILE), bodies: Record<string, unknown>[] = [];
+    await writeFile(script, FAST_STATUS_LINE_SOURCE);
+    const server = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk);
+      bodies.push({ url: req.url, ...JSON.parse(Buffer.concat(chunks).toString()) }); res.end("{}");
+    });
+    await new Promise<void>(resolve => server.listen(path.join(hook, "agent.sock"), resolve));
+    try {
+      const child = spawn(process.execPath, [script, "usage-statusline", Buffer.from(JSON.stringify(wrapped)).toString("base64")], {
+        env: { PATH: process.env.PATH, HOME: hook, PHREN_BRIDGE_HOME: hook, CLAUDE_CONFIG_DIR: "/c" }, stdio: ["pipe", "pipe", "pipe"] });
+      let stdout = "";
+      child.stdout.on("data", chunk => stdout += chunk);
+      const finished = new Promise(resolve => child.once("exit", resolve)); child.stdin.end(input);
+      expect(await finished).toBe(0);
+      // The wrapped wrapper is skipped: the owner's `cat` runs once.
+      expect(stdout).toBe(input);
+      expect(bodies).toEqual([{ url: "/usage-statusline", configDir: "/c", input }]);
+    } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(hook, { recursive: true, force: true }); }
+  });
+  it("writes an unchanged status line snapshot once per interval", async () => {
+    const previous = process.env.PHREN_BRIDGE_HOME, previousConfig = process.env.CLAUDE_CONFIG_DIR;
+    process.env.PHREN_BRIDGE_HOME = root; delete process.env.CLAUDE_CONFIG_DIR;
+    try {
+      const file = path.join(root, "usage/claude.json"), at = Date.parse("2026-11-07T18:00:00Z");
+      const report = (percent: number) => ({ rate_limits: { five_hour: { used_percentage: percent, resets_at: reset } } });
+      await recordClaudeStatusLine(report(10), undefined, at);
+      const first = await readFile(file, "utf8");
+      await recordClaudeStatusLine(report(10), undefined, at + 1_000);
+      expect(await readFile(file, "utf8")).toBe(first);
+      await recordClaudeStatusLine(report(11), undefined, at + 2_000);
+      expect(JSON.parse(await readFile(file, "utf8")).rate_limits.five_hour.used_percentage).toBe(11);
+      await recordClaudeStatusLine(report(11), undefined, at + 20_000);
+      expect(JSON.parse(await readFile(file, "utf8")).updatedAt).toBe(new Date(at + 20_000).toISOString());
+    } finally {
+      if (previous === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = previous;
+      if (previousConfig !== undefined) process.env.CLAUDE_CONFIG_DIR = previousConfig;
+    }
   });
 });
 

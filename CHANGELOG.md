@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
+- Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.
+
+### Changed
+
+- Bun runners opt in to the browser shim explicitly with `--preload` and `initPage`; the Hook no longer sets `BUN_OPTIONS` in every pane.
+
+### Fixed
+
+- The Hook no longer burns a core on a busy computer. Its overview re-read every session's whole transcript (over 100 MB for a long one), probed every project folder through throwing lookups, and re-parsed every fan-out manifest and turn record per session; transcripts are now read from where the last read stopped and the rest are cached until their files change.
+- Claude's status line runs one small forwarder that reports to the running Hook instead of loading the Hook bundle on every refresh. Installs under different node versions had wrapped the previous wrapper, so one refresh ran several bundles; any such chain is collapsed to the owner's own status line on the next install.
+- `hook-prompt` skips background-agent notifications and teammate messages, and the hook commands start faster.
+- The phone's streamed Claude reply preview no longer mixes in text from Claude's diff sidebar, and a long reply that already landed is not shown again as a preview.
+
 ## [0.3.72] - 2026-11-07
 
 ### Added

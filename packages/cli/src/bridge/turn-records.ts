@@ -198,12 +198,16 @@ export function backgroundLeft(count: number | undefined, stoppedAt: string, fin
   return Math.max(0, count - finishedTasks.filter(at => Date.parse(at) >= stopped).length);
 }
 
-async function readRecord(file: string): Promise<TurnRecord | undefined> {
+async function readRecord(file: string, cache?: Map<string, { stamp: string; record: TurnRecord | undefined }>): Promise<TurnRecord | undefined> {
   try {
     const info = await lstat(file);
     if (!info.isFile() || info.size > MAX_RECORD_BYTES) return undefined;
+    const stamp = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`, cached = cache?.get(file);
+    if (cached?.stamp === stamp) return cached.record;
     const parsed = turnRecordSchema.safeParse(JSON.parse(await readFile(file, "utf8")));
-    return parsed.success ? parsed.data : undefined;
+    const record = parsed.success ? parsed.data : undefined;
+    cache?.set(file, { stamp, record });
+    return record;
   } catch { return undefined; }
 }
 
@@ -230,6 +234,9 @@ export function readTurn(server: string, pane: string): Promise<TurnRecord | und
 export interface StopTasks { seq: number; at: string; running: string[]; finished: string[]; truncated?: boolean }
 const STOP_TASKS_CACHE_MS = 2_000;
 let stopTasksCache: { at: number; root: string; bySession: Promise<Map<string, StopTasks>> } | undefined;
+/** Every pane's record, parsed, while its file is unchanged: the scan below runs every two seconds over
+ * hundreds of records, nearly all of them closed panes'. */
+const stopRecordCache = new Map<string, { stamp: string; record: TurnRecord | undefined }>();
 
 /** The background tasks the latest Stop of conversation `session` listed, from whichever pane's record
  * holds it (the child tree knows the conversation, not its pane); undefined when no Stop listed any. */
@@ -241,16 +248,18 @@ export async function latestStopTasks(source: Provider, session: string): Promis
       // with the old process) outdates the list a closed pane's record still holds.
       // Panes are read in name order, and a record written in the same millisecond as another wins only when
       // its last event came after its own Stop (the pane that went on), so a tie never depends on directory order.
-      const newest = new Map<string, TurnRecord>();
+      const newest = new Map<string, TurnRecord>(), seen = new Set<string>();
       for (const server of (await readdir(root).catch(() => [] as string[])).sort()) {
         for (const name of (await readdir(path.join(root, server)).catch(() => [] as string[])).filter(name => name.endsWith(".json")).sort()) {
-          const record = await readRecord(path.join(root, server, name));
+          seen.add(path.join(root, server, name));
+          const record = await readRecord(path.join(root, server, name), stopRecordCache);
           if (!record) continue;
           const key = `${record.source}\0${record.session}`, previous = newest.get(key);
           const at = Date.parse(record.at), before = previous ? Date.parse(previous.at) : -Infinity;
           if (at > before || (at === before && record.stop?.seq !== record.seq && previous?.stop?.seq === previous?.seq)) newest.set(key, record);
         }
       }
+      for (const file of stopRecordCache.keys()) if (!seen.has(file)) stopRecordCache.delete(file);
       const found = new Map<string, StopTasks>();
       for (const [key, record] of newest) if (record.stop?.tasks) found.set(key, { seq: record.stop.seq, at: record.stop.at, ...record.stop.tasks });
       return found;

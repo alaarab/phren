@@ -1,0 +1,30 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { browserHint } from "./browser-hint.js";
+let root: string;
+beforeEach(() => {
+  mkdirSync(".scratch", { recursive: true });
+  root = mkdtempSync(path.resolve(".scratch/browser-hint-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.stubEnv("PHREN_BROWSER_SOCKET", "");
+  vi.stubEnv("PHREN_BROWSER_WATCH", "1");
+  vi.stubEnv("PHREN_PROACTIVITY", "high");
+});
+afterEach(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+it("waits for installation and relevant prompts, then claims once per session", () => {
+  expect(browserHint(root, "Playwright", "s1", "high")).toBeUndefined();
+  writeFileSync(path.join(root, "browser.sock"), "");
+  expect(browserHint(root, "fix lint", "s1", "high")).toBeUndefined();
+  expect(browserHint(root, "Playwright", undefined, "high")).toBeUndefined();
+  expect(browserHint(root, "Playwright", "s1", "low")).toBeUndefined();
+  vi.stubEnv("PHREN_BROWSER_SOCKET", "/already/installed");
+  expect(browserHint(root, "Playwright", "s1", "high")).toBeUndefined();
+  vi.stubEnv("PHREN_BROWSER_SOCKET", "");
+  expect(browserHint(root, "PLAYWRIGHT", "s1", "high")).toBe('To let the owner watch this browser in Phren, start Playwright after: eval "$(phren browser env)"');
+  expect(browserHint(root, "browser screenshot bun", "s1", "high")).toBeUndefined();
+  expect(browserHint(root, "UI walkthrough with BUN", "s2", "medium")).toContain("Bun:");
+  expect(browserHint(root, "take a SCREENSHOT", "s3", "high")).toBeDefined();
+  vi.stubEnv("PHREN_PROACTIVITY", "off");
+  expect(browserHint(root, "browser", "s4", "high")).toBeUndefined();
+});

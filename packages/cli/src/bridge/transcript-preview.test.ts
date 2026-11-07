@@ -16,7 +16,83 @@ async function scratch() {
 }
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
+// Reconstructed from the owner's 2026-11-07 screens. Claude 2.1.319's diff
+// sidebar uses bold filenames and dim/italic untracked-file instructions.
+const sidebarScreen = (left: string[], right: string[]) => [
+  "❯ Explain this",
+  ...left.map((line, index) => line.padEnd(112) + (right[index] ?? "")),
+  "✻ Working… (8s · esc to interrupt)", "❯",
+].join("\n");
+const fileSidebar = sidebarScreen([
+  "⏺ I've started a fresh CI run (pipeline 2) on the iOS repo's setup branch, so it picks up your token.",
+  "  It runs on the Mac runners. The MacBook was very busy earlier, so it may queue for a while.",
+  "  I'll report when it passes or fails.", "",
+  "  The build 1 TestFlight upload is still being watched too.",
+], [
+  "\x1b[1m.claude/skills/audit\x1b[22m",
+  "\x1b[1m.claude/skills/codex-iterate\x1b[22m",
+  "\x1b[1m.claude/skills/conductor\x1b[22m",
+  "\x1b[1m.claude/skills/creative\x1b[22m",
+  "\x1b[1m.claude/skills/dev-loop\x1b[22m",
+]);
+const grantText = "I can't mint credentials for myself, and my current example.dev token lacks the write scopes needed for tokens or CI variables. I'm starting a setup grant now, which you approve once from your phone.";
+const grantSidebar = sidebarScreen([
+  "⏺ I can't mint credentials for myself, and my current example.dev token lacks the write",
+  "  scopes needed for tokens or CI variables. I'm starting a setup grant now, which you",
+  "  approve once from your phone.",
+], [
+  "\x1b[2;3mNew file not yet staged.\x1b[23;22m",
+  "\x1b[2;3mRun `git add :/.claude/skill-manifest.json` to see line counts.\x1b[23;22m",
+  "\x1b[1m.claude/skills/audit\x1b[22m (untracked)",
+]);
+
 describe("live reply previews", () => {
+  it.each([
+    [fileSidebar, "I've started a fresh CI run (pipeline 2) on the iOS repo's setup branch, so it picks up your token. It runs on the Mac runners. The MacBook was very busy earlier, so it may queue for a while. I'll report when it passes or fails. The build 1 TestFlight upload is still being watched too."],
+    [grantSidebar, grantText],
+  ])("separates a diff sidebar from the reply before unwrapping", (screen, expected) => {
+    expect(claudePanePreview(screen, "Explain this").replace(/\s+/g, " ")).toBe(expected);
+  });
+
+  it("crops touching text and unstyled panel wraps at the established column", () => {
+    const screen = sidebarScreen([
+      "⏺ " + "The reply fills this row. ".repeat(4) + "Still!",
+      "  The next reply row.", "", "  The reply ends here.",
+    ], [
+      "\x1b[1m.claude/skills/audit\x1b[22m",
+      "\x1b[1m.claude/skills/codex-iterate\x1b[22m",
+      "laude/skills/conductor",
+      "\x1b[1m.claude/skills/creative\x1b[22m",
+    ]);
+    expect(claudePanePreview(screen, "Explain this")).toBe(
+      "The reply fills this row. ".repeat(4) + "Still! The next reply row.\n\nThe reply ends here.");
+  });
+
+  it("withholds a read whose panel has no safe boundary", () => {
+    const ambiguous = [
+      "❯ Explain this", "⏺ The reply is still being written.",
+      "                                                \x1b[2;3mNew file not yet staged.\x1b[0m", "❯",
+    ].join("\n");
+    expect(claudePanePreview(ambiguous, "Explain this")).toBe("");
+    expect(claudePanePreview(ambiguous.replace(/\x1b\[[0-9;]*m/g, ""), "Explain this")).toBe("");
+    expect(claudePanePreview(fileSidebar.replace("I've", "我"), "Explain this")).toBe("");
+  });
+
+  it.each([grantSidebar, "❯ Explain this\n⏺ " + grantText + "\n❯"])("does not preview a landed paragraph beside the diff sidebar or scrolled off its opening", async initial => {
+    let screen = initial;
+    const stream = new TranscriptPreviewStream(target, async () => screen);
+    stream.observe([user]);
+    expect((await stream.update("working", undefined, 0))?.preview?.text).toBeTruthy();
+    stream.observe([{ line: 1, raw: { type: "assistant", timestamp: start,
+      message: { content: [{ type: "text", text: "The existing token can read repository metadata and pipeline status, but changing setup requires a separate grant. I checked the available scopes and confirmed that this account must approve the device login before I can configure the runner or create CI variables.\n\n" + grantText + "\n\nI will wait for approval." }] } } }]);
+    expect(await stream.update("working", undefined, 100)).toEqual({ preview: null });
+    expect((await stream.update("working", undefined, 500))?.preview ?? null).toBeNull();
+    screen = "⏺ " + grantText + "\n✻ Working… (8s · esc to interrupt)\n❯";
+    expect((await stream.update("working", undefined, 1000))?.preview ?? null).toBeNull();
+    screen = "❯ Explain this\n⏺ Your setup grant is now ready.\n❯";
+    expect((await stream.update("working", undefined, 1500))?.preview?.text).toBe("Your setup grant is now ready.");
+  });
+
   it("returns no pane text when Herdr fails, logging the reason once per pane", async () => {
     vi.stubEnv("PHREN_HERDR_HOME", await scratch());
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});

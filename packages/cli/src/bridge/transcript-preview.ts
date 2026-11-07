@@ -27,7 +27,8 @@ const MAX_PREVIEW_BYTES = MAX_TEXT * 6 + 1_024;
  * unless `inTurn` (the turn already landed an entry, so the screen is its own
  * output and the prompt scrolled off above it). */
 export function claudePanePreview(rendered: string, prompt: string, previous = "", inTurn = false): string {
-  const screen = rendered.split("\n");
+  const screen = claudeReplyRegion(rendered.split("\n"));
+  if (!screen) return "";
   const raw = screen.map(stripTerminal);
   // What the phone shows: the line with Claude's bold as Markdown. Detection
   // below reads the plain line.
@@ -309,6 +310,69 @@ export function readPreviewPane(target: Target): Promise<string> {
 // An SGR sequence (captured) or any other control sequence stripTerminal removes.
 const PANE_CONTROL = /\x1b\[([0-?]*)[ -/]*([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\r/g;
 
+/** Separate a styled sidebar before classifying rows or measuring wraps. Claude's diff
+ * panel has no enclosing box: bold paths and dim/italic instructions start at a fixed
+ * column, with padding between them and the reply. Two rows establish that column;
+ * crop every row there, including unstyled wraps and rows with no intervening space.
+ * An isolated region cannot establish a safe boundary, so that read stays silent. */
+function claudeReplyRegion(screen: string[]): string[] | undefined {
+  const columns = new Map<number, number>();
+  const rows = screen.map(line => {
+    const styles = new Map<number, string>();
+    const runs: { raw: number; plain: number; text: string }[] = [];
+    let plain = "", last = 0, inkStyle = "";
+    const take = (end: number) => {
+      const text = line.slice(last, end);
+      if (!text) return;
+      runs.push({ raw: last, plain: plain.length, text });
+      if (text.trim()) {
+        const style = [...styles].sort(([a], [b]) => a - b).map(([key, value]) => `${key}:${value}`).join(";");
+        const before = plain + text.slice(0, text.length - text.trimStart().length);
+        if (before.length >= 20 && / {4,}$/.test(before) && style && style !== inkStyle) {
+          columns.set(before.length, (columns.get(before.length) ?? 0) + 1);
+        }
+        inkStyle = style;
+      }
+      plain += text;
+    };
+    for (const match of line.matchAll(PANE_CONTROL)) {
+      take(match.index);
+      last = match.index + match[0].length;
+      if (match[2] !== "m") continue;
+      const params = (match[1] || "0").split(/[;:]/).map(value => Number(value || 0));
+      for (let i = 0; i < params.length; i++) {
+        const code = params[i];
+        if (code === 0) styles.clear();
+        else if (code === 22) { styles.delete(1); styles.delete(2); }
+        else if ([23, 24, 27, 29].includes(code)) styles.delete(code - 20);
+        else if (code === 39 || code === 49) styles.delete(code - 1);
+        else if (code === 38 || code === 48 || code === 58) {
+          const size = params[i + 1] === 5 ? 2 : params[i + 1] === 2 ? 4 : 0;
+          styles.set(code, params.slice(i + 1, i + size + 1).join(":")); i += size;
+        } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) styles.set(38, String(code));
+        else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) styles.set(48, String(code));
+        else styles.set(code, "");
+      }
+    }
+    take(line.length);
+    return { line, runs };
+  });
+  // Without usable styles/padding, a known diff-panel notice is still evidence
+  // that this read cannot safely be interpreted as a single text region.
+  const panelNotice = screen.some(line => /New file not yet staged\.|Run `?git add :\/.*to see line counts\./.test(stripTerminal(line)));
+  if (!columns.size) return panelNotice ? undefined : screen;
+  const repeated = [...columns].filter(([, count]) => count >= 2).map(([column]) => column);
+  if (!repeated.length) return undefined;
+  const column = Math.min(...repeated);
+  // Offsets above count UTF-16 units. Wide glyphs and combining marks make that
+  // an unsafe terminal column; do not guess a crop in those reads.
+  if (rows.some(({ line }) => /[\t\p{Mark}\u1100-\u11ff\u2e80-\ua4cf\uac00-\ud7a3\ud800-\udfff\uf900-\ufaff\ufe00-\ufe6f\uff00-\uffef]/u.test(stripTerminal(line).slice(0, column)))) return undefined;
+  return rows.map(({ line, runs }) => {
+    const run = runs.find(run => run.plain + run.text.length > column);
+    return run ? line.slice(0, run.raw + Math.max(0, column - run.plain)) + "\x1b[0m" : line;
+  });
+}
+
 /**
  * One pane line as Markdown bold. Claude draws a reply's **bold** with SGR 1
  * and drops the asterisks, so a plain read loses it and the phone's preview
@@ -545,12 +609,14 @@ export class TranscriptPreviewStream {
   }
 
   /** Whether pane text is a reply block that already landed: its words agree with the block's as far as
-   * both go (drawsLanded), so a block still drawing the same opening as a landed one waits until the two part. */
+   * both go (drawsLanded), or a long paragraph is still on screen after the block's opening scrolled away.
+   * A block still drawing the same opening as a landed one waits until the two part. */
   private hasLanded(text: string): boolean {
     const words = previewWords(text);
     return !words || [...this.landedTexts].some(landed =>
       // A short block ("Let me check.") is not a longer one that starts with its words.
-      !(landed.length < LANDED_MATCH_CHARS && words.length > landed.length) && drawsLanded(words, landed));
+      (words.length >= LANDED_MATCH_CHARS && landed.includes(words))
+      || !(landed.length < LANDED_MATCH_CHARS && words.length > landed.length) && drawsLanded(words, landed));
   }
 
   /** Seed a reconnect from a classified owner row in the verified transcript. */

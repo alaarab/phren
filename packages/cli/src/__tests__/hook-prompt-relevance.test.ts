@@ -74,4 +74,8 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
     expect(output).toContain("deploy.sh is the only deploy path");
     expect(output).toContain(`[phren finding-sensitivity=balanced] ${FINDING_SENSITIVITY_CONFIG.balanced.agentInstruction}`);
   });
+
+  it("skips a background agent's result, even one asking the same question", () => {
+    expect(run("<task-notification><task-id>a1</task-id><status>completed</status><result>how do I deploy stockview</result></task-notification>", store)).toBe("");
+  });
 });

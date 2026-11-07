@@ -11,7 +11,7 @@ import {
   updateRuntimeHealth,
 } from "../shared/governance.js";
 import { detectProject } from "../shared/index.js";
-import { getHooksEnabledPreference } from "../init/init.js";
+import { getHooksEnabledPreference } from "../init/preferences.js";
 import { isToolHookEnabled } from "../hooks.js";
 import { isProjectHookEnabled } from "../project-config.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
@@ -100,11 +100,11 @@ export {
 } from "../init/setup.js";
 export { getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
 export { hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
-export { FINDING_SENSITIVITY_CONFIG } from "./config.js";
+export { FINDING_SENSITIVITY_CONFIG } from "./config-policy.js";
 export { isFeatureEnabled, errorMessage } from "../utils.js";
 export { bootstrapPhrenDotEnv } from "../phren-dotenv.js";
 export { finalizeTaskSession } from "../task/lifecycle.js";
 export { appendFindingJournal } from "../finding/journal.js";
-export { getHooksEnabledPreference } from "../init/init.js";
+export { getHooksEnabledPreference } from "../init/preferences.js";
 export { isToolHookEnabled } from "../hooks.js";
 export { runDoctor } from "../link/link.js";
