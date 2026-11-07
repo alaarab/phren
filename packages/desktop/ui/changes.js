@@ -6,6 +6,7 @@ import { openWorktreeSessions, removalSheet } from './changes/worktrees.js';
 // worktrees, each scoped to the session (or a worker's worktree). Its CSS
 // (changes/styles.js) is injected once; helpers live in changes/util.js. It
 // re-renders fully from module state.
+import { runsButton } from "./sections/forge.js";
 import { isShown, watchShown } from "./shown.js";
 import { hookGet, hookPost, readRepoFile } from "./api.js";
 import { store, projectOf } from "./shell/store.js";
@@ -1206,6 +1207,7 @@ export function openChanges(el, ctx) {
     if (typeof p.ahead === "number" && p.ahead) route.appendChild(span("chg-req-by", `${p.ahead} ahead`));
     if (typeof p.behind === "number" && p.behind) route.appendChild(span("chg-req-by", `${p.behind} behind`));
     card.appendChild(route);
+    card.appendChild(runsButton({ computer, project: projectOf(ctx.child), branch: p.head, pull: p.number, host, webUrl: p.url }, "chg-btn"));
 
     const chips = div("chg-req-chips");
     const review = { APPROVED: ["Approved", "ok"], CHANGES_REQUESTED: ["Changes requested", "bad"], REVIEW_REQUIRED: ["Review required", "wait"] }[p.reviewDecision];
@@ -1436,6 +1438,7 @@ export function openChanges(el, ctx) {
     if (p.updated) meta.appendChild(span("chg-req-by", age(p.updated)));
     mid.appendChild(meta);
     row.appendChild(mid);
+    row.appendChild(runsButton({ computer, project: projectOf(ctx.child), branch: p.head, pull: p.number, host: state.pulls?.host, webUrl: p.url }, "chg-btn"));
     row.title = p.url || "";
     row.onclick = () => { if (p.url) window.open(p.url, "_blank", "noopener"); };
     return row;
