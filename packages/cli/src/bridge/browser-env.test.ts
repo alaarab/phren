@@ -28,9 +28,9 @@ describe("browser env command", () => {
     const script = 'eval "$PHREN_TEST_ENV_OUTPUT" || exit $?; node -e \'console.log(JSON.stringify(Object.fromEntries(["BUN_OPTIONS","NODE_OPTIONS","PHREN_BROWSER_SOCKET","PHREN_BROWSER_SESSION"].map(k=>[k,process.env[k]]))))\'';
     const flags = shell === "zsh" ? ["-f", "-i", "-c"] : ["--noprofile", "--norc", "-c"];
     const result = execFileSync(shell, [...flags, script], { env: { ...process.env, NODE_OPTIONS: "", PHREN_TEST_ENV_OUTPUT: output.join("\n") }, encoding: "utf8" });
-    expect(JSON.parse(result)).toEqual(env);
+    expect(JSON.parse(result)).toEqual({ ...env, BUN_OPTIONS: "--smol" });
     expect(env.NODE_OPTIONS).toMatch(/^--trace-warnings --require=/);
-    expect(env.BUN_OPTIONS).toMatch(/^--smol --preload=/);
+    expect(env).not.toHaveProperty("BUN_OPTIONS");
   });
   it("keeps installed shim paths with spaces and quotes evaluable and offers the Bun CLI fallback", async () => {
     const bridge = path.join(root, "with ' \" $() ` spaces");
@@ -55,7 +55,9 @@ describe("browser env command", () => {
     for (const [name, value] of [["manual", `manual-${process.ppid}`], ["TMUX_PANE", "%42"], ["HERDR_PANE_ID", "p7"], ["PHREN_BROWSER_SESSION", "inherited"]]) {
       if (name !== "manual") vi.stubEnv(name, value);
       await runBrowser(["env", "--json"]);
-      expect(JSON.parse(output.pop()!).PHREN_BROWSER_SESSION).toBe(value);
+      const env = JSON.parse(output.pop()!);
+      expect(env.PHREN_BROWSER_SESSION).toBe(value);
+      expect(env).not.toHaveProperty("BUN_OPTIONS");
     }
     await runBrowser(["env", "--session", "override", "--json"]);
     expect(JSON.parse(output.pop()!).PHREN_BROWSER_SESSION).toBe("override");

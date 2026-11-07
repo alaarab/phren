@@ -17,11 +17,7 @@ function installedBrowserShimPath(): string {
 export function browserEnv(session: string, existing = process.env.NODE_OPTIONS ?? ""): Record<string, string> {
   const shim = installedBrowserShimPath();
   const requireOption = `--require=${JSON.stringify(shim)}`;
-  const bunOptions = process.env.BUN_OPTIONS ?? "";
-  // Bun 1.4.2 splits BUN_OPTIONS on whitespace without shell unquoting and
-  // does not accept file: URLs here. For spaced paths print the CLI fallback.
-  const bun: Record<string, string> = /\s/.test(shim) ? {} : { BUN_OPTIONS: `${bunOptions}${bunOptions ? " " : ""}--preload=${shim}` };
-  return { ...bun, NODE_OPTIONS: `${existing}${existing ? " " : ""}${requireOption}`, PHREN_BROWSER_SOCKET: path.join(bridgeRoot(), "browser.sock"), PHREN_BROWSER_SESSION: session };
+  return { NODE_OPTIONS: `${existing}${existing ? " " : ""}${requireOption}`, PHREN_BROWSER_SOCKET: path.join(bridgeRoot(), "browser.sock"), PHREN_BROWSER_SESSION: session };
 }
 export function printBrowserEnv(session = process.env.PHREN_BROWSER_SESSION || process.env.HERDR_PANE_ID || process.env.TMUX_PANE || `manual-${process.ppid}`, format: "shell" | "json" | "fish" = "shell"): void {
   const env = browserEnv(session);
@@ -31,7 +27,7 @@ export function printBrowserEnv(session = process.env.PHREN_BROWSER_SESSION || p
     console.log(format === "fish" ? `set -gx ${key} ${quoted};` : `export ${key}=${quoted}`);
   }
   // A comment remains shell-evaluable, including paths containing newlines.
-  const bun = `Bun 1.4.2: bun --preload '${installedBrowserShimPath().replace(/'/g, "'\\''")}' run.mjs; also call the shim's initPage({ page }) after newPage(): Bun bypasses automatic interception. Use this CLI form if the shim path contains spaces (BUN_OPTIONS cannot quote them).`;
+  const bun = `Bun 1.4.2: bun --preload '${installedBrowserShimPath().replace(/'/g, "'\\''")}' run.mjs; also call the shim's initPage({ page }) after newPage(): Bun bypasses automatic interception.`;
   console.log(bun.split("\n").map(line => `# ${line}`).join("\n"));
 }
 

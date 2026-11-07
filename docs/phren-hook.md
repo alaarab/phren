@@ -1813,9 +1813,9 @@ port, and last delivery time/outcome, without secrets or payloads.
 
 ### Browser watching and owner help
 
-Run `eval "$(phren browser env)"` in bash or zsh before launching Playwright Chromium to watch it from the phone, including in sessions started before the Hook update or outside the Hook. The command prints quoted exports and appends to existing `NODE_OPTIONS` and `BUN_OPTIONS`. `--session <name>` overrides the inherited `PHREN_BROWSER_SESSION`, Herdr pane id, tmux pane id, or `manual-<parent-pid>` fallback, in that order. `--json` prints only the environment object; for fish use `phren browser env --fish | source`.
+Run `eval "$(phren browser env)"` in bash or zsh before launching Playwright Chromium to watch it from the phone, including in sessions started before the Hook update or outside the Hook. The command prints quoted exports and appends to existing `NODE_OPTIONS`. `--session <name>` overrides the inherited `PHREN_BROWSER_SESSION`, Herdr pane id, tmux pane id, or `manual-<parent-pid>` fallback, in that order. `--json` prints only the environment object; for fish use `phren browser env --fish | source`.
 
-Bun 1.4.2 was checked locally: it ignores `NODE_OPTIONS --require`, accepts [`BUN_OPTIONS --preload`](https://bun.sh/docs/runtime/environment-variables), and loads this CommonJS shim, but bypasses the shim's `Module._load` interception. The exports include `BUN_OPTIONS` when the shim path has no whitespace. Bun does not unquote paths in `BUN_OPTIONS`; for a path containing spaces, use `bun --preload '<shim>' scripts/page-review/run.mjs` with the path printed by `phren browser env`. In either case, Bun runners must explicitly attach each page after creating it:
+Bun 1.4.2 was checked locally: it ignores `NODE_OPTIONS --require`, accepts [`BUN_OPTIONS --preload`](https://bun.sh/docs/runtime/environment-variables), and loads this CommonJS shim, but bypasses the shim's `Module._load` interception. Bun setup is opt-in per runner: use `bun --preload '<shim>' scripts/page-review/run.mjs` with the path printed in the comment lines from `phren browser env`. The shared pane environment and shell exports leave `BUN_OPTIONS` untouched. Bun runners must explicitly attach each page after creating it:
 
 ```js
 import shim from "<shim>"; // The absolute phren-playwright.cjs path in env output.
