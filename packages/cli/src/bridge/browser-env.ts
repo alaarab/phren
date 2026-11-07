@@ -48,7 +48,7 @@ export async function runBrowser(args: string[]): Promise<number> {
     const timer = setTimeout(() => finish("timeout"), timeout * 1000 + 1000);
     process.once("SIGINT", interrupt);
     socket.on("connect", () => socket.write(browserWire(0x05, { browserId, session: process.env.PHREN_BROWSER_SESSION, reason, timeout })));
-    socket.on("data", chunk => {
+    socket.on("data", (chunk: Buffer) => {
       try { for (const message of reader.push(chunk)) if (message.type === 0x13) finish(message.data.outcome); }
       catch { finish("connection-error"); }
     });

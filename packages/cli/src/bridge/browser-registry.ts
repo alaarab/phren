@@ -110,7 +110,7 @@ export class BrowserRegistry extends EventEmitter {
     if (!browser) { socket.end(browserWire(0x13, { outcome: "no-browser" })); return; }
     this.finishAsk(browser.id, "timeout");
     const timer = setTimeout(() => this.finishAsk(browser.id, "timeout"), (request.timeout ?? 900) * 1000); timer.unref();
-    this.asks.set(browser.id, { socket, timer, taken: false });
+    this.asks.set(browser.id, { socket, timer, taken: this.controls.has(browser.id) });
     browser.help = { reason: request.reason, t: Date.now() };
     socket.write(browserWire(0x12, { browserId: browser.id }));
     this.handoff(browser.id, "help", request.reason); this.controlChanged(browser.id);

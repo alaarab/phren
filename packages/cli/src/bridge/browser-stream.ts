@@ -59,7 +59,7 @@ export function streamBrowser(client: StreamClient, query: URLSearchParams, regi
       if (message.event === "click" || message.event === "wheel") {
         if (!finite(message.x) || !finite(message.y)) return;
         if (message.event === "wheel" && (!finite(message.dx) || !finite(message.dy))) return;
-        event = { event: message.event, x: clamp(message.x), y: clamp(message.y), ...(message.event === "wheel" ? { dx: message.dx, dy: message.dy } : {}) };
+        event = { event: message.event, x: clamp(message.x), y: clamp(message.y), ...(message.event === "wheel" ? { dx: Math.max(-5, Math.min(5, message.dx)), dy: Math.max(-5, Math.min(5, message.dy)) } : {}) };
       } else if (message.event === "text" && typeof message.text === "string" && message.text.length <= 1000) event = { event: "text", text: message.text };
       else if (message.event === "key" && ["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(message.key)) event = { event: "key", key: message.key };
       else return;
