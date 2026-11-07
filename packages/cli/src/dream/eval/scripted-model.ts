@@ -5,8 +5,8 @@
  * the right inputs, not just that the scorer matches a canned answer.
  */
 
-import type { DreamChange } from "./contract-stub.js";
-import type { HelperRunner } from "./contract-stub.js";
+import type { DreamChange } from "./dream-adapter.js";
+import type { HelperRunner } from "./dream-adapter.js";
 import { CLAUDE_SESSION, CODEX_SESSION, FACTS, FIDS, type EvalFixture } from "./fixture.js";
 import { overBudget } from "../budget.js";
 

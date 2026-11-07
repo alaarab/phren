@@ -101,6 +101,7 @@ function toSetConfig(key: string, value: unknown): { domain: string; settings: R
   if (key === "workflow.riskySections") return { domain: "workflow", settings: { riskySections: value } };
   if (key.startsWith("index.")) return { domain: "index", settings: { [key.slice("index.".length)]: value } };
   if (key.startsWith("access.")) return { domain: "access", settings: { [key.slice("access.".length)]: value } };
+  if (key.startsWith("dreaming.")) return { domain: "dreaming", settings: { [key.slice("dreaming.".length)]: value } };
   return null; // topic — not writable through set_config (managed via the Reference/topics UI)
 }
 

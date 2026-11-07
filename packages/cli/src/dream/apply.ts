@@ -16,7 +16,8 @@ import { renameOverSync, runtimeFile } from "../phren-paths.js";
 import { appendArchivedEntriesToTopicDoc, readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { journalFile, projectStoreDir } from "./collect.js";
-import { injectedSize, writePage } from "./contract-stubs.js"; // CONTRACT STUB: ./pages.js and ./budget.js at integration
+import { checkPromotion } from "./budget.js";
+import { writePage } from "./pages.js";
 import type { DreamChange, DreamChangeset, DreamEvidence, DreamOp } from "./types.js";
 
 export type DreamMode = "propose" | "apply";
@@ -159,11 +160,10 @@ async function applyOne(phrenPath: string, project: string, change: DreamChange,
       return removed.ok ? ok(`moved ${fidRef(fid)} to ${topic.slug}`) : fail(`archived to ${topic.slug} but not removed: ${removed.error}`);
     }
     case "promote_truth": {
-      const budget = Math.round(options.injectBudgetKB * 1024);
-      const size = await injectedSize(phrenPath, project);
-      const adds = Buffer.byteLength(change.text, "utf8") + 24;
-      if (size + adds > budget && !all.some(other => other.op === "demote_truth")) {
-        return fail(`would put the injected layer at ${size + adds} bytes, over its ${budget}-byte budget, with no demotion in this changeset`);
+      const demoted = all.flatMap(other => other.op === "demote_truth" ? [other.truth] : []);
+      const check = checkPromotion(phrenPath, project, options.injectBudgetKB, change.text, demoted);
+      if (!check.fits) {
+        return fail(`would put the injected layer at ${check.bytesAfter} bytes, over its ${check.budgetBytes}-byte budget, without enough demotions in this changeset`);
       }
       const result = upsertCanonical(phrenPath, project, change.text);
       return result.ok ? ok(result.data) : fail(result.error);

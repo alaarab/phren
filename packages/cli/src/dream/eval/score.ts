@@ -6,7 +6,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { DreamChange } from "./contract-stub.js";
+import type { DreamChange } from "./dream-adapter.js";
 import { FACTS, FIDS, type EvalFixture } from "./fixture.js";
 import { overBudget, parseTruths } from "../budget.js";
 

@@ -10,6 +10,7 @@ import { storeAwareProjectPath } from "./store-routing.js";
 import { withFileLock } from "./governance/locks.js";
 import { getMachineName } from "./machine-identity.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
+import type { DreamingConfig } from "./config/dreaming.js";
 
 export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;
 export type ProjectOwnershipMode = typeof PROJECT_OWNERSHIP_MODES[number];
@@ -31,6 +32,8 @@ export interface ProjectConfigOverrides {
     lowConfidenceThreshold?: number;
     riskySections?: Array<"Review" | "Stale" | "Conflicts">;
   };
+  /** Per-project overrides of the `dreaming` domain (config/dreaming.ts). */
+  dreaming?: Partial<DreamingConfig>;
 }
 
 export interface ProjectAccessControl {

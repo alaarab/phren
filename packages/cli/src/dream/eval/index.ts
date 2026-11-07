@@ -17,7 +17,7 @@ import * as os from "os";
 import * as path from "path";
 import { helperEnv, helperFor, runHelper } from "../../bridge/helper.js";
 import { overBudget } from "../budget.js";
-import { defaultDream, type DreamFn, type HelperRunner } from "./contract-stub.js";
+import { defaultDream, type DreamFn, type HelperRunner } from "./dream-adapter.js";
 import { buildEvalFixture, type EvalFixture } from "./fixture.js";
 import { extractChanges, readLatestDream, scoreChanges, type EvalScore } from "./score.js";
 import { scriptedRunner } from "./scripted-model.js";

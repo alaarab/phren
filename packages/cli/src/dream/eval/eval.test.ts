@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "../../test-helpers.js";
 import { transcriptPath } from "../../bridge/transcripts.js";
 import { overBudget } from "../budget.js";
-import type { DreamFn, EvalDreamOptions } from "./contract-stub.js";
+import type { DreamFn, EvalDreamOptions } from "./dream-adapter.js";
 import { buildEvalFixture, CLAUDE_SESSION, CODEX_SESSION, FIDS } from "./fixture.js";
 import { runDreamEval, scoreChanges } from "./index.js";
 

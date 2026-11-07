@@ -15,7 +15,7 @@ import { codexHome, copilotHome } from "../home-paths.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { readProjectTopics } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
-import { injectedSize, overBudget } from "./contract-stubs.js"; // CONTRACT STUB: ./budget.js at integration
+import { overBudget } from "./budget.js";
 
 export type DreamTranscriptSource = "claude" | "codex" | "copilot" | "opencode";
 
@@ -379,8 +379,9 @@ export async function collect(phrenPath: string, project: string, options: Colle
   const repoDir = dirs[0];
   const gitLog = options.gitLog === false || !repoDir ? [] : (options.gitLog ?? defaultGitLog)(repoDir);
   const budgetBytes = Math.round((options.injectBudgetKB ?? 8) * 1024);
-  const sizeBytes = await injectedSize(phrenPath, project);
-  const candidates = sizeBytes > budgetBytes ? await overBudget(phrenPath, project, options.injectBudgetKB ?? 8) : [];
+  const budgetState = overBudget(phrenPath, project, options.injectBudgetKB ?? 8);
+  const sizeBytes = budgetState.bytes;
+  const candidates = budgetState.candidates.map(candidate => candidate.text);
 
   return {
     project,

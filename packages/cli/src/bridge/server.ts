@@ -55,6 +55,8 @@ import { AccountUsageReader } from "./usage.js";
 import { ResourceMonitor } from "./resources.js";
 import { ALERT_CHECK_MS, HealthAlerts } from "./machine-health-alerts.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
+import { DREAM_TICK_MS, DreamScheduler, dreamProjectOf, dreamSessionsFromSnapshot, dreamStoreProjects, dreamTickerEnabled, readLastRun, runDreamChild } from "./dream-schedule.js";
+import { getDreamingConfig } from "../config/dreaming.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
 import { capabilitiesForModules, createRouteHandler, effectiveStatusRows, type HookInfo, requireRoute, selectedServer, workspacesReader } from "./server-routes.js";
@@ -319,6 +321,16 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   await codexServers.adopt().catch(() => {});
   void scheduler?.tick().catch(() => {});
   const scheduleTimer = scheduler ? setInterval(() => { countTick("schedules"); void scheduler.tick().catch(() => {}); }, 30_000) : undefined;
+  // Dreaming (bridge/dream-schedule.ts): each project's `dreaming` config decides; off by default.
+  const dreamProject = dreamProjectOf(scheduleStore, modules.profile);
+  const dreams = dreamTickerEnabled() ? new DreamScheduler({ now: () => new Date(),
+    projects: () => dreamStoreProjects(scheduleStore, modules.profile),
+    config: project => getDreamingConfig(scheduleStore, project),
+    lastRun: project => readLastRun(scheduleStore, project),
+    liveSessions: async () => (await Promise.all((await recentServers()).map(async server =>
+      dreamSessionsFromSnapshot(await sharedSnapshot(String(server.session), 4000), dreamProject)))).flat(),
+    run: project => runDreamChild(scheduleStore, project) }) : undefined;
+  const dreamTimer = dreams ? setInterval(() => { countTick("dreams"); void dreams.tick().catch(() => {}); }, DREAM_TICK_MS) : undefined;
   // Off unless PHREN_CANARY_DAILY=1 or `phren canary --daily on`.
   // Refresh the shared Codex sign-in before its workers each try to at once.
   const codexAuth = codexAppServerEnabled() && codexAuthRefreshEnabled() ? new CodexAuthKeeper(codexServers) : undefined;
@@ -378,7 +390,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(dreamTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});
