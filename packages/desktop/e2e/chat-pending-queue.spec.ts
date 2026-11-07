@@ -14,6 +14,10 @@ test("Hook-held messages survive re-opening, edit, cancel and send now through t
   overview.phren.capabilities = { ...overview.phren.capabilities, ...{ afterTurnQueue: true, queuedMessageActions: ["claude"] } };
   harness = await startHarness("pending-queue", {
     overviewFrames: [overview],
+    transcriptFrames: [
+      { raw: { type: "user", uuid: "pq-u1", message: { role: "user", content: "Fix the login flow" } } },
+      { raw: { type: "assistant", uuid: "pq-a1", message: { role: "assistant", content: [{ type: "text", text: "On it. The session token is dropped before the guard runs." }] } } },
+    ],
     routes: {
       "POST /v1/prompt/after-turn/list": () => ({ json: { items } }),
       "POST /v1/prompt/after-turn": (_req, body) => {
