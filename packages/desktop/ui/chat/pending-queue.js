@@ -11,6 +11,11 @@ export function createPendingQueue({ computer, target, sendNow, editDraft, onIte
   root.append(list, error);
   let capabilities = {}, items = [], agentMessages = [], revision = 0, busy = false, destroyed = false, reading = false, timer;
   const withdrawn = new Set();
+  // Keep the queue's controls in render order for focus restoration. Rebuilding
+  // an empty strip needs neither DOM containment nor selector queries.
+  let controls = [];
+  const hasFocus = () => controls.includes(document.activeElement);
+  const restoreFocus = () => controls.find(control => !control.disabled)?.focus();
   let editID = null, editText = "", signature = "";
   const capable = () => capabilities.afterTurnQueue === true;
   const agentCapable = () => (capabilities.queuedMessageActions || []).includes(target.source);
@@ -28,14 +33,15 @@ export function createPendingQueue({ computer, target, sendNow, editDraft, onIte
   }
   async function mutate(action) {
     if (busy || destroyed) return;
-    const returnFocus = list.contains(document.activeElement);
+    const returnFocus = hasFocus();
     busy = true; ++revision; error.textContent = ""; draw();
     try { await action(); }
     catch (err) { if (!destroyed) error.textContent = err.message; }
-    finally { busy = false; if (!destroyed) { signature = ""; draw(); if (returnFocus && document.activeElement === document.body) (list.querySelector("textarea") || list.querySelector("button:not(:disabled)"))?.focus(); await refresh(); } }
+    finally { busy = false; if (!destroyed) { signature = ""; draw(); if (returnFocus && document.activeElement === document.body) restoreFocus(); await refresh(); } }
   }
   function button(label, action) {
     const button = el("button", "pc-queue-action", label); button.type = "button"; button.disabled = busy;
+    controls.push(button);
     button.addEventListener("click", () => void mutate(action)); return button;
   }
   function draw() {
@@ -44,8 +50,8 @@ export function createPendingQueue({ computer, target, sendNow, editDraft, onIte
     const next = JSON.stringify([visible, agentMessages, busy, editID]);
     root.hidden = !visible.length && !agentMessages.length && !error.textContent;
     if (next === signature) return;
-    const hadFocus = list.contains(document.activeElement);
-    signature = next; list.replaceChildren();
+    const hadFocus = hasFocus();
+    signature = next; controls = []; list.replaceChildren();
     for (const item of visible) {
       const row = el("div", "pc-held-row");
       row.append(el("div", "pc-held-text", item.text), el("div", "pc-held-state", TITLES[item.state] || item.state));
@@ -54,6 +60,7 @@ export function createPendingQueue({ computer, target, sendNow, editDraft, onIte
       if (item.state === "queued") {
         if (editID === item.id) {
           const input = el("textarea", "pc-queue-edit"); input.value = editText; input.setAttribute("aria-label", "Edit queued message");
+          input.disabled = busy; controls.push(input);
           input.addEventListener("input", () => { editText = input.value; });
           row.append(input, button("Save", async () => { await post("edit", { id: item.id, text: editText }); editID = null; }), button("Keep original", async () => { editID = null; }));
         } else row.append(button("Send now", async () => {
@@ -82,7 +89,7 @@ export function createPendingQueue({ computer, target, sendNow, editDraft, onIte
       }
       list.append(row);
     }
-    if (hadFocus) (list.querySelector("textarea") || list.querySelector("button:not(:disabled)"))?.focus();
+    if (hadFocus) restoreFocus();
   }
   async function loadCapabilities() {
     capabilities = await store.capabilities(computer);
