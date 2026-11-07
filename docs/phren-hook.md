@@ -1813,6 +1813,8 @@ port, and last delivery time/outcome, without secrets or payloads.
 
 ### Browser watching and owner help
 
+Browser producers and `phren browser ask` connect over a private Unix socket on macOS/Linux and a named pipe scoped to the Hook root on Windows.
+
 Run `eval "$(phren browser env)"` in bash or zsh before launching Playwright Chromium to watch it from the phone, including in sessions started before the Hook update or outside the Hook. The command prints quoted exports and appends to existing `NODE_OPTIONS`. `--session <name>` overrides the inherited `PHREN_BROWSER_SESSION`, Herdr pane id, tmux pane id, or `manual-<parent-pid>` fallback, in that order. `--json` prints only the environment object; for fish use `phren browser env --fish | source`.
 
 Bun 1.4.2 was checked locally: it ignores `NODE_OPTIONS --require`, accepts [`BUN_OPTIONS --preload`](https://bun.sh/docs/runtime/environment-variables), and loads this CommonJS shim, but bypasses the shim's `Module._load` interception. Bun setup is opt-in per runner: use `bun --preload '<shim>' scripts/page-review/run.mjs` with the path printed in the comment lines from `phren browser env`. The shared pane environment and shell exports leave `BUN_OPTIONS` untouched. Bun runners must explicitly attach each page after creating it:

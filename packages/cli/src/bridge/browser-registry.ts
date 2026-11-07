@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import { createServer, connect, type Server, type Socket } from "node:net";
 import path from "node:path";
 import { BrowserMessageReader, browserWire, type ProducerMessage, type Ask, type BrowserInput, type BrowserOutcome } from "./browser-protocol.js";
+import { browserSocketPath } from "./browser-socket.js";
 import { BrowserRecordings } from "./browser-recordings.js";
 
 export interface BrowserPage { id: string; url: string; title: string; width: number; height: number; live: boolean }
@@ -128,8 +129,8 @@ export class BrowserRegistry extends EventEmitter {
   }
   async start(): Promise<void> {
     this.recordings.recover(); this.recordings.retain();
-    const socketPath = path.join(this.root, "browser.sock");
-    const old = await fs.lstat(socketPath).catch(() => undefined);
+    const socketPath = browserSocketPath(this.root);
+    const old = process.platform === "win32" ? undefined : await fs.lstat(socketPath).catch(() => undefined);
     if (old) {
       if (!old.isSocket() || (process.getuid && old.uid !== process.getuid())) throw new Error("Unexpected browser socket");
       const live = await new Promise<boolean>(resolve => { const s = connect(socketPath); s.once("connect", () => { s.destroy(); resolve(true); }); s.once("error", () => resolve(false)); s.setTimeout(500, () => { s.destroy(); resolve(true); }); });
@@ -152,7 +153,7 @@ export class BrowserRegistry extends EventEmitter {
       socket.on("close", () => { this.sockets.delete(socket); for (const [id, ask] of this.asks) if (ask.socket === socket) this.finishAsk(id); this.disconnect(socket); });
     });
     await new Promise<void>((resolve, reject) => { this.server!.once("error", reject); this.server!.listen(socketPath, resolve); });
-    await fs.chmod(socketPath, 0o600);
+    if (process.platform !== "win32") await fs.chmod(socketPath, 0o600);
     this.timer = setInterval(() => { try { this.recordings.retain(); this.list(); } catch { /* disk unavailable */ } }, 3_600_000); this.timer.unref();
   }
   close(): void { clearInterval(this.timer); for (const s of this.sockets) s.destroy(); for (const id of this.owners.keys()) this.end(id); this.server?.close(); }

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync } from "node:fs";
-import path from "node:path";
-import { bridgeRoot } from "../bridge/protocol.js";
+import { browserSocketPath } from "../bridge/browser-socket.js";
 import { sessionMarker } from "../shared.js";
 
 /** Claim the notice atomically: parallel prompt hooks share the session marker. */
@@ -9,7 +8,7 @@ export function browserHint(phrenPath: string, prompt: string, session: string |
   if (!session || proactivity === "low" || proactivity === "off" || process.env.PHREN_PROACTIVITY === "off"
     || process.env.PHREN_BROWSER_SOCKET || process.env.PHREN_BROWSER_WATCH === "0"
     || !/\b(?:playwright|browser|ui\s+walk(?:through)?|screenshots?)\b/i.test(prompt)
-    || !existsSync(path.join(bridgeRoot(), "browser.sock"))) return undefined;
+    || (process.platform !== "win32" && !existsSync(browserSocketPath()))) return undefined;
   try {
     const key = createHash("sha256").update(session).digest("hex");
     closeSync(openSync(sessionMarker(phrenPath, `browser-hint-${key}`), "wx", 0o600));

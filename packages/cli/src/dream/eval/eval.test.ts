@@ -55,7 +55,7 @@ describe("dream eval", () => {
     const saved = process.env.HOME;
     process.env.HOME = fixture.home;
     try {
-      expect(await transcriptPath("claude", CLAUDE_SESSION)).toContain(fs.realpathSync(fixture.home));
+      expect(await transcriptPath("claude", CLAUDE_SESSION)).toContain(fs.realpathSync.native(fixture.home));
       expect(await transcriptPath("codex", CODEX_SESSION)).toContain(CODEX_SESSION);
     } finally {
       process.env.HOME = saved;

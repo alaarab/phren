@@ -7,6 +7,7 @@ import * as http from "http";
 import * as querystring from "querystring";
 import { createWebUiServer, renderPageForTests } from "./ui/memory-ui.js";
 import { getWebUiBrowserCommand, waitForWebUiReady } from "./ui/server.js";
+import { CONFIG_DOMAINS } from "./config/schema.js";
 import { buildGraph } from "./ui/data.js";
 
 function seedProject(root: string): void {
@@ -193,7 +194,7 @@ describe("web-ui server", () => {
     expect(parsed.view.fields["retention.ttlDays"].value).toBe(120);
     expect(parsed.view.fields["retention.ttlDays"].source).toBe("default");
     expect(Array.isArray(parsed.schema)).toBe(true);
-    expect(parsed.schema.length).toBe(8);
+    expect(parsed.schema.map((domain: { id: string }) => domain.id)).toEqual(CONFIG_DOMAINS.map(domain => domain.id));
   });
 
   it("includes the resolved view and index policy in /api/settings", async () => {

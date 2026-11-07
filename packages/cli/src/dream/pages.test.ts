@@ -66,7 +66,7 @@ describe("dream pages", () => {
   it("is indexed as a reference doc by the existing search index", async () => {
     await writePage(store, project, "rate-limiter", "Postgres advisory locks back the limiter.", []);
     const db = await buildIndex(store, undefined, { force: true });
-    const rows = db.exec("SELECT type, filename FROM docs WHERE path LIKE '%reference/pages/rate-limiter.md'");
+    const rows = db.exec("SELECT type, filename FROM docs WHERE path = ?", [path.join(store, project, "reference", "pages", "rate-limiter.md")]);
     expect(rows[0]?.values).toEqual([["reference", "rate-limiter.md"]]);
   });
 });

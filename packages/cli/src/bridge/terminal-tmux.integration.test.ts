@@ -100,7 +100,8 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
 
   it("opens a session, reads a shell back, types into it and starts an agent there", async () => {
     await tmuxTerminal.create(server, { label: "it work", cwd: folder });
-    const first = await until(() => tmuxSnapshot(server), s => objects(s.panes).length === 1);
+    // The pane exists before its child has changed to the requested cwd.
+    const first = await until(() => tmuxSnapshot(server), s => objects(s.panes).length === 1 && objects(s.panes)[0].cwd === folder);
     expect(objects(first.workspaces).map(w => w.label)).toEqual(["it work"]);
     const pane = String(objects(first.panes)[0].pane_id);
     expect(objects(first.panes)[0]).toMatchObject({ workspace_id: expect.stringMatching(/^s\d+$/), tab_id: expect.stringMatching(/^w\d+$/), cwd: folder });

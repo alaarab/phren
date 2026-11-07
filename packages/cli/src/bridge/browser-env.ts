@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connect } from "node:net";
 import { BROWSER_ID, BrowserMessageReader, browserWire } from "./browser-protocol.js";
+import { browserSocketPath } from "./browser-socket.js";
 import { bridgeRoot } from "./protocol.js";
 
 export function browserShimPath(): string {
@@ -17,7 +18,7 @@ function installedBrowserShimPath(): string {
 export function browserEnv(session: string, existing = process.env.NODE_OPTIONS ?? ""): Record<string, string> {
   const shim = installedBrowserShimPath();
   const requireOption = `--require=${JSON.stringify(shim)}`;
-  return { NODE_OPTIONS: `${existing}${existing ? " " : ""}${requireOption}`, PHREN_BROWSER_SOCKET: path.join(bridgeRoot(), "browser.sock"), PHREN_BROWSER_SESSION: session };
+  return { NODE_OPTIONS: `${existing}${existing ? " " : ""}${requireOption}`, PHREN_BROWSER_SOCKET: browserSocketPath(), PHREN_BROWSER_SESSION: session };
 }
 export function printBrowserEnv(session = process.env.PHREN_BROWSER_SESSION || process.env.HERDR_PANE_ID || process.env.TMUX_PANE || `manual-${process.ppid}`, format: "shell" | "json" | "fish" = "shell"): void {
   const env = browserEnv(session);
@@ -55,7 +56,7 @@ export async function runBrowser(args: string[]): Promise<number> {
     else { console.error(usage); return 1; }
   }
   return new Promise(resolve => {
-    const socket = connect(process.env.PHREN_BROWSER_SOCKET || path.join(bridgeRoot(), "browser.sock"));
+    const socket = connect(process.env.PHREN_BROWSER_SOCKET || browserSocketPath());
     const reader = new BrowserMessageReader();
     let finished = false;
     const finish = (outcome: string) => {
