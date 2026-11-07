@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { WebSocket } from "ws";
 import { z } from "zod";
 import { logger } from "../logger.js";
@@ -85,6 +86,13 @@ export function transcriptStreams(ctx: StreamContext) {
   async function childConversationReader(target: Target, child: string) {
     const relation = childAgent(await childAgentTree(target.source, target.session), child);
     if (!relation) throw new BridgeError(404, "This child agent does not belong to the selected conversation.");
+    // A verified child can be listed before its first transcript write.
+    // Keep its public identity while waiting, rather than reading the parent.
+    try { await stat(relation.transcript); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { source: relation.provider, session: relation.id };
+      throw error;
+    }
     const reader = new TranscriptReader(relation.transcript, relation.provider, undefined, undefined, relation.provider === "claude", relation.cwd);
     return { reader, source: relation.provider, session: relation.id };
   }
@@ -95,7 +103,7 @@ export function transcriptStreams(ctx: StreamContext) {
     let busy = false, ready = false, first = true;
     let awaitingTranscript = false, lastTranscriptLookup = 0;
     let initialPane: Json;
-    let busyAt = 0;
+    let busyAt = 0, statusSentAt = 0, statusKey = "";
     const pending: number[] = [];
     const stop = () => { abort.abort(); clearInterval(timer); unwatch?.(); pending.length = 0; };
     client.once("close", stop); client.once("error", stop);
@@ -129,7 +137,7 @@ export function transcriptStreams(ctx: StreamContext) {
     const findTranscript = async () => {
       if (Date.now() - lastTranscriptLookup < 2_000) return;
       lastTranscriptLookup = Date.now();
-      const opened = await conversationReader(target);
+      const opened = child === null ? await conversationReader(target) : await childConversationReader(target, child);
       if (opened.reader) { reader = opened.reader; conversation = { source: opened.source, session: opened.session }; awaitingTranscript = false; }
     };
     const tick = async () => {
@@ -226,7 +234,7 @@ export function transcriptStreams(ctx: StreamContext) {
             if (!between) busyAt = Date.now();
             const nextPrompt = between && suggestion && suggestion.readAt > busyAt ? suggestion.text : undefined;
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
-            send(client, { agentStatus: { source: target.source, session: target.session,
+            const frame = { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval || servedQuestion ? "waiting" : resolvedStatus, pendingApproval, pendingQuestions, terminalPrompt,
               ...(waiting && agentHooks.passwordPrompt(target) ? { passwordPrompt: true } : {}),
               compacting: agentHooks.compacting(target),
@@ -243,7 +251,14 @@ export function transcriptStreams(ctx: StreamContext) {
                 // through /v1/questions/answer, whether or not a hold caught it.
                 ...(target.source === "claude" || servedQuestion ? { questions: true } : {}),
                 // What the composer's permission, plan and fast chips can change here.
-                ...(settings ? { settings } : {}) }, ...(settingsState ? { settingsState } : {}), branch } });
+                ...(settings ? { settings } : {}) }, ...(settingsState ? { settingsState } : {}), branch } };
+            // Keep polling for dialogs at 500 ms, but send idle sockets only
+            // a periodic full status refresh (also usable by older phones).
+            const key = JSON.stringify(frame), at = Date.now();
+            if (key !== statusKey || at - statusSentAt >= 20_000) {
+              send(client, frame);
+              statusKey = key; statusSentAt = at;
+            }
           }
           if (sideAnswers && sideQuestions) {
             for (const { revision, ...side } of sideQuestions.list(target)) {
@@ -299,7 +314,7 @@ export function transcriptStreams(ctx: StreamContext) {
       if (url.pathname === "/v1/transcripts") {
         const opened = child === null ? await conversationReader(target) : await childConversationReader(target, child);
         reader = opened.reader; conversation = { source: opened.source, session: opened.session };
-        awaitingTranscript = child === null && !reader; lastTranscriptLookup = Date.now();
+        awaitingTranscript = !reader; lastTranscriptLookup = Date.now();
       }
       if (abort.signal.aborted) { stop(); return; }
       ready = true;

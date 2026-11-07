@@ -11,7 +11,7 @@ import { BridgeError, id, object, objects, requestID, serverName, provider, sess
 import { logger } from "../logger.js";
 import { recordedSession } from "./agent-hook-stores.js";
 import { paneRecord, recordTitle } from "./session-activity.js";
-import { tabActivityKey, type TabActivityStamp } from "./tab-activity.js";
+import { panesByTab, tabActivityKey, type TabActivityStamp } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -260,6 +260,12 @@ export function isConductorName(name: string | undefined): boolean {
  * none); left out, the agent's name decides, as before the record. */
 export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, TabActivityStamp>,
   conductorPane?: string | null): Json {
+  const grouped = panesByTab(s);
+  const tabsByWorkspace = new Map<unknown, Json[]>();
+  for (const tab of objects(s.tabs)) {
+    const tabs = tabsByWorkspace.get(tab.workspace_id);
+    if (tabs) tabs.push(tab); else tabsByWorkspace.set(tab.workspace_id, [tab]);
+  }
   const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
     && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
   const focus = focusedPane && id.safeParse(s.focused_workspace_id).success
@@ -270,9 +276,9 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
   // Focus identifies a pane to inspect. Its conversation is still resolved and
   // validated independently through panes(), never inferred from a directory.
   return { kind: "herdr", focus, groups: objects(s.workspaces).map(w => ({ id: w.workspace_id, label: w.label,
-    children: objects(s.tabs).filter(t => t.workspace_id === w.workspace_id).map(t => {
-      const panes = objects(s.panes).filter(p => p.tab_id === t.tab_id && p.workspace_id === t.workspace_id);
-      const agent = panes.find(p => p.agent);
+    children: (tabsByWorkspace.get(w.workspace_id) ?? []).map(t => {
+      const panes = grouped.get(tabActivityKey(t.workspace_id, t.tab_id)) ?? [];
+      const agents = panes.filter(p => p.agent), agent = agents[0];
       const activity = lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id));
       // Herdr's per-pane state_change_seq climbs with every agent status
       // change; the phone orders "just finished" ahead of "finished an hour ago" by it.
@@ -284,8 +290,8 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
         lastChangedAt: activity?.lastChangedAt,
         statusSince: activity?.statusSince,
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
-        contextUsedPercent: agent && panes.filter(p => p.agent).length === 1 ? contextUsedPercent?.get(agent) : undefined,
-        agentPaneCount: panes.filter(p => p.agent).length, paneCount: panes.length };
+        contextUsedPercent: agent && agents.length === 1 ? contextUsedPercent?.get(agent) : undefined,
+        agentPaneCount: agents.length, paneCount: panes.length };
     }) })) };
 }
 

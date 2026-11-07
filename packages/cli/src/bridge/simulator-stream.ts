@@ -118,6 +118,8 @@ export class LatestFrame {
     if (!this.options.acked || this.inFlight === 0) return;
     this.inFlight--; this.pump();
   }
+  /** Discard a previous page's queued frame without forgiving its outstanding acknowledgements. */
+  discardWaiting(): void { this.waiting = undefined; }
   close(): void { this.closed = true; this.waiting = undefined; clearTimeout(this.timer); }
   private get bytesPerSecond(): number { return this.options.bytesPerSecond ?? STREAM_BYTES_PER_SECOND; }
   private pump(): void {

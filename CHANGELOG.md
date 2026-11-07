@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.71] - 2026-11-02
+
+### Fixed
+
+- Answer Claude's multi-question dialog when a narrow pane wraps its tab bar: the wrapped rows are rebuilt (including a split inside Submit or a label, emoji and wide characters, and a trimmed wrap space), so answers no longer fail with "Nothing was sent".
+
 ## [0.3.70] - 2026-11-02
 
 ### Fixed

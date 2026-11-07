@@ -1,3 +1,4 @@
+import { browserEnv } from "./browser-env.js";
 // tmux as the Hook's terminal provider, for computers without Herdr.
 //
 // Two tmux servers are Hook servers: the owner's own (the default socket,
@@ -450,7 +451,7 @@ export const tmuxTerminal: TerminalProvider = {
   paneEnv(server, { pane }) {
     const socket = socketOf(server), folder = tmuxSocketFolders()[0];
     const file = socketPaths.get(socket) ?? (folder ? path.join(folder, socket) : undefined);
-    return file ? { TMUX: `${file},0,0`, TMUX_PANE: toTmuxId(pane, "p") } : undefined;
+    return file ? { ...browserEnv(pane), TMUX: `${file},0,0`, TMUX_PANE: toTmuxId(pane, "p") } : undefined;
   },
   // A pane user option, not `select-pane -T`: agents overwrite the pane title.
   async renamePane(server, pane, label) {
