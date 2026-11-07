@@ -1,3 +1,4 @@
+import { openForge } from "./forge.js";
 import { el } from "../dom.js";
 // Projects: every project across the computers as a grid of cards. Each card
 // opens a detail page with the project's memory (summary, open work, live
@@ -185,7 +186,13 @@ export function mountProjects(root) {
       // Ask phren about this project from its memory, without tools.
       const chat = el("button", "pj-btn", "Quick chat");
       chat.addEventListener("click", () => openLaunchSheet({ chat: true, project: state.detail.name, computer: state.detail.computer, title: `Quick chat about ${state.detail.name}` }));
-      header.append(knobsBtn, chat, launch);
+      const ci = el("button", "pj-btn", "CI");
+      ci.addEventListener("click", () => {
+        const detail = state.detail;
+        const data = state.data.get(detail.computer)?.projects.get(detail.name)?.forge?.data;
+        openForge({ computer: detail.computer, project: detail.name, host: data?.host, webUrl: data?.host?.webUrl });
+      });
+      header.append(ci, knobsBtn, chat, launch);
       return;
     }
     const title = el("h1", "pj-title", "Projects");

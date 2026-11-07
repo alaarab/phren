@@ -888,3 +888,155 @@ outside that scrollport; the sheet is bounded by the dynamic viewport minus its
 backdrop padding. At scroll end the complete single-login hint and its unique,
 full-width add action stay above the footer. The account usage line never wraps;
 long identity text can wrap independently.
+
+### D1 — Fleet Browsers
+
+`sections/browsers.js` registers the Browsers palette command and mounts the Fleet
+page next to Previews. It follows the shared overview store for online computers,
+gates reads on each Hook's `browsers` capability, and polls only while shown (15 s).
+Live rows show page title/URL, session, age, help and control hints. Recordings show
+date, duration and navigation count. Older Hooks show a newer-Phren message.
+Documents use `shell/tabs.js`, without persisting browser IDs between launches.
+
+`browsers/live.js` watches binary JPEG frames and JSON start/page/control/error
+messages through `WS /hosts/<computer>/v1/browsers/stream?browser=<id>&ack=1`.
+Every received frame is acknowledged, after image decoding or immediately if a
+frame must be skipped. The Hook confirms control ownership; clicking Take control
+or Take over never grants local ownership. The help card offers the same action.
+Done, two Escapes within 700 ms, document/section hide, window blur, page visibility
+loss and close release control and discard queued wheel input. Hidden views close
+their socket; showing reconnects without retaking control. A disconnected active
+view offers Reconnect. The image retains its aspect ratio. Keyboard input is scoped
+to the focused frame; printable characters and paste send text, and the protocol's
+allowlisted keys send key events. `browsers/logic.js` owns fitted-image hit testing,
+34 ms wheel batches (frame fractions), control-state transitions and timeline seek.
+
+`browsers/replay.js` reads recording metadata/frame indexes, supports timed playback
+and frame scrubbing, and renders navigation and optional `meta.handoffs` markers
+as keyboard-accessible seek buttons. Hiding pauses playback; closing aborts reads.
+All HTTP uses the daemon proxy via `hookGet` or same-origin image URLs:
+`GET /hosts/<computer>/v1/browsers`, `/v1/browsers/recordings`,
+`/v1/browsers/recordings/index?id=…`, `/v1/browsers/recordings/frame?id=…&n=…`.
+`browsers/browsers.css` uses only theme variables, with no animated transitions.
+
+Coverage: `src/ui-browsers.test.ts` owns pure geometry, batching/cancellation,
+authority and marker seeking. `e2e/browsers.spec.ts` uses the existing fake Hook
+for HTTP through the real daemon and Playwright's browser-side fake WebSocket
+for screencast/ack/control/input; it does not verify daemon WS forwarding.
+Home's needs-you count remains session-based: browser help is absent from the
+current overview contract and would require a shared browser attention feed.
+The named phone browser reference files were absent in this read-only checkout;
+the Hook browser modules and D1 brief define the port's contract.
+
+### D2: phone chat sending parity
+
+`chat/pending-queue.js` owns the pending strip. The composer offers **Send now**
+and **After this turn** for an ordinary draft while working. The latter requires
+`afterTurnQueue`, uses `POST /v1/prompt/after-turn { target, id, text }`, and lists
+with `/after-turn/list { target }`; edit/cancel use `/after-turn/edit` and
+`/after-turn/cancel { target, id, text? }`. Polls preserve unchanged nodes and
+edits, discard stale reads, and stop on destroy. Unknown sends are never retried
+automatically. A retry of an uncertain enqueue retains its id and uploaded paths;
+only the submitted draft and attachments are consumed on confirmation. Send now
+first requires a confirmed cancellation, then uses ordinary delivery with a fresh
+id. This is two requests because the Hook has no atomic after-turn send-now route.
+Claude's transcript `isQueued` rows appear separately: `queuedMessageActions`
+must include the target source before offering `/v1/prompt/queue { target,
+action: "send-now" | "withdraw" }`. Edit withdraws before prepending the returned
+`messages` to the draft. Errors preserve the draft and show the Hook's reason.
+All transport uses `hookPost` through the daemon's `/hosts/<computer>` proxy.
+Older Hooks disable After this turn with the newer-Phren reason.
+
+`chat/send-behavior.js` contains pure phone rules: a paste at **32 KiB UTF-8**
+becomes `pasted-text.txt`; the chip offers Keep inline and Remove. The existing
+upload path sends the exact bytes and appends the phone's `Attached files on
+this computer:` footer, including its final newline. Finished activity rows use
+phone duration formatting (`Thought for 27s`, `Worked for 1m 04s`), preserving
+harness verbs and stopped-turn wording from desktop-kit. `chat/wait-clock.js`
+updates Home and both sidebar Needs you layouts from `statusSince` with **one**
+minute clock, changing text only (`Waiting`, `Waiting 20m`, `Waiting 2h`,
+`Waiting 1d`); missing timestamps omit the badge.
+
+The timeline's follow state changes only on reader actions: streaming, resize and
+backlog replacement cannot resume following. Touch holds the viewport; following
+resumes via **Latest messages**, a send, or a reader scroll to the final pixel.
+Rows anchor the scrolled-up reader, with native overflow anchoring disabled.
+A successful paired `gh pr create` / `glab mr create` tool result ending in a
+request URL produces the quiet `PR #42 opened · View` (or MR) after a completed
+turn. Assistant prose and PR reads do not count. `pullRequestLanded` shares the
+phone's successful-publication-result wording, including already-open results;
+there is no structured agent-created-PR frame, so arbitrary forge clients cannot
+be detected reliably. Coverage: `src/ui-chat-send-behavior.test.ts` and
+`e2e/chat-pending-queue.spec.ts` (fake Hook, reserved for the orchestrator's run).
+
+## D3 — Changes review, diff notes, live checkouts and safe removal
+
+`changes/review.js` ports the phone's DiffReviewLedger: checkout identity (Hook
+computer id + repository, with computer/scope fallback), path and staged state,
+plus SHA-256 of the exact complete patch. Missing or truncated patches cannot
+be reviewed. Marks live in the viewer's `phren.desktop.changes.reviewed.v1`
+localStorage, bounded to 1 MiB with oldest entries evicted; reads and writes
+handle unavailable storage. Changes shows “N of M reviewed”, a per-file mark,
+and Next unreviewed (wraps, skips the current file). A file name still opens the
+centre diff; “Preview diff and add notes” opens its inline patch. Centre diffs
+also offer the same mark for their staged or unstaged patch.
+
+`changes/notes.js` shares a draft per computer/session between inline patches
+and centre diff tabs. Old/new line-number buttons open a keyboard-accessible
+note dialog; Monaco offers gutter clicks and an “Add note on this diff line”
+context-menu action. The tray edits/removes notes and sends them together via
+`POST /v1/prompt {target,text,deliveryId}`. Formatting, ordering, excerpt limits,
+fences, checkout and patch metadata follow ChatCodeNoteMessage on the phone.
+Retries reuse the delivery id; failures retain notes. Notes keep their original
+excerpt and fingerprint across refreshes. The dialog lives outside the pane's
+redraw tree, preserving a half-written note. No composer changes. Drafts are
+in-memory for the viewer lifetime; reviewed marks persist across restarts.
+
+`changes/live.js` follows the phone's `gitWatch` capability through
+`WS /hosts/<computer>/v1/git/watch?<target>&worktree=…`: refresh on open/change,
+ignore heartbeat/unknown frames, stop on an error frame, reconnect after
+1/2/4/8/16/30 seconds. Hidden/background documents disconnect. The Hook supplies
+the phone's 1-second debounce (and 3-second polling on platforms without native
+watching). The existing 10-second refresh remains the fallback for old Hooks.
+Changes coalesces reads, retains its expanded file, scroll and text selection;
+Monaco retains diff view state and avoids resetting unchanged models. Watch
+frames deferred during an input or confirmation are retried when it closes.
+
+`changes/worktrees.js` matches sessions on the same computer to the deepest
+listed checkout by whole path components, resolves relative paths from the
+repository, and does not attribute an omitted deeper current checkout to its
+parent. Workers rows show “Open session” when occupied. “Remove checkout” is
+only enabled for non-main rows with `worktreeRemove`; older Hooks show a disabled
+control with an update reason. Its dialog reads
+`POST /v1/git/worktrees/remove/preview {server,pane,worktree}`, shows the phone's
+loss warnings and open sessions, and confirms through
+`POST /v1/git/worktrees/remove {...,token}`. Missing permission/token and open
+sessions block confirmation. A `409 worktree-changed` replaces the preview and
+requires another confirmation; a successful result must say `removed:true`.
+Refresh rereads the preview. The branch stays. No Hook changes or route stubs.
+
+Validation: `src/ui-changes-review.test.ts` owns ledger, phone prompt bytes and
+worktree matching/warnings. `e2e/changes-review.spec.ts` covers mark persistence
+and invalidation, plus sending two diff-side notes in one prompt; the
+orchestrator runs browser coverage. Missing patches (including untracked files
+without a Hook patch) cannot be marked reviewed or given a patch-bound note.
+
+### D4 — Forge CI preview and missing Hook transport
+
+`sections/forge.js` registers the Projects group's CI page (`mountForge`,
+`openForge(scope)`, `runsButton(scope)`). Projects has a CI entry per project;
+Changes › PRs adds a Runs button to the current request and each other request,
+without changing `ui/changes/*`. Scope carries computer, project, optional PR,
+branch and host link. Existing Hooks expose checks but no runs/detail/log routes,
+so live CI is disabled with an update reason. Explicit Preview GitHub / Preview
+gitboy actions use `sections/forge/fixture.js` only; a persistent notice identifies
+sample data. No new network requests, secrets or browser persistence are added.
+`forge/presentation.js` normalizes host statuses, formats durations, validates
+HTTPS links and decodes ANSI to allowlisted spans; log text always uses textContent.
+The preview includes run rows, jobs/steps, log snapshots every five seconds until
+finished, tail following, Jump to end and find with previous/next and Enter/Shift
+Enter. Hidden views cancel timers and invalidate pending responses. Styles live
+in `sections/forge.css`, using only theme variables. Rerun is absent because no
+Hook action exists. Proposed routes/auth and remaining decisions are recorded in
+`.scratch/forge-design.md`. Coverage: `src/ui-forge.test.ts` and
+`e2e/forge.spec.ts` (orchestrator runs the latter).

@@ -4,6 +4,21 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## [Unreleased]
+
+### New
+
+- **Browsers** under Fleet (and in ⌘K): see the Playwright browsers your agents are running on every computer, watch one live with its URL and navigation, take control and hand it back, answer an agent's request for help, and replay a recording with its navigation and handoff markers.
+- **After this turn** in the chat composer: a message sent while the agent is working can be held by the Hook until the turn ends, and held messages can be edited, cancelled or sent now. They survive closing and reopening the chat.
+- Large pastes become a text attachment, a turn ends with a **Worked for** row, Home's Needs you cards say how long they've waited, and a turn that opened a pull request adds a quiet "PR #N opened · View" line.
+- **Changes review**: mark files reviewed and step to the next unreviewed one ("N of M reviewed"), leave notes on diff lines and send them to the agent together, and Changes refreshes while an agent edits. Changes › Workers removes a worker checkout safely and shows the session already open in a worktree.
+- **CI preview** in Forge: runs and their job logs, read-only, where the Hook offers them.
+
+### Fixed
+
+- A scrolled-up chat reader stays where they are while replies stream in; only Latest messages, sending, or scrolling to the end brings them down.
+- The Changes panel fits a 320 px window.
+
 ## [0.1.14] - 2026-10-24
 
 ### New

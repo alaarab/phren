@@ -1,10 +1,15 @@
+import { createLedger, reviewItem } from './changes/review.js';
+import { noteDraft, notesTray } from './changes/notes.js';
+import { watchChanges } from './changes/live.js';
+import { openWorktreeSessions, removalSheet } from './changes/worktrees.js';
 // Changes workbench pane: working tree, history, branches, pull requests and
 // worktrees, each scoped to the session (or a worker's worktree). Its CSS
 // (changes/styles.js) is injected once; helpers live in changes/util.js. It
 // re-renders fully from module state.
+import { runsButton } from "./sections/forge.js";
 import { isShown, watchShown } from "./shown.js";
 import { hookGet, hookPost, readRepoFile } from "./api.js";
-import { projectOf } from "./shell/store.js";
+import { store, projectOf } from "./shell/store.js";
 import { noteOwnAction } from "./shell/ci-watch.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 import { hostTokenError, tokenDestinationText } from "./project-host-token.js";
@@ -16,7 +21,7 @@ import { armMerge, disarmMerge, isArmed, onArmedChange } from "./shell/merge-whe
 import { createStaging } from "./changes/stage.js";
 import { age } from "./time.js";
 import { CHANGES_CSS } from "./changes/styles.js";
-import { basename, button, dirname, div, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, span, tileClass } from "./changes/util.js";
+import { basename, button as makeButton, dirname, div as makeDiv, escapeHtml, hostMark, hunkHeader, icon, planPublish, prReason, pushReason, span, tileClass } from "./changes/util.js";
 import { countOf } from "./text.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
@@ -48,6 +53,13 @@ export function openChanges(el, ctx) {
     // Phren tasks naming the current request's branch: `key` is the project and branch asked about.
     branchTasks: { key: "", tasks: [], done: new Set(), busy: null, error: "" },
   };
+  const ledger = createLedger();
+  let items = [];
+  let diffTruncated = false;
+  let loading = false, queued = false;
+  const notes = noteDraft(computer, target);
+  const reviewCheckout = () => (store.merged?.computers?.find(c => c.computer === computer)?.overview?.phren?.computer?.id || computer) + "\x01" + (state.status?.repository || state.worktree || JSON.stringify(target));
+  const stopNotes = notes.subscribe(() => { if (visible && !typing()) render(); });
   let timer = null;
   let commitBtn = null;
   let toastTimer = null;
@@ -69,21 +81,87 @@ export function openChanges(el, ctx) {
   // textarea too, and is focused most of the time.
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.tagName === "INPUT" || a.tagName === "SELECT") && el.contains(a); };
   // A half-typed token or an open merge confirmation must survive the 10-second re-read.
-  const canPoll = () => visible && document.visibilityState === "visible" && isShown(el) && !state.confirm && !state.sheet && !typing()
+  const canPoll = () => visible && document.visibilityState === "visible" && isShown(el) && !state.confirm && !state.sheet && !state.removing && !typing()
     && !(state.connect && state.connect.token) && !(state.merge && state.merge.confirm);
 
+  // Retain the elements we draw instead of rediscovering the pane's DOM.
+  // This also lets lightweight hosts render Changes without selector APIs.
+  const newRenderRefs = () => ({ scroll: [], rows: [], lines: [], buttons: [], commit: null });
+  let renderRefs = newRenderRefs();
+  function div(cls, text) {
+    const node = makeDiv(cls, text);
+    const classes = (cls || '').split(' ');
+    if (classes.includes('chg-body') || classes.includes('chg-diff')) renderRefs.scroll.push(node);
+    if (classes.includes('chg-row')) renderRefs.rows.push(node);
+    if (classes.includes('chg-line')) renderRefs.lines.push(node);
+    return node;
+  }
+  function button(label, cls, onclick) {
+    const node = makeButton(label, cls, onclick);
+    renderRefs.buttons.push(node);
+    return node;
+  }
+
   function render() {
+    if (!visible || state.removing) return;
+    const scroll = renderRefs.scroll.map(n => [n.scrollTop,n.scrollLeft]);
+    const focused = el.contains(document.activeElement) ? document.activeElement : null;
+    const focusLabel = focused?.getAttribute?.('aria-label');
+    const focusRow = focused?.closest('[data-review-row]')?.dataset.reviewRow;
+    const selection = window.getSelection?.();
+    let selected = null;
+    if (selection?.rangeCount && el.contains(selection.anchorNode) && el.contains(selection.focusNode)) {
+      const range = selection.getRangeAt(0), before = range.cloneRange();
+      before.selectNodeContents(el); before.setEnd(range.startContainer,range.startOffset);
+      selected = [before.toString().length,range.toString().length];
+    }
+    // Keep a selected diff's text anchored to its file/side line, even if earlier rows change.
+    const anchorRow = selection?.anchorNode?.parentElement?.closest('[data-diff-line]');
+    const focusTextRow = selection?.focusNode?.parentElement?.closest('[data-diff-line]');
+    const endpoint = (row, node, at) => {
+      if (!row || !el.contains(row)) return null;
+      const r = document.createRange(); r.selectNodeContents(row); r.setEnd(node,at);
+      return [row.dataset.diffLine,r.toString().length];
+    };
+    const endpoints = selection?.rangeCount ? [endpoint(anchorRow,selection.anchorNode,selection.anchorOffset),endpoint(focusTextRow,selection.focusNode,selection.focusOffset)] : [];
     el.innerHTML = "";
+    renderRefs = newRenderRefs();
     const root = div("chg");
     root.appendChild(renderTop());
     root.appendChild(renderBody());
     if (state.view === "changes") root.appendChild(renderFooter());
+    root.appendChild(notesTray(notes));
     if (state.notice) root.appendChild(renderNotice());
     if (state.copyToast) root.appendChild(renderToast());
     if (state.sheet) root.appendChild(renderSheet());
     el.appendChild(root);
-    const ta = root.querySelector(".chg-msg");
+    const ta = renderRefs.commit;
     if (ta) autosize(ta);
+    renderRefs.scroll.forEach((n,i) => { if (scroll[i]) { n.scrollTop=scroll[i][0]; n.scrollLeft=scroll[i][1]; } });
+    if (focusLabel) {
+      const row = focusRow ? renderRefs.rows.find(n => n.dataset.reviewRow === focusRow) : null;
+      renderRefs.buttons.find(n => n.getAttribute?.('aria-label') === focusLabel && (!focusRow || row?.contains(n)))?.focus?.({preventScroll:true});
+    }
+    const resolveEndpoint = value => {
+      if (!value) return null;
+      const row = renderRefs.lines.find(n => n.dataset.diffLine === value[0]);
+      if (!row) return null;
+      const walker = document.createTreeWalker(row,NodeFilter.SHOW_TEXT); let left=value[1], n;
+      while ((n=walker.nextNode())) { if (left<=n.length) return [n,left]; left-=n.length; }
+      return null;
+    };
+    const anchor = resolveEndpoint(endpoints[0]), focus = resolveEndpoint(endpoints[1]);
+    if (anchor && focus) selection.setBaseAndExtent(...anchor,...focus);
+    else if (selected) {
+      const walker = document.createTreeWalker(el,NodeFilter.SHOW_TEXT);
+      const range = document.createRange(); let offset=0, start=false, n;
+      while ((n=walker.nextNode())) {
+        const end=offset+n.length;
+        if (!start && selected[0]<=end) { range.setStart(n,Math.max(0,selected[0]-offset)); start=true; }
+        if (start && selected[0]+selected[1]<=end) { range.setEnd(n,Math.max(0,selected[0]+selected[1]-offset)); selection.removeAllRanges(); selection.addRange(range); break; }
+        offset=end;
+      }
+    }
   }
 
   function toast(text) {
@@ -126,6 +204,13 @@ export function openChanges(el, ctx) {
   }
 
   async function refresh() {
+    if (!visible) return;
+    if (loading) { queued = true; return; }
+    loading = true;
+    try { await refreshOnce(); }
+    finally { loading = false; if (queued) { queued = false; refresh(); } }
+  }
+  async function refreshOnce() {
     if (!target) { state.error = "This session has no target."; render(); return; }
     try {
       if (state.view === "changes") await loadChanges();
@@ -143,12 +228,20 @@ export function openChanges(el, ctx) {
   }
 
   async function loadChanges() {
+    const scope = state.worktree;
     const res = await hookPost(computer, "/v1/git/status", scopeBody());
+    if (scope !== state.worktree || !visible) return;
+    const diff = await hookPost(computer, "/v1/diff", scopeBody());
+    if (scope !== state.worktree || !visible) return;
     state.status = res;
+    state.diffs = Object.fromEntries((diff.files || []).map(f => [f.path,f]));
+    diffTruncated = diff.truncated === true;
+    items = await Promise.all((res.files || []).map(f => reviewItem(reviewCheckout(),f,
+      state.diffs[f.path]?.sections?.find(s => s.kind === (f.staged ? 'staged' : 'unstaged')),diffTruncated)));
     if (state.expanded) {
       const f = (res.files || []).find((x) => x.path === state.expanded.path && !!x.staged === state.expanded.staged);
       if (!f) state.expanded = null;
-      else await loadDiff(f);
+      else if (f.status === "?" || f.status === "A") await loadDiff(f);
     }
     loadPullsQuiet();
     loadKnowsQuiet();
@@ -202,14 +295,14 @@ export function openChanges(el, ctx) {
   }
 
   async function loadDiff(f) {
-    const res = await hookPost(computer, "/v1/diff", scopeBody({ paths: [f.path] }));
+    const res = await hookPost(computer, "/v1/diff", scopeBody(state.worktree ? {} : { paths: [f.path] }));
     const data = (res.files || []).find((x) => x.path === f.path) || (res.files || [])[0];
     state.diffs[f.path] = data;
     // A new file has no diff hunks until it is staged; read its content instead.
     const added = f.status === "?" || f.status === "A";
     const hasHunks = ((data && data.sections) || []).some((s) => !s.binary && parsePatch(s.patch || "").length > 0);
     if (added && !hasHunks) {
-      try { state.addedText[f.path] = (await readRepoFile(computer, target, f.path)).text || ""; }
+      try { state.addedText[f.path] = (await readRepoFile(computer, state.worktree ? {...target,worktree:state.worktree} : target, f.path)).text || ""; }
       catch { state.addedText[f.path] = null; }
     }
   }
@@ -435,6 +528,13 @@ export function openChanges(el, ctx) {
       body.appendChild(empty);
       return body;
     }
+    const reviewBar = div('chg-review-bar');
+    reviewBar.appendChild(span('', `${ledger.count(items)} of ${items.length} reviewed`));
+    const files = state.status.files || [];
+    const index = files.findIndex(f => state.expanded?.path === f.path && !!f.staged === state.expanded.staged);
+    const next = index < 0 ? items.findIndex(item => !ledger.reviewed(item)) : ledger.next(index,items);
+    const advance = button('Next unreviewed', 'chg-btn', () => { if (next != null && next >= 0) toggleDiff(files[next]); });
+    advance.disabled = next == null || next < 0; reviewBar.appendChild(advance); body.appendChild(reviewBar);
     if (state.knows.findings.length) body.appendChild(renderKnows());
     if (staged.length) body.appendChild(renderSection("STAGED", staged));
     if (changed.length) body.appendChild(renderSection("CHANGES", changed));
@@ -509,11 +609,11 @@ export function openChanges(el, ctx) {
 
   function renderFileRow(f) {
     const row = div("chg-row");
-    // Modified and renamed files open their diff as a centre tab; untracked and
-    // deleted files have nothing to read, so they expand inline.
+    row.dataset.reviewRow = `${f.path}\x01${!!f.staged}`;
+    // Keep the name opening the centre diff; Preview offers inline review.
     row.onclick = () => {
-      if (f.status === "?" || f.status === "D") toggleDiff(f);
-      else ctx.openFile(f.path, { diff: true });
+      if (f.status === '?' || f.status === 'D') toggleDiff(f);
+      else ctx.openFile(f.path, {diff:true, ...(state.worktree ? {worktree:state.worktree} : {})});
     };
     row.appendChild(div("chg-tile " + tileClass(f.status), f.status === "?" ? "?" : f.status));
     const main = div("chg-main");
@@ -532,6 +632,14 @@ export function openChanges(el, ctx) {
       row.appendChild(badge);
     }
     const actions = div("chg-actions");
+    const index = (state.status.files || []).indexOf(f), item = items[index];
+    const reviewed = ledger.reviewed(item);
+    const mark = button(reviewed ? '✓' : '○', 'chg-btn chg-review-mark', e => { e.stopPropagation(); ledger.toggle(item); render(); });
+    mark.setAttribute('aria-label',reviewed ? 'Mark file unreviewed' : 'Mark file reviewed');
+    mark.setAttribute('aria-pressed', String(reviewed)); mark.disabled = !item?.fingerprint;
+    mark.title = item?.fingerprint ? (reviewed ? 'Mark file unreviewed' : 'Mark file reviewed') : 'Cannot mark reviewed without a complete patch';
+    row.appendChild(mark);
+    actions.appendChild(icon('≡', 'Preview diff and add notes', () => toggleDiff(f)));
     actions.appendChild(icon("↗", "Open file", () => ctx.openFile(f.path)));
     if (f.status !== "?" && f.status !== "D") actions.appendChild(icon("⇄", "Open side-by-side diff", () => ctx.openFile(f.path, { diff: true })));
     if (f.staged) actions.appendChild(icon("−", "Unstage", () => doUnstage(f)));
@@ -563,7 +671,7 @@ export function openChanges(el, ctx) {
   function renderDiff(f) {
     const wrap = div("chg-diff");
     const data = state.diffs[f.path];
-    const sections = (data && data.sections) || [];
+    const sections = ((data && data.sections) || []).filter(s => s.kind === (f.staged ? 'staged' : 'unstaged'));
     const hasHunks = sections.some((s) => !s.binary && parsePatch(s.patch || "").length > 0);
     // Added or untracked file with no diff hunks: show its content as additions.
     if ((f.status === "?" || f.status === "A") && !hasHunks) {
@@ -593,24 +701,32 @@ export function openChanges(el, ctx) {
 
   function renderPatch(box, patch, path) {
     const parsed = parsePatch(patch);
-    renderHunks(box, Array.isArray(parsed) ? parsed : (parsed && parsed.hunks) || [], path);
+    renderHunks(box, Array.isArray(parsed) ? parsed : (parsed && parsed.hunks) || [], path, patch);
   }
 
-  function renderHunks(box, hunks, path) {
+  function renderHunks(box, hunks, path, patch = null) {
     for (const hunk of hunks) {
       const header = hunkHeader(hunk);
       if (header) box.appendChild(div("chg-hunk", header));
       const lines = hunk.lines || [];
       annotate(lines);
-      for (const line of lines) box.appendChild(renderDiffLine(line, path));
+      for (const line of lines) box.appendChild(renderDiffLine(line, path, patch));
     }
   }
 
-  function renderDiffLine(line, path) {
+  function renderDiffLine(line, path, patch) {
     const kind = line.kind === "add" ? "add" : line.kind === "del" ? "del" : "";
     const row = div("chg-line" + (kind ? " " + kind : ""));
-    row.appendChild(span("ln", line.kind === "add" ? "" : line.oldLine != null ? String(line.oldLine) : ""));
-    row.appendChild(span("ln", line.kind === "del" ? "" : line.newLine != null ? String(line.newLine) : ""));
+    row.dataset.diffLine = `${path}\x01${state.expanded?.staged}\x01${line.oldLine}:${line.newLine}`;
+    for (const side of ['old','new']) {
+      const number = side === 'old' ? line.oldLine : line.newLine;
+      if (number == null || patch == null) row.appendChild(span('ln',number == null ? '' : String(number)));
+      else {
+        const gutter = button(String(number), 'ln chg-note-gutter', e => { e.stopPropagation(); notes.add({path,line:number,side,text:line.text || '',checkout:reviewCheckout(),patch}); });
+        gutter.disabled = notes.busy;
+        gutter.setAttribute('aria-label', `Add note on ${path}:${number} (${side} side)`); row.appendChild(gutter);
+      }
+    }
     row.appendChild(span("mark", kind === "add" ? "+" : kind === "del" ? "−" : " "));
     const code = div("code");
     if (line.segments && line.segments.length) {
@@ -620,10 +736,6 @@ export function openChanges(el, ctx) {
       code.textContent = line.text == null ? "" : line.text;
     }
     row.appendChild(code);
-    const askNo = line.newLine != null ? line.newLine : line.oldLine;
-    if (askNo != null) {
-      row.appendChild(button("Ask", "chg-ask", (e) => { e.stopPropagation(); ctx.ask(`${path}:${askNo}\n> ${line.text || ""}\n`); }));
-    }
     return row;
   }
 
@@ -693,6 +805,7 @@ export function openChanges(el, ctx) {
     if (plan.commit) {
       const row = div("chg-commit");
       const ta = document.createElement("textarea");
+      renderRefs.commit = ta;
       ta.className = "chg-msg"; ta.placeholder = "Commit message"; ta.rows = 1; ta.value = state.draft;
       ta.addEventListener("input", () => { state.draft = ta.value; autosize(ta); updateCommitBtn(); });
       ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && state.draft.trim()) { e.preventDefault(); doCommit(); } });
@@ -1042,8 +1155,11 @@ export function openChanges(el, ctx) {
   }
 
   function renderConnect(res) {
-    const host = { ...res.host };
-    const c = state.connect || (state.connect = { token: "", error: "" });
+    const c = state.connect || (state.connect = { token: "", error: "", host: { ...res.host } });
+    // A refresh may replace state.pulls before it finishes. Keep a typed token
+    // bound to the destination the visible card told the owner about.
+    if (!c.token && state.busy !== "connect") c.host = { ...res.host };
+    const host = { ...(c.host || res.host) };
     const card = div("chg-connect");
     const head = div("chg-connect-h");
     head.appendChild(hostMark(host.kind, 30));
@@ -1114,6 +1230,7 @@ export function openChanges(el, ctx) {
     if (typeof p.ahead === "number" && p.ahead) route.appendChild(span("chg-req-by", `${p.ahead} ahead`));
     if (typeof p.behind === "number" && p.behind) route.appendChild(span("chg-req-by", `${p.behind} behind`));
     card.appendChild(route);
+    card.appendChild(runsButton({ computer, project: projectOf(ctx.child), branch: p.head, pull: p.number, host, webUrl: p.url }, "chg-btn"));
 
     const chips = div("chg-req-chips");
     const review = { APPROVED: ["Approved", "ok"], CHANGES_REQUESTED: ["Changes requested", "bad"], REVIEW_REQUIRED: ["Review required", "wait"] }[p.reviewDecision];
@@ -1344,6 +1461,7 @@ export function openChanges(el, ctx) {
     if (p.updated) meta.appendChild(span("chg-req-by", age(p.updated)));
     mid.appendChild(meta);
     row.appendChild(mid);
+    row.appendChild(runsButton({ computer, project: projectOf(ctx.child), branch: p.head, pull: p.number, host: state.pulls?.host, webUrl: p.url }, "chg-btn"));
     row.title = p.url || "";
     row.onclick = () => { if (p.url) window.open(p.url, "_blank", "noopener"); };
     return row;
@@ -1389,6 +1507,18 @@ export function openChanges(el, ctx) {
     if (w.behind > 0) track.appendChild(span("down", "↓" + w.behind));
     if (w.changed > 0) track.appendChild(span("chg-dels", w.changed + " changed"));
     row.appendChild(track);
+    const open = openWorktreeSessions(state.worktrees.worktrees || [],store.sessions(),computer,state.status?.repository || state.worktrees.root).get(w.id);
+    if (open) {
+      const jump = button(`Open session · ${open.child.title || open.child.id}`, 'chg-btn', e => {
+        e.stopPropagation(); import('./shell/sections.js').then(({sectionHandle}) => sectionHandle('agents').openSession(computer,open.child));
+      }); row.appendChild(jump);
+    }
+    if (!w.main) {
+      const remove = button('Remove checkout','chg-btn danger', e => { e.stopPropagation(); state.removing = true; const sheet = removalSheet(computer,target,w,refresh,() => { state.removing = false; }); el.appendChild(sheet); });
+      remove.disabled = store.can(computer,'worktreeRemove') !== true;
+      if (remove.disabled) remove.title = `Needs a newer Phren on ${computer}`;
+      row.appendChild(remove);
+    }
     row.title = w.path || "";
     row.onclick = () => openWorktree(w);
     return row;
@@ -1492,7 +1622,8 @@ export function openChanges(el, ctx) {
   // ---- lifecycle -----------------------------------------------------------
   // A re-read skipped while the pane was off screen runs when it comes back.
   let skipped = false;
-  function startTimer() { timer = setInterval(() => { if (canPoll()) refresh(); else if (!isShown(el)) skipped = true; }, 10000); }
+  let livePending = false;
+  function startTimer() { timer = setInterval(() => { if (canPoll()) { livePending = false; refresh(); } else if (!isShown(el)) skipped = true; }, 10000); }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   const stopWatchingShown = watchShown(el, () => { if (skipped && canPoll()) { skipped = false; refresh(); } });
 
@@ -1505,13 +1636,16 @@ export function openChanges(el, ctx) {
   // Arming re-draws the merge bar; a merge or disarm by the watch re-reads.
   const stopArmedChange = onArmedChange(() => { if (state.view === "pulls" && !state.busy) refresh(); });
 
+  const stopLive = watchChanges(computer,target,el,() => state.worktree,() => { livePending = true; if (canPoll()) { livePending = false; refresh(); } });
+  const deferredLive = setInterval(() => { if (livePending && canPoll()) { livePending = false; refresh(); } }, 1000);
+  store.capabilities(computer).then(() => { if (visible && state.view === 'worktrees') render(); }).catch(() => {});
   startTimer();
   refresh();
 
   return {
     refresh,
     showView: selectView,
-    close() { visible = false; stopTimer(); stopWatchingShown(); window.removeEventListener("phren:git-changed", onGitChanged); stopArmedChange(); el.innerHTML = ""; },
+    close() { visible = false; stopNotes(); stopLive(); clearInterval(deferredLive); stopTimer(); stopWatchingShown(); window.removeEventListener("phren:git-changed", onGitChanged); stopArmedChange(); el.innerHTML = ""; },
   };
 }
 

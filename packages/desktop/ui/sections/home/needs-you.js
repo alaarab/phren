@@ -1,3 +1,4 @@
+import { waitBadge } from "../../chat/wait-clock.js";
 import { el } from "../../dom.js";
 import { needsYou, sessions, projectOf } from "../../shell/store.js";
 import { snoozes, snoozable, snoozeChoices } from "../../shell/snooze.js";
@@ -127,6 +128,11 @@ export function createNeeds({ root, state, open, block, sessionRow, fill, isVisi
 
   function needsRow(row, index) {
     const button = sessionRow(row, { tone: "waiting", selected: index === selected, sub: needsSub(row) });
+    const badge = waitBadge(el("span", "home-age"), row.child.statusSince);
+    if (badge) {
+      const age = button.querySelector(".home-age");
+      if (age) age.replaceWith(badge); else button.querySelector(".home-row-meta")?.append(badge);
+    }
     const waiting = row.child.agentStatus === "waiting" && !row.child.approvalPending && row.child.target;
     if (!waiting) return button;
     const wrap = el("div", "home-reply-row");
