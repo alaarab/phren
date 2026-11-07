@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 82 MCP tools across 18 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 83 MCP tools across 18 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -1584,6 +1584,16 @@ Enabled, mode, cadence, window, last run (`dreams/last-run.json`), next eligible
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name, optionally store-qualified. |
+
+### `dream_apply`
+
+Apply pending structured proposals from a stored dream (`dreams/<runId>.json`) through the same paths a dream in apply mode uses. Each target finding is re-checked first; a proposal whose finding is missing or changed since the run is refused. Proposed new findings are approved through the review queue instead.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `runId` | string | yes | The dream's run id (`phren dream log` lists them). |
+| `only` | number[] | no | Zero-based proposal indices to apply; all pending proposals when omitted. |
 
 ### `dream_log`
 

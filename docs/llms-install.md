@@ -70,7 +70,7 @@ Team stores sync independently via git. Findings, notes, and tasks in a team sto
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (82)
+## MCP Tools (83)
 
 ### Search and Browse
 
@@ -227,6 +227,7 @@ Parameters for these are in [api-reference.md](api-reference.md).
 | `set_topic_summary` | see api-reference.md | Store the paragraph you wrote for a topic archive as its '## Now' block, and refresh the project's 'What phren knows' block. Refused if the paragraph names anything the topic's bullets do not (the invented names are returned): fix the paragraph rather than the check. |
 | `dream_run` | see api-reference.md | Run a dream now for one project: an offline pass that corrects, merges and reorganizes its memory from recent transcripts, findings, truths, pages and git. Propose mode files review-queue items; apply mode makes the changes and logs them. `dryRun`, `mode`, `force` (run while dreaming is off). |
 | `dream_status` | see api-reference.md | Dreaming status per project: enabled, mode, cadence, window, last run, next eligible time and last outcome counts. |
+| `dream_apply` | see api-reference.md | Apply pending proposals from a stored dream, refusing changed targets. |
 | `dream_log` | see api-reference.md | The latest entries of a project's dream journal (dreams/journal.md), newest first. |
 | `store_list` | see api-reference.md | List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry. |
 
