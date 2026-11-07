@@ -14,6 +14,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Bun runners opt in to the browser shim explicitly with `--preload` and `initPage`; the Hook no longer sets `BUN_OPTIONS` in every pane.
 
+### Fixed
+
+- The phone's streamed Claude reply preview no longer mixes in text from Claude's diff sidebar, and a long reply that already landed is not shown again as a preview.
+
 ## [0.3.72] - 2026-11-07
 
 ### Added
