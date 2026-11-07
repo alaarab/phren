@@ -35,9 +35,9 @@ const fileSidebar = sidebarScreen([
   "\x1b[1m.claude/skills/creative\x1b[22m",
   "\x1b[1m.claude/skills/dev-loop\x1b[22m",
 ]);
-const grantText = "I can't mint credentials for myself, and my current gitboy.dev token lacks the write scopes needed for tokens or CI variables. I'm starting a setup grant now, which you approve once from your phone.";
+const grantText = "I can't mint credentials for myself, and my current example.dev token lacks the write scopes needed for tokens or CI variables. I'm starting a setup grant now, which you approve once from your phone.";
 const grantSidebar = sidebarScreen([
-  "⏺ I can't mint credentials for myself, and my current gitboy.dev token lacks the write",
+  "⏺ I can't mint credentials for myself, and my current example.dev token lacks the write",
   "  scopes needed for tokens or CI variables. I'm starting a setup grant now, which you",
   "  approve once from your phone.",
 ], [
