@@ -760,14 +760,20 @@ describe.skipIf(!hasNodeSqlite)("conversation search over Codex's SQLite thread 
     expect(page.partial).toBeUndefined();
     expect(page.results).toHaveLength(1);
     expect(page.results[0].conversation).toBe(session(1));
-    expect((await conversationSearch("discovered identity 505", "20")).results[0].conversation).toBe(session(505));
+    // A directory rescan can return a partial page even after indexing completed.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6_000);
+    let last = await conversationSearch("discovered identity 505", "20");
+    for (let pass = 0; pass < 10 && last.partial && !last.results.length; pass++) {
+      last = await conversationSearch("discovered identity 505", "20", last.cursor);
+    }
+    expect(last.results.map(row => row.conversation)).toEqual([session(505)]);
 
     // A completed cycle must restart, including identities created afterward.
     const later = session(506);
     db.prepare("insert into thread_turns values (?, 'turn', 1, 'completed', 1, 1)").run(later);
     db.prepare("insert into thread_items values (?, 'turn', 'u', 1, 1000, ?, 'userMessage', 506)")
       .run(later, JSON.stringify({ type: "userMessage", id: "u", content: [{ type: "text", text: "later discovery marker" }] }));
-    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6_000);
+    clock.mockReturnValue(Date.now() + 6_000);
     let fresh = await conversationSearch("later discovery marker", "20");
     for (let pass = 0; pass < 10 && (fresh.partial || !fresh.results.length); pass++) fresh = await conversationSearch("later discovery marker", "20");
     clock.mockRestore();

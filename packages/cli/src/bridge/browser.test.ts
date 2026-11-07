@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserMessageReader, MAX_BROWSER_MESSAGE, type Hello, type BrowserMessage } from "./browser-protocol.js";
+import { browserSocketPath } from "./browser-socket.js";
 import { runBrowser } from "./browser-env.js";
 import { BrowserRegistry } from "./browser-registry.js";
 import { BrowserRecordings } from "./browser-recordings.js";
@@ -141,8 +142,8 @@ it("streams the latest page with a two-frame ack window and closes when its brow
 
 it("listens on a private socket and ends a producer on malformed input or disconnect", async () => {
   const r = registry(); await r.start();
-  const socketPath = path.join(r.root, "browser.sock");
-  expect(fs.statSync(socketPath).mode & 0o777).toBe(0o600);
+  const socketPath = browserSocketPath(r.root);
+  if (process.platform !== "win32") expect(fs.statSync(socketPath).mode & 0o777).toBe(0o600);
   const socket = connect(socketPath); await once(socket, "connect");
   const registered = once(r, "change"); socket.write(wire(1, hello)); await registered;
   expect(r.list()[0].live).toBe(true);
@@ -191,7 +192,7 @@ it("announces control, takes, steals, ignores a non-holder release, and releases
 });
 
 async function peer(r: BrowserRegistry) {
-  const socket = connect(path.join(r.root, "browser.sock")), reader = new BrowserMessageReader();
+  const socket = connect(browserSocketPath(r.root)), reader = new BrowserMessageReader();
   const messages: BrowserMessage[] = [], arrival = new EventEmitter();
   socket.on("data", chunk => { messages.push(...reader.push(chunk)); arrival.emit("message"); });
   socket.on("error", () => {});
@@ -275,7 +276,7 @@ it.each(["done", "no-browser", "timeout", "cancelled"] as const)("browser ask CL
   const r = registry();
   const phones = outcome === "no-browser" ? undefined : livePhones(r);
   await r.start();
-  vi.stubEnv("PHREN_BROWSER_SOCKET", path.join(r.root, "browser.sock")); vi.stubEnv("PHREN_BROWSER_SESSION", hello.session);
+  vi.stubEnv("PHREN_BROWSER_SOCKET", browserSocketPath(r.root)); vi.stubEnv("PHREN_BROWSER_SESSION", hello.session);
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   if (outcome === "timeout") vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const asked = outcome === "no-browser" ? undefined : once(r, "control");
