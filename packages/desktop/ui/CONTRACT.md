@@ -888,3 +888,23 @@ outside that scrollport; the sheet is bounded by the dynamic viewport minus its
 backdrop padding. At scroll end the complete single-login hint and its unique,
 full-width add action stay above the footer. The account usage line never wraps;
 long identity text can wrap independently.
+
+### D4 — Forge CI preview and missing Hook transport
+
+`sections/forge.js` registers the Projects group's CI page (`mountForge`,
+`openForge(scope)`, `runsButton(scope)`). Projects has a CI entry per project;
+Changes › PRs adds a Runs button to the current request and each other request,
+without changing `ui/changes/*`. Scope carries computer, project, optional PR,
+branch and host link. Existing Hooks expose checks but no runs/detail/log routes,
+so live CI is disabled with an update reason. Explicit Preview GitHub / Preview
+gitboy actions use `sections/forge/fixture.js` only; a persistent notice identifies
+sample data. No new network requests, secrets or browser persistence are added.
+`forge/presentation.js` normalizes host statuses, formats durations, validates
+HTTPS links and decodes ANSI to allowlisted spans; log text always uses textContent.
+The preview includes run rows, jobs/steps, log snapshots every five seconds until
+finished, tail following, Jump to end and find with previous/next and Enter/Shift
+Enter. Hidden views cancel timers and invalidate pending responses. Styles live
+in `sections/forge.css`, using only theme variables. Rerun is absent because no
+Hook action exists. Proposed routes/auth and remaining decisions are recorded in
+`.scratch/forge-design.md`. Coverage: `src/ui-forge.test.ts` and
+`e2e/forge.spec.ts` (orchestrator runs the latter).

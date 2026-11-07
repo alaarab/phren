@@ -1,0 +1,32 @@
+.forge { display: flex; flex-direction: column; min-height: 0; height: 100%; padding: var(--space-section); gap: var(--space-md); }
+.forge-header, .forge-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm); }
+.forge h1 { font-size: 20px; margin: 0; }
+.forge h2 { font-size: 16px; margin: var(--space-md) 0; }
+.forge-notice { padding: var(--space-md); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--waiting); }
+.forge-body { min-height: 0; overflow: auto; flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: var(--space-sm); }
+.forge-button, .forge-controls input, .forge-row { font: inherit; color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); padding: var(--space-sm) var(--space-md); }
+.forge-button { cursor: pointer; min-height: var(--control-h); }
+.forge-button:disabled { color: var(--muted); cursor: default; }
+.forge-row { display: flex; align-items: center; gap: var(--space-md); text-align: left; width: 100%; cursor: pointer; min-height: var(--row-h); }
+.forge-row:hover, .forge-button:hover:enabled { background: var(--raised); }
+.forge :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.forge-main { flex: 1; min-width: 0; overflow-wrap: anywhere; display: grid; gap: var(--space-xs); }
+.forge-meta { color: var(--muted); font-size: var(--font-meta); overflow-wrap: anywhere; }
+.forge-status { font-size: var(--font-meta); color: var(--muted); min-width: 65px; }
+.forge-status.success { color: var(--done); }
+.forge-status.failed, .forge-error { color: var(--danger); }
+.forge-status.running { color: var(--working); }
+.forge-status.waiting, .forge-status.queued { color: var(--waiting); }
+.forge-job { background: var(--sunken); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-sm); }
+.forge-step { display: flex; gap: var(--space-md); padding: var(--space-sm) var(--space-lg); }
+.forge-log { flex: 1; min-height: 160px; overflow: auto; margin: 0; padding: var(--space-lg); background: var(--tool); color: var(--text-2); font: var(--font-mono)/1.6 var(--mono); white-space: pre; tab-size: 4; }
+.forge-log mark { background: var(--waiting); color: var(--sunken); }
+.forge-log .forge-current { outline: 2px solid var(--accent); }
+.forge-ansi-bold { font-weight: bold; }
+.forge-ansi-dim { color: var(--dim); }
+.forge-ansi-danger { color: var(--danger); }
+.forge-ansi-done { color: var(--done); }
+.forge-ansi-waiting { color: var(--waiting); }
+.forge-ansi-path { color: var(--path); }
+.forge-ansi-accent { color: var(--accent); }
+.forge-ansi-text { color: var(--text); }
