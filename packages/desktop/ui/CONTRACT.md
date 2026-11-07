@@ -888,3 +888,55 @@ outside that scrollport; the sheet is bounded by the dynamic viewport minus its
 backdrop padding. At scroll end the complete single-login hint and its unique,
 full-width add action stay above the footer. The account usage line never wraps;
 long identity text can wrap independently.
+
+## D3 — Changes review, diff notes, live checkouts and safe removal
+
+`changes/review.js` ports the phone's DiffReviewLedger: checkout identity (Hook
+computer id + repository, with computer/scope fallback), path and staged state,
+plus SHA-256 of the exact complete patch. Missing or truncated patches cannot
+be reviewed. Marks live in the viewer's `phren.desktop.changes.reviewed.v1`
+localStorage, bounded to 1 MiB with oldest entries evicted; reads and writes
+handle unavailable storage. Changes shows “N of M reviewed”, a per-file mark,
+and Next unreviewed (wraps, skips the current file). A file name still opens the
+centre diff; “Preview diff and add notes” opens its inline patch. Centre diffs
+also offer the same mark for their staged or unstaged patch.
+
+`changes/notes.js` shares a draft per computer/session between inline patches
+and centre diff tabs. Old/new line-number buttons open a keyboard-accessible
+note dialog; Monaco offers gutter clicks and an “Add note on this diff line”
+context-menu action. The tray edits/removes notes and sends them together via
+`POST /v1/prompt {target,text,deliveryId}`. Formatting, ordering, excerpt limits,
+fences, checkout and patch metadata follow ChatCodeNoteMessage on the phone.
+Retries reuse the delivery id; failures retain notes. Notes keep their original
+excerpt and fingerprint across refreshes. The dialog lives outside the pane's
+redraw tree, preserving a half-written note. No composer changes. Drafts are
+in-memory for the viewer lifetime; reviewed marks persist across restarts.
+
+`changes/live.js` follows the phone's `gitWatch` capability through
+`WS /hosts/<computer>/v1/git/watch?<target>&worktree=…`: refresh on open/change,
+ignore heartbeat/unknown frames, stop on an error frame, reconnect after
+1/2/4/8/16/30 seconds. Hidden/background documents disconnect. The Hook supplies
+the phone's 1-second debounce (and 3-second polling on platforms without native
+watching). The existing 10-second refresh remains the fallback for old Hooks.
+Changes coalesces reads, retains its expanded file, scroll and text selection;
+Monaco retains diff view state and avoids resetting unchanged models. Watch
+frames deferred during an input or confirmation are retried when it closes.
+
+`changes/worktrees.js` matches sessions on the same computer to the deepest
+listed checkout by whole path components, resolves relative paths from the
+repository, and does not attribute an omitted deeper current checkout to its
+parent. Workers rows show “Open session” when occupied. “Remove checkout” is
+only enabled for non-main rows with `worktreeRemove`; older Hooks show a disabled
+control with an update reason. Its dialog reads
+`POST /v1/git/worktrees/remove/preview {server,pane,worktree}`, shows the phone's
+loss warnings and open sessions, and confirms through
+`POST /v1/git/worktrees/remove {...,token}`. Missing permission/token and open
+sessions block confirmation. A `409 worktree-changed` replaces the preview and
+requires another confirmation; a successful result must say `removed:true`.
+Refresh rereads the preview. The branch stays. No Hook changes or route stubs.
+
+Validation: `src/ui-changes-review.test.ts` owns ledger, phone prompt bytes and
+worktree matching/warnings. `e2e/changes-review.spec.ts` covers mark persistence
+and invalidation, plus sending two diff-side notes in one prompt; the
+orchestrator runs browser coverage. Missing patches (including untracked files
+without a Hook patch) cannot be marked reviewed or given a patch-bound note.
