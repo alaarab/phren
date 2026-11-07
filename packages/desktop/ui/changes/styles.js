@@ -21,7 +21,7 @@ export const CHANGES_CSS = `
 .chg-sec{margin-top:12px}
 .chg-sec-h{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .chg-pill{background:var(--raised);border-radius:999px;padding:1px 8px;font-size:11px;color:var(--text-2)}
-.chg-row{display:flex;align-items:center;gap:10px;min-height:44px;padding:4px 6px;border-radius:10px;cursor:pointer;position:relative}
+.chg-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;min-height:44px;padding:4px 6px;border-radius:10px;cursor:pointer;position:relative}
 .chg-row:hover{background:var(--surface)}
 .chg-row-menu{position:absolute;top:40px;right:6px;z-index:7;min-width:140px;background:var(--card);border:1px solid var(--border-strong);border-radius:12px;padding:6px;box-shadow:0 16px 40px rgba(0,0,0,.5)}
 .chg-row-item{display:block;width:100%;text-align:left;border:none;background:none;color:var(--text-2);font:13px system-ui,sans-serif;padding:8px 10px;border-radius:9px;cursor:pointer}
@@ -32,13 +32,13 @@ export const CHANGES_CSS = `
 .chg-tile.D{background:rgba(239,152,152,.16);color:var(--danger)}
 .chg-tile.R{background:var(--raised);color:var(--link)}
 .chg-tile.Q{background:var(--raised);color:var(--muted)}
-.chg-main{min-width:0;flex:1}
+.chg-main{min-width:0;flex:1 1 80px}
 .chg-name{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chg-folder{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chg-stat{display:flex;gap:8px;font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}
 .chg-adds{color:var(--done)}
 .chg-dels{color:var(--danger)}
-.chg-actions{display:flex;gap:4px;opacity:0;pointer-events:none}
+.chg-actions{display:flex;flex:none;gap:4px;margin-left:auto;opacity:0;pointer-events:none}
 .chg-row:hover .chg-actions,.chg-row:focus-within .chg-actions{opacity:1;pointer-events:auto}
 .chg-icon{width:26px;height:26px;border:none;border-radius:7px;background:var(--raised);color:var(--muted);font-size:12px;cursor:pointer}
 .chg-icon:hover{background:var(--card);color:var(--text)}

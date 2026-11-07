@@ -31,8 +31,12 @@ import {
 } from "./extensions.js";
 
 const require = createRequire(import.meta.url);
-// The compiled file lives in dist/src/, so the UI folder is two levels up.
-const UI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../ui");
+// Source runs live in src/, packaged runs in dist/src/. Resolve the source
+// layout directly so development servers never depend on a shared packages/ui
+// symlink that another process can remove while modules are loading.
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+const UI_DIR = existsSync(resolve(MODULE_DIR, "../ui/index.html"))
+  ? resolve(MODULE_DIR, "../ui") : resolve(MODULE_DIR, "../../ui");
 const MAX_BODY = 12 * 1024 * 1024;
 const COOKIE = "phren_desktop";
 const HEARTBEAT_MS = 20_000;

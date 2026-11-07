@@ -627,7 +627,7 @@ export function createComposer({ computer, target, provider, branch, project, on
 
   async function send(afterTurn = false) {
     if (!hasDraft() || submitting || attachments.some(att => !att.base64)) return;
-    if (working && !isSlashCommand(input.value) && !afterTurn) {
+    if (working && heldQueue.capable() && !isSlashCommand(input.value) && !afterTurn) {
       openPopover(primaryBtn, (body) => {
         const now = node("button", "pc-send-choice", "Send now"); now.type = "button";
         now.addEventListener("click", () => { closePopover(); void submitDraft(false); });

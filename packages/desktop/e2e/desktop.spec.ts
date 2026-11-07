@@ -611,7 +611,7 @@ test("Home and Conductor agree on the running conductor", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".home-conductor-title")).toHaveText("Conductor");
   await page.locator('.section-pill[data-group="fleet"]').click();
-  await expect(page.locator(".section-sub")).toHaveText(["Conductor", "Schedules", "Previews"]);
+  await expect(page.locator(".section-sub")).toHaveText(["Conductor", "Schedules", "Previews", "Browsers"]);
   await page.locator('.section-sub[data-section="conductor"]').click();
   await expect(page.locator(".conductor-run-title")).toHaveText("Conductor");
   await expect(page.getByText("No conductor is running")).toHaveCount(0);

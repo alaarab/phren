@@ -268,7 +268,11 @@ export function createTimelineView(container, ctx = {}) {
       armLanding();
       return;
     }
-    if (readerIntent && scroll.scrollTop !== lastTop) {
+    // A scroll away from the tail is itself reader intent (including an
+    // accessibility client setting scrollTop). Render/follow writes update
+    // lastTop synchronously, so their later scroll events cannot detach us.
+    // Only an explicit gesture may rejoin the tail after content shrinks.
+    if (scroll.scrollTop !== lastTop && (readerIntent || distanceFromBottom() > 1)) {
       reader = followState(reader, { type: "reader-scroll", distance: distanceFromBottom() });
     }
     lastTop = scroll.scrollTop;
