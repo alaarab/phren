@@ -72,6 +72,21 @@ async function claudeChildModel(file: string): Promise<string | undefined> {
  * too: Git routes must fail explicitly when a checkout disappears, never
  * substitute the parent repository. */
 export async function claudeChildCheckout(file: string): Promise<Pick<ChildAgentRelation, "cwd" | "worktreeName" | "branch">> {
+  // A child's first rows never change and its meta file rarely does; the tree asks for every child each time.
+  const [child, metaInfo] = await Promise.all([stat(file), stat(file.slice(0, -".jsonl".length) + ".meta.json").catch(() => undefined)]);
+  const stamp = `${child.dev}:${child.ino}:${metaInfo ? `${metaInfo.ino}:${metaInfo.size}:${metaInfo.mtimeMs}` : "-"}`;
+  const cached = claudeCheckoutCache.get(file);
+  if (cached?.stamp === stamp) return cached.checkout;
+  const checkout = await readClaudeChildCheckout(file);
+  if (checkout.cwd) {
+    claudeCheckoutCache.delete(file); claudeCheckoutCache.set(file, { stamp, checkout });
+    while (claudeCheckoutCache.size > 1024) claudeCheckoutCache.delete(claudeCheckoutCache.keys().next().value!);
+  }
+  return checkout;
+}
+const claudeCheckoutCache = new Map<string, { stamp: string; checkout: Pick<ChildAgentRelation, "cwd" | "worktreeName" | "branch"> }>();
+
+async function readClaudeChildCheckout(file: string): Promise<Pick<ChildAgentRelation, "cwd" | "worktreeName" | "branch">> {
   const meta = await readFile(file.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
   let cwd = typeof meta.worktreePath === "string" && path.isAbsolute(meta.worktreePath) ? meta.worktreePath : undefined;
   let branch = typeof meta.worktreeBranch === "string" && meta.worktreeBranch ? meta.worktreeBranch.slice(0, 200) : undefined;
@@ -125,7 +140,15 @@ export async function claudeChildAgents(file: string, session: string): Promise<
   return claudeChildRelations(file, session, signature, rows, stop);
 }
 
-async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
+/** A parent transcript read up to `offset`, with the fold's state there. Claude Code only appends to
+ * it, so a grown file is read from `offset` on: a busy session's transcript runs past 100 MB, and
+ * reading it whole for every change kept the Hook near a full core. */
+interface ClaudeParentParse {
+  identity: string; offset: number; stops: Map<string, string>; background: Map<string, ClaudeCall>; rows: ClaudeParentRows; reading?: Promise<void>;
+}
+const claudeParentParses = new Map<string, ClaudeParentParse>();
+
+function newParentParse(identity: string): ClaudeParentParse {
   const launches = new Map<string, ClaudeLaunch>();
   const stops = new Map<string, string>();
   // A background skill (`/code-review` run as `@code-review`) is announced in
@@ -142,108 +165,147 @@ async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
   // Agent calls by tool_use id: the parent waits on a foreground one until its tool_result; a background one
   // waits here for its launch result, which names its agent (or, when it names none, stays here).
   const foreground = new Map<string, ClaudeCall>(), background = new Map<string, ClaudeCall>(), unidentified = new Map<string, ClaudeCall>();
-  const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
-  for await (const line of lines) {
-    try {
-      const raw = object(JSON.parse(line)), result = object(raw.toolUseResult);
-      const blocks = objects(object(raw.message).content);
-      const status = String(result.status ?? "");
-      // The agent id under the key Claude Code uses, or the one an older or newer version does.
-      const agentId = String([result.agentId, result.agent_id, result.taskType === "local_workflow" ? undefined : result.taskId, result.task_id]
-        .find(value => typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value)) ?? "");
-      // A launch that runs on: async by its own word, or by any status that is not an end.
-      const launched = result.taskType !== "local_workflow" && !/^(completed|failed|error|killed|cancell?ed|stopped|done)$/.test(status)
-        && (result.isAsync === true || /^(async_)?(launched|running|started|queued|pending|spawned)$/.test(status));
-      const resultCall = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
-      if (launched && agentId && resultCall) {
-        launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId: resultCall, state: "running" });
-      } else if (launched && resultCall && !agentId && background.has(resultCall)) {
-        const call = background.get(resultCall);
-        // Timed from the call itself: its agent can start before the launch result is stamped.
-        unidentified.set(resultCall, { path: String(result.description || call?.path || "Agent").slice(0, 200), callId: resultCall, prompt: call?.prompt ?? "",
-          ...(call?.at ? { at: call.at } : typeof raw.timestamp === "string" ? { at: raw.timestamp } : {}) });
-      }
-      // SendMessage to a finished agent resumes it until its next final notification.
-      const resumed = typeof result.resumedAgentId === "string" ? launches.get(result.resumedAgentId) : undefined;
-      if (resumed && typeof result.message === "string" && /^Resuming agent\b/i.test(result.message)) {
-        resumed.state = "running";
-        if (typeof raw.timestamp === "string") resumed.resumedAt = raw.timestamp;
-      }
-      if (result.taskType === "local_workflow" && status === "async_launched" && typeof result.taskId === "string"
-          && typeof result.runId === "string" && /^wf_[A-Za-z0-9-]{1,64}$/.test(result.runId)) {
-        const callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
-        workflows.set(result.taskId, { runId: result.runId, name: String(result.workflowName || "Workflow").slice(0, 200), callId, state: "running" });
-      }
-      if (raw.type === "system" && typeof raw.content === "string" && raw.content.includes("<forked-skill-launch>")) {
-        const launch = object(JSON.parse(/<forked-skill-launch>([\s\S]*?)<\/forked-skill-launch>/.exec(raw.content)?.[1] ?? "{}"));
-        const id = String(launch.agentId ?? "");
-        if (/^[A-Za-z0-9._-]{1,128}$/.test(id)) {
-          launches.set(id, { path: String(launch.description || (launch.skillName ? `/${launch.skillName}` : "Skill")).slice(0, 200), callId: `skill:${id}`, state: "running" });
-          skills.add(id);
-        }
-      }
-      if (raw.type === "assistant") {
-        for (const block of blocks) {
-          if (block.type !== "tool_use") continue;
-          if (block.name === "TaskStop" && typeof block.id === "string" && typeof object(block.input).task_id === "string") {
-            stops.set(block.id, String(object(block.input).task_id));
-          }
-          if (block.name !== "Agent" && block.name !== "Task") continue;
-          const input = object(block.input), name = String(input.name ?? "");
-          if (typeof block.id !== "string") continue;
-          if (block.name === "Agent" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) {
-            teammates.set(name, { path: String(input.description || name).slice(0, 200), callId: block.id.slice(0, 200), state: "running" });
-            continue;
-          }
-          const call: ClaudeCall = { path: String(input.description || input.subagent_type || "Agent").slice(0, 200), callId: block.id.slice(0, 200),
-            prompt: typeof input.prompt === "string" ? input.prompt : "", ...(typeof raw.timestamp === "string" ? { at: raw.timestamp } : {}) };
-          (input.run_in_background === true ? background : foreground).set(call.callId, call);
-        }
-      }
-      // A call's result ends the parent's wait on it: the foreground agent finished, failed or was interrupted.
-      if (raw.type === "user") for (const block of blocks) {
-        if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
-        foreground.delete(block.tool_use_id); background.delete(block.tool_use_id);
-      }
-      // A stop request alone proves nothing. Its successful, matching result
-      // ends the child even when no later task notification is recorded.
-      if (raw.type === "user") {
-        for (const block of blocks) {
-          if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
-          const task = stops.get(block.tool_use_id);
-          if (!task) continue;
-          stops.delete(block.tool_use_id);
-          const previous = launches.get(task) ?? workflows.get(task);
-          if (previous && block.is_error !== true && result.task_id === task && typeof result.message === "string"
-              && /^Successfully stopped task\b/i.test(result.message)) previous.state = "completed";
-        }
-      }
-      const content = typeof raw.content === "string" ? raw.content : typeof object(raw.message).content === "string" ? String(object(raw.message).content) : "";
-      const attachment = object(raw.attachment);
-      const notices = [raw.type === "queue-operation" || raw.type === "user" ? content : "",
-        ...(raw.type === "user" ? blocks.filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)) : []),
-        raw.type === "attachment" && attachment.type === "queued_command" && attachment.commandMode === "task-notification" && typeof attachment.prompt === "string" ? attachment.prompt : ""];
-      for (const notice of notices) {
-        for (const match of notice.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
-          const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(match[1])?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(match[1])?.[1].trim();
-          // Terminal notifications end only the child named in that envelope.
-          const previous = child && (launches.get(child) ?? workflows.get(child));
-          if (previous && ["completed", "failed", "cancelled", "canceled", "killed", "stopped"].includes(taskStatus ?? "")) previous.state = "completed";
-        }
-      }
-      // One row can carry several messages (a shutdown approval and the
-      // system's termination notice together). Idle, an approved shutdown
-      // and termination end a teammate; anything else it says wakes it.
-      for (const match of content.includes("<teammate-message") ? content.matchAll(/<teammate-message teammate_id="([A-Za-z0-9][A-Za-z0-9_-]{0,63})"[^>]*>([\s\S]*?)<\/teammate-message>/g) : []) {
-        const [, from, body] = match;
-        const type = /"type":"([a-z_]+)"/.exec(body)?.[1];
-        const ended = from === "system" && type === "teammate_terminated" ? /"message":"([A-Za-z0-9][A-Za-z0-9_-]{0,63}) has shut down/.exec(body)?.[1] : undefined;
-        const teammate = teammates.get(ended ?? from);
-        if (teammate) teammate.state = ended || type === "idle_notification" || type === "shutdown_approved" ? "completed" : "running";
-      }
-    } catch { /* Ignore unrelated/malformed rows. */ }
+  return { identity, offset: 0, stops, background, rows: { launches, skills, workflows, teammates, foreground, unidentified } };
+}
+
+async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
+  // Reads of one file take turns, so no row is applied twice.
+  while (claudeParentParses.get(file)?.reading) await claudeParentParses.get(file)!.reading;
+  const metadata = await stat(file), identity = `${metadata.dev}:${metadata.ino}`;
+  let parse = claudeParentParses.get(file);
+  if (parse?.reading) return claudeParentRows(file);
+  // Replaced or rewritten (shorter than what was read): read from the start.
+  if (!parse || parse.identity !== identity || metadata.size < parse.offset) parse = newParentParse(identity);
+  claudeParentParses.delete(file); claudeParentParses.set(file, parse);
+  while (claudeParentParses.size > 64) claudeParentParses.delete(claudeParentParses.keys().next().value!);
+  if (metadata.size > parse.offset) {
+    const reading = readParentRows(file, parse, metadata.size);
+    parse.reading = reading.catch(() => undefined).finally(() => { parse.reading = undefined; });
+    await reading;
   }
-  return { launches, skills, workflows, teammates, foreground, unidentified };
+  return copyRows(parse.rows);
+}
+
+/** Applies every whole row in [offset, size). A last row with no newline yet counts once it parses; a
+ * part-written one is left for the next read. */
+async function readParentRows(file: string, parse: ClaudeParentParse, size: number): Promise<void> {
+  let carry: Buffer = Buffer.alloc(0);
+  for await (const chunk of createReadStream(file, { start: parse.offset, end: size - 1 }) as AsyncIterable<Buffer>) {
+    let data = carry.length ? Buffer.concat([carry, chunk]) : chunk, from = 0;
+    for (let at = data.indexOf(10); at !== -1; at = data.indexOf(10, from)) {
+      const end = at > from && data[at - 1] === 13 ? at - 1 : at;
+      applyParentRow(parse, data.toString("utf8", from, end));
+      parse.offset += at + 1 - from; from = at + 1;
+    }
+    carry = data.subarray(from);
+  }
+  if (!carry.length) return;
+  const line = carry.toString("utf8");
+  try { JSON.parse(line); } catch { return; }
+  applyParentRow(parse, line);
+  parse.offset += carry.length;
+}
+
+function applyParentRow(parse: ClaudeParentParse, line: string): void {
+  const { stops, background } = parse, { launches, skills, workflows, teammates, foreground, unidentified } = parse.rows;
+  try {
+    const raw = object(JSON.parse(line)), result = object(raw.toolUseResult);
+    const blocks = objects(object(raw.message).content);
+    const status = String(result.status ?? "");
+    // The agent id under the key Claude Code uses, or the one an older or newer version does.
+    const agentId = String([result.agentId, result.agent_id, result.taskType === "local_workflow" ? undefined : result.taskId, result.task_id]
+      .find(value => typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value)) ?? "");
+    // A launch that runs on: async by its own word, or by any status that is not an end.
+    const launched = result.taskType !== "local_workflow" && !/^(completed|failed|error|killed|cancell?ed|stopped|done)$/.test(status)
+      && (result.isAsync === true || /^(async_)?(launched|running|started|queued|pending|spawned)$/.test(status));
+    const resultCall = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
+    if (launched && agentId && resultCall) {
+      launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId: resultCall, state: "running" });
+    } else if (launched && resultCall && !agentId && background.has(resultCall)) {
+      const call = background.get(resultCall);
+      // Timed from the call itself: its agent can start before the launch result is stamped.
+      unidentified.set(resultCall, { path: String(result.description || call?.path || "Agent").slice(0, 200), callId: resultCall, prompt: call?.prompt ?? "",
+        ...(call?.at ? { at: call.at } : typeof raw.timestamp === "string" ? { at: raw.timestamp } : {}) });
+    }
+    // SendMessage to a finished agent resumes it until its next final notification.
+    const resumed = typeof result.resumedAgentId === "string" ? launches.get(result.resumedAgentId) : undefined;
+    if (resumed && typeof result.message === "string" && /^Resuming agent\b/i.test(result.message)) {
+      resumed.state = "running";
+      if (typeof raw.timestamp === "string") resumed.resumedAt = raw.timestamp;
+    }
+    if (result.taskType === "local_workflow" && status === "async_launched" && typeof result.taskId === "string"
+        && typeof result.runId === "string" && /^wf_[A-Za-z0-9-]{1,64}$/.test(result.runId)) {
+      const callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
+      workflows.set(result.taskId, { runId: result.runId, name: String(result.workflowName || "Workflow").slice(0, 200), callId, state: "running" });
+    }
+    if (raw.type === "system" && typeof raw.content === "string" && raw.content.includes("<forked-skill-launch>")) {
+      const launch = object(JSON.parse(/<forked-skill-launch>([\s\S]*?)<\/forked-skill-launch>/.exec(raw.content)?.[1] ?? "{}"));
+      const id = String(launch.agentId ?? "");
+      if (/^[A-Za-z0-9._-]{1,128}$/.test(id)) {
+        launches.set(id, { path: String(launch.description || (launch.skillName ? `/${launch.skillName}` : "Skill")).slice(0, 200), callId: `skill:${id}`, state: "running" });
+        skills.add(id);
+      }
+    }
+    if (raw.type === "assistant") {
+      for (const block of blocks) {
+        if (block.type !== "tool_use") continue;
+        if (block.name === "TaskStop" && typeof block.id === "string" && typeof object(block.input).task_id === "string") {
+          stops.set(block.id, String(object(block.input).task_id));
+        }
+        if (block.name !== "Agent" && block.name !== "Task") continue;
+        const input = object(block.input), name = String(input.name ?? "");
+        if (typeof block.id !== "string") continue;
+        if (block.name === "Agent" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) {
+          teammates.set(name, { path: String(input.description || name).slice(0, 200), callId: block.id.slice(0, 200), state: "running" });
+          continue;
+        }
+        const call: ClaudeCall = { path: String(input.description || input.subagent_type || "Agent").slice(0, 200), callId: block.id.slice(0, 200),
+          prompt: typeof input.prompt === "string" ? input.prompt : "", ...(typeof raw.timestamp === "string" ? { at: raw.timestamp } : {}) };
+        (input.run_in_background === true ? background : foreground).set(call.callId, call);
+      }
+    }
+    // A call's result ends the parent's wait on it: the foreground agent finished, failed or was interrupted.
+    if (raw.type === "user") for (const block of blocks) {
+      if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+      foreground.delete(block.tool_use_id); background.delete(block.tool_use_id);
+    }
+    // A stop request alone proves nothing. Its successful, matching result
+    // ends the child even when no later task notification is recorded.
+    if (raw.type === "user") {
+      for (const block of blocks) {
+        if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+        const task = stops.get(block.tool_use_id);
+        if (!task) continue;
+        stops.delete(block.tool_use_id);
+        const previous = launches.get(task) ?? workflows.get(task);
+        if (previous && block.is_error !== true && result.task_id === task && typeof result.message === "string"
+            && /^Successfully stopped task\b/i.test(result.message)) previous.state = "completed";
+      }
+    }
+    const content = typeof raw.content === "string" ? raw.content : typeof object(raw.message).content === "string" ? String(object(raw.message).content) : "";
+    const attachment = object(raw.attachment);
+    const notices = [raw.type === "queue-operation" || raw.type === "user" ? content : "",
+      ...(raw.type === "user" ? blocks.filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)) : []),
+      raw.type === "attachment" && attachment.type === "queued_command" && attachment.commandMode === "task-notification" && typeof attachment.prompt === "string" ? attachment.prompt : ""];
+    for (const notice of notices) {
+      for (const match of notice.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+        const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(match[1])?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(match[1])?.[1].trim();
+        // Terminal notifications end only the child named in that envelope.
+        const previous = child && (launches.get(child) ?? workflows.get(child));
+        if (previous && ["completed", "failed", "cancelled", "canceled", "killed", "stopped"].includes(taskStatus ?? "")) previous.state = "completed";
+      }
+    }
+    // One row can carry several messages (a shutdown approval and the
+    // system's termination notice together). Idle, an approved shutdown
+    // and termination end a teammate; anything else it says wakes it.
+    for (const match of content.includes("<teammate-message") ? content.matchAll(/<teammate-message teammate_id="([A-Za-z0-9][A-Za-z0-9_-]{0,63})"[^>]*>([\s\S]*?)<\/teammate-message>/g) : []) {
+      const [, from, body] = match;
+      const type = /"type":"([a-z_]+)"/.exec(body)?.[1];
+      const ended = from === "system" && type === "teammate_terminated" ? /"message":"([A-Za-z0-9][A-Za-z0-9_-]{0,63}) has shut down/.exec(body)?.[1] : undefined;
+      const teammate = teammates.get(ended ?? from);
+      if (teammate) teammate.state = ended || type === "idle_notification" || type === "shutdown_approved" ? "completed" : "running";
+    }
+  } catch { /* Ignore unrelated/malformed rows. */ }
 }
 
 async function claudeChildRelations(file: string, session: string, signature: string, rows: ClaudeParentRows, stop?: StopTasks): Promise<ChildAgentRelation[]> {
@@ -484,17 +546,30 @@ async function claudeWorkflowAgents(root: string, session: string, workflow: { r
   return relations;
 }
 
+/** Answers from a child's first row, which Claude Code never rewrites: kept per file while it is the same file. */
+const claudeBelongsCache = new Map<string, { identity: string; belongs: boolean }>();
+
 async function claudeChildBelongsTo(file: string, parent: string, agentId: string): Promise<boolean> {
-  let bytes = Buffer.alloc(0);
+  const info = await stat(file), identity = `${info.dev}:${info.ino}`, key = `${file}\0${parent}\0${agentId}`;
+  const cached = claudeBelongsCache.get(key);
+  if (cached?.identity === identity) return cached.belongs;
+  let bytes = Buffer.alloc(0), whole = false;
   for await (const chunk of createReadStream(file, { start: 0, end: 1_048_575 })) {
     bytes = Buffer.concat([bytes, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-    const newline = bytes.indexOf(0x0a); if (newline >= 0) { bytes = bytes.subarray(0, newline); break; }
+    const newline = bytes.indexOf(0x0a); if (newline >= 0) { bytes = bytes.subarray(0, newline); whole = true; break; }
   }
+  let belongs = false;
   try {
     const raw = object(JSON.parse(bytes.toString("utf8")));
-    return (raw.isSidechain === true && raw.sessionId === parent && raw.agentId === agentId)
+    belongs = (raw.isSidechain === true && raw.sessionId === parent && raw.agentId === agentId)
       || (raw.type === "fork-context-ref" && raw.parentSessionId === parent && raw.agentId === agentId);
-  } catch { return false; }
+  } catch { /* Not a row yet, or not one of this parent's. */ }
+  // A first row still being written is read again next time.
+  if (whole) {
+    claudeBelongsCache.delete(key); claudeBelongsCache.set(key, { identity, belongs });
+    while (claudeBelongsCache.size > 1024) claudeBelongsCache.delete(claudeBelongsCache.keys().next().value!);
+  }
+  return belongs;
 }
 
 // `effort` rides on each assistant row (Claude Code 2.1): with `message.model`

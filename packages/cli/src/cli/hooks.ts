@@ -31,14 +31,15 @@ import {
   clampFloat,
   errorMessage,
 } from "../utils.js";
-import { getHooksEnabledPreference } from "../init/init.js";
+import { getHooksEnabledPreference } from "../init/preferences.js";
+import { classifyClaudePromptText } from "../bridge/input-classification.js";
 import { logger } from "../logger.js";
 import { isToolHookEnabled, runPrePromptHooks } from "../hooks.js";
 import { handleExtractMemories } from "./extract.js";
 import { appendAuditLog } from "../shared.js";
 import { updateRuntimeHealth } from "../shared/governance.js";
 import { getProactivityLevel, getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
-import { FINDING_SENSITIVITY_CONFIG } from "./config.js";
+import { FINDING_SENSITIVITY_CONFIG } from "./config-policy.js";
 import * as fs from "fs";
 
 // ── Re-exports from focused modules ─────────────────────────────────────────
@@ -163,6 +164,10 @@ export async function handleHookPrompt() {
   if (!input) process.exit(0);
 
   const { prompt, cwd, sessionId } = input;
+
+  // A background agent's result or a teammate's message is not the owner asking anything:
+  // the context pass (about a second on a busy store) has nothing to answer.
+  if (classifyClaudePromptText(prompt).category === "notification") process.exit(0);
 
   if (!getHooksEnabledPreference(getPhrenPath())) {
     appendAuditLog(getPhrenPath(), "hook_prompt", "status=disabled");
