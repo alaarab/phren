@@ -1,7 +1,7 @@
 // Explicit preview data. No credentials, real project data or network requests.
 export function createFixture(hostKind = "github") {
   const gitboy = hostKind === "gitboy";
-  const base = gitboy ? "https://gitboy.dev/phren-owner/phren" : "https://github.com/phren-owner/phren";
+  const base = gitboy ? "https://forge.example.dev/phren-owner/phren" : "https://github.com/phren-owner/phren";
   const createdAt = new Date(Date.now() - 95_000).toISOString();
   const runs = [
     { id: "42", number: 42, title: "Show CI runs on desktop", workflow: gitboy ? "Pipeline" : "CI", branch: "feature/forge", sha: "a83fe21", actor: "phren-owner", status: "running", createdAt, webUrl: `${base}/${gitboy ? "pipelines" : "actions/runs"}/42` },

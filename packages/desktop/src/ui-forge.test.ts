@@ -51,6 +51,6 @@ describe("Forge presentation", () => {
     expect(matches("a.b aXb", "a.b")).toEqual([[0, 3]]);
     expect(webUrl("javascript:alert(1)")).toBeNull();
     expect(webUrl("https://token@example.com/log")).toBeNull();
-    expect(webUrl("https://gitboy.dev/owner/repo")).toBe("https://gitboy.dev/owner/repo");
+    expect(webUrl("https://forge.example.dev/owner/repo")).toBe("https://forge.example.dev/owner/repo");
   });
 });
