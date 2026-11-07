@@ -927,3 +927,44 @@ Home's needs-you count remains session-based: browser help is absent from the
 current overview contract and would require a shared browser attention feed.
 The named phone browser reference files were absent in this read-only checkout;
 the Hook browser modules and D1 brief define the port's contract.
+
+### D2: phone chat sending parity
+
+`chat/pending-queue.js` owns the pending strip. The composer offers **Send now**
+and **After this turn** for an ordinary draft while working. The latter requires
+`afterTurnQueue`, uses `POST /v1/prompt/after-turn { target, id, text }`, and lists
+with `/after-turn/list { target }`; edit/cancel use `/after-turn/edit` and
+`/after-turn/cancel { target, id, text? }`. Polls preserve unchanged nodes and
+edits, discard stale reads, and stop on destroy. Unknown sends are never retried
+automatically. A retry of an uncertain enqueue retains its id and uploaded paths;
+only the submitted draft and attachments are consumed on confirmation. Send now
+first requires a confirmed cancellation, then uses ordinary delivery with a fresh
+id. This is two requests because the Hook has no atomic after-turn send-now route.
+Claude's transcript `isQueued` rows appear separately: `queuedMessageActions`
+must include the target source before offering `/v1/prompt/queue { target,
+action: "send-now" | "withdraw" }`. Edit withdraws before prepending the returned
+`messages` to the draft. Errors preserve the draft and show the Hook's reason.
+All transport uses `hookPost` through the daemon's `/hosts/<computer>` proxy.
+Older Hooks disable After this turn with the newer-Phren reason.
+
+`chat/send-behavior.js` contains pure phone rules: a paste at **32 KiB UTF-8**
+becomes `pasted-text.txt`; the chip offers Keep inline and Remove. The existing
+upload path sends the exact bytes and appends the phone's `Attached files on
+this computer:` footer, including its final newline. Finished activity rows use
+phone duration formatting (`Thought for 27s`, `Worked for 1m 04s`), preserving
+harness verbs and stopped-turn wording from desktop-kit. `chat/wait-clock.js`
+updates Home and both sidebar Needs you layouts from `statusSince` with **one**
+minute clock, changing text only (`Waiting`, `Waiting 20m`, `Waiting 2h`,
+`Waiting 1d`); missing timestamps omit the badge.
+
+The timeline's follow state changes only on reader actions: streaming, resize and
+backlog replacement cannot resume following. Touch holds the viewport; following
+resumes via **Latest messages**, a send, or a reader scroll to the final pixel.
+Rows anchor the scrolled-up reader, with native overflow anchoring disabled.
+A successful paired `gh pr create` / `glab mr create` tool result ending in a
+request URL produces the quiet `PR #42 opened · View` (or MR) after a completed
+turn. Assistant prose and PR reads do not count. `pullRequestLanded` shares the
+phone's successful-publication-result wording, including already-open results;
+there is no structured agent-created-PR frame, so arbitrary forge clients cannot
+be detected reliably. Coverage: `src/ui-chat-send-behavior.test.ts` and
+`e2e/chat-pending-queue.spec.ts` (fake Hook, reserved for the orchestrator's run).

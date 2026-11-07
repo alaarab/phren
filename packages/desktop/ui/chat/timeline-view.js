@@ -1,10 +1,11 @@
+import { followState, workedForLabel, openedRequest } from "./send-behavior.js";
 import { el as h } from "../dom.js";
 import { exhausted } from "../shell/usage-windows.js";
 // The desktop chat timeline: draws the kit's prepared transcript rows the way
 // the phone does. Plain browser ES module. `render` is incremental: rows are
 // keyed by their stable id and only rebuilt when their render key changes; the
 // scroll stays anchored at the bottom when the reader is there, otherwise their
-// place is kept and a "Jump to latest" pill appears.
+// place is kept and a "Latest messages" pill appears.
 
 import * as kit from "/vendor/kit/index.js";
 import { parsePatch, wordSegments } from "../patch.js";
@@ -131,7 +132,7 @@ function groupTurns(entries) {
   let leading = [];
   for (const entry of entries) {
     const first = entry.messages && entry.messages[0];
-    const startsTurn = !entry.pendingEcho && !!first && first.role === "user";
+    const startsTurn = !entry.pendingEcho && !!first && first.role === "user" && !first.isQueued;
     if (startsTurn) { turns.push([...leading, entry]); leading = []; }
     else if (turns.length) turns[turns.length - 1].push(entry);
     else leading.push(entry);
@@ -174,7 +175,7 @@ export function createTimelineView(container, ctx = {}) {
   const column = h("div", "ct-column");
   scroll.append(column);
   scroll.tabIndex = -1; // a click in the transcript puts focus here, so Alt+Up/Down reach the outline
-  const jump = h("button", "ct-jump", "Jump to latest");
+  const jump = h("button", "ct-jump", "Latest messages");
   jump.type = "button";
   jump.hidden = true;
   container.append(scroll, jump);
@@ -184,6 +185,9 @@ export function createTimelineView(container, ctx = {}) {
   let jobsEl = null;
   let previewRow = null;
   let atBottom = true;
+  let reader = { following: true, touching: false };
+  let readerIntent = false;
+  let lastTop = 0;
   let reachTopFired = false;
   const onTop = [];
   let expandedAll = false;    // the fold is open, every turn drawn
@@ -197,17 +201,18 @@ export function createTimelineView(container, ctx = {}) {
   let promptRows = [];        // every loaded user prompt: { id, el, text }; el is null behind the fold
 
   const distanceFromBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
-  const isAtBottom = () => distanceFromBottom() < 40;
-  const scrollToBottom = () => { scroll.scrollTop = scroll.scrollHeight; };
+  const isAtBottom = () => reader.following && !reader.touching;
+  const scrollToBottom = () => { scroll.scrollTop = scroll.scrollHeight; lastTop = scroll.scrollTop; };
 
   function updateJump() {
-    atBottom = isAtBottom();
+    atBottom = reader.following && !reader.touching;
     jump.hidden = atBottom;
   }
 
   /** A prompt jump begins: the reader leaves the bottom and nothing may move the view until it lands. */
   function beginJump(goal = null) {
     detached = true;
+    reader = followState(reader, { type: "leave" });
     atBottom = false;
     jumpGoal = goal;
     clearTimeout(jumpCap);
@@ -236,12 +241,37 @@ export function createTimelineView(container, ctx = {}) {
   for (const type of ["wheel", "touchstart", "pointerdown"]) scroll.addEventListener(type, endJump, { passive: true });
   scroll.addEventListener("keydown", (event) => { if (!(event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown"))) endJump(); });
 
+  scroll.addEventListener("wheel", (event) => {
+    readerIntent = true;
+    if (event.deltaY < 0) reader = followState(reader, { type: "leave" });
+    else if (event.deltaY > 0 && distanceFromBottom() <= 1) reader = followState(reader, { type: "reader-scroll", distance: distanceFromBottom() });
+    updateJump();
+  }, { passive: true });
+  scroll.addEventListener("pointerdown", () => {
+    readerIntent = true; reader = followState(reader, { type: "leave" }); updateJump();
+  }, { passive: true });
+  scroll.addEventListener("touchstart", () => {
+    readerIntent = true; reader = followState(reader, { type: "touch-start" }); updateJump();
+  }, { passive: true });
+  for (const type of ["touchend", "touchcancel"]) scroll.addEventListener(type, () => {
+    reader = followState(reader, { type: "touch-end" }); updateJump();
+  }, { passive: true });
+  scroll.addEventListener("keydown", (event) => {
+    if (!event.altKey && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+      readerIntent = true;
+      reader = followState(reader, { type: "leave" }); updateJump();
+    }
+  });
   scroll.addEventListener("scroll", () => {
     if (detached) {
       // Landing is decided by the scroll settling, not by position: the view is not "at the bottom" mid-jump.
       armLanding();
       return;
     }
+    if (readerIntent && scroll.scrollTop !== lastTop) {
+      reader = followState(reader, { type: "reader-scroll", distance: distanceFromBottom() });
+    }
+    lastTop = scroll.scrollTop;
     updateJump();
     // Collapsed, the fold is the top: nothing hidden above it to load.
     if (foldHidden) { reachTopFired = false; return; }
@@ -251,11 +281,20 @@ export function createTimelineView(container, ctx = {}) {
       reachTopFired = false;
     }
   });
-  jump.addEventListener("click", () => { detached = false; clearTimeout(detachTimer); clearTimeout(jumpCap); scrollToBottom(); updateJump(); });
+  function followLatest() {
+    reader = followState(reader, { type: "latest" }); readerIntent = false;
+    detached = false; clearTimeout(detachTimer); clearTimeout(jumpCap); scrollToBottom(); updateJump();
+  }
+  jump.addEventListener("click", followLatest);
+  function onSend(event) {
+    const sent = event.detail;
+    if (sent?.computer === ctx.computer && sent.target?.pane === ctx.target?.pane && sent.target?.session === ctx.target?.session) followLatest();
+  }
+  window.addEventListener("phren:chat-send", onSend);
 
   // Content that grows after a render (an image loading, a card opening) or a
   // pane shown again keeps a reader who was at the bottom there, instead of
-  // leaving them a "Jump to latest" they never scrolled away from.
+  // leaving them a "Latest messages" they never scrolled away from.
   const follow = new ResizeObserver(() => {
     if (!atBottom || detached) return;
     scrollToBottom();
@@ -391,9 +430,15 @@ export function createTimelineView(container, ctx = {}) {
     lastPreview = preview;
     const entries = (preparation && preparation.entries) || [];
     const jobs = (preparation && preparation.jobs) || [];
+    const requests = new Map();
+    for (const turn of groupTurns(entries)) {
+      const finished = turn.find(entry => entry.turnActivity && !entry.turnActivity.isLive);
+      if (!finished) continue;
+      const request = openedRequest(turn.flatMap(entry => entry.messages || []));
+      if (request) requests.set(turn[turn.length - 1], request);
+    }
     // Where the reader last was, not where growth since then left the view.
-    const stick = !detached && (atBottom || isAtBottom());
-    const beforeHeight = scroll.scrollHeight;
+    const stick = !detached && isAtBottom();
     const beforeTop = scroll.scrollTop;
     const anchor = stick || detached ? null : readingAnchor();
 
@@ -439,6 +484,13 @@ export function createTimelineView(container, ctx = {}) {
       if (row.live) live.push(row.live);
       row.el.setAttribute("data-row-id", id); // find in chat keeps its place across a re-rendered row
       ordered.push(row.el);
+      const request = requests.get(entry);
+      if (request) {
+        const line = h("div", "ct-pr-opened");
+        const view = h("a", "ct-pr-view", "View"); view.href = request.url; view.target = "_blank"; view.rel = "noopener noreferrer";
+        view.setAttribute("aria-label", `View ${request.text}`);
+        line.append(h("span", "", `${request.text} · `), view); ordered.push(line);
+      }
       if (isPrompt(entry)) promptRows.push({ id, el: row.el, text: kit.VoiceMarker.hidden(entry.messages[0].text) });
     });
     for (const [id, row] of [...rows]) if (!seen.has(id)) { row.cleanup?.(); row.el.remove(); rows.delete(id); }
@@ -458,8 +510,9 @@ export function createTimelineView(container, ctx = {}) {
     } else {
       // Keep the row the reader is looking at where it was: growth below (a streamed reply) must not move them.
       const moved = anchor ? anchorShift(anchor) : null;
-      scroll.scrollTop = moved === null ? beforeTop + (scroll.scrollHeight - beforeHeight) : scroll.scrollTop + moved;
+      scroll.scrollTop = moved === null ? beforeTop : scroll.scrollTop + moved;
     }
+    lastTop = scroll.scrollTop;
     if (!detached) updateJump();
     outline.schedule();
   }
@@ -757,9 +810,10 @@ export function createTimelineView(container, ctx = {}) {
       registerLive(update);
     } else {
       row.classList.add("is-finished");
-      const note = h("span", "ct-activity-note", activity.label(activity.finishedAt ?? activity.startedAt));
+      const label = workedForLabel(activity);
+      const note = h("span", "ct-activity-note", label);
       row.append(note);
-      row.title = activity.label(activity.finishedAt ?? activity.startedAt);
+      row.title = label;
     }
     return row;
   }
@@ -1324,6 +1378,7 @@ export function createTimelineView(container, ctx = {}) {
     onScrollTop(fn) { onTop.push(fn); },
     destroy() {
       clearInterval(tick);
+      window.removeEventListener("phren:chat-send", onSend);
       follow.disconnect();
       outlineObserver.disconnect();
       clearTimeout(detachTimer);

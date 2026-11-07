@@ -3,7 +3,7 @@ import { agentLabel } from "../harness.js";
 // Phren desktop chat composer. Plain browser ES module, no framework.
 // Ports the phone's ChatComposerBar behaviour: a collapsible Background strip,
 // a multiline editor above one row of inline-SVG icon buttons, send with
-// delivery state, a local queue while the agent works, image attachments, the
+// delivery state, a Hook-held queue while the agent works, image attachments, the
 // slash-command menu, and worded footer selectors (Permission, Model, Effort,
 // plus a context/Fast ring button), each opening its own small popover.
 //
@@ -19,6 +19,8 @@ import { agentLabel } from "../harness.js";
 // The pure helpers below carry no DOM so they import and test in Node.
 
 import { hookPost, hookGet } from "../api.js";
+import { pasteBecomesAttachment, PASTE_ATTACHMENT_NAME } from "./send-behavior.js";
+import { createPendingQueue } from "./pending-queue.js";
 import { createRecall } from "./recall.js";
 import { createPromptHistory, historyKey } from "./prompt-history.js";
 
@@ -320,6 +322,8 @@ export function createComposer({ computer, target, provider, branch, project, on
   // ---- state ----
   let status = {};
   let working = false;
+  let submitting = false;
+  let enqueueAttempt = null;
   let attachments = [];
   let backgroundJobs = [];
   let counts = { agents: 0, workers: 0 };
@@ -337,6 +341,24 @@ export function createComposer({ computer, target, provider, branch, project, on
   let slashRows = [];
   let slashIndex = -1;
   let destroyed = false;
+
+  const heldQueue = createPendingQueue({ computer, target,
+    sendNow: async (text) => {
+      const id = crypto.randomUUID();
+      setPending(id, text, "pending");
+      followSent();
+      await deliver(id, text, [], 1);
+    },
+    onItems: (items) => {
+      const attempt = enqueueAttempt;
+      if (attempt && items.some(item => item.id === attempt.id && item.state !== "cancelled")) consumeQueuedDraft(attempt);
+    },
+    editDraft: (text) => { input.value = [text, input.value].filter(part => part.trim()).join("\n\n"); onInput(); input.focus(); },
+  });
+  card.insertBefore(heldQueue.el, pendingEl);
+  function followSent() {
+    window.dispatchEvent(new CustomEvent("phren:chat-send", { detail: { computer, target } }));
+  }
 
   // ---- draft persistence ----
   try {
@@ -461,11 +483,20 @@ export function createComposer({ computer, target, provider, branch, project, on
     attachmentsEl.replaceChildren();
     attachmentsEl.hidden = attachments.length === 0;
     for (const att of attachments) {
-      const chip = node("div", "pc-attach");
-      const img = node("img"); img.src = att.url; img.alt = att.name;
-      chip.append(img);
+      const chip = node("div", `pc-attach${att.pastedText ? " pc-attach-document" : ""}`);
+      if (att.pastedText) chip.append(node("span", "pc-attach-text", att.name));
+      else { const img = node("img"); img.src = att.url; img.alt = att.name; chip.append(img); }
+      if (att.pastedText) {
+        const inline = node("button", "pc-queue-action", "Keep inline"); inline.type = "button";
+        inline.setAttribute("aria-label", `Keep ${att.name} inline`);
+        inline.addEventListener("click", () => {
+          input.value = [input.value, att.text].filter(Boolean).join("\n\n");
+          attachments = attachments.filter(a => a !== att); renderAttachments(); onInput(); input.focus();
+        }); chip.append(inline);
+      }
       const x = node("button", "pc-attach-x", "\u00d7");
       x.title = `Remove ${att.name}`;
+      x.setAttribute("aria-label", x.title);
       x.addEventListener("click", () => {
         attachments = attachments.filter((a) => a.id !== att.id);
         renderAttachments();
@@ -497,6 +528,20 @@ export function createComposer({ computer, target, provider, branch, project, on
 
   input.addEventListener("input", onInput);
   input.addEventListener("paste", (event) => {
+    const pasted = event.clipboardData?.getData("text/plain") || "";
+    if (pasteBecomesAttachment(pasted)) {
+      event.preventDefault();
+      if (new TextEncoder().encode(pasted).length > MAX_IMAGE_BYTES) {
+        draftError.textContent = "Choose a file under 8 MB."; return;
+      }
+      // FileReader preserves the exact UTF-8 bytes, including non-ASCII text.
+      const file = new File([pasted], PASTE_ATTACHMENT_NAME, { type: "text/plain" });
+      const token = { id: crypto.randomUUID(), name: PASTE_ATTACHMENT_NAME, pastedText: true, text: pasted, base64: null };
+      attachments.push(token); renderAttachments(); updateFooter();
+      readBase64(file).then(base64 => { if (!destroyed) { token.base64 = base64; updateFooter(); } })
+        .catch(error => { if (!destroyed) { attachments = attachments.filter(a => a !== token); draftError.textContent = error.message; renderAttachments(); updateFooter(); } });
+      return;
+    }
     const items = event.clipboardData ? event.clipboardData.items : null;
     if (!items) return;
     const files = [];
@@ -581,8 +626,27 @@ export function createComposer({ computer, target, provider, branch, project, on
     return paths;
   }
 
-  async function send() {
-    if (!hasDraft()) return;
+  async function send(afterTurn = false) {
+    if (!hasDraft() || submitting || attachments.some(att => !att.base64)) return;
+    if (working && !isSlashCommand(input.value) && !afterTurn) {
+      openPopover(primaryBtn, (body) => {
+        const now = node("button", "pc-send-choice", "Send now"); now.type = "button";
+        now.addEventListener("click", () => { closePopover(); void submitDraft(false); });
+        const later = node("button", "pc-send-choice", "After this turn"); later.type = "button";
+        later.disabled = !heldQueue.capable();
+        if (later.disabled) later.title = `Needs a newer Phren on ${computer}`;
+        later.addEventListener("click", () => { closePopover(); void send(true); });
+        body.append(now, later); now.focus();
+      });
+      return;
+    }
+    await submitDraft(afterTurn);
+  }
+
+  async function submitDraft(afterTurn) {
+    if (!hasDraft() || submitting || attachments.some(att => !att.base64)) return;
+    if (afterTurn) { await enqueueDraft(); return; }
+    followSent();
     if (popover) closePopover();
     const text = input.value;
     const sending = attachments.slice();
@@ -598,6 +662,31 @@ export function createComposer({ computer, target, provider, branch, project, on
     await deliver(id, text, sending, 1);
   }
 
+  function consumeQueuedDraft(attempt) {
+    if (destroyed || enqueueAttempt !== attempt) return;
+    if (input.value === attempt.text) input.value = "";
+    attachments = attachments.filter(a => !attempt.sending.includes(a));
+    enqueueAttempt = null; notice.textContent = ""; followSent(); renderAttachments(); onInput();
+  }
+
+  async function enqueueDraft() {
+    if (!heldQueue.capable()) return;
+    submitting = true; updateFooter(); closePopover();
+    const text = input.value, sending = attachments.slice();
+    // A lost response retains both the id and uploaded paths for a safe retry.
+    if (!enqueueAttempt || enqueueAttempt.text !== text || enqueueAttempt.files !== sending.map(a => a.id).join(",")) {
+      enqueueAttempt = { id: crypto.randomUUID(), text, sending, files: sending.map(a => a.id).join(","), paths: null };
+    }
+    const attempt = enqueueAttempt;
+    try {
+      if (!attempt.paths) attempt.paths = await uploadAll(sending);
+      await heldQueue.enqueue(attempt.id, withAttachments(text, attempt.paths) + (attempt.paths.length ? "\n" : ""));
+      if (destroyed) return;
+      consumeQueuedDraft(attempt);
+    } catch (error) { if (!destroyed) notice.textContent = error.message; }
+    finally { submitting = false; if (!destroyed) updateFooter(); }
+  }
+
   // Attachments upload once; every retry sends the same paths under the same
   // id, so the Hook (which types one id once) can recognize it.
   async function deliver(id, text, sending, refusals, uploaded = null, uncertain = 0) {
@@ -605,7 +694,7 @@ export function createComposer({ computer, target, provider, branch, project, on
     let paths = uploaded;
     try {
       if (!paths) paths = await uploadAll(sending);
-      const res = await hookPost(computer, "/v1/prompt", promptBody(target, withAttachments(text, paths), id));
+      const res = await hookPost(computer, "/v1/prompt", promptBody(target, withAttachments(text, paths) + (paths.length ? "\n" : ""), id));
       applyPromptReply(id, res);
     } catch (error) {
       if (!pendings.has(id) || deliveryIsFinal(pendings.get(id).state)) return;
@@ -641,6 +730,7 @@ export function createComposer({ computer, target, provider, branch, project, on
         return;
       }
       setPending(id, text || "[image]", "failed", reason || "Send failed");
+      if (sending.length) { attachments.push(...sending.filter(att => !attachments.includes(att))); renderAttachments(); updateFooter(); }
       if (!input.value && text) { input.value = text; onInput(); }
     }
   }
@@ -697,6 +787,7 @@ export function createComposer({ computer, target, provider, branch, project, on
   }
 
   function reconcileTranscript(messages, acknowledgementID = (id) => id) {
+    heldQueue.reconcile(messages);
     const normalize = (text) => text.replace(/\s+/gu, " ").trim();
     // Sends before the initial backlog wait for its end, never its old user rows.
     for (const entry of pendings.values()) {
@@ -861,7 +952,7 @@ export function createComposer({ computer, target, provider, branch, project, on
     } else {
       primaryBtn.classList.remove("stop");
       primaryBtn.title = "Send";
-      primaryBtn.disabled = !draft;
+      primaryBtn.disabled = !draft || submitting || attachments.some(att => !att.base64);
       primaryBtn.append(ICON.up());
     }
   }
@@ -1114,6 +1205,7 @@ export function createComposer({ computer, target, provider, branch, project, on
     destroy() {
       destroyed = true;
       recall.destroy();
+      heldQueue.destroy();
       for (const entry of pendings.values()) if (entry.timer) clearTimeout(entry.timer);
       pendings.clear();
       closePopover();
