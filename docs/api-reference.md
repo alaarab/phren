@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 79 MCP tools across 17 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 82 MCP tools across 18 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -1536,7 +1536,7 @@ Read current governance and policy configuration. Supports all config domains in
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `domain` | enum | no | Config domain to read: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, or `all` (default). |
+| `domain` | enum | no | Config domain to read: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, `dreaming`, or `all` (default). |
 | `project` | string | no | Project name. When provided, returns merged view with project overrides and `_source` annotations. Required for `topic` domain. |
 
 ### `set_config`
@@ -1545,7 +1545,7 @@ Update configuration for a specific domain. Unified setter for all config domain
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `domain` | enum | yes | Config domain: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `index`, or `topic`. |
+| `domain` | enum | yes | Config domain: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, or `dreaming`. |
 | `settings` | object | yes | Domain-specific settings (see below). |
 | `project` | string | no | Project name. When provided, writes to project's `phren.project.yaml` instead of global `.config/`. Required for `topic` domain. |
 
@@ -1558,6 +1558,41 @@ Update configuration for a specific domain. Unified setter for all config domain
 - **workflow**: `{ lowConfidenceThreshold?, riskySections?, taskMode?, findingSensitivity? }`
 - **index**: `{ includeGlobs?, excludeGlobs?, includeHidden? }`
 - **topic**: `{ topics: [{ slug, label, description?, keywords? }], domain? }`
+- **dreaming**: `{ enabled?, mode?: "propose"|"apply", cadence?: "nightly"|"idle"|"weekly"|"manual", window?: "HH:MM-HH:MM", idleMinutes?, lookbackHours?, maxChanges?, injectBudgetKB?, phases?: ("capture"|"correct"|"organize"|"prune")[], model?, clear?: string[] }`. Global values live in `.config/dreaming.json`, a project's in `config.dreaming` of its `phren.project.yaml`; `clear` (with `project`) removes that project's override of the named keys so they inherit again. Off by default; see [Dreaming](dreaming.md).
+
+---
+
+## Dreaming
+
+An offline pass that reorganizes a project's memory between sessions ([Dreaming](dreaming.md)). The Hook starts scheduled dreams on its own when a project's `dreaming` config enables them; these tools run, inspect and read them. In the core profile they are reached through `phren_admin`. CLI: `phren dream run|status|log`.
+
+### `dream_run`
+
+Run a dream now. Returns `busy` while another dream for the project runs, and `disabled` while dreaming is off unless `force`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `dryRun` | boolean | no | Return the changeset without writing anything. |
+| `mode` | enum | no | `propose` or `apply`; overrides `dreaming.mode` for this run. |
+| `force` | boolean | no | Run even when dreaming is disabled for the project. |
+
+### `dream_status`
+
+Enabled, mode, cadence, window, last run (`dreams/last-run.json`), next eligible time and the last run's outcome counts. Without `project`, every project in the active profile. The next eligible time follows timing only; the Hook also waits while an agent works in the project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Project name, optionally store-qualified. |
+
+### `dream_log`
+
+The latest entries of the project's dream journal (`dreams/journal.md`), newest first.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `limit` | number | no | Entries to return (1–500, default 20). |
 
 ---
 

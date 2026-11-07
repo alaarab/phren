@@ -14,9 +14,9 @@ import {
 } from "../governance/policy.js";
 
 describe("config schema", () => {
-  it("defines all eight domains", () => {
+  it("defines all nine domains", () => {
     expect(CONFIG_DOMAINS.map((d) => d.id).sort()).toEqual(
-      ["access", "findingSensitivity", "index", "proactivity", "retention", "taskMode", "topic", "workflow"],
+      ["access", "dreaming", "findingSensitivity", "index", "proactivity", "retention", "taskMode", "topic", "workflow"],
     );
   });
 

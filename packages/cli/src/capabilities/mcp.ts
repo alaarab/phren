@@ -40,7 +40,7 @@ export const mcpManifest: CapabilityManifest = {
 
     // Config
     "config.get": { implemented: true, handler: "index.ts:get_config (supports all domains including topic)" },
-    "config.set": { implemented: true, handler: "index.ts:set_config (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic)" },
+    "config.set": { implemented: true, handler: "index.ts:set_config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, dreaming)" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "index.ts:health_check" },

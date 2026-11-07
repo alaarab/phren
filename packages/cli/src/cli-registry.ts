@@ -136,6 +136,13 @@ const SCHEDULE_SUBCOMMANDS: Subcommand[] = [
   { name: "history", usage: "phren schedule history [project] [--id <id>] [--limit <n>]", summary: "Show local schedule runs" },
 ];
 
+const DREAM_SUBCOMMANDS: Subcommand[] = [
+  { name: "run", usage: "phren dream run [--project <p>] [--dry-run] [--apply|--propose] [--force] [--json]", summary: "Run a dream now" },
+  { name: "status", usage: "phren dream status [--project <p>] [--json]", summary: "Enabled, cadence, last run, next eligible time" },
+  { name: "log", usage: "phren dream log [--project <p>] [--limit <n>] [--json]", summary: "Read the dream journal" },
+  { name: "eval", usage: "phren dream eval [--real] [--model <m>] [--json]", summary: "Score the dream engine on its fixture store" },
+];
+
 const SKILLS_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren skills list", summary: "List installed skills" },
   { name: "add", usage: "phren skills add <project> <path>", summary: "Link a skill into a project" },
@@ -678,6 +685,17 @@ export const REGISTRY: Command[] = [
     run: async (args) => {
       const { handleMaintain } = await import("./cli/govern.js");
       await handleMaintain(args);
+    },
+  },
+  {
+    name: "dream",
+    topic: "maintain",
+    usage: "phren dream <subcommand>",
+    summary: "Reorganize a project's memory offline (dreaming)",
+    subcommands: DREAM_SUBCOMMANDS,
+    run: async (args, ctx) => {
+      const { handleDreamCommand } = await import("./cli/dream.js");
+      await handleDreamCommand(args, ctx.phrenPath(), ctx.profile());
     },
   },
   {
