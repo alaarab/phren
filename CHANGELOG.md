@@ -5,10 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.72] - 2026-11-07
+
 ### Added
+
+- Watch agents' Chromium Playwright browsers live from the phone and replay them. Panes the Hook starts load a small shim (`NODE_OPTIONS`, `PHREN_BROWSER_SOCKET`, `PHREN_BROWSER_SESSION`) that streams screencast frames and navigations to the Hook (`GET /v1/browsers`, `/v1/browsers/stream`); recordings are kept for replay. `phren browser env` prints the environment for a shell the Hook did not start.
+- Drive a watched browser from the phone with an explicit handoff (tap, scroll, type and keys, one holder at a time, released after 120 s idle), and `phren browser ask "<reason>"` lets an agent wait for the owner to log in or solve a captcha.
+- Citation freshness checks GitHub-hosted citations against their gitboy mirror.
 
 - Dreaming: an offline pass, off by default, that reads a project's recent transcripts and corrects, merges, captures and reorganizes its memory with evidence for every change. Configured as the `dreaming` domain (store-wide or per project), it applies and logs its changes or proposes them (new findings to the review queue, the rest for `phren dream apply`), writes one page per subject under `reference/pages/`, keeps truths and always-injected context under `injectBudgetKB`, and ships an eval (`phren dream eval`) scored against a fixture project. See `docs/dreaming.md`.
 - Private repository-qualified task links and `phren tasks reconcile`: preview merge completion before opting in, retain merge evidence, flag closed PRs and work needing verification, and capture links from dispatch reports without publishing task identities to GitHub.
+
+### Fixed
+
+- A sub-agent's stream waits for its transcript to appear instead of going silent.
+- Cross-harness session moves continue from saved history and keep a held brief's publication.
+- Fewer repeated snapshot scans and status frames in the Hook.
 
 ## [0.3.71] - 2026-11-02
 
