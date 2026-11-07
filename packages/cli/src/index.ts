@@ -342,6 +342,7 @@ async function main() {
     import("./tools/config.js"),
     import("./tools/notes.js"),
     import("./tools/summaries.js"),
+    import("./tools/dream.js"),
     ...(codeAvailable ? [import("./tools/code.js")] : []),
     ...(hasModule("conductor") ? [import("./tools/dispatch.js"), import("./tools/helper.js")] : []),
   ]);

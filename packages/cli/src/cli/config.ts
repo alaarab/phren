@@ -22,6 +22,7 @@ import {
 import { handleConfigLlm } from "./config-llm.js";
 import { handleConfigAccess } from "./config-access.js";
 import { handleConfigSynonyms } from "./config-synonyms.js";
+import { handleConfigDreaming } from "./config-dreaming.js";
 
 // Re-export the public surface so external importers (cli-registry.ts, tools/config.ts,
 // tests) keep resolving the same names from "./cli/config.js" after the split.
@@ -162,6 +163,9 @@ export async function handleConfig(args: string[]) {
       return handleConfigLlm(rest);
     case "synonyms":
       return handleConfigSynonyms(rest);
+    case "dreaming":
+    case "dream":
+      return handleConfigDreaming(rest);
     default:
       console.log(`phren config - manage settings and policies
 
@@ -186,6 +190,8 @@ Subcommands:
                                         Finding capture level (minimal|conservative|balanced|aggressive)
   phren config access [--project <name>] [get|set --admins=...]
                                         Role-based access lists (admins|contributors|readers)
+  phren config dreaming [--project <name>] [get|set key=value ...|unset key ...]
+                                        Dreaming: offline memory reorganization (off by default)
   phren config project-ownership [mode]
                                         Default ownership for future project enrollments
   phren config llm [get|set model|endpoint|key]

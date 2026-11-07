@@ -2,6 +2,7 @@
 // dedicated modules (data-tasks.ts, profile-store.ts, shell-state-store.ts)
 // and owns finding/queue logic directly.
 import * as fs from "fs";
+import { assertFindingVersions } from "../finding/versions.js";
 import * as path from "path";
 import { renameOverSync } from "../phren-paths.js";
 import * as yaml from "js-yaml";
@@ -586,7 +587,7 @@ export function removeFindings(phrenPath: string, project: string, matches: stri
   });
 }
 
-export function editFinding(phrenPath: string, project: string, oldText: string, newText: string): PhrenResult<string> {
+export function editFinding(phrenPath: string, project: string, oldText: string, newText: string, expectedFindings?: Record<string, string>): PhrenResult<string> {
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
@@ -600,6 +601,7 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
   if (!fs.existsSync(findingsPath)) return phrenErr(`No ${FINDINGS_FILENAME} file found for "${project}".`, PhrenError.FILE_NOT_FOUND);
 
   return withSafeLock(findingsPath, () => {
+    assertFindingVersions(findingsPath, expectedFindings);
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
     const needle = normalizeFindingText(oldText);
     const bulletLines = collectFindingBulletLines(lines);

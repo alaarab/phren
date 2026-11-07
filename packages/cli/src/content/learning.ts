@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { assertFindingVersions } from "../finding/versions.js";
 import * as path from "path";
 import { renameOverSync } from "../phren-paths.js";
 import * as crypto from "crypto";
@@ -59,6 +60,7 @@ function defaultFindingIdSource(): string {
 }
 
 interface AddFindingOptions {
+  expectedFindings?: Record<string, string>;
   extraAnnotations?: string[];
   sessionId?: string;
   scope?: string;
@@ -367,6 +369,7 @@ export function addFindingToFile(
   if (!fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" does not exist.`, PhrenError.INVALID_PROJECT_NAME);
 
   const result: PhrenResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
+    assertFindingVersions(learningsPath, opts?.expectedFindings);
     const preparedForNewFile = prepareFinding({
       finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
       citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,

@@ -74,6 +74,11 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
 - `~/.phren/`, the store: projects, `global/`, `profiles/`, `.config/`,
   `.runtime/`, `.sessions/`, `.env` (feature flags), `machines.yaml`,
   `phren.root.yaml`, `phren.SKILL.md`.
+- Dreaming, only once enabled or run by hand: `.config/dreaming.json` (global
+  settings; a project's live under `config.dreaming` in its `phren.project.yaml`)
+  and `<project>/dreams/` (`last-run.json`, one `<runId>.json` per dream,
+  `journal.md`). The Hook starts scheduled dreams as a low-priority
+  `phren dream run --scheduled` child; `PHREN_DREAMING=off` stops its ticker.
 - Inside each store's Git repository, from sync: `refs/phren/backup/<ms>` (the
   pre-merge HEAD whenever local and remote history had both moved, deleted
   after 14 days), `.config/maintenance-writer.json` (which computer rewrites

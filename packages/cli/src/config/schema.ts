@@ -6,7 +6,7 @@
  * defaults, and ranges can never drift apart.
  *
  * Each field is a {@link ConfigFieldDescriptor}; fields are grouped into the
- * eight {@link CONFIG_DOMAINS}. Nothing here renders UI — descriptors are pure
+ * nine {@link CONFIG_DOMAINS}. Nothing here renders UI — descriptors are pure
  * data so every surface can present them in its own idiom.
  */
 
@@ -15,8 +15,9 @@ import {
   DEFAULT_WORKFLOW_POLICY,
   DEFAULT_INDEX_POLICY,
 } from "../governance/policy.js";
+import { DEFAULT_DREAMING_CONFIG, DREAMING_RANGES } from "./dreaming.js";
 
-/** The eight configurable domains, named to match the `get_config`/`set_config` MCP tools. */
+/** The nine configurable domains, named to match the `get_config`/`set_config` MCP tools. */
 export type ConfigDomainId =
   | "proactivity"
   | "taskMode"
@@ -25,10 +26,11 @@ export type ConfigDomainId =
   | "workflow"
   | "index"
   | "topic"
-  | "access";
+  | "access"
+  | "dreaming";
 
 /** How a field's value is entered. Surfaces pick a widget from this. */
-export type ConfigControl = "enum" | "number" | "boolean" | "string-list" | "object";
+export type ConfigControl = "enum" | "number" | "boolean" | "string" | "string-list" | "object";
 
 /** Where a field may be set. `global+project` fields support per-project overrides. */
 export type ConfigScope = "global+project" | "global-only" | "project-only";
@@ -545,6 +547,163 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
       },
     ],
   },
+  {
+    id: "dreaming",
+    label: "Dreaming",
+    icon: "sparkle",
+    summary: "An offline pass that reorganizes a project's memory between sessions. Off by default.",
+    scope: "global+project",
+    fields: [
+      {
+        key: "dreaming.enabled",
+        domain: "dreaming",
+        label: "Dreaming",
+        summary: "Whether the Hook runs dream passes on its own.",
+        help:
+          "A dream reads recent transcripts, the project's findings, truths and pages, and the repo's git log, "
+          + "then corrects, merges and reorganizes memory. `phren dream run --force` still works when this is off.",
+        control: "boolean",
+        default: DEFAULT_DREAMING_CONFIG.enabled,
+        scope: "global+project",
+        impact: "On = the Hook spends helper-model usage on a scheduled pass for each enabled project.",
+        risk: "caution",
+      },
+      {
+        key: "dreaming.mode",
+        domain: "dreaming",
+        label: "Mode",
+        summary: "Whether a dream proposes its changes or applies them.",
+        help:
+          "Propose puts one review-queue item per change, with its evidence, for you to accept. "
+          + "Apply makes the changes through the normal finding, truth and topic APIs and logs them in dreams/journal.md.",
+        control: "enum",
+        options: [
+          { value: "propose", label: "Propose", blurb: "Every change waits in the review queue for you.", recommended: true },
+          { value: "apply", label: "Apply", blurb: "Changes are made directly and recorded in the dream journal." },
+        ],
+        default: DEFAULT_DREAMING_CONFIG.mode,
+        scope: "global+project",
+        impact: "Apply edits, supersedes and retracts findings without asking; every change stays in history.",
+        risk: "caution",
+      },
+      {
+        key: "dreaming.cadence",
+        domain: "dreaming",
+        label: "Cadence",
+        summary: "When the Hook starts a dream on its own.",
+        help:
+          "Nightly runs once a day inside the window; weekly once a week inside the window; idle after the project "
+          + "has had no live agent session for the idle time; manual only when you run `phren dream run`.",
+        control: "enum",
+        options: [
+          { value: "nightly", label: "Nightly", blurb: "Once a day, inside the window.", recommended: true },
+          { value: "idle", label: "Idle", blurb: "After the project has had no live agent session for a while." },
+          { value: "weekly", label: "Weekly", blurb: "Once every seven days, inside the window." },
+          { value: "manual", label: "Manual", blurb: "Only when you run it yourself." },
+        ],
+        default: DEFAULT_DREAMING_CONFIG.cadence,
+        scope: "global+project",
+        impact: "More frequent dreams use more helper usage and churn memory more often.",
+        risk: "safe",
+      },
+      {
+        key: "dreaming.window",
+        domain: "dreaming",
+        label: "Window",
+        summary: "Local time range nightly and weekly dreams may start in (HH:MM-HH:MM).",
+        help: "A range like 02:00-05:00; it may wrap midnight (23:00-04:00). Idle and manual dreams ignore it.",
+        control: "string",
+        default: DEFAULT_DREAMING_CONFIG.window,
+        scope: "global+project",
+        impact: "Pick hours when you are not working, so a dream never competes with a live session.",
+        risk: "safe",
+      },
+      {
+        key: "dreaming.idleMinutes",
+        domain: "dreaming",
+        label: "Idle minutes",
+        summary: "For the idle cadence: minutes without a live agent session before a dream starts.",
+        help: "The Hook checks every ten minutes, so a dream starts up to ten minutes after this much quiet.",
+        control: "number",
+        range: { ...DREAMING_RANGES.idleMinutes },
+        default: DEFAULT_DREAMING_CONFIG.idleMinutes,
+        scope: "global+project",
+        impact: "Lower = dreams follow work sooner; higher = only after longer breaks.",
+        risk: "safe",
+      },
+      {
+        key: "dreaming.lookbackHours",
+        domain: "dreaming",
+        label: "Lookback (hours)",
+        summary: "How far back a dream reads transcripts when it has no earlier run to start from.",
+        help: "After the first dream, each one reads from the previous run's end; this caps the window otherwise.",
+        control: "number",
+        range: { ...DREAMING_RANGES.lookbackHours },
+        default: DEFAULT_DREAMING_CONFIG.lookbackHours,
+        scope: "global+project",
+        impact: "Longer = more transcript evidence per dream, and a larger prompt.",
+        risk: "safe",
+      },
+      {
+        key: "dreaming.maxChanges",
+        domain: "dreaming",
+        label: "Max changes",
+        summary: "The most changes one dream may make or propose.",
+        help: "Changes past this cap are dropped and recorded in the dream's report.",
+        control: "number",
+        range: { ...DREAMING_RANGES.maxChanges },
+        default: DEFAULT_DREAMING_CONFIG.maxChanges,
+        scope: "global+project",
+        impact: "Higher lets one dream reorganize more, and gives you more to review.",
+        risk: "safe",
+      },
+      {
+        key: "dreaming.injectBudgetKB",
+        domain: "dreaming",
+        label: "Inject budget (KB)",
+        summary: "The cap on truths plus always-injected context; a dream demotes to stay under it.",
+        help:
+          "Whatever Phren injects at every session start spreads its errors to every session, so it stays small. "
+          + "A dream will not promote a truth past this budget without demoting another.",
+        control: "number",
+        range: { ...DREAMING_RANGES.injectBudgetKB },
+        default: DEFAULT_DREAMING_CONFIG.injectBudgetKB,
+        scope: "global+project",
+        impact: "Lower = a leaner session start; higher = more pinned context every session.",
+        risk: "safe",
+      },
+      {
+        key: "dreaming.phases",
+        domain: "dreaming",
+        label: "Phases",
+        summary: "What a dream works on.",
+        help: "Any of capture, correct, organize, prune. Unknown values are ignored.",
+        control: "string-list",
+        options: [
+          { value: "capture", label: "Capture", blurb: "Save decisions and lessons the transcripts show but memory lacks." },
+          { value: "correct", label: "Correct", blurb: "Fix or retract notes that transcripts, code or git contradict." },
+          { value: "organize", label: "Organize", blurb: "Merge duplicates, move findings to topics, write subject pages." },
+          { value: "prune", label: "Prune", blurb: "Demote and retire what no longer earns its place." },
+        ],
+        default: [...DEFAULT_DREAMING_CONFIG.phases],
+        scope: "global+project",
+        impact: "Fewer phases = a narrower, cheaper pass.",
+        risk: "safe",
+      },
+      {
+        key: "dreaming.model",
+        domain: "dreaming",
+        label: "Model",
+        summary: "The model a dream runs on; empty uses the project's helper model.",
+        help: "Runs under the project's helper account (phren.project.yaml helper: { account, model }).",
+        control: "string",
+        default: DEFAULT_DREAMING_CONFIG.model,
+        scope: "global+project",
+        impact: "A stronger model gives better judgment at a higher cost per dream.",
+        risk: "safe",
+      },
+    ],
+  },
 ];
 
 // ── Lookups ───────────────────────────────────────────────────────────────────
@@ -590,6 +749,8 @@ export const CONFIG_DOMAIN_ALIASES: Record<string, ConfigDomainId> = {
   topic: "topic",
   topics: "topic",
   access: "access",
+  dreaming: "dreaming",
+  dream: "dreaming",
 };
 
 /** Resolve a user-supplied domain/subcommand token to a canonical domain id. */

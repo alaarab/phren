@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { assertFindingVersions } from "./versions.js";
 import * as path from "path";
 import { renameOverSync } from "../phren-paths.js";
 import { PhrenError, phrenErr, phrenOk, type PhrenResult, type FindingTag } from "../phren-core.js";
@@ -296,7 +297,8 @@ export function supersedeFinding(
   phrenPath: string,
   project: string,
   findingText: string,
-  supersededBy: string
+  supersededBy: string,
+  expectedFindings?: Record<string, string>
 ): PhrenResult<{ finding: string; superseded_by: string; status: FindingLifecycleStatus }> {
   const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
@@ -305,6 +307,7 @@ export function supersedeFinding(
   if (!ref) return phrenErr("superseded_by cannot be empty.", PhrenError.EMPTY_INPUT);
 
   return withFileLock(findingsPath, () => {
+    assertFindingVersions(findingsPath, expectedFindings);
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
     const matched = matchFinding(lines, findingText);
     if (!matched.ok) return matched;
@@ -327,7 +330,8 @@ export function retractFinding(
   phrenPath: string,
   project: string,
   findingText: string,
-  reason: string
+  reason: string,
+  expectedFindings?: Record<string, string>
 ): PhrenResult<{ finding: string; reason: string; status: FindingLifecycleStatus }> {
   const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
@@ -336,6 +340,7 @@ export function retractFinding(
   if (!reasonText) return phrenErr("reason cannot be empty.", PhrenError.EMPTY_INPUT);
 
   return withFileLock(findingsPath, () => {
+    assertFindingVersions(findingsPath, expectedFindings);
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
     const matched = matchFinding(lines, findingText);
     if (!matched.ok) return matched;

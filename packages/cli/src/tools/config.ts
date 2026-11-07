@@ -40,6 +40,13 @@ import {
 } from "../project-topics.js";
 import { buildConfigView } from "../config/resolve.js";
 import { getConfigField, CONFIG_DOMAINS } from "../config/schema.js";
+import {
+  DREAMING_KEYS,
+  getDreamingConfig,
+  parseDreamingPatch,
+  updateDreamingConfig,
+  type DreamingConfig,
+} from "../config/dreaming.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -231,6 +238,9 @@ async function handleGetConfig(
     if (d === "all" || d === "index") {
       result.index = getIndexPolicy(phrenPath);
     }
+    if (d === "all" || d === "dreaming") {
+      result.dreaming = getDreamingConfig(phrenPath, project);
+    }
 
     result.fields = resolvedFields(phrenPath, d, project);
     result.schema = configSchema(d);
@@ -266,6 +276,9 @@ async function handleGetConfig(
   if (d === "all" || d === "index") {
     result.index = getIndexPolicy(phrenPath);
   }
+  if (d === "all" || d === "dreaming") {
+    result.dreaming = getDreamingConfig(phrenPath);
+  }
 
   result.fields = resolvedFields(phrenPath, d);
   result.schema = configSchema(d);
@@ -280,7 +293,7 @@ async function handleGetConfig(
 async function handleSetConfig(
   ctx: McpContext,
   { domain, settings, project }: {
-    domain: "proactivity" | "taskMode" | "findingSensitivity" | "retention" | "workflow" | "access" | "index" | "topic";
+    domain: "proactivity" | "taskMode" | "findingSensitivity" | "retention" | "workflow" | "access" | "index" | "topic" | "dreaming";
     settings: Record<string, unknown>;
     project?: string;
   },
@@ -675,6 +688,38 @@ async function handleSetConfig(
       });
     }
 
+    // ── dreaming ──────────────────────────────────────────────────
+    case "dreaming": {
+      const { clear: rawClear, ...rest } = settings;
+      const parsed = parseDreamingPatch(rest);
+      const clear = Array.isArray(rawClear) ? rawClear.map(String) : [];
+      const badClear = clear.filter((key) => !(DREAMING_KEYS as string[]).includes(key));
+      if (parsed.unknown.length || badClear.length) {
+        return mcpResponse({ ok: false, error: `Unknown dreaming settings: ${[...parsed.unknown, ...badClear].join(", ")}. Valid: ${DREAMING_KEYS.join(", ")}.` });
+      }
+      if (parsed.errors.length) return mcpResponse({ ok: false, error: parsed.errors.join(" ") });
+      if (clear.length && !project) {
+        return mcpResponse({ ok: false, error: "clear removes a project's override; pass project." });
+      }
+      if (!Object.keys(parsed.patch).length && !clear.length) {
+        return mcpResponse({ ok: false, error: `Provide at least one of: ${DREAMING_KEYS.join(", ")}.` });
+      }
+      let warning: string | null = null;
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
+        warning = checkProjectRegistered(phrenPath, project);
+      }
+      updateDreamingConfig(phrenPath, parsed.patch, project, clear as Array<keyof DreamingConfig>);
+      const effective = getDreamingConfig(phrenPath, project);
+      const where = project ? ` for project "${project}"` : "";
+      return mcpResponse({
+        ok: true,
+        message: warning ? `Dreaming config updated${where}. WARNING: ${warning}` : `Dreaming config updated${where}.`,
+        data: { ...(project ? { project } : {}), dreaming: effective, ...(warning ? { warning } : {}) },
+      });
+    }
+
     default:
       return mcpResponse({ ok: false, error: `Unknown config domain: ${domain}` });
   }
@@ -689,12 +734,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · get config",
       description:
         "Read current configuration for one or all config domains: proactivity, taskMode, " +
-        "findingSensitivity, retention (policy), workflow, access, index, topic. " +
+        "findingSensitivity, retention (policy), workflow, access, index, topic, dreaming. " +
         "Returns both configured and effective values. When project is provided, returns " +
         "the merged view with project overrides applied and _source annotations.",
       inputSchema: z.object({
         domain: z
-          .enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "topic", "all"])
+          .enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "topic", "dreaming", "all"])
           .optional()
           .describe("Config domain to read. Defaults to 'all'."),
         project: projectParam,
@@ -713,14 +758,16 @@ export function register(server: McpServer, ctx: McpContext): void {
         "and set_topic_config. When project is provided, writes to that project's phren.project.yaml " +
         "instead of global .config/.",
       inputSchema: z.object({
-        domain: z.enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "topic"]),
+        domain: z.enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "topic", "dreaming"]),
         settings: z.record(z.string(), z.unknown()).describe(
           "Domain-specific settings. proactivity: { level, scope? } | taskMode: { mode } | " +
           "findingSensitivity: { level } | retention: { ttlDays?, retentionDays?, autoAcceptThreshold?, " +
           "minInjectConfidence?, decay? } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
           "findingSensitivity? } | access: { admins?, contributors?, readers? } (each an array of actor names) | " +
           "index: { includeGlobs?, excludeGlobs?, includeHidden? } | " +
-          "topic: { topics, domain? }"
+          "topic: { topics, domain? } | " +
+          "dreaming: { enabled?, mode?, cadence?, window?, idleMinutes?, lookbackHours?, maxChanges?, injectBudgetKB?, " +
+          "phases?, model?, clear? } (clear: keys whose project override to remove, so they inherit again)"
         ),
         project: z.string().optional().describe(
           "Project name. When provided, writes to that project's phren.project.yaml instead of global .config/. " +

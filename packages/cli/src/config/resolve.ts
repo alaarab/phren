@@ -17,6 +17,7 @@ import { readProjectConfig } from "../project-config.js";
 import { isRecord } from "../shared.js";
 import { allConfigFields, getConfigField } from "./schema.js";
 import type { ConfigDomainId } from "./schema.js";
+import { DREAMING_KEYS, globalDreamingPath, readGlobalDreaming, readProjectDreaming } from "./dreaming.js";
 
 /** One field, resolved across the precedence chain. */
 export interface ResolvedField {
@@ -283,6 +284,17 @@ export function buildConfigView(phrenPath: string, project?: string): ConfigView
     const union = [...new Set([...(globalList ?? []), ...(projectList ?? [])])];
     const resolved = resolveConfigField(fieldKey, [], levels);
     fields[fieldKey] = { ...resolved, value: union };
+  }
+
+  // ── dreaming ───────────────────────────────────────────────────────────────
+  const globalDreaming = readGlobalDreaming(phrenPath);
+  const projectDreaming = project ? readProjectDreaming(phrenPath, project) : {};
+  for (const prop of DREAMING_KEYS) {
+    const fieldKey = `dreaming.${prop}`;
+    const levels: Level[] = [];
+    pushIfSet(levels, "project", projectDreaming[prop], projectConfigPath);
+    pushIfSet(levels, "global", globalDreaming[prop], globalDreamingPath(phrenPath));
+    fields[fieldKey] = resolveConfigField(fieldKey, getConfigField(fieldKey)?.default, levels);
   }
 
   return {
