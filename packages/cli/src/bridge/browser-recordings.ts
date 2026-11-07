@@ -3,10 +3,12 @@ import path from "node:path";
 import { BridgeError } from "./protocol.js";
 import { BROWSER_ID, type Hello, type PageInfo, type FrameInfo } from "./browser-protocol.js";
 
+export interface BrowserHandoff { t: number; kind: "take" | "release" | "help"; reason?: string }
 export interface RecordingMeta {
   id: string; browserId: string; session: string; cwd: string; engine: string; headless: boolean;
   startedAt: number; endedAt: number | null; frames: number; bytes: number;
   pages: { pageId: string; url: string; title: string; t: number }[];
+  handoffs: BrowserHandoff[];
   navigations: { t: number; pageId: string; url: string; title: string }[];
 }
 interface IndexFrame { t: number; pageId: string; offset: number; length: number; width: number; height: number }
@@ -28,7 +30,7 @@ export class BrowserRecordings {
     fs.mkdirSync(dir, { mode: 0o700 }); // never overwrite an earlier recording
     fs.writeFileSync(path.join(dir, "frames.bin"), "", { mode: 0o600 });
     fs.writeFileSync(path.join(dir, "index.jsonl"), "", { mode: 0o600 });
-    const meta: RecordingMeta = { id: hello.browserId, browserId: hello.browserId, session: hello.session, cwd: hello.cwd, engine: hello.engine, headless: hello.headless, startedAt: now, endedAt: null, frames: 0, bytes: 0, pages: [], navigations: [] };
+    const meta: RecordingMeta = { id: hello.browserId, browserId: hello.browserId, session: hello.session, cwd: hello.cwd, engine: hello.engine, headless: hello.headless, startedAt: now, endedAt: null, frames: 0, bytes: 0, pages: [], navigations: [], handoffs: [] };
     this.save(meta); this.active.set(meta.id, { meta, last: new Map() });
   }
   page(page: PageInfo, now = Date.now()): void {
@@ -56,6 +58,11 @@ export class BrowserRecordings {
     fs.appendFileSync(path.join(dir, "index.jsonl"), JSON.stringify(row) + "\n");
     state.meta.bytes += jpeg.length; state.meta.frames++;
     state.last.set(info.pageId, { t: info.t, jpeg }); this.save(state.meta);
+  }
+  handoff(id: string, kind: BrowserHandoff["kind"], reason?: string): void {
+    const state = this.active.get(id); if (!state) return;
+    state.meta.handoffs.push({ t: Date.now(), kind, ...(reason ? { reason } : {}) });
+    this.save(state.meta);
   }
   end(id: string, now = Date.now()): void {
     const state = this.active.get(id); if (!state) return;

@@ -4,8 +4,9 @@ import { EventEmitter, once } from "node:events";
 import { connect } from "node:net";
 import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserMessageReader, MAX_BROWSER_MESSAGE, type Hello, type BrowserMessage } from "./browser-protocol.js";
+import { runBrowser } from "./browser-env.js";
 import { BrowserRegistry } from "./browser-registry.js";
 import { BrowserRecordings } from "./browser-recordings.js";
 import { streamBrowser } from "./browser-stream.js";
@@ -26,7 +27,7 @@ const roots: string[] = [];
 const registries: BrowserRegistry[] = [];
 function root(): string { const scratch = path.join(process.cwd(), ".scratch"); fs.mkdirSync(scratch, { recursive: true }); const dir = fs.mkdtempSync(path.join(scratch, "browser-test-")); roots.push(dir); return dir; }
 function registry(): BrowserRegistry { const value = new BrowserRegistry(root()); registries.push(value); return value; }
-afterEach(() => { for (const r of registries.splice(0)) r.close(); for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { for (const r of registries.splice(0)) r.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers(); for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe("browser socket protocol", () => {
   it("parses coalesced and byte-fragmented messages including binary JPEGs", () => {
@@ -149,4 +150,146 @@ it("listens on a private socket and ends a producer on malformed input or discon
   socket.write(wire(99, {})); await closed; await ended;
   expect(r.list()[0].live).toBe(false);
   expect(r.recordings.list()[0].endedAt).not.toBeNull();
+});
+
+function sendPhone(phone: Phone, message: object): void { phone.emit("message", Buffer.from(JSON.stringify(message)), false); }
+function controlMessages(phone: Phone): unknown[] { return phone.sent.filter((v): v is string => typeof v === "string").map(v => JSON.parse(v)).filter(v => v.type === "control"); }
+function livePhones(r: BrowserRegistry): { owner: object; a: Phone; b: Phone } {
+  const owner = {}, a = new Phone(), b = new Phone();
+  r.accept(owner, { type: 1, data: hello }); r.accept(owner, { type: 2, data: page });
+  for (const phone of [a, b]) streamBrowser(phone, new URLSearchParams(`browser=${hello.browserId}`), r);
+  return { owner, a, b };
+}
+it("announces control, takes, steals, ignores a non-holder release, and releases on close and idle", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000);
+  const r = registry(), { a, b } = livePhones(r);
+  expect(controlMessages(a).at(-1)).toEqual({ type: "control", holder: null, help: null });
+  sendPhone(a, { type: "control", action: "take" });
+  expect(controlMessages(a).at(-1)).toMatchObject({ holder: "you" });
+  expect(controlMessages(b).at(-1)).toMatchObject({ holder: "other" });
+  const held = JSON.parse((await request(r, "GET", "/v1/browsers")).body.toString()).browsers[0];
+  expect(held).toMatchObject({ control: { held: true, since: 1000 }, help: null });
+  sendPhone(b, { type: "control", action: "take" });
+  expect(controlMessages(a).at(-1)).toMatchObject({ holder: "other" });
+  sendPhone(a, { type: "control", action: "release" });
+  expect(controlMessages(b).at(-1)).toMatchObject({ holder: "you" });
+  sendPhone(b, { type: "control", action: "release" });
+  expect(controlMessages(b).at(-1)).toMatchObject({ holder: null });
+  sendPhone(a, { type: "control", action: "take" }); a.close();
+  expect(controlMessages(b).at(-1)).toMatchObject({ holder: null });
+  sendPhone(b, { type: "control", action: "take" });
+  await vi.advanceTimersByTimeAsync(119_000);
+  sendPhone(b, { type: "input", event: "text", text: "keep alive" });
+  await vi.advanceTimersByTimeAsync(119_999);
+  expect(controlMessages(b).at(-1)).toMatchObject({ holder: "you" });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(controlMessages(b).at(-1)).toMatchObject({ holder: null });
+  expect(r.recordings.index(hello.browserId).meta.handoffs).toMatchObject([
+    { kind: "take", t: 1000 }, { kind: "release", reason: "stolen" }, { kind: "take" }, { kind: "release" },
+    { kind: "take" }, { kind: "release", reason: "disconnected" }, { kind: "take" }, { kind: "release", reason: "idle" },
+  ]);
+});
+
+async function peer(r: BrowserRegistry) {
+  const socket = connect(path.join(r.root, "browser.sock")), reader = new BrowserMessageReader();
+  const messages: BrowserMessage[] = [], arrival = new EventEmitter();
+  socket.on("data", chunk => { messages.push(...reader.push(chunk)); arrival.emit("message"); });
+  socket.on("error", () => {});
+  await once(socket, "connect");
+  return { socket, messages, async next(): Promise<BrowserMessage> { while (!messages.length) await once(arrival, "message"); return messages.shift()!; } };
+}
+it("drops input without control and forwards only bounded valid input as 0x10 to the streamed page", async () => {
+  const r = registry(); await r.start(); const producer = await peer(r);
+  let changed = once(r, "change"); producer.socket.write(wire(1, hello)); await changed;
+  changed = once(r, "change"); producer.socket.write(wire(2, page)); await changed;
+  const phone = new Phone(); streamBrowser(phone, new URLSearchParams(`browser=${hello.browserId}`), r);
+  sendPhone(phone, { type: "input", event: "click", x: 0.5, y: 0.5 });
+  expect(JSON.parse(phone.sent.at(-1) as string)).toEqual({ type: "error", message: "Take control first" });
+  sendPhone(phone, { type: "control", action: "take" });
+  sendPhone(phone, { type: "input", event: "text", text: "x".repeat(1001) });
+  sendPhone(phone, { type: "input", event: "key", key: "Delete" });
+  sendPhone(phone, { type: "input", event: "click", x: -2, y: 3 });
+  expect(await producer.next()).toEqual({ type: 16, data: { browserId: hello.browserId, pageId: page.pageId, event: "click", x: 0, y: 1 } });
+  // A later page announcement changes both the streamed frame and the input destination.
+  changed = once(r, "change"); producer.socket.write(wire(2, { ...page, pageId: "page_next" })); await changed;
+  sendPhone(phone, { type: "input", event: "wheel", x: 0.5, y: 0.25, dx: -0.1, dy: 0.5 });
+  expect(await producer.next()).toMatchObject({ type: 16, data: { pageId: "page_next", event: "wheel", dx: -0.1, dy: 0.5 } });
+  // A fresh second isolates the rate limit from the invalid messages above.
+  const now = Date.now(); vi.spyOn(Date, "now").mockReturnValue(now + 1000);
+  for (let n = 0; n < 65; n++) sendPhone(phone, { type: "input", event: "text", text: String(n) });
+  sendPhone(phone, { type: "control", action: "release" });
+  // Closing the producer flushes its input stream, making the negative count assertion deterministic.
+  producer.socket.end(); await once(producer.socket, "close");
+  expect(producer.messages).toHaveLength(60);
+  expect(producer.messages.at(-1)).toMatchObject({ data: { text: "59" } });
+});
+
+it.each(["done", "timeout", "ended", "cancelled"] as const)("settles an ask connection on %s and persists help handoffs", async outcome => {
+  const r = registry(), { owner, a } = livePhones(r); await r.start();
+  const cli = await peer(r);
+  if (outcome === "timeout") vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  cli.socket.write(wire(5, { session: hello.session, reason: "Log in", timeout: outcome === "timeout" ? 1 : 900 }));
+  expect(await cli.next()).toEqual({ type: 18, data: { browserId: hello.browserId } });
+  const listed = JSON.parse((await request(r, "GET", "/v1/browsers")).body.toString()).browsers[0];
+  expect(listed).toMatchObject({ control: { held: false, since: null }, help: { reason: "Log in", t: expect.any(Number) } });
+  expect(controlMessages(a).at(-1)).toMatchObject({ help: { reason: "Log in" } });
+  if (outcome === "done") {
+    sendPhone(a, { type: "control", action: "release" });
+    expect(r.get(hello.browserId)?.help).not.toBeNull();
+    sendPhone(a, { type: "control", action: "take" });
+    expect(r.get(hello.browserId)?.help).not.toBeNull();
+    sendPhone(a, { type: "control", action: "release" });
+  } else if (outcome === "timeout") await vi.advanceTimersByTimeAsync(1000);
+  else if (outcome === "ended") { sendPhone(a, { type: "control", action: "take" }); r.disconnect(owner); }
+  else if (outcome === "cancelled") {
+    const cleared = once(r, "control"); cli.socket.destroy(); await cleared;
+  }
+  if (outcome !== "cancelled") expect(await cli.next()).toEqual({ type: 19, data: { outcome } });
+  expect(r.get(hello.browserId)?.help).toBeNull();
+  expect(r.recordings.index(hello.browserId).meta.handoffs[0]).toMatchObject({ kind: "help", reason: "Log in", t: expect.any(Number) });
+  expect(r.get(hello.browserId)?.live).toBe(outcome !== "ended");
+});
+it("returns no-browser without registering an ask as a producer", async () => {
+  const r = registry(); await r.start(); const cli = await peer(r);
+  cli.socket.write(wire(5, { reason: "Captcha" }));
+  expect(await cli.next()).toEqual({ type: 19, data: { outcome: "no-browser" } });
+  expect(r.list()).toEqual([]); expect(r.recordings.list()).toEqual([]);
+});
+it("selects an explicit browser, otherwise newest in session, otherwise newest live browser", async () => {
+  const r = registry(), owner = {}; vi.spyOn(Date, "now").mockReturnValue(1000);
+  r.accept(owner, { type: 1, data: hello });
+  vi.mocked(Date.now).mockReturnValue(2000);
+  r.accept(owner, { type: 1, data: { ...hello, browserId: "browser_session" } });
+  r.accept(owner, { type: 1, data: { ...hello, browserId: "browser_other", session: "other" } });
+  await r.start();
+  for (const [selection, id] of [[{ browserId: hello.browserId, session: "other" }, hello.browserId], [{ session: hello.session }, "browser_session"], [{ session: "missing" }, "browser_other"], [{}, "browser_other"]] as const) {
+    const cli = await peer(r); cli.socket.write(wire(5, { reason: "Help", ...selection }));
+    expect(await cli.next()).toEqual({ type: 18, data: { browserId: id } });
+    const cleared = once(r, "control"); cli.socket.destroy(); await cleared;
+  }
+  const cli = await peer(r); cli.socket.write(wire(5, { reason: "Help", browserId: "browser_missing" }));
+  expect(await cli.next()).toEqual({ type: 19, data: { outcome: "no-browser" } });
+});
+
+it.each(["done", "no-browser", "timeout", "cancelled"] as const)("browser ask CLI prints one %s outcome, returns its exit code, and clears help", async outcome => {
+  const r = registry();
+  const phones = outcome === "no-browser" ? undefined : livePhones(r);
+  await r.start();
+  vi.stubEnv("PHREN_BROWSER_SOCKET", path.join(r.root, "browser.sock")); vi.stubEnv("PHREN_BROWSER_SESSION", hello.session);
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  if (outcome === "timeout") vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const asked = outcome === "no-browser" ? undefined : once(r, "control");
+  const result = runBrowser(["ask", "Log in", "--timeout", "1"]);
+  if (asked) await asked;
+  if (outcome === "done") {
+    sendPhone(phones!.a, { type: "control", action: "take" });
+    sendPhone(phones!.a, { type: "control", action: "release" });
+  } else if (outcome === "timeout") await vi.advanceTimersByTimeAsync(1000);
+  else if (outcome === "cancelled") {
+    // Invoke the CLI signal handler without signalling Vitest's own SIGINT listeners.
+    const cleared = once(r, "control"); process.rawListeners("SIGINT").at(-1)!.call(process); await cleared;
+  }
+  expect(await result).toBe(outcome === "done" ? 0 : 1);
+  expect(log.mock.calls).toEqual([[`Browser help: ${outcome}`]]);
+  if (phones) expect(r.get(hello.browserId)?.help).toBeNull();
 });

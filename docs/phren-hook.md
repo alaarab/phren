@@ -1810,3 +1810,9 @@ clears another operation's state. Polling remains the fallback after that budget
 or if a peer is offline or a delivery fails.
 `GET /v1/health/details` reports `gitboyWebhooks`: configured/listening state,
 port, and last delivery time/outcome, without secrets or payloads.
+
+### Browser watching and owner help
+
+Run `eval "$(phren browser env)"` before launching Playwright Chromium to watch it from the phone. Use `phren browser ask "Log in" [--browser <id>] [--timeout <seconds>]` to request owner help and wait (default 900 seconds); it prints one outcome line and exits 0 after take + release, or 1 on timeout, browser end, cancellation, or no live browser.
+
+The phone explicitly takes control, can take over from another device, and releases with Done; disconnect or 120 seconds without input also releases it. Hook browser rows include `control: {held, since}` and `help: {reason, t} | null`. Recordings retain take, release, and help handoffs in `meta.handoffs`. Input applies to the streamed page, is limited to 60 messages per second and 1000 characters per text message, and uses normalized frame coordinates. Only Chromium supports input. A new help request for the same browser supersedes the previous request with a timeout outcome.
