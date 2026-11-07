@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
+- Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.
+
+### Changed
+
+- Bun runners opt in to the browser shim explicitly with `--preload` and `initPage`; the Hook no longer sets `BUN_OPTIONS` in every pane.
+
 ### Fixed
 
 - The phone's streamed Claude reply preview no longer mixes in text from Claude's diff sidebar, and a long reply that already landed is not shown again as a preview.

@@ -212,7 +212,7 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 export const REGISTRY: Command[] = [
   { name: "browser", topic: "setup", usage: "phren browser <env|ask>", summary: "Watch a browser or ask the owner for help", standalone: true,
     subcommands: [
-      { name: "env", usage: "phren browser env", summary: "Print browser watching environment" },
+      { name: "env", usage: "phren browser env [--session <name>] [--json | --fish]", summary: 'Start Playwright after eval "$(phren browser env)"; see Bun preload guidance in output' },
       { name: "ask", usage: 'phren browser ask "<reason>" [--browser <id>] [--timeout <s>]', summary: "Wait for owner help (900 s default); Ctrl-C cancels" },
     ],
     run: async args => { const { runBrowser } = await import("./bridge/browser-env.js"); return runBrowser(args); } },

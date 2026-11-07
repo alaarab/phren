@@ -1,3 +1,4 @@
+import { paneBrowserWatch } from "./browser-watch.js";
 import { createHmac, randomBytes } from "node:crypto";
 import { paneAccount, paneAccountKey, notePaneTranscript } from "./pane-accounts.js";
 import type { AccountRef } from "./claude-accounts.js";
@@ -538,11 +539,12 @@ export async function paneChatState(server: string, pane: Json, options: { token
   if (!provider.safeParse(pane.agent).success) return {};
   const identity = await resolveIdentity(server, pane, false);
   const sessionId = identity.sessionId;
+  const watch = paneBrowserWatch(server, pane, sessionId, identity.pids?.[0] ?? (typeof pane.agent_pid === "number" ? pane.agent_pid : undefined));
   const key = startingPaneKey(server, pane);
   if (sessionId) identifyStartingBinding(key, sessionId);
   // A pane whose conversation is known is not starting, so a caller that
   // reads only `sessionId` and `starting` (the overview) needs no PIDs.
-  if (sessionId && options.tokenWhenIdentified === false) return { sessionId };
+  if (sessionId && options.tokenWhenIdentified === false) return { sessionId, browserWatch: watch };
   const pids = identity.pids ?? await foregroundPids(server, pane);
   // The token binds to the agent's own process, the oldest in the pane's
   // foreground group. Helpers it spawns while starting up (Codex forks
@@ -565,7 +567,7 @@ export async function paneChatState(server: string, pane: Json, options: { token
       startingBindings.set(key, binding);
     }
   }
-  return { sessionId, ...(process && binding ? { startingToken: binding.token } : {}), ...(starting ? { starting: true } : {}) };
+  return { sessionId, browserWatch: paneBrowserWatch(server, pane, sessionId, pids[0]), ...(process && binding ? { startingToken: binding.token } : {}), ...(starting ? { starting: true } : {}) };
 }
 
 /** `{ account }` for a Claude pane whose account is known, else nothing. */
