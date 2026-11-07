@@ -190,3 +190,18 @@
 @container chat (max-width: 290px) {
   .pc-low { display: none; }
 }
+
+.pc-held-queue { border-bottom: 1px solid var(--border); padding: var(--space-sm); }
+.pc-held-row + .pc-held-row { border-top: 1px solid var(--border); margin-top: var(--space-sm); padding-top: var(--space-sm); }
+.pc-held-text { color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 100px; overflow: auto; font-size: var(--font-ui); }
+.pc-held-state { color: var(--muted); font-size: var(--font-meta); margin: var(--space-xs) 0; }
+.pc-queue-action, .pc-send-choice { font: inherit; color: var(--text-2); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 5px 9px; cursor: pointer; }
+.pc-queue-action { margin: var(--space-xs) var(--space-xs) 0 0; }
+.pc-send-choice { display: block; width: 100%; text-align: left; margin-block: var(--space-xs); }
+.pc-queue-action:disabled, .pc-send-choice:disabled { opacity: .5; cursor: default; }
+.pc-queue-action:focus-visible, .pc-send-choice:focus-visible, .pc-queue-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pc-queue-edit { width: 100%; min-height: 64px; background: var(--sunken); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: var(--space-sm); font: inherit; resize: vertical; }
+.pc-queue-error { color: var(--danger); font-size: var(--font-meta); overflow-wrap: anywhere; }
+.pc-attach-text { padding: var(--space-sm); color: var(--text-2); font-size: var(--font-meta); }
+
+.pc-attach.pc-attach-document { width: auto; max-width: 100%; height: auto; min-height: 56px; padding: var(--space-sm) 24px var(--space-sm) var(--space-xs); display: flex; flex-wrap: wrap; align-items: center; }

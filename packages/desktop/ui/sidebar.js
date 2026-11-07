@@ -1,3 +1,4 @@
+import { waitBadge } from "./chat/wait-clock.js";
 import { el as h, el } from "./dom.js";
 import { handoffRow } from "./shell/handoff.js";
 import { renderHandoffRow } from "./shell/handoff-view.js";
@@ -472,7 +473,7 @@ function rowHandoff(sb, desc) {
 function rowSig(sb, desc) {
   const c = desc.child;
   const approval = sb.approvals.get(keyOf(desc.computer, c));
-  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "", c.stalled ? c.stalledSince : "", c.backgroundTasks ?? "",
+  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.statusSince, c.lastReply ?? "", c.stalled ? c.stalledSince : "", c.backgroundTasks ?? "",
     JSON.stringify(rowHandoff(sb, desc)), c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : "",
@@ -536,7 +537,8 @@ function rowContent(sb, node, desc) {
   const chip = el("span", "sb-computer", computer);
   chip.style.setProperty("--host-color", hostColor(computer));
   const stalled = stalledMinutes(child);
-  top.append(chip, stalled !== null ? el("span", "sb-stalled", stallLabel(stalled)) : el("span", "sb-age", age(child.lastChangedAt)));
+  const waiting = kind === "needs" ? waitBadge(el("span", "sb-age"), child.statusSince) : null;
+  top.append(chip, waiting || (stalled !== null ? el("span", "sb-stalled", stallLabel(stalled)) : el("span", "sb-age", age(child.lastChangedAt))));
   if (unread) top.append(el("span", "sb-unread"));
   const snooze = snoozeMark(desc);
   if (snooze) top.append(snooze);
@@ -603,6 +605,7 @@ function compactRowContent(sb, node, desc) {
     renderHandoffRow(handoffs, computer, rowHandoff(sb, desc));
     out.push(handoffs);
   }
+  if (kind === "needs") { const wait = waitBadge(el("span", "sb-cage"), child.statusSince); if (wait) out.push(wait); }
   if (kind === "working") out.push(el("span", "sb-cspin"));
   else if (["needs", "error", "unknown"].includes(kind)) out.push(el("span", "sb-cmark " + kind, BADGE[kind]));
   else out.push(el("span", "sb-cage", age(child.lastChangedAt, "")));

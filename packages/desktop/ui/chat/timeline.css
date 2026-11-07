@@ -332,3 +332,9 @@
   .ct-outline-flash .ct-user-bubble { animation: none; box-shadow: 0 0 0 2px var(--accent); }
   .ct-outline-tick::after { transition: none; }
 }
+
+/* Following is explicit; native scroll anchoring must not fight our row anchor. */
+.ct-scroll { overflow-anchor: none; }
+.ct-pr-opened { color: var(--muted); font-size: var(--font-meta); padding-block: var(--space-sm); }
+.ct-pr-view { color: var(--link); }
+.ct-pr-view:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
