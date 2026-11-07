@@ -79,6 +79,11 @@ function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions,
     const named = override.trim().toLowerCase();
     const kind = ["github", "gitlab", "gitboy"].includes(named) ? named : kindFromDomain(parsed.domain);
     if (kind === "gitboy") value = { ...parsed, root: remote ? local : undefined };
+    else {
+      // A gitboy mirror of another host keeps the owner/repo path and the commit ids.
+      const mirror = read("config", ...(local ? [] : ["--global"]), "--get", `phren.${parsed.domain}.mirror`).trim().toLowerCase();
+      if (mirror && validDomain(mirror)) value = { ...parsed, domain: mirror, root: remote ? local : undefined };
+    }
   }
   // A budget-limited git lookup must not become a day-long negative resolution.
   if (Date.now() < deadline) entries[key] = { checkedAt: new Date().toISOString(), value };

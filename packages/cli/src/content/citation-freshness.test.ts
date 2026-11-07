@@ -36,7 +36,11 @@ const writeOutside = (file: string, entries: unknown) => {
   const when = new Date(Date.now() + ++outsideWrites * 1000);
   utimesSync(file, when, when);
 };
-beforeEach(() => { tmp = makeTempDir("citation-freshness-"); });
+beforeEach(() => {
+  tmp = makeTempDir("citation-freshness-");
+  // The developer's own ~/.gitconfig (a phren.<domain>.mirror, say) must not reach these tests.
+  vi.stubEnv("GIT_CONFIG_GLOBAL", path.join(tmp.path, "gitconfig"));
+});
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); tmp.cleanup(); });
 
 describe("gitboy citation freshness", () => {
@@ -115,6 +119,19 @@ describe("gitboy citation freshness", () => {
     vi.mocked(execFileSync).mockClear();
     await refreshCitationFreshness([cite], { ...options(), fetchImpl: vi.fn() });
     expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it("checks another host's repository against its gitboy mirror, per domain", async () => {
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => response(url, true));
+    writeFileSync(path.join(tmp.path, "gitconfig"), "[phren \"github.com\"]\n\tmirror = GitBoy.Example\n");
+    const cite = citation("src/a.ts", { projectRemote: "https://github.com/alice/app" });
+    const other = citation("src/a.ts", { projectRemote: "https://gitlab.com/alice/app" });
+    const result = await refreshCitationFreshness([cite, other], { ...options(), fetchImpl });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const url = new URL(String(fetchImpl.mock.calls[0][0]));
+    expect(url.host + url.pathname).toBe("gitboy.example/api/v1/repos/alice/app/changed");
+    expect(url.searchParams.get("since")).toBe("abcdef1");
+    expect([...result.values()].map(item => item.state)).toEqual(["changed"]);
   });
 
   it("groups repositories and commits, deduplicates paths and batches at 100", async () => {
