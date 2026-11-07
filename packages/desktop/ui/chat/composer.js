@@ -293,7 +293,6 @@ export function createComposer({ computer, target, provider, branch, project, on
   const footer = node("div", "pc-footer");
   // Findings about what is being typed, from the session's project.
   const recall = createRecall({ computer, project, draft: () => input.value, attach: (text) => { input.value = text; onInput(); input.focus(); } });
-  card.append(attachmentsEl, slashEl, pendingEl, ghostEl, recall.el, input, draftError, notice, footer);
 
   // Background strip above the card: folded by default, remembered per target.
   const wrap = node("div", "pc-wrap");
@@ -355,9 +354,9 @@ export function createComposer({ computer, target, provider, branch, project, on
     },
     editDraft: (text) => { input.value = [text, input.value].filter(part => part.trim()).join("\n\n"); onInput(); input.focus(); },
   });
-  card.insertBefore(heldQueue.el, pendingEl);
+  card.append(attachmentsEl, slashEl, heldQueue.el, pendingEl, ghostEl, recall.el, input, draftError, notice, footer);
   function followSent() {
-    window.dispatchEvent(new CustomEvent("phren:chat-send", { detail: { computer, target } }));
+    globalThis.window?.dispatchEvent(new CustomEvent("phren:chat-send", { detail: { computer, target } }));
   }
 
   // ---- draft persistence ----
@@ -528,7 +527,7 @@ export function createComposer({ computer, target, provider, branch, project, on
 
   input.addEventListener("input", onInput);
   input.addEventListener("paste", (event) => {
-    const pasted = event.clipboardData?.getData("text/plain") || "";
+    const pasted = event.clipboardData?.getData?.("text/plain") || "";
     if (pasteBecomesAttachment(pasted)) {
       event.preventDefault();
       if (new TextEncoder().encode(pasted).length > MAX_IMAGE_BYTES) {
