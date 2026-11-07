@@ -1,3 +1,5 @@
+import { BrowserRegistry } from "./browser-registry.js";
+import { streamBrowser } from "./browser-stream.js";
 import { continuationPlacement } from "./continuation-launch.js";
 import { ConductorSuccessionService, preflightConductorWorkers } from "./conductor-succession.js";
 import { StorePulls } from "./store-pull.js";
@@ -257,6 +259,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const storePulls = new StorePulls(scheduleStore);
   const gitboyWebhooks = new GitboyWebhooks(root, storeId => storePulls.request(storeId), undefined,
     scheduler ? event => scheduler.ingestEvent(event) : undefined);
+  const browsers = new BrowserRegistry(root);
+  await browsers.start();
   const stopRetention = modules.has("git") ? await startChangeRetention() : () => {};
   if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
   const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, settingsSwitcher, info, activeCapabilities });
@@ -273,14 +277,14 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
   const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams, returns, handOffs, inbox, mover, succession, storePulls, gitboyWebhooks, turnQueue }));
+    fanoutMessages, canary, streams, returns, handOffs, inbox, mover, succession, storePulls, gitboyWebhooks, turnQueue, browsers }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   const socketPools = new SocketBudget<WebSocket>();
   http.on("upgrade", (request, socket, head) => {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
-      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/git/watch", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
+      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/git/watch", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/browsers/stream"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
       requireRoute(modules, "WS", url.pathname);
       // Parsed before the upgrade: an invalid server name is refused as the other routes refuse it.
       const overviewServer = url.pathname === "/v1/overview" ? selectedServer(url) : undefined;
@@ -296,6 +300,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1"); return; }
         if (url.pathname === "/v1/git/watch") { void gitWatch.stream(client, url); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => failRelay(client)); return; }
+        if (url.pathname === "/v1/browsers/stream") { streamBrowser(client, url.searchParams, browsers); return; }
         if (url.pathname === "/v1/simulators/stream") { void streamSimulator(client, url.searchParams).catch(() => client.close(1011, "Simulator stream unavailable")); return; }
         if (url.pathname === "/v1/speech/live") { void relayLiveSpeech(client, url.searchParams).catch(() => client.close(1011, "Spoken replies unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
@@ -373,7 +378,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

@@ -1,3 +1,4 @@
+import { browserEnv } from "./browser-env.js";
 // Herdr as the Hook's terminal provider: each method is one call on Herdr's
 // socket API. It calls herdr.ts's exported `rpc`, the seam the bridge tests
 // fake, so a test that records Herdr requests sees exactly what it did before
@@ -153,7 +154,7 @@ export const herdrTerminal: TerminalProvider = {
   },
   // What Herdr sets in its own panes (herdrPaneFromEnv reads them back).
   paneEnv(server, { workspace, tab, pane }) {
-    return { HERDR_ENV: "1", HERDR_SOCKET_PATH: herdrSocketPath(server), HERDR_WORKSPACE_ID: workspace, HERDR_TAB_ID: tab, HERDR_PANE_ID: pane };
+    return { ...browserEnv(pane), HERDR_ENV: "1", HERDR_SOCKET_PATH: herdrSocketPath(server), HERDR_WORKSPACE_ID: workspace, HERDR_TAB_ID: tab, HERDR_PANE_ID: pane };
   },
   async reportAgent(server, pane, agent, state) {
     await rpc(server, "pane.report_agent", { pane_id: pane, source: PHREN_REPORT_SOURCE, agent, state });

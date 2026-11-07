@@ -153,7 +153,7 @@ describe("built-in registration declarations", () => {
     const store = source("bridge/memory-store.ts");
     const storeRoutes = (method: string) => [...store.matchAll(new RegExp(`method === "${method}" && url.pathname === STORE_ROUTES\\.(\\w+)`, "g"))]
       .map(match => `/v1/store/${match[1]}`);
-    const currentGets = [...[...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]), ...storeRoutes("GET")];
+    const currentGets = [...[...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]), ...storeRoutes("GET"), "/v1/browsers", "/v1/browsers/recordings", "/v1/browsers/recordings/index", "/v1/browsers/recordings/frame"];
     expect(declared.filter(route => route.method === "GET").map(route => route.path).sort()).toEqual(currentGets.sort());
     const postBlock = server.slice(server.indexOf('} else if (request.method === "POST")'), server.indexOf('} else throw new BridgeError(405'))
       + source("bridge/server-pane-routes.ts");
@@ -167,7 +167,7 @@ describe("built-in registration declarations", () => {
     // Routed before the per-method blocks, beside the other /v1/store/ prefix routes.
     currentPosts.add("/v1/store/pull-now");
     expect(declared.filter(route => route.method === "POST").map(route => route.path).sort()).toEqual([...currentPosts].sort());
-    expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/git/watch"]);
+    expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/browsers/stream", "/v1/git/watch"]);
   });
 
   it("can feed only memory into the existing gate without exposing task or dispatch actions", async () => {
