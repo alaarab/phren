@@ -1,3 +1,5 @@
+import { browserShimPath } from "./browser-env.js";
+declare const BROWSER_SHIM_SOURCE: string | undefined;
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
@@ -281,6 +283,9 @@ export async function install(version: string, noService = false, force = false)
   const previousBundle = await missingFile(readFile(installedBundle));
   const stagedBundle = installedBundle + `.phren-${process.pid}`;
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
+  const shimDirectory = path.join(destination, "bridge/browser-shim");
+  await mkdir(shimDirectory, { recursive: true, mode: 0o700 });
+  await atomic(path.join(shimDirectory, "phren-playwright.cjs"), typeof BROWSER_SHIM_SOURCE !== "undefined" ? BROWSER_SHIM_SOURCE : await readFile(browserShimPath(), "utf8"), 0o600);
   await atomic(fastHookPath(destination), FAST_HOOK_SOURCE);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
   const gateway = await detectGateway();

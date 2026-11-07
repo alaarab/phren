@@ -193,7 +193,6 @@ async function loginKind(home: ClaudeHome, last: LastKnown): Promise<LoginKind |
  * account fits. Logged with the reason.
  */
 export async function pickClaudeAccount(what: string, scope: PickScope = {}, computer = "this computer", now = Date.now()): Promise<AccountChoice | undefined> {
-  if (!usageReader) return undefined;
   const project = scopeRule(scope);
   const last = await readLastKnown();
   // This computer's accounts.yaml roles and pools, read here rather than only through the inventory: a slow or
@@ -254,7 +253,7 @@ export async function pickClaudeAccount(what: string, scope: PickScope = {}, com
   };
   if (!policyApplies(policyRooms([]), rules)) {
     if (policyRooms([]).filter(room => room.usable !== false).length < 2) return fallback();
-    const usage = await within(2_500, usageReader());
+    const usage = usageReader ? await within(2_500, usageReader()) : undefined;
     if (!usage) return fallback();
     const { choice, skipped } = chooseAccount(claudeRooms(inventory, usage, now), limitedBy(await readAccountLimits(now), computer));
     if (choice) {
@@ -265,8 +264,8 @@ export async function pickClaudeAccount(what: string, scope: PickScope = {}, com
     logger.info("accounts", `${what}: no Claude account has room (${skipped.join("; ")}); launching under default.`);
     return undefined;
   }
-  // Unknown room ranks last, so a slow usage read still leaves the policy to choose.
-  const usage = await within(2_500, usageReader()) ?? [];
+  // Unknown room ranks last: an absent or slow usage reader must not bypass pools or roles.
+  const usage = (usageReader ? await within(2_500, usageReader()) : undefined) ?? [];
   const { choice, skipped } = choosePolicyAccount(policyRooms(usage), rules, limitedBy(await readAccountLimits(now), computer));
   if (!choice) {
     throw new BridgeError(409, `No Claude account on ${computer} may do this work${skipped.length ? `: ${skipped.join("; ")}` : ""}.`.slice(0, 500),

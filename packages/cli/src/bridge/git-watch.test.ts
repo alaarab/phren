@@ -58,7 +58,9 @@ describe("live Git changes", () => {
   beforeEach(() => { watcherCounts.opened = 0; watcherCounts.closed = 0; });
   afterEach(async () => {
     vi.useRealTimers();
-    for (const directory of created.splice(0)) await rm(directory, { recursive: true, force: true });
+    // close() stops future polls; an already running Git process can briefly
+    // hold its cwd open on Windows. Retry removal until that process exits.
+    for (const directory of created.splice(0)) await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   async function repository(): Promise<{ root: string; git: (...args: string[]) => Promise<string> }> {

@@ -9,6 +9,28 @@ import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 const pane = (name: string) => readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "claude-questions", `${name}.txt`), "utf8");
 
 describe("reading Claude's question dialog", () => {
+  const shortDialog = (bar: string) => [bar, "", "Pick?", "", "❯ 1. A", "  2. B", "  3. Type something.",
+    "  4. Chat about this", "", "Enter to select", "Esc to cancel"].join("\n");
+
+  it.each([
+    ["Submit", "← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["a tab label", "← ☐ Color theme ☐ Too\nls ✔ Submit →", ["Color theme", "Tools"]],
+    ["Submit after combining-mark output", "e\u0301".repeat(22) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["Submit with a wide tab label", "─".repeat(24) + "\n← ☐ 色彩🎨 ☐ Tools ✔ Sub\nmit →", ["色彩🎨", "Tools"]],
+    ["Submit after VS16 emoji output", "☕️".repeat(8) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["Submit after ZWJ emoji output", "👨‍👩‍👧‍👦".repeat(3) + "\n\n← ☐ Color ☐ Tools ✔ Sub\nmit →", ["Color", "Tools"]],
+    ["a label before a spaced Submit suffix", "← ☐ Color ☐ Too\nls ✔\nSubmit →", ["Color", "Tools"]],
+    ["a tab whose separating space the capture trimmed", "← ☐ Color theme ☐ Size ☐\nTools ✔ Submit →", ["Color theme", "Size", "Tools"]],
+    ["three rows with a trimmed space", "← ☐ Color ☐\nSize ☐ Too\nls ✔ Submit →", ["Color", "Size", "Tools"]],
+  ] as const)("preserves characters when a tab bar wraps inside %s", (_name, bar, tabs) => {
+    expect(claudeQuestionDialog(shortDialog(bar))).toMatchObject({ kind: "question", title: "Pick?", tabs });
+  });
+
+  it("starts the tab bar at its leading arrow, excluding a preceding checkbox row", () => {
+    expect(claudeQuestionDialog(shortDialog("☐ Previous task\n← ☐ Color ☐ Tools ✔ Submit →")))
+      .toMatchObject({ kind: "question", title: "Pick?", tabs: ["Color", "Tools"] });
+  });
+
   it("reads the first of three questions under its tab bar, not the prompt above it", () => {
     expect(claudeQuestionDialog(pane("q1"))).toEqual({
       kind: "question", tabs: ["Color", "Tools", "Size"], multiSelect: false, cursor: 1,
@@ -20,6 +42,22 @@ describe("reading Claude's question dialog", () => {
       ],
       other: { number: 4, label: "Type something.", answered: false, cursor: false },
     });
+  });
+
+  it.each(["q1", "review", "long-single"])("rejects a stale or quoted %s dialog", name => {
+    expect(claudeQuestionDialog(pane(name).replace(/❯/g, " "))).toBeUndefined();
+    expect(claudeQuestionDialog(pane(name) + "\n❯ Continue\nWorking…")).toBeUndefined();
+    expect(claudeQuestionDialog("```text\n" + pane(name) + "\n```")).toBeUndefined();
+    expect(claudeQuestionDialog(pane(name).split("\n").map(line => "> " + line).join("\n"))).toBeUndefined();
+  });
+
+  it("reads and answers a question whose footer wraps before Esc to cancel", async () => {
+    expect(claudeQuestionDialog(pane("single").replace(" · Esc to cancel", " ·\nEsc to cancel"))).toMatchObject({ kind: "question", title: "Pick one?", cursor: 1 });
+    const claude = new FakeClaude([{ question: "Pick one?", options: [{ label: "A" }, { label: "B" }] }]);
+    const io = claude.io();
+    await answerClaudeQuestionDialog({ ...io, read: async () => (await io.read()).replace(" · Esc to cancel", " ·\nEsc to cancel") },
+      [{ question: "Pick one?", options: [{ label: "A" }, { label: "B" }] }], [{ options: [1] }]);
+    expect(claude.result).toEqual({ "Pick one?": "B" });
   });
 
   it("reads multi-select boxes, a typed answer and the Next row", () => {
@@ -63,6 +101,22 @@ const set: DialogQuestion[] = [
 ];
 
 describe("answering Claude's question dialog", () => {
+  it.each([false, true])("submits four questions with a wrapped tab bar and a final multi-select (Other: %s)", async typed => {
+    const questions: DialogQuestion[] = [set[0], set[2],
+      { question: "Which environment?", options: [{ label: "Staging" }, { label: "Production" }] }, set[1]];
+    const claude = new FakeClaude(questions), io = claude.io();
+    // The owner may already be on question four in the terminal. Reflow the
+    // real dialog layout at two tab boundaries, including Submit on its own
+    // physical row; the existing fake always draws a single wide tab bar.
+    claude.tab = 3;
+    await answerClaudeQuestionDialog({ ...io, read: async () => (await io.read())
+      .replace(/(←[^\n]*?[☐☒] \S+  [☐☒] \S+)  /, "$1\n")
+      .replace(/  ✔ Submit  →/, "\n✔ Submit  →") }, questions,
+    [{ options: [1] }, { options: [0] }, { options: [0] }, { options: [0, 1, 2], ...(typed ? { text: "Nano editor" } : {}) }]);
+    expect(claude.result).toEqual({ "Which color?": "Green", "Which size?": "Small", "Which environment?": "Staging",
+      "Which tools?": ["Vim", "Emacs", "VSCode", ...(typed ? ["Nano editor"] : [])] });
+  });
+
   it("the old blind digits-then-Tab walk skips the next question and never submits", async () => {
     const claude = new FakeClaude(set);
     for (const keys of [["2", "tab"], ["1", "3", "tab"], ["2", "enter"]]) await claude.io().keys(keys);

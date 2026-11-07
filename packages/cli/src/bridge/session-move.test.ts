@@ -394,9 +394,10 @@ describe("moving a session to another agent", () => {
     expect(await recordedConductor()).toEqual(old);
   });
 
-  it.each([undefined, "replace"])("saves the hand-off and replaces the agent in place (mode %s)", async mode => {
+  it.each([[undefined, undefined], ["replace", undefined], ["replace", "agent-summary"]])("saves the hand-off and replaces the healthy agent in place (mode %s, continuation %s)", async (mode, continuation) => {
     const { deps, typed, launches, closed } = world({ reply: writes });
-    const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" }, mode ? { mode } : {});
+    deps.usage = async () => [{ source: "claude", windows: [{ id: "five-hour", name: "5 hour", usedPercent: 99 }] }];
+    const record = await move(deps, { harness: "codex", model: "gpt-5.5", effort: "high" }, { ...(mode ? { mode } : {}), ...(continuation ? { continuation } : {}) });
 
     expect(record).toMatchObject({ state: "moved", placement: "same-pane", exit: "clean", dispatch: DISPATCH,
       handoff: { source: "agent" }, target: { pane: "w1:p1", source: "codex", session: NEXT } });
@@ -414,6 +415,10 @@ describe("moving a session to another agent", () => {
     // The first prompt is the whole hand-off plus the instruction to continue.
     expect(String(object(launches[0].data.brief).text)).toMatch(/Continue from here[\s\S]*## Goal\nFix the parser\./);
     expect(closed).toEqual([]);
+    const history = path.join(path.dirname(record.handoff!.path), "conversation.md");
+    expect(await readFile(history, "utf8")).toContain("Fix the parser and open a PR");
+    expect(handoff).toContain("Saved history: conversation.md, beside this hand-off file.");
+    expect(String(object(launches[0].data.brief).text)).toContain(record.handoff!.path);
   });
 
   it.each([
@@ -570,6 +575,54 @@ describe("moving a session to another agent", () => {
     expect(handoff).toContain(" M src/parser.ts");
     // The move's own request is not part of the work it hands over.
     expect(handoff).not.toContain("Do not commit, stash");
+  });
+
+  it.each(["usage", "transcript", "saved-history"])("continues locally from saved history without asking the source (%s)", async signal => {
+    const { deps, typed, launches } = world({ reply: writes });
+    const recent = [user("Now finish the parser"), agent("The parser is edited; verification remains.")];
+    const earlier = [user("Original request: preserve parser compatibility"), agent("Earlier decision outside the transcript tail")];
+    deps.transcript = async () => signal === "transcript" ? [...recent, JSON.stringify({ type: "assistant", isApiErrorMessage: true, error: "rate_limit",
+      message: { role: "assistant", content: [{ type: "text", text: "You've hit your session limit · resets 3pm" }] } })] : recent;
+    deps.conversation = async () => ({ lines: [...earlier, ...recent], complete: true });
+    deps.usage = async () => [{ source: "claude", windows: [{ id: "five-hour", name: "5 hour", usedPercent: signal === "usage" ? 100 : 20 }] }];
+    const deliver = vi.spyOn(deps, "deliver");
+    const prompt = deps.terminal.prompt;
+    deps.terminal.prompt = async (...args) => {
+      // The source stays alive until both the hand-off and history have been saved.
+      const folders = await readdir(path.join(root, "briefs"));
+      const folder = path.join(root, "briefs", folders[0]);
+      expect(await readFile(path.join(folder, "conversation.md"), "utf8")).toContain("Earlier decision outside the transcript tail");
+      expect(await readFile(path.join(folder, "handoff.md"), "utf8")).toContain("abc123 Start parser fix");
+      return prompt(...args);
+    };
+    const record = await move(deps, { harness: "codex" }, signal === "saved-history" ? { continuation: "saved-history" } : {});
+    expect(record).toMatchObject({ state: "moved", continuation: "saved-history", handoff: { source: "fallback" } });
+    expect(deliver).not.toHaveBeenCalled();
+    expect(typed).toEqual(["/exit"]);
+    expect(launches).toHaveLength(1);
+    const document = await readFile(record.handoff!.path, "utf8");
+    expect(document).toContain("Original brief: fix the parser");
+    expect(document).toContain("Now finish the parser");
+    expect(document).toContain(" M src/parser.ts");
+    expect(document).toContain("12 pnpm dev");
+    expect(document).toContain("Read more history from this file as needed");
+    expect(document).toContain("Inspect the checkout before continuing");
+    expect(String(object(launches[0].data.brief).text).length).toBeLessThanOrEqual(32_768);
+  });
+
+  it("falls back and launches when the source session ends while waiting for its summary", async () => {
+    const { deps, pane, launches } = world();
+    const deliver = deps.deliver;
+    deps.deliver = async (...args) => {
+      const result = await deliver(...args);
+      delete pane.agent;
+      return result;
+    };
+    const record = await move(deps, { harness: "codex" });
+    expect(record).toMatchObject({ state: "moved", handoff: { source: "fallback", reason: expect.stringContaining("session ended") } });
+    expect(await readFile(record.handoff!.path, "utf8")).toContain("Fix the parser and open a PR");
+    expect(await readFile(path.join(path.dirname(record.handoff!.path), "conversation.md"), "utf8")).toContain("edited src/parser.ts");
+    expect(launches).toHaveLength(1);
   });
 
   it.each([
@@ -746,20 +799,25 @@ describe("stopping the agent so a held hand-off goes in", () => {
       await Promise.race([Promise.resolve(mover.settled(from.server, from.pane)).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 2_000))]);
     }
   });
-  async function held(deliver?: MoverDeps["deliver"]) {
+  async function held(deliver?: MoverDeps["deliver"], phase: "delivering" | "waiting" = "waiting") {
     const w = world({ reply: writes });
     // The agent is on a step; the request waits behind it.
     w.pane.agent_status = "working";
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    w.deps.sleep = () => gate;
-    if (deliver) w.deps.deliver = deliver;
-    else w.deps.deliver = async () => ({ ok: true, queued: true });
+    let delivering!: () => void, waiting!: () => void;
+    const deliveryStarted = new Promise<void>(resolve => { delivering = resolve; });
+    const handoffWaiting = new Promise<void>(resolve => { waiting = resolve; });
+    w.deps.sleep = () => { waiting(); return gate; };
+    const send = deliver ?? (async () => ({ ok: true, queued: true }));
+    w.deps.deliver = (...args) => { delivering(); return send(...args); };
     const mover = new SessionMover(w.deps);
     const record = await mover.start({ target: from, to: { harness: "codex" } }, { owner: true });
     running.push({ mover, release, id: record.id });
-    await new Promise(resolve => setImmediate(resolve));
-    return { ...w, mover, record, release };
+    // History reads before delivery may outlast an event-loop turn. Wait for the
+    // hand-off poll to reach its gate, unless the test deliberately holds delivery.
+    await (phase === "delivering" ? deliveryStarted : handoffWaiting);
+    return { ...w, mover, record, release, handoffWaiting };
   }
   /** A queue whose row for the move's request is in `state` (queued for the pane's terminal and conversation). */
   const answering = (state: "queued" | "attempting" | "uncertain" | "delivered" | "failed", row: { terminal: string; session?: string } = { terminal: "term-1", session: SESSION }) => {
@@ -825,7 +883,6 @@ describe("stopping the agent so a held hand-off goes in", () => {
       send: async (_target, text, _id, typing) => { await typing(); sent.push(text); return { delivered: true }; } });
     const f = await held((target, text, deliveryId) => queue.enqueue({ target, text, deliveryId }));
     // The request is on the queue, held behind the agent's step.
-    for (let i = 0; i < 50 && !await queue.status(`move-${f.record.id}`, from).then(() => true, () => false); i++) await new Promise(resolve => setTimeout(resolve, 5));
     expect(await queue.status(`move-${f.record.id}`, from)).toMatchObject({ queued: true });
     // Both arrive while it waits: one Escape lands, before any typing, and both say so.
     const both = await Promise.all([f.mover.interrupt(f.record.id, queue), f.mover.interrupt(f.record.id, queue)]);
@@ -868,10 +925,10 @@ describe("stopping the agent so a held hand-off goes in", () => {
   it("sends nothing before the request is queued, or for a move this Hook no longer runs", async () => {
     // The request is still on its way to the queue.
     let queued!: () => void;
-    const f = await held(() => new Promise(resolve => { queued = () => resolve({ ok: true, queued: true }); }));
+    const f = await held(() => new Promise(resolve => { queued = () => resolve({ ok: true, queued: true }); }), "delivering");
     expect(await f.mover.interrupt(f.record.id, answering("queued"))).toEqual({ interrupted: false, state: "finished" });
     queued();
-    await new Promise(resolve => setImmediate(resolve));
+    await f.handoffWaiting;
     // No row made yet: nothing an Escape would let in.
     const empty = { whileQueued: async (_id: string, _target: Target, action: (row?: { terminal: string }) => Promise<void>) => { await action(); return { ran: true as const }; } };
     expect(await f.mover.interrupt(f.record.id, empty)).toEqual({ interrupted: false, state: "idle" });

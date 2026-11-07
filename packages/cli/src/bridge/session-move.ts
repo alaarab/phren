@@ -1,16 +1,17 @@
+import { capacityRoom, type AccountUsage } from "./usage.js";
 import { targetTranscriptPath } from "./transcripts.js";
 import { CONVERSATION_LIMIT, CONVERSATION_MARKER, ORPHAN_GRACE_MS, pruneContinuationConversations, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
 import type { ConductorSuccessionService } from "./conductor-succession.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
-// Moving a live session to another agent: the agent in the pane writes a
-// hand-off, exits the way it normally does, and the target harness starts in
+// Moving a live session to another agent: the Hook saves its history and an
+// optional agent summary, exits the source, and the target harness starts in
 // the same pane by default, or a new chat that keeps the old agent running.
 //
 // The hand-off is asked for through the same durable prompt path `hand_off`
 // uses, as a reply between two marker lines; the Hook reads it from the
 // transcript and saves it. A reply never waits on a permission prompt, which
 // a write outside the checkout would in a supervised session. When the agent
-// does not answer in time, the hand-off is built from the transcript's tail,
+// cannot answer, the hand-off is built from its saved conversation,
 // the git state and the original brief instead, as a worker continued on
 // another account is (account-failover.ts).
 //
@@ -56,8 +57,9 @@ export const moveRequestSchema = z.object({
    * account's home and the same conversation resumes there (`claude --resume`),
    * so an account at its usage limit can still switch. `summary-by-target` (a move to another computer):
    * the source is not asked for a hand-off; the new agent there builds one from the copied conversation.
-   * A source whose last turn ended on its usage limit is moved this way without asking. */
-  continuation: z.enum(["handoff", "resume", "summary-by-target"]).default("handoff"),
+   * `saved-history` continues immediately on this computer or a peer; `agent-summary` asks a healthy
+   * source for an optional summary. Omitted/`handoff` automatically skips an exhausted source. */
+  continuation: z.enum(["handoff", "resume", "summary-by-target", "agent-summary", "saved-history"]).default("handoff"),
   /** Kept on a retry: the same id returns the move already under way. */
   id: z.string().uuid().optional(),
   /** How long the agent gets to write its hand-off before Phren builds one. */
@@ -79,7 +81,7 @@ const moveRecordSchema = z.object({
   mode: z.enum(["replace", "new-chat"]).optional(),
   /** `resume`: the same conversation under another account here. `summary-by-target`: the source was out of
    * usage, so the agent on the other computer builds the hand-off from the copied conversation. */
-  continuation: z.enum(["resume", "summary-by-target"]).optional(),
+  continuation: z.enum(["resume", "summary-by-target", "agent-summary", "saved-history"]).optional(),
   modeForced: z.literal("conductor").optional(),
   handedOffTo: z.object({ computer: z.string().optional(), target: z.union([targetSchema, startingTargetSchema]) }).strict().optional(),
   handedOffFrom: z.object({ target: targetSchema, title: z.string().max(200) }).strict().optional(),
@@ -405,10 +407,11 @@ export function fallbackHandoff(input: { reason: string; from: string; entries: 
   return input.original ? withOriginalBrief(head, input.original, Number.MAX_SAFE_INTEGER, "the original brief file") : head;
 }
 
-/** Whether a Claude conversation's last turn ended on its subscription's usage limit (Claude's own
- * rate-limit row): its agent cannot answer a hand-off request. */
+/** Whether the harness ended its latest turn with a quota error: it cannot answer a hand-off request. */
 export function sourceOutOfUsage(lines: readonly string[], source: Provider): boolean {
-  return source === "claude" && isClaudeUsageLimit(finalTurnFromLines(lines, "claude").error);
+  if (source === "phren") return false;
+  const error = finalTurnFromLines(lines, source).error;
+  return isClaudeUsageLimit(error) || /usage.?limit|rate.?limit|quota|insufficient.?credits|429/i.test(error ?? "");
 }
 
 /** Room left in a cross-computer brief for the copied conversation, once the rest of the hand-off is in. */
@@ -512,7 +515,7 @@ export function handoffDocument(record: MoveRecord, body: string, observed: stri
 
 /** The new agent's first prompt: the whole hand-off when it fits the brief, else where to read it. */
 export function continuePrompt(document: string, file: string): string {
-  const lead = "Phren moved this session to you. The hand-off from the previous agent follows. Continue from here: check the current state first, keep its uncommitted changes, and do not start over.";
+  const lead = `Phren moved this session to you. The hand-off from the previous agent follows (saved at ${file}; resolve its history file beside it). Continue from here: check the current state first, keep its uncommitted changes, and do not start over.`;
   const whole = `${lead}\n\n${document}`;
   if (whole.length <= PROMPT_LIMIT) return whole;
   return `Phren moved this session to you. The previous agent's hand-off is ${document.length} characters, too long for this prompt: read all of ${file} before anything else. Then continue from here: check the current state first, keep its uncommitted changes, and do not start over.`;
@@ -539,7 +542,9 @@ export interface MoverDeps {
   inventory: () => Promise<HarnessInventory | undefined>;
   /** The conversation's transcript lines, its tail is enough. */
   transcript: (target: Target) => Promise<string[]>;
-  /** The whole transcript for a summary-by-target move's copy, and whether all of it was read. */
+  /** Current account limits from the Hook's shared usage reader. */
+  usage?: () => Promise<AccountUsage[]>;
+  /** The whole transcript for a continuation copy, and whether all of it was read. */
   conversation?: (target: Target) => Promise<{ lines: string[]; complete: boolean }>;
   /** Copies a Claude conversation into another account's home (`copyClaudeConversation` over its transcript).
    * With `check`, only resolves and validates both ends, so a move is refused before the old agent exits. */
@@ -702,7 +707,7 @@ export class SessionMover {
     const at = new Date(this.now).toISOString();
     const resume = data.continuation === "resume";
     const record: MoveRecord = { id: data.id ?? randomUUID(), state: resume ? "exiting" : "handing-off", createdAt: at, updatedAt: at,
-      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(resume ? { continuation: "resume" as const } : data.continuation === "summary-by-target" ? { continuation: "summary-by-target" as const } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
+      ...(project ? { project } : {}), mode: conductor || peer ? "new-chat" : data.mode, ...(data.continuation !== "handoff" ? { continuation: data.continuation } : {}), ...(conductor ? { modeForced: "conductor" as const } : {}), from: { target, ...(account ? { account } : {}), ...(label ? { label: label.slice(0, 200) } : {}) }, to, cwd, ...(computerId ? { computerId } : {}), ...(peer?.fingerprint ? { computerFingerprint: peer.fingerprint } : {}), ...(accountChoice ? { accountChoice } : {}),
       ...(dispatch && briefId.safeParse(dispatch).success ? { dispatch } : {}), ...(workerDispatch ? { workerDispatch } : {}) };
     await assertUnusedLaunchId(record.id);
     if (conductor && peer) {
@@ -733,16 +738,20 @@ export class SessionMover {
       const pids = pane ? (await this.deps.terminal.processes(from.server, from.pane).catch(() => undefined))?.foregroundPids ?? [] : [];
       const [git, processes] = await Promise.all([(this.deps.git ?? readGitState)(record.cwd).catch(() => undefined),
         (this.deps.processesBelow ?? processesBelow)(pids).catch(() => [] as string[])]);
-      // A source out of usage cannot answer a hand-off request: on another computer, the new agent builds it.
-      const requested = record.continuation === "summary-by-target";
-      const lines = peer ? await this.deps.transcript(from).catch(() => undefined) : [];
-      // Asked for by name, the move never launches an agent with no conversation to build from.
-      if (requested && !lines?.length) throw new BridgeError(409, "The conversation could not be read, so the agent on the other computer would have nothing to build a hand-off from; the old chat remains open.");
-      const exhausted = !!peer && sourceOutOfUsage(lines ?? [], from.source);
-      const byTarget = !!peer && (requested || exhausted);
-      if (byTarget && !requested) await this.update(record, { continuation: "summary-by-target" });
-      const written = byTarget ? { reason: `${exhausted ? "its account is out of usage" : "the owner asked"}, so the agent on ${peer!.name} builds the hand-off from the copied conversation.` }
-        : await this.askForHandoff(record, handoffMs);
+      // Saved history is available even when the outgoing harness cannot answer or disappears.
+      const portable = !!peer || from.source !== record.to.harness || record.continuation === "saved-history";
+      const lines = await this.deps.transcript(from).catch(() => [] as string[]);
+      const whole = portable ? await (this.deps.conversation ?? wholeTranscript)(from).catch(() => undefined) : undefined;
+      const entries = conversationEntries(whole?.lines ?? lines, from.source);
+      const limits = await this.deps.usage?.().catch(() => [] as AccountUsage[]);
+      const exhausted = sourceOutOfUsage(lines, from.source) || capacityRoom(limits ?? [], this.now)
+        .some(row => row.source === from.source && (from.source !== "claude" || (row.account ?? DEFAULT_ACCOUNT) === (record.from.account ?? DEFAULT_ACCOUNT)) && row.exhausted);
+      const requested = record.continuation === "summary-by-target" || record.continuation === "saved-history";
+      if (record.continuation === "summary-by-target" && !entries.length) throw new BridgeError(409, "The conversation could not be read, so the agent on the other computer would have nothing to build a hand-off from; the old chat remains open.");
+      const byTarget = portable && (requested || exhausted);
+      if (byTarget && !requested) await this.update(record, { continuation: peer ? "summary-by-target" : "saved-history" });
+      const written = byTarget ? { reason: `${exhausted ? "its account is out of usage" : "the owner asked for immediate continuation"}; continue from saved history.` }
+        : await this.askForHandoff(record, handoffMs).catch(error => ({ reason: `the hand-off request failed (${error instanceof Error ? error.message : String(error)}).` }));
       // The wait is over. Its request, if still untyped, is taken back first: typed later it would ask the old
       // agent (left running by a new-chat move) for a hand-off nobody reads. Then an interrupt already checking
       // finishes, and none starts after (the move goes on to exit or launch, where an Escape would hit the exit
@@ -751,36 +760,53 @@ export class SessionMover {
       await this.lifecycle(record.id, async () => { this.asking.delete(record.id); });
       const observed = observedState(git, processes, !peer), at = new Date(this.now).toISOString();
       let body: string;
-      if (byTarget) {
+      if (byTarget || (portable && !("text" in written))) {
         const original = record.dispatch ? await this.deps.brief?.(record.dispatch).catch(() => undefined) : undefined;
-        const entries = conversationEntries(lines ?? [], from.source);
         const fit = (room: number) => targetSummaryBody({ from: harnessName({ harness: from.source, account: record.from.account }), exhausted,
-          entries, room, prepare: text => redactPeerHandoff(text.replaceAll(record.cwd, "<source checkout>")), ...(original ? { original } : {}),
+          entries, room, prepare: text => peer ? redactPeerHandoff(text.replaceAll(record.cwd, "<source checkout>")) : briefText(text),
+          original: original ?? entries.find(entry => entry.role === "owner")?.text,
           ...(record.dispatch ? { dispatch: record.dispatch } : {}), ...(record.from.label ? { label: record.from.label } : {}) });
         // What fits beside the rest of the hand-off in the one brief the other computer gets, measured as sent:
         // the checkout path replaced and credentials redacted, either of which can lengthen the text. Messages
         // are prepared that way before they are counted; the refit only catches what the rest of the brief adds.
         // The receiving Hook appends where it put the whole conversation, so that line's room is kept free.
         const limit = PROMPT_LIMIT - POINTER_ROOM;
-        let room = limit - peerPrompt(record, handoffDocument(record, "", observed, at, !!conductor)).length - TRANSCRIPT_MARGIN;
+        const promptFor = (body: string) => {
+          const document = handoffDocument(record, body, observed, at, !!conductor);
+          return peer ? peerPrompt(record, document) : `Phren moved this session to you. Inspect the checkout before continuing.\n\n${document}`;
+        };
+        let room = limit - promptFor("").length - TRANSCRIPT_MARGIN;
         body = fit(room);
         for (let tries = 0; tries < 4; tries++) {
-          const over = peerPrompt(record, handoffDocument(record, body, observed, at, !!conductor)).length - limit;
+          const over = promptFor(body).length - limit;
           if (over <= 0) break;
           room -= over + 500; body = fit(room);
         }
-        // The whole conversation, for the receiving Hook to pull beside the brief (continuation-launch.ts). A copy
-        // that cannot be saved leaves the excerpt, which the brief carries anyway.
-        // Read whole here: the lines above are the transcript's last 512 KiB, which tool output can fill.
-        const whole = await (this.deps.conversation ?? wholeTranscript)(from).catch(() => undefined);
-        await saveContinuationConversation(record.id, conversationCopy(whole ? conversationEntries(whole.lines, from.source) : entries,
-          text => briefText(redactPeerHandoff(text.replaceAll(record.cwd, "<source checkout>"))), CONVERSATION_LIMIT, whole?.complete ?? false))
-          .catch(() => undefined);
       } else {
         const fallback = "text" in written ? undefined : await this.fallback(record, written.reason);
         body = "text" in written ? written.text : record.mode === "new-chat"
           ? `## Goal and current state\n\n${fallback}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`
           : fallback!;
+      }
+      if (portable && !peer && record.mode === "new-chat" && !("text" in written)) {
+        body = `## Goal and current state\n\n${body}\n\n## Next steps\n\nContinue the owner's goal above after checking the checkout and the latest agent reply.\n\n## Key files\n\nOpen or changed files are named in the conversation above and the checked Git state below; open editor tabs are not available to the Hook.`;
+      }
+      let savedHistory: string | undefined;
+      if (portable) {
+        const prepare = (text: string) => briefText(peer ? redactPeerHandoff(text.replaceAll(record.cwd, "<source checkout>")) : text);
+        const first = entries.find(entry => entry.role === "owner")?.text;
+        const original = record.dispatch ? await this.deps.brief?.(record.dispatch).catch(() => undefined) : undefined;
+        const prefix = [original ? `Original dispatch request:\n${prepare(original).slice(0, ORIGINAL_RESERVE)}` : "",
+          first ? `Original owner request:\n${prepare(first).slice(0, ORIGINAL_RESERVE)}` : ""].filter(Boolean).join("\n\n");
+        const copy = `${prefix}\n\n${conversationCopy(entries, prepare, CONVERSATION_LIMIT - prefix.length - 2, whole?.complete ?? false)}`;
+        // Save before exiting the source. This durable local copy outlives intent-copy cleanup.
+        // writeLaunchBrief publishes its folder atomically and owns the launch id.
+        // Fill in the history only after that publication, still before source exit.
+        savedHistory = copy;
+        if (peer) {
+          await saveContinuationConversation(record.id, copy);
+          if (!body.includes(CONVERSATION_MARKER)) body += `\n\n${CONVERSATION_MARKER}. Read more history from the conversation file supplied beside this brief as needed; inspect the checkout before continuing.`;
+        } else body += "\n\nSaved history: conversation.md, beside this hand-off file. Read more history from this file as needed, including the original request and earlier decisions. Inspect the checkout before continuing; preserve the owner's uncommitted changes.";
       }
       const document = handoffDocument(record, body, observed, at, !!conductor);
       await this.assertNotAborted(record);
@@ -788,6 +814,7 @@ export class SessionMover {
       const prompt = briefText(continuePrompt(document, file));
       // The folder is the new agent's brief folder; the hand-off is written into it, whole.
       await writeLaunchBrief({ id: record.id, text: prompt }, this.now, record.from.label);
+      if (savedHistory !== undefined) await atomic(path.join(path.dirname(file), "conversation.md"), savedHistory);
       await atomic(file, document);
       await this.update(record, { state: record.mode === "new-chat" ? "launching" : "exiting", handoff: { path: file, source: "text" in written ? "agent" : "fallback",
         ...("reason" in written ? { reason: written.reason.slice(0, 300) } : {}), chars: document.length } });
@@ -1084,7 +1111,7 @@ export class SessionMover {
     }
   }
 
-  /** The agent's own hand-off, or why there is none. Fails only when the session itself went away. */
+  /** The agent's optional hand-off, or why there is none; run also catches lifecycle failures. */
   private async askForHandoff(record: MoveRecord, handoffMs: number): Promise<{ text: string } | { reason: string }> {
     const from = record.from.target;
     const deadline = this.now + handoffMs;
@@ -1105,7 +1132,7 @@ export class SessionMover {
       await this.sleep(this.poll);
       aborted();
       const pane = findPane(await this.deps.snapshot(from.server), placeOf(from));
-      if (!pane || pane.agent !== from.source) throw new BridgeError(409, "The session ended before it wrote its hand-off; nothing was started.");
+      if (!pane || pane.agent !== from.source) throw new BridgeError(409, "The session ended before it wrote its hand-off.");
       const lines = await this.deps.transcript(from).catch(() => [] as string[]);
       const text = extractHandoff(repliesAfterRequest(conversationEntries(lines, from.source), record.id), record.id);
       if (!text) continue;

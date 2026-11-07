@@ -74,10 +74,11 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     process.env.HISTFILE = process.platform === "win32" ? path.join(home, ".history") : "/dev/null";
     // A stand-in for Claude Code: a Node script named claude that echoes what it is sent.
     // "DIALOG" draws Claude's permission dialog, as its auto-mode fallback
-    // does with no hook behind it; "CLEAR" clears the screen.
+    // does with no hook behind it; "CLEAR" clears the screen
+    // back to Claude's working line.
     await writeFile(path.join(folder, "claude"), `#!${process.execPath}\nconst rl = require("node:readline").createInterface({ input: process.stdin });\n`
       + `const dialog = ${JSON.stringify(CLAUDE_DIALOG)};\nprocess.stdout.write("fake claude ready\\n");\n`
-      + `rl.on("line", line => process.stdout.write(line === "DIALOG" ? dialog : line === "CLEAR" ? "\\x1b[2J\\x1b[H" : "got: " + line + "\\n"));\n`);
+      + `rl.on("line", line => process.stdout.write(line === "DIALOG" ? dialog : line === "CLEAR" ? "\\x1b[2J\\x1b[H✻ Working… (esc to interrupt)\\n" : "got: " + line + "\\n"));\n`);
     await chmod(path.join(folder, "claude"), 0o755);
     // A stand-in for a fresh Codex: its startup menu (hooks to review), then,
     // once "3" answers it, its composer. It sends no lifecycle event, as Codex

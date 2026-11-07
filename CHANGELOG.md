@@ -9,6 +9,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Private repository-qualified task links and `phren tasks reconcile`: preview merge completion before opting in, retain merge evidence, flag closed PRs and work needing verification, and capture links from dispatch reports without publishing task identities to GitHub.
 
+## [0.3.71] - 2026-11-02
+
+### Fixed
+
+- Answer Claude's multi-question dialog when a narrow pane wraps its tab bar: the wrapped rows are rebuilt (including a split inside Submit or a label, emoji and wide characters, and a trimmed wrap space), so answers no longer fail with "Nothing was sent".
+
+## [0.3.70] - 2026-11-02
+
+### Fixed
+
+- Recognize every supported Claude permission-mode footer when clearing resolved dialogs, including accept-edits and bypass-permissions, so question cards, tmux blocked status and permission holds retire at the empty composer.
+
+- Restore Claude plan confirmations and wrapped Claude/Codex dialogs in narrow panes, including AskUserQuestion footers. Resize and incomplete screen reads preserve pending permissions. Screen confirmation now takes a separate 300 ms second read with a 400 ms read budget; default discovery is 350 ms and phone status updates every 500 ms.
+
+- Hook question cards require an active harness dialog at the bottom of the live screen. Screen-only blocking requires two consecutive observations and clears on disappearance; ordinary numbered output, quoted dialogs and stale rows no longer become questions. Released Claude permissions that disappear between reads retire after their initial draw grace. Transcript questions resolve by identity on their result, the next assistant turn, Stop or an owner prompt, even when the result never arrives.
+
+## [0.3.69] - 2026-11-01
+
+### Fixed
+
+- Unnamed Claude phone launches and schedules enforce account pools and roles even without a usage reader. Headless schedules use their owning store for project pool rules. Helper runs require the owner’s explicit `role: helpers`, including accounts named by a team project.
+
+- Hook delivery follow-up observes legitimate working turns without expiring at 30 seconds, then waits up to 30 seconds after the pane finishes for confirmation. It never sends delayed Enter keys: tmux and Herdr cannot atomically verify Claude's full composer and submit it. Unconfirmed messages remain reviewable with a reason and may still settle from a late submission hook. Recorded Claude nonbreaking prompt separators are recognized without normalizing message whitespace; wrapped or collapsed inputs are reported as unverifiable rather than submitted. Starting panes receive no blind recovery keys.
+
 ## [0.3.68] - 2026-11-01
 
 ### Added

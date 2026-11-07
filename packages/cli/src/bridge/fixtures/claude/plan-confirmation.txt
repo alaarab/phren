@@ -1,0 +1,5 @@
+ Ready to code?
+ ❯ 1. Yes, proceed
+   2. No, keep planning
+
+ Esc to cancel

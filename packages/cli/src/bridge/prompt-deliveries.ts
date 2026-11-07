@@ -273,7 +273,11 @@ export class PromptDeliveries {
     return this.records.find(record => record.hash === hash && this.samePane(record, target) && (record.state === "typed" || record.state === "queued"));
   }
   /** A message Phren typed into `target`'s pane that no conversation there has submitted yet. */
-  pending(target: Target, text: string): boolean { return !!this.open(target, text); }
+  pending(target: Target, text: string, id?: string): boolean {
+    if (!id) return !!this.open(target, text);
+    const record = this.find(id, target);
+    return !!record && PromptDeliveries.open(record) && record.session === target.session && record.hash === promptHash(text);
+  }
   /** Whether `record` still holds its pane: open, and either young or in a pane whose hooks will settle it. */
   private inFlight(record: Record): boolean {
     return PromptDeliveries.open(record) && (this.now() - record.at < IN_FLIGHT_MS || this.hookPanes.has(this.paneKey(record)));

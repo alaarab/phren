@@ -53,7 +53,7 @@ There is nothing to migrate. The existing `~/.claude` becomes the `default` acco
 
 ## Hook contract
 
-All fields are additive. A request that leaves out `account` means `default`.
+All fields are additive. A Claude launch that leaves out `account` uses the automatic choice described below.
 
 ### `GET /v1/harnesses`
 
@@ -90,7 +90,7 @@ All of this is opt-in. A store that sets none of it behaves exactly as before.
 - **Pool:** a Claude account slot may have a `pool`, a short tag (`personal`, `client-a`) for whose work it may do.
 - **Role:** a slot may have a `role`, which says how it is used without being named:
   - `helpers`: for helper runs;
-  - `last-resort`: offered only when no `helpers` account fits;
+  - `last-resort`: offered only when no ordinary or `helpers` account has room;
   - `off`: never chosen automatically, though still by hand on the phone.
 
   An account with no role is an ordinary account, as every account was before, except a Console (API-billed) login: with no role it is off for automatic use, so API credit is only spent once you give the account a role.
@@ -103,7 +103,7 @@ Where they bind (`account-policy.ts`):
 
 A config that can't be read allows no pool rather than any. A `phren.project.yaml` that names `allowedPools` but can't be parsed refuses every Claude account for that project, named ones included (a broken file that never named a list still means any pool). An `accounts.yaml` that can't be read is flagged on the Claude listing entry (`poolsUnreadable: true`), and every Claude account on that computer is refused, named or not, until it is fixed. On the same computer, a move with no account named is checked against the account it will run under: the pane's own, else `default`.
 
-With no pools, no roles and no Console logins, every choice is the same as before. A launch from the phone or a schedule that names no account picks on the receiving computer the same way as dispatch once a pool, a role or a Console login is in play there: the project's (`project` in the launch, else the one whose checkout holds the folder) and this computer's `allowedPools`, never `off` or a Console login with no role, `last-resort` only when no other account has room. When none fits the launch is refused with 409 `account_pool` before a pane is created, and a scheduled run fails with that reason.
+With no pools, no roles and no Console logins, every choice is the same as before. A launch from the phone or a schedule that names no account picks on the receiving computer the same way as dispatch once a pool, a role or a Console login is in play there: the project's (`project` in the launch, else the one whose checkout holds the folder) and this computer's `allowedPools`, never `off` or a Console login with no role, `last-resort` only when no other account has room. These checks still apply when usage is unavailable or its reader has not been installed; unknown room ranks last. Headless schedules read the project rules from the store that owns the schedule. When none fits the launch is refused with 409 `account_pool` before a pane is created, and a scheduled run fails with that reason.
 
 ```bash
 phren bridge accounts pool api200 personal        # or --clear
@@ -130,6 +130,8 @@ helper:
   account: api      # a Claude account on this computer with role helpers (phren bridge accounts role api helpers); default is ~/.claude
   model: haiku      # optional, haiku by default
 ```
+
+Naming an account in a personal or team project file does not authorize helper use. The owner must explicitly mark that local account with `phren bridge accounts role <account> helpers`; an unset, `off` or `last-resort` role is refused.
 
 Each call runs `claude -p --model <model> --output-format json --strict-mcp-config` with the prompt on stdin, in the lead's folder (or the `cwd` it passes), with the account's `CLAUDE_CONFIG_DIR`. The folder decides the project: it must be a project's checkout or worktree, and a `project` the lead names must be that one, so one project's helper account never runs in another project's folder.
 

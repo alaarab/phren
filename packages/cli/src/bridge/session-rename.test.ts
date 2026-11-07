@@ -139,7 +139,7 @@ describe("Claude Code", () => {
       expect(log.typed).toEqual([]);
       expect(log.panes).toEqual([["w1:p1", "Tide charts"]]);
     }
-    for (const screen of ["❯ half a sentence I was typing\n", "no prompt here\n", " Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n❯ \n"]) {
+    for (const screen of ["❯ half a sentence I was typing\n", "no prompt here\n", " Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n"]) {
       const { rename, log } = setup({ panes: [agentPane("w1:p1", "claude")], screen });
       expect((await rename()).native).toMatchObject({ applied: false, reason: expect.stringContaining("Not typed") });
       expect(log.typed).toEqual([]);

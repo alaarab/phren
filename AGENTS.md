@@ -116,7 +116,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.3.68 (see `packages/cli/package.json`).
+`@phren/cli` 0.3.71 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 
@@ -141,7 +141,7 @@ Note: `reference/topics/` is a *runtime* location inside a user's `.phren/<proje
 
 ## Owner development and release workflow
 
-Feature PRs run builds, lint and docs only. Tests are deferred, never reported as passed. Consolidate the requested features, then dispatch CI on the exact release commit with `release_candidate=true` once. The RC-only `browser-test` job runs the CLI and desktop Playwright suites, building desktop-kit, desktop and the Monaco editor host before the desktop suite; desktop failure reports and traces are retained for three days. Publication requires that successful full RC run on the same commit and reuses its evidence. No per-feature tests or redundant manual native jobs. Preserve running workers and source pins.
+Feature PRs run builds, lint and docs only. Tests are deferred, never reported as passed. Consolidate the requested features, then dispatch CI on the exact release commit with `release_candidate=true` once. The RC-only `browser-test` job runs the CLI and desktop Playwright suites, building desktop-kit, desktop and the Monaco editor host before the desktop suite; desktop failure reports and traces are retained for three days. Publication requires that successful full RC run on the same commit and reuses its evidence. No per-feature tests or redundant manual native jobs. Preserve running workers and source pins. A scheduled nightly on main runs the same full RC suite but is not release evidence.
 
 <!-- BEGIN:turborepo-agent-rules -->
 

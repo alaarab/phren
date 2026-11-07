@@ -97,7 +97,8 @@ describe("cleanupStore", () => {
     const done = await cleanupStore(root, run, { now });
     expect(fs.existsSync(path.join(root, ".git", "MERGE_HEAD"))).toBe(false);
     expect(git(root, "status", "--porcelain")).toBe("");
-    expect(fs.readFileSync(path.join(root, "file.txt"), "utf8")).toBe("main\n");
+    // merge --abort restores Git's checkout bytes (CRLF with core.autocrlf).
+    expect(fs.readFileSync(path.join(root, "file.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("main\n");
     expect(done.some((line) => line.includes("aborted a merge"))).toBe(true);
   });
 
@@ -134,8 +135,9 @@ describe("cleanupStore", () => {
     fs.rmSync(gone, { recursive: true, force: true });
     const done = await cleanupStore(root, run);
     const listed = git(root, "worktree", "list", "--porcelain");
-    expect(listed).toContain(live);
-    expect(listed).not.toContain(gone);
+    // Git's porcelain paths use forward slashes on Windows too.
+    expect(listed).toContain(live.split(path.sep).join("/"));
+    expect(listed).not.toContain(gone.split(path.sep).join("/"));
     expect(done).toContain("pruned 1 worktree record(s) whose folders were gone");
   });
 

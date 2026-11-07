@@ -1343,7 +1343,7 @@ schedules:
 
     // Seen on the phone: an idle Claude Code redrawing (an update notice)
     // dropped the Enter, and the text sat in its input line.
-    it("presses Enter once more when an idle agent has not taken the prompt, and says so when it still has not", async () => {
+    it("reports an idle agent’s unsubmitted prompt without sending Enter, and confirms a submission hook", async () => {
       const submit = (prompt: string) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target: claude, event: "UserPromptSubmit", prompt });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
@@ -1353,25 +1353,27 @@ schedules:
       });
       paneAgent = "claude"; agentStatus = "idle";
       const claude = { ...target, source: "claude" as const };
-      const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
-      const before = enters();
-      const retried = api("/v1/prompt", { target: claude, text: "commit it when the soak passes" });
-      await waitFor(() => enters() > before, 4_000);
+      const confirmed = api("/v1/prompt", { target: claude, text: "commit it when the soak passes", deliveryId: "idle-confirmed-01" });
+      await waitFor(() => commands.some(c => c.method === "agent.prompt" && c.params.text === "commit it when the soak passes"), 4_000);
       expect(await submit("commit it when the soak passes")).toEqual({ status: 200 });
-      expect(await retried).toEqual({ status: 200, data: { ok: true, delivered: true, state: "delivered" } });
-      expect(enters()).toBe(before + 1);
-      // Nothing takes it even after the second Enter: not sent, never a third.
-      expect((await api("/v1/prompt", { target: claude, text: "keep going with the phone layout" })).data)
-        .toMatchObject({ ok: true, deliveryUncertain: true, unsubmitted: true });
-      expect(enters()).toBe(before + 2);
-      // A slash command opens a menu a second Enter would answer: never retried.
+      expect(await confirmed).toEqual({ status: 200, data: { ok: true, delivered: true, state: "delivered" } });
+      expect((await api("/v1/prompt/status", { target: claude, deliveryId: "idle-confirmed-01" })).data)
+        .toEqual({ ok: true, state: "delivered", session });
+      // The full message is visible, but a screen read cannot authorize Enter.
+      paneLines = recorded("claude/2.1.284/owner-typing-tmux.ansi").replace("❯\u00a0x", "❯\u00a0keep going with the phone layout");
+      const reason = "The message is visible but cannot be safely resubmitted; check and submit it in the terminal.";
+      expect((await api("/v1/prompt", { target: claude, text: "keep going with the phone layout", deliveryId: "idle-unsubmitted-01" })).data)
+        .toEqual({ ok: true, deliveryUncertain: true, unsubmitted: true, state: "failed", reason });
+      expect((await api("/v1/prompt/status", { target: claude, deliveryId: "idle-unsubmitted-01" })).data)
+        .toEqual({ ok: true, state: "failed", reason, session });
+      // A slash command opens a menu a second Enter would answer.
       await api("/v1/prompt", { target: claude, text: "/model" });
-      expect(enters()).toBe(before + 2);
+      expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
     }, 15_000);
 
     // Seen 2026-09-24: a hand-off pasted into a busy Claude Code showed "paste
     // again to expand" and sat in its input line after the turn ended.
-    it("presses Enter once when a busy agent's turn ends with the prompt still unsubmitted, and never after it was taken", async () => {
+    it("fails a busy agent’s unsubmitted prompt after its turn without Enter, and settles submission hooks as delivered", async () => {
       const submit = (prompt: string) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target: claude, event: "UserPromptSubmit", prompt });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
@@ -1381,50 +1383,59 @@ schedules:
       });
       paneAgent = "claude"; agentStatus = "working";
       const claude = { ...target, source: "claude" as const };
-      const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
-      const before = enters();
-      expect((await api("/v1/prompt", { target: claude, text: "hand off the parser review" })).data).toEqual({ ok: true, queued: true });
+      const text = "hand off the parser review";
+      paneLines = recorded("claude/2.1.284/owner-typing-tmux.ansi").replace("❯\u00a0x", `❯\u00a0${text}`);
+      expect((await api("/v1/prompt", { target: claude, text, deliveryId: "busy-unsubmitted-01" })).data)
+        .toEqual({ ok: true, queued: true, state: "queued" });
       await sleep(2_500);
-      expect(enters()).toBe(before);
+      expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
       agentStatus = "idle";
-      await waitFor(() => enters() > before, 8_000);
-      expect(await submit("hand off the parser review")).toEqual({ status: 200 });
-      await sleep(2_500);
-      expect(enters()).toBe(before + 1);
+      let failed: any;
+      await waitFor(async () => {
+        await sleep(200);
+        failed = (await api("/v1/prompt/status", { target: claude, deliveryId: "busy-unsubmitted-01" })).data;
+        return failed.state === "failed";
+      }, 40_000);
+      expect(failed).toEqual({ ok: true, state: "failed", session,
+        reason: "The message is visible but cannot be safely resubmitted; check and submit it in the terminal." });
+      expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
+      // A late submission hook can still confirm the failed delivery.
+      expect(await submit(text)).toEqual({ status: 200 });
+      expect((await api("/v1/prompt/status", { target: claude, deliveryId: "busy-unsubmitted-01" })).data)
+        .toEqual({ ok: true, state: "delivered", session });
       // Taken when the turn ended: nothing more is pressed.
-      // A working Claude takes a message typed mid-turn and runs its
-      // UserPromptSubmit ~340 ms later (seen 2026-09-28, curly quotes and
-      // all); the phone gets a confirmed delivery, not a bare ok.
+      // A working Claude takes a message typed mid-turn (including curly
+      // quotes); its submission hook confirms delivery before the turn ends.
       agentStatus = "working";
       const midTurn = "then run the soak, I\u2019d say the \u2018disconnecting\u2019 flash matters";
-      const taken = api("/v1/prompt", { target: claude, text: midTurn });
-      await sleep(400);
+      const taken = api("/v1/prompt", { target: claude, text: midTurn, deliveryId: "busy-confirmed-01" });
+      await waitFor(() => commands.some(c => c.method === "agent.prompt" && c.params.text === midTurn), 4_000);
       expect(await submit(midTurn)).toEqual({ status: 200 });
       expect((await taken).data).toEqual({ ok: true, delivered: true, state: "delivered" });
       agentStatus = "idle";
       await sleep(5_000);
-      expect(enters()).toBe(before + 1);
-    }, 30_000);
+      expect((await api("/v1/prompt/status", { target: claude, deliveryId: "busy-confirmed-01" })).data)
+        .toEqual({ ok: true, state: "delivered", session });
+      expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
+    }, 60_000);
 
-    it("presses Enter once when a starting Claude Code stays idle after its first prompt, and says when it still has not started", async () => {
+    it("reports a starting Claude Code’s idle first prompt as unconfirmed without sending Enter", async () => {
       reportIdentity = false; paneAgent = "claude"; agentStatus = "idle";
       const pane = (await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0];
       expect(pane).toMatchObject({ agent: "claude", starting: true });
       const { session: _session, ...location } = target;
       const starting = { ...location, source: "claude", starting: true, startingToken: pane.startingToken };
-      const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
-      const before = enters();
       // Herdr refuses the first prompts while it finishes starting the agent
       // ("not an active named agent", seen with Codex 2026-09-28); the brief waits.
       promptNotReady = 2;
       expect((await api("/v1/prompt", { target: starting, text: "A long dispatched brief" })).data)
         .toEqual({ ok: true, deliveryUncertain: true, unsubmitted: true });
       expect(commands.filter(c => c.method === "agent.prompt" && c.params.text === "A long dispatched brief")).toHaveLength(3);
-      expect(enters()).toBe(before + 1);
+      expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
       // A worker that started on its brief is never sent another Enter.
       agentStatus = "working";
       expect((await api("/v1/prompt", { target: starting, text: "Another brief" })).status).toBe(200);
-      expect(enters()).toBe(before + 1);
+      expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
     }, 20_000);
 
     it("serves a Herdr tab's pane layout for the desktop's mirror", async () => {
@@ -1741,21 +1752,24 @@ schedules:
       paneAgent = "claude"; agentStatus = "blocked";
       paneLines = "Parser aborted (timeout, resource limit, or over-length)\n"
         + "Do you want to proceed?\n"
-        + "> 1. Yes\n"
+        + "❯ 1. Yes\n"
         + "2. Yes, and switch to auto mode · auto mode handles these prompts for you\n"
         + "3. No\n"
         + "Esc to cancel · Tab to amend\n";
       const claude = { ...target, source: "claude" as const };
-      const status = async () => {
+      const status = async (published = false) => {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(claude)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
         await waitFor(() => frames.length, 2_000);
+        // A dialog the Hook has not seen before is published once a second
+        // read confirms it, a tick after the first frame.
+        if (published) await waitFor(() => frames.some(f => f.agentStatus?.terminalPrompt), 2_000);
         socket.terminate();
-        return frames[0].agentStatus;
+        return ((published && frames.find(f => f.agentStatus?.terminalPrompt)) || frames[0]).agentStatus;
       };
       // No PermissionRequest fired: the Hook reads the pane and finds the dialog.
-      expect(await status()).toMatchObject({ status: "blocked", terminalPrompt: {
+      expect(await status(true)).toMatchObject({ status: "blocked", terminalPrompt: {
         toolName: "Question", message: "Do you want to proceed?",
         choice: { title: "Do you want to proceed?",
           options: [{ label: "Yes", key: "1" },
@@ -1768,7 +1782,7 @@ schedules:
       // Still drawn, still waiting: the dialog is read again past the throttle window.
       agentStatus = "blocked";
       await sleep(DIALOG_THROTTLE_MS + 50);
-      expect((await status()).terminalPrompt).toMatchObject({ choice: { title: "Do you want to proceed?" } });
+      expect((await status(true)).terminalPrompt).toMatchObject({ choice: { title: "Do you want to proceed?" } });
       // The phone sends the option's digit; the Hook appends Enter to submit it.
       expect((await api("/v1/keys", { target: claude, keys: ["1"] })).status).toBe(200);
       expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["1", "enter"]]);
@@ -1791,17 +1805,20 @@ schedules:
         + "  2. Yes, and don't ask again for commands that start with 'bun /tmp/atlas-shell-review.ts' (p)\n"
         + "  3. No, and tell Codex what to do differently (esc)\n"
         + "Press enter to confirm or esc to cancel\n";
-      const status = async () => {
+      const status = async (published = false) => {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
         await waitFor(() => frames.length, 2_000);
+        // A dialog the Hook has not seen before is published once a second
+        // read confirms it, a tick after the first frame.
+        if (published) await waitFor(() => frames.some(f => f.agentStatus?.terminalPrompt), 2_000);
         socket.terminate();
-        return frames[0].agentStatus;
+        return ((published && frames.find(f => f.agentStatus?.terminalPrompt)) || frames[0]).agentStatus;
       };
       // No PermissionRequest fired and no structured question: the Hook reads
       // the pane's own numbered rows and keys them by their trailing letters.
-      const first = await status();
+      const first = await status(true);
       expect(first.terminalPrompt).toMatchObject({ toolName: "Question", choice: {
         title: "Would you like to run the following command?\nEnvironment: local\n"
           + "Reason: Allow final headless rendering of the revised terminal hint hierarchy?\n"
@@ -1818,22 +1835,35 @@ schedules:
       // The phone sends the option's own key, not its row number.
       expect((await api("/v1/keys", { target, keys: ["p"] })).status).toBe(200);
       expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["p"]]);
-      // Answered: the prompt is gone, and stays gone once the pane works.
-      expect((await status()).terminalPrompt).toBeUndefined();
+      // Answered: Codex draws its working line, and the prompt stays gone
+      // through later screen reads and confirmations, then once the pane works.
+      paneLines = "• Working (1s • esc to interrupt)\n";
+      const watched = async () => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+        await once(socket, "open");
+        await sleep(DIALOG_THROTTLE_MS + 1_200);
+        socket.terminate();
+        return frames.map(f => f.agentStatus);
+      };
+      const after = await watched();
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.filter(s => s?.terminalPrompt)).toEqual([]);
       agentStatus = "working";
-      expect((await status()).terminalPrompt).toBeUndefined();
+      expect((await watched()).filter(s => s?.terminalPrompt)).toEqual([]);
     });
 
     describe("Codex keyless terminal menus", () => {
       beforeEach(startFixture, HOOK_START_MS + 8_000);
 
+      // A new menu is published once a second read confirms it, a tick after the first frame.
       async function status() {
         const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
         const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
         await once(socket, "open");
-        await waitFor(() => frames.length, 2_000);
+        await waitFor(() => frames.some(f => f.agentStatus?.terminalPrompt), 2_000);
         socket.terminate();
-        return frames[0].agentStatus;
+        return (frames.find(f => f.agentStatus?.terminalPrompt) ?? frames[0]).agentStatus;
       }
 
       it.each([

@@ -11,6 +11,7 @@ describe("locating a project on this computer", () => {
     home = path.join(root, "home");
     mkdirSync(home);
     vi.stubEnv("HOME", home);
+    vi.stubEnv("USERPROFILE", home); // os.homedir() uses USERPROFILE on Windows.
     vi.stubEnv("PHREN_HERDR_HOME", path.join(root, "herdr"));
   });
   afterEach(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });

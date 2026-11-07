@@ -22,7 +22,11 @@ beforeEach(async () => {
   await git("add", "."); await git("commit", "-qm", "start");
   changes = new ToolChanges({ budgetMs: 10_000 });
 });
-afterEach(async () => { await changes.close(); vi.unstubAllEnvs(); await rm(home, { recursive: true, force: true }); });
+afterEach(async () => {
+  await changes.close(); vi.unstubAllEnvs();
+  // Windows can still hold a just-closed handle under the store for a moment.
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+});
 
 const files = async (conversation: string, id: string) => (await changes.view(conversation).changes(id))?.map(file => file.path) ?? [];
 

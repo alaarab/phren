@@ -7,7 +7,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import type { AgentHooks } from "./agent-hooks.js";
 import { TURN_ENDED_WITHOUT_IT, type DeliveryOutcome } from "./prompt-deliveries.js";
-import { claudeSubagentView } from "./claude-suggestion.js";
+import { screenDialog } from "./pane-status.js";
+import { claudeInputMatches, claudeSubagentView } from "./claude-suggestion.js";
 import type { DialogAnswer, DialogQuestion } from "./claude-question-dialog.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitShow, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
@@ -211,7 +212,7 @@ const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.tes
 
 /** What `takesPrompt` checks before typing into a Claude pane Herdr reads working: nothing structured
  * pending there and no dialog on its screen. */
-export function promptGuards(agentHooks: Pick<AgentHooks, "approval" | "terminalPrompt" | "servedQuestion">, target: Target): PromptGuards {
+export function promptGuards(agentHooks: Pick<AgentHooks, "approval" | "terminalPrompt" | "servedQuestion">, target: Target): Required<PromptGuards> {
   return { held: () => !!(agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)),
     screen: () => terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }) };
 }
@@ -235,21 +236,38 @@ async function relaysSuggestion(target: Target, text: string): Promise<boolean> 
 /** Herdr answered the request with a refusal (a 409 carrying its own error code): it performed nothing. */
 const herdrRefused = (error: unknown) => error instanceof BridgeError && error.status === 409 && typeof error.details?.herdrCode === "string";
 
-/** An idle agent that has not taken typed text within the first wait
- * likely lost the Enter while it redrew (an update notice, a resize): the
- * text sits in its input line. Press Enter once more and wait again. A
- * pane that turned working took it; one still idle is reported unsubmitted,
- * so the phone shows the message as not sent instead of waiting forever. */
-async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: string): Promise<DeliveryOutcome | "unsubmitted"> {
-  const status = async () => { try { return String(findPane(await snapshot(target.server), target)?.agent_status ?? "unknown"); } catch { return "unknown"; } };
-  // A pane that turned working started a turn: its UserPromptSubmit is on its way (the agent runs its
-  // other hooks too). Wait for it rather than answering "queued" for a message the agent took.
-  if (await status() === "working") return await agentHooks.deliveries.awaitLate(target, text);
-  const late = agentHooks.deliveries.awaitLate(target, text);
-  await terminalProvider().sendKeys(target.server, target.pane, ["enter"]);
-  const outcome = await late;
-  if (outcome !== "pending") return outcome;
-  return await status() === "working" ? "pending" : "unsubmitted";
+/** Fresh terminal and conversation evidence for a delivery follow-up. Failure
+ * ends recovery; a later valid submission can still settle the failed receipt. */
+async function deliveryPane(target: Target, terminal: unknown): Promise<Json> {
+  const pane = findPane(await snapshot(target.server), target);
+  if (!pane || typeof terminal !== "string" || pane.terminal_id !== terminal || pane.agent !== target.source) throw new Error("The terminal instance changed or could not be verified.");
+  if (await paneIdentity(target.server, pane, true) !== target.session) throw new Error("The conversation changed or could not be verified.");
+  return pane;
+}
+
+/** Screen reads cannot authorize a later key write: neither tmux nor Herdr
+ * exposes an atomic Claude composer/identity/held-state check-and-submit.
+ * Observe the receipt and report what can be verified, without writing keys.
+ * In particular, expanding a collapsed paste with keys would have the same
+ * race and still would not expose authoritative full composer text. */
+async function observeIdleDelivery(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, id?: string): Promise<DeliveryOutcome | "unsubmitted"> {
+  const fail = (reason: string) => { agentHooks.deliveries.fail(id, target, reason); return "unsubmitted" as const; };
+  const guards = promptGuards(agentHooks, target);
+  try {
+    if (!id) return fail("No delivery identity is available; check the terminal.");
+    const pane = await deliveryPane(target, terminal);
+    if (pane.agent_status === "working" && !guards.held()) return await agentHooks.deliveries.awaitLate(target, text);
+    if (!["idle", "done"].includes(String(pane.agent_status))) return fail("The agent is not idle or done; observation stopped.");
+    if (guards.held()) return fail("The agent has a held approval, question or terminal prompt; observation stopped.");
+    const screen = await guards.screen();
+    // These are observations only. The owner or harness may change the input
+    // even before readScreen resolves; no screen result permits an Enter.
+    if (!agentHooks.deliveries.pending(target, text, id)) return agentHooks.deliveries.status(id, target).state === "delivered" ? "delivered" : "unsubmitted";
+    if (screenDialog(target.source, screen) || !claudeInputMatches(screen, text)) return fail("The full message cannot be verified in the input box; check the terminal.");
+    return fail("The message is visible but cannot be safely resubmitted; check and submit it in the terminal.");
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "The delivery checks failed; check the terminal.");
+  }
 }
 
 /** A Claude pane showing a subagent's view (its empty input reads "Message
@@ -305,58 +323,51 @@ export function retryAfterSubagentView(agentHooks: AgentHooks, target: Target, t
     process.stderr.write(`phren hook: retrying phone message ${id} in the conversation after leaving the subagent view\n`);
     const expected = agentHooks.deliveries.expect(target, text, 1_500, undefined, id, typeof terminal === "string" ? terminal : undefined);
     await terminalProvider().prompt(target.server, target.pane, text);
-    if (await expected === "pending") await resubmitIfIdle(agentHooks, target, text);
+    if (await expected === "pending") await observeIdleDelivery(agentHooks, target, terminal, text, id);
   };
   const schedule = () => { const timer = setTimeout(() => void look().catch(() => undefined), intervalMs); timer.unref?.(); };
   schedule();
 }
 
-/** A busy Claude Code queues typed text on Enter, but after a long paste
- * ("paste again to expand") it can swallow that Enter and leave the text in
- * its input line, where it stays after the turn ends. Follow the pane: once
- * it has stayed finished for two looks while the prompt is still unsubmitted,
- * press Enter once. A closed or replaced pane, a delivery the conversation
- * took, or ten minutes end the watch; a pane asking for input is never answered. */
-export function followQueuedDelivery(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, intervalMs = 2_000): void {
-  const started = Date.now();
-  let finishedLooks = 0;
+/** Observe while the original conversation works, then allow 30 seconds for
+ * its submission acknowledgement after it finishes. A new legitimate turn
+ * resets that window. No observation sends input to the terminal. */
+export function followQueuedDelivery(agentHooks: AgentHooks, target: Target, terminal: unknown, text: string, id?: string, intervalMs = 2_000): void {
+  let finishedAt: number | undefined;
+  const fail = (reason: string) => agentHooks.deliveries.fail(id, target, reason);
   const look = async () => {
-    if (!agentHooks.deliveries.pending(target, text) || Date.now() - started > 600_000) return;
-    let pane: Json | undefined;
-    try { pane = findPane(await snapshot(target.server), target); } catch { pane = undefined; }
-    if (!pane) { schedule(); return; }
-    if (pane.terminal_id !== terminal) return;
-    const status = String(pane.agent_status);
-    finishedLooks = status === "idle" || status === "done" ? finishedLooks + 1 : 0;
-    if (finishedLooks >= 2) { await resubmitIfIdle(agentHooks, target, text).catch(() => undefined); return; }
-    schedule();
+    if (!id || !agentHooks.deliveries.pending(target, text, id)) return;
+    try {
+      const pane = await deliveryPane(target, terminal);
+      const status = String(pane.agent_status);
+      if (promptGuards(agentHooks, target).held() || !["working", "idle", "done"].includes(status)) {
+        fail("The agent needs input or its status is unknown; observation stopped."); return;
+      }
+      if (status === "working") finishedAt = undefined;
+      else {
+        finishedAt ??= Date.now();
+        if (Date.now() - finishedAt >= 30_000) { await observeIdleDelivery(agentHooks, target, terminal, text, id); return; }
+      }
+      schedule();
+    } catch { fail("The terminal or conversation could not be verified; observation stopped."); }
   };
   const schedule = () => { const timer = setTimeout(() => void look(), intervalMs); timer.unref?.(); };
   schedule();
 }
 
-/** A fresh Claude Code that took its first prompt starts working. One that
- * stays idle kept the brief in its input line (a long paste can swallow the
- * Enter): press Enter once, only while it is idle, so a dialog is never
- * answered. False when it still has not started. */
+/** A starting pane has no verified conversation/delivery binding yet, so
+ * observe its initial submission without sending delayed keys. */
 async function submitStartingPrompt(server: string, target: { workspace: string; tab: string; pane: string }, terminal: unknown, looks = 4, intervalMs = 500): Promise<boolean> {
-  const status = async () => {
-    try { const pane = findPane(await snapshot(server), target); return pane && pane.terminal_id === terminal ? String(pane.agent_status) : "gone"; }
-    catch { return "unknown"; }
-  };
-  const settled = async () => {
-    for (let look = 0; look < looks; look++) {
-      await sleep(intervalMs);
-      const current = await status();
-      if (current !== "idle" && current !== "done") return current;
-    }
-    return "idle";
-  };
-  const first = await settled();
-  if (first !== "idle") return first !== "gone";
-  await terminalProvider().sendKeys(server, target.pane, ["enter"]);
-  const second = await settled();
-  return second !== "idle" && second !== "gone";
+  for (let look = 0; look < looks; look++) {
+    await sleep(intervalMs);
+    try {
+      const pane = findPane(await snapshot(server), target);
+      if (!pane || pane.terminal_id !== terminal) return false;
+      if (pane.agent_status === "working") return true;
+      if (!["idle", "done"].includes(String(pane.agent_status))) return false;
+    } catch { return false; }
+  }
+  return false;
 }
 
 /** One key per character; Herdr's send_keys takes single characters and named
@@ -488,8 +499,8 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       }
       refuseWorkingSlash(current, text);
     });
-    // A dispatched worker's brief is often long enough for Claude Code to
-    // swallow the Enter; a slash command opens a menu an Enter would answer.
+    // Observe a fresh Claude pane without adding keys to its initial send;
+    // a slash command opens a menu and needs no submission observation.
     const submitted = target.source !== "claude" || text.trim().startsWith("/")
       || await submitStartingPrompt(target.server, target, pane.terminal_id);
     if (!submitted) result = { ok: true, deliveryUncertain: true, unsubmitted: true };
@@ -611,8 +622,8 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // Only Claude confirms plain prompts through its hook, and a slash
     // command opens a menu that a second Enter would answer.
     if (outcome === "pending" && target.source === "claude" && !text.trim().startsWith("/")) {
-      if (!busy) outcome = await resubmitIfIdle(agentHooks, target, text);
-      else followQueuedDelivery(agentHooks, target, pane.terminal_id, text);
+      if (!busy) outcome = await observeIdleDelivery(agentHooks, target, pane.terminal_id, text, deliveryId);
+      else followQueuedDelivery(agentHooks, target, pane.terminal_id, text, deliveryId);
     }
     if (deliveryId && target.source === "claude" && outcome !== "delivered") retryAfterSubagentView(agentHooks, target, pane.terminal_id, text, deliveryId);
     // A bare slash command opens the agent's own menu; the phone may
@@ -621,7 +632,8 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target, text.trim());
     if (outcome === "delivered") result = { ok: true, delivered: true, state: "delivered" };
     else if (outcome === "unsubmitted") {
-      const reason = "The agent did not take the message; it may still be in its input line.";
+      const failed = deliveryId ? agentHooks.deliveries.status(deliveryId, target) : undefined;
+      const reason = failed?.state === "failed" && failed.reason ? failed.reason : "The agent did not take the message; it may still be in its input line.";
       if (deliveryId) agentHooks.deliveries.fail(deliveryId, target, reason);
       result = { ok: true, deliveryUncertain: true, unsubmitted: true, ...(deliveryId ? { state: "failed", reason } : {}) };
     } else {

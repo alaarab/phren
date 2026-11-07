@@ -26,7 +26,12 @@ export function checkpointActivityArrived(target: Target): void {
 const activityGeneration = (target: Target) => Math.max(...activityKeys(target).map(key => activityGenerations.get(key) ?? 0));
 
 const exec = promisify(execFile);
+// The two hash directories and ref UUID can push a ref's .lock over Windows'
+// MAX_PATH even in a short checkout. Apply per process, never to user config.
+const GIT_PATH_OPTIONS = ["-c", "core.longpaths=true"];
 const LIMIT = 50;
+// Background capture has its own safety cap, independent of callback latency.
+const CAPTURE_BUDGET_MS = 60_000;
 const secret = randomBytes(32);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const rowSchema = z.object({ id: z.string().uuid(), turn: z.number().int().nonnegative(),
@@ -54,7 +59,7 @@ async function context(cwd: string, target: Target, budget = 15_000): Promise<Co
   const runEnv = async (root: string, extra: NodeJS.ProcessEnv, ...args: string[]) => {
     const left = Math.floor(deadline - performance.now());
     if (left <= 0) throw new Error("Checkpoint time budget exceeded");
-    return (await exec("git", ["-C", root, "--no-pager", ...args], { env: { ...checkoutGitEnv(), ...extra }, timeout: left, killSignal: "SIGKILL", maxBuffer: 8_388_608 })).stdout;
+    return (await exec("git", [...GIT_PATH_OPTIONS, "-C", root, "--no-pager", ...args], { env: { ...checkoutGitEnv(), ...extra }, timeout: left, killSignal: "SIGKILL", maxBuffer: 8_388_608 })).stdout;
   };
   const runAt = (root: string, ...args: string[]) => runEnv(root, {}, ...args);
   let root: string, dir: string, common: string;
@@ -74,11 +79,11 @@ async function context(cwd: string, target: Target, budget = 15_000): Promise<Co
     input: (index, args, input) => new Promise<string>((resolve, reject) => {
       const left = Math.floor(deadline - performance.now());
       if (left <= 0) { reject(new Error("Checkpoint time budget exceeded")); return; }
-      const child = execFile("git", ["-C", root, ...args], { env: { ...checkoutGitEnv(), ...(index ? { GIT_INDEX_FILE: index } : {}) }, timeout: left, killSignal: "SIGKILL", maxBuffer: 8_388_608 },
+      const child = execFile("git", [...GIT_PATH_OPTIONS, "-C", root, ...args], { env: { ...checkoutGitEnv(), ...(index ? { GIT_INDEX_FILE: index } : {}) }, timeout: left, killSignal: "SIGKILL", maxBuffer: 8_388_608 },
         (error, stdout) => error ? reject(error) : resolve(stdout));
       child.stdin!.on("error", () => {}); child.stdin!.end(input);
     }),
-    bytes: async oid => { check(); return (await exec("git", ["-C", root, "cat-file", "blob", oid], { env: checkoutGitEnv(), encoding: "buffer", timeout: Math.max(1, Math.floor(deadline - performance.now())), maxBuffer: 8_388_608 })).stdout; },
+    bytes: async oid => { check(); return (await exec("git", [...GIT_PATH_OPTIONS, "-C", root, "cat-file", "blob", oid], { env: checkoutGitEnv(), encoding: "buffer", timeout: Math.max(1, Math.floor(deadline - performance.now())), maxBuffer: 8_388_608 })).stdout; },
     private: (index, ...args) => runEnv(root, { GIT_INDEX_FILE: index }, "-c", "core.fsmonitor=false", ...args) };
 }
 
@@ -146,30 +151,82 @@ async function save(ctx: Context, current: string, meta: Omit<CheckpointRow, "id
   return row;
 }
 
-/** Budget includes all Git subprocesses; a failed/slow capture never fails the lifecycle callback. */
-let warned = false;
-const prompts = new Map<string, { turn: number; text: string }>();
-export async function checkpointBoundary(cwd: string, target: Target, event: string, turn: number, prompt = "", promptEntryId?: string): Promise<void> {
-  if (event !== "UserPromptSubmit" && event !== "Stop") return;
-  try {
-    const ctx = await context(cwd, target, 300);
-    if (event === "UserPromptSubmit") {
-      prompts.delete(ctx.prefix);
-      prompts.set(ctx.prefix, { turn, text: prompt.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 240) });
-      if (prompts.size > 256) prompts.delete(prompts.keys().next().value!);
-    }
-    const identity = event === "UserPromptSubmit" ? promptEntryId : undefined;
-    await locked(ctx, async () => {
-      const previous = await rows(ctx), last = previous.at(-1);
-      const remembered = prompts.get(ctx.prefix);
-      const excerpt = remembered?.turn === turn ? remembered.text : last?.turn === turn ? last.prompt : "";
-      await save(ctx, await tree(ctx), { turn, boundary: event === "Stop" ? "stop" : "prompt", at: new Date().toISOString(),
-        prompt: excerpt, ...(identity ? { promptEntryId: identity } : {}) }, Boolean(identity));
-    });
-  } catch (error) {
-    if (error instanceof BridgeError && ["checkpoint-not-isolated", "checkpoint-busy"].includes(String(error.details?.code))) return;
-    if (!warned) { warned = true; console.warn("[phren-hook] Checkpoint capture skipped (failed or exceeded its 300 ms budget)."); }
+// All operations on a worktree share a queue, including different conversations:
+// the private Git lock and the working files are shared by those conversations.
+const pending = new Map<string, Promise<void>>();
+async function checkoutKey(cwd: string): Promise<string> {
+  let directory: string;
+  try { directory = await realpath(cwd); } catch { return path.resolve(cwd); }
+  for (let current = directory; ; current = path.dirname(current)) {
+    try { await lstat(path.join(current, ".git")); return current; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return directory; }
+    if (path.dirname(current) === current) return directory;
   }
+}
+function enqueue<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const result = (pending.get(key) ?? Promise.resolve()).then(work);
+  const settled = result.then(() => {}, () => {});
+  pending.set(key, settled);
+  void settled.then(() => { if (pending.get(key) === settled) pending.delete(key); });
+  return result;
+}
+
+// Resolve paths in admission order, without making a callback do filesystem
+// I/O. Only admission is shared globally: independent worktrees capture in
+// parallel. Wrapping the queued promise keeps admission off the capture path.
+let admission = Promise.resolve();
+function schedule<T>(cwd: string, work: (root: string) => Promise<T>): Promise<T> {
+  const admitted = admission.then(async () => {
+    const root = await checkoutKey(cwd);
+    return { result: enqueue(root, () => work(root)) };
+  });
+  admission = admitted.then(() => {}, () => {});
+  return admitted.then(({ result }) => result);
+}
+
+type Boundary = Omit<CheckpointRow, "id" | "filesChanged">;
+type SkippedCapture = Boundary & { reason: string };
+const skipped = new Map<string, SkippedCapture[]>();
+const prompts = new Map<string, { turn: number; text: string }>();
+const conversationKey = (root: string, target: Target) => JSON.stringify([root, target.source, target.session]);
+
+/** Record immutable boundary facts before returning; Git runs off the callback path.
+ * The snapshot contains the files when the queued capture runs, not historical
+ * bytes from the callback instant. A route joins this queue before reading them. */
+export function checkpointBoundary(cwd: string, target: Target, event: string, turn: number, prompt = "", promptEntryId?: string, at = new Date().toISOString()): void {
+  if (event !== "UserPromptSubmit" && event !== "Stop") return;
+  const owner = { ...target };
+  const boundary: Boundary = { turn, boundary: event === "Stop" ? "stop" : "prompt", at,
+    prompt: prompt.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 240),
+    ...(event === "UserPromptSubmit" && promptEntryId ? { promptEntryId } : {}) };
+  void schedule(cwd, async root => {
+    const key = conversationKey(root, owner);
+    try {
+      const ctx = await context(root, owner, CAPTURE_BUDGET_MS);
+      if (boundary.boundary === "prompt") {
+        prompts.delete(key);
+        prompts.set(key, { turn: boundary.turn, text: boundary.prompt });
+        if (prompts.size > 256) prompts.delete(prompts.keys().next().value!);
+      }
+      await locked(ctx, async () => {
+        const last = (await rows(ctx)).at(-1);
+        const remembered = prompts.get(key);
+        const excerpt = boundary.boundary === "prompt" ? boundary.prompt
+          : remembered?.turn === boundary.turn ? remembered.text : last?.turn === boundary.turn ? last.prompt : "";
+        await save(ctx, await tree(ctx), { ...boundary, prompt: excerpt }, Boolean(boundary.promptEntryId));
+      });
+    } catch (error) {
+      if (error instanceof BridgeError && error.details?.code === "checkpoint-not-isolated") return;
+      const reason = error instanceof BridgeError ? String(error.details?.code ?? "checkpoint-failed")
+        : /time budget/.test(String(error)) || (error as { killed?: boolean }).killed ? "checkpoint-timeout" : "checkpoint-failed";
+      const failures = skipped.get(key) ?? [];
+      failures.push({ ...boundary, reason });
+      skipped.delete(key);
+      skipped.set(key, failures.slice(-LIMIT));
+      if (skipped.size > 256) skipped.delete(skipped.keys().next().value!);
+      console.warn(`[phren-hook] Checkpoint capture skipped (${reason}); boundary recorded in skippedCaptures.`);
+    }
+  });
 }
 
 async function idle(target: Target, readPane: () => Promise<Json>): Promise<void> {
@@ -196,7 +253,7 @@ async function selected(ctx: Context, value: unknown): Promise<CheckpointRow> {
 
 /** Only the pane's own checkout and conversation; child/worktree selectors are deliberately excluded. */
 export async function checkpointRoute(cwd: string, target: Target, action: string, data: Record<string, unknown>, readPane: () => Promise<Json>): Promise<unknown> {
-  try { return await handleCheckpointRoute(cwd, target, action, data, readPane); }
+  try { return await schedule(cwd, root => handleCheckpointRoute(root, target, action, data, readPane)); }
   catch (error) {
     if (error instanceof BridgeError || error instanceof z.ZodError) throw error;
     const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
@@ -215,7 +272,7 @@ async function handleCheckpointRoute(cwd: string, target: Target, action: string
     throw error;
   }
   return locked(ctx, async () => {
-    if (action === "list") return { state: "ready", repository: ctx.root, checkpoints: (await rows(ctx)).reverse(), limit: LIMIT };
+    if (action === "list") return { state: "ready", repository: ctx.root, checkpoints: (await rows(ctx)).reverse(), skippedCaptures: [...(skipped.get(conversationKey(ctx.root, target)) ?? [])], limit: LIMIT };
     if (!["preview", "restore"].includes(action)) throw new BridgeError(404, "Unknown checkpoint route.");
     const row = await selected(ctx, data.checkpointId);
     const current = await tree(ctx), destination = (await ctx.run("rev-parse", `${ctx.prefix}${row.id}^{tree}`)).trim();

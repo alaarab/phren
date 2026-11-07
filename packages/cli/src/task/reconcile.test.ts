@@ -67,7 +67,7 @@ describe("private task merge links", () => {
     } finally { temp.cleanup(); }
   });
 
-  it.skipIf(process.platform === "win32")("reconciles through a fake gh: preview, apply, review gates, caching, retry and offline safety", async () => {
+  it.skipIf(process.platform === "win32")("reconciles through a fake gh: preview, apply, review gates, caching, retry and offline safety", { timeout: 30_000 }, async () => {
     const temp = makeTempDir("task-reconcile-");
     try {
       grantAdmin(temp.path);

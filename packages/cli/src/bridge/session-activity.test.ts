@@ -228,6 +228,9 @@ describe("a session that takes a typed prompt", () => {
     expect(await takesPrompt("default", working, session, { held: () => true, screen: async () => waiting })).toBe(false);
     expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => dialog })).toBe(false);
     expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => { throw new Error("no screen"); } })).toBe(false);
+    for (const unknown of ["", "partial redraw", "❯ Previous prompt\nDo you"]) {
+      expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => unknown })).toBe(false);
+    }
     expect(await takesPrompt("default", working, session, { held: () => false, screen: async () => waiting })).toBe(true);
     // An idle pane is not read at all.
     const screen = vi.fn(async () => dialog);

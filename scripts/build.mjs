@@ -47,6 +47,9 @@ function tscExec() {
 }
 
 function copySupplementalAssets(targetDir) {
+  const shimDir = path.join(targetDir, "bridge/browser-shim");
+  fs.mkdirSync(shimDir, { recursive: true });
+  fs.copyFileSync(path.join(srcRoot, "bridge/browser-shim/phren-playwright.cjs"), path.join(shimDir, "phren-playwright.cjs"));
   for (const entry of fs.readdirSync(srcRoot)) {
     if (!/^synonyms.*\.json$/u.test(entry)) continue;
     fs.copyFileSync(path.join(srcRoot, entry), path.join(targetDir, entry));
@@ -124,6 +127,7 @@ try {
       PHREN_HOOK_VERSION: JSON.stringify(JSON.parse(fs.readFileSync(path.join(cliRoot, "package.json"), "utf8")).version),
       // The simulator helpers' Swift sources ride inside the bundle
       // and are compiled on the Mac that needs them.
+      BROWSER_SHIM_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/browser-shim/phren-playwright.cjs"), "utf8")),
       SIMTAP_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simtap.swift"), "utf8")),
       SIMCAST_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simcast.swift"), "utf8")),
       // The OpenCode transcript plugin rides inside the bundle too, so a copied

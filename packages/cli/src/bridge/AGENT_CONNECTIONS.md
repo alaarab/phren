@@ -591,6 +591,33 @@ the binary again immediately before each execution and rejects a mismatch.
 This check and PID confinement do not establish a security boundary against
 another process running as the same local user.
 
+### Claude synchronous questions
+
+Terminal question cards use the current harness dialog at the bottom of the live
+screen. Claude permissions and plan confirmations (`Ready to code?`) require
+their prompt, numbered options, one selection marker and final cancel hint.
+Prompts, option labels and question footers are parsed as logical lines across
+physical wrapping. Screen-only evidence is confirmed with a second read after
+300 ms, with a separate 400 ms read budget, before promoting a working pane to
+blocked. Default discovery is 350 ms and phone status polling is 500 ms;
+`PHREN_DIALOG_THROTTLE_MS` changes discovery, not the confirmation delay.
+A newer composer or harness working hint clears the dialog. Unparseable,
+partial and empty screens are unknown and preserve existing state and holds. Released permissions retain an initial three-second
+draw grace, then a readable absence also retires requests never observed on
+screen. A live hook hold remains authoritative until its own resolution or an
+observed dialog disappears.
+Failed reads do not prove disappearance.
+
+For transcript `AskUserQuestion` calls, a matching `tool_result`, a different
+foreground assistant message, an owner prompt or foreground Stop resolves the
+question by tool-use ID. Queued prompts, background notices and chunks sharing an
+assistant message ID do not resolve it. The Hook projects a `tool_result` with
+`phren_resolution: true`, `is_error: true` and no answer beside the resolved call
+on its existing transcript row, and replaces the live tail when the resolved set
+changes. This lets existing clients retire the question even if the native
+result is delayed or absent. Native transcript files remain untouched; reconnects
+and history pages use the same projection.
+
 ### Codex asynchronous questions
 
 Status frames advertise `capabilities.asyncQuestions` only when the installed

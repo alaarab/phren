@@ -277,7 +277,7 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     const { actionId } = hooks.workerApproval(target)!;
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 4_000);
     try {
-      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "Working" } }));
+      vi.mocked(rpc).mockImplementationOnce(async () => ({ read: { text: "✻ Working (esc to interrupt)\n❯ " } }));
       await hooks.observeWaitingPanes("default", [{ ...pane, agent_status: "working" }], async () => target);
       await expect(hooks.answer(target, actionId, "approve")).rejects.toThrow(/no longer pending/);
     } finally { clock.mockRestore(); }

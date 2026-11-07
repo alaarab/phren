@@ -797,12 +797,16 @@ What works:
     turn that ends with the final answer (or `session.idle`, an abort) idle.
 - Dialogs without a callback: Claude's auto-mode fallback and Codex, OpenCode
   and Copilot terminal dialogs have no PermissionRequest behind them. While a
-  pane is working, the Hook reads its screen at most once every 3 seconds
-  (`PHREN_DIALOG_THROTTLE_MS`); a dialog there marks the pane blocked, which
-  puts the question on the phone, and the pane goes back to working when the
-  dialog is gone. Only a harness's own dialog counts: Claude's and phren-agent's
-  numbered rows with their "Esc to cancel" footer, Codex's and Copilot's
-  choice rows, OpenCode's "Permission required" prompt.
+  pane is working, the Hook checks its screen every 350 ms by default
+  (`PHREN_DIALOG_THROTTLE_MS`). A positive read gets a separate confirmation
+  after 300 ms, with a 400 ms read budget independent of polling. Phone status
+  updates every 500 ms. Only the harness's active dialog counts: Claude's
+  permissions and plan confirmations (including "Ready to code?") with their
+  numbered options, selection marker and cancel footer; Codex's and Copilot's
+  choice rows; OpenCode's "Permission required" prompt. Wrapped prompts, option
+  labels and question footers are joined into logical lines before matching.
+  A newer composer or working hint clears the blocked state; an empty, partial
+  or unparseable screen preserves it and any live hold.
 - A fresh Codex: Codex runs its SessionStart hook only with its first turn, so
   a Codex that has just opened has sent no lifecycle event. Until it does, the
   Hook reads its screen on the same throttle: a startup menu (folder trust,
@@ -1507,7 +1511,7 @@ Without `moveToComputer`, existing clients and local moves are unchanged.
 ### Session moves
 
 With capability `sessionMove`, `POST /v1/sessions/move` takes
-`{target, to: {harness, account?, model?, effort?}, mode?: "replace" | "new-chat", id?, handoffTimeoutMs?}`
+`{target, to: {harness, account?, model?, effort?}, mode?: "replace" | "new-chat", continuation?, id?, handoffTimeoutMs?}`
 and answers once the move is checked and recorded, with `{ok, move}`. The
 hand-off, exit and relaunch continue after the answer. `GET
 /v1/sessions/move?id=<uuid>` returns `{move}`, and `GET /v1/sessions/moves`
@@ -1516,6 +1520,24 @@ usable here is refused with 409 `harness_unavailable` or `account_unavailable`;
 a pane already moving with 409 `move_in_progress`. The phone and desktop offer
 only harnesses `/v1/harnesses` reports as usable, and follow a move by polling
 its id. The record's fields and the steps are in docs/conductor.md.
+
+`continuation` accepts `"saved-history"` for immediate continuation without an
+outgoing-model call, or `"agent-summary"` to request an optional summary from a
+healthy source. Omitted or `"handoff"` chooses automatically: an exhausted
+source (account usage state or a quota error in its transcript) is skipped,
+on this computer as well as a peer. Summary delivery failures, a session ending,
+and timeouts fall back to saved history. Existing `"resume"` (Claude account
+resume) and `"summary-by-target"` (peer continuation) retain their meanings.
+
+Every cross-harness move saves a durable `conversation.md` beside its hand-off
+before exiting the source. The Hook reads the full transcript (at most 64 MiB,
+with a truncation notice), preserves the original request and recent exchanges,
+and gives the destination a bounded excerpt with branch/HEAD, dirty files and
+observed processes. The destination is told to read more history from the file
+as needed and inspect its checkout before continuing. The conversation copy
+keeps at most 2,000,000 characters, with omitted messages marked. A healthy
+source's summary supplements this history. Failure to save context prevents
+the source from being exited. Phones that omit `continuation` need no changes.
 
 While a move is `handing-off`, its hand-off request waits for the agent's step
 to end. The phone's "Stop <agent> and hand off now" sends the owner-only
@@ -1788,3 +1810,9 @@ clears another operation's state. Polling remains the fallback after that budget
 or if a peer is offline or a delivery fails.
 `GET /v1/health/details` reports `gitboyWebhooks`: configured/listening state,
 port, and last delivery time/outcome, without secrets or payloads.
+
+### Browser watching and owner help
+
+Run `eval "$(phren browser env)"` before launching Playwright Chromium to watch it from the phone. Use `phren browser ask "Log in" [--browser <id>] [--timeout <seconds>]` to request owner help and wait (default 900 seconds); it prints one outcome line and exits 0 after take + release, or 1 on timeout, browser end, cancellation, or no live browser.
+
+The phone explicitly takes control, can take over from another device, and releases with Done; disconnect or 120 seconds without input also releases it. Hook browser rows include `control: {held, since}` and `help: {reason, t} | null`. Recordings retain take, release, and help handoffs in `meta.handoffs`. Input applies to the streamed page, is limited to 60 messages per second and 1000 characters per text message, and uses normalized frame coordinates. Only Chromium supports input. A new help request for the same browser supersedes the previous request with a timeout outcome.
