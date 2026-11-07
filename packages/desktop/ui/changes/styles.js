@@ -1,5 +1,11 @@
 // The Changes pane's styles, injected once by changes.js (injectStyle).
 export const CHANGES_CSS = `
+.chg-review-mark{flex:none;min-width:26px;padding:3px!important}.chg-review-mark[aria-pressed="true"]{color:var(--done)}
+.chg-review-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;color:var(--muted)}
+.chg-note-gutter{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit}
+.chg-note-gutter:hover,.chg-note-gutter:focus-visible{color:var(--accent);background:var(--raised)}
+.chg-sheet-card{max-height:85vh;overflow:auto}
+
 .chg{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--text-2);font:13px/1.45 system-ui,sans-serif}
 .chg-top{padding:12px 12px 8px;flex:none}
 .chg-segs{display:flex;gap:3px;background:var(--surface);border-radius:999px;padding:3px}
@@ -33,7 +39,7 @@ export const CHANGES_CSS = `
 .chg-adds{color:var(--done)}
 .chg-dels{color:var(--danger)}
 .chg-actions{display:flex;gap:4px;opacity:0;pointer-events:none}
-.chg-row:hover .chg-actions{opacity:1;pointer-events:auto}
+.chg-row:hover .chg-actions,.chg-row:focus-within .chg-actions{opacity:1;pointer-events:auto}
 .chg-icon{width:26px;height:26px;border:none;border-radius:7px;background:var(--raised);color:var(--muted);font-size:12px;cursor:pointer}
 .chg-icon:hover{background:var(--card);color:var(--text)}
 .chg-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:40px 0;color:var(--muted);text-align:center}

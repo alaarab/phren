@@ -1,3 +1,7 @@
+import { createLedger, reviewItem } from './changes/review.js';
+import { noteDraft, notesTray } from './changes/notes.js';
+import { watchChanges } from './changes/live.js';
+import { isShown } from './shown.js';
 import { el as node } from "./dom.js";
 // One diff as a centre-tab document: Monaco's diff editor over two whole
 // versions of a file (HEAD, the index, the working file, or a commit and its
@@ -93,6 +97,7 @@ export function openDiffDoc(el, opts, env) {
   let modes = [];
   let changes = [];
   let current = -1;
+  let initialNavigation = true;
   let busy = false;
   let repository;
   let sideBySide = readFlag(SIDE_KEY, true);
@@ -103,6 +108,10 @@ export function openDiffDoc(el, opts, env) {
   let review = store.can(computer, "gitReview") === true;
   let pendingLine = opts.line != null ? opts.line : null;
   const subs = [];
+  const ledger = createLedger();
+  const notes = noteDraft(computer,target);
+  let item = null, diffTruncated = false, loading = false, reload = false;
+  const checkout = () => (store.merged?.computers?.find(c => c.computer === computer)?.overview?.phren?.computer?.id || computer) + '\x01' + (repository || opts.worktree || JSON.stringify(target));
 
   const root = node("div", "ed-doc dd-doc");
   const bar = node("div", "dd-bar");
@@ -113,6 +122,9 @@ export function openDiffDoc(el, opts, env) {
   host.appendChild(editorHost);
   root.append(bar, banner, host);
   el.appendChild(root);
+  const tray = node('div'); root.appendChild(tray);
+  const drawNotes = () => tray.replaceChildren(notesTray(notes));
+  const stopNotes = notes.subscribe(drawNotes); drawNotes();
 
   function showBanner(kind, text) {
     banner.className = "ed-banner " + kind;
@@ -145,6 +157,11 @@ export function openDiffDoc(el, opts, env) {
       bar.appendChild(segs);
     } else if (!commit && modes.length === 1) {
       bar.appendChild(node("span", "dd-sha", MODE_LABEL[modes[0]]));
+    }
+    if (!commit && mode !== 'all') {
+      const marked = ledger.reviewed(item);
+      const mark = button('dd-btn', marked ? 'Reviewed' : 'Mark reviewed', marked ? 'Mark file unreviewed' : 'Mark file reviewed', () => { ledger.toggle(item); renderBar(); });
+      mark.disabled = !item?.fingerprint; mark.setAttribute('aria-pressed',String(marked)); bar.appendChild(mark);
     }
     const totals = lineChangeTotals(changes);
     const counts = node("span", "dd-counts");
@@ -259,6 +276,7 @@ export function openDiffDoc(el, opts, env) {
     if (commit) return;
     const res = await hookPost(computer, "/v1/diff", scope(opts.worktree ? {} : { paths: [opts.path] }));
     const file = (res.files || []).find((f) => f.path === opts.path);
+    diffTruncated = res.truncated === true;
     sections = (file && file.sections) || [];
     fileStatus = (file && file.status) || "";
     repository = res.repository || res.root || repository;
@@ -296,8 +314,14 @@ export function openDiffDoc(el, opts, env) {
   }
 
   async function load(keepPosition = false) {
+    if (disposed || !monaco) return;
+    if (loading) { reload = true; return; }
+    loading = true;
+    try { await loadOnce(keepPosition); }
+    finally { loading = false; if (reload) { reload = false; load(true); } }
+  }
+  async function loadOnce(keepPosition = false) {
     if (disposed) return;
-    const position = keepPosition ? modifiedEditor()?.getPosition() : null;
     try {
       await readSections();
       if (!commit) {
@@ -306,11 +330,16 @@ export function openDiffDoc(el, opts, env) {
         if (!modes.includes(mode)) mode = plan.initial;
         if (fileStatus === "?" && !modes.length) modes = ["unstaged"];
       }
+      const readingMode = mode;
       const pair = await sides();
+      if (readingMode !== mode) { reload = true; return; }
+      item = await reviewItem(checkout(),{path:opts.path,staged:mode === 'staged'},sections.find(s => s.kind === mode),diffTruncated);
       if (disposed) return;
       const unreadable = [pair.original, pair.modified].find((v) => v.binary || v.tooLarge);
       if (unreadable) showBanner("muted", unreadable.binary ? "Binary file: there is no text to compare." : "This file is over 2 MB, too large to compare here.");
       else if (!keepPosition) clearBanner();
+      const viewState = keepPosition ? diffEditor?.saveViewState() : null;
+      const position = keepPosition ? modifiedEditor()?.getPosition() : null;
       const language = env.languageFor(monaco, opts.path);
       if (!originalModel) {
         originalModel = monaco.editor.createModel(pair.original.text || "", language);
@@ -320,6 +349,7 @@ export function openDiffDoc(el, opts, env) {
           renderSideBySide: sideBySide,
           useInlineViewWhenSpaceIsLimited: false,
           originalEditable: false,
+          glyphMargin: true,
           readOnly: true,
           renderMarginRevertIcon: false,
           ignoreTrimWhitespace: ignoreWhitespace,
@@ -331,6 +361,18 @@ export function openDiffDoc(el, opts, env) {
         diffEditor.setModel({ original: originalModel, modified: modifiedModel });
         const modified = diffEditor.getModifiedEditor();
         if (env.askAction) modified.addAction(env.askAction(modified));
+        if (!commit) for (const [editor,side] of [[diffEditor.getOriginalEditor(),'old'],[modified,'new']]) {
+          const add = line => {
+            if (!line || notes.busy) return;
+            const patch = sections.find(s => s.kind === mode)?.patch;
+            if (typeof patch !== 'string') return;
+            notes.add({path:opts.path,line,side,text:editor.getModel().getLineContent(line),checkout:checkout(),patch});
+          };
+          subs.push(editor.onMouseDown(e => {
+            if ([monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN,monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS].includes(e.target.type)) add(e.target.position?.lineNumber);
+          }));
+          editor.addAction({id:`phren.diff.note.${side}`,label:'Add note on this diff line',contextMenuGroupId:'1_modification',run:() => add(editor.getPosition()?.lineNumber)});
+        }
         modified.addAction({ id: "phren.diff.next", label: "Next change", keybindings: [monaco.KeyCode.F7], run: () => go(1) });
         modified.addAction({ id: "phren.diff.prev", label: "Previous change", keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.F5], run: () => go(-1) });
         if (canStage()) {
@@ -343,15 +385,16 @@ export function openDiffDoc(el, opts, env) {
           renderBar();
           if (pendingLine != null) {
             modified.revealLineInCenter(pendingLine); modified.setPosition({ lineNumber: pendingLine, column: 1 }); pendingLine = null;
-          } else if (!keepPosition && current < 0 && changes.length) { current = 0; reveal(changes[0]); renderBar(); }
+          } else if (initialNavigation && !keepPosition && current < 0 && changes.length) { initialNavigation = false; current = 0; reveal(changes[0]); renderBar(); }
         }));
       } else {
         monaco.editor.setModelLanguage(originalModel, language);
         monaco.editor.setModelLanguage(modifiedModel, language);
-        originalModel.setValue(pair.original.text || "");
-        modifiedModel.setValue(pair.modified.text || "");
+        if (originalModel.getValue() !== (pair.original.text || '')) originalModel.setValue(pair.original.text || '');
+        if (modifiedModel.getValue() !== (pair.modified.text || '')) modifiedModel.setValue(pair.modified.text || '');
         if (!keepPosition) current = -1;
-        if (position) { modifiedEditor().setPosition(position); modifiedEditor().revealPositionInCenterIfOutsideViewport(position); }
+        if (viewState) diffEditor.restoreViewState(viewState);
+        else if (position) modifiedEditor().setPosition(position);
       }
       renderBar();
       if (!changes.length && !commit && !sections.length && fileStatus !== "?") host.dataset.empty = "1";
@@ -368,6 +411,9 @@ export function openDiffDoc(el, opts, env) {
   }
   window.addEventListener("phren:git-changed", onGitChanged);
 
+  const stopLive = commit ? () => {} : watchChanges(computer,target,el,() => opts.worktree,() => load(true));
+  // Old Hooks retain the manual refresh plus the existing ten-second fallback.
+  const poll = commit ? null : setInterval(() => { if (isShown(el) && document.visibilityState === 'visible') load(true); },10000);
   renderBar();
   Promise.all([env.loadMonaco(), store.capabilities(computer)])
     .then(([m, caps]) => { monaco = m; review = caps.gitReview === true; return load(); }).catch(() => showBanner("danger", "Could not open the diff editor."));
@@ -387,7 +433,7 @@ export function openDiffDoc(el, opts, env) {
     hide() {},
     refresh: () => load(true),
     close() {
-      disposed = true;
+      disposed = true; stopNotes(); stopLive(); clearInterval(poll);
       window.removeEventListener("phren:git-changed", onGitChanged);
       for (const s of subs) s.dispose?.();
       diffEditor?.dispose(); diffEditor = null;
