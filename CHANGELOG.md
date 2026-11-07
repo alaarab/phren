@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The phone's streamed Claude reply preview no longer mixes in text from Claude's diff sidebar, and a long reply that already landed is not shown again as a preview.
+
 ## [0.3.72] - 2026-11-07
 
 ### Added
