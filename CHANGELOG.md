@@ -21,6 +21,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Keyed launches scrub inherited gitboy, GitHub, GitLab, askpass, SSH and Git config variables from the tmux, Herdr and Codex launch paths.
 - Crash reconciliation recovers a launch from its arrival record or starting token before declaring it interrupted.
 - A stale idempotency lock now fails closed with a retryable error instead of being unlinked by another caller.
+- Keyed `--worktree` dispatches now use a fresh clone with a per-dispatch managed global Git config and explicit environment, so user URL-specific credentials, SSH identities and inherited tokens cannot reach the worker. The clone, config and token file are registered before launch and cleaned up on close, finish, or seven-day reconciliation.
+- Cancellation uses one verified close path for both `dispatch close` and placement-time cancellation; every receipt write preserves `cancelRequestedAt`, and reconcile settles and closes recovered launches with a pending cancel.
 - Dispatches with an idempotency key run in the harness's standard permission mode (`full-access` is refused), never inherit the caller's environment, use only this computer's stored gitboy token through a Git credential helper for Git and the API, and create worktrees without running repository hooks.
 - `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
 - Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.

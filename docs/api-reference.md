@@ -138,28 +138,31 @@ A keyed dispatch runs only `claude` or `codex` in supervised mode; any other
 harness or permission mode is refused. The launch boundary refuses skip-approval
 or allow-all flags in the resolved arguments.
 
-For a keyed dispatch with `--worktree` in a gitboy checkout, the worktree's own
-config (never the global config) clears any inherited helper for that host and
-adds `credential.https://<host>.helper = !phren bridge git-credential` plus
-`credential.https://<host>.useHttpPath = false`. It also rewrites
-`remote.origin.url`/`pushurl` to credential-free
-`https://<host>/<owner>/<repo>.git`, sets `core.sshCommand=false`, and clears
-`http.https://<host>/.extraHeader`; an underivable owner/repo is refused. The
-helper answers HTTPS `get` from the Hook's stored gitboy agent token only; an
-ordinary token, or one not marked `agent: true`, never answers. The worktree is
-created with
-`--no-checkout` and populated with `--attr-source` set to Git's empty tree, so no
-repository hook or smudge/process filter runs; this needs Git 2.40 or newer.
-LFS files remain pointers until the agent fetches them.
+A keyed `--worktree` dispatch uses a fresh clone under
+`<bridge>/clones/<dispatch id>`, not a worktree of the user's checkout. It is
+created with `git clone --no-checkout --reference-if-able <checkout>
+--dissociate` and populated with `--attr-source` set to Git's empty tree, so no
+repository hook or smudge/process filter runs. The clone and agent use a
+per-dispatch managed global config (0600) with only a cleared
+`credential.helper`, the host's `!phren bridge git-credential` helper,
+`useHttpPath=false`, `core.sshCommand=false`, `core.hooksPath=/dev/null`, and
+the user's `user.name`/`user.email` values; the clone's own `.git/config` is
+ours. Its remote is credential-free `https://<host>/<owner>/<repo>.git`; an
+underivable owner/repo is refused. User global, system and repository URL
+overrides cannot apply. The helper answers HTTPS `get` from the Hook's stored
+gitboy agent token only; an ordinary token, or one not marked `agent: true`,
+never answers. LFS files remain pointers until the agent fetches them.
 
 The agent gets the token for the API only as `GITBOY_TOKEN_FILE`, a 0600 file in
-the worktree's git dir; no token is placed in the environment or argv. A keyed
-launch also empties inherited `GITBOY_TOKEN`, other `GITBOY_*` (except
-`GITBOY_HOST`/`GITBOY_TOKEN_FILE`), `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`,
-`GIT_ASKPASS`, `SSH_ASKPASS`, `SSH_AUTH_SOCK`, `GIT_CONFIG_*`, `GIT_SSH` and
-`GIT_SSH_COMMAND` on the tmux, Herdr and Codex launch paths. The file is removed
-when the dispatch closes or finishes. A missing agent token fails closed with
-`No gitboy agent token for <domain>...`.
+the clone's git dir; no token is placed in the environment or argv. A keyed
+launch gets an explicit environment only: `HOME`, `USER`, `LOGNAME`, `PATH`,
+`SHELL`, `TERM`, `LANG`, `LC_ALL`, `TMPDIR`, harness config dirs when set, and
+our `GITBOY_HOST`, `GITBOY_TOKEN_FILE`, `GIT_CONFIG_GLOBAL`,
+`GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`. tmux runs `exec env -i`
+after shell init; Herdr and the Codex server receive exactly that set. The
+clone, managed config and token file are registered before launch and removed
+when the dispatch closes or finishes, or on reconcile after seven days. A
+missing agent token fails closed with `No gitboy agent token for <domain>...`.
 
 `close` calls `POST /v1/dispatch/cancel` with exactly one of
 `{ "dispatch": "<uuid>" }` or `{ "idempotencyKey": "<key>" }`: the Hook looks
@@ -168,9 +171,11 @@ the pane, and closes it only while it still matches the exact recorded binding
 (session id or starting token). Missing evidence fails closed and stays pending;
 a different session is never closed. It retries up to three times, writes
 `closedAt` and the terminal `cancelled` return only after a successful snapshot
-shows the pane gone, and a failed snapshot stays pending. A cancellation during
-placement records the intent on the receipt; the launcher closes the pane it
-created and finalizes it. It exits 0 and prints
+shows the pane gone, and a failed snapshot stays pending. Every placement write
+re-reads the receipt under its lock, preserving `cancelRequestedAt`; the
+launcher uses the same close path after each placement step. Reconcile settles
+a leftover launching/sending receipt and runs that close path when a cancel is
+pending. It exits 0 and prints
 `{"dispatch":"<id>","closed":true}` when it cancels; an unconfirmed close prints
 `{"dispatch":"<id>","closed":false,"pending":true}` and exits 1, leaving the
 intent for a later retry. An unknown key, or a dispatch already gone, prints

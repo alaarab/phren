@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { noteBrowserLaunch } from "./browser-watch.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, mkdtemp, readFile, realpath, rmdir } from "node:fs/promises";
@@ -19,7 +20,8 @@ import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
 import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
-import { keyedEnvScrub, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { keyedExplicitEnv, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { createDispatchClone, dispatchClonePaths, type DispatchClonePaths } from "./dispatch-clone.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -30,7 +32,7 @@ import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
 import { stripTerminal } from "../terminal-text.js";
 import { JobRegistry } from "./job-registry.js";
-import { atomic, BridgeError, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
+import { atomic, BridgeError, id, type Json, launchEfforts, object, objects, PERMISSION_MODES, provider } from "./protocol.js";
 import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./settings-switch.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
@@ -487,8 +489,19 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
   // Created last, once nothing else can refuse the launch, so a refusal
-  // never leaves a worktree or branch behind.
-  const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory!, worktreeRequest, { keyed: !!data.idempotencyKey }) : undefined;
+  // never leaves a checkout or branch behind. A keyed dispatch gets a fresh
+  // clone with its own managed global config; an unkeyed launch keeps the
+  // ordinary worktree of the user's checkout.
+  const keyed = role === "agent" && !!data.idempotencyKey;
+  const keyedDispatchId = keyed ? z.string().uuid().parse(data.dispatchId ?? brief?.id ?? randomUUID()) : undefined;
+  const givenPaths = z.object({ cloneDir: z.string().max(4096), gitConfigFile: z.string().max(4096), agentTokenFile: z.string().max(4096) })
+    .strict().optional().parse(data.phrenPaths);
+  let worktree: (LaunchWorktree & Partial<DispatchClonePaths>) | undefined;
+  if (worktreeRequest) {
+    worktree = keyed
+      ? await createDispatchClone(projectDirectory!, { branch: worktreeRequest.branch, dispatchId: keyedDispatchId!, paths: givenPaths ?? dispatchClonePaths(keyedDispatchId!) })
+      : await createLaunchWorktree(projectDirectory!, worktreeRequest);
+  }
   // The same root as the conductor, chosen by this computer's PHREN_PATH.
   // mkdtemp keeps simultaneous chats with the same title isolated.
   let scratch: string | undefined;
@@ -507,16 +520,27 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     scratch = await mkdtemp(path.join(agents, `${new Date().toISOString().slice(0, 10)}-${herdrAgentName(label)}-`));
   }
   const cwd = scratch ?? worktree?.cwd ?? projectDirectory!;
-  // A keyed gitboy dispatch uses only the stored agent token, and a fresh
-  // worktree gets the credential helper in its own config. The token reaches
-  // the agent as a private file path, never as an environment value.
+  // A keyed dispatch uses only the stored agent token and the clone's managed
+  // config. Its environment is an explicit allowlist, never an overlay on the
+  // Hook's own environment.
   let keyedGitboy: Awaited<ReturnType<typeof prepareKeyedGitboy>>;
   let agentTokenFile: string | undefined;
-  if (role === "agent" && data.idempotencyKey) {
-    keyedGitboy = await prepareKeyedGitboy(cwd, worktree?.path);
+  let keyedEnv: Record<string, string> | undefined;
+  if (keyed) {
+    try {
+      keyedGitboy = await prepareKeyedGitboy(cwd, { tokenFile: worktree?.agentTokenFile, gitConfigFile: worktree?.gitConfigFile });
+    } catch (error) {
+      await worktree?.discard();
+      throw error;
+    }
     agentTokenFile = keyedGitboy?.tokenFile;
+    keyedEnv = keyedExplicitEnv(process.env, {
+      ...(keyedGitboy?.env ?? {}),
+      ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}),
+      ...(home ? claudeLaunchEnv(home) : {}),
+    });
   }
-  const envVariables = { ...variables, ...(keyedGitboy ? keyedEnvScrub() : {}), ...(keyedGitboy?.env ?? {}) };
+  const envVariables = keyedEnv ?? { ...variables };
   const env = Object.keys(envVariables).length ? envVariables : undefined;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
   // agent too; a folder the Hook picked or just created is trusted up front.
@@ -543,7 +567,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
   await options.onPlaced?.({ server, ...place, source: kind });
   const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
-    ...(data.effort === undefined ? {} : { effort }), env: { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) },
+    ...(data.effort === undefined ? {} : { effort }),
+    env: keyedEnv ? { ...keyedEnv } : { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) }, envExact: !!keyedEnv,
     ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief, ...(permissionMode ? { remoteArgs: codexModeFlags(permissionMode) } : {}) }).catch(error => {
     const note = `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`;
     if (error instanceof AppServerUnsupportedError) logger.debug("launch", note); else logger.warn("launch", note);
@@ -568,7 +593,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
     ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
   try {
-    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
+    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}), ...(keyedEnv ? { envExact: true } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
     if (error instanceof BridgeError && error.message.startsWith("Codex exited at start:")) throw error;
@@ -624,7 +649,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
       briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
-    ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}), ...(agentTokenFile ? { agentTokenFile } : {}) };
+    ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}), ...(agentTokenFile ? { agentTokenFile } : {}),
+    ...(worktree?.cloneDir ? { cloneDir: worktree.cloneDir, gitConfigFile: worktree.gitConfigFile } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
   if (!["focus", "rename", "create", "close", "scroll"].includes(operation)) throw new BridgeError(400, "Unsupported Herdr action.");

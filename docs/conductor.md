@@ -340,35 +340,36 @@ continues as launched. Only with no evidence does it become a failed receipt
 with `error: "launch interrupted"`; nothing is relaunched automatically. A
 repeated key returns that receipt with `existing: true` and `state: "failed"`.
 
-`--worktree` starts the worker in a fresh `git worktree add` of the project's
-checkout on a new branch, never reused. The branch is
+`--worktree` starts an unkeyed worker in a fresh `git worktree add` of the
+project's checkout, never reused. A keyed `--worktree` dispatch instead gets a
+fresh clone under `<bridge>/clones/<dispatch id>`, created with
+`git clone --no-checkout --reference-if-able <checkout> --dissociate` and
+checked out with `--attr-source` set to Git's empty tree, so no repository hook,
+smudge filter or process filter can run before the agent starts. LFS files stay
+as pointers until the agent fetches them itself. The branch is
 `agent/<key-slug or dispatch id>`, or `--branch <name>` when the caller names it
-(gitboy's brief does; it is validated as a Git branch name). A keyed worktree is
-created with `git -c core.hooksPath=/dev/null worktree add --no-checkout ...`
-and then checked out with `--attr-source` set to Git's empty tree, so no
-repository hook, smudge filter or process filter can run before the agent
-starts. That needs Git 2.40 or newer; older Git refuses a keyed `--worktree`
-dispatch. LFS files stay as pointers until the agent fetches them itself.
+(gitboy's brief does; it is validated as a Git branch name).
 
-In a keyed dispatch's gitboy worktree, the worktree's own config (never the
-global config) clears inherited helpers for that host and sets
-`credential.https://<host>.helper = !phren bridge git-credential` and
-`credential.https://<host>.useHttpPath = false`. It also rewrites
-`remote.origin.url` and `remote.origin.pushurl` to the credential-free
-`https://<host>/<owner>/<repo>.git`, sets `core.sshCommand=false`, and clears
-`http.https://<host>/.extraHeader`, so an SSH origin cannot use the owner's
-identity and no inherited HTTP header can carry a token. A remote whose
-owner/repository cannot be derived is refused. The helper answers HTTPS `get`
-from this computer's stored gitboy token with `username=x-token` and
-`password=<token>`; `store` and `erase` do nothing. Only a `gba_` token stored
-with the `agent: true` marker is used; if it is missing the dispatch fails with
-`No gitboy agent token for <domain>. Run phren bridge git-host set <domain>
-gitboy with a gba_ token.` The token never goes into argv, a remote URL or a
-log. For the API the agent gets only `GITBOY_TOKEN_FILE`, a 0600 file in the
-worktree's git dir; the file is removed when the dispatch closes or finishes.
-A gitboy `gba_` token is stored as an agent token: `phren bridge git-host set`
-prints the agent identity and expiry, and `phren bridge git-host list` marks it
-`agent token`.
+The clone uses a per-dispatch managed global Git config (0600) containing only
+a cleared `credential.helper`, the host's `!phren bridge git-credential` helper,
+`useHttpPath=false`, `core.sshCommand=false`, `core.hooksPath=/dev/null`, and
+the user's `user.name`/`user.email` values. Its environment is
+`GIT_CONFIG_GLOBAL=<that file>` with `GIT_CONFIG_NOSYSTEM=1`, so the user's
+global, system or repository URL-specific helpers and headers cannot apply. The
+clone's own `.git/config` is ours; its remote is the credential-free
+`https://<host>/<owner>/<repo>.git`, and a remote whose owner/repository cannot
+be derived is refused. The helper answers HTTPS `get` from this computer's
+stored gitboy token with `username=x-token` and `password=<token>`; `store` and
+`erase` do nothing. Only a `gba_` token stored with the `agent: true` marker is
+used; if it is missing the dispatch fails with `No gitboy agent token for
+<domain>. Run phren bridge git-host set <domain> gitboy with a gba_ token.`
+The token never goes into argv, a remote URL or a log. For the API the agent
+gets only `GITBOY_TOKEN_FILE`, a 0600 file in the clone's git dir. The clone,
+managed config and token file are registered before the worker starts and are
+removed when the dispatch closes or finishes (or on reconcile for terminal
+dispatches older than seven days). A gitboy `gba_` token is stored as an agent
+token: `phren bridge git-host set` prints the agent identity and expiry, and
+`phren bridge git-host list` marks it `agent token`.
 
 `wait` prints NDJSON, one line per state change, and leaves every other return
 unread for a conductor on the same Hook:
@@ -406,10 +407,14 @@ backoff, and writes `closedAt` and the terminal `cancelled` return only after a
 successful snapshot shows the pane gone. A failed snapshot stays pending. A
 close that cannot be confirmed answers
 `{"dispatch":"<id>","closed":false,"pending":true}` and exits 1, leaving the
-intent for a later retry. A cancellation during placement records the intent on
-the receipt; the launcher closes the pane it just created and finalizes it, and
-the close call reports pending until a later close confirms. Its `wait` then
-ends `failed` with `error: "cancelled"`. Closing an already-closed or vanished
+intent for a later retry. Every placement write re-reads the receipt under its
+lock, so `cancelRequestedAt` is never lost; after each placement step the
+launcher uses the same close path as `dispatch close`. A cancellation during
+placement records the intent on the receipt; the launcher closes the pane it
+just created and finalizes it, and the close call reports pending until a later
+close confirms. Reconcile settles any leftover launching/sending receipt and
+runs the close path immediately when a cancel is pending. Its `wait` then ends
+`failed` with `error: "cancelled"`. Closing an already-closed or vanished
 dispatch answers `{"dispatch":"<id>","closed":false}` and exits 0; an unknown key
 answers `{"closed":false}` with no id.
 
@@ -427,12 +432,13 @@ Hook:
   JSON, and `startSession` (`packages/cli/src/bridge/server-launch.ts`) builds
   the agent's environment itself from the sudo askpass, `PHREN_DISPATCH_ID`, the
   served OpenCode environment and the Claude account home. The runner's
-  variables never cross the Hook's HTTP socket. A keyed launch also scrubs the
-  Hook's own `GITBOY_TOKEN`, every other `GITBOY_*` except `GITBOY_HOST` and
-  `GITBOY_TOKEN_FILE`, `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GIT_ASKPASS`,
-  `SSH_ASKPASS`, `SSH_AUTH_SOCK`, `GIT_CONFIG_*`, `GIT_SSH` and `GIT_SSH_COMMAND`
-  from what the worker would inherit on every launch path (tmux `-e NAME=`,
-  Herdr/Codex env overlays).
+  variables never cross the Hook's HTTP socket. A keyed launch gets an explicit
+  environment only: `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `LANG`,
+  `LC_ALL`, `TMPDIR`, the harness config dirs when set, and our
+  `GITBOY_HOST`, `GITBOY_TOKEN_FILE`, `GIT_CONFIG_GLOBAL`,
+  `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`. tmux runs the harness as
+  `exec env -i ...` after shell init; Herdr and the Codex server receive that
+  exact set. Nothing else from the Hook's or caller's environment is inherited.
 - In a keyed dispatch's gitboy checkout the worker gets this computer's stored
   `phren-agent` token for Git and the API, and no other: `gitHostLaunchEnv`
   (`packages/cli/src/bridge/git-credential.ts`) reads `git-hosts.json` with

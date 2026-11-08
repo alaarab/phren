@@ -182,6 +182,13 @@ function socketOf(server: string): string {
   if (!socket) throw new BridgeError(400, "This is not a tmux server.");
   return socket;
 }
+const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+/** The exact keyed-launch command: shell init, then `env -i` with only the explicit environment. */
+export function explicitAgentCommand(kind: string, args: string[], env: Record<string, string>): string {
+  const expanded = new Set(["HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "LANG", "LC_ALL", "TMPDIR", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
+  const assignments = Object.entries(env).map(([key, value]) => expanded.has(key) ? `${key}="$${key}"` : `${key}=${shellQuote(value)}`);
+  return `exec env -i ${assignments.join(" ")} ${shellQuote(kind)} ${args.map(shellQuote).join(" ")}`.replace(/\s+$/, "");
+}
 const tmux = (server: string, args: string[], options?: { input?: string; timeoutMs?: number; signal?: AbortSignal }) => deps.run(socketOf(server), args, options);
 
 // tmux ids carry sigils the Hook's ids do not allow: session $3, window @5,
@@ -420,7 +427,7 @@ export const tmuxTerminal: TerminalProvider = {
     const taken = new Set((await tmux(server, ["list-sessions", "-F", "#{session_name}"]).catch(() => "")).split("\n").filter(Boolean));
     return created(await tmux(server, ["new-session", "-d", ...printed, "-s", sessionName(label, taken), "-x", "200", "-y", "50", ...directory, ...name]));
   },
-  async startAgent(server, pane, { name, kind, args, timeoutMs, env }) {
+  async startAgent(server, pane, { name, kind, args, timeoutMs, env, envExact }) {
     if (!["claude", "codex", "copilot", "opencode", "phren"].includes(kind)) throw new BridgeError(400, "This agent cannot be started in tmux.");
     await requireDirectExec();
     const target = toTmuxId(pane, "p"), row = await paneRow(server, target);
@@ -431,10 +438,16 @@ export const tmuxTerminal: TerminalProvider = {
     // the pane falls back to that shell when it exits. The harness and its
     // arguments are the script's positional parameters, never script text.
     const shell = loginShell();
-    // Variables for the agent alone (a dispatch id) ride on the respawn.
-    const variables = Object.entries(env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
-    await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []), ...variables,
-      "--", shell, "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l', "phren", shell, kind, ...args]);
+    if (envExact) {
+      const command = explicitAgentCommand(kind, args, env ?? {});
+      await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []),
+        "--", shell, "-l", "-c", command]);
+    } else {
+      // Variables for the agent alone (a dispatch id) ride on the respawn.
+      const variables = Object.entries(env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
+      await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []), ...variables,
+        "--", shell, "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l', "phren", shell, kind, ...args]);
+    }
     // Started once the harness is the pane's foreground program.
     const deadline = Date.now() + Math.min(timeoutMs, 30_000);
     for (;;) {

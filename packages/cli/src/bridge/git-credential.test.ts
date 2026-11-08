@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { configureGitboyWorktree, gitCredentialCommand, keyedEnvScrub, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { gitCredentialCommand, keyedExplicitEnv, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { writeManagedConfig } from "./dispatch-clone.js";
+import { explicitAgentCommand } from "./terminal-tmux.js";
 import { resolveAgentToken, resolveHostToken, writeHostToken } from "./git-host-auth.js";
-import { createLaunchWorktree } from "./launch-worktree.js";
 
 const execFileAsync = promisify(execFile);
 const gitEnv = () => ({ ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x" });
@@ -43,28 +44,50 @@ describe("the gitboy credential helper", () => {
     expect(await gitCredentialCommand("erase", "protocol=https\nhost=gitboy.example.com\n\n")).toBeUndefined();
   });
 
-  it("scrubs inherited token and git variables from a keyed launch", () => {
-    const scrub = keyedEnvScrub({ GITBOY_TOKEN: "secret", GITBOY_HOST: "keep", GITBOY_OTHER: "x", GIT_CONFIG_COUNT: "1", GH_TOKEN: "t", PATH: "/bin" });
-    expect(scrub).toMatchObject({ GITBOY_TOKEN: "", GITBOY_OTHER: "", GIT_CONFIG_COUNT: "", GH_TOKEN: "", GIT_ASKPASS: "", SSH_AUTH_SOCK: "", GIT_SSH_COMMAND: "" });
-    expect(scrub).not.toHaveProperty("GITBOY_HOST");
-    expect(scrub).not.toHaveProperty("PATH");
-    expect(Object.values(scrub).every(value => value === "")).toBe(true);
+  it("builds only the explicit keyed environment", () => {
+    const env = keyedExplicitEnv({ HOME: "/home/sam", PATH: "/bin", CODEX_HOME: "/codex", GITBOY_TOKEN: "secret", GH_TOKEN: "t", GIT_CONFIG_COUNT: "1" },
+      { GITBOY_HOST: "gitboy.example.com", GIT_CONFIG_NOSYSTEM: "1" });
+    expect(env).toMatchObject({ HOME: "/home/sam", PATH: "/bin", CODEX_HOME: "/codex", GITBOY_HOST: "gitboy.example.com", GIT_CONFIG_NOSYSTEM: "1" });
+    expect(env).not.toHaveProperty("GITBOY_TOKEN");
+    expect(env).not.toHaveProperty("GH_TOKEN");
+    expect(env).not.toHaveProperty("GIT_CONFIG_COUNT");
   });
 
-  it("rewrites an SSH origin to credential-free HTTPS and disables SSH", async () => {
+  it("builds a tmux command with only the explicit environment and no token", () => {
+    const env = keyedExplicitEnv({ PATH: "/bin", HOME: "/home/sam", GITBOY_TOKEN: "secret", GH_TOKEN: "secret2" },
+      { GITBOY_HOST: "gitboy.example.com", GITBOY_TOKEN_FILE: "/tmp/token", GIT_CONFIG_GLOBAL: "/tmp/config", GIT_CONFIG_NOSYSTEM: "1" });
+    const command = explicitAgentCommand("codex", ["-a", "untrusted", "-s", "read-only"], env);
+    expect(command).toContain('PATH="$PATH"');
+    expect(command).toContain("GITBOY_TOKEN_FILE='/tmp/token'");
+    expect(command).toContain("GIT_CONFIG_GLOBAL='/tmp/config'");
+    expect(command).not.toContain("secret");
+    expect(command).not.toMatch(/\bGITBOY_TOKEN=/);
+    expect(command).not.toMatch(/\bGH_TOKEN=/);
+  });
+
+  it("uses only a managed global config, so user URL overrides do not apply", async () => {
     const dir = await repoFrom("git@gitboy.example.com:o/r.git");
-    const worktree = await createLaunchWorktree(dir, { branch: "agent/ssh" });
-    expect(await configureGitboyWorktree(worktree.path, worktree.branch)).toBe(true);
-    expect((await git(worktree.path, "config", "--worktree", "--get", "remote.origin.url")).trim()).toBe("https://gitboy.example.com/o/r.git");
-    expect((await git(worktree.path, "config", "--worktree", "--get", "remote.origin.pushurl")).trim()).toBe("https://gitboy.example.com/o/r.git");
-    expect((await git(worktree.path, "config", "--worktree", "--get", "core.sshCommand")).trim()).toBe("false");
-    expect((await git(worktree.path, "config", "--worktree", "--get", "http.https://gitboy.example.com/.extraHeader")).trim()).toBe("");
+    await git(dir, "config", "user.name", "Sam Owner");
+    await git(dir, "config", "user.email", "sam@example.com");
+    const managed = path.join(root, "managed.gitconfig");
+    const user = path.join(root, "user.gitconfig");
+    await writeManagedConfig(managed, "gitboy.example.com", dir);
+    await writeFile(user, '[credential "https://gitboy.example.com"]\n\thelper = user-helper\n[http "https://gitboy.example.com/"]\n\textraHeader = Authorization: secret\n');
+    const url = "https://gitboy.example.com/o/r";
+    const managedEnv = { ...process.env, GIT_CONFIG_GLOBAL: managed, GIT_CONFIG_NOSYSTEM: "1" };
+    const userEnv = { ...process.env, GIT_CONFIG_GLOBAL: user, GIT_CONFIG_NOSYSTEM: "1" };
+    expect((await execFileAsync("git", ["-C", dir, "config", "--get-urlmatch", "credential.helper", url], { env: userEnv })).stdout.trim()).toBe("user-helper");
+    expect((await execFileAsync("git", ["-C", dir, "config", "--get-urlmatch", "credential.helper", url], { env: managedEnv })).stdout.trim())
+      .toBe("!phren bridge git-credential");
+    expect((await execFileAsync("git", ["-C", dir, "config", "--get", "core.sshCommand"], { env: managedEnv })).stdout.trim()).toBe("false");
+    expect((await execFileAsync("git", ["-C", dir, "config", "--get", "user.name"], { env: managedEnv })).stdout.trim()).toBe("Sam Owner");
   });
 
   it("refuses a gitboy remote whose owner and repository cannot be derived", async () => {
     const dir = await repoFrom("https://gitboy.example.com/only-one-segment.git");
-    const worktree = await createLaunchWorktree(dir, { branch: "agent/bad-remote" });
-    await expect(configureGitboyWorktree(worktree.path, worktree.branch)).rejects.toMatchObject({ status: 409 });
+    const { createDispatchClone } = await import("./dispatch-clone.js");
+    await expect(createDispatchClone(dir, { branch: "agent/bad-remote", dispatchId: "50000000-0000-4000-8000-000000000002" }))
+      .rejects.toMatchObject({ status: 409 });
   });
 
   it("uses only an agent-marked gba_ token and carries the marker through resolveHostToken", async () => {
@@ -94,21 +117,4 @@ describe("the gitboy credential helper", () => {
     await expect(prepareKeyedGitboy(dir)).rejects.toMatchObject({ status: 409, message: expect.stringContaining("No gitboy agent token") });
   });
 
-  it("writes the helper and host path setting into the worktree config, not global", async () => {
-    await git(root, "init", "-q", "-b", "main");
-    await git(root, "remote", "add", "origin", "https://gitboy.example.com/o/r.git");
-    await mkdir(path.join(root, "app"), { recursive: true });
-    await writeFile(path.join(root, "app", "index.ts"), "export {};\n");
-    await git(root, "add", ".");
-    await git(root, "commit", "-qm", "start");
-    const worktree = await createLaunchWorktree(path.join(root, "app"), { branch: "agent/test" });
-
-    expect(await configureGitboyWorktree(worktree.path, worktree.branch)).toBe(true);
-    const helpers = (await git(worktree.path, "config", "--worktree", "--get-all", "credential.https://gitboy.example.com.helper"))
-      .split("\n").slice(0, -1);
-    expect(helpers).toEqual(["", "!phren bridge git-credential"]);
-    expect((await git(worktree.path, "config", "--worktree", "--get", "credential.https://gitboy.example.com.useHttpPath")).trim()).toBe("false");
-    // The same keys are absent from the global config.
-    await expect(execFileAsync("git", ["config", "--global", "--get", "credential.https://gitboy.example.com.helper"], { env: gitEnv() })).rejects.toThrow();
-  });
 });

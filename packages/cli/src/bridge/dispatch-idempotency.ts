@@ -31,6 +31,9 @@ const recordSchema = z.object({
   harness: z.string().max(32).optional(),
   label: z.string().max(200).optional(),
   computer: z.string().max(200).optional(),
+  cloneDir: z.string().max(4096).optional(),
+  gitConfigFile: z.string().max(4096).optional(),
+  agentTokenFile: z.string().max(4096).optional(),
 }).strict();
 export type IdempotencyRecord = z.infer<typeof recordSchema>;
 export type IdempotencyPhase = z.infer<typeof phaseSchema>;
@@ -130,6 +133,9 @@ export interface KeySeed {
   harness?: string;
   label?: string;
   computer?: string;
+  cloneDir?: string;
+  gitConfigFile?: string;
+  agentTokenFile?: string;
 }
 
 /** Reserve `key` for this caller, with its dispatch id, atomically. */
