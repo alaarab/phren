@@ -107,6 +107,7 @@ describe("the gitboy credential helper", () => {
   it("refuses clone paths outside the managed root", async () => {
     const dir = await repo();
     const outside = path.join(root, "outside");
+    const { createDispatchClone } = await import("./dispatch-clone.js");
     await expect(createDispatchClone(dir, { branch: "agent/escape", dispatchId: "50000000-0000-4000-8000-000000000003",
       paths: { cloneDir: outside, gitConfigFile: path.join(root, "outside.gitconfig"), agentTokenFile: path.join(outside, "phren-agent-token") } }))
       .rejects.toMatchObject({ status: 403 });
