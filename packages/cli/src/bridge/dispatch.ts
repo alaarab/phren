@@ -317,7 +317,7 @@ export function failureReason(error: unknown): string {
 }
 
 /** A fresh terminal snapshot proves the bound worker gone; a failed snapshot does not. */
-async function boundWorkerGone(receipt: Receipt): Promise<boolean> {
+export async function boundWorkerGone(receipt: Receipt): Promise<boolean> {
   const target = receipt.target;
   if (!target) return false;
   try {
@@ -330,6 +330,16 @@ async function boundWorkerGone(receipt: Receipt): Promise<boolean> {
       : target;
     return !findPane(snapshot, address);
   } catch { return false; }
+}
+
+/** A worker that may still run has no termination time; drop any stale retention clock. */
+export async function clearWorkerEnded(id: string): Promise<void> {
+  await updateReceipt(id, value => {
+    if (!value.endedAt && !value.retainedUntil) return false;
+    delete value.endedAt;
+    delete value.retainedUntil;
+    return true;
+  }).catch(() => undefined);
 }
 
 /** A keyed lookup, after reconciling a launch that was interrupted. */
@@ -394,48 +404,56 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
     const state = terminal.returned?.state;
     const done = state === "done";
     const keepOpen = terminal.closeOnFinish === false;
-    // Failed, cancelled and interrupted work keeps its clone (recoverable),
-    // even after the close that ended the worker.
+    const paths = {
+      cloneDir: record.cloneDir ?? terminal.cloneDir,
+      gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
+      agentTokenFile: record.agentTokenFile ?? terminal.agentTokenFile,
+    };
+    // Failed, cancelled and interrupted work keeps its clone (recoverable).
+    // Retention starts only once a fresh snapshot confirms the worker gone;
+    // a failed return alone never removes its token.
     if (state === "failed" || state === "gone" || (terminal.closedAt && !done)) {
+      if (!await boundWorkerGone(terminal)) {
+        await clearWorkerEnded(terminal.id);
+        return;
+      }
+      await removeDispatchSecrets(paths);
       let endedAt = terminal.endedAt;
       let retainedUntil = terminal.retainedUntil;
-      if (!endedAt || !retainedUntil) {
-        const at = endedAt ?? terminal.closedAt ?? new Date().toISOString();
-        const ended = endedAt ?? at;
-        const until = retainedUntil ?? new Date(Date.parse(ended) + 7 * 24 * 60 * 60_000).toISOString();
-        endedAt = ended;
+      if (!endedAt) {
+        const at = terminal.closedAt ?? new Date().toISOString();
+        const until = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+        endedAt = at;
         retainedUntil = until;
         await updateReceipt(terminal.id, value => {
-          if (!value.endedAt) value.endedAt = ended;
+          if (!value.endedAt) value.endedAt = at;
+          if (!value.retainedUntil) value.retainedUntil = until;
+          return true;
+        }).catch(() => undefined);
+      } else if (!retainedUntil) {
+        const until = new Date(Date.parse(endedAt) + 7 * 24 * 60 * 60_000).toISOString();
+        retainedUntil = until;
+        await updateReceipt(terminal.id, value => {
           if (!value.retainedUntil) value.retainedUntil = until;
           return true;
         }).catch(() => undefined);
       }
       if (retainedUntil && Number.isFinite(Date.parse(retainedUntil)) && Date.now() >= Date.parse(retainedUntil)) {
-        await removeDispatchClone({
-          cloneDir: record.cloneDir ?? terminal.cloneDir,
-          gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
-          agentTokenFile: record.agentTokenFile ?? terminal.agentTokenFile,
-        });
+        // Confirm again at the moment of deletion; a live worker keeps its clone.
+        if (!await boundWorkerGone(terminal)) { await clearWorkerEnded(terminal.id); return; }
+        await removeDispatchClone(paths);
       }
       return;
     }
     if (done) {
-      const gone = !terminal.closedAt && !keepOpen ? await boundWorkerGone(terminal) : false;
-      if (terminal.closedAt || gone) {
-        await removeDispatchClone({
-          cloneDir: record.cloneDir ?? terminal.cloneDir,
-          gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
-          agentTokenFile: record.agentTokenFile ?? terminal.agentTokenFile,
-        });
+      if (terminal.closedAt) { await removeDispatchClone(paths); return; }
+      if (keepOpen) {
+        // Keep-open work is never deleted before it is closed.
+        await clearWorkerEnded(terminal.id);
         return;
       }
-      if (keepOpen && !terminal.endedAt) {
-        await updateReceipt(terminal.id, value => {
-          if (value.endedAt) return false;
-          value.endedAt = new Date().toISOString(); return true;
-        }).catch(() => undefined);
-      }
+      if (await boundWorkerGone(terminal)) { await removeDispatchClone(paths); return; }
+      await clearWorkerEnded(terminal.id);
     }
   }
   const closeIfCancelled = async (): Promise<boolean> => {
@@ -963,6 +981,9 @@ export class DispatchService {
       // An alias or hostname (`Mac`, `Sams-Mac-mini.local`) names the same computer as its hooks.yaml name.
       const named = data.computer === "anywhere" || isLocalComputer(data.computer, here.names) ? undefined : await linkedComputer(data.computer).catch(() => undefined);
       const toLocal = data.computer !== "anywhere" && (isLocalComputer(data.computer, here.names) || (named !== undefined && "local" in named));
+      if (data.idempotencyKey && data.computer !== "anywhere" && !toLocal) {
+        throw new BridgeError(400, "Keyed dispatches run on this computer only.");
+      }
       const peerName = named && "peer" in named ? named.peer : data.computer;
       const enrolled = await hookPeers().catch(error => { if (toLocal || data.computer === "anywhere") return []; throw error; });
       // A conductor dispatches only within its set: each peer says whether it links this computer back.
@@ -1030,6 +1051,8 @@ export class DispatchService {
         if (refused) throw new BridgeError(409, `${peer.name}: ${refused}`, { code: "account_pool" });
       }
       // Chosen here by pools and roles, the account goes in the launch; otherwise that computer picks, as before.
+      // Keyed work is gitboy's runner: its clone and token never leave this Hook.
+      if (data.idempotencyKey && !peer.local) throw new BridgeError(400, "Keyed dispatches run on this computer only.");
       const policyChoice = data.account ? undefined : pooled.get(peer.name);
       const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });
       // An agent (a call that names its pane) may start a worker only up to its grant's

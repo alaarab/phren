@@ -113,6 +113,32 @@ describe("dispatch receipts and selection", () => {
     expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", computer: "Devbox" });
   });
 
+  it("refuses a keyed dispatch to a named peer, and one that anywhere resolves to a peer", async () => {
+    await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", worktree: true, idempotencyKey: "gitboy:host:peer" }))
+      .rejects.toMatchObject({ status: 400, message: "Keyed dispatches run on this computer only." });
+    await expect(new DispatchService().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:anywhere-peer" }))
+      .rejects.toMatchObject({ status: 400, message: "Keyed dispatches run on this computer only." });
+    expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(false);
+  });
+
+  it("keeps a keyed dispatch that anywhere resolves to this computer local", async () => {
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 10 } : { ok: true });
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:anywhere-local" });
+    expect(result).toMatchObject({ state: "accepted", computer: "Laptop" });
+    expect(vi.mocked(hookRequest).mock.calls.some(call => call[0].startsWith("/v1/workspaces/launch"))).toBe(true);
+    expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(false);
+  });
+
+  it("leaves the unkeyed peer path unchanged", async () => {
+    const result = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ state: "accepted", computer: "Desk" });
+    expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(true);
+  });
+
   it("places a Claude worker by pools and roles: skips a computer with no account it may use and names the account it chose", async () => {
     const claude = (accounts: Array<Record<string, unknown>>) => [{ source: "claude", installed: true, usable: true, accounts: accounts.map(item => ({ usable: true, ...item })) }];
     const listed: Record<string, ReturnType<typeof claude>> = {

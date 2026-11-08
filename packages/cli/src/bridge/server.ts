@@ -121,6 +121,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     localWorkers: hookWorkers(agentHooks),
     close: async (receipt, verifiedPeer) => {
       const data = { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn };
+      // Keyed dispatches are local-only: close on this Hook, never over a peer.
+      if (receipt.idempotencyKey) return closeFinishedWorker(data, handOffs);
       if (receipt.computerId === computerID) return closeFinishedWorker(data, handOffs);
       const peer = verifiedPeer ?? (await hookPeers().catch(() => [])).find(peer => peer.name === receipt.computer);
       if (peer) return peerRequest(peer, "/v1/dispatch/close", data);

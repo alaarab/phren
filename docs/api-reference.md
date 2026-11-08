@@ -160,16 +160,20 @@ launch gets an explicit environment only: `HOME`, `USER`, `LOGNAME`, `PATH`,
 our `GITBOY_HOST`, `GITBOY_TOKEN_FILE`, `GIT_CONFIG_GLOBAL`,
 `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`. tmux runs `exec env -i`
 after shell init; Herdr and the Codex server receive exactly that set. A keyed
-dispatch requires `--worktree` and always runs in a managed clone. The clone,
-managed config and token file are registered before launch. The token is removed
-as soon as the worker ends. A completed clone is removed only when `closedAt`
-is set or a fresh snapshot proves the bound worker gone, and never for a
-keep-open dispatch before it is closed. Failed, cancelled and interrupted clones
-are kept with `retainedUntil` measured from `endedAt` (when the worker was
-observed gone or closed), their config and token removed immediately, and
-reconciliation removes them after that date. Only the Hook that created the
-clone cleans its filesystem. A missing agent token fails closed with
-`No gitboy agent token for <domain>...`.
+dispatch requires `--worktree` and runs on this computer only: a keyed dispatch
+to a peer, or an `anywhere` placement that resolves to one, is refused with
+`Keyed dispatches run on this computer only.` The clone, managed config and
+token file are registered before launch. The token is removed only on confirmed
+termination: a verified close, or a fresh snapshot showing the bound pane or
+session gone. A failed or interrupted return alone never removes it. A
+completed clone is removed only when `closedAt` is set or a fresh snapshot
+proves the bound worker gone, and never for a keep-open dispatch before it is
+closed. Failed, cancelled and interrupted clones are kept with `retainedUntil`
+measured from `endedAt`, recorded only once the worker is confirmed gone, never
+from a failed return or the dispatch's creation. Reconciliation re-checks a
+fresh snapshot before deleting and clears `endedAt` when the worker is still
+alive. Only the Hook that created the clone cleans its filesystem. A missing
+agent token fails closed with `No gitboy agent token for <domain>...`.
 
 `close` calls `POST /v1/dispatch/cancel` with exactly one of
 `{ "dispatch": "<uuid>" }` or `{ "idempotencyKey": "<key>" }`: the Hook looks

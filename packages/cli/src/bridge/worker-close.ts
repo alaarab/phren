@@ -139,7 +139,9 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
   const dispatchId = receipt.id;
   const duringPlacement = receipt.state === "launching" || receipt.state === "sending";
   const target = receipt.target;
-  const cleanupPaths = { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
+  const cleanupPaths = receipt.idempotencyKey
+    ? dispatchClonePaths(receipt.id)
+    : { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
   if (!target) {
     // No pane was recorded: there is nothing to close, and the worker is gone.
     await retainCancelled(dispatchId, duringPlacement, cleanupPaths);

@@ -365,17 +365,21 @@ used; if it is missing the dispatch fails with `No gitboy agent token for
 <domain>. Run phren bridge git-host set <domain> gitboy with a gba_ token.`
 The token never goes into argv, a remote URL or a log. For the API the agent
 gets only `GITBOY_TOKEN_FILE`, a 0600 file in the clone's git dir. A keyed
-dispatch requires `--worktree`: it always runs in a managed clone. The clone,
-managed config and token file are registered before the worker starts. The
-token is removed as soon as the worker ends, whatever the outcome. A completed
-clone is removed only when `closedAt` is set or a fresh terminal snapshot shows
-the bound worker gone, and never for a keep-open dispatch before it is closed.
-Failed, cancelled and interrupted clones are kept as recoverable work, with
-their managed config and token removed immediately and `retainedUntil` measured
-from `endedAt` (the time the worker was observed gone or closed), not from the
-dispatch's creation. Reconciliation removes them after that date. The Hook that
-created the clone owns this cleanup; a dispatching computer never touches a
-peer's files. A gitboy `gba_` token is stored as an agent token:
+dispatch requires `--worktree` and runs on this computer only: a keyed dispatch
+to a peer, or an `anywhere` placement that resolves to one, is refused with
+`Keyed dispatches run on this computer only.` Its clone, managed config and
+token file are registered before the worker starts. The token is removed only
+on confirmed termination: a verified close, or a fresh terminal snapshot
+showing the bound pane or session gone. A failed or interrupted return alone
+never removes it. A completed clone is removed only when `closedAt` is set or a
+fresh terminal snapshot shows the bound worker gone, and never for a keep-open
+dispatch before it is closed. Failed, cancelled and interrupted clones are kept
+as recoverable work; `retainedUntil` starts from `endedAt`, recorded only once
+the worker is confirmed gone, never from the dispatch's creation or a failed
+return. Reconciliation re-checks a fresh snapshot before deleting and clears
+`endedAt` when the worker is still alive. The Hook that created the clone owns
+this cleanup; a dispatching computer never touches a peer's files. A gitboy
+`gba_` token is stored as an agent token:
 `phren bridge git-host set` prints the agent identity and expiry, and
 `phren bridge git-host list` marks it `agent token`.
 

@@ -201,14 +201,59 @@ describe("local dispatch", () => {
     });
     const returns = new DispatchReturns({ now: () => Date.now(), request: async () => ({}), peers: async () => [],
       isLocal: () => true, localWorkers: async () => ({ workers: [] }) });
-    await returns.cleanup();
-    expect(await stat(paths.cloneDir).then(() => true, () => false)).toBe(true);
-    expect(await stat(paths.gitConfigFile).catch(() => undefined)).toBeUndefined();
-    expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
-    expect((await dispatchStatus()).find(row => row.id === placed.id)?.retainedUntil).toEqual(expect.any(String));
-    await updateReceipt(placed.id, value => { value.retainedUntil = new Date(Date.now() - 1_000).toISOString(); return true; });
-    await reconcileInterruptedDispatches();
-    expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }) } as unknown as TerminalProvider);
+    try {
+      await returns.cleanup();
+      expect(await stat(paths.cloneDir).then(() => true, () => false)).toBe(true);
+      expect(await stat(paths.gitConfigFile).catch(() => undefined)).toBeUndefined();
+      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+      expect((await dispatchStatus()).find(row => row.id === placed.id)?.retainedUntil).toEqual(expect.any(String));
+      await updateReceipt(placed.id, value => { value.retainedUntil = new Date(Date.now() - 1_000).toISOString(); return true; });
+      await reconcileInterruptedDispatches();
+      expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("keeps a failed clone and token while its pane still runs, even after retention", async () => {
+    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:failed-alive", worktree: true });
+    const paths = dispatchClonePaths(placed.id);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.gitConfigFile, "managed config\n");
+    await writeFile(paths.agentTokenFile, "token\n");
+    await updateReceipt(placed.id, value => {
+      value.returned = { state: "failed", at: new Date().toISOString(), error: "usage limit", read: false };
+      value.endedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString();
+      value.retainedUntil = new Date(Date.now() - 1_000).toISOString();
+      return true;
+    });
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [{ pane_id: target.pane,
+      workspace_id: target.workspace, tab_id: target.tab, agent: target.source }] }) } as unknown as TerminalProvider);
+    try {
+      await reconcileInterruptedDispatches();
+      expect(await stat(paths.cloneDir).then(() => true, () => false)).toBe(true);
+      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+      expect((await dispatchStatus()).find(row => row.id === placed.id)?.endedAt).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("deletes a failed clone after retention once its pane is confirmed gone", async () => {
+    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:failed-gone", worktree: true });
+    const paths = dispatchClonePaths(placed.id);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.gitConfigFile, "managed config\n");
+    await writeFile(paths.agentTokenFile, "token\n");
+    await updateReceipt(placed.id, value => {
+      value.returned = { state: "failed", at: new Date().toISOString(), error: "usage limit", read: false };
+      value.endedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString();
+      value.retainedUntil = new Date(Date.now() - 1_000).toISOString();
+      return true;
+    });
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }) } as unknown as TerminalProvider);
+    try {
+      await reconcileInterruptedDispatches();
+      expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
+      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+    } finally { restore(); }
   });
 
   it("never touches a peer dispatch's files when cleaning up", async () => {
