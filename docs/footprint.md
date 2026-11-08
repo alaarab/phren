@@ -143,8 +143,7 @@ markers are left untouched.
 `phren bridge install` is separate from the memory-store setup. It installs a
 standalone helper in `~/.local/share/phren/bridge/versions/<version>`, with a
 `current` symlink, `dispatch` entry point, `askpass` helper for `sudo -A` (0700),
-`git-credential` helper for a gitboy worker's Git access (0700), and
-`installed.json` rollback record.
+and `installed.json` rollback record.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for
@@ -290,7 +289,9 @@ nothing to that checkout.
   `<bridge>/dispatch-origin-handovers.json` files.
 - `<bridge>/dispatches/` holds dispatch receipts without prompt text;
   `<bridge>/idempotency/<sha256>.json` (0600) holds each local dispatch
-  idempotency key's dispatch id for 30 days;
+  idempotency key's dispatch id for 30 days; a keyed gitboy worktree's own
+  config holds only the `phren bridge git-credential` helper and its host
+  settings;
   on the computer that runs a dispatched Claude or Codex worker (or a
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
   and what the worker's hooks reported (`arrival.json`), kept seven days and

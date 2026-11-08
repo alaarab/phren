@@ -756,7 +756,7 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
         if (policyChoice?.account) {

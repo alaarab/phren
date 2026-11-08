@@ -19,7 +19,7 @@ import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
 import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
-import { gitHostLaunchEnv } from "./git-credential.js";
+import { configureGitboyWorktree, gitHostLaunchEnv } from "./git-credential.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -486,9 +486,12 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     scratch = await mkdtemp(path.join(agents, `${new Date().toISOString().slice(0, 10)}-${herdrAgentName(label)}-`));
   }
   const cwd = scratch ?? worktree?.cwd ?? projectDirectory!;
-  // A worker in a gitboy checkout gets this computer's stored phren-agent
-  // token, never the caller's environment: the Hook builds the agent env here.
-  const hostEnv = role === "agent" ? await gitHostLaunchEnv(cwd).catch(() => undefined) : undefined;
+  // A keyed dispatch in a fresh gitboy worktree gets the Hook's credential
+  // helper in that worktree's own config, never the global config.
+  if (worktree && data.idempotencyKey && role === "agent") await configureGitboyWorktree(worktree.path, worktree.branch);
+  // A keyed worker in a gitboy checkout gets this computer's stored
+  // phren-agent token for the API, never the caller's environment.
+  const hostEnv = role === "agent" ? await gitHostLaunchEnv(cwd, !!data.idempotencyKey).catch(() => undefined) : undefined;
   const envVariables = { ...variables, ...(hostEnv ?? {}) };
   const env = Object.keys(envVariables).length ? envVariables : undefined;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the

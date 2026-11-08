@@ -8,6 +8,7 @@ import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 import { dispatchStatus, originPaneSchema, updateReceipt } from "./dispatch.js";
+import { findIdempotencyKey, idempotencyKeySchema } from "./dispatch-idempotency.js";
 type ClosedTarget = Target | StartingTarget;
 const closedTargetSchema = z.union([targetSchema, startingTargetSchema]);
 const file = (target: ClosedTarget) => path.join(bridgeRoot(), "closed-workers", `${createHash("sha256").update(JSON.stringify([target.server, target.workspace, target.tab, target.pane, target.source, "session" in target ? target.session : target.startingToken])).digest("hex")}.json`);
@@ -30,19 +31,28 @@ export async function markPaneClosed(server: string, pane: Json): Promise<void> 
 }
 
 /**
- * Cancel a running dispatch by id: stop its agent, close its pane, and record
- * a failed `cancelled` return so `phren dispatch wait` ends with that error.
- * Idempotent: a dispatch already closed answers `closed: false`.
+ * Cancel a running dispatch by id or idempotency key: stop its agent, close its
+ * pane, and record a failed `cancelled` return so `phren dispatch wait` ends
+ * with that error. Idempotent: a dispatch already closed answers `closed: false`.
  */
 export async function cancelDispatch(input: unknown): Promise<Json> {
-  const data = z.object({ dispatch: z.string().uuid() }).strict().parse(input);
-  const receipt = (await dispatchStatus()).find(row => row.id === data.dispatch);
-  if (!receipt) throw new BridgeError(404, "Unknown dispatch.");
-  if (receipt.closedAt) return { ok: true, dispatch: data.dispatch, closed: false };
+  const data = z.union([
+    z.object({ dispatch: z.string().uuid() }).strict(),
+    z.object({ idempotencyKey: idempotencyKeySchema }).strict(),
+  ]).parse(input);
+  let dispatchId: string | undefined;
+  if ("dispatch" in data) dispatchId = data.dispatch;
+  else dispatchId = (await findIdempotencyKey(data.idempotencyKey))?.dispatchId;
+  // An unknown key names no dispatch; a known one whose receipt is gone still
+  // answers with the id it named.
+  if (!dispatchId) return { ok: true, closed: false };
+  const receipt = (await dispatchStatus()).find(row => row.id === dispatchId);
+  if (!receipt) return { ok: true, dispatch: dispatchId, closed: false };
+  if (receipt.closedAt) return { ok: true, dispatch: dispatchId, closed: false };
   if (["launching", "sending"].includes(receipt.state)) throw new BridgeError(409, "This dispatch is still being placed; try closing it again in a moment.");
   const at = new Date().toISOString();
   let cancelled = false;
-  const current = await updateReceipt(data.dispatch, value => {
+  const current = await updateReceipt(dispatchId, value => {
     if (value.closedAt) return false;
     value.closedAt = at;
     value.state = "failed";
@@ -51,7 +61,7 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
     cancelled = true;
     return true;
   });
-  if (!current || !cancelled) return { ok: true, dispatch: data.dispatch, closed: false };
+  if (!current || !cancelled) return { ok: true, dispatch: dispatchId, closed: false };
   const target = current.target;
   if (target) {
     const { snapshot, findPane } = await import("./herdr.js");
@@ -59,7 +69,7 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
     if (pane) await markPaneClosed(target.server, pane).catch(() => undefined);
     await terminalProvider().closePane(target.server, target.pane).catch(() => undefined);
   }
-  return { ok: true, dispatch: data.dispatch, closed: true };
+  return { ok: true, dispatch: dispatchId, closed: true };
 }
 
 /** Called on the worker's computer only after the sender read the done return.

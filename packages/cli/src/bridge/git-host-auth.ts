@@ -28,7 +28,7 @@ export function gitHostsFile(): string {
   return path.join(bridgeRoot(), "git-hosts.json");
 }
 
-interface StoredHost { kind: TokenHostKind; token: string; user?: string; savedAt?: string }
+interface StoredHost { kind: TokenHostKind; token: string; user?: string; savedAt?: string; agent?: true }
 type StoredFile = { hosts: Record<string, StoredHost> };
 
 function clean(value: unknown): string | undefined {
@@ -53,7 +53,7 @@ async function readStore(file = gitHostsFile()): Promise<StoredFile | "unsafe" |
         const entry = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
         const token = clean(entry.token);
         const kind = entry.kind === "gitlab" || entry.kind === "gitboy" ? entry.kind : null;
-        if (token && kind) hosts[normalDomain(domain)] = { kind, token, ...(clean(entry.user) ? { user: clean(entry.user) } : {}), ...(clean(entry.savedAt) ? { savedAt: clean(entry.savedAt) } : {}) };
+        if (token && kind) hosts[normalDomain(domain)] = { kind, token, ...(clean(entry.user) ? { user: clean(entry.user) } : {}), ...(clean(entry.savedAt) ? { savedAt: clean(entry.savedAt) } : {}), ...(entry.agent === true ? { agent: true as const } : {}) };
       }
     }
     return { hosts };
@@ -61,13 +61,13 @@ async function readStore(file = gitHostsFile()): Promise<StoredFile | "unsafe" |
 }
 
 /** Store (or, with an empty token, forget) one domain's token. */
-export async function writeHostToken(domain: string, kind: TokenHostKind, token: string, user?: string, file = gitHostsFile()): Promise<void> {
+export async function writeHostToken(domain: string, kind: TokenHostKind, token: string, user?: string, file = gitHostsFile(), agent?: boolean): Promise<void> {
   const key = normalDomain(domain);
   if (!key || /[\s/]/.test(key)) throw new Error("That is not a host name.");
   const current = await readStore(file);
   const hosts = current && current !== "unsafe" ? { ...current.hosts } : {};
   const value = clean(token);
-  if (value) hosts[key] = { kind, token: value, ...(user ? { user } : {}), savedAt: new Date().toISOString() };
+  if (value) hosts[key] = { kind, token: value, ...(user ? { user } : {}), savedAt: new Date().toISOString(), ...(agent ? { agent: true as const } : {}) };
   else delete hosts[key];
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await atomic(file, JSON.stringify({ hosts }, null, 2) + "\n", 0o600);
@@ -114,10 +114,10 @@ export async function resolveHostToken(kind: TokenHostKind, domain: string, opti
 }
 
 /** Each stored domain with its kind and who it signs in as. Never a token. */
-export async function listHostTokens(file = gitHostsFile()): Promise<{ domain: string; kind: TokenHostKind; user?: string; savedAt?: string }[] | "unsafe"> {
+export async function listHostTokens(file = gitHostsFile()): Promise<{ domain: string; kind: TokenHostKind; user?: string; savedAt?: string; agent?: true }[] | "unsafe"> {
   const store = await readStore(file);
   if (store === "unsafe") return "unsafe";
-  return Object.entries(store?.hosts ?? {}).map(([domain, { kind, user, savedAt }]) => ({ domain, kind, ...(user ? { user } : {}), ...(savedAt ? { savedAt } : {}) }));
+  return Object.entries(store?.hosts ?? {}).map(([domain, { kind, user, savedAt, agent }]) => ({ domain, kind, ...(user ? { user } : {}), ...(savedAt ? { savedAt } : {}), ...(agent ? { agent: true as const } : {}) }));
 }
 
 /** Credential fingerprint only: raw credentials never enter lookup keys.

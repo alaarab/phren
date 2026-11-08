@@ -19,7 +19,6 @@ import { health } from "./transport.js";
 import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
 import { FAST_STATUS_LINE_SOURCE, fastStatusLinePath } from "./status-line-fast.js";
 import { installAskpass, removeAskpass } from "./sudo.js";
-import { installGitCredential, removeGitCredential } from "./git-credential.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 import { carryCodexHookTrust } from "./codex-hook-trust.js";
 import type { GatewayScope } from "./scoped-gateway.js";
@@ -303,7 +302,6 @@ export async function install(version: string, noService = false, force = false)
     root, herdr, store: modules.store, profile: modules.profile, node: process.execPath, bundle: path.join(root, "current/bridge-hook.mjs"),
   }), 0o700);
   await installAskpass(process.execPath, path.join(root, "current/bridge-hook.mjs"));
-  await installGitCredential(process.execPath, path.join(root, "current/bridge-hook.mjs"));
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
@@ -388,7 +386,6 @@ export async function uninstall() {
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
   await applyOpencodePlugin(true);
   await removeAskpass();
-  await removeGitCredential();
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
   console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android, phren-computer, phren-gitboy and phren-gitboy-write keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
 }

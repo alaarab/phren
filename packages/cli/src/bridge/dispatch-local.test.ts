@@ -4,7 +4,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus } from "./dispatch.js";
-import { dispatchInputFromArgs } from "./dispatch-command.js";
+import { closeRequestFromArgs, dispatchInputFromArgs } from "./dispatch-command.js";
 import { waitForDispatch } from "./dispatch-wait.js";
 import { cancelDispatch } from "./worker-close.js";
 import { hookRequest } from "./client.js";
@@ -113,5 +113,25 @@ describe("local dispatch", () => {
       } });
     expect(code).toBe(1);
     expect(lines.at(-1)).toMatchObject({ dispatch: placed.id, state: "failed", final: true, error: "cancelled" });
+  });
+
+  it("closes by idempotency key, refuses both forms, and an unknown key closes nothing", async () => {
+    const key = "gitboy:host:close-key";
+    const placed = await service().dispatch({ ...brief, idempotencyKey: key });
+    const closePane = vi.fn(async () => undefined);
+    const restore = setTerminalProvider({
+      snapshot: async () => ({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
+        terminal_id: "term-1", agent: target.source, agent_status: "working" }] }),
+      closePane,
+    } as unknown as TerminalProvider);
+    try {
+      expect(await cancelDispatch({ idempotencyKey: key })).toMatchObject({ dispatch: placed.id, closed: true });
+      expect(await cancelDispatch({ idempotencyKey: "gitboy:host:missing" })).toEqual({ ok: true, closed: false });
+      await expect(cancelDispatch({ dispatch: placed.id, idempotencyKey: key } as never)).rejects.toThrow();
+      expect(closeRequestFromArgs(["--idempotency-key", key])).toEqual({ idempotencyKey: key });
+      expect(closeRequestFromArgs([placed.id])).toEqual({ dispatch: placed.id });
+      expect(() => closeRequestFromArgs([placed.id, "--idempotency-key", key])).toThrow();
+      expect(closePane).toHaveBeenCalledTimes(1);
+    } finally { restore(); }
   });
 });

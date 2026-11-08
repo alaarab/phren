@@ -62,16 +62,16 @@ export async function runDispatch(args: string[]): Promise<number> {
   }
   if (args[0] === "wait") {
     const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: {
-      timeout: { type: "string" }, json: { type: "boolean" },
+      timeout: { type: "string" }, json: { type: "boolean" }, follow: { type: "boolean" },
     } });
-    if (positionals.length !== 1) throw new Error("Usage: phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]");
+    if (positionals.length !== 1) throw new Error("Usage: phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json] [--follow]");
     const seconds = values.timeout === undefined ? undefined : Number(values.timeout);
     if (seconds !== undefined && (!Number.isFinite(seconds) || seconds < 0)) throw new Error("--timeout is a non-negative number of seconds.");
     return waitForDispatch(positionals[0], { timeoutMs: seconds === undefined ? undefined : seconds * 1000 });
   }
-  if (args[0] === "close" && args.length === 2 && /^[a-f0-9-]{36}$/i.test(args[1])) {
-    const result = await hookRequest("/v1/dispatch/cancel", { dispatch: args[1] });
-    console.log(JSON.stringify({ dispatch: result.dispatch ?? args[1], closed: result.closed === true }, null, 2));
+  if (args[0] === "close") {
+    const result = await hookRequest("/v1/dispatch/cancel", closeRequestFromArgs(args.slice(1)));
+    console.log(JSON.stringify({ ...(typeof result.dispatch === "string" ? { dispatch: result.dispatch } : {}), closed: result.closed === true }, null, 2));
     return 0;
   }
   const input = await dispatchInputFromArgs(args);
@@ -140,6 +140,20 @@ export async function dispatchInputFromArgs(args: string[], stdin: Readable = pr
     throw new Error(`phren dispatch: ${parsed.error.issues.map(issue => `${flag(issue.path)} ${issue.code === "invalid_type" && /received undefined/.test(issue.message) ? "is required" : issue.message}`).join("; ")}. Run phren dispatch for usage.`);
   }
   return parsed.data;
+}
+
+/** Exactly one of a dispatch id and an idempotency key, for `dispatch close`. */
+export function closeRequestFromArgs(args: string[]): { dispatch: string } | { idempotencyKey: string } {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "idempotency-key": { type: "string" } } });
+  const key = values["idempotency-key"];
+  const id = positionals[0];
+  if (positionals.length > 1 || (id === undefined) === (key === undefined)) {
+    throw new Error("Usage: phren dispatch close <dispatch-id> | phren dispatch close --idempotency-key <key>");
+  }
+  if (key !== undefined && !idempotencyKeySchema.safeParse(key).success) {
+    throw new Error(idempotencyKeySchema.safeParse(key).error!.issues[0]?.message ?? "Invalid idempotency key.");
+  }
+  return key !== undefined ? { idempotencyKey: key } : { dispatch: id! };
 }
 
 export async function runHandOff(args: string[]): Promise<number> {

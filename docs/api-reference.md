@@ -92,8 +92,9 @@ CLI equivalent:
 
 ```sh
 phren dispatch local gitboy --harness claude --idempotency-key "gitboy:<host>:<session id>" --worktree --prompt-file -
-phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]
+phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json] [--follow]
 phren dispatch close <dispatch-id>
+phren dispatch close --idempotency-key <key>
 ```
 
 `local` places on this computer through its own Hook, with no `hooks.yaml` entry
@@ -119,9 +120,19 @@ with `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }`. Exit codes: 0
 days). A Hook that stays unavailable for 5 minutes, or an unknown id after a 30
 s grace period, ends `failed`.
 
-`close` calls `POST /v1/dispatch/cancel { "dispatch": "<uuid>" }`: the Hook
-records a failed `cancelled` return, stops the agent and closes its pane. A
-repeated close answers `{ "dispatch": "<uuid>", "closed": false }` and exits 0.
+For a keyed dispatch with `--worktree` in a gitboy checkout, the worktree's own
+config (never the global config) clears any inherited helper for that host and
+adds `credential.https://<host>.helper = !phren bridge git-credential` plus
+`credential.https://<host>.useHttpPath = false`. The helper answers HTTPS `get`
+from the Hook's stored gitboy token only.
+
+`close` calls `POST /v1/dispatch/cancel` with exactly one of
+`{ "dispatch": "<uuid>" }` or `{ "idempotencyKey": "<key>" }`: the Hook looks
+the key up in the same durable store, records a failed `cancelled` return,
+stops the agent and closes its pane. It exits 0 and prints
+`{"dispatch":"<id>","closed":true}` when it cancels; an unknown key, or one
+whose dispatch is already gone, prints `{"closed":false}` (with `dispatch` when
+the key still names one). `--follow` is accepted as a no-op by `wait`.
 
 ### `dispatch_returns`
 
@@ -2209,9 +2220,11 @@ host reports them: `reviewDecision` (`APPROVED`, `REVIEW_REQUIRED` or `CHANGES_R
 | Route | Body | Answer |
 | --- | --- | --- |
 | `POST /v1/git/pr/merge` | `number`, `method?` (`merge`, `squash` or `rebase`; default `merge`), `expectedHeadSha?`, `deleteBranch?`, `expectedRepository?`, `expectedRemote?` | `{ok: true, number, method, ...}`, or `{ok: false, reason, message}`. `reason: "blocked"` is the host's own refusal: failing checks, missing approvals, conflicts, or a head that moved past `expectedHeadSha`. `expectedRemote` is the pulls listing's `remote` the card came from; when the checkout's remote now names another repository, the merge is refused with 409 `git-remote-changed` before the host is asked (and the cached listing dropped, so a refresh reads it again); when the host's tool cannot say which repository it would merge in (gh signed out or offline), the answer is `{ok: false, reason: "failed"}` and nothing is merged. GitHub merges with `gh pr merge --match-head-commit` and never deletes the local branch; GitLab merges by the project's own method (squash per request). |
-| `POST /v1/git/host-token` | `token` (empty disconnects), `expectedRepository?` | `{ok, kind, domain, user?}`. Connects this repository's GitLab or gitboy host: the token is checked against the host's current-user API, then stored with that account in the Hook's `git-hosts.json` (mode 600, never the store). A token the host refuses is `{ok: false, reason: "auth"}`; GitHub answers `reason: "unsupported"` (it uses `gh auth login`). |
+| `POST /v1/git/host-token` | `token` (empty disconnects), `expectedRepository?` | `{ok, kind, domain, user?, agent?}`. Connects this repository's GitLab or gitboy host: the token is checked against the host's current-user API, then stored with that account in the Hook's `git-hosts.json` (mode 600, never the store). A gitboy `gba_` agent token also reports `agent_token: {name, repo_ids, expires_at}`; `agent: true` is stored and returned. A token the host refuses is `{ok: false, reason: "auth"}`; GitHub answers `reason: "unsupported"` (it uses `gh auth login`). |
 
-`phren bridge git-host [list | set <domain> gitlab|gitboy | remove <domain>]` does the same from a shell, reading the token from stdin.
+`phren bridge git-host [list | set <domain> gitlab|gitboy | remove <domain>]` does the same from a shell, reading the token from stdin. A gitboy agent token prints `Connected <domain> (gitboy agent token as @<user>, expires <date>)` and `list` marks it `agent token`.
+
+`phren bridge git-credential` is the git credential helper for a keyed dispatch's worktree. It answers `get` only, for `protocol=https` and a host with a stored gitboy token, with `username=x-token` and `password=<token>`; `store` and `erase` do nothing. The token never appears in argv, the remote URL or a log.
 
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,

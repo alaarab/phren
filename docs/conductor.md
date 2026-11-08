@@ -304,6 +304,7 @@ phren dispatch local gitboy --harness claude --idempotency-key "gitboy:<host>:<s
   --worktree --prompt-file -
 phren dispatch wait <dispatch-id> --json
 phren dispatch close <dispatch-id>
+phren dispatch close --idempotency-key "gitboy:<host>:<session id>"
 ```
 
 `local` is this computer, the same placement as its own name or `local` in the
@@ -334,6 +335,16 @@ checkout on a new branch, never reused. The branch is
 core.hooksPath=/dev/null worktree add ...`, so no repository hook or script runs
 before the agent starts.
 
+In a keyed dispatch's gitboy worktree, the worktree's own config (never the
+global config) clears inherited helpers for that host and sets
+`credential.https://<host>.helper = !phren bridge git-credential` and
+`credential.https://<host>.useHttpPath = false`. The helper answers HTTPS `get`
+from this computer's stored gitboy token with `username=x-token` and
+`password=<token>`; `store` and `erase` do nothing. The token never goes into
+argv, a remote URL or a log. A gitboy `gba_` token is stored as an agent token:
+`phren bridge git-host set` prints the agent identity and expiry, and
+`phren bridge git-host list` marks it `agent token`.
+
 `wait` prints NDJSON, one line per state change, and leaves every other return
 unread for a conductor on the same Hook:
 
@@ -344,8 +355,8 @@ unread for a conductor on the same Hook:
 ```
 
 `needs_you` is not final: the agent waits for an answer in Phren, and `wait`
-keeps following. `--json` is accepted, and the output is always JSON. `prs`
-comes from the worker's `phren dispatch report`. It polls
+keeps following. `--json` and `--follow` are accepted, and the output is always
+JSON. `prs` comes from the worker's `phren dispatch report`. It polls
 about every 2 s at first, backing off to 10 s with jitter, peeks at
 `/v1/dispatch/returns?peek=1`, and reads `/v1/dispatch/workers` to tell a gone
 pane from one still working. It survives transient Hook errors, but ends
@@ -355,10 +366,13 @@ dispatch"`. The timeout defaults to none and is capped at 7 days. Exit codes: 0
 `done`, 1 `failed` or `gone`, 124 `timeout`. When the result is final it
 acknowledges only that dispatch's return (`POST /v1/dispatch/returns/ack`).
 
-`close` cancels a running dispatch: the Hook records a failed `cancelled` return,
-stops the agent and closes its pane (`POST /v1/dispatch/cancel`). Its `wait`
-then ends `failed` with `error: "cancelled"`. Closing an already-closed dispatch
-answers `{"dispatch":"<id>","closed":false}` and exits 0.
+`close` cancels a running dispatch by id, or by its idempotency key with
+`--idempotency-key`: the Hook looks the key up in the same durable store, records
+a failed `cancelled` return, stops the agent and closes its pane
+(`POST /v1/dispatch/cancel` with exactly one of `dispatch` or
+`idempotencyKey`). Its `wait` then ends `failed` with `error: "cancelled"`.
+Closing an already-closed dispatch answers `{"dispatch":"<id>","closed":false}`
+and exits 0; an unknown key answers `{"closed":false}` with no id.
 
 A dispatch with an idempotency key follows an execution policy enforced by the
 Hook:
@@ -371,13 +385,13 @@ Hook:
   the agent's environment itself from the sudo askpass, `PHREN_DISPATCH_ID`, the
   served OpenCode environment and the Claude account home. The runner's
   variables never cross the Hook's HTTP socket.
-- In a gitboy checkout the worker gets this computer's stored `phren-agent`
-  token for Git and the API, and no other: `gitHostLaunchEnv`
+- In a keyed dispatch's gitboy checkout the worker gets this computer's stored
+  `phren-agent` token for Git and the API, and no other: `gitHostLaunchEnv`
   (`packages/cli/src/bridge/git-credential.ts`) reads `git-hosts.json` with
-  `resolveHostToken("gitboy", domain, { env: {}, cli: false })`, sets
-  `GITBOY_HOST`/`GITBOY_TOKEN`, and installs a credential helper
-  (`<bridge>/git-credential`) that answers git from the same store. An empty
-  `credential.helper` resets any helper from the agent's own config.
+  `resolveHostToken("gitboy", domain, { env: {}, cli: false })` and sets
+  `GITBOY_HOST`/`GITBOY_TOKEN`; a fresh worktree also gets the credential helper
+  in its own config (see above), with inherited helpers for that host cleared
+  first.
 - A worktree is created with repository hooks disabled, as above.
 
 ### Copilot workers
