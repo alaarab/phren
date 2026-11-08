@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { configureGitboyWorktree, gitCredentialCommand } from "./git-credential.js";
-import { writeHostToken } from "./git-host-auth.js";
+import { configureGitboyWorktree, gitCredentialCommand, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { resolveAgentToken, resolveHostToken, writeHostToken } from "./git-host-auth.js";
 import { createLaunchWorktree } from "./launch-worktree.js";
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +22,17 @@ describe("the gitboy credential helper", () => {
   });
   afterEach(async () => { delete process.env.PHREN_BRIDGE_HOME; delete process.env.GIT_CONFIG_GLOBAL; await rm(root, { recursive: true, force: true }); });
 
+  async function repo(domain = "gitboy.example.com"): Promise<string> {
+    const dir = path.join(root, `repo-${Math.random().toString(16).slice(2)}`);
+    await mkdir(dir, { recursive: true });
+    await git(dir, "init", "-q", "-b", "main");
+    await git(dir, "remote", "add", "origin", `https://${domain}/o/r.git`);
+    await writeFile(path.join(dir, "a"), "x\n");
+    await git(dir, "add", ".");
+    await git(dir, "commit", "-qm", "start");
+    return dir;
+  }
+
   it("answers get for https on a stored gitboy host and nothing else", async () => {
     expect(await gitCredentialCommand("get", "protocol=https\nhost=gitboy.example.com\n\n")).toBe("username=x-token\npassword=gba_test\n");
     expect(await gitCredentialCommand("get", "protocol=https\nhost=gitboy.example.com:443\n\n")).toBe("username=x-token\npassword=gba_test\n");
@@ -29,6 +40,33 @@ describe("the gitboy credential helper", () => {
     expect(await gitCredentialCommand("get", "protocol=http\nhost=gitboy.example.com\n\n")).toBeUndefined();
     expect(await gitCredentialCommand("store", "protocol=https\nhost=gitboy.example.com\n\n")).toBeUndefined();
     expect(await gitCredentialCommand("erase", "protocol=https\nhost=gitboy.example.com\n\n")).toBeUndefined();
+  });
+
+  it("uses only an agent-marked gba_ token and carries the marker through resolveHostToken", async () => {
+    expect(await resolveAgentToken("gitboy.example.com")).toMatchObject({ token: "gba_test", agent: true });
+    expect(await resolveHostToken("gitboy", "gitboy.example.com")).toMatchObject({ token: "gba_test", agent: true });
+    await writeHostToken("ordinary.example.com", "gitboy", "gbp_user", "sam");
+    expect(await resolveAgentToken("ordinary.example.com")).toBeUndefined();
+    await writeHostToken("not-agent.example.com", "gitboy", "gbp_not", "sam", undefined, true);
+    expect(await resolveAgentToken("not-agent.example.com")).toBeUndefined();
+    expect(await gitCredentialCommand("get", "protocol=https\nhost=ordinary.example.com\n\n")).toBeUndefined();
+  });
+
+  it("writes the agent token to a private file and passes only its path", async () => {
+    const dir = await repo();
+    const prepared = await prepareKeyedGitboy(dir);
+    expect(prepared).toBeDefined();
+    expect(prepared!.env).not.toHaveProperty("GITBOY_TOKEN");
+    expect(prepared!.env.GITBOY_TOKEN_FILE).toBe(prepared!.tokenFile);
+    expect(await readFile(prepared!.tokenFile, "utf8")).toBe("gba_test");
+    if (process.platform !== "win32") expect((await stat(prepared!.tokenFile)).mode & 0o777).toBe(0o600);
+    await removeAgentTokenFile(prepared!.tokenFile);
+    expect(await stat(prepared!.tokenFile).catch(() => undefined)).toBeUndefined();
+  });
+
+  it("fails closed when a keyed gitboy checkout has no agent token", async () => {
+    const dir = await repo("gitboy-missing.example.com");
+    await expect(prepareKeyedGitboy(dir)).rejects.toMatchObject({ status: 409, message: expect.stringContaining("No gitboy agent token") });
   });
 
   it("writes the helper and host path setting into the worktree config, not global", async () => {

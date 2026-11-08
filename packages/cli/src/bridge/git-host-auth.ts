@@ -22,7 +22,7 @@ const exec = promisify(execFile);
 export type TokenHostKind = "gitlab" | "gitboy";
 export type TokenSource = "environment" | "file" | "cli";
 
-export interface HostToken { token: string; source: TokenSource; user?: string }
+export interface HostToken { token: string; source: TokenSource; user?: string; agent?: true }
 
 export function gitHostsFile(): string {
   return path.join(bridgeRoot(), "git-hosts.json");
@@ -105,12 +105,25 @@ export async function resolveHostToken(kind: TokenHostKind, domain: string, opti
   if (env) return { token: env, source: "environment" };
   const store = await readStore(options.file);
   const stored = store && store !== "unsafe" ? store.hosts[key] : undefined;
-  if (stored && stored.kind === kind) return { token: stored.token, source: "file", ...(stored.user ? { user: stored.user } : {}) };
+  if (stored && stored.kind === kind) return { token: stored.token, source: "file", ...(stored.user ? { user: stored.user } : {}), ...(stored.agent ? { agent: true as const } : {}) };
   if (options.cli !== false) {
     const cli = await fromCli(kind, key);
     if (cli) return { token: cli, source: "cli" };
   }
   return undefined;
+}
+
+/**
+ * The gitboy agent token for a domain: only a token `phren bridge git-host set`
+ * marked `agent: true` and that carries the `gba_` prefix. Keyed dispatches
+ * use this and nothing else.
+ */
+export async function resolveAgentToken(domain: string, file = gitHostsFile()): Promise<HostToken | undefined> {
+  const key = normalDomain(domain);
+  const store = await readStore(file);
+  const stored = store && store !== "unsafe" ? store.hosts[key] : undefined;
+  if (!stored || stored.kind !== "gitboy" || stored.agent !== true || !stored.token.startsWith("gba_")) return undefined;
+  return { token: stored.token, source: "file", agent: true, ...(stored.user ? { user: stored.user } : {}) };
 }
 
 /** Each stored domain with its kind and who it signs in as. Never a token. */

@@ -1,7 +1,9 @@
 import { ownerInboxSchema } from "./owner-inbox.js";
 import { prsSchema } from "./return-contract.js";
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { parseArgs } from "node:util";
 import { hookRequest } from "./client.js";
 import { DISPATCH_PROMPT_LIMIT, dispatchSchema, type DispatchInput } from "./dispatch.js";
@@ -71,8 +73,9 @@ export async function runDispatch(args: string[]): Promise<number> {
   }
   if (args[0] === "close") {
     const result = await hookRequest("/v1/dispatch/cancel", closeRequestFromArgs(args.slice(1)));
-    console.log(JSON.stringify({ ...(typeof result.dispatch === "string" ? { dispatch: result.dispatch } : {}), closed: result.closed === true }, null, 2));
-    return 0;
+    console.log(JSON.stringify({ ...(typeof result.dispatch === "string" ? { dispatch: result.dispatch } : {}), closed: result.closed === true,
+      ...(result.pending === true ? { pending: true } : {}) }, null, 2));
+    return result.pending === true ? 1 : 0;
   }
   const input = await dispatchInputFromArgs(args);
   // Run inside an agent's pane, the dispatch remembers that pane for return notices.
@@ -89,11 +92,24 @@ export const PROMPT_LIMIT = DISPATCH_PROMPT_LIMIT;
 
 /** A brief from a file, or stdin for `-`. The text never goes through argv. */
 export async function readPromptFile(file: string, stdin: Readable = process.stdin): Promise<string> {
-  const prompt = file === "-" ? await (async () => {
-    let text = "";
-    for await (const chunk of stdin) text += String(chunk);
-    return text;
-  })() : await readFile(file, "utf8");
+  if (file !== "-") {
+    const info = await stat(file);
+    if (info.size > PROMPT_LIMIT) throw new Error(`Worker brief is too large: ${info.size} bytes; the limit is ${PROMPT_LIMIT} characters.`);
+  }
+  const stream: Readable = file === "-" ? stdin : createReadStream(file);
+  const decoder = new StringDecoder("utf8");
+  let prompt = "";
+  try {
+    for await (const chunk of stream) {
+      prompt += decoder.write(typeof chunk === "string" ? Buffer.from(chunk) : chunk as Buffer);
+      if (prompt.length > PROMPT_LIMIT) {
+        throw new Error(`Worker brief is too large: more than ${PROMPT_LIMIT} characters.`);
+      }
+    }
+    prompt += decoder.end();
+  } finally {
+    if (file !== "-") (stream as ReturnType<typeof createReadStream>).destroy();
+  }
   if (prompt.length > PROMPT_LIMIT) throw new Error(`Worker brief is too large: ${prompt.length} characters; the limit is ${PROMPT_LIMIT}.`);
   return prompt;
 }

@@ -324,26 +324,41 @@ returned an earlier one):
 
 `--idempotency-key` is 1 to 200 characters of `[A-Za-z0-9:._@/-]`. The Hook
 stores key to dispatch id under `<bridge>/idempotency/<sha256>.json` (0600), so
-it survives a restart and expires after 30 days. The reservation is an exclusive
-file create: two concurrent calls with the same key start one agent, and the
-second returns the same receipt with `existing: true`.
+it survives a restart and expires after 30 days. The dispatch id is generated
+before the reservation; the full record is written to a temp file and published
+with `link`, which is atomic and never lets a concurrent caller reclaim an empty
+or half-written file. Expiry and replacement happen only under a per-key lock
+with a 60 s stale-lock limit, and updates/deletes check the owner nonce.
+
+A reservation that stays `reserved` or `launching` for five minutes with no
+recorded target and no live worker is reconciled to a failed receipt with
+`error: "launch interrupted"`; nothing is relaunched automatically. A repeated
+key returns that receipt with `existing: true` and `state: "failed"`.
 
 `--worktree` starts the worker in a fresh `git worktree add` of the project's
 checkout on a new branch, never reused. The branch is
 `agent/<key-slug or dispatch id>`, or `--branch <name>` when the caller names it
-(gitboy's brief does; it is validated as a Git branch name). A worktree is created with `git -c
-core.hooksPath=/dev/null worktree add ...`, so no repository hook or script runs
-before the agent starts.
+(gitboy's brief does; it is validated as a Git branch name). A keyed worktree is
+created with `git -c core.hooksPath=/dev/null worktree add --no-checkout ...`
+and then checked out with `--attr-source` set to Git's empty tree, so no
+repository hook, smudge filter or process filter can run before the agent
+starts. That needs Git 2.40 or newer; older Git refuses a keyed `--worktree`
+dispatch. LFS files stay as pointers until the agent fetches them itself.
 
 In a keyed dispatch's gitboy worktree, the worktree's own config (never the
 global config) clears inherited helpers for that host and sets
 `credential.https://<host>.helper = !phren bridge git-credential` and
 `credential.https://<host>.useHttpPath = false`. The helper answers HTTPS `get`
 from this computer's stored gitboy token with `username=x-token` and
-`password=<token>`; `store` and `erase` do nothing. The token never goes into
-argv, a remote URL or a log. A gitboy `gba_` token is stored as an agent token:
-`phren bridge git-host set` prints the agent identity and expiry, and
-`phren bridge git-host list` marks it `agent token`.
+`password=<token>`; `store` and `erase` do nothing. Only a `gba_` token stored
+with the `agent: true` marker is used; if it is missing the dispatch fails with
+`No gitboy agent token for <domain>. Run phren bridge git-host set <domain>
+gitboy with a gba_ token.` The token never goes into argv, a remote URL or a
+log. For the API the agent gets only `GITBOY_TOKEN_FILE`, a 0600 file in the
+worktree's git dir; the file is removed when the dispatch closes or finishes.
+A gitboy `gba_` token is stored as an agent token: `phren bridge git-host set`
+prints the agent identity and expiry, and `phren bridge git-host list` marks it
+`agent token`.
 
 `wait` prints NDJSON, one line per state change, and leaves every other return
 unread for a conductor on the same Hook:
@@ -355,31 +370,44 @@ unread for a conductor on the same Hook:
 ```
 
 `needs_you` is not final: the agent waits for an answer in Phren, and `wait`
-keeps following. `--json` and `--follow` are accepted, and the output is always
-JSON. `prs` comes from the worker's `phren dispatch report`. It polls
-about every 2 s at first, backing off to 10 s with jitter, peeks at
-`/v1/dispatch/returns?peek=1`, and reads `/v1/dispatch/workers` to tell a gone
-pane from one still working. It survives transient Hook errors, but ends
-`failed` after 5 minutes of continuous unavailability, and an id the Hook does
-not know after a 30 s grace period ends `failed` with `error: "unknown
-dispatch"`. The timeout defaults to none and is capped at 7 days. Exit codes: 0
-`done`, 1 `failed` or `gone`, 124 `timeout`. When the result is final it
-acknowledges only that dispatch's return (`POST /v1/dispatch/returns/ack`).
+keeps following. A needs-you return from before the worker was last seen
+working is historical: live worker state is polled on every tick, and a worker
+that resumed emits `running` again. `--json` and `--follow` are accepted, and
+the output is always JSON. `prs` comes from the worker's `phren dispatch
+report`. It polls about every 2 s at first, backing off to 10 s with jitter,
+peeks at `/v1/dispatch/returns?peek=1`, and reads `/v1/dispatch/workers` to tell
+a gone pane from one still working. It survives transient Hook errors, but
+failures of any polled route count toward one 5-minute continuous-unavailability
+deadline, then it ends `failed`. A receipt with no target and no return for five
+minutes after it was created ends `failed` with `error: "launch did not
+complete"`. An id the Hook does not know after a 30 s grace period ends `failed`
+with `error: "unknown dispatch"`. The timeout defaults to none and is capped at
+7 days. Exit codes: 0 `done`, 1 `failed` or `gone`, 124 `timeout`. When the
+result is final it acknowledges only that dispatch's return
+(`POST /v1/dispatch/returns/ack`).
 
 `close` cancels a running dispatch by id, or by its idempotency key with
-`--idempotency-key`: the Hook looks the key up in the same durable store, records
-a failed `cancelled` return, stops the agent and closes its pane
-(`POST /v1/dispatch/cancel` with exactly one of `dispatch` or
-`idempotencyKey`). Its `wait` then ends `failed` with `error: "cancelled"`.
-Closing an already-closed dispatch answers `{"dispatch":"<id>","closed":false}`
-and exits 0; an unknown key answers `{"closed":false}` with no id.
+`--idempotency-key`: the Hook looks the key up in the same durable store,
+records `cancelRequestedAt`, and closes the pane only after re-resolving it and
+confirming it still runs the dispatch's recorded session. It retries the close
+up to three times with backoff, and writes `closedAt` and the terminal
+`cancelled` return only after the pane is confirmed gone. A close that cannot be
+confirmed answers `{"dispatch":"<id>","closed":false,"pending":true}` and exits
+1, leaving the intent for a later retry; a replacement session is never closed.
+Its `wait` then ends `failed` with `error: "cancelled"`. Closing an already-closed
+or vanished dispatch answers `{"dispatch":"<id>","closed":false}` and exits 0; an
+unknown key answers `{"closed":false}` with no id.
 
 A dispatch with an idempotency key follows an execution policy enforced by the
 Hook:
 
-- It runs in the harness's standard permission mode. `--permission-mode
-  full-access` (and any skip-approvals or `--dangerously-*` equivalent) is
-  refused with 400; none is ever the default.
+- It runs only `claude` or `codex`, in that harness's supervised, approval-requiring
+  mode (`--permission-mode supervised`, Claude's `default`, Codex's untrusted
+  read-only). Any other harness or permission mode is refused with 400. The
+  receiving launch boundary checks the resolved arguments again and refuses
+  skip-approval or allow-all flags (`--dangerously-*`, `--allow-all*`,
+  `--yolo`, `--full-auto`, `bypassPermissions`, Codex `-a never` /
+  `danger-full-access`) before spawning.
 - The agent does not inherit the caller's environment. The launch request is
   JSON, and `startSession` (`packages/cli/src/bridge/server-launch.ts`) builds
   the agent's environment itself from the sudo askpass, `PHREN_DISPATCH_ID`, the

@@ -38,7 +38,7 @@ import type { AgentHooks } from "./agent-hooks.js";
 import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeRoutes } from "./code-routes.js";
 import type { WorkspaceContextUsage } from "./context.js";
-import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema } from "./dispatch.js";
+import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema, reconcileInterruptedDispatches } from "./dispatch.js";
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId, briefRoot, launchesWithBrief, readLaunchBrief } from "./launch-brief.js";
@@ -527,7 +527,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/terminals/resolve": result = await resolveTerminalReference(url.searchParams.get("ref"),
             { computer: info.computer, from: url.searchParams.get("from") }); break;
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
-          case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
+          case "/v1/dispatch": await reconcileInterruptedDispatches(); result = { dispatches: await dispatchStatus() }; break;
           // A session move (session-move.ts) by its id, or this computer's recent moves.
           case "/v1/conductor/move/launch": {
             if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");

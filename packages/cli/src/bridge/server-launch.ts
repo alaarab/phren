@@ -19,7 +19,7 @@ import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
 import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
-import { configureGitboyWorktree, gitHostLaunchEnv } from "./git-credential.js";
+import { prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -50,6 +50,17 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
   // phren-agent takes low to xhigh, and max as xhigh.
   if (kind === "phren") return ["--reasoning", effort];
   return [];
+}
+
+/** Refuse a keyed launch whose resolved arguments would skip approvals or allow everything. */
+export function assertKeyedLaunchArgs(kind: string, args: readonly string[]): void {
+  const line = args.join(" ");
+  const unsafe = /--dangerously|--allow-all|--yolo|--full-auto|bypassPermissions/.test(line)
+    || /(?:^|\s)-a\s+never(?:\s|$)/.test(line)
+    || /(?:^|\s)-s\s+danger-full-access(?:\s|$)/.test(line)
+    || /--ask-for-approval(?:=|\s+)never/.test(line)
+    || /--sandbox(?:=|\s+)danger-full-access/.test(line);
+  if (unsafe) throw new BridgeError(400, `A keyed ${kind} launch may not use skip-approval or allow-all flags.`);
 }
 
 /** phren's own agent runs as `phren agent`: the subcommand and its interactive TUI lead its arguments. */
@@ -395,7 +406,16 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const kind = z.enum(launchKinds).parse(data.kind);
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
   const named = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
-  const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
+  let permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
+  if (data.idempotencyKey) {
+    if (kind !== "claude" && kind !== "codex") {
+      throw new BridgeError(400, "A dispatch with an idempotency key may run only claude or codex; this harness is refused.");
+    }
+    if (permissionMode && permissionMode !== "supervised") {
+      throw new BridgeError(400, `A dispatch with an idempotency key runs supervised; --permission-mode ${permissionMode} is refused.`);
+    }
+    permissionMode = "supervised";
+  }
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
   if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
   if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
@@ -447,6 +467,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const args = role === "conductor" ? [...await prepareConductor(kind, effort, model), ...(kind === "phren" ? phrenArgs : [])]
     : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(resumeClaude ? ["--resume", resumeClaude] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
+  if (data.idempotencyKey) assertKeyedLaunchArgs(kind, args);
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
   // first turn. The typed arguments below stay the fallback.
@@ -467,7 +488,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
   // Created last, once nothing else can refuse the launch, so a refusal
   // never leaves a worktree or branch behind.
-  const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory!, worktreeRequest) : undefined;
+  const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory!, worktreeRequest, { keyed: !!data.idempotencyKey }) : undefined;
   // The same root as the conductor, chosen by this computer's PHREN_PATH.
   // mkdtemp keeps simultaneous chats with the same title isolated.
   let scratch: string | undefined;
@@ -486,13 +507,16 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     scratch = await mkdtemp(path.join(agents, `${new Date().toISOString().slice(0, 10)}-${herdrAgentName(label)}-`));
   }
   const cwd = scratch ?? worktree?.cwd ?? projectDirectory!;
-  // A keyed dispatch in a fresh gitboy worktree gets the Hook's credential
-  // helper in that worktree's own config, never the global config.
-  if (worktree && data.idempotencyKey && role === "agent") await configureGitboyWorktree(worktree.path, worktree.branch);
-  // A keyed worker in a gitboy checkout gets this computer's stored
-  // phren-agent token for the API, never the caller's environment.
-  const hostEnv = role === "agent" ? await gitHostLaunchEnv(cwd, !!data.idempotencyKey).catch(() => undefined) : undefined;
-  const envVariables = { ...variables, ...(hostEnv ?? {}) };
+  // A keyed gitboy dispatch uses only the stored agent token, and a fresh
+  // worktree gets the credential helper in its own config. The token reaches
+  // the agent as a private file path, never as an environment value.
+  let keyedGitboy: Awaited<ReturnType<typeof prepareKeyedGitboy>>;
+  let agentTokenFile: string | undefined;
+  if (role === "agent" && data.idempotencyKey) {
+    keyedGitboy = await prepareKeyedGitboy(cwd, worktree?.path);
+    agentTokenFile = keyedGitboy?.tokenFile;
+  }
+  const envVariables = { ...variables, ...(keyedGitboy?.env ?? {}) };
   const env = Object.keys(envVariables).length ? envVariables : undefined;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
   // agent too; a folder the Hook picked or just created is trusted up front.
@@ -500,7 +524,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     home ? { ...process.env, ...claudeLaunchEnv(home) } : process.env);
   if (!options.into) {
     try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
-    catch (error) { await worktree?.discard(); if (scratch) await rmdir(scratch).catch(() => undefined); throw error; }
+    catch (error) { await removeAgentTokenFile(agentTokenFile); await worktree?.discard(); if (scratch) await rmdir(scratch).catch(() => undefined); throw error; }
   }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined = options.into;
   for (let attempt = 0; attempt < 25 && !created; attempt++) {
@@ -515,7 +539,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
       created = { workspaceId: String(tab.workspace_id), tabId: String(tab.tab_id), paneId: String(pane.pane_id) };
     } else await new Promise(resolve => setTimeout(resolve, 200));
   }
-  if (!created) throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
+  if (!created) { await removeAgentTokenFile(agentTokenFile); throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`); }
   const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
   await options.onPlaced?.({ server, ...place, source: kind });
   const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
@@ -553,6 +577,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     // that screen from the chat instead of stranding the workspace.
     const blocked = agentNotReady(error);
     if (!blocked) {
+    await removeAgentTokenFile(agentTokenFile);
     const host = terminalName(server);
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time"
       : error instanceof BridgeError && error.message.startsWith(`${host}: `) ? error.message.slice(host.length + 2) : `${host} reported an error`;
@@ -599,7 +624,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
       briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
-    ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
+    ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}), ...(agentTokenFile ? { agentTokenFile } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
   if (!["focus", "rename", "create", "close", "scroll"].includes(operation)) throw new BridgeError(400, "Unsupported Herdr action.");

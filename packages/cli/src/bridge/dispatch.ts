@@ -27,7 +27,7 @@ import { limitedBy, limitKey, readAccountLimits, type AccountRoom, type WindowRo
 import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplies, poolRefusal, projectRule, withPolicy, type PolicyRoom, type PoolRule } from "./account-policy.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 import { worktreeBranch } from "./launch-worktree.js";
-import { findIdempotencyKey, idempotencyKeySchema, recordIdempotencyDispatch, releaseIdempotencyKey, reserveIdempotencyKey, waitForIdempotencyKey, worktreeBranchFor } from "./dispatch-idempotency.js";
+import { findIdempotencyKey, idempotencyKeySchema, LAUNCH_INTERRUPTED_MS, listIdempotencyRecords, releaseIdempotencyKey, reserveIdempotencyKey, updateIdempotencyPhase, waitForIdempotencyKey, worktreeBranchFor, type IdempotencyRecord } from "./dispatch-idempotency.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
@@ -102,7 +102,9 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   origin: originPaneSchema.extend({ agent: provider, terminal: z.string().min(1).max(200) }).strict().optional()
     .describe("The local agent pane that placed this dispatch; return notices go there."),
   closedAt: timestamp.optional(),
+  cancelRequestedAt: timestamp.optional(),
   closePending: z.object({ at: timestamp, turn: z.string().optional() }).strict().optional(),
+  agentTokenFile: z.string().max(4096).optional().describe("Private file holding the keyed worker's gitboy agent token; removed when it closes or finishes."),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
     background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
@@ -282,6 +284,86 @@ export function failureReason(error: unknown): string {
   const code = (error as NodeJS.ErrnoException)?.code;
   const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
   return `${typeof code === "string" && !(error instanceof BridgeError) ? `${code}: ` : ""}${message}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
+}
+
+/** A keyed lookup, after reconciling a launch that was interrupted. */
+async function lookupKeyedDispatch(key: string): Promise<Json | undefined> {
+  const record = await findIdempotencyKey(key);
+  if (!record) return undefined;
+  await reconcileIdempotencyRecord(record);
+  const receipt = await readReceipt(record.dispatchId).catch(() => undefined);
+  if (!receipt) return undefined;
+  return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
+}
+
+/**
+ * A reservation stuck in `reserved` or `launching` for five minutes with no
+ * target and no live worker is an interrupted launch. It becomes a failed
+ * receipt with "launch interrupted"; nothing is relaunched automatically.
+ */
+export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Promise<void> {
+  if (record.phase !== "reserved" && record.phase !== "launching") return;
+  if (Date.now() - Date.parse(record.createdAt) < LAUNCH_INTERRUPTED_MS) return;
+  let receipt: Receipt | undefined;
+  try { receipt = await readReceipt(record.dispatchId); } catch { return; }
+  if (receipt) {
+    if (receipt.target) {
+      await updateIdempotencyPhase(record.key, record.owner, "launched").catch(() => undefined);
+      return;
+    }
+    const worker = receipt.worker;
+    const workerLive = worker && ["working", "blocked", "needs-you"].includes(worker.state)
+      && Number.isFinite(Date.parse(worker.checkedAt)) && Date.now() - Date.parse(worker.checkedAt) < LAUNCH_INTERRUPTED_MS;
+    if (workerLive) return;
+    if (receipt.returned && ["done", "failed", "gone"].includes(receipt.returned.state)) {
+      await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
+      return;
+    }
+    // A stale receipt can still say launching/sending; the ordinary writer
+    // refuses those, so reconcile it under the receipt lock directly.
+    await serializeReceiptUpdate(async () => {
+      const current = await readReceipt(receipt.id);
+      if (!current || current.target || current.closedAt) return;
+      if (current.returned && ["done", "failed", "gone"].includes(current.returned.state)) return;
+      current.state = "failed";
+      current.error = "launch interrupted";
+      current.updatedAt = new Date().toISOString();
+      current.returned = { state: "failed", at: current.updatedAt, error: "launch interrupted", read: false };
+      await saveReceipt(current);
+    }).catch(() => undefined);
+    await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
+    return;
+  }
+  // The process died after reserving but before its first receipt write.
+  const at = new Date().toISOString();
+  const fallback: Receipt = {
+    id: record.dispatchId,
+    computer: (record.computer as Receipt["computer"] | undefined) ?? "local",
+    project: record.project ?? "unknown",
+    harness: (record.harness as Receipt["harness"] | undefined) ?? "claude",
+    label: record.label ?? "gitboy agent",
+    createdAt: record.createdAt,
+    updatedAt: at,
+    state: "failed",
+    error: "launch interrupted",
+    returned: { state: "failed", at, error: "launch interrupted", read: false },
+  };
+  await saveReceipt(fallback);
+  await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
+}
+
+/** Reconcile every live reservation; called on Hook start. */
+export async function reconcileInterruptedDispatches(): Promise<void> {
+  for (const record of await listIdempotencyRecords()) {
+    await reconcileIdempotencyRecord(record).catch(error => logger.warn("dispatch", `Could not reconcile idempotency key ${record.key}: ${failureReason(error)}`));
+  }
+}
+
+/** The durable record for a key after reconciliation, for cancel-by-key and dispatch retries. */
+export async function reconcileIdempotencyKey(key: string): Promise<IdempotencyRecord | undefined> {
+  const record = await findIdempotencyKey(key);
+  if (record) await reconcileIdempotencyRecord(record);
+  return record;
 }
 
 export function dispatchStatus(): Promise<Receipt[]> {
@@ -593,49 +675,55 @@ export class DispatchService {
    * `continues` names the dispatch whose worker hit its usage limit (account-failover.ts). */
   async dispatch(input: unknown, originValue?: unknown, continues?: string): Promise<Json> {
     const data = dispatchSchema.parse(input);
-    if (data.idempotencyKey) return this.dispatchKeyed(data, originValue, continues);
-    return this.place(data, originValue, continues);
+    if (data.idempotencyKey) return this.dispatchKeyed(data, randomUUID(), originValue, continues);
+    return this.place(data, randomUUID(), originValue, continues);
   }
 
   /**
    * The gitboy path: a caller that may retry after a crash names a key and
-   * gets the dispatch that key already started. The reservation file is the
-   * atomic check-and-insert, so two concurrent calls start one agent; the
-   * loser waits for the winner's dispatch id and returns its receipt.
+   * gets the dispatch that key already started. The dispatch id is generated
+   * before the reservation, and the reservation is published atomically, so
+   * two concurrent calls start one agent; the loser returns the winner's
+   * receipt.
    */
-  private async dispatchKeyed(data: DispatchInput, originValue?: unknown, continues?: string): Promise<Json> {
+  private async dispatchKeyed(data: DispatchInput, dispatchId: string, originValue?: unknown, continues?: string): Promise<Json> {
     const key = data.idempotencyKey!;
-    const known = await findIdempotencyKey(key);
-    if (known?.dispatchId) {
-      const receipt = await readReceipt(known.dispatchId);
-      if (receipt) return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
-      // The receipt was archived: the key no longer names a live dispatch.
-      await releaseIdempotencyKey(key);
-    }
-    const reservation = await reserveIdempotencyKey(key);
+    const existing = await lookupKeyedDispatch(key);
+    if (existing) return existing;
+    const owner = randomUUID();
+    const reservation = await reserveIdempotencyKey(key, dispatchId, owner,
+      { project: data.project, harness: data.harness, label: data.label, computer: data.computer });
     if (!reservation.reserved) {
       const record = await waitForIdempotencyKey(key);
-      if (!record?.dispatchId) throw new BridgeError(503, "Another dispatch with this idempotency key did not settle; try again.");
-      const receipt = await readReceipt(record.dispatchId);
+      if (!record) throw new BridgeError(503, "Another dispatch with this idempotency key did not settle; try again.");
+      const receipt = await lookupKeyedDispatch(key);
       if (!receipt) throw new BridgeError(503, "The dispatch for this idempotency key has no receipt.");
-      return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
+      return receipt;
     }
-    let recorded = false;
     try {
-      const result = await this.place(data, originValue, continues, async id => {
-        await recordIdempotencyDispatch(key, id);
-        recorded = true;
-      });
+      const result = await this.place(data, dispatchId, originValue, continues, { key, owner });
       return { ...result, existing: false };
     } catch (error) {
-      if (!recorded) await releaseIdempotencyKey(key).catch(() => undefined);
+      // A placement that never saved a receipt gives the key back; once a
+      // receipt exists the key stays, so a retry returns that dispatch. A
+      // receipt read failure is not proof that none exists.
+      let receipt: Receipt | undefined;
+      try { receipt = await readReceipt(dispatchId); } catch { throw error; }
+      if (!receipt) await releaseIdempotencyKey(key, owner).catch(() => undefined);
       throw error;
     }
   }
 
-  private async place(data: DispatchInput, originValue?: unknown, continues?: string, onReceipt?: (id: string) => Promise<void>): Promise<Json> {
-    if (data.idempotencyKey && data.permissionMode === "full-access") {
-      throw new BridgeError(400, "A dispatch with an idempotency key runs in its harness's standard permission mode; full-access and skip-approval modes are refused.");
+  private async place(data: DispatchInput, dispatchId: string, originValue?: unknown, continues?: string,
+    keyed?: { key: string; owner: string }): Promise<Json> {
+    if (data.idempotencyKey) {
+      if (data.harness !== "claude" && data.harness !== "codex") {
+        throw new BridgeError(400, "A dispatch with an idempotency key may run only claude or codex; copilot, opencode and other harnesses are refused.");
+      }
+      if (data.permissionMode && data.permissionMode !== "supervised") {
+        throw new BridgeError(400, `A dispatch with an idempotency key runs supervised; --permission-mode ${data.permissionMode} is refused.`);
+      }
+      data.permissionMode = "supervised";
     }
     if (data.branch && data.worktree !== true) throw new BridgeError(400, "--branch needs --worktree.");
     if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
@@ -735,12 +823,13 @@ export class DispatchService {
       // lower its mode); the owner's own dispatch only carries the policy's line.
       const checked: AuthorityCheck | undefined = agent ? await checkAgentDispatch(data, grant?.maxPermissionMode ?? DEFAULT_MAX_PERMISSION_MODE) : undefined;
       if (checked?.permissionMode) data.permissionMode = checked.permissionMode;
+      // A keyed dispatch never leaves supervised, whatever a grant or policy says.
+      if (data.idempotencyKey) data.permissionMode = "supervised";
       const authority = checked?.authority ?? await readAuthority().then(policy => projectAuthority(policy, data.project)).catch(() => undefined);
       const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt: originalPrompt, ...metadata } = data;
       const prompt = peer.local ? originalPrompt : redactPeerHandoff(originalPrompt);
-      const dispatchId = randomUUID();
       // A fresh worktree per dispatch: the caller may name its branch (gitboy's
       // brief does), otherwise it is derived from the idempotency key or the id.
       const worktree = data.worktree === true ? (data.branch ?? worktreeBranchFor(data.idempotencyKey, dispatchId)) : undefined;
@@ -751,12 +840,16 @@ export class DispatchService {
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}) };
       await save(receipt, originWindow);
-      await onReceipt?.(receipt.id);
       try {
+        if (keyed && !await updateIdempotencyPhase(keyed.key, keyed.owner, "launching")) {
+          throw new BridgeError(409, "This dispatch no longer owns its idempotency key.");
+        }
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
           { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
+        if (keyed) await updateIdempotencyPhase(keyed.key, keyed.owner, "launched").catch(() => undefined);
+        if (typeof launched.agentTokenFile === "string") receipt.agentTokenFile = launched.agentTokenFile;
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
         if (policyChoice?.account) {

@@ -15,6 +15,8 @@ import type { Json } from "./protocol.js";
 export const WAIT_GRACE_MS = 30_000;
 /** Continuous Hook unavailability before the wait ends failed. */
 export const WAIT_UNAVAILABLE_MS = 5 * 60_000;
+/** A receipt with no target and no return this old did not complete its launch. */
+export const WAIT_LAUNCH_MS = 5 * 60_000;
 /** Longest wait a caller may ask for. */
 export const WAIT_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -69,6 +71,7 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
   let lastState: string | undefined;
   let unknownSince: number | undefined;
   let failingSince: number | undefined;
+  let lastWorkingAt: number | undefined;
   let attempt = 0;
 
   const emit = (state: string, extra: Json = {}) => {
@@ -84,7 +87,7 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
       return 124;
     }
     let receipt: Json | undefined, returned: Json | undefined, worker: Json | undefined, peeked: Json | undefined;
-    let listError: unknown, peekError: unknown;
+    let listError: unknown, peekError: unknown, workerError: unknown;
     try {
       const list = await request("/v1/dispatch");
       receipt = objects(list.dispatches).find(row => row.id === id);
@@ -93,17 +96,6 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
       const peek = await request("/v1/dispatch/returns?peek=1", {});
       peeked = objects(peek.returns).find(row => row.id === id);
     } catch (error) { peekError = error; }
-    if (listError && peekError) {
-      if (failingSince === undefined) failingSince = now();
-      else if (now() - failingSince >= unavailableLimit) {
-        final("failed", { error: `Phren Hook unavailable: ${reason(peekError ?? listError)}` });
-        return 1;
-      }
-      attempt++;
-      await sleep(waitDelay(attempt, base, jitter));
-      continue;
-    }
-    failingSince = undefined;
     if (!listError) {
       if (receipt) unknownSince = undefined;
       else if (unknownSince === undefined) unknownSince = now();
@@ -112,17 +104,25 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
     // A return the conductor already read is still this dispatch's latest;
     // use whichever of the peek and the receipt names the newer one.
     returned = fromReceipt && String(fromReceipt.at ?? "") > String(peeked?.at ?? "") ? fromReceipt : peeked ?? fromReceipt;
+    // Live state is read on every poll, even when a return exists: a historical
+    // needs-you return must not mask a worker that has resumed.
+    if (receipt?.target) {
+      try {
+        const answer = await request("/v1/dispatch/workers", { targets: [{ ...object(receipt.target), dispatch: id }] });
+        worker = objects(answer.workers)[0];
+      } catch (error) { workerError = error; }
+    }
+    if (listError || peekError || workerError) {
+      if (failingSince === undefined) failingSince = now();
+      else if (now() - failingSince >= unavailableLimit) {
+        final("failed", { error: `Phren Hook unavailable: ${reason(workerError ?? peekError ?? listError)}` });
+        return 1;
+      }
+    } else failingSince = undefined;
     if (!listError && !receipt && !returned && unknownSince !== undefined && now() - unknownSince >= grace) {
       final("failed", { error: "unknown dispatch" });
       return 1;
     }
-    if (!returned && receipt?.target) {
-      try {
-        const answer = await request("/v1/dispatch/workers", { targets: [{ ...object(receipt.target), dispatch: id }] });
-        worker = objects(answer.workers)[0];
-      } catch { /* The live state can lag; the next poll asks again. */ }
-    }
-
     const acknowledge = async () => {
       const own = receipt?.returned ? object(receipt.returned) : undefined;
       if (!peeked && own?.read !== false) return;
@@ -131,6 +131,12 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
     // A placement that failed before any worker existed has no return of its own.
     if (!returned && receipt?.state === "failed") {
       final("failed", { ...(typeof receipt.error === "string" ? { error: receipt.error } : {}) });
+      return 1;
+    }
+    // A receipt that never gained a target or a return is a launch that did not complete.
+    if (!returned && receipt && !receipt.target && Number.isFinite(Date.parse(String(receipt.createdAt)))
+      && now() - Date.parse(String(receipt.createdAt)) >= WAIT_LAUNCH_MS) {
+      final("failed", { error: "launch did not complete" });
       return 1;
     }
     const state = typeof returned?.state === "string" ? returned.state : undefined;
@@ -150,12 +156,19 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
       return 1;
     }
     const workerState = typeof worker?.state === "string" ? worker.state : typeof object(receipt?.worker).state === "string" ? String(object(receipt?.worker).state) : undefined;
-    if (state === "needs-you" || state === "blocked") {
-      const question = questionOf(returned);
-      emit("needs_you", question ? { question } : {});
+    if (workerState === "working") lastWorkingAt = now();
+    const returnedAt = Date.parse(String(returned?.at ?? ""));
+    // A needs-you return from before the worker was last seen working is historical.
+    const needsYou = (state === "needs-you" || state === "blocked")
+      && (lastWorkingAt === undefined || !Number.isFinite(returnedAt) || returnedAt >= lastWorkingAt);
+    if (workerState === "working") {
+      emit("running");
     } else if (workerState === "gone" || workerState === "closed") {
       final("gone");
       return 1;
+    } else if (needsYou) {
+      const question = questionOf(returned);
+      emit("needs_you", question ? { question } : {});
     } else if (workerState === "needs-you" || workerState === "blocked") {
       const question = questionOf(worker);
       emit("needs_you", question ? { question } : {});

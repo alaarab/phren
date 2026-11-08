@@ -1,35 +1,49 @@
-import { createHash } from "node:crypto";
-import { lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { link, lstat, mkdir, open, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { atomic, bridgeRoot } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot } from "./protocol.js";
 
 /**
  * Idempotency keys for local dispatches (`phren dispatch local ... --idempotency-key`).
- * The runner may crash between placing a dispatch and recording its id, then
- * retry the same key. A key is reserved with an exclusive create, so two
- * concurrent callers start one agent; the first writes the dispatch id into
- * the reservation as soon as its receipt exists. Records live beside the
- * dispatch receipts, so they survive a Hook restart, and expire after 30 days.
+ * A reservation is written to a temp file and published with `link`, which is
+ * atomic and fails with EEXIST: an empty or half-written file is never a
+ * reservation another caller can reclaim. Expiry and replacement run under a
+ * per-key lock, and every update or delete checks the owner nonce.
  */
 
 export const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** A reservation that has not reached "launched" is interrupted after this. */
+export const LAUNCH_INTERRUPTED_MS = 5 * 60_000;
+/** A lock older than this may be broken by another caller. */
+export const IDEMPOTENCY_LOCK_STALE_MS = 60_000;
 export const idempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9:._@/-]+$/,
   "An idempotency key is 1 to 200 characters of letters, digits, and : . _ @ / -");
 
+const phaseSchema = z.enum(["reserved", "launching", "launched", "failed"]);
 const recordSchema = z.object({
   key: z.string().min(1).max(200),
+  dispatchId: z.string().uuid(),
+  owner: z.string().uuid(),
   createdAt: z.string().datetime(),
-  dispatchId: z.string().uuid().optional(),
+  phase: phaseSchema,
+  project: z.string().max(100).optional(),
+  harness: z.string().max(32).optional(),
+  label: z.string().max(200).optional(),
+  computer: z.string().max(200).optional(),
 }).strict();
 export type IdempotencyRecord = z.infer<typeof recordSchema>;
+export type IdempotencyPhase = z.infer<typeof phaseSchema>;
 
 const keyRoot = () => path.join(bridgeRoot(), "idempotency");
-const keyFile = (key: string) => path.join(keyRoot(), `${createHash("sha256").update(key).digest("hex")}.json`);
+const hashOf = (key: string) => createHash("sha256").update(key).digest("hex");
+export const idempotencyKeyFile = (key: string) => path.join(keyRoot(), `${hashOf(key)}.json`);
+const lockFile = (key: string) => path.join(keyRoot(), `${hashOf(key)}.lock`);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function expired(record: IdempotencyRecord, now = Date.now()): boolean {
-  return now - Date.parse(record.createdAt) > IDEMPOTENCY_TTL_MS;
+  const created = Date.parse(record.createdAt);
+  return Number.isFinite(created) && now - created > IDEMPOTENCY_TTL_MS;
 }
 
 async function readKey(file: string): Promise<IdempotencyRecord | undefined> {
@@ -41,58 +55,120 @@ async function readKey(file: string): Promise<IdempotencyRecord | undefined> {
   try { return recordSchema.parse(JSON.parse(await readFile(file, "utf8"))); } catch { return undefined; }
 }
 
-/** The live record for a key, or undefined when there is none or it expired. */
-export async function findIdempotencyKey(key: string): Promise<IdempotencyRecord | undefined> {
-  const file = keyFile(key);
-  const record = await readKey(file);
-  if (!record) return undefined;
-  if (!expired(record)) return record;
-  await unlink(file).catch(() => undefined);
-  return undefined;
+/** Publish a full record atomically. False means the key already exists. */
+async function publish(key: string, record: IdempotencyRecord): Promise<boolean> {
+  await mkdir(keyRoot(), { recursive: true, mode: 0o700 });
+  const temp = path.join(keyRoot(), `.${hashOf(key)}.${record.owner}.tmp`);
+  await writeFile(temp, JSON.stringify(record), { mode: 0o600, flag: "wx" });
+  try {
+    await link(temp, idempotencyKeyFile(key));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  } finally {
+    await unlink(temp).catch(() => undefined);
+  }
+}
+
+interface KeyLock { key: string; owner: string }
+async function acquireLock(key: string, owner: string, now: number): Promise<KeyLock | undefined> {
+  const file = lockFile(key);
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    try {
+      const handle = await open(file, "wx", 0o600);
+      try { await handle.writeFile(JSON.stringify({ owner, createdAt: new Date(now).toISOString() })); await handle.sync(); } finally { await handle.close(); }
+      return { key, owner };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const info = await lstat(file).catch(() => undefined);
+      if (info && Date.now() - info.mtimeMs > IDEMPOTENCY_LOCK_STALE_MS) { await unlink(file).catch(() => undefined); continue; }
+      if (Date.now() >= deadline) return undefined;
+      await sleep(50);
+    }
+  }
+}
+async function releaseLock(lock: KeyLock): Promise<void> {
+  const file = lockFile(lock.key);
+  let held: { owner?: unknown } | undefined;
+  try { held = JSON.parse(await readFile(file, "utf8")) as { owner?: unknown }; } catch { return; }
+  if (held.owner === lock.owner) await unlink(file).catch(() => undefined);
+}
+
+async function replaceExpired(key: string, fresh: IdempotencyRecord, now: number): Promise<KeyReservation> {
+  const lock = await acquireLock(key, fresh.owner, now);
+  if (!lock) throw new BridgeError(503, "The idempotency key is being reclaimed; try again.");
+  try {
+    const current = await readKey(idempotencyKeyFile(key));
+    if (current && !expired(current, now)) return { reserved: false, record: current };
+    // Only an expired record is replaced, and only while holding this key's lock.
+    if (current) await unlink(idempotencyKeyFile(key)).catch(() => undefined);
+    if (await publish(key, fresh)) return { reserved: true, record: fresh };
+    const raced = await readKey(idempotencyKeyFile(key));
+    if (!raced) throw new BridgeError(503, "The idempotency key's reservation is unreadable; refusing to start another dispatch.");
+    return { reserved: false, record: raced };
+  } finally {
+    await releaseLock(lock);
+  }
 }
 
 export type KeyReservation = { reserved: true; record: IdempotencyRecord } | { reserved: false; record: IdempotencyRecord };
 
-/**
- * Reserve `key` for this caller. The exclusive create is the atomic
- * check-and-insert: exactly one caller gets `reserved: true`; the others get
- * the record already there (which may not name a dispatch yet).
- */
-export async function reserveIdempotencyKey(key: string, now = Date.now()): Promise<KeyReservation> {
-  await mkdir(keyRoot(), { recursive: true, mode: 0o700 });
-  const file = keyFile(key);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const record: IdempotencyRecord = { key, createdAt: new Date(now).toISOString() };
-    try {
-      const handle = await open(file, "wx", 0o600);
-      try { await handle.writeFile(JSON.stringify(record)); await handle.sync(); } finally { await handle.close(); }
-      return { reserved: true, record };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const existing = await readKey(file);
-      if (!existing || expired(existing, now)) {
-        await unlink(file).catch(() => undefined);
-        continue;
-      }
-      return { reserved: false, record: existing };
-    }
+export interface KeySeed {
+  project?: string;
+  harness?: string;
+  label?: string;
+  computer?: string;
+}
+
+/** Reserve `key` for this caller, with its dispatch id, atomically. */
+export async function reserveIdempotencyKey(key: string, dispatchId: string, owner: string, seed: KeySeed = {}, now = Date.now()): Promise<KeyReservation> {
+  const record: IdempotencyRecord = { key, dispatchId, owner, createdAt: new Date(now).toISOString(), phase: "reserved", ...seed };
+  if (await publish(key, record)) return { reserved: true, record };
+  const existing = await readKey(idempotencyKeyFile(key));
+  // An unreadable reservation is not free: never unlink it and start a second agent.
+  if (!existing) throw new BridgeError(503, "The idempotency key's reservation is unreadable; refusing to start another dispatch.");
+  if (!expired(existing, now)) return { reserved: false, record: existing };
+  return replaceExpired(key, record, now);
+}
+
+/** Move the reservation's phase. False when this caller no longer owns it. */
+export async function updateIdempotencyPhase(key: string, owner: string, phase: IdempotencyPhase): Promise<boolean> {
+  const file = idempotencyKeyFile(key);
+  const record = await readKey(file);
+  if (!record || record.owner !== owner) return false;
+  await atomic(file, JSON.stringify({ ...record, phase }), 0o600);
+  return true;
+}
+
+/** Release a reservation this caller owns and never launched. */
+export async function releaseIdempotencyKey(key: string, owner: string): Promise<boolean> {
+  const file = idempotencyKeyFile(key);
+  const record = await readKey(file);
+  if (!record || record.owner !== owner) return false;
+  await unlink(file).catch(() => undefined);
+  return true;
+}
+
+/** The live record for a key, or undefined when there is none or it expired. */
+export async function findIdempotencyKey(key: string): Promise<IdempotencyRecord | undefined> {
+  const record = await readKey(idempotencyKeyFile(key));
+  return record && !expired(record) ? record : undefined;
+}
+
+/** Every live reservation, for reconciliation on Hook start. */
+export async function listIdempotencyRecords(): Promise<IdempotencyRecord[]> {
+  const names = await readdir(keyRoot()).catch(error => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return [] as string[];
+  });
+  const records: IdempotencyRecord[] = [];
+  for (const name of names.filter(name => /^[a-f0-9]{64}\.json$/.test(name))) {
+    const record = await readKey(path.join(keyRoot(), name));
+    if (record && !expired(record)) records.push(record);
   }
-  const existing = await readKey(file);
-  if (!existing) throw new Error("Could not reserve the dispatch idempotency key.");
-  return { reserved: false, record: existing };
-}
-
-/** Record which dispatch this key started. Atomic, so a concurrent reader sees the old or the new record. */
-export async function recordIdempotencyDispatch(key: string, dispatchId: string): Promise<void> {
-  const file = keyFile(key);
-  const current = await readKey(file);
-  const record: IdempotencyRecord = { ...(current ?? { key, createdAt: new Date().toISOString() }), key, dispatchId };
-  await atomic(file, JSON.stringify(record), 0o600);
-}
-
-/** Give back a reservation that never started a dispatch. */
-export async function releaseIdempotencyKey(key: string): Promise<void> {
-  await unlink(keyFile(key)).catch(() => undefined);
+  return records;
 }
 
 /** Wait for the reserving caller to name its dispatch. Undefined when the key disappears or the wait runs out. */
@@ -101,7 +177,7 @@ export async function waitForIdempotencyKey(key: string, timeoutMs = 180_000): P
   while (Date.now() < deadline) {
     const record = await findIdempotencyKey(key);
     if (!record) return undefined;
-    if (record.dispatchId) return record;
+    if (record.phase !== "reserved") return record;
     await sleep(100);
   }
   return undefined;

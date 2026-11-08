@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { createLaunchWorktree, launchWorktreeSchema, worktreeFolderName } from "./launch-worktree.js";
-import { launchSession } from "./server-launch.js";
+import { createLaunchWorktree, EMPTY_TREE, launchWorktreeSchema, worktreeAddArgs, worktreeCheckoutArgs, worktreeFolderName } from "./launch-worktree.js";
+import { assertKeyedLaunchArgs, launchSession } from "./server-launch.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -71,6 +71,23 @@ describe("launch worktrees", () => {
     const worktree = await createLaunchWorktree(root, { branch: "phren/no-hooks" });
     expect(await stat(marker).catch(() => undefined)).toBeUndefined();
     await worktree.discard();
+  });
+
+  it("creates keyed worktrees with no checkout and an empty attribute source", () => {
+    expect(worktreeAddArgs(true, "agent/x", "/tmp/wt", "abc"))
+      .toEqual(["-c", "core.hooksPath=/dev/null", "worktree", "add", "--no-checkout", "-b", "agent/x", "/tmp/wt", "abc"]);
+    expect(worktreeAddArgs(false, "agent/x", "/tmp/wt", "abc"))
+      .toEqual(["-c", "core.hooksPath=/dev/null", "worktree", "add", "-b", "agent/x", "/tmp/wt", "abc"]);
+    expect(worktreeCheckoutArgs()).toEqual(["-c", "core.hooksPath=/dev/null", `--attr-source=${EMPTY_TREE}`, "checkout"]);
+  });
+
+  it("refuses unsafe keyed launch flags and a keyed copilot at the launch boundary", async () => {
+    expect(() => assertKeyedLaunchArgs("codex", ["--dangerously-bypass-approvals-and-sandbox"])).toThrow();
+    expect(() => assertKeyedLaunchArgs("claude", ["--permission-mode", "bypassPermissions"])).toThrow();
+    expect(() => assertKeyedLaunchArgs("codex", ["-a", "untrusted", "-s", "read-only"])).not.toThrow();
+    const root = await repository();
+    await expect(launchSession("default", { cwd: root, label: "c", kind: "copilot", idempotencyKey: "k" }))
+      .rejects.toMatchObject({ status: 400 });
   });
 
   it("refuses a conductor in a worktree before asking Herdr for anything", async () => {

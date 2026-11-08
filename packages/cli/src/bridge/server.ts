@@ -37,7 +37,7 @@ import { approvalPushCapability } from "./push.js";
 import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
-import { DispatchService } from "./dispatch.js";
+import { DispatchService, reconcileInterruptedDispatches } from "./dispatch.js";
 import { DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { findPane, paneChatState, paneIdentity, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
@@ -79,6 +79,7 @@ import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.j
 import { localNames } from "./computer-names.js";
 import { startStoreSyncLoop } from "../sync/store-sync.js";
 import { SocketBudget, socketIdentity, socketKind } from "./socket-budget.js";
+import { logger } from "../logger.js";
 
 export { capabilities, capabilitiesForModules, requireRoute } from "./server-routes.js";
 export { streamCloseReason } from "./server-stream.js";
@@ -136,6 +137,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       return true;
     },
   }) : undefined;
+  if (dispatches) await reconcileInterruptedDispatches().catch(error => logger.warn("dispatch", `Could not reconcile interrupted dispatches: ${error instanceof Error ? error.message : String(error)}`));
   // Push is offered only once an APNs sender loaded; phones may still register.
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });

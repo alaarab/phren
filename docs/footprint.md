@@ -291,7 +291,8 @@ nothing to that checkout.
   `<bridge>/idempotency/<sha256>.json` (0600) holds each local dispatch
   idempotency key's dispatch id for 30 days; a keyed gitboy worktree's own
   config holds only the `phren bridge git-credential` helper and its host
-  settings;
+  settings, and `<worktree git dir>/phren-agent-token` (0600) holds the agent
+  token until the dispatch closes or finishes;
   on the computer that runs a dispatched Claude or Codex worker (or a
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
   and what the worker's hooks reported (`arrival.json`), kept seven days and

@@ -103,10 +103,16 @@ exactly one of `--prompt` and `--prompt-file` is accepted, and an oversized
 brief is refused at the schema's 32768 characters. The brief never goes through
 argv. The receipt adds a stable `dispatch` field (the id) and `existing`
 (`false` when this call started it, `true` when an idempotency key returned an
-earlier one). Keys are durable under `<bridge>/idempotency/` (0600, 30 days),
-and the exclusive-create reservation makes concurrent same-key calls start one
-agent. See [Conductor](conductor.md#local-idempotent-dispatches-gitboys-runner)
-for the full execution policy.
+earlier one). Keys are durable under `<bridge>/idempotency/` (0600, 30 days).
+The dispatch id is generated first; the full reservation is published with an
+atomic `link`, so concurrent same-key calls start one agent and an empty or
+unreadable reservation is never reclaimed. Expiry and replacement run under a
+per-key lock (60 s stale limit), and updates/deletes check the owner nonce. A
+reservation stuck in `reserved`/`launching` for five minutes with no target and
+no live worker becomes a failed receipt (`error: "launch interrupted"`), and is
+never relaunched. See
+[Conductor](conductor.md#local-idempotent-dispatches-gitboys-runner) for the
+full execution policy.
 
 `wait` prints NDJSON, one line per state change
 (`{"dispatch":"<id>","state":"running"|"needs_you","question"?:...,"at":"<ISO>"}`)
@@ -117,22 +123,44 @@ so a conductor's returns stay unread, reads
 `POST /v1/dispatch/workers` for live state, and acknowledges only this dispatch
 with `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }`. Exit codes: 0
 `done`, 1 `failed` or `gone`, 124 `timeout` (no timeout by default, capped at 7
-days). A Hook that stays unavailable for 5 minutes, or an unknown id after a 30
-s grace period, ends `failed`.
+days). Failures of any polled route count toward one 5-minute
+continuous-unavailability deadline. A receipt with no target and no return for
+five minutes ends `failed` with `error: "launch did not complete"`, and an
+unknown id after a 30 s grace period ends `failed`. Live worker state is polled
+even when a return exists: a needs-you return from before the worker last ran
+is historical, and a resumed worker emits `running` again.
+
+A keyed dispatch runs only `claude` or `codex` in supervised mode; any other
+harness or permission mode is refused. The launch boundary refuses skip-approval
+or allow-all flags in the resolved arguments.
 
 For a keyed dispatch with `--worktree` in a gitboy checkout, the worktree's own
 config (never the global config) clears any inherited helper for that host and
 adds `credential.https://<host>.helper = !phren bridge git-credential` plus
 `credential.https://<host>.useHttpPath = false`. The helper answers HTTPS `get`
-from the Hook's stored gitboy token only.
+from the Hook's stored gitboy agent token only; an ordinary token, or one not
+marked `agent: true`, never answers. The worktree is created with
+`--no-checkout` and populated with `--attr-source` set to Git's empty tree, so no
+repository hook or smudge/process filter runs; this needs Git 2.40 or newer.
+LFS files remain pointers until the agent fetches them.
+
+The agent gets the token for the API only as `GITBOY_TOKEN_FILE`, a 0600 file in
+the worktree's git dir; no token is placed in the environment or argv. The file
+is removed when the dispatch closes or finishes. A missing agent token fails
+closed with `No gitboy agent token for <domain>...`.
 
 `close` calls `POST /v1/dispatch/cancel` with exactly one of
 `{ "dispatch": "<uuid>" }` or `{ "idempotencyKey": "<key>" }`: the Hook looks
-the key up in the same durable store, records a failed `cancelled` return,
-stops the agent and closes its pane. It exits 0 and prints
-`{"dispatch":"<id>","closed":true}` when it cancels; an unknown key, or one
-whose dispatch is already gone, prints `{"closed":false}` (with `dispatch` when
-the key still names one). `--follow` is accepted as a no-op by `wait`.
+the key up in the same durable store, records `cancelRequestedAt`, re-resolves
+the pane, and closes it only while it still runs the recorded session. It
+retries up to three times, writes `closedAt` and the terminal `cancelled`
+return only after the pane is confirmed gone, and never closes a replacement
+session. It exits 0 and prints `{"dispatch":"<id>","closed":true}` when it
+cancels; an unconfirmed close prints
+`{"dispatch":"<id>","closed":false,"pending":true}` and exits 1, leaving the
+intent for a later retry. An unknown key, or a dispatch already gone, prints
+`{"closed":false}` (with `dispatch` when the key still names one). `--follow` is
+accepted as a no-op by `wait`.
 
 ### `dispatch_returns`
 
@@ -2224,7 +2252,7 @@ host reports them: `reviewDecision` (`APPROVED`, `REVIEW_REQUIRED` or `CHANGES_R
 
 `phren bridge git-host [list | set <domain> gitlab|gitboy | remove <domain>]` does the same from a shell, reading the token from stdin. A gitboy agent token prints `Connected <domain> (gitboy agent token as @<user>, expires <date>)` and `list` marks it `agent token`.
 
-`phren bridge git-credential` is the git credential helper for a keyed dispatch's worktree. It answers `get` only, for `protocol=https` and a host with a stored gitboy token, with `username=x-token` and `password=<token>`; `store` and `erase` do nothing. The token never appears in argv, the remote URL or a log.
+`phren bridge git-credential` is the git credential helper for a keyed dispatch's worktree. It answers `get` only, for `protocol=https` and a host with a stored gitboy agent token (`agent: true` and a `gba_` prefix), with `username=x-token` and `password=<token>`; `store` and `erase` do nothing. The token never appears in argv, the remote URL or a log.
 
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,

@@ -1,4 +1,5 @@
 import { intentionallyClosed } from "./worker-close.js";
+import { removeAgentTokenFile } from "./git-credential.js";
 import { workerPrs, readIntegrator } from "./worker-reports.js";
 import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
@@ -997,6 +998,9 @@ export class DispatchReturns {
 
   async cleanup(): Promise<void> {
     for (const receipt of await dispatchStatus()) {
+      if (receipt.agentTokenFile && (receipt.closedAt || (receipt.returned && ["done", "failed", "gone"].includes(receipt.returned.state)))) {
+        await removeAgentTokenFile(receipt.agentTokenFile);
+      }
       if (!receipt.closePending || receipt.closedAt || receipt.returned?.at !== receipt.closePending.at || receipt.returned.state !== "done" || !receipt.returned.read) continue;
       const peer = this.isSelf(receipt) ? undefined : (await this.peers().catch(() => [])).find(peer => peer.name === receipt.computer);
       if (!this.isSelf(receipt) && receipt.moves?.some(move => move.to.computer) && (!peer || !await this.verifiedMovedPeer(receipt, peer))) continue;
