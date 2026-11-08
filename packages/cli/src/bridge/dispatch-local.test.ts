@@ -11,7 +11,7 @@ import { dispatchClonePaths } from "./dispatch-clone.js";
 import { recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { closeRequestFromArgs, dispatchInputFromArgs } from "./dispatch-command.js";
 import { waitForDispatch } from "./dispatch-wait.js";
-import { cancelDispatch, paneBinding, paneRunsTarget } from "./worker-close.js";
+import { cancelDispatch, closeVerifiedWorker, paneBinding, paneRunsTarget } from "./worker-close.js";
 import { hookRequest } from "./client.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
@@ -433,5 +433,31 @@ describe("local dispatch", () => {
       expect(closePane).toHaveBeenCalled();
       expect((await findIdempotencyKey("gitboy:host:launcher-cancel"))?.phase).toBe("failed");
     } finally { restore(); }
+  });
+
+  it("keeps a lost-reply launch pending, and recovers its worker from the arrival record", async () => {
+    const id = randomUUID();
+    const base = { id, computer: "local", project: "phren", harness: "codex", label: "Lost reply", idempotencyKey: `gitboy:host:${id}`,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "uncertain" } as unknown as Parameters<typeof closeVerifiedWorker>[0];
+    const closePane = vi.fn(async () => undefined);
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }), closePane } as unknown as TerminalProvider);
+    try {
+      // No target and no arrival: the worker may be running somewhere; never claim it gone.
+      expect(await closeVerifiedWorker(base)).toMatchObject({ dispatch: id, closed: false, pending: true });
+      expect(closePane).not.toHaveBeenCalled();
+    } finally { restore(); }
+
+    // With the worker's arrival record, the binding is recovered and the pane is closed through it.
+    const arrived = { server: "default", workspace: "w9", tab: "t9", pane: "p9", source: "codex", session: "019a0000-0000-7000-8000-000000000009" };
+    await writeLaunchBrief({ id, text: "brief" });
+    await recordBriefArrival(id, "SessionStart", arrived);
+    let panes = [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", terminal_id: "term-9", agent: "codex", agent_status: "working", sessionId: arrived.session }];
+    const close = vi.fn(async () => { panes = []; });
+    const restoreLive = setTerminalProvider({ snapshot: async () => ({ panes }), closePane: close } as unknown as TerminalProvider);
+    try {
+      const result = await closeVerifiedWorker(base);
+      expect(result).not.toMatchObject({ gone: true, pending: true });
+      expect(close).toHaveBeenCalled();
+    } finally { restoreLive(); }
   });
 });

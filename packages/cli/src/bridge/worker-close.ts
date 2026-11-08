@@ -138,12 +138,23 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
 export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
   const dispatchId = receipt.id;
   const duringPlacement = receipt.state === "launching" || receipt.state === "sending";
-  const target = receipt.target;
+  let target = receipt.target;
   const cleanupPaths = receipt.idempotencyKey
     ? dispatchClonePaths(receipt.id)
     : { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
   if (!target) {
-    // No pane was recorded: there is nothing to close, and the worker is gone.
+    // A launch whose reply was lost may still have started its worker: take
+    // the binding from the worker's own arrival record when there is one.
+    const { briefArrival } = await import("./launch-brief.js");
+    const arrival = await briefArrival(dispatchId).catch(() => undefined);
+    target = arrival?.accepted?.target ?? arrival?.started?.target;
+  }
+  if (!target) {
+    // Still no binding. If the launch outcome is unknown, a worker may be
+    // running that we can't find: stay pending and keep its secrets. Only a
+    // dispatch that never reached a launch is finalized as gone.
+    const outcomeUnknown = duringPlacement || receipt.state === "uncertain";
+    if (outcomeUnknown) return { ok: true, dispatch: dispatchId, closed: false, pending: true };
     await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
     return { ok: true, dispatch: dispatchId, closed: false, gone: true };
   }

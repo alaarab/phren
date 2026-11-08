@@ -607,7 +607,10 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     // that screen from the chat instead of stranding the workspace.
     const blocked = agentNotReady(error);
     if (!blocked) {
-    await removeAgentTokenFile(agentTokenFile);
+    // A keyed worker may have started before the error (a snapshot read can
+    // fail after the harness runs): its token stays for the confirmed-
+    // termination cleanup, which knows the path from the receipt.
+    if (!keyedEnv) await removeAgentTokenFile(agentTokenFile);
     const host = terminalName(server);
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time"
       : error instanceof BridgeError && error.message.startsWith(`${host}: `) ? error.message.slice(host.length + 2) : `${host} reported an error`;
