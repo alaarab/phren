@@ -155,11 +155,16 @@ describe("local dispatch", () => {
     const id = randomUUID();
     await reserveIdempotencyKey(key, id, randomUUID(), { project: "phren", harness: "codex", label: "Arrived", computer: "local" },
       Date.now() - 6 * 60_000);
-    const arrived = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", starting: true, startingToken: "b".repeat(64) };
+    // A SessionStart arrival always names the agent's session.
+    const arrived = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", session: "019a0000-0000-7000-8000-000000000001", starting: true, startingToken: "b".repeat(64) };
     await writeLaunchBrief({ id, text: "brief" });
     await recordBriefArrival(id, "SessionStart", arrived);
     await reconcileInterruptedDispatches();
-    expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({ state: "accepted", target: arrived });
+    // Recovered by its session, so the target drops the starting-token fields.
+    const { starting: _starting, startingToken: _token, ...identified } = arrived;
+    const recovered = (await dispatchStatus()).find(row => row.id === id);
+    expect(recovered).toMatchObject({ state: "accepted", target: identified });
+    expect(recovered?.target).not.toHaveProperty("startingToken");
     expect((await findIdempotencyKey(key))?.phase).toBe("launched");
   });
 
