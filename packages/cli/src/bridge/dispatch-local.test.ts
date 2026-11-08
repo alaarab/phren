@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,6 +13,7 @@ import { recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { closeRequestFromArgs, dispatchInputFromArgs } from "./dispatch-command.js";
 import { waitForDispatch } from "./dispatch-wait.js";
 import { cancelDispatch, closeVerifiedWorker, paneBinding, paneRunsTarget } from "./worker-close.js";
+import { acquireLaunchLock, launchLockFile, processStartTime, releaseLaunchLock, workerFilePath } from "./worker-identity.js";
 import { hookRequest } from "./client.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
@@ -31,6 +33,7 @@ const service = () => new DispatchService(undefined, undefined, 1);
 
 describe("local dispatch", () => {
   let root: string;
+  const children: ChildProcess[] = [];
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-local-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
     vi.mocked(hookPeers).mockResolvedValue([]);
@@ -39,7 +42,22 @@ describe("local dispatch", () => {
       ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
   });
-  afterEach(async () => { vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
+  afterEach(async () => {
+    for (const child of children) child.kill("SIGKILL");
+    children.length = 0;
+    vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true });
+  });
+
+  const liveWorker = async (id: string): Promise<number> => {
+    const child = spawn("sleep", ["30"], { stdio: "ignore" });
+    children.push(child);
+    const pid = child.pid!;
+    const start = await processStartTime(pid);
+    if (!start) throw new Error("no start time");
+    await mkdir(path.dirname(workerFilePath(id)), { recursive: true });
+    await writeFile(workerFilePath(id), `${pid} ${start}\n`, { mode: 0o600 });
+    return pid;
+  };
 
   const launches = () => vi.mocked(hookRequest).mock.calls.filter(call => call[0].startsWith("/v1/workspaces/launch"));
 
@@ -220,6 +238,7 @@ describe("local dispatch", () => {
     await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
     await writeFile(paths.gitConfigFile, "managed config\n");
     await writeFile(paths.agentTokenFile, "token\n");
+    await liveWorker(placed.id);
     await updateReceipt(placed.id, value => {
       value.returned = { state: "failed", at: new Date().toISOString(), error: "usage limit", read: false };
       value.endedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString();
@@ -282,6 +301,7 @@ describe("local dispatch", () => {
     await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
     await writeFile(paths.gitConfigFile, "config\n");
     await writeFile(paths.agentTokenFile, "token\n");
+    await liveWorker(placed.id);
     await updateReceipt(placed.id, value => {
       value.returned = { state: "done", at: new Date().toISOString(), reply: "ok", read: true };
       value.retainedUntil = new Date(Date.now() - 1_000).toISOString();
@@ -314,11 +334,13 @@ describe("local dispatch", () => {
 
   it("closes a running dispatch once and its wait ends cancelled", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:close" });
+    const pid = await liveWorker(placed.id);
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes }),
+      processes: async () => ({ foregroundPids: [pid] }),
       closePane,
     } as unknown as TerminalProvider);
     try {
@@ -341,11 +363,13 @@ describe("local dispatch", () => {
   it("closes by idempotency key, refuses both forms, and an unknown key closes nothing", async () => {
     const key = "gitboy:host:close-key";
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
+    const pid = await liveWorker(placed.id);
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes }),
+      processes: async () => ({ foregroundPids: [pid] }),
       closePane,
     } as unknown as TerminalProvider);
     try {
@@ -359,18 +383,17 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("leaves an unconfirmed close pending and retries it later", async () => {
+  it("keeps a cancel pending while a live launch lock is held, and ignores a stale one", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:pending" });
-    let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
-      terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
-    let remove = false;
-    const closePane = vi.fn(async () => { if (remove) panes = []; });
-    const restore = setTerminalProvider({ snapshot: async () => ({ panes }), closePane } as unknown as TerminalProvider);
+    const lock = await acquireLaunchLock(placed.id);
     try {
       expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
-      remove = true;
-      expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: true });
-    } finally { restore(); }
+    } finally { await releaseLaunchLock(lock); }
+    // The launch is over and wrote no worker identity: no worker is running.
+    expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, gone: true });
+    // A stale lock is ignored the same way.
+    await writeFile(launchLockFile(placed.id), JSON.stringify({ pid: 999999, start: "gone", nonce: "stale" }), { mode: 0o600 });
+    expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, gone: true });
   });
 
   it("finalizes a vanished worker without closing a pane", async () => {
@@ -393,14 +416,16 @@ describe("local dispatch", () => {
     expect(paneBinding(target as never, { agent: "codex" }, {})).toBe("unknown");
   });
 
-  it("keeps a cancellation pending when the pane snapshot fails", async () => {
-    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:snapshot" });
-    const restore = setTerminalProvider({ snapshot: async () => { throw new Error("snapshot down"); }, closePane: vi.fn() } as unknown as TerminalProvider);
-    try {
-      expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
-      expect((await dispatchStatus()).find(row => row.id === placed.id)).toMatchObject({ cancelRequestedAt: expect.any(String) });
-      expect((await dispatchStatus()).find(row => row.id === placed.id)?.closedAt).toBeUndefined();
-    } finally { restore(); }
+  it("keeps secrets when the worker identity is unknown", async () => {
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:unknown" });
+    const paths = dispatchClonePaths(placed.id);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.agentTokenFile, "token\n");
+    await writeFile(workerFilePath(placed.id), "not a pid\n", { mode: 0o600 });
+    expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
+    expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+    expect((await dispatchStatus()).find(row => row.id === placed.id)).toMatchObject({ cancelRequestedAt: expect.any(String) });
+    expect((await dispatchStatus()).find(row => row.id === placed.id)?.closedAt).toBeUndefined();
   });
 
   it("records cancelRequestedAt during placement instead of reporting gone", async () => {
@@ -415,12 +440,16 @@ describe("local dispatch", () => {
   it("lets the launcher close a pane cancelled during placement", async () => {
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
+    let workerPid: number | undefined;
     const closePane = vi.fn(async () => { panes = []; });
-    const restore = setTerminalProvider({ snapshot: async () => ({ panes }), closePane } as unknown as TerminalProvider);
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes }),
+      processes: async () => ({ foregroundPids: workerPid ? [workerPid] : [] }), closePane } as unknown as TerminalProvider);
     vi.mocked(hookRequest).mockImplementation(async (route, data) => {
       if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 };
       if (route.startsWith("/v1/workspaces/launch")) {
-        const file = path.join(root, "dispatches", `${String((data?.brief as Json).id)}.json`);
+        const id = String((data?.brief as Json).id);
+        workerPid = await liveWorker(id);
+        const file = path.join(root, "dispatches", `${id}.json`);
         const receipt = JSON.parse(await readFile(file, "utf8"));
         await writeFile(file, JSON.stringify({ ...receipt, cancelRequestedAt: new Date().toISOString() }));
         return { ok: true, target };
@@ -435,30 +464,25 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("keeps a lost-reply launch pending, and recovers its worker from the arrival record", async () => {
+  it("keeps a keyed lost-reply launch pending under its lock, then closes by worker identity", async () => {
     const id = randomUUID();
     const base = { id, computer: "local", project: "phren", harness: "codex", label: "Lost reply", idempotencyKey: `gitboy:host:${id}`,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "uncertain" } as unknown as Parameters<typeof closeVerifiedWorker>[0];
-    const closePane = vi.fn(async () => undefined);
-    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }), closePane } as unknown as TerminalProvider);
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "uncertain", launchServer: "default" } as unknown as Parameters<typeof closeVerifiedWorker>[0];
+    const lock = await acquireLaunchLock(id);
     try {
-      // No target and no arrival: the worker may be running somewhere; never claim it gone.
+      // The launch handler still holds the lock: a worker may be starting.
       expect(await closeVerifiedWorker(base)).toMatchObject({ dispatch: id, closed: false, pending: true });
-      expect(closePane).not.toHaveBeenCalled();
-    } finally { restore(); }
+    } finally { await releaseLaunchLock(lock); }
 
-    // With the worker's arrival record, the binding is recovered and the pane is closed through it.
-    const arrived = { server: "default", workspace: "w9", tab: "t9", pane: "p9", source: "codex", session: "019a0000-0000-7000-8000-000000000009" };
-    await writeLaunchBrief({ id, text: "brief" });
-    await recordBriefArrival(id, "SessionStart", arrived);
-    let panes = [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", terminal_id: "term-9", agent: "codex", agent_status: "working", sessionId: arrived.session }];
-    const close = vi.fn(async () => { panes = []; });
-    const restoreLive = setTerminalProvider({ snapshot: async () => ({ panes }), closePane: close } as unknown as TerminalProvider);
+    // A fresh module state still finds the live worker through its file.
+    const pid = await liveWorker(id);
+    const closePane = vi.fn(async () => undefined);
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", agent: "codex" }] }),
+      processes: async () => ({ foregroundPids: [pid] }), closePane } as unknown as TerminalProvider);
     try {
-      const result = await closeVerifiedWorker(base);
-      expect(result).not.toMatchObject({ gone: true, pending: true });
-      expect(close).toHaveBeenCalled();
-    } finally { restoreLive(); }
+      expect(await closeVerifiedWorker(base)).toMatchObject({ closed: true });
+      expect(closePane).toHaveBeenCalled();
+    } finally { restore(); }
   });
 
   const ambiguousReceipt = async (key: string, outcome: "ambiguous" | "not-started" = "ambiguous") => {
@@ -487,77 +511,49 @@ describe("local dispatch", () => {
     expect((await dispatchStatus()).find(row => row.id === placed.id)?.startingToken).toBe(body.startingToken);
   });
 
-  it("keeps a 504 launch pending until a successful scan proves no worker, then removes its token", async () => {
-    const { id, paths } = await ambiguousReceipt("gitboy:host:504");
-    const failing = setTerminalProvider({ snapshot: async () => { throw new Error("snapshot down"); }, closePane: vi.fn() } as unknown as TerminalProvider);
+  it("reconcile keeps secrets while a keyed worker is alive and removes them once it is gone", async () => {
+    const { id, paths } = await ambiguousReceipt("gitboy:host:reconcile-alive");
+    await liveWorker(id);
+    await reconcileInterruptedDispatches();
+    expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+    const child = children[children.length - 1];
+    child.kill("SIGKILL");
+    await new Promise<void>(resolve => child.once("exit", () => resolve()));
+    await reconcileInterruptedDispatches();
+    expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+    expect((await dispatchStatus()).find(row => row.id === id)?.endedAt).toEqual(expect.any(String));
+  });
+
+  it("does not kill a replacement process in the same pane", async () => {
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:replacement" });
+    const pid = await liveWorker(placed.id);
+    const closePane = vi.fn(async () => undefined);
+    const restore = setTerminalProvider({
+      snapshot: async () => ({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: target.source }] }),
+      processes: async () => ({ foregroundPids: [process.pid] }),
+      closePane,
+    } as unknown as TerminalProvider);
     try {
-      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: false, pending: true });
-      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
-    } finally { failing(); }
-    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }), closePane: vi.fn() } as unknown as TerminalProvider);
-    try {
-      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: false, gone: true });
-      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+      expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: true });
+      expect(closePane).not.toHaveBeenCalled();
+      expect(await (await import("./worker-identity.js")).workerAlive(placed.id)).toBe("gone");
     } finally { restore(); }
   });
 
-  it("adopts a pane carrying the launch's starting token and closes it", async () => {
-    const { id, paths, startingToken } = await ambiguousReceipt("gitboy:host:adopt");
-    let panes = [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", terminal_id: "term-9", agent: "codex",
-      agent_status: "working", startingToken }];
-    const closePane = vi.fn(async () => { panes = []; });
-    const restore = setTerminalProvider({ snapshot: async () => ({ panes }), closePane } as unknown as TerminalProvider);
-    try {
-      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: true });
-      expect(closePane).toHaveBeenCalled();
-      expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({
-        launchOutcome: "started", target: { pane: "p9" },
-      });
-      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
-    } finally { restore(); }
-  });
-
-  it("finalizes a not-started refusal without scanning", async () => {
-    const { id, paths } = await ambiguousReceipt("gitboy:host:not-started", "not-started");
-    const snapshot = vi.fn(async () => { throw new Error("must not scan"); });
-    const restore = setTerminalProvider({ snapshot, closePane: vi.fn() } as unknown as TerminalProvider);
-    try {
-      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: false, gone: true });
-      expect(snapshot).not.toHaveBeenCalled();
-      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
-    } finally { restore(); }
-  });
-
-  it("reconcile keeps an ambiguous token until a scan, and removes it after 24 hours", async () => {
-    const { id, paths } = await ambiguousReceipt("gitboy:host:reconcile-504");
-    const failing = setTerminalProvider({ snapshot: async () => { throw new Error("snapshot down"); } } as unknown as TerminalProvider);
-    try {
-      await reconcileInterruptedDispatches();
-      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
-    } finally { failing(); }
-    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }) } as unknown as TerminalProvider);
-    try {
-      await reconcileInterruptedDispatches();
-      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
-      expect((await dispatchStatus()).find(row => row.id === id)?.scanSince).toEqual(expect.any(String));
-      await updateReceipt(id, value => { value.scanSince = new Date(Date.now() - 25 * 60 * 60_000).toISOString(); return true; });
-      await reconcileInterruptedDispatches();
-      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
-    } finally { restore(); }
-  });
-
-  it("reconcile adopts a pane carrying the launch's starting token", async () => {
-    const { id, paths, startingToken } = await ambiguousReceipt("gitboy:host:reconcile-adopt");
-    const panes = [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", terminal_id: "term-9", agent: "codex",
-      agent_status: "working", startingToken }];
-    const restore = setTerminalProvider({ snapshot: async () => ({ panes }) } as unknown as TerminalProvider);
-    try {
-      await reconcileInterruptedDispatches();
-      expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({
-        launchOutcome: "started", target: { pane: "p9" },
-      });
-      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
-    } finally { restore(); }
+  it("finds a live worker through its durable file after a simulated Hook restart", async () => {
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:restart" });
+    await liveWorker(placed.id);
+    vi.resetModules();
+    const fresh = await import("./worker-close.js");
+    const identity = await import("./worker-identity.js");
+    const terminal = await import("./terminal.js");
+    const dispatch = await import("./dispatch.js");
+    terminal.setTerminalProvider({ snapshot: async () => ({ panes: [] }), processes: async () => ({ foregroundPids: [] }),
+      closePane: vi.fn() } as unknown as TerminalProvider);
+    const receipt = (await dispatch.dispatchStatus()).find(row => row.id === placed.id)!;
+    expect(await identity.workerAlive(placed.id)).toBe("alive");
+    expect(await fresh.closeVerifiedWorker(receipt)).toMatchObject({ dispatch: placed.id, closed: true });
+    expect(await identity.workerAlive(placed.id)).toBe("gone");
   });
 
 });

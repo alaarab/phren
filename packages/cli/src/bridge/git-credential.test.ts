@@ -71,6 +71,22 @@ describe("the gitboy credential helper", () => {
     expect(herdrExplicitCommand({ name: "worker", kind: "codex", args: ["-a", "untrusted", "-s", "read-only"], timeoutMs: 1_000, env, envExact: true })).toBe(command);
   });
 
+  it("wraps a keyed command with the worker identity record and exec", () => {
+    const worker = "/bridge/clones/50000000-0000-4000-8000-000000000007.worker";
+    const env = keyedExplicitEnv({ PATH: "/bin", HOME: "/home/sam" },
+      { GITBOY_HOST: "gitboy.example.com", GITBOY_TOKEN_FILE: "/tmp/token", GIT_CONFIG_GLOBAL: "/tmp/config",
+        GIT_CONFIG_NOSYSTEM: "1", PHREN_WORKER_ID_FILE: worker });
+    const args = ["-a", "untrusted", "-s", "read-only"];
+    const command = explicitAgentCommand("codex", args, env);
+    expect(command).toContain("/bin/sh -c");
+    expect(command).toContain("umask 077");
+    expect(command).toContain('exec "$@"');
+    expect(command).toContain(`PHREN_WORKER_ID_FILE='${worker}'`);
+    expect(command).toContain("phren-worker 'codex' '-a' 'untrusted' '-s' 'read-only'");
+    expect(command).not.toContain("secret");
+    expect(herdrExplicitCommand({ name: "worker", kind: "codex", args, timeoutMs: 1_000, env, envExact: true })).toBe(command);
+  });
+
   it("adds our pane identity variables to the explicit environment", async () => {
     const paneEnv = herdrTerminal.paneEnv?.("default", { workspace: "w1", tab: "t1", pane: "p1" }) ?? {};
     const env = { ...keyedExplicitEnv({ PATH: "/bin" }, { GITBOY_HOST: "gitboy.example.com" }), ...paneEnv };

@@ -2,14 +2,15 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json, type Target, type StartingTarget, targetSchema, startingTargetSchema } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, objects, type Json, type Target, type StartingTarget, targetSchema, startingTargetSchema } from "./protocol.js";
 import { validateTarget, paneChatState, paneStartingToken, clearStartingToken, clearStartingTokenByToken } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 import { originPaneSchema, reconcileIdempotencyKey, scanStartingToken, settleCancelledReservation, startingTargetFromPane, updateReceipt, type Receipt } from "./dispatch.js";
 import { idempotencyKeySchema, withIdempotencyKeyLock, type IdempotencyRecord } from "./dispatch-idempotency.js";
-import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
+import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets, type DispatchClonePaths } from "./dispatch-clone.js";
+import { launchInProgress, removeWorkerFile, terminateWorker, workerAlive, workerPid } from "./worker-identity.js";
 type ClosedTarget = Target | StartingTarget;
 const closedTargetSchema = z.union([targetSchema, startingTargetSchema]);
 const file = (target: ClosedTarget) => path.join(bridgeRoot(), "closed-workers", `${createHash("sha256").update(JSON.stringify([target.server, target.workspace, target.tab, target.pane, target.source, "session" in target ? target.session : target.startingToken])).digest("hex")}.json`);
@@ -122,6 +123,7 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
     // Assigned inside the lock callback, so read it through its declared type.
     const reserved = record as IdempotencyRecord | undefined;
     if (reserved && (reserved.phase === "reserved" || reserved.phase === "launching")) {
+      if (await launchInProgress(reserved.dispatchId)) return { ok: true, dispatch: dispatchId, closed: false, pending: true };
       await settleCancelledReservation(reserved);
       return { ok: true, dispatch: dispatchId, closed: false };
     }
@@ -134,14 +136,61 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
   return closeVerifiedWorker(receipt);
 }
 
+/** The pane whose foreground process is the recorded worker PID, if any. */
+async function paneRunningPid(server: string, pid: number): Promise<Json | undefined> {
+  try {
+    const snapshot = await terminalProvider().snapshot(server);
+    for (const pane of objects(snapshot.panes)) {
+      const paneId = typeof pane.pane_id === "string" ? pane.pane_id : undefined;
+      if (!paneId) continue;
+      try {
+        const info = await terminalProvider().processes(server, paneId);
+        if (info.foregroundPids.includes(pid)) return pane;
+      } catch { /* this pane cannot be read; try the next */ }
+    }
+  } catch { /* no snapshot: the PID path still applies */ }
+  return undefined;
+}
+
+/** A keyed worker is closed by its durable process identity, never by a pane's inherited token. */
+async function closeKeyedWorker(receipt: Receipt, duringPlacement: boolean, cleanupPaths: Partial<DispatchClonePaths>): Promise<Json> {
+  const dispatchId = receipt.id;
+  const finalize = async (closed: boolean): Promise<Json> => {
+    await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
+    await removeWorkerFile(dispatchId);
+    clearStartingTokenByToken(receipt.startingToken ?? "");
+    return { ok: true, dispatch: dispatchId, closed, ...(closed ? {} : { gone: true }) };
+  };
+  const alive = await workerAlive(dispatchId, receipt.workerFile);
+  if (alive === "unknown") return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+  if (alive === "gone") return finalize(false);
+  const worker = await workerPid(dispatchId, receipt.workerFile);
+  if (!worker) return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+  const server = receipt.launchServer ?? receipt.target?.server;
+  if (server) {
+    const pane = await paneRunningPid(server, worker.pid);
+    if (pane) {
+      // The pane still runs the recorded process: close it through the provider.
+      await terminalProvider().closePane(server, String(pane.pane_id)).catch(() => undefined);
+      if (await workerAlive(dispatchId, receipt.workerFile) === "gone") return finalize(true);
+    }
+  }
+  // A replacement session in the pane has another PID; only the recorded
+  // process is signalled, after re-checking its start time.
+  await terminateWorker(worker.pid, worker.start);
+  if (await workerAlive(dispatchId, receipt.workerFile) === "gone") return finalize(true);
+  return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+}
+
 /** The one close path: exact binding, confirmed snapshot, terminal return only after it is gone. */
 export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
   const dispatchId = receipt.id;
   const duringPlacement = receipt.state === "launching" || receipt.state === "sending";
-  let target = receipt.target;
   const cleanupPaths = receipt.idempotencyKey
     ? dispatchClonePaths(receipt.id)
     : { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
+  if (receipt.idempotencyKey) return closeKeyedWorker(receipt, duringPlacement, cleanupPaths);
+  let target = receipt.target;
   if (!target) {
     // A launch whose reply was lost may still have started its worker: take
     // the binding from the worker's own arrival record when there is one.

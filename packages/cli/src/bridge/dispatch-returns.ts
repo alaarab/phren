@@ -1,5 +1,6 @@
 import { intentionallyClosed } from "./worker-close.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
+import { removeWorkerFile, workerAlive } from "./worker-identity.js";
 import { workerPrs, readIntegrator } from "./worker-reports.js";
 import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
@@ -1007,6 +1008,21 @@ export class DispatchReturns {
       // Keyed dispatches are local-only; never use a peer path for one.
       if (receipt.idempotencyKey && !local) continue;
       if (local && (state === "failed" || state === "gone")) {
+        if (receipt.idempotencyKey) {
+          // A keyed worker's durable PID/start time decides, not its return.
+          const alive = await workerAlive(receipt.id, receipt.workerFile ?? paths.workerFile);
+          if (alive !== "gone") { await clearWorkerEnded(receipt.id); continue; }
+          await removeDispatchSecrets(paths);
+          await removeWorkerFile(receipt.id);
+          const at = receipt.closedAt ?? new Date(this.now()).toISOString();
+          const until = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+          await updateReceipt(receipt.id, value => {
+            if (!value.endedAt) value.endedAt = at;
+            if (!value.retainedUntil) value.retainedUntil = until;
+            return true;
+          }).catch(() => undefined);
+          continue;
+        }
         // A launch that never reached its request has no worker: its secrets
         // go immediately. Any other outcome waits for confirmed termination.
         if (!receipt.target && receipt.launchOutcome === "not-started") {
@@ -1040,13 +1056,21 @@ export class DispatchReturns {
         continue;
       }
       if (local && state === "done") {
-        if (receipt.closedAt) { await removeDispatchClone(paths); continue; }
-        if (receipt.closeOnFinish === false) {
-          // Keep-open work stays alive; it has no termination time yet.
+        if (receipt.idempotencyKey) {
+          if (receipt.closedAt) { await removeDispatchClone(paths); continue; }
+          if (receipt.closeOnFinish === false) { await clearWorkerEnded(receipt.id); continue; }
+          const alive = await workerAlive(receipt.id, receipt.workerFile ?? paths.workerFile);
+          if (alive === "gone") { await removeDispatchClone(paths); continue; }
           await clearWorkerEnded(receipt.id);
-          continue;
+        } else {
+          if (receipt.closedAt) { await removeDispatchClone(paths); continue; }
+          if (receipt.closeOnFinish === false) {
+            // Keep-open work stays alive; it has no termination time yet.
+            await clearWorkerEnded(receipt.id);
+            continue;
+          }
+          // A done worker's pane may still run: keep its token until the verified close.
         }
-        // A done worker's pane may still run: keep its token until the verified close.
       }
       if (!receipt.closePending || receipt.closedAt || receipt.returned?.at !== receipt.closePending.at || receipt.returned.state !== "done" || !receipt.returned.read) continue;
       const peer = this.isSelf(receipt) ? undefined : (await this.peers().catch(() => [])).find(peer => peer.name === receipt.computer);

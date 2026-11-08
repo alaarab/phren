@@ -187,7 +187,14 @@ const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 export function explicitAgentCommand(kind: string, args: string[], env: Record<string, string>): string {
   const expanded = new Set(["HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "LANG", "LC_ALL", "TMPDIR"]);
   const assignments = Object.entries(env).map(([key, value]) => expanded.has(key) ? `${key}="$${key}"` : `${key}=${shellQuote(value)}`);
-  return `exec env -i ${assignments.join(" ")} ${shellQuote(kind)} ${args.map(shellQuote).join(" ")}`.replace(/\s+$/, "");
+  const harness = [kind, ...args];
+  if (env.PHREN_WORKER_ID_FILE) {
+    // Record the exec'd process identity before handing the same PID to the
+    // harness. The command line carries paths and arguments only, never a secret.
+    const script = `umask 077; printf "%s %s\\n" "$$" "$(ps -o lstart= -p $$ | tr -s " ")" > "$PHREN_WORKER_ID_FILE.tmp" && mv "$PHREN_WORKER_ID_FILE.tmp" "$PHREN_WORKER_ID_FILE" && exec "$@"`;
+    return `exec env -i ${assignments.join(" ")} /bin/sh -c ${shellQuote(script)} phren-worker ${harness.map(shellQuote).join(" ")}`.replace(/\s+$/, "");
+  }
+  return `exec env -i ${assignments.join(" ")} ${harness.map(shellQuote).join(" ")}`.replace(/\s+$/, "");
 }
 const tmux = (server: string, args: string[], options?: { input?: string; timeoutMs?: number; signal?: AbortSignal }) => deps.run(socketOf(server), args, options);
 

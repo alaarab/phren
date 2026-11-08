@@ -22,6 +22,7 @@ import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { keyedExplicitEnv, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
 import { createDispatchClone, dispatchClonePaths, type DispatchClonePaths } from "./dispatch-clone.js";
+import { acquireLaunchLock, releaseLaunchLock, type LaunchLock } from "./worker-identity.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -476,7 +477,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
   // first turn. The typed arguments below stay the fallback.
-  const structured = kind === "codex" && role === "agent" && !options.canary && codexAppServerEnabled();
+  // A keyed Codex worker uses the typed explicit command so its durable
+  // worker identity file is written before the harness execs.
+  const structured = kind === "codex" && role === "agent" && !options.canary && !data.idempotencyKey && codexAppServerEnabled();
   // OpenCode serves its own API on a port of its own (opencode-panes.ts): the
   // Hook sends its prompts, answers its asks and interrupts it over HTTP, and
   // the pane stays the owner's view. A brief goes the same way once it
@@ -499,6 +502,10 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const keyed = role === "agent" && !!data.idempotencyKey;
   if (keyed && !worktreeRequest) throw new BridgeError(400, "A dispatch with an idempotency key requires --worktree: keyed workers run only in a Phren-managed clone.");
   const keyedDispatchId = keyed ? z.string().uuid().parse(data.dispatchId ?? brief?.id ?? randomUUID()) : undefined;
+  const keyedWorkerFile = keyed ? dispatchClonePaths(keyedDispatchId!).workerFile : undefined;
+  let launchLock: LaunchLock | undefined;
+  if (keyed) launchLock = await acquireLaunchLock(keyedDispatchId!);
+  try {
   let worktree: (LaunchWorktree & Partial<DispatchClonePaths>) | undefined;
   if (worktreeRequest) {
     worktree = keyed
@@ -540,7 +547,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     keyedEnv = keyedExplicitEnv(process.env, {
       ...(keyedGitboy?.env ?? {}),
       ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}),
-      ...(suppliedStartingToken ? { PHREN_STARTING_TOKEN: suppliedStartingToken } : {}),
+      ...(keyedWorkerFile ? { PHREN_WORKER_ID_FILE: keyedWorkerFile } : {}),
       ...(home ? claudeLaunchEnv(home) : {}),
     });
   }
@@ -664,7 +671,11 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
       briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}), ...(agentTokenFile ? { agentTokenFile } : {}),
-    ...(worktree?.cloneDir ? { cloneDir: worktree.cloneDir, gitConfigFile: worktree.gitConfigFile } : {}) };
+    ...(worktree?.cloneDir ? { cloneDir: worktree.cloneDir, gitConfigFile: worktree.gitConfigFile } : {}),
+    ...(worktree?.workerFile ? { workerFile: worktree.workerFile } : {}) };
+  } finally {
+    if (launchLock) await releaseLaunchLock(launchLock);
+  }
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
   if (!["focus", "rename", "create", "close", "scroll"].includes(operation)) throw new BridgeError(400, "Unsupported Herdr action.");

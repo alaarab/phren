@@ -28,6 +28,7 @@ import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplie
 import { arrivalSchema, briefArrival, type BriefArrival } from "./launch-brief.js";
 import { worktreeBranch } from "./launch-worktree.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets, type DispatchClonePaths } from "./dispatch-clone.js";
+import { launchInProgress, removeWorkerFile, workerAlive } from "./worker-identity.js";
 import { findIdempotencyKey, idempotencyKeySchema, LAUNCH_INTERRUPTED_MS, listIdempotencyRecords, releaseIdempotencyKey, reserveIdempotencyKey, updateIdempotencyPhase, waitForIdempotencyKey, withIdempotencyKeyLock, worktreeBranchFor, type IdempotencyRecord } from "./dispatch-idempotency.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -108,6 +109,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   agentTokenFile: z.string().max(4096).optional().describe("Private file holding the keyed worker's gitboy agent token; removed when it closes or finishes."),
   cloneDir: z.string().max(4096).optional().describe("The keyed dispatch's isolated clone; removed when it closes or finishes, or after its retention date."),
   gitConfigFile: z.string().max(4096).optional().describe("The keyed dispatch's managed global Git config; removed with the clone or as soon as a failed/cancelled worker ends."),
+  workerFile: z.string().max(4096).optional().describe("The keyed worker's PID and start-time record, written before the harness execs."),
   retainedUntil: timestamp.optional().describe("When a failed, cancelled or keep-open clone may be removed by reconciliation."),
   endedAt: timestamp.optional().describe("When the worker was observed gone or closed; retention is measured from here."),
   launchOutcome: z.enum(["not-started", "ambiguous", "started"]).optional()
@@ -182,7 +184,7 @@ function save(receipt: Receipt, originWindow: DispatchOriginWindow): Promise<voi
   });
 }
 
-const PLACEMENT_FIELDS = ["state", "error", "brief", "target", "account", "accountChoice", "agentTokenFile", "cloneDir", "gitConfigFile", "returned", "closedAt", "launchOutcome"] as const;
+const PLACEMENT_FIELDS = ["state", "error", "brief", "target", "account", "accountChoice", "agentTokenFile", "cloneDir", "gitConfigFile", "workerFile", "returned", "closedAt", "launchOutcome"] as const;
 
 /** Every placement write re-reads the receipt under the lock, so a concurrent cancelRequestedAt is never lost. */
 async function persistReceipt(receipt: Receipt, originWindow: DispatchOriginWindow, change: (value: Receipt) => void = () => undefined): Promise<void> {
@@ -429,6 +431,9 @@ async function lookupKeyedDispatch(key: string): Promise<Json | undefined> {
 
 /** A key cancelled before its receipt existed: settle it as failed/cancelled without launching. */
 export async function settleCancelledReservation(record: IdempotencyRecord): Promise<Receipt> {
+  if (await launchInProgress(record.dispatchId)) {
+    throw new BridgeError(409, "This dispatch's launch is in progress; its cancel is recorded and will be applied.");
+  }
   const existing = await readReceipt(record.dispatchId).catch(() => undefined);
   if (existing) return existing;
   const at = new Date().toISOString();
@@ -443,6 +448,7 @@ export async function settleCancelledReservation(record: IdempotencyRecord): Pro
     state: "failed",
     error: "cancelled",
     returned: { state: "failed", at, error: "cancelled", read: false },
+    idempotencyKey: record.key,
     launchOutcome: "not-started",
     ...(record.startingToken ? { startingToken: record.startingToken } : {}),
     endedAt: at,
@@ -450,6 +456,7 @@ export async function settleCancelledReservation(record: IdempotencyRecord): Pro
     ...(record.cloneDir ? { cloneDir: record.cloneDir } : {}),
     ...(record.gitConfigFile ? { gitConfigFile: record.gitConfigFile } : {}),
     ...(record.agentTokenFile ? { agentTokenFile: record.agentTokenFile } : {}),
+    ...(record.workerFile ? { workerFile: record.workerFile } : {}),
   };
   await saveReceipt(receipt);
   await removeDispatchSecrets({ cloneDir: record.cloneDir, gitConfigFile: record.gitConfigFile, agentTokenFile: record.agentTokenFile });
@@ -458,18 +465,16 @@ export async function settleCancelledReservation(record: IdempotencyRecord): Pro
 }
 
 /**
- * An interrupted launch keeps its token until a successful scan proves no
- * pane carries it. A not-started launch is certain immediately; an ambiguous
- * one is confirmed only after 24 hours of successful scans with no token.
+ * An interrupted launch is resolved by durable proof: a keyed worker's PID and
+ * start time, or (for unkeyed work) the launch's starting token. A live launch
+ * lock means the launch is still placing, so nothing is final.
  */
 async function confirmInterruptedLaunch(receipt: Receipt): Promise<void> {
-  const paths = { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
+  const paths = { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile, workerFile: receipt.workerFile };
   const clearSeed = async () => {
     if (receipt.startingToken) (await import("./herdr.js")).clearStartingTokenByToken(receipt.startingToken);
   };
-  if (receipt.launchOutcome === "not-started") {
-    await removeDispatchSecrets(paths);
-    await clearSeed();
+  const finish = async () => {
     const at = new Date().toISOString();
     await updateReceipt(receipt.id, value => {
       if (!value.endedAt) value.endedAt = at;
@@ -478,6 +483,26 @@ async function confirmInterruptedLaunch(receipt: Receipt): Promise<void> {
     }, { duringPlacement: true }).catch(() => undefined);
     const until = receipt.retainedUntil ? Date.parse(receipt.retainedUntil) : NaN;
     if (Number.isFinite(until) && Date.now() >= until) await removeDispatchClone(paths);
+  };
+  if (receipt.idempotencyKey) {
+    const alive = await workerAlive(receipt.id, receipt.workerFile ?? dispatchClonePaths(receipt.id).workerFile);
+    if (alive === "unknown") return;
+    if (alive === "alive") {
+      await updateReceipt(receipt.id, value => {
+        value.launchOutcome = "started";
+        return true;
+      }, { duringPlacement: true }).catch(() => undefined);
+      return;
+    }
+    await removeDispatchSecrets(paths);
+    await removeWorkerFile(receipt.id);
+    await finish();
+    return;
+  }
+  if (receipt.launchOutcome === "not-started") {
+    await removeDispatchSecrets(paths);
+    await clearSeed();
+    await finish();
     return;
   }
   if (!receipt.startingToken) return;
@@ -504,14 +529,7 @@ async function confirmInterruptedLaunch(receipt: Receipt): Promise<void> {
   if (!Number.isFinite(Date.parse(since)) || Date.now() - Date.parse(since) < 24 * 60 * 60_000) return;
   await removeDispatchSecrets(paths);
   await clearSeed();
-  const at = new Date().toISOString();
-  await updateReceipt(receipt.id, value => {
-    if (!value.endedAt) value.endedAt = at;
-    if (!value.retainedUntil) value.retainedUntil = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
-    return true;
-  }).catch(() => undefined);
-  const until = receipt.retainedUntil ? Date.parse(receipt.retainedUntil) : NaN;
-  if (Number.isFinite(until) && Date.now() >= until) await removeDispatchClone(paths);
+  await finish();
 }
 
 /**
@@ -529,11 +547,42 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       cloneDir: record.cloneDir ?? terminal.cloneDir,
       gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
       agentTokenFile: record.agentTokenFile ?? terminal.agentTokenFile,
+      workerFile: record.workerFile ?? terminal.workerFile,
     };
     // Failed, cancelled and interrupted work keeps its clone (recoverable).
-    // Retention starts only once a fresh snapshot confirms the worker gone;
+    // Retention starts only once durable proof confirms the worker gone;
     // a failed return alone never removes its token.
     if (state === "failed" || state === "gone" || (terminal.closedAt && !done)) {
+      if (terminal.idempotencyKey) {
+        const alive = await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile);
+        if (alive !== "gone") { await clearWorkerEnded(terminal.id); return; }
+        await removeDispatchSecrets(paths);
+        await removeWorkerFile(terminal.id);
+        let endedAt = terminal.endedAt;
+        let retainedUntil = terminal.retainedUntil;
+        if (!endedAt) {
+          const at = terminal.closedAt ?? new Date().toISOString();
+          const until = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+          endedAt = at;
+          retainedUntil = until;
+          await updateReceipt(terminal.id, value => {
+            if (!value.endedAt) value.endedAt = at;
+            if (!value.retainedUntil) value.retainedUntil = until;
+            return true;
+          }).catch(() => undefined);
+        } else if (!retainedUntil) {
+          const until = new Date(Date.parse(endedAt) + 7 * 24 * 60 * 60_000).toISOString();
+          retainedUntil = until;
+          await updateReceipt(terminal.id, value => {
+            if (!value.retainedUntil) value.retainedUntil = until;
+            return true;
+          }).catch(() => undefined);
+        }
+        if (retainedUntil && Number.isFinite(Date.parse(retainedUntil)) && Date.now() >= Date.parse(retainedUntil)) {
+          if (await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile) === "gone") await removeDispatchClone(paths);
+        }
+        return;
+      }
       if (!terminal.target) {
         // An ambiguous launch has no binding to snapshot: its own starting
         // token decides whether a worker runs.
@@ -573,6 +622,14 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       return;
     }
     if (done) {
+      if (terminal.idempotencyKey) {
+        if (terminal.closedAt) { await removeDispatchClone(paths); return; }
+        if (keepOpen) { await clearWorkerEnded(terminal.id); return; }
+        const alive = await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile);
+        if (alive === "gone") { await removeDispatchClone(paths); return; }
+        await clearWorkerEnded(terminal.id);
+        return;
+      }
       if (terminal.closedAt) { await removeDispatchClone(paths); return; }
       if (keepOpen) {
         // Keep-open work is never deleted before it is closed.
@@ -655,6 +712,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       current.updatedAt = new Date().toISOString();
       current.returned = { state: "failed", at: current.updatedAt, error: "launch interrupted", read: false };
       if (!current.startingToken && record.startingToken) current.startingToken = record.startingToken;
+      if (!current.workerFile && record.workerFile) current.workerFile = record.workerFile;
       if (!current.launchServer) current.launchServer = localHost().server;
       current.launchOutcome = current.launchOutcome ?? (record.phase === "reserved" ? "not-started" : "ambiguous");
       if (current.launchOutcome === "not-started") {
@@ -705,6 +763,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
     state: "failed",
     error: "launch interrupted",
     returned: { state: "failed", at, error: "launch interrupted", read: false },
+    idempotencyKey: record.key,
     launchOutcome: outcome,
     launchServer: localHost().server,
     ...(record.startingToken ? { startingToken: record.startingToken } : {}),
@@ -712,6 +771,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
     ...(record.cloneDir ? { cloneDir: record.cloneDir } : {}),
     ...(record.gitConfigFile ? { gitConfigFile: record.gitConfigFile } : {}),
     ...(record.agentTokenFile ? { agentTokenFile: record.agentTokenFile } : {}),
+    ...(record.workerFile ? { workerFile: record.workerFile } : {}),
   };
   await saveReceipt(fallback);
   await confirmInterruptedLaunch(fallback);
@@ -1061,6 +1121,7 @@ export class DispatchService {
     if (existing) return existing;
     const known = await findIdempotencyKey(key);
     if (known?.cancelRequestedAt) {
+      if (await launchInProgress(known.dispatchId)) return { ok: false, dispatch: known.dispatchId, pending: true, existing: true };
       const receipt = await settleCancelledReservation(known);
       return { ok: false, ...receipt, dispatch: receipt.id, existing: true };
     }
@@ -1222,7 +1283,7 @@ export class DispatchService {
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}),
-        ...(keyed?.paths ? { cloneDir: keyed.paths.cloneDir, gitConfigFile: keyed.paths.gitConfigFile, agentTokenFile: keyed.paths.agentTokenFile } : {}) };
+        ...(keyed?.paths ? { cloneDir: keyed.paths.cloneDir, gitConfigFile: keyed.paths.gitConfigFile, agentTokenFile: keyed.paths.agentTokenFile, ...(keyed.paths.workerFile ? { workerFile: keyed.paths.workerFile } : {}) } : {}) };
       if (keyed) {
         await withIdempotencyKeyLock(keyed.key, async record => {
           if (record?.cancelRequestedAt) {
@@ -1280,6 +1341,7 @@ export class DispatchService {
         if (typeof launched.cloneDir === "string") receipt.cloneDir = launched.cloneDir;
         if (typeof launched.gitConfigFile === "string") receipt.gitConfigFile = launched.gitConfigFile;
         if (typeof launched.agentTokenFile === "string") receipt.agentTokenFile = launched.agentTokenFile;
+        if (typeof launched.workerFile === "string") receipt.workerFile = launched.workerFile;
         // Persist the binding and cleanup paths before any snapshot or arrival wait.
         if (parsedLaunched.success && parsedLaunched.data.source === data.harness && parsedLaunched.data.server === peer.server) {
           receipt.target = parsedLaunched.data;

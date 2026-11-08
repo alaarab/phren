@@ -368,20 +368,26 @@ gets only `GITBOY_TOKEN_FILE`, a 0600 file in the clone's git dir. A keyed
 dispatch requires `--worktree` and runs on this computer only: a keyed dispatch
 to a peer, or an `anywhere` placement that resolves to one, is refused with
 `Keyed dispatches run on this computer only.` Its clone, managed config and
-token file are registered before the worker starts. The token is removed only
-on confirmed termination: a verified close, or a fresh terminal snapshot
-showing the bound pane or session gone. A failed or interrupted return alone
-never removes it. A completed clone is removed only when `closedAt` is set or a
-fresh terminal snapshot shows the bound worker gone, and never for a keep-open
-dispatch before it is closed. Failed, cancelled and interrupted clones are kept
-as recoverable work; `retainedUntil` starts from `endedAt`, recorded only once
-the worker is confirmed gone, never from the dispatch's creation or a failed
-return. Reconciliation re-checks a fresh snapshot before deleting and clears
-`endedAt` when the worker is still alive. The Hook that created the clone owns
-this cleanup; a dispatching computer never touches a peer's files. A gitboy
-`gba_` token is stored as an agent token:
-`phren bridge git-host set` prints the agent identity and expiry, and
-`phren bridge git-host list` marks it `agent token`.
+token file are registered before the worker starts. A keyed launch writes a
+durable worker identity file `<clone>.worker` before the harness execs: the
+explicit command records the shell's PID and start time, then `exec`s the
+harness, so the recorded PID is the harness's. The launch handler holds
+`<clone>.launching` from before clone preparation until it returns or fails.
+Cancel and reconciliation never finalize while that lock's owner is alive: a
+live worker is closed only when the pane's foreground process is the recorded
+PID; otherwise the recorded PID is sent SIGTERM, then SIGKILL after 10 s, after
+re-checking its start time. A replacement process in the same pane has another
+PID or start time and is never touched. A gone worker finalizes and its token
+is removed; an unknown liveness keeps the token and stays pending. The token is
+removed only on confirmed termination; a failed or interrupted return alone
+never removes it. A completed clone is removed only when `closedAt` is set or
+the worker is confirmed gone, and never for a keep-open dispatch before it is
+closed. Failed, cancelled and interrupted clones are kept as recoverable work;
+`retainedUntil` starts from `endedAt`, recorded only once the worker is
+confirmed gone. The Hook that created the clone owns this cleanup; a
+dispatching computer never touches a peer's files. A gitboy `gba_` token is
+stored as an agent token: `phren bridge git-host set` prints the agent identity
+and expiry, and `phren bridge git-host list` marks it `agent token`.
 
 `wait` prints NDJSON, one line per state change, and leaves every other return
 unread for a conductor on the same Hook:

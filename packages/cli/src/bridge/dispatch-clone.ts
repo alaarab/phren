@@ -9,6 +9,7 @@ import { EMPTY_TREE } from "./launch-worktree.js";
 import { credentialFreeRemote, keyedExplicitEnv, removeAgentTokenFile } from "./git-credential.js";
 import { detectHost } from "./git-hosts.js";
 import { BridgeError, bridgeRoot } from "./protocol.js";
+import { workerFilePath } from "./worker-identity.js";
 
 /** A keyed dispatch's isolated checkout. The clone and its managed global
  * config are outside the user's checkout and are removed with the dispatch. */
@@ -16,6 +17,8 @@ export interface DispatchClonePaths {
   cloneDir: string;
   gitConfigFile: string;
   agentTokenFile: string;
+  /** The wrapper's PID/start-time record, beside the clone. */
+  workerFile?: string;
 }
 
 export function dispatchClonePaths(dispatchId: string): DispatchClonePaths {
@@ -25,6 +28,7 @@ export function dispatchClonePaths(dispatchId: string): DispatchClonePaths {
     cloneDir,
     gitConfigFile: path.join(root, `${dispatchId}.gitconfig`),
     agentTokenFile: path.join(cloneDir, ".git", "phren-agent-token"),
+    workerFile: workerFilePath(dispatchId),
   };
 }
 
@@ -160,6 +164,7 @@ export async function removeDispatchClone(paths: Partial<DispatchClonePaths> | u
   await remove(paths.cloneDir, canonical => rm(canonical, { recursive: true, force: true }));
   await remove(paths.gitConfigFile, canonical => unlink(canonical));
   await remove(paths.agentTokenFile, canonical => removeAgentTokenFile(canonical));
+  await remove(paths.workerFile, canonical => unlink(canonical));
 }
 
 /** Keep the clone (recoverable work) but remove the token and managed config immediately. */
