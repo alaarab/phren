@@ -1010,7 +1010,7 @@ export class DispatchReturns {
       if (local && (state === "failed" || state === "gone")) {
         if (receipt.idempotencyKey) {
           // A keyed worker's durable PID/start time decides, not its return.
-          const alive = await workerAlive(receipt.id, receipt.workerFile ?? paths.workerFile);
+          const alive = await workerAlive(receipt.id, receipt.workerFile ?? dispatchClonePaths(receipt.id).workerFile);
           if (alive !== "gone") { await clearWorkerEnded(receipt.id); continue; }
           await removeDispatchSecrets(paths);
           await removeWorkerFile(receipt.id);
@@ -1059,7 +1059,7 @@ export class DispatchReturns {
         if (receipt.idempotencyKey) {
           if (receipt.closedAt) { await removeDispatchClone(paths); continue; }
           if (receipt.closeOnFinish === false) { await clearWorkerEnded(receipt.id); continue; }
-          const alive = await workerAlive(receipt.id, receipt.workerFile ?? paths.workerFile);
+          const alive = await workerAlive(receipt.id, receipt.workerFile ?? dispatchClonePaths(receipt.id).workerFile);
           if (alive === "gone") { await removeDispatchClone(paths); continue; }
           await clearWorkerEnded(receipt.id);
         } else {

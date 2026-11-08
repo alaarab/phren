@@ -391,9 +391,12 @@ describe("local dispatch", () => {
     } finally { await releaseLaunchLock(lock); }
     // The launch is over and wrote no worker identity: no worker is running.
     expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, gone: true });
-    // A stale lock is ignored the same way.
-    await writeFile(launchLockFile(placed.id), JSON.stringify({ pid: 999999, start: "gone", nonce: "stale" }), { mode: 0o600 });
-    expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, gone: true });
+    // Closing it again is idempotent.
+    expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false });
+    // A stale lock (its owner process is gone) on a fresh dispatch is ignored.
+    const second = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:stale-lock" });
+    await writeFile(launchLockFile(second.id), JSON.stringify({ pid: 999999, start: "gone", nonce: "stale" }), { mode: 0o600 });
+    expect(await cancelDispatch({ dispatch: second.id })).toMatchObject({ dispatch: second.id, closed: false, gone: true });
   });
 
   it("finalizes a vanished worker without closing a pane", async () => {
