@@ -2764,6 +2764,50 @@ schedules:
         .then(r => r.stdout, (error: { code?: number; message: string }) => error.code === 1 ? "" : `grep failed: ${error.message}`);
       expect(written).toBe("");
     });
+
+    it("hands phren secret-exec's command the secret the phone typed, and nothing else sees it", async () => {
+      const askpass = path.join(root, "bridge/askpass"), out = path.join(root, "secret-got"), err = path.join(root, "secret-err");
+      await writeFile(askpass, askpassScript(process.execPath, hookBundle), { mode: 0o700 });
+      const spec = JSON.stringify({ prompt: "Mac login password", format: "plist", key: "Password", fields: { Username: "me" } });
+      const env = { ...process.env, HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_SECRET_SPEC: spec, HERDR_ENV: "", TMUX: "" };
+      // The same process shape runSecretExec builds: a parent with the helper's script and the command as its two children, the helper's stdout on the command's stdin.
+      const run = () => new Promise<{ code: number | null; stdout: string }>(resolve => {
+        const child = spawn("/bin/sh", ["-c", `/bin/sh '${askpass}' --secret-exec 2>'${err}' | /bin/sh -c "cat > '${out}'"`], { env, stdio: ["ignore", "pipe", "ignore"] });
+        let stdout = ""; child.stdout!.on("data", b => stdout += b); child.on("exit", code => resolve({ code, stdout }));
+      });
+      await run();
+      expect(await readFile(err, "utf8")).toContain("No phone can answer");
+
+      const frames: any[] = [];
+      const phone = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/overview?secrets=1`);
+      phone.on("message", data => frames.push(JSON.parse(String(data))));
+      await waitFor(() => frames.some(frame => frame.type === "secrets"), 10_000);
+      expect((await api("/v1/health")).data.capabilities.secretExec).toBe(true);
+      const approved = run();
+      await waitFor(() => frames.at(-1)?.type === "secrets" && frames.at(-1).requests.length === 1, 15_000);
+      const [asked] = frames.at(-1).requests;
+      expect(asked).toMatchObject({ kind: "secret", command: `/bin/sh -c cat > '${out}'`, prompt: "Mac login password", stdin: { format: "plist", key: "Password", fields: { Username: "me" } } });
+      expect((await api("/v1/secrets")).data).toEqual({ requests: [asked] });
+      expect(await api("/v1/secrets/answer", { id: asked.id, secret: "battery staple\nx" })).toEqual({ status: 400, data: { error: "Send an id and a secret, or deny." } });
+      expect(await api("/v1/secrets/answer", { id: asked.id, secret: "battery staple 7&" })).toEqual({ status: 200, data: { ok: true } });
+      const result = await approved;
+      expect(result.stdout).toBe("");
+      expect(await readFile(out, "utf8")).toContain("<key>Password</key>\n\t<string>battery staple 7&amp;</string>");
+      expect(await readFile(err, "utf8")).toBe("");
+
+      const denied = run();
+      await waitFor(() => frames.at(-1)?.requests?.length === 1, 15_000);
+      expect(await api("/v1/secrets/answer", { id: frames.at(-1).requests[0].id, deny: true })).toEqual({ status: 200, data: { ok: true } });
+      await denied;
+      expect(await readFile(err, "utf8")).toBe("phren secret-exec: Denied on the phone.\n");
+      phone.close();
+
+      expect(JSON.stringify(frames)).not.toContain("battery staple");
+      expect(log).not.toContain("battery staple");
+      const written = await promisify(execFile)("grep", ["-rlD", "skip", "battery staple", path.join(root, "bridge")])
+        .then(r => r.stdout, (error: { code?: number; message: string }) => error.code === 1 ? "" : `grep failed: ${error.message}`);
+      expect(written).toBe("");
+    });
   });
 
   describeAll("isolated fixture", () => {

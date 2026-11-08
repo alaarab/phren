@@ -263,6 +263,11 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/sudo.js")).runSudo(args),
   },
   {
+    name: "secret-exec", topic: "core", standalone: true, usage: "phren secret-exec [--prompt <text>] [--plist <key> [--field K=V]...] -- <command...>",
+    summary: "Run a command with a secret typed on your phone on its stdin (a line, or a plist field); the phone shows the exact command and the secret never reaches the agent",
+    run: async args => (await import("./bridge/secret.js")).runSecretExec(args),
+  },
+  {
     name: "computers", topic: "core", standalone: true,
     usage: "phren computers [<name>] [--resources] [--pick [mac|linux|any]] [--exclude a,b] [--local] [--json] | phren computers mcp",
     summary: "Each computer's load, memory, disk, battery and heavy jobs from Phren Hook, without Phren memory; `mcp` serves them read-only to agents",
