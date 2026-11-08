@@ -123,7 +123,7 @@ export async function removeDispatchClone(paths: Partial<DispatchClonePaths> | u
   const root = path.join(bridgeRoot(), "clones");
   const cloneDir = paths.cloneDir;
   const id = cloneDir && path.dirname(cloneDir) === root ? path.basename(cloneDir) : undefined;
-  if (id && /^[a-f0-9-]{36}$/i.test(id)) await rm(cloneDir, { recursive: true, force: true }).catch(() => undefined);
+  if (cloneDir && id && /^[a-f0-9-]{36}$/i.test(id)) await rm(cloneDir, { recursive: true, force: true }).catch(() => undefined);
   const config = paths.gitConfigFile;
   if (config && path.dirname(config) === root && /^[a-f0-9-]{36}\.gitconfig$/i.test(path.basename(config))) await unlink(config).catch(() => undefined);
   await removeAgentTokenFile(paths.agentTokenFile);

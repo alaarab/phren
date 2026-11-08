@@ -961,7 +961,12 @@ export class DispatchService {
             if (value.state === "launching" || value.state === "sending") value.state = "uncertain";
           });
         }
-        return { ...result, dispatch: receipt.id, existing: false };
+        // A cancelled placement settles its key, so a repeated key reports it.
+        if (keyed && !result.pending) await updateIdempotencyPhase(keyed.key, keyed.owner, "failed").catch(() => undefined);
+        // The caller gets the dispatch's receipt, settled as cancelled (or
+        // still pending), not the close result alone.
+        const settled = await updateReceipt(receipt.id, () => false, { duringPlacement: true });
+        return { ok: true, ...(settled ?? {}), ...(result.pending ? { pending: true } : {}), dispatch: receipt.id, existing: false } as Json;
       };
       try {
         if (keyed && !await updateIdempotencyPhase(keyed.key, keyed.owner, "launching")) {
