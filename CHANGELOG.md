@@ -27,6 +27,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - A cancel before the first receipt is persisted on the idempotency reservation, settles the key and receipt as cancelled, and never launches.
 - Clone cleanup follows retention: completed clones are deleted only after confirmed pane closure and unless keep-open; failed/cancelled/interrupted clones stay for seven days with secrets removed immediately.
 - Keyed clone paths are derived from the dispatch UUID and confined to the managed root; symlinked project folders that escape the clone are refused.
+- Successful clones expire only after `closedAt` or a fresh snapshot proves the worker gone; keep-open clones wait for closure, and failed/cancelled retention is measured from `endedAt`.
+- First-receipt creation and cancel markers are serialized under the idempotency key lock, so a cancel cannot disappear during placement.
+- Keyed dispatches require `--worktree`, so their token always lives in the managed clone root.
+- Peer clone files are cleaned only by the Hook that created them; the dispatching computer never touches a peer's filesystem.
+- The explicit tmux/Herdr command keeps chosen account config dirs literal, and Herdr keyed launches type only into a fresh, idle sh/bash/zsh pane after clearing the line.
 - Dispatches with an idempotency key run in the harness's standard permission mode (`full-access` is refused), never inherit the caller's environment, use only this computer's stored gitboy token through a Git credential helper for Git and the API, and create worktrees without running repository hooks.
 - `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
 - Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.

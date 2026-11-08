@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { gitCredentialCommand, keyedExplicitEnv, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
 import { cloneStartDirectory, dispatchClonePaths, writeManagedConfig } from "./dispatch-clone.js";
 import { explicitAgentCommand } from "./terminal-tmux.js";
-import { herdrExplicitCommand, herdrTerminal } from "./terminal-herdr.js";
+import { herdrExplicitCommand, herdrTerminal, shellFromProcessInfo } from "./terminal-herdr.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { resolveAgentToken, resolveHostToken, writeHostToken } from "./git-host-auth.js";
 
@@ -57,10 +57,13 @@ describe("the gitboy credential helper", () => {
 
   it("builds a tmux command with only the explicit environment and no token", () => {
     const env = keyedExplicitEnv({ PATH: "/bin", HOME: "/home/sam", GITBOY_TOKEN: "secret", GH_TOKEN: "secret2" },
-      { GITBOY_HOST: "gitboy.example.com", GITBOY_TOKEN_FILE: "/tmp/token", GIT_CONFIG_GLOBAL: "/tmp/config", GIT_CONFIG_NOSYSTEM: "1" });
+      { GITBOY_HOST: "gitboy.example.com", GITBOY_TOKEN_FILE: "/tmp/token", GIT_CONFIG_GLOBAL: "/tmp/config", GIT_CONFIG_NOSYSTEM: "1",
+        CLAUDE_CONFIG_DIR: "/accounts/work" });
     const command = explicitAgentCommand("codex", ["-a", "untrusted", "-s", "read-only"], env);
     expect(command).toContain('PATH="$PATH"');
     expect(command).toContain("GITBOY_TOKEN_FILE='/tmp/token'");
+    expect(command).toContain("CLAUDE_CONFIG_DIR='/accounts/work'");
+    expect(command).not.toContain('CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR"');
     expect(command).toContain("GIT_CONFIG_GLOBAL='/tmp/config'");
     expect(command).not.toContain("secret");
     expect(command).not.toMatch(/\bGITBOY_TOKEN=/);
@@ -72,6 +75,13 @@ describe("the gitboy credential helper", () => {
     const paneEnv = herdrTerminal.paneEnv?.("default", { workspace: "w1", tab: "t1", pane: "p1" }) ?? {};
     const env = { ...keyedExplicitEnv({ PATH: "/bin" }, { GITBOY_HOST: "gitboy.example.com" }), ...paneEnv };
     expect(await terminalPaneFromEnv(env)).toMatchObject({ server: "default", workspace: "w1", tab: "t1", pane: "p1" });
+  });
+
+  it("accepts only sh, bash and zsh for a keyed Herdr shell", () => {
+    const info = (cmdline: string) => ({ shell_pid: 1, foreground_process_group_id: 1, foreground_processes: [{ pid: 1, cmdline }] });
+    expect(shellFromProcessInfo(info("/bin/zsh -l"))).toBe("zsh");
+    expect(shellFromProcessInfo(info("-bash"))).toBe("bash");
+    expect(shellFromProcessInfo(info("/usr/local/bin/fish -l"))).toBeUndefined();
   });
 
   it("uses only a managed global config, so user URL overrides do not apply", async () => {
@@ -133,7 +143,7 @@ describe("the gitboy credential helper", () => {
 
   it("writes the agent token to a private file and passes only its path", async () => {
     const dir = await repo();
-    const prepared = await prepareKeyedGitboy(dir);
+    const prepared = await prepareKeyedGitboy(dir, { tokenFile: dispatchClonePaths("50000000-0000-4000-8000-000000000005").agentTokenFile });
     expect(prepared).toBeDefined();
     expect(prepared!.env).not.toHaveProperty("GITBOY_TOKEN");
     expect(prepared!.env.GITBOY_TOKEN_FILE).toBe(prepared!.tokenFile);
@@ -145,7 +155,8 @@ describe("the gitboy credential helper", () => {
 
   it("fails closed when a keyed gitboy checkout has no agent token", async () => {
     const dir = await repo("gitboy-missing.example.com");
-    await expect(prepareKeyedGitboy(dir)).rejects.toMatchObject({ status: 409, message: expect.stringContaining("No gitboy agent token") });
+    await expect(prepareKeyedGitboy(dir, { tokenFile: dispatchClonePaths("50000000-0000-4000-8000-000000000006").agentTokenFile }))
+      .rejects.toMatchObject({ status: 409, message: expect.stringContaining("No gitboy agent token") });
   });
 
 });

@@ -493,6 +493,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // clone with its own managed global config; an unkeyed launch keeps the
   // ordinary worktree of the user's checkout.
   const keyed = role === "agent" && !!data.idempotencyKey;
+  if (keyed && !worktreeRequest) throw new BridgeError(400, "A dispatch with an idempotency key requires --worktree: keyed workers run only in a Phren-managed clone.");
   const keyedDispatchId = keyed ? z.string().uuid().parse(data.dispatchId ?? brief?.id ?? randomUUID()) : undefined;
   let worktree: (LaunchWorktree & Partial<DispatchClonePaths>) | undefined;
   if (worktreeRequest) {
@@ -526,7 +527,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   let keyedEnv: Record<string, string> | undefined;
   if (keyed) {
     try {
-      keyedGitboy = await prepareKeyedGitboy(cwd, { tokenFile: worktree?.agentTokenFile, gitConfigFile: worktree?.gitConfigFile });
+      keyedGitboy = await prepareKeyedGitboy(cwd, { tokenFile: worktree!.agentTokenFile!, gitConfigFile: worktree!.gitConfigFile });
     } catch (error) {
       await worktree?.discard();
       throw error;
@@ -597,7 +598,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
     ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
   try {
-    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(launchEnv ? { env: launchEnv } : {}), ...(keyedEnv ? { envExact: true } : {}) });
+    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(launchEnv ? { env: launchEnv } : {}), ...(keyedEnv ? { envExact: true, freshPane: !options.into } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
     if (error instanceof BridgeError && error.message.startsWith("Codex exited at start:")) throw error;

@@ -28,7 +28,7 @@ import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplie
 import { arrivalSchema, briefArrival, type BriefArrival } from "./launch-brief.js";
 import { worktreeBranch } from "./launch-worktree.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets, type DispatchClonePaths } from "./dispatch-clone.js";
-import { findIdempotencyKey, idempotencyKeySchema, LAUNCH_INTERRUPTED_MS, listIdempotencyRecords, releaseIdempotencyKey, reserveIdempotencyKey, updateIdempotencyPhase, waitForIdempotencyKey, worktreeBranchFor, type IdempotencyRecord } from "./dispatch-idempotency.js";
+import { findIdempotencyKey, idempotencyKeySchema, LAUNCH_INTERRUPTED_MS, listIdempotencyRecords, releaseIdempotencyKey, reserveIdempotencyKey, updateIdempotencyPhase, waitForIdempotencyKey, withIdempotencyKeyLock, worktreeBranchFor, type IdempotencyRecord } from "./dispatch-idempotency.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
@@ -109,6 +109,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   cloneDir: z.string().max(4096).optional().describe("The keyed dispatch's isolated clone; removed when it closes or finishes, or after its retention date."),
   gitConfigFile: z.string().max(4096).optional().describe("The keyed dispatch's managed global Git config; removed with the clone or as soon as a failed/cancelled worker ends."),
   retainedUntil: timestamp.optional().describe("When a failed, cancelled or keep-open clone may be removed by reconciliation."),
+  endedAt: timestamp.optional().describe("When the worker was observed gone or closed; retention is measured from here."),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
     background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
@@ -315,13 +316,40 @@ export function failureReason(error: unknown): string {
   return `${typeof code === "string" && !(error instanceof BridgeError) ? `${code}: ` : ""}${message}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
 }
 
+/** A fresh terminal snapshot proves the bound worker gone; a failed snapshot does not. */
+async function boundWorkerGone(receipt: Receipt): Promise<boolean> {
+  const target = receipt.target;
+  if (!target) return false;
+  try {
+    const { findPane } = await import("./herdr.js");
+    const { terminalProvider } = await import("./terminal.js");
+    const snapshot = await terminalProvider().snapshot(target.server);
+    // A launch token binds the pane itself; without one, the agent must match.
+    const address = "starting" in target && target.starting === true
+      ? { workspace: target.workspace, tab: target.tab, pane: target.pane }
+      : target;
+    return !findPane(snapshot, address);
+  } catch { return false; }
+}
+
 /** A keyed lookup, after reconciling a launch that was interrupted. */
 async function lookupKeyedDispatch(key: string): Promise<Json | undefined> {
   const record = await findIdempotencyKey(key);
   if (!record) return undefined;
   await reconcileIdempotencyRecord(record);
-  const receipt = await readReceipt(record.dispatchId).catch(() => undefined);
+  let receipt = await readReceipt(record.dispatchId).catch(() => undefined);
   if (!receipt) return undefined;
+  if (record.cancelRequestedAt && !receipt.cancelRequestedAt) {
+    await withIdempotencyKeyLock(record.key, async current => {
+      if (!current?.cancelRequestedAt) return;
+      await updateReceipt(record.dispatchId, value => {
+        if (value.cancelRequestedAt) return false;
+        value.cancelRequestedAt = current.cancelRequestedAt;
+        return true;
+      }, { duringPlacement: true }).catch(() => undefined);
+    });
+    receipt = await readReceipt(record.dispatchId).catch(() => receipt);
+  }
   return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
 }
 
@@ -341,7 +369,8 @@ export async function settleCancelledReservation(record: IdempotencyRecord): Pro
     state: "failed",
     error: "cancelled",
     returned: { state: "failed", at, error: "cancelled", read: false },
-    retainedUntil: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+    endedAt: at,
+    retainedUntil: new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString(),
     ...(record.cloneDir ? { cloneDir: record.cloneDir } : {}),
     ...(record.gitConfigFile ? { gitConfigFile: record.gitConfigFile } : {}),
     ...(record.agentTokenFile ? { agentTokenFile: record.agentTokenFile } : {}),
@@ -358,17 +387,53 @@ export async function settleCancelledReservation(record: IdempotencyRecord): Pro
  * receipt with "launch interrupted"; nothing is relaunched automatically.
  */
 export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Promise<void> {
-  const created = Date.parse(record.createdAt);
   const terminal = await readReceipt(record.dispatchId).catch(() => undefined);
-  if (terminal && (terminal.closedAt || (terminal.returned && ["done", "failed", "gone"].includes(terminal.returned.state)))) {
-    const until = terminal.retainedUntil ? Date.parse(terminal.retainedUntil) : created + 7 * 24 * 60 * 60_000;
-    if (Number.isFinite(until) && Date.now() >= until) {
-      await removeDispatchClone({
-        cloneDir: record.cloneDir ?? terminal.cloneDir,
-        gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
-        agentTokenFile: record.agentTokenFile ?? terminal.agentTokenFile,
-      });
+  if (terminal && isLocalComputer(terminal.computer)) {
+    const state = terminal.returned?.state;
+    const done = state === "done";
+    const keepOpen = terminal.closeOnFinish === false;
+    // Failed, cancelled and interrupted work keeps its clone (recoverable),
+    // even after the close that ended the worker.
+    if (state === "failed" || state === "gone" || (terminal.closedAt && !done)) {
+      let endedAt = terminal.endedAt;
+      let retainedUntil = terminal.retainedUntil;
+      if (!endedAt || !retainedUntil) {
+        const at = endedAt ?? terminal.closedAt ?? new Date().toISOString();
+        const ended = endedAt ?? at;
+        const until = retainedUntil ?? new Date(Date.parse(ended) + 7 * 24 * 60 * 60_000).toISOString();
+        endedAt = ended;
+        retainedUntil = until;
+        await updateReceipt(terminal.id, value => {
+          if (!value.endedAt) value.endedAt = ended;
+          if (!value.retainedUntil) value.retainedUntil = until;
+          return true;
+        }).catch(() => undefined);
+      }
+      if (retainedUntil && Number.isFinite(Date.parse(retainedUntil)) && Date.now() >= Date.parse(retainedUntil)) {
+        await removeDispatchClone({
+          cloneDir: record.cloneDir ?? terminal.cloneDir,
+          gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
+          agentTokenFile: record.agentTokenFile ?? terminal.agentTokenFile,
+        });
+      }
       return;
+    }
+    if (done) {
+      const gone = !terminal.closedAt && !keepOpen ? await boundWorkerGone(terminal) : false;
+      if (terminal.closedAt || gone) {
+        await removeDispatchClone({
+          cloneDir: record.cloneDir ?? terminal.cloneDir,
+          gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
+          agentTokenFile: record.agentTokenFile ?? terminal.agentTokenFile,
+        });
+        return;
+      }
+      if (keepOpen && !terminal.endedAt) {
+        await updateReceipt(terminal.id, value => {
+          if (value.endedAt) return false;
+          value.endedAt = new Date().toISOString(); return true;
+        }).catch(() => undefined);
+      }
     }
   }
   const closeIfCancelled = async (): Promise<boolean> => {
@@ -818,6 +883,9 @@ export class DispatchService {
    * `continues` names the dispatch whose worker hit its usage limit (account-failover.ts). */
   async dispatch(input: unknown, originValue?: unknown, continues?: string): Promise<Json> {
     const data = dispatchSchema.parse(input);
+    if (data.idempotencyKey && data.worktree !== true) {
+      throw new BridgeError(400, "A dispatch with an idempotency key requires --worktree: keyed workers run only in a Phren-managed clone.");
+    }
     if (data.idempotencyKey) return this.dispatchKeyed(data, randomUUID(), originValue, continues);
     return this.place(data, randomUUID(), originValue, continues);
   }
@@ -989,11 +1057,22 @@ export class DispatchService {
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}),
         ...(keyed?.paths ? { cloneDir: keyed.paths.cloneDir, gitConfigFile: keyed.paths.gitConfigFile, agentTokenFile: keyed.paths.agentTokenFile } : {}) };
-      await save(receipt, originWindow);
+      if (keyed) {
+        await withIdempotencyKeyLock(keyed.key, async record => {
+          if (record?.cancelRequestedAt) {
+            receipt.cancelRequestedAt = record.cancelRequestedAt;
+            receipt.state = "failed";
+            receipt.error = "cancelled";
+            receipt.returned = { state: "failed", at: new Date().toISOString(), error: "cancelled", read: false };
+          }
+          await save(receipt, originWindow);
+        });
+      } else await save(receipt, originWindow);
       const keyCancelled = async (): Promise<boolean> => {
         if (!keyed) return false;
+        const durable = await updateReceipt(receipt.id, () => false, { duringPlacement: true });
         const record = await findIdempotencyKey(keyed.key);
-        if (!record?.cancelRequestedAt) return false;
+        if (!durable?.cancelRequestedAt && !record?.cancelRequestedAt) return false;
         receipt.state = "failed";
         receipt.error = "cancelled";
         receipt.returned = { state: "failed", at: new Date().toISOString(), error: "cancelled", read: false };

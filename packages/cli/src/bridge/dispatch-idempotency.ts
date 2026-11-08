@@ -159,6 +159,20 @@ export async function updateIdempotencyPhase(key: string, owner: string, phase: 
   return true;
 }
 
+/** Run under the key's lock, with the current reservation record. */
+export async function withIdempotencyKeyLock<T>(key: string, run: (record: IdempotencyRecord | undefined, save: (record: IdempotencyRecord) => Promise<void>) => Promise<T>): Promise<T> {
+  const owner = randomUUID();
+  const lock = await acquireLock(key, owner, Date.now());
+  if (!lock) throw new BridgeError(503, "The idempotency key is busy; retry.");
+  try {
+    const file = idempotencyKeyFile(key);
+    const record = await readKey(file);
+    return await run(record, async next => { await atomic(file, JSON.stringify(next), 0o600); });
+  } finally {
+    await releaseLock(lock);
+  }
+}
+
 /** Record a cancellation on the reservation itself, under its lock, before any receipt exists. */
 export async function requestIdempotencyCancel(key: string, now = Date.now()): Promise<IdempotencyRecord | undefined> {
   const owner = randomUUID();

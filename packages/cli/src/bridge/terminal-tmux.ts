@@ -185,7 +185,7 @@ function socketOf(server: string): string {
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 /** The exact keyed-launch command: shell init, then `env -i` with only the explicit environment. */
 export function explicitAgentCommand(kind: string, args: string[], env: Record<string, string>): string {
-  const expanded = new Set(["HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "LANG", "LC_ALL", "TMPDIR", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
+  const expanded = new Set(["HOME", "USER", "LOGNAME", "PATH", "SHELL", "TERM", "LANG", "LC_ALL", "TMPDIR"]);
   const assignments = Object.entries(env).map(([key, value]) => expanded.has(key) ? `${key}="$${key}"` : `${key}=${shellQuote(value)}`);
   return `exec env -i ${assignments.join(" ")} ${shellQuote(kind)} ${args.map(shellQuote).join(" ")}`.replace(/\s+$/, "");
 }

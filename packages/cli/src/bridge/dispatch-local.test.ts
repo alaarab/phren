@@ -5,7 +5,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, reconcileInterruptedDispatches, updateReceipt } from "./dispatch.js";
-import { findIdempotencyKey, idempotencyKeyFile, idempotencyLockFile, reserveIdempotencyKey, updateIdempotencyPhase } from "./dispatch-idempotency.js";
+import { findIdempotencyKey, idempotencyKeyFile, idempotencyLockFile, requestIdempotencyCancel, reserveIdempotencyKey, updateIdempotencyPhase } from "./dispatch-idempotency.js";
 import { DispatchReturns } from "./dispatch-returns.js";
 import { dispatchClonePaths } from "./dispatch-clone.js";
 import { recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
@@ -15,7 +15,7 @@ import { cancelDispatch, paneBinding, paneRunsTarget } from "./worker-close.js";
 import { hookRequest } from "./client.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
-import type { Json } from "./protocol.js";
+import { atomicInPrivateDir, type Json } from "./protocol.js";
 
 vi.mock("./peers.js", () => {
   const hookPeers = vi.fn();
@@ -66,17 +66,17 @@ describe("local dispatch", () => {
 
   it("returns the dispatch a key already started, and one concurrent pair starts one agent", async () => {
     const key = "gitboy:gitboy.dev:session-1";
-    const first = await service().dispatch({ ...brief, idempotencyKey: key });
+    const first = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
     expect(first).toMatchObject({ existing: false, dispatch: first.id, id: first.id });
     expect((await findIdempotencyKey(key))?.phase).toBe("launched");
-    const again = await service().dispatch({ ...brief, idempotencyKey: key });
+    const again = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
     expect(again).toMatchObject({ existing: true, dispatch: first.id, id: first.id });
     expect(launches()).toHaveLength(1);
 
     const other = "gitboy:gitboy.dev:session-2";
     const [a, b] = await Promise.all([
-      service().dispatch({ ...brief, idempotencyKey: other }),
-      service().dispatch({ ...brief, idempotencyKey: other }),
+      service().dispatch({ ...brief, worktree: true, idempotencyKey: other }),
+      service().dispatch({ ...brief, worktree: true, idempotencyKey: other }),
     ]);
     expect(a.id).toBe(b.id);
     expect([a.existing, b.existing].sort()).toEqual([false, true]);
@@ -89,7 +89,7 @@ describe("local dispatch", () => {
     expect(first).toMatchObject({ existing: false, branch: "agent/gitboy-gitboy.dev-session-3" });
     expect(launches()[0][1]).toMatchObject({ worktree: { branch: "agent/gitboy-gitboy.dev-session-3" } });
 
-    const reloaded = await service().dispatch({ ...brief, idempotencyKey: key });
+    const reloaded = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
     expect(reloaded).toMatchObject({ existing: true, id: first.id });
     expect(launches()).toHaveLength(1);
 
@@ -98,15 +98,21 @@ describe("local dispatch", () => {
     expect(launches()[1][1]).toMatchObject({ worktree: { branch: "agent/42-1a2b3c4d" } });
   });
 
+  it("refuses a keyed dispatch without a managed worktree clone", async () => {
+    await expect(service().dispatch({ ...brief, idempotencyKey: "gitboy:host:no-clone" }))
+      .rejects.toMatchObject({ status: 400, message: expect.stringContaining("requires --worktree") });
+    expect(launches()).toHaveLength(0);
+  });
+
   it("refuses full-access, non-supervised modes and non-claude/codex harnesses for a keyed dispatch", async () => {
-    await expect(service().dispatch({ ...brief, idempotencyKey: "gitboy:host:full", permissionMode: "full-access" }))
+    await expect(service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:full", permissionMode: "full-access" }))
       .rejects.toMatchObject({ status: 400, message: expect.stringContaining("full-access") });
-    await expect(service().dispatch({ ...brief, harness: "claude", idempotencyKey: "gitboy:host:auto", permissionMode: "auto" }))
+    await expect(service().dispatch({ ...brief, harness: "claude", worktree: true, idempotencyKey: "gitboy:host:auto", permissionMode: "auto" }))
       .rejects.toMatchObject({ status: 400, message: expect.stringContaining("supervised") });
-    await expect(service().dispatch({ ...brief, harness: "copilot", idempotencyKey: "gitboy:host:copilot", permissionMode: "auto" }))
+    await expect(service().dispatch({ ...brief, harness: "copilot", worktree: true, idempotencyKey: "gitboy:host:copilot", permissionMode: "auto" }))
       .rejects.toMatchObject({ status: 400, message: expect.stringContaining("claude or codex") });
     expect(launches()).toHaveLength(0);
-    const placed = await service().dispatch({ ...brief, harness: "codex", idempotencyKey: "gitboy:host:supervised" });
+    const placed = await service().dispatch({ ...brief, harness: "codex", worktree: true, idempotencyKey: "gitboy:host:supervised" });
     expect(placed).toMatchObject({ permissionMode: "supervised" });
     expect(launches().at(-1)?.[1]).toMatchObject({ permissionMode: "supervised" });
   });
@@ -147,7 +153,7 @@ describe("local dispatch", () => {
     expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({
       state: "failed", error: "launch interrupted", returned: { state: "failed", error: "launch interrupted" },
     });
-    expect(await service().dispatch({ ...brief, idempotencyKey: key }))
+    expect(await service().dispatch({ ...brief, worktree: true, idempotencyKey: key }))
       .toMatchObject({ existing: true, id, state: "failed", error: "launch interrupted" });
     expect(launches()).toHaveLength(0);
   });
@@ -178,7 +184,7 @@ describe("local dispatch", () => {
     expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({
       state: "failed", error: "cancelled", returned: { state: "failed", error: "cancelled" },
     });
-    expect(await service().dispatch({ ...brief, idempotencyKey: key })).toMatchObject({ existing: true, id, state: "failed", error: "cancelled" });
+    expect(await service().dispatch({ ...brief, worktree: true, idempotencyKey: key })).toMatchObject({ existing: true, id, state: "failed", error: "cancelled" });
     expect(launches()).toHaveLength(0);
   });
 
@@ -205,8 +211,64 @@ describe("local dispatch", () => {
     expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
   });
 
+  it("never touches a peer dispatch's files when cleaning up", async () => {
+    const id = randomUUID();
+    const paths = dispatchClonePaths(id);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.gitConfigFile, "config\n");
+    await writeFile(paths.agentTokenFile, "token\n");
+    const at = new Date().toISOString();
+    await atomicInPrivateDir(path.join(root, "dispatches", `${id}.json`), {
+      id, computer: "Peer", project: "phren", harness: "codex", label: "peer", state: "accepted",
+      createdAt: at, updatedAt: at, returned: { state: "failed", at, error: "boom", read: false },
+      cloneDir: paths.cloneDir, gitConfigFile: paths.gitConfigFile, agentTokenFile: paths.agentTokenFile,
+    });
+    const returns = new DispatchReturns({ now: () => Date.now(), request: async () => ({}), peers: async () => [],
+      isLocal: () => false, localWorkers: async () => ({ workers: [] }) });
+    await returns.cleanup();
+    expect(await stat(paths.cloneDir).then(() => true, () => false)).toBe(true);
+    expect(await stat(paths.gitConfigFile).then(() => true, () => false)).toBe(true);
+    expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+  });
+
+  it("does not delete a done clone while its worker is still bound", async () => {
+    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:live-done", worktree: true });
+    const paths = dispatchClonePaths(placed.id);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.gitConfigFile, "config\n");
+    await writeFile(paths.agentTokenFile, "token\n");
+    await updateReceipt(placed.id, value => {
+      value.returned = { state: "done", at: new Date().toISOString(), reply: "ok", read: true };
+      value.retainedUntil = new Date(Date.now() - 1_000).toISOString();
+      return true;
+    });
+    const restore = setTerminalProvider({
+      snapshot: async () => ({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
+        terminal_id: "term-1", agent: target.source, agent_status: "idle", startingToken: target.startingToken }] }),
+    } as unknown as TerminalProvider);
+    try {
+      await reconcileInterruptedDispatches();
+      expect(await stat(paths.cloneDir).then(() => true, () => false)).toBe(true);
+    } finally { restore(); }
+  });
+
+  it("transfers a cancel that lands before first-receipt creation", async () => {
+    const key = "gitboy:host:between";
+    vi.mocked(hookRequest).mockImplementation(async route => {
+      if (route === "/v1/dispatch/capacity") {
+        await requestIdempotencyCancel(key);
+        return { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 };
+      }
+      if (route.startsWith("/v1/workspaces/launch")) return { ok: true, target };
+      return { ok: true };
+    });
+    const result = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
+    expect(result).toMatchObject({ state: "failed", error: "cancelled" });
+    expect(launches()).toHaveLength(0);
+  });
+
   it("closes a running dispatch once and its wait ends cancelled", async () => {
-    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:close" });
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:close" });
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
@@ -233,7 +295,7 @@ describe("local dispatch", () => {
 
   it("closes by idempotency key, refuses both forms, and an unknown key closes nothing", async () => {
     const key = "gitboy:host:close-key";
-    const placed = await service().dispatch({ ...brief, idempotencyKey: key });
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
@@ -253,7 +315,7 @@ describe("local dispatch", () => {
   });
 
   it("leaves an unconfirmed close pending and retries it later", async () => {
-    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:pending" });
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:pending" });
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     let remove = false;
@@ -267,7 +329,7 @@ describe("local dispatch", () => {
   });
 
   it("finalizes a vanished worker without closing a pane", async () => {
-    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:gone" });
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:gone" });
     const closePane = vi.fn(async () => undefined);
     const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }), closePane } as unknown as TerminalProvider);
     try {
@@ -287,7 +349,7 @@ describe("local dispatch", () => {
   });
 
   it("keeps a cancellation pending when the pane snapshot fails", async () => {
-    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:snapshot" });
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:snapshot" });
     const restore = setTerminalProvider({ snapshot: async () => { throw new Error("snapshot down"); }, closePane: vi.fn() } as unknown as TerminalProvider);
     try {
       expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
@@ -297,7 +359,7 @@ describe("local dispatch", () => {
   });
 
   it("records cancelRequestedAt during placement instead of reporting gone", async () => {
-    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:placing" });
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:placing" });
     const file = path.join(root, "dispatches", `${placed.id}.json`);
     const receipt = JSON.parse(await readFile(file, "utf8"));
     await writeFile(file, JSON.stringify({ ...receipt, state: "launching" }));
@@ -321,7 +383,7 @@ describe("local dispatch", () => {
       return { ok: true };
     });
     try {
-      const result = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:launcher-cancel" });
+      const result = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:launcher-cancel" });
       expect(result).toMatchObject({ state: "failed", error: "cancelled" });
       expect(closePane).toHaveBeenCalled();
       expect((await findIdempotencyKey("gitboy:host:launcher-cancel"))?.phase).toBe("failed");

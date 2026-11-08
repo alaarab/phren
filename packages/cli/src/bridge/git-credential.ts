@@ -1,9 +1,5 @@
-import { execFile } from "node:child_process";
 import { mkdir, open, unlink } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
-import { nonInteractiveGitEnv } from "../utils-helpers.js";
-import { countGit } from "./metrics.js";
 import { detectHost, type GitHost } from "./git-hosts.js";
 import { resolveAgentToken } from "./git-host-auth.js";
 import { BridgeError } from "./protocol.js";
@@ -33,20 +29,6 @@ export function keyedExplicitEnv(base: NodeJS.ProcessEnv = process.env, extra: R
   return { ...env, ...extra };
 }
 
-const exec = promisify(execFile);
-
-async function git(cwd: string, ...args: string[]): Promise<string> {
-  countGit("git-credential");
-  return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
-    timeout: 30_000, maxBuffer: 1_048_576, env: nonInteractiveGitEnv({ ...process.env, GIT_CONFIG_NOSYSTEM: "1" }),
-  })).stdout;
-}
-
-/**
- * Configure the worktree itself (never the global config): clear any inherited
- * helper for this host, add the Hook's helper, and keep git from applying the
- * path-specific matching that could send the token to another repository path.
- */
 /** The credential-free HTTPS remote for a gitboy host, or a refusal when owner/repo cannot be derived. */
 export function credentialFreeRemote(host: Pick<GitHost, "domain" | "webUrl">): string {
   if (!host.domain || !host.webUrl) throw new BridgeError(409, "This gitboy checkout has no owner/repository in its remote URL, so a keyed dispatch cannot use it.");
@@ -69,13 +51,6 @@ export async function writeAgentTokenFileAt(file: string, token: string): Promis
   return file;
 }
 
-/** Write the agent token to a private file in the checkout's git dir, never to the environment. */
-export async function writeAgentTokenFile(cwd: string, token: string): Promise<string> {
-  const gitDir = (await git(cwd, "rev-parse", "--absolute-git-dir")).trim();
-  if (!path.isAbsolute(gitDir)) throw new BridgeError(409, "This checkout's git directory is not available.");
-  return writeAgentTokenFileAt(path.join(gitDir, "phren-agent-token"), token);
-}
-
 /** Remove a token file this Hook wrote; only the expected file name is ever touched. */
 export async function removeAgentTokenFile(file: string | undefined): Promise<void> {
   if (!file || !path.isAbsolute(file) || path.basename(file) !== "phren-agent-token") return;
@@ -88,7 +63,7 @@ export interface KeyedGitboy {
 }
 export interface KeyedGitboyOptions {
   /** The exact token file path (the clone's git dir). */
-  tokenFile?: string;
+  tokenFile: string;
   /** The managed global config the clone and the agent use. */
   gitConfigFile?: string;
 }
@@ -98,7 +73,7 @@ export interface KeyedGitboyOptions {
  * and fails closed when there is none. The token goes to a 0600 file; the agent
  * gets only GITBOY_TOKEN_FILE (and, for a clone, its managed GIT_CONFIG_GLOBAL).
  */
-export async function prepareKeyedGitboy(cwd: string, options: KeyedGitboyOptions = {}): Promise<KeyedGitboy | undefined> {
+export async function prepareKeyedGitboy(cwd: string, options: KeyedGitboyOptions): Promise<KeyedGitboy | undefined> {
   const host = await detectHost(cwd, "");
   // Keyed dispatches exist for gitboy's runner. A checkout Phren can't place
   // on a gitboy host with an agent token is refused, never launched with
@@ -108,7 +83,7 @@ export async function prepareKeyedGitboy(cwd: string, options: KeyedGitboyOption
     const domain = host.domain ?? "this checkout's host";
     throw new BridgeError(409, `No gitboy agent token for ${domain}. Run phren bridge git-host set ${domain} gitboy with a gba_ token.`);
   }
-  const tokenFile = options.tokenFile ? await writeAgentTokenFileAt(options.tokenFile, stored.token) : await writeAgentTokenFile(cwd, stored.token);
+  const tokenFile = await writeAgentTokenFileAt(options.tokenFile, stored.token);
   return {
     env: {
       GITBOY_HOST: host.domain,
@@ -118,12 +93,6 @@ export async function prepareKeyedGitboy(cwd: string, options: KeyedGitboyOption
     },
     tokenFile,
   };
-}
-
-/** Backwards-compatible environment helper: keyed gitboy launches only. */
-export async function gitHostLaunchEnv(cwd: string, keyed: boolean): Promise<Record<string, string> | undefined> {
-  if (!keyed) return undefined;
-  return (await prepareKeyedGitboy(cwd))?.env;
 }
 
 /** A git credential request for a host with a stored gitboy token, answered for `get` only. */

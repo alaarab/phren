@@ -997,25 +997,30 @@ export class DispatchReturns {
   }
 
   async cleanup(): Promise<void> {
-    const retained = () => new Date(this.now() + 7 * 24 * 60 * 60_000).toISOString();
     for (const receipt of await dispatchStatus()) {
       const paths = { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
       const state = receipt.returned?.state;
-      if (state === "failed" || state === "gone") {
+      // Only the Hook that created the clone/token owns their filesystem.
+      const local = this.isSelf(receipt) || this.isLocal(receipt.computer);
+      if (local && (state === "failed" || state === "gone")) {
         // Recoverable work stays; its secrets do not.
         await removeDispatchSecrets(paths);
-        if (!receipt.retainedUntil) await updateReceipt(receipt.id, value => {
-          if (value.retainedUntil) return false;
-          value.retainedUntil = retained(); return true;
+        if (!receipt.endedAt || !receipt.retainedUntil) await updateReceipt(receipt.id, value => {
+          const ended = value.endedAt ?? value.closedAt ?? new Date(this.now()).toISOString();
+          if (!value.endedAt) value.endedAt = ended;
+          if (!value.retainedUntil) value.retainedUntil = new Date(Date.parse(ended) + 7 * 24 * 60 * 60_000).toISOString();
+          return true;
         }).catch(() => undefined);
         continue;
       }
-      if (state === "done") {
+      if (local && state === "done") {
         await removeDispatchSecrets(paths);
         if (receipt.closeOnFinish === false) {
-          if (!receipt.retainedUntil) await updateReceipt(receipt.id, value => {
-            if (value.retainedUntil) return false;
-            value.retainedUntil = retained(); return true;
+          if (!receipt.endedAt || !receipt.retainedUntil) await updateReceipt(receipt.id, value => {
+            const ended = value.endedAt ?? value.closedAt ?? new Date(this.now()).toISOString();
+            if (!value.endedAt) value.endedAt = ended;
+            if (!value.retainedUntil) value.retainedUntil = new Date(Date.parse(ended) + 7 * 24 * 60 * 60_000).toISOString();
+            return true;
           }).catch(() => undefined);
           continue;
         }

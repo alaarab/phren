@@ -8,8 +8,8 @@ import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 import { originPaneSchema, reconcileIdempotencyKey, settleCancelledReservation, updateReceipt, type Receipt } from "./dispatch.js";
-import { idempotencyKeySchema, requestIdempotencyCancel } from "./dispatch-idempotency.js";
-import { removeDispatchSecrets } from "./dispatch-clone.js";
+import { idempotencyKeySchema, withIdempotencyKeyLock } from "./dispatch-idempotency.js";
+import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
 type ClosedTarget = Target | StartingTarget;
 const closedTargetSchema = z.union([targetSchema, startingTargetSchema]);
 const file = (target: ClosedTarget) => path.join(bridgeRoot(), "closed-workers", `${createHash("sha256").update(JSON.stringify([target.server, target.workspace, target.tab, target.pane, target.source, "session" in target ? target.session : target.startingToken])).digest("hex")}.json`);
@@ -57,8 +57,9 @@ async function retainCancelled(dispatchId: string, duringPlacement: boolean, pat
   await finalizeCancelled(dispatchId, duringPlacement);
   await removeDispatchSecrets(paths);
   await updateReceipt(dispatchId, value => {
-    if (value.retainedUntil) return false;
-    value.retainedUntil = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+    const ended = value.endedAt ?? value.closedAt ?? new Date().toISOString();
+    if (!value.endedAt) value.endedAt = ended;
+    if (!value.retainedUntil) value.retainedUntil = new Date(Date.parse(ended) + 7 * 24 * 60 * 60_000).toISOString();
     return true;
   }).catch(() => undefined);
 }
@@ -91,24 +92,35 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
   ]).parse(input);
   let dispatchId: string | undefined;
   let record: Awaited<ReturnType<typeof reconcileIdempotencyKey>> = undefined;
-  if ("dispatch" in data) dispatchId = data.dispatch;
-  else { record = await reconcileIdempotencyKey(data.idempotencyKey); dispatchId = record?.dispatchId; }
+  let placement = false;
+  let receipt: Receipt | undefined;
+  const mark = (value: Receipt, at: string) => {
+    placement = value.state === "launching" || value.state === "sending";
+    if (value.cancelRequestedAt) return false;
+    value.cancelRequestedAt = at;
+    return true;
+  };
+  if ("dispatch" in data) {
+    dispatchId = data.dispatch;
+    receipt = await updateReceipt(dispatchId, value => mark(value, new Date().toISOString()), { duringPlacement: true });
+  } else {
+    // The key lock serializes this marker with first-receipt creation.
+    await withIdempotencyKeyLock(data.idempotencyKey, async (current, save) => {
+      record = current;
+      dispatchId = current?.dispatchId;
+      if (!dispatchId) return;
+      const at = new Date().toISOString();
+      const updated = await updateReceipt(dispatchId, value => mark(value, at), { duringPlacement: true });
+      if (updated) receipt = updated;
+      else if (current && !current.cancelRequestedAt) { current.cancelRequestedAt = at; await save(current); }
+    });
+  }
   // An unknown key names no dispatch; a known one whose receipt is gone still
   // answers with the id it named.
   if (!dispatchId) return { ok: true, closed: false };
-  let placement = false;
-  const receipt = await updateReceipt(dispatchId, value => {
-    // This callback runs under the receipt lock and sees the durable phase,
-    // including launching/sending that dispatchStatus() reports as uncertain.
-    placement = value.state === "launching" || value.state === "sending";
-    if (value.cancelRequestedAt) return false;
-    value.cancelRequestedAt = new Date().toISOString();
-    return true;
-  }, { duringPlacement: true });
   if (!receipt) {
     if (record && (record.phase === "reserved" || record.phase === "launching")) {
-      const cancelled = await requestIdempotencyCancel(record.key);
-      if (cancelled) await settleCancelledReservation(cancelled);
+      await settleCancelledReservation(record);
       return { ok: true, dispatch: dispatchId, closed: false };
     }
     return { ok: true, dispatch: dispatchId, closed: false };
@@ -172,6 +184,13 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
   return { ok: true, dispatch: dispatchId, closed: false, pending: true };
 }
 
+/** The Hook that launched the worker owns its clone and token: a confirmed close removes both. */
+async function releaseClosedFiles(dispatchId: string): Promise<void> {
+  const paths = dispatchClonePaths(dispatchId);
+  await removeDispatchSecrets(paths);
+  await removeDispatchClone(paths);
+}
+
 /** Called on the worker's computer only after the sender read the done return.
  * Recheck this exact ended turn and skip any new work, background work or inbox. */
 export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue): Promise<Json> {
@@ -201,6 +220,7 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
     if (remaining && findPane(remaining, data.target)?.terminal_id === pane.terminal_id) await rm(file(data.target), { force: true });
     throw error;
   }
+  await releaseClosedFiles(data.dispatch);
   return { ok: true, closed: true };
 }
 

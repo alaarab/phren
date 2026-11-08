@@ -364,16 +364,20 @@ stored gitboy token with `username=x-token` and `password=<token>`; `store` and
 used; if it is missing the dispatch fails with `No gitboy agent token for
 <domain>. Run phren bridge git-host set <domain> gitboy with a gba_ token.`
 The token never goes into argv, a remote URL or a log. For the API the agent
-gets only `GITBOY_TOKEN_FILE`, a 0600 file in the clone's git dir. The clone,
+gets only `GITBOY_TOKEN_FILE`, a 0600 file in the clone's git dir. A keyed
+dispatch requires `--worktree`: it always runs in a managed clone. The clone,
 managed config and token file are registered before the worker starts. The
 token is removed as soon as the worker ends, whatever the outcome. A completed
-clone is removed only after the pane is confirmed gone and the dispatch is not
-keep-open. Failed, cancelled and interrupted clones are kept as recoverable
-work, with their managed config and token removed immediately and
-`retainedUntil` set to seven days; reconciliation removes them after that. A
-gitboy `gba_` token is stored as an agent token: `phren bridge git-host set`
-prints the agent identity and expiry, and `phren bridge git-host list` marks it
-`agent token`.
+clone is removed only when `closedAt` is set or a fresh terminal snapshot shows
+the bound worker gone, and never for a keep-open dispatch before it is closed.
+Failed, cancelled and interrupted clones are kept as recoverable work, with
+their managed config and token removed immediately and `retainedUntil` measured
+from `endedAt` (the time the worker was observed gone or closed), not from the
+dispatch's creation. Reconciliation removes them after that date. The Hook that
+created the clone owns this cleanup; a dispatching computer never touches a
+peer's files. A gitboy `gba_` token is stored as an agent token:
+`phren bridge git-host set` prints the agent identity and expiry, and
+`phren bridge git-host list` marks it `agent token`.
 
 `wait` prints NDJSON, one line per state change, and leaves every other return
 unread for a conductor on the same Hook:
