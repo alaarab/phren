@@ -7,7 +7,7 @@ import { validateTarget, paneChatState } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
-import { originPaneSchema } from "./dispatch.js";
+import { dispatchStatus, originPaneSchema, updateReceipt } from "./dispatch.js";
 type ClosedTarget = Target | StartingTarget;
 const closedTargetSchema = z.union([targetSchema, startingTargetSchema]);
 const file = (target: ClosedTarget) => path.join(bridgeRoot(), "closed-workers", `${createHash("sha256").update(JSON.stringify([target.server, target.workspace, target.tab, target.pane, target.source, "session" in target ? target.session : target.startingToken])).digest("hex")}.json`);
@@ -27,6 +27,39 @@ export async function markPaneClosed(server: string, pane: Json): Promise<void> 
   const starting = startingTargetSchema.safeParse({ server, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id,
     source: pane.agent, starting: true, startingToken: chat.startingToken });
   if (starting.success) await markWorkerClosed(starting.data, String(pane.terminal_id));
+}
+
+/**
+ * Cancel a running dispatch by id: stop its agent, close its pane, and record
+ * a failed `cancelled` return so `phren dispatch wait` ends with that error.
+ * Idempotent: a dispatch already closed answers `closed: false`.
+ */
+export async function cancelDispatch(input: unknown): Promise<Json> {
+  const data = z.object({ dispatch: z.string().uuid() }).strict().parse(input);
+  const receipt = (await dispatchStatus()).find(row => row.id === data.dispatch);
+  if (!receipt) throw new BridgeError(404, "Unknown dispatch.");
+  if (receipt.closedAt) return { ok: true, dispatch: data.dispatch, closed: false };
+  if (["launching", "sending"].includes(receipt.state)) throw new BridgeError(409, "This dispatch is still being placed; try closing it again in a moment.");
+  const at = new Date().toISOString();
+  let cancelled = false;
+  const current = await updateReceipt(data.dispatch, value => {
+    if (value.closedAt) return false;
+    value.closedAt = at;
+    value.state = "failed";
+    value.error = "cancelled";
+    value.returned = { state: "failed", at, error: "cancelled", read: false };
+    cancelled = true;
+    return true;
+  });
+  if (!current || !cancelled) return { ok: true, dispatch: data.dispatch, closed: false };
+  const target = current.target;
+  if (target) {
+    const { snapshot, findPane } = await import("./herdr.js");
+    const pane = findPane(await snapshot(target.server).catch(() => ({})), target);
+    if (pane) await markPaneClosed(target.server, pane).catch(() => undefined);
+    await terminalProvider().closePane(target.server, target.pane).catch(() => undefined);
+  }
+  return { ok: true, dispatch: data.dispatch, closed: true };
 }
 
 /** Called on the worker's computer only after the sender read the done return.

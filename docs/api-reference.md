@@ -40,7 +40,7 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
+| `computer` | string | yes | Enrolled name, `local` for this computer, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
 | `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
 | `harness` | enum | yes | `codex`, `claude`, `opencode` or `copilot`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
@@ -49,12 +49,17 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 | `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude, Codex and Copilot (see [Conductor](conductor.md#copilot-workers) for Copilot's flags); `opencode` is refused with 400 before a receipt is saved. |
 | `releaseActions` | string[] | no | Release actions the brief asks for: `merge`, `publish`, `deploy`, `app-store`, `github-admin`. From an agent, an action the project's release authority policy marks ask-first is refused with 403 until the owner confirms it. An ask-first project also lowers the agent's permission ceiling there and starts a worker with no mode at it. See docs/authority.md. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
-| `label` | string | yes | Task label, up to 200 characters. |
+| `label` | string | yes | Task label, up to 200 characters. Optional for `phren dispatch local`, where it defaults to the first 60 characters of `idempotencyKey` or `gitboy agent`. |
+| `idempotencyKey` | string | no | 1 to 200 characters of `[A-Za-z0-9:._@/-]`. The Hook returns the dispatch this key already started (`existing: true`) instead of starting another, for 30 days. Keyed dispatches run in the harness's standard permission mode; `full-access` is refused. |
+| `worktree` | boolean | no | Start the worker in a fresh git worktree of the project's checkout, on a new branch never reused. |
+| `branch` | string | no | Branch for the worktree; defaults to `agent/<key-slug or dispatch id>`. Needs `worktree`. |
 | `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
 | `parentTarget` | object | no | Live local target used to validate the parent identity. |
 
-Returns the receipt in `data`: dispatch ID, computer, project, harness/model/effort/permissionMode,
-label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
+Returns the receipt in `data`: dispatch ID (`dispatch`, also `id`), computer, project,
+harness/model/effort/permissionMode, label, timestamps, state, remote target when
+known, grant match (`granted`), `existing` (`true` when an idempotency key returned
+an earlier dispatch), and an optional error.
 `accepted` means first-prompt acceptance, not task completion: for Claude and
 Codex the brief goes with the launch and the worker's own hook confirms it by
 dispatch ID (`brief: "launch"`); OpenCode and Copilot get it typed (`brief: "typed"`).
@@ -82,6 +87,41 @@ refused for quota.
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
+
+### Local dispatch, `wait` and `close`
+
+```sh
+phren dispatch local gitboy --harness claude --idempotency-key "gitboy:<host>:<session id>" --worktree --prompt-file -
+phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]
+phren dispatch close <dispatch-id>
+```
+
+`local` places on this computer through its own Hook, with no `hooks.yaml` entry
+or SSH. `--prompt-file -` reads the brief from stdin and a path reads that file;
+exactly one of `--prompt` and `--prompt-file` is accepted, and an oversized
+brief is refused at the schema's 32768 characters. The brief never goes through
+argv. The receipt adds a stable `dispatch` field (the id) and `existing`
+(`false` when this call started it, `true` when an idempotency key returned an
+earlier one). Keys are durable under `<bridge>/idempotency/` (0600, 30 days),
+and the exclusive-create reservation makes concurrent same-key calls start one
+agent. See [Conductor](conductor.md#local-idempotent-dispatches-gitboys-runner)
+for the full execution policy.
+
+`wait` prints NDJSON, one line per state change
+(`{"dispatch":"<id>","state":"running"|"needs_you","question"?:...,"at":"<ISO>"}`)
+and a final line
+(`{"dispatch":"<id>","state":"done"|"failed"|"gone"|"timeout","final":true,"final_reply"?:...,"question"?:...,"error"?:...,"prs"?:[...]}`).
+`needs_you` is not final. It peeks with `POST /v1/dispatch/returns?peek=1`
+so a conductor's returns stay unread, reads
+`POST /v1/dispatch/workers` for live state, and acknowledges only this dispatch
+with `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }`. Exit codes: 0
+`done`, 1 `failed` or `gone`, 124 `timeout` (no timeout by default, capped at 7
+days). A Hook that stays unavailable for 5 minutes, or an unknown id after a 30
+s grace period, ends `failed`.
+
+`close` calls `POST /v1/dispatch/cancel { "dispatch": "<uuid>" }`: the Hook
+records a failed `cancelled` return, stops the agent and closes its pane. A
+repeated close answers `{ "dispatch": "<uuid>", "closed": false }` and exits 0.
 
 ### `dispatch_returns`
 
@@ -114,7 +154,7 @@ on a working agent is tried again every 5 seconds, under the same `deliveryId`.
 
 CLI equivalent: `phren dispatch returns`. `phren dispatch returns --watch` prints them as they land, one line each, until Ctrl-C (`--json`: one JSON object per line), without marking them read, so an agent conductor on the same Hook still gets them; `--consume` takes them as it prints.
 
-The Hook route behind it, `POST /v1/dispatch/returns`, takes the unread returns (marks them read). With `?peek=1` it lists the same rows and leaves them unread; a peek is answered by this Hook itself, never forwarded to a conductor's successor, and refused from a peer.
+The Hook route behind it, `POST /v1/dispatch/returns`, takes the unread returns (marks them read). With `?peek=1` it lists the same rows and leaves them unread; a peek is answered by this Hook itself, never forwarded to a conductor's successor, and refused from a peer. `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }` marks only that dispatch's return read (used by `phren dispatch wait`), and is refused from a peer the same way.
 
 A `blocked` row with an `approval` object is a permission request the worker is
 waiting on, forwarded by its Hook: `actionId`, `tool`, and, when known,

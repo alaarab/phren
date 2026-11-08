@@ -294,6 +294,92 @@ does the harness submits the brief itself. An unconfirmed brief is asked about
 again on each returns poll, so the receipt turns `accepted` when the worker
 confirms it. Briefs are kept for seven days (at most 256).
 
+### Local, idempotent dispatches (gitboy's runner)
+
+gitboy's runner starts one agent on the computer that runs Phren and follows
+that dispatch to its end:
+
+```sh
+phren dispatch local gitboy --harness claude --idempotency-key "gitboy:<host>:<session id>" \
+  --worktree --prompt-file -
+phren dispatch wait <dispatch-id> --json
+phren dispatch close <dispatch-id>
+```
+
+`local` is this computer, the same placement as its own name or `local` in the
+general form. `--prompt-file -` reads the brief from stdin (a path reads that
+file); exactly one of `--prompt` and `--prompt-file` is allowed, and a brief
+over the 32768-character schema limit is refused. The brief is never put in
+argv. For `local`, `--label` defaults to the first 60 characters of the
+idempotency key, or `gitboy agent` without a key.
+
+The output is the receipt plus a stable `dispatch` field (the id) and
+`existing` (`false` for the placement that started the agent, `true` when a key
+returned an earlier one):
+
+```json
+{ "dispatch": "<uuid>", "existing": false, "id": "<uuid>", "state": "accepted", "...": "receipt fields" }
+```
+
+`--idempotency-key` is 1 to 200 characters of `[A-Za-z0-9:._@/-]`. The Hook
+stores key to dispatch id under `<bridge>/idempotency/<sha256>.json` (0600), so
+it survives a restart and expires after 30 days. The reservation is an exclusive
+file create: two concurrent calls with the same key start one agent, and the
+second returns the same receipt with `existing: true`.
+
+`--worktree` starts the worker in a fresh `git worktree add` of the project's
+checkout on a new branch, never reused. The branch is
+`agent/<key-slug or dispatch id>`, or `--branch <name>` when the caller names it
+(gitboy's brief does; it is validated as a Git branch name). A worktree is created with `git -c
+core.hooksPath=/dev/null worktree add ...`, so no repository hook or script runs
+before the agent starts.
+
+`wait` prints NDJSON, one line per state change, and leaves every other return
+unread for a conductor on the same Hook:
+
+```json
+{"dispatch":"<id>","state":"running","at":"2026-11-08T10:00:00.000Z"}
+{"dispatch":"<id>","state":"needs_you","question":"Which branch?","at":"2026-11-08T10:01:00.000Z"}
+{"dispatch":"<id>","state":"done","final":true,"final_reply":"All checks passed","prs":[{"url":"https://gitboy.dev/o/r/pulls/1","repo":"o/r","branch":"agent/42","tests":"passing"}]}
+```
+
+`needs_you` is not final: the agent waits for an answer in Phren, and `wait`
+keeps following. `--json` is accepted, and the output is always JSON. `prs`
+comes from the worker's `phren dispatch report`. It polls
+about every 2 s at first, backing off to 10 s with jitter, peeks at
+`/v1/dispatch/returns?peek=1`, and reads `/v1/dispatch/workers` to tell a gone
+pane from one still working. It survives transient Hook errors, but ends
+`failed` after 5 minutes of continuous unavailability, and an id the Hook does
+not know after a 30 s grace period ends `failed` with `error: "unknown
+dispatch"`. The timeout defaults to none and is capped at 7 days. Exit codes: 0
+`done`, 1 `failed` or `gone`, 124 `timeout`. When the result is final it
+acknowledges only that dispatch's return (`POST /v1/dispatch/returns/ack`).
+
+`close` cancels a running dispatch: the Hook records a failed `cancelled` return,
+stops the agent and closes its pane (`POST /v1/dispatch/cancel`). Its `wait`
+then ends `failed` with `error: "cancelled"`. Closing an already-closed dispatch
+answers `{"dispatch":"<id>","closed":false}` and exits 0.
+
+A dispatch with an idempotency key follows an execution policy enforced by the
+Hook:
+
+- It runs in the harness's standard permission mode. `--permission-mode
+  full-access` (and any skip-approvals or `--dangerously-*` equivalent) is
+  refused with 400; none is ever the default.
+- The agent does not inherit the caller's environment. The launch request is
+  JSON, and `startSession` (`packages/cli/src/bridge/server-launch.ts`) builds
+  the agent's environment itself from the sudo askpass, `PHREN_DISPATCH_ID`, the
+  served OpenCode environment and the Claude account home. The runner's
+  variables never cross the Hook's HTTP socket.
+- In a gitboy checkout the worker gets this computer's stored `phren-agent`
+  token for Git and the API, and no other: `gitHostLaunchEnv`
+  (`packages/cli/src/bridge/git-credential.ts`) reads `git-hosts.json` with
+  `resolveHostToken("gitboy", domain, { env: {}, cli: false })`, sets
+  `GITBOY_HOST`/`GITBOY_TOKEN`, and installs a credential helper
+  (`<bridge>/git-credential`) that answers git from the same store. An empty
+  `credential.helper` resets any helper from the agent's own config.
+- A worktree is created with repository hooks disabled, as above.
+
 ### Copilot workers
 
 `harness: "copilot"` starts GitHub Copilot CLI in the new pane, the same way the

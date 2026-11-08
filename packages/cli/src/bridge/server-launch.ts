@@ -19,6 +19,7 @@ import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
 import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
+import { gitHostLaunchEnv } from "./git-credential.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -461,7 +462,6 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
   const dispatchId = options.dispatchId ?? brief?.id;
   const variables = { ...askpassEnv(), ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
-  const env = Object.keys(variables).length ? variables : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
@@ -486,6 +486,11 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     scratch = await mkdtemp(path.join(agents, `${new Date().toISOString().slice(0, 10)}-${herdrAgentName(label)}-`));
   }
   const cwd = scratch ?? worktree?.cwd ?? projectDirectory!;
+  // A worker in a gitboy checkout gets this computer's stored phren-agent
+  // token, never the caller's environment: the Hook builds the agent env here.
+  const hostEnv = role === "agent" ? await gitHostLaunchEnv(cwd).catch(() => undefined) : undefined;
+  const envVariables = { ...variables, ...(hostEnv ?? {}) };
+  const env = Object.keys(envVariables).length ? envVariables : undefined;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
   // agent too; a folder the Hook picked or just created is trusted up front.
   if (scratch || worktree || options.trustFolder) await pretrustFolder(kind, cwd, scratch ? "new agent folder" : worktree ? `new worktree for ${worktree.branch}` : "project folder",

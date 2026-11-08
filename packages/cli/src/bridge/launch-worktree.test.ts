@@ -64,6 +64,15 @@ describe("launch worktrees", () => {
     expect(worktreeFolderName("release/1.0")).toBe("release-1-0");
   });
 
+  it("creates the worktree with repository hooks disabled", async () => {
+    const root = await repository();
+    const marker = path.join(root, "hook-ran");
+    await writeFile(path.join(root, ".git", "hooks", "post-checkout"), `#!/bin/sh\ntouch "${marker}"\n`, { mode: 0o755 });
+    const worktree = await createLaunchWorktree(root, { branch: "phren/no-hooks" });
+    expect(await stat(marker).catch(() => undefined)).toBeUndefined();
+    await worktree.discard();
+  });
+
   it("refuses a conductor in a worktree before asking Herdr for anything", async () => {
     const root = await repository();
     await expect(launchSession("default", { cwd: root, label: "c", kind: "claude", role: "conductor", worktree: { branch: "phren/c" } }))

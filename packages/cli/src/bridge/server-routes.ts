@@ -18,7 +18,7 @@ import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMo
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
-import { closeFinishedWorker, closeOwnPane } from "./worker-close.js";
+import { cancelDispatch, closeFinishedWorker, closeOwnPane } from "./worker-close.js";
 import { reportWorker, readIntegrator, setIntegrator } from "./worker-reports.js";
 import { sessionStalls } from "./stalls.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
@@ -1031,6 +1031,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await reportWorker(data);
         } else if (url.pathname === "/v1/dispatch/close") {
           result = await closeFinishedWorker(data, ctx.handOffs);
+        } else if (url.pathname === "/v1/dispatch/cancel") {
+          // Cancel a running dispatch by id: stop its agent and close its pane.
+          if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "A peer cannot cancel a dispatch on this computer.");
+          result = await cancelDispatch(data);
         } else if (url.pathname === "/v1/dispatch/close-self") {
           result = await closeOwnPane(data);
         } else if (url.pathname === "/v1/hand-off") {
@@ -1046,6 +1050,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await conductorCall("dispatch", brief, origin, () => dispatches!.dispatch(brief, origin));
         } else if (url.pathname === "/v1/dispatch/workers") {
           result = await hookWorkers(agentHooks)(data);
+        } else if (url.pathname === "/v1/dispatch/returns/ack") {
+          // `phren dispatch wait` acknowledges only the dispatch it followed,
+          // never the other returns a conductor on this Hook still needs.
+          if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
+          const body = z.object({ dispatch: z.string().uuid() }).strict().parse(data);
+          result = await ctx.returns!.acknowledgeOne(body.dispatch);
         } else if (url.pathname === "/v1/dispatch/returns" && url.searchParams.get("peek") === "1") {
           // The unread returns, left unread: a watcher (`phren dispatch returns --watch`) beside an agent
           // conductor, which still takes them. Read here, never forwarded to a successor, which would take them.

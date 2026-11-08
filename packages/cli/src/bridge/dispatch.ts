@@ -26,14 +26,18 @@ import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { limitedBy, limitKey, readAccountLimits, type AccountRoom, type WindowRoom } from "./account-choice.js";
 import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplies, poolRefusal, projectRule, withPolicy, type PolicyRoom, type PoolRule } from "./account-policy.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
+import { worktreeBranch } from "./launch-worktree.js";
+import { findIdempotencyKey, idempotencyKeySchema, recordIdempotencyDispatch, releaseIdempotencyKey, reserveIdempotencyKey, waitForIdempotencyKey, worktreeBranchFor } from "./dispatch-idempotency.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
+/** The longest worker brief a dispatch takes, in characters. */
+export const DISPATCH_PROMPT_LIMIT = 32768;
 /** The harnesses a dispatch, a code note's hand-off or a schedule can start. */
 export const PEER_COPILOT_REASON = "Copilot cannot continue on another computer: its harness does not confirm launch-brief arrival. Continue locally or choose another harness.";
 export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
 export const dispatchSchema = z.object({
-  computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, or anywhere for the least busy connected computer."),
+  computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, local for this computer, or anywhere for the least busy connected computer."),
   task: mergeTaskIdentitySchema.optional().describe("Private task identity for merge reconciliation. Never put it in commits or GitHub."),
   project: projectName.describe("Project slug registered on the receiving computer."),
   harness: z.enum(DISPATCH_HARNESSES).describe("Agent harness on the receiving computer."),
@@ -44,8 +48,12 @@ export const dispatchSchema = z.object({
   permissionMode: z.enum(PERMISSION_MODES).optional().describe("Permission mode the worker starts in: supervised, auto-edits, auto or full-access (Claude, Codex and Copilot; not OpenCode); otherwise the receiving computer's own default."),
   releaseActions: z.array(releaseAction).min(1).max(RELEASE_ACTIONS.length).optional()
     .describe("Release-type actions the brief asks the worker to do (merge, publish, deploy, app-store, github-admin). Ask-first projects refuse them from an agent unless the owner confirmed."),
-  prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
+  prompt: z.string().min(1).max(DISPATCH_PROMPT_LIMIT).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe(`Worker brief, at most ${DISPATCH_PROMPT_LIMIT} characters.`),
   label: text(200).describe("Short task label."),
+  idempotencyKey: idempotencyKeySchema.optional()
+    .describe("Caller-supplied key (1 to 200 characters of letters, digits and : . _ @ / -). The Hook returns the dispatch this key already started instead of starting another, for 30 days. Dispatches with a key run in their harness's standard permission mode."),
+  worktree: z.boolean().optional().describe("Start the worker in a fresh git worktree of the project's checkout, on a new branch. Never reused."),
+  branch: worktreeBranch.optional().describe("Branch for the worktree; defaults to agent/<key-slug or dispatch id>. Needs worktree."),
   closeOnFinish: z.boolean().optional().describe("Close the finished worker pane after its done return is read. Defaults to true; false keeps it open."),
   integrator: integratorSchema.optional().describe("Forward structured PR reports to this integrator, overriding the Hook default."),
   parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
@@ -585,6 +593,51 @@ export class DispatchService {
    * `continues` names the dispatch whose worker hit its usage limit (account-failover.ts). */
   async dispatch(input: unknown, originValue?: unknown, continues?: string): Promise<Json> {
     const data = dispatchSchema.parse(input);
+    if (data.idempotencyKey) return this.dispatchKeyed(data, originValue, continues);
+    return this.place(data, originValue, continues);
+  }
+
+  /**
+   * The gitboy path: a caller that may retry after a crash names a key and
+   * gets the dispatch that key already started. The reservation file is the
+   * atomic check-and-insert, so two concurrent calls start one agent; the
+   * loser waits for the winner's dispatch id and returns its receipt.
+   */
+  private async dispatchKeyed(data: DispatchInput, originValue?: unknown, continues?: string): Promise<Json> {
+    const key = data.idempotencyKey!;
+    const known = await findIdempotencyKey(key);
+    if (known?.dispatchId) {
+      const receipt = await readReceipt(known.dispatchId);
+      if (receipt) return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
+      // The receipt was archived: the key no longer names a live dispatch.
+      await releaseIdempotencyKey(key);
+    }
+    const reservation = await reserveIdempotencyKey(key);
+    if (!reservation.reserved) {
+      const record = await waitForIdempotencyKey(key);
+      if (!record?.dispatchId) throw new BridgeError(503, "Another dispatch with this idempotency key did not settle; try again.");
+      const receipt = await readReceipt(record.dispatchId);
+      if (!receipt) throw new BridgeError(503, "The dispatch for this idempotency key has no receipt.");
+      return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
+    }
+    let recorded = false;
+    try {
+      const result = await this.place(data, originValue, continues, async id => {
+        await recordIdempotencyDispatch(key, id);
+        recorded = true;
+      });
+      return { ...result, existing: false };
+    } catch (error) {
+      if (!recorded) await releaseIdempotencyKey(key).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async place(data: DispatchInput, originValue?: unknown, continues?: string, onReceipt?: (id: string) => Promise<void>): Promise<Json> {
+    if (data.idempotencyKey && data.permissionMode === "full-access") {
+      throw new BridgeError(400, "A dispatch with an idempotency key runs in its harness's standard permission mode; full-access and skip-approval modes are refused.");
+    }
+    if (data.branch && data.worktree !== true) throw new BridgeError(400, "--branch needs --worktree.");
     if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
@@ -687,17 +740,23 @@ export class DispatchService {
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt: originalPrompt, ...metadata } = data;
       const prompt = peer.local ? originalPrompt : redactPeerHandoff(originalPrompt);
-      const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
+      const dispatchId = randomUUID();
+      // A fresh worktree per dispatch: the caller may name its branch (gitboy's
+      // brief does), otherwise it is derived from the idempotency key or the id.
+      const worktree = data.worktree === true ? (data.branch ?? worktreeBranchFor(data.idempotencyKey, dispatchId)) : undefined;
+      const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: dispatchId,
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
+        ...(worktree ? { branch: worktree } : {}),
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}) };
       await save(receipt, originWindow);
+      await onReceipt?.(receipt.id);
       try {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
         if (policyChoice?.account) {
@@ -718,7 +777,7 @@ export class DispatchService {
           await this.confirmLaunched(peer, receipt, launched, originWindow);
           if (ignored) receipt.error = [receipt.error, ignored].filter(Boolean).join(" ").slice(0, 500);
           receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
-          return { ok: receipt.state === "accepted", ...receipt };
+          return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: false };
         }
         receipt.brief = "typed";
         const settled: { target?: unknown; status?: string } = launched.target ? { target: launched.target } : await settledTarget(peer, launched, data.harness, this.settleIntervalMs);
@@ -749,7 +808,7 @@ export class DispatchService {
         }
       }
       receipt.updatedAt = new Date().toISOString(); await save(receipt, originWindow);
-      return { ok: receipt.state === "accepted", ...receipt };
+      return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: false };
     } finally {
       originWindow.finish();
       release();

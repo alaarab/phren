@@ -1014,6 +1014,25 @@ export class DispatchReturns {
     return this.request(peer, "/v1/dispatch/close", { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn });
   }
 
+  /**
+   * Mark one dispatch's return read, leaving every other return untouched:
+   * `phren dispatch wait` follows one worker and must not consume a
+   * conductor's returns on the same Hook.
+   */
+  async acknowledgeOne(id: string): Promise<Json> {
+    let acknowledged = false;
+    await updateReceipt(id, value => {
+      if (!value.returned || value.returned.read) return false;
+      value.returned.read = true;
+      if (value.returned.state === "done" && value.closeOnFinish !== false && !value.returned.background && value.returned.turn && !value.closedAt)
+        value.closePending = { at: value.returned.at, turn: value.returned.turn };
+      acknowledged = true;
+      return true;
+    }).catch(() => undefined);
+    if (acknowledged) { await this.forwardPrs(); await this.cleanup(); }
+    return { ok: true, dispatch: id, acknowledged };
+  }
+
   /** A remote successor acknowledges only the exact return version it received. */
   async acknowledge(rows: Json[]): Promise<void> {
     for (const row of rows) await updateReceipt(String(row.id), value => {

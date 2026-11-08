@@ -247,9 +247,11 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode|copilot] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
+      { name: "wait", usage: "phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]", summary: "Follow one local dispatch to its end as NDJSON; exits 0 done, 1 failed or gone, 124 timeout" },
+      { name: "close", usage: "phren dispatch close <dispatch-id>", summary: "Cancel a running local dispatch: stop its agent and close its pane" },
       { name: "returns", usage: "phren dispatch returns [--watch [--json] [--consume]]", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read; --watch prints them as they land until Ctrl-C, leaving them unread unless --consume" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" },
       { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" },

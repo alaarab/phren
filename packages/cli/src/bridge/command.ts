@@ -10,6 +10,7 @@ import { object, provider, socketPath, type Json } from "./protocol.js";
 import { apnsSetupSteps } from "./push.js";
 import { speechKeyFile, speechKeyStatus, writeSpeechKey } from "./speech-key.js";
 import { gitHostsFile, listHostTokens, writeHostToken } from "./git-host-auth.js";
+import { gitCredentialAnswer } from "./git-credential.js";
 import { hostInfo, PROVIDERS } from "./git-hosts.js";
 import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, FALLBACK_SPEECH_MODEL, resolveSpeechModel, resolveSpeechRegion, resolveSpeechVoice, SPEECH_REGIONS, speechModelId, speechRegion, speechVoiceFile, voiceId, writeSpeechModel, writeSpeechRegion, writeSpeechVoice } from "./speech-voice.js";
 import { AccountUsageReader, captureClaudeUsage, type AccountUsage } from "./usage.js";
@@ -125,6 +126,17 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "git-host": {
       // Tokens for GitLab and gitboy, which the Hook reads over HTTP; GitHub keeps gh's sign-in.
       const [, action = "list", domain, kind] = args;
+      if (action === "credential" && domain) {
+        // Git's credential protocol, run by <bridge>/git-credential. Only a
+        // get answers, from the Hook's stored token, never the environment.
+        if (args[3] !== undefined && args[3] !== "get") return 0;
+        let request = "";
+        for await (const chunk of process.stdin) request += chunk;
+        const answer = await gitCredentialAnswer(domain, request);
+        if (!answer) return 1;
+        process.stdout.write(`username=${answer.username}\npassword=${answer.password}\n`);
+        return 0;
+      }
       if (action === "list" && args.length <= 2) {
         const hosts = await listHostTokens();
         if (hosts === "unsafe") throw new Error(`${gitHostsFile()} is readable by other users; run chmod 600 on it.`);

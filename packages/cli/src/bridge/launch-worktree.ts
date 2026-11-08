@@ -64,7 +64,9 @@ export async function createLaunchWorktree(cwd: string, request: LaunchWorktreeR
     throw new BridgeError(409, `The folder .claude/worktrees/${worktreeFolderName(branch)} already exists. Choose another branch name.`);
   }
   await mkdir(path.dirname(worktree), { recursive: true });
-  try { await git(root, "worktree", "add", "-b", branch, worktree, head); }
+  // No repository-selected hook or script runs before the agent starts:
+  // `git worktree add` would otherwise run the checkout's post-checkout hook.
+  try { await git(root, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-b", branch, worktree, head); }
   catch (error) {
     const detail = error instanceof Error && "stderr" in error ? String((error as { stderr?: unknown }).stderr ?? "").trim().split("\n").at(-1) : "";
     throw new BridgeError(409, `Git could not create the worktree${detail ? `: ${detail.replace(/^fatal:\s*/, "")}` : "."}`);

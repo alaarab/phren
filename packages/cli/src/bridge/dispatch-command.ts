@@ -1,8 +1,12 @@
 import { ownerInboxSchema } from "./owner-inbox.js";
 import { prsSchema } from "./return-contract.js";
+import { readFile } from "node:fs/promises";
+import type { Readable } from "node:stream";
 import { parseArgs } from "node:util";
 import { hookRequest } from "./client.js";
-import { dispatchSchema } from "./dispatch.js";
+import { DISPATCH_PROMPT_LIMIT, dispatchSchema, type DispatchInput } from "./dispatch.js";
+import { idempotencyKeySchema } from "./dispatch-idempotency.js";
+import { waitForDispatch } from "./dispatch-wait.js";
 import { handOff, moveSession } from "./hand-off.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { dispatchIdFromEnv } from "./launch-brief.js";
@@ -56,15 +60,67 @@ export async function runDispatch(args: string[]): Promise<number> {
     const { listLiveSessions } = await import("./hand-off.js");
     console.log(JSON.stringify(await listLiveSessions(), null, 2)); return 0;
   }
+  if (args[0] === "wait") {
+    const { values, positionals } = parseArgs({ args: args.slice(1), allowPositionals: true, options: {
+      timeout: { type: "string" }, json: { type: "boolean" },
+    } });
+    if (positionals.length !== 1) throw new Error("Usage: phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]");
+    const seconds = values.timeout === undefined ? undefined : Number(values.timeout);
+    if (seconds !== undefined && (!Number.isFinite(seconds) || seconds < 0)) throw new Error("--timeout is a non-negative number of seconds.");
+    return waitForDispatch(positionals[0], { timeoutMs: seconds === undefined ? undefined : seconds * 1000 });
+  }
+  if (args[0] === "close" && args.length === 2 && /^[a-f0-9-]{36}$/i.test(args[1])) {
+    const result = await hookRequest("/v1/dispatch/cancel", { dispatch: args[1] });
+    console.log(JSON.stringify({ dispatch: result.dispatch ?? args[1], closed: result.closed === true }, null, 2));
+    return 0;
+  }
+  const input = await dispatchInputFromArgs(args);
+  // Run inside an agent's pane, the dispatch remembers that pane for return notices.
+  const origin = await terminalPaneFromEnv();
+  const result = await hookRequest("/v1/dispatch", { ...input, ...(origin ? { origin } : {}) }, undefined, 180_000);
+  console.log(JSON.stringify(result, null, 2));
+  return result.ok === true || result.existing === true ? 0 : 1;
+}
+
+const DISPATCH_USAGE = "Usage: phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [--permission-mode supervised|auto-edits|auto|full-access] [explicit parent flags]";
+
+/** The brief limit shared with dispatchSchema. */
+export const PROMPT_LIMIT = DISPATCH_PROMPT_LIMIT;
+
+/** A brief from a file, or stdin for `-`. The text never goes through argv. */
+export async function readPromptFile(file: string, stdin: Readable = process.stdin): Promise<string> {
+  const prompt = file === "-" ? await (async () => {
+    let text = "";
+    for await (const chunk of stdin) text += String(chunk);
+    return text;
+  })() : await readFile(file, "utf8");
+  if (prompt.length > PROMPT_LIMIT) throw new Error(`Worker brief is too large: ${prompt.length} characters; the limit is ${PROMPT_LIMIT}.`);
+  return prompt;
+}
+
+/** The dispatch form's argv, prompt file/stdin and defaults, without reaching a Hook. */
+export async function dispatchInputFromArgs(args: string[], stdin: Readable = process.stdin): Promise<DispatchInput> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     "keep-open": { type: "boolean" },
-    harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, "permission-mode": { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
+    harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, "permission-mode": { type: "string" },
+    prompt: { type: "string" }, "prompt-file": { type: "string" }, label: { type: "string" }, "idempotency-key": { type: "string" },
+    worktree: { type: "boolean" }, branch: { type: "string" },
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },
     "parent-server": { type: "string" }, "parent-workspace": { type: "string" }, "parent-tab": { type: "string" }, "parent-pane": { type: "string" },
   } });
-  if (positionals.length !== 2) throw new Error("Usage: phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode|copilot] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [--permission-mode supervised|auto-edits|auto|full-access] [explicit parent flags]");
+  if (positionals.length !== 2) throw new Error(DISPATCH_USAGE);
+  const [computer, project] = positionals;
+  const promptFile = values["prompt-file"];
+  if ((values.prompt === undefined) === (promptFile === undefined)) throw new Error("Give exactly one of --prompt and --prompt-file.");
+  const prompt = promptFile !== undefined ? await readPromptFile(promptFile, stdin) : values.prompt!;
+  const key = values["idempotency-key"];
+  if (key !== undefined && !idempotencyKeySchema.safeParse(key).success) {
+    throw new Error(idempotencyKeySchema.safeParse(key).error!.issues[0]?.message ?? "Invalid idempotency key.");
+  }
+  const label = values.label ?? (computer === "local" ? (key ? key.slice(0, 60) : "gitboy agent") : undefined);
+  if (values.branch !== undefined && !values.worktree) throw new Error("--branch needs --worktree.");
   const parentValues = ["parent-provider", "parent-session", "parent-computer", "parent-server", "parent-workspace", "parent-tab", "parent-pane"] as const;
-  const hasParent = parentValues.some(key => values[key] !== undefined);
+  const hasParent = parentValues.some(name => values[name] !== undefined);
   const parent = hasParent ? {
     provider: values["parent-provider"], session: values["parent-session"], computer: values["parent-computer"],
   } : undefined;
@@ -72,21 +128,18 @@ export async function runDispatch(args: string[]): Promise<number> {
     server: values["parent-server"], workspace: values["parent-workspace"], tab: values["parent-tab"], pane: values["parent-pane"],
     source: values["parent-provider"], session: values["parent-session"],
   } : undefined;
-  const { "permission-mode": permissionMode, "keep-open": keepOpen, ...rest } = values;
-  const ordinary = { ...Object.fromEntries(Object.entries(rest).filter(([key]) => !key.startsWith("parent-"))), ...(permissionMode !== undefined ? { permissionMode } : {}), ...(keepOpen ? { closeOnFinish: false } : {}) };
-  const parsed = dispatchSchema.safeParse({ computer: positionals[0], project: positionals[1], ...ordinary,
+  const { "permission-mode": permissionMode, "keep-open": keepOpen, prompt: _prompt, "prompt-file": _promptFile, "idempotency-key": _key, worktree, branch, ...rest } = values;
+  const ordinary = { ...Object.fromEntries(Object.entries(rest).filter(([name]) => !name.startsWith("parent-"))),
+    ...(permissionMode !== undefined ? { permissionMode } : {}), ...(keepOpen ? { closeOnFinish: false } : {}),
+    ...(worktree ? { worktree: true } : {}), ...(branch !== undefined ? { branch } : {}), ...(key !== undefined ? { idempotencyKey: key } : {}) };
+  const parsed = dispatchSchema.safeParse({ computer, project, prompt, ...(label !== undefined ? { label } : {}), ...ordinary,
     ...(parent ? { parent, parentTarget } : {}) });
   if (!parsed.success) {
     // Name the flag, not a schema path: a missing --label or --prompt is the usual slip.
     const flag = (path: PropertyKey[]) => path.length ? (["computer", "project"].includes(String(path[0])) ? `<${String(path[0])}>` : `--${String(path[0]).replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`) : "input";
     throw new Error(`phren dispatch: ${parsed.error.issues.map(issue => `${flag(issue.path)} ${issue.code === "invalid_type" && /received undefined/.test(issue.message) ? "is required" : issue.message}`).join("; ")}. Run phren dispatch for usage.`);
   }
-  const input = parsed.data;
-  // Run inside an agent's pane, the dispatch remembers that pane for return notices.
-  const origin = await terminalPaneFromEnv();
-  const result = await hookRequest("/v1/dispatch", { ...input, ...(origin ? { origin } : {}) }, undefined, 180_000);
-  console.log(JSON.stringify(result, null, 2));
-  return result.ok === true ? 0 : 1;
+  return parsed.data;
 }
 
 export async function runHandOff(args: string[]): Promise<number> {

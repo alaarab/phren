@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `phren dispatch local <project>` places a worker on this computer with `--prompt-file -` (stdin, never argv), `--idempotency-key` (durable for 30 days; a repeated key returns the same dispatch with `existing: true`), and `--worktree [--branch <name>]` (a fresh worktree per dispatch, created with repository hooks disabled).
+- `phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]` follows one dispatch as NDJSON (running, needs_you, then a final done, failed, gone or timeout line), peeks at returns so a conductor's stay unread, and acknowledges only its own. Exit codes 0 done, 1 failed or gone, 124 timeout.
+- `phren dispatch close <dispatch-id>` cancels a running dispatch, stops its agent, closes its pane, and ends its wait `failed` with `error: "cancelled"`; a repeated close answers `closed: false`.
+- Dispatches with an idempotency key run in the harness's standard permission mode (`full-access` is refused), never inherit the caller's environment, use only this computer's stored gitboy token through a Git credential helper for Git and the API, and create worktrees without running repository hooks.
 - `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
 - Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.
 
