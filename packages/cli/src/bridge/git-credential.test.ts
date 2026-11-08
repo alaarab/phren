@@ -1,12 +1,14 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { gitCredentialCommand, keyedExplicitEnv, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
-import { writeManagedConfig } from "./dispatch-clone.js";
+import { cloneStartDirectory, dispatchClonePaths, writeManagedConfig } from "./dispatch-clone.js";
 import { explicitAgentCommand } from "./terminal-tmux.js";
+import { herdrExplicitCommand, herdrTerminal } from "./terminal-herdr.js";
+import { terminalPaneFromEnv } from "./terminal.js";
 import { resolveAgentToken, resolveHostToken, writeHostToken } from "./git-host-auth.js";
 
 const execFileAsync = promisify(execFile);
@@ -63,13 +65,20 @@ describe("the gitboy credential helper", () => {
     expect(command).not.toContain("secret");
     expect(command).not.toMatch(/\bGITBOY_TOKEN=/);
     expect(command).not.toMatch(/\bGH_TOKEN=/);
+    expect(herdrExplicitCommand({ name: "worker", kind: "codex", args: ["-a", "untrusted", "-s", "read-only"], timeoutMs: 1_000, env, envExact: true })).toBe(command);
+  });
+
+  it("adds our pane identity variables to the explicit environment", async () => {
+    const paneEnv = herdrTerminal.paneEnv?.("default", { workspace: "w1", tab: "t1", pane: "p1" }) ?? {};
+    const env = { ...keyedExplicitEnv({ PATH: "/bin" }, { GITBOY_HOST: "gitboy.example.com" }), ...paneEnv };
+    expect(await terminalPaneFromEnv(env)).toMatchObject({ server: "default", workspace: "w1", tab: "t1", pane: "p1" });
   });
 
   it("uses only a managed global config, so user URL overrides do not apply", async () => {
     const dir = await repoFrom("git@gitboy.example.com:o/r.git");
     await git(dir, "config", "user.name", "Sam Owner");
     await git(dir, "config", "user.email", "sam@example.com");
-    const managed = path.join(root, "managed.gitconfig");
+    const managed = dispatchClonePaths("50000000-0000-4000-8000-000000000004").gitConfigFile;
     const user = path.join(root, "user.gitconfig");
     await writeManagedConfig(managed, "gitboy.example.com", dir);
     await writeFile(user, '[credential "https://gitboy.example.com"]\n\thelper = user-helper\n[http "https://gitboy.example.com/"]\n\textraHeader = Authorization: secret\n');
@@ -81,6 +90,27 @@ describe("the gitboy credential helper", () => {
       .toBe("!phren bridge git-credential");
     expect((await execFileAsync("git", ["-C", dir, "config", "--get", "core.sshCommand"], { env: managedEnv })).stdout.trim()).toBe("false");
     expect((await execFileAsync("git", ["-C", dir, "config", "--get", "user.name"], { env: managedEnv })).stdout.trim()).toBe("Sam Owner");
+  });
+
+  it("refuses a symlinked project folder that escapes the clone", async () => {
+    const repo = path.join(root, "repo");
+    const checkout = path.join(repo, "app");
+    const clone = path.join(root, "clone");
+    const outside = path.join(root, "outside");
+    await mkdir(checkout, { recursive: true });
+    await mkdir(clone, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await symlink(outside, path.join(clone, "app"));
+    await expect(cloneStartDirectory(clone, repo, checkout)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("refuses clone paths outside the managed root", async () => {
+    const dir = await repo();
+    const outside = path.join(root, "outside");
+    await expect(createDispatchClone(dir, { branch: "agent/escape", dispatchId: "50000000-0000-4000-8000-000000000003",
+      paths: { cloneDir: outside, gitConfigFile: path.join(root, "outside.gitconfig"), agentTokenFile: path.join(outside, "phren-agent-token") } }))
+      .rejects.toMatchObject({ status: 403 });
+    expect(await stat(outside).catch(() => undefined)).toBeUndefined();
   });
 
   it("refuses a gitboy remote whose owner and repository cannot be derived", async () => {

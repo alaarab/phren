@@ -6,7 +6,7 @@ import { browserEnv } from "./browser-env.js";
 import { herdrSocketPath, rpc, snapshot } from "./herdr.js";
 import { BridgeError, object, objects, type Json } from "./protocol.js";
 import type { AgentStart, PaneProcesses, TerminalPane, TerminalProvider } from "./terminal.js";
-import { agentFromCommand } from "./terminal-tmux.js";
+import { agentFromCommand, explicitAgentCommand } from "./terminal-tmux.js";
 
 const text = (value: unknown): string | undefined => typeof value === "string" && value ? value : undefined;
 
@@ -71,6 +71,28 @@ async function startPhren(server: string, pane: string, { name, args, timeoutMs 
   }
   await rpc(server, "pane.report_agent", { pane_id: pane, source: PHREN_REPORT_SOURCE, agent: "phren", state: "idle" });
   await rpc(server, "agent.rename", { target: pane, name }).catch(() => undefined);
+}
+
+/** The exact command Herdr types for a keyed launch. */
+export function herdrExplicitCommand(agent: AgentStart): string {
+  return explicitAgentCommand(agent.kind, agent.args, agent.env ?? {});
+}
+
+/** Keyed launches: type our explicit `env -i` command at the pane's shell. */
+async function startExplicit(server: string, pane: string, { kind, args, timeoutMs, env }: AgentStart): Promise<void> {
+  const before = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
+  if (!Number.isSafeInteger(before.shell_pid) || before.foreground_process_group_id !== before.shell_pid) {
+    throw new BridgeError(409, `Herdr: agent target pane ${pane} is not an available shell`, { herdrCode: "agent_pane_busy" });
+  }
+  await rpc(server, "pane.send_text", { pane_id: pane, text: herdrExplicitCommand({ name: "", kind, args, timeoutMs, env }) });
+  await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["Enter"] });
+  const deadline = Date.now() + Math.min(timeoutMs, 30_000);
+  for (;;) {
+    const info = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
+    if (objects(info.foreground_processes).some(p => typeof p.cmdline === "string" && agentFromCommand(p.cmdline) === kind)) return;
+    if (Date.now() >= deadline) throw new BridgeError(504, `${kind} did not start in the Herdr pane. Check that it is installed and on the login shell's PATH.`);
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
 }
 
 /** A Herdr snapshot's panes in the provider's shape; Herdr's agent report becomes hints. */
@@ -149,6 +171,7 @@ export const herdrTerminal: TerminalProvider = {
   async startAgent(server, pane, agent) {
     const { name, kind, args, timeoutMs } = agent;
     if (kind === "phren") { await startPhren(server, pane, agent); return; }
+    if (agent.envExact) { await startExplicit(server, pane, agent); return; }
     // Herdr waits up to `timeout_ms` for the agent to become ready; the socket waits a little longer.
     await rpc(server, "agent.start", { name, kind, pane_id: pane, timeout_ms: timeoutMs, ...(args.length ? { args } : {}) }, undefined, timeoutMs + 5_000);
   },

@@ -160,9 +160,13 @@ launch gets an explicit environment only: `HOME`, `USER`, `LOGNAME`, `PATH`,
 our `GITBOY_HOST`, `GITBOY_TOKEN_FILE`, `GIT_CONFIG_GLOBAL`,
 `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`. tmux runs `exec env -i`
 after shell init; Herdr and the Codex server receive exactly that set. The
-clone, managed config and token file are registered before launch and removed
-when the dispatch closes or finishes, or on reconcile after seven days. A
-missing agent token fails closed with `No gitboy agent token for <domain>...`.
+clone, managed config and token file are registered before launch. The token is
+removed as soon as the worker ends. A completed clone is removed only after the
+pane is confirmed gone and the dispatch is not keep-open. Failed, cancelled and
+interrupted clones are kept as recoverable work with `retainedUntil` set to
+seven days; their config and token are removed immediately, and reconciliation
+removes the clone after that date. A missing agent token fails closed with
+`No gitboy agent token for <domain>...`.
 
 `close` calls `POST /v1/dispatch/cancel` with exactly one of
 `{ "dispatch": "<uuid>" }` or `{ "idempotencyKey": "<key>" }`: the Hook looks

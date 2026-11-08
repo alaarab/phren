@@ -1,5 +1,5 @@
 import { intentionallyClosed } from "./worker-close.js";
-import { removeDispatchClone } from "./dispatch-clone.js";
+import { removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
 import { workerPrs, readIntegrator } from "./worker-reports.js";
 import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
@@ -997,9 +997,29 @@ export class DispatchReturns {
   }
 
   async cleanup(): Promise<void> {
+    const retained = () => new Date(this.now() + 7 * 24 * 60 * 60_000).toISOString();
     for (const receipt of await dispatchStatus()) {
-      if (receipt.closedAt || (receipt.returned && ["done", "failed", "gone"].includes(receipt.returned.state))) {
-        await removeDispatchClone({ cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile });
+      const paths = { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
+      const state = receipt.returned?.state;
+      if (state === "failed" || state === "gone") {
+        // Recoverable work stays; its secrets do not.
+        await removeDispatchSecrets(paths);
+        if (!receipt.retainedUntil) await updateReceipt(receipt.id, value => {
+          if (value.retainedUntil) return false;
+          value.retainedUntil = retained(); return true;
+        }).catch(() => undefined);
+        continue;
+      }
+      if (state === "done") {
+        await removeDispatchSecrets(paths);
+        if (receipt.closeOnFinish === false) {
+          if (!receipt.retainedUntil) await updateReceipt(receipt.id, value => {
+            if (value.retainedUntil) return false;
+            value.retainedUntil = retained(); return true;
+          }).catch(() => undefined);
+          continue;
+        }
+        if (receipt.closedAt) { await removeDispatchClone(paths); continue; }
       }
       if (!receipt.closePending || receipt.closedAt || receipt.returned?.at !== receipt.closePending.at || receipt.returned.state !== "done" || !receipt.returned.read) continue;
       const peer = this.isSelf(receipt) ? undefined : (await this.peers().catch(() => [])).find(peer => peer.name === receipt.computer);

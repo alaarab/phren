@@ -27,7 +27,7 @@ import { limitedBy, limitKey, readAccountLimits, type AccountRoom, type WindowRo
 import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplies, poolRefusal, projectRule, withPolicy, type PolicyRoom, type PoolRule } from "./account-policy.js";
 import { arrivalSchema, briefArrival, type BriefArrival } from "./launch-brief.js";
 import { worktreeBranch } from "./launch-worktree.js";
-import { dispatchClonePaths, removeDispatchClone, type DispatchClonePaths } from "./dispatch-clone.js";
+import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets, type DispatchClonePaths } from "./dispatch-clone.js";
 import { findIdempotencyKey, idempotencyKeySchema, LAUNCH_INTERRUPTED_MS, listIdempotencyRecords, releaseIdempotencyKey, reserveIdempotencyKey, updateIdempotencyPhase, waitForIdempotencyKey, worktreeBranchFor, type IdempotencyRecord } from "./dispatch-idempotency.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -106,8 +106,9 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   cancelRequestedAt: timestamp.optional(),
   closePending: z.object({ at: timestamp, turn: z.string().optional() }).strict().optional(),
   agentTokenFile: z.string().max(4096).optional().describe("Private file holding the keyed worker's gitboy agent token; removed when it closes or finishes."),
-  cloneDir: z.string().max(4096).optional().describe("The keyed dispatch's isolated clone; removed when it closes or finishes."),
-  gitConfigFile: z.string().max(4096).optional().describe("The keyed dispatch's managed global Git config; removed with the clone."),
+  cloneDir: z.string().max(4096).optional().describe("The keyed dispatch's isolated clone; removed when it closes or finishes, or after its retention date."),
+  gitConfigFile: z.string().max(4096).optional().describe("The keyed dispatch's managed global Git config; removed with the clone or as soon as a failed/cancelled worker ends."),
+  retainedUntil: timestamp.optional().describe("When a failed, cancelled or keep-open clone may be removed by reconciliation."),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
     background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
@@ -324,6 +325,33 @@ async function lookupKeyedDispatch(key: string): Promise<Json | undefined> {
   return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
 }
 
+/** A key cancelled before its receipt existed: settle it as failed/cancelled without launching. */
+export async function settleCancelledReservation(record: IdempotencyRecord): Promise<Receipt> {
+  const existing = await readReceipt(record.dispatchId).catch(() => undefined);
+  if (existing) return existing;
+  const at = new Date().toISOString();
+  const receipt: Receipt = {
+    id: record.dispatchId,
+    computer: (record.computer as Receipt["computer"] | undefined) ?? "local",
+    project: record.project ?? "unknown",
+    harness: (record.harness as Receipt["harness"] | undefined) ?? "claude",
+    label: record.label ?? "gitboy agent",
+    createdAt: record.createdAt,
+    updatedAt: at,
+    state: "failed",
+    error: "cancelled",
+    returned: { state: "failed", at, error: "cancelled", read: false },
+    retainedUntil: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+    ...(record.cloneDir ? { cloneDir: record.cloneDir } : {}),
+    ...(record.gitConfigFile ? { gitConfigFile: record.gitConfigFile } : {}),
+    ...(record.agentTokenFile ? { agentTokenFile: record.agentTokenFile } : {}),
+  };
+  await saveReceipt(receipt);
+  await removeDispatchSecrets({ cloneDir: record.cloneDir, gitConfigFile: record.gitConfigFile, agentTokenFile: record.agentTokenFile });
+  await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
+  return receipt;
+}
+
 /**
  * A reservation stuck in `reserved` or `launching` for five minutes with no
  * target and no live worker is an interrupted launch. It becomes a failed
@@ -331,9 +359,10 @@ async function lookupKeyedDispatch(key: string): Promise<Json | undefined> {
  */
 export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Promise<void> {
   const created = Date.parse(record.createdAt);
-  if (Number.isFinite(created) && Date.now() - created > 7 * 24 * 60 * 60_000) {
-    const terminal = await readReceipt(record.dispatchId).catch(() => undefined);
-    if (terminal && (terminal.closedAt || (terminal.returned && ["done", "failed", "gone"].includes(terminal.returned.state)))) {
+  const terminal = await readReceipt(record.dispatchId).catch(() => undefined);
+  if (terminal && (terminal.closedAt || (terminal.returned && ["done", "failed", "gone"].includes(terminal.returned.state)))) {
+    const until = terminal.retainedUntil ? Date.parse(terminal.retainedUntil) : created + 7 * 24 * 60 * 60_000;
+    if (Number.isFinite(until) && Date.now() >= until) {
       await removeDispatchClone({
         cloneDir: record.cloneDir ?? terminal.cloneDir,
         gitConfigFile: record.gitConfigFile ?? terminal.gitConfigFile,
@@ -412,8 +441,11 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       current.error = "launch interrupted";
       current.updatedAt = new Date().toISOString();
       current.returned = { state: "failed", at: current.updatedAt, error: "launch interrupted", read: false };
+      current.retainedUntil = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
       await saveReceipt(current);
     }).catch(() => undefined);
+    await removeDispatchSecrets({ cloneDir: record.cloneDir ?? receipt.cloneDir, gitConfigFile: record.gitConfigFile ?? receipt.gitConfigFile,
+      agentTokenFile: record.agentTokenFile ?? receipt.agentTokenFile });
     await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
     return;
   }
@@ -453,11 +485,13 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
     state: "failed",
     error: "launch interrupted",
     returned: { state: "failed", at, error: "launch interrupted", read: false },
+    retainedUntil: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
     ...(record.cloneDir ? { cloneDir: record.cloneDir } : {}),
     ...(record.gitConfigFile ? { gitConfigFile: record.gitConfigFile } : {}),
     ...(record.agentTokenFile ? { agentTokenFile: record.agentTokenFile } : {}),
   };
   await saveReceipt(fallback);
+  await removeDispatchSecrets({ cloneDir: record.cloneDir, gitConfigFile: record.gitConfigFile, agentTokenFile: record.agentTokenFile });
   await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
 }
 
@@ -799,6 +833,11 @@ export class DispatchService {
     const key = data.idempotencyKey!;
     const existing = await lookupKeyedDispatch(key);
     if (existing) return existing;
+    const known = await findIdempotencyKey(key);
+    if (known?.cancelRequestedAt) {
+      const receipt = await settleCancelledReservation(known);
+      return { ok: false, ...receipt, dispatch: receipt.id, existing: true };
+    }
     const owner = randomUUID();
     const paths = data.worktree === true ? dispatchClonePaths(dispatchId) : undefined;
     const reservation = await reserveIdempotencyKey(key, dispatchId, owner,
@@ -951,6 +990,18 @@ export class DispatchService {
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}),
         ...(keyed?.paths ? { cloneDir: keyed.paths.cloneDir, gitConfigFile: keyed.paths.gitConfigFile, agentTokenFile: keyed.paths.agentTokenFile } : {}) };
       await save(receipt, originWindow);
+      const keyCancelled = async (): Promise<boolean> => {
+        if (!keyed) return false;
+        const record = await findIdempotencyKey(keyed.key);
+        if (!record?.cancelRequestedAt) return false;
+        receipt.state = "failed";
+        receipt.error = "cancelled";
+        receipt.returned = { state: "failed", at: new Date().toISOString(), error: "cancelled", read: false };
+        await persistReceipt(receipt, originWindow);
+        await updateIdempotencyPhase(keyed.key, keyed.owner, "failed").catch(() => undefined);
+        return true;
+      };
+      if (await keyCancelled()) return { ok: false, ...receipt, dispatch: receipt.id, existing: false };
       const cancelIfRequested = async (): Promise<Json | undefined> => {
         const durable = await updateReceipt(receipt.id, () => false, { duringPlacement: true });
         if (!durable?.cancelRequestedAt) return undefined;
@@ -972,6 +1023,7 @@ export class DispatchService {
         if (keyed && !await updateIdempotencyPhase(keyed.key, keyed.owner, "launching")) {
           throw new BridgeError(409, "This dispatch no longer owns its idempotency key.");
         }
+        if (await keyCancelled()) return { ok: false, ...receipt, dispatch: receipt.id, existing: false };
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,

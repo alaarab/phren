@@ -365,11 +365,15 @@ used; if it is missing the dispatch fails with `No gitboy agent token for
 <domain>. Run phren bridge git-host set <domain> gitboy with a gba_ token.`
 The token never goes into argv, a remote URL or a log. For the API the agent
 gets only `GITBOY_TOKEN_FILE`, a 0600 file in the clone's git dir. The clone,
-managed config and token file are registered before the worker starts and are
-removed when the dispatch closes or finishes (or on reconcile for terminal
-dispatches older than seven days). A gitboy `gba_` token is stored as an agent
-token: `phren bridge git-host set` prints the agent identity and expiry, and
-`phren bridge git-host list` marks it `agent token`.
+managed config and token file are registered before the worker starts. The
+token is removed as soon as the worker ends, whatever the outcome. A completed
+clone is removed only after the pane is confirmed gone and the dispatch is not
+keep-open. Failed, cancelled and interrupted clones are kept as recoverable
+work, with their managed config and token removed immediately and
+`retainedUntil` set to seven days; reconciliation removes them after that. A
+gitboy `gba_` token is stored as an agent token: `phren bridge git-host set`
+prints the agent identity and expiry, and `phren bridge git-host list` marks it
+`agent token`.
 
 `wait` prints NDJSON, one line per state change, and leaves every other return
 unread for a conductor on the same Hook:

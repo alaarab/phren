@@ -34,6 +34,7 @@ const recordSchema = z.object({
   cloneDir: z.string().max(4096).optional(),
   gitConfigFile: z.string().max(4096).optional(),
   agentTokenFile: z.string().max(4096).optional(),
+  cancelRequestedAt: z.string().datetime().optional(),
 }).strict();
 export type IdempotencyRecord = z.infer<typeof recordSchema>;
 export type IdempotencyPhase = z.infer<typeof phaseSchema>;
@@ -156,6 +157,24 @@ export async function updateIdempotencyPhase(key: string, owner: string, phase: 
   if (!record || record.owner !== owner) return false;
   await atomic(file, JSON.stringify({ ...record, phase }), 0o600);
   return true;
+}
+
+/** Record a cancellation on the reservation itself, under its lock, before any receipt exists. */
+export async function requestIdempotencyCancel(key: string, now = Date.now()): Promise<IdempotencyRecord | undefined> {
+  const owner = randomUUID();
+  const lock = await acquireLock(key, owner, now);
+  if (!lock) throw new BridgeError(503, "The idempotency key is busy; retry.");
+  try {
+    const file = idempotencyKeyFile(key);
+    const record = await readKey(file);
+    if (!record) return undefined;
+    if (record.cancelRequestedAt) return record;
+    record.cancelRequestedAt = new Date(now).toISOString();
+    await atomic(file, JSON.stringify(record), 0o600);
+    return record;
+  } finally {
+    await releaseLock(lock);
+  }
 }
 
 /** Release a reservation this caller owns and never launched. */

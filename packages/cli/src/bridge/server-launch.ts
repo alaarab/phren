@@ -494,12 +494,10 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // ordinary worktree of the user's checkout.
   const keyed = role === "agent" && !!data.idempotencyKey;
   const keyedDispatchId = keyed ? z.string().uuid().parse(data.dispatchId ?? brief?.id ?? randomUUID()) : undefined;
-  const givenPaths = z.object({ cloneDir: z.string().max(4096), gitConfigFile: z.string().max(4096), agentTokenFile: z.string().max(4096) })
-    .strict().optional().parse(data.phrenPaths);
   let worktree: (LaunchWorktree & Partial<DispatchClonePaths>) | undefined;
   if (worktreeRequest) {
     worktree = keyed
-      ? await createDispatchClone(projectDirectory!, { branch: worktreeRequest.branch, dispatchId: keyedDispatchId!, paths: givenPaths ?? dispatchClonePaths(keyedDispatchId!) })
+      ? await createDispatchClone(projectDirectory!, { branch: worktreeRequest.branch, dispatchId: keyedDispatchId!, paths: dispatchClonePaths(keyedDispatchId!) })
       : await createLaunchWorktree(projectDirectory!, worktreeRequest);
   }
   // The same root as the conductor, chosen by this computer's PHREN_PATH.
@@ -566,9 +564,15 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (!created) { await removeAgentTokenFile(agentTokenFile); throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`); }
   const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
   await options.onPlaced?.({ server, ...place, source: kind });
+  // The pane identity variables are ours (Herdr/tmux), not the caller's, and
+  // the worker's hooks need them under the explicit keyed environment too.
+  const paneEnv = terminalProvider().paneEnv?.(server, place) ?? {};
+  const identityEnv = Object.fromEntries(Object.entries(paneEnv)
+    .filter(([key]) => /^(?:HERDR_(?:ENV|SOCKET_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)|TMUX|TMUX_PANE)$/.test(key)));
+  const launchEnv = keyedEnv ? { ...keyedEnv, ...identityEnv } : env;
   const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
     ...(data.effort === undefined ? {} : { effort }),
-    env: keyedEnv ? { ...keyedEnv } : { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) }, envExact: !!keyedEnv,
+    env: keyedEnv ? { ...(launchEnv ?? {}) } : { ...paneEnv, ...(env ?? {}) }, envExact: !!keyedEnv,
     ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief, ...(permissionMode ? { remoteArgs: codexModeFlags(permissionMode) } : {}) }).catch(error => {
     const note = `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`;
     if (error instanceof AppServerUnsupportedError) logger.debug("launch", note); else logger.warn("launch", note);
@@ -593,7 +597,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
     ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
   try {
-    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}), ...(keyedEnv ? { envExact: true } : {}) });
+    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(launchEnv ? { env: launchEnv } : {}), ...(keyedEnv ? { envExact: true } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
     if (error instanceof BridgeError && error.message.startsWith("Codex exited at start:")) throw error;

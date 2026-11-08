@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DispatchService, dispatchStatus, reconcileInterruptedDispatches } from "./dispatch.js";
+import { DispatchService, dispatchStatus, reconcileInterruptedDispatches, updateReceipt } from "./dispatch.js";
 import { findIdempotencyKey, idempotencyKeyFile, idempotencyLockFile, reserveIdempotencyKey, updateIdempotencyPhase } from "./dispatch-idempotency.js";
+import { DispatchReturns } from "./dispatch-returns.js";
+import { dispatchClonePaths } from "./dispatch-clone.js";
 import { recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { closeRequestFromArgs, dispatchInputFromArgs } from "./dispatch-command.js";
 import { waitForDispatch } from "./dispatch-wait.js";
@@ -166,6 +168,41 @@ describe("local dispatch", () => {
     expect(recovered).toMatchObject({ state: "accepted", target: identified });
     expect(recovered?.target).not.toHaveProperty("startingToken");
     expect((await findIdempotencyKey(key))?.phase).toBe("launched");
+  });
+
+  it("persists a cancel before the first receipt and never launches", async () => {
+    const key = "gitboy:host:pre-receipt";
+    const id = randomUUID();
+    await reserveIdempotencyKey(key, id, randomUUID(), { project: "phren", harness: "codex", label: "Pre", computer: "local" });
+    expect(await cancelDispatch({ idempotencyKey: key })).toMatchObject({ dispatch: id, closed: false });
+    expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({
+      state: "failed", error: "cancelled", returned: { state: "failed", error: "cancelled" },
+    });
+    expect(await service().dispatch({ ...brief, idempotencyKey: key })).toMatchObject({ existing: true, id, state: "failed", error: "cancelled" });
+    expect(launches()).toHaveLength(0);
+  });
+
+  it("retains a failed clone, removes its secrets, and deletes it after retention", async () => {
+    const key = "gitboy:host:retain";
+    const placed = await service().dispatch({ ...brief, idempotencyKey: key, worktree: true });
+    const paths = dispatchClonePaths(placed.id);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.gitConfigFile, "managed config\n");
+    await writeFile(paths.agentTokenFile, "token\n");
+    await updateReceipt(placed.id, value => {
+      value.returned = { state: "failed", at: new Date().toISOString(), error: "boom", read: false };
+      return true;
+    });
+    const returns = new DispatchReturns({ now: () => Date.now(), request: async () => ({}), peers: async () => [],
+      isLocal: () => true, localWorkers: async () => ({ workers: [] }) });
+    await returns.cleanup();
+    expect(await stat(paths.cloneDir).then(() => true, () => false)).toBe(true);
+    expect(await stat(paths.gitConfigFile).catch(() => undefined)).toBeUndefined();
+    expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+    expect((await dispatchStatus()).find(row => row.id === placed.id)?.retainedUntil).toEqual(expect.any(String));
+    await updateReceipt(placed.id, value => { value.retainedUntil = new Date(Date.now() - 1_000).toISOString(); return true; });
+    await reconcileInterruptedDispatches();
+    expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
   });
 
   it("closes a running dispatch once and its wait ends cancelled", async () => {

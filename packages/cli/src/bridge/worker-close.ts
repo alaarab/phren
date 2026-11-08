@@ -7,9 +7,9 @@ import { validateTarget, paneChatState } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
-import { originPaneSchema, reconcileIdempotencyKey, updateReceipt, type Receipt } from "./dispatch.js";
-import { idempotencyKeySchema } from "./dispatch-idempotency.js";
-import { removeDispatchClone } from "./dispatch-clone.js";
+import { originPaneSchema, reconcileIdempotencyKey, settleCancelledReservation, updateReceipt, type Receipt } from "./dispatch.js";
+import { idempotencyKeySchema, requestIdempotencyCancel } from "./dispatch-idempotency.js";
+import { removeDispatchSecrets } from "./dispatch-clone.js";
 type ClosedTarget = Target | StartingTarget;
 const closedTargetSchema = z.union([targetSchema, startingTargetSchema]);
 const file = (target: ClosedTarget) => path.join(bridgeRoot(), "closed-workers", `${createHash("sha256").update(JSON.stringify([target.server, target.workspace, target.tab, target.pane, target.source, "session" in target ? target.session : target.startingToken])).digest("hex")}.json`);
@@ -51,6 +51,16 @@ export function paneBinding(target: Target | StartingTarget, pane: Json | undefi
 
 export function paneRunsTarget(target: Target | StartingTarget, pane: Json | undefined, chat: Json): boolean {
   return paneBinding(target, pane, chat) === "match";
+}
+
+async function retainCancelled(dispatchId: string, duringPlacement: boolean, paths: { cloneDir?: string; gitConfigFile?: string; agentTokenFile?: string }): Promise<void> {
+  await finalizeCancelled(dispatchId, duringPlacement);
+  await removeDispatchSecrets(paths);
+  await updateReceipt(dispatchId, value => {
+    if (value.retainedUntil) return false;
+    value.retainedUntil = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+    return true;
+  }).catch(() => undefined);
 }
 
 async function finalizeCancelled(dispatchId: string, duringPlacement = false): Promise<boolean> {
@@ -97,7 +107,9 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
   }, { duringPlacement: true });
   if (!receipt) {
     if (record && (record.phase === "reserved" || record.phase === "launching")) {
-      return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+      const cancelled = await requestIdempotencyCancel(record.key);
+      if (cancelled) await settleCancelledReservation(cancelled);
+      return { ok: true, dispatch: dispatchId, closed: false };
     }
     return { ok: true, dispatch: dispatchId, closed: false };
   }
@@ -116,8 +128,7 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
   const cleanupPaths = { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
   if (!target) {
     // No pane was recorded: there is nothing to close, and the worker is gone.
-    await finalizeCancelled(dispatchId, duringPlacement);
-    await removeDispatchClone(cleanupPaths);
+    await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
     return { ok: true, dispatch: dispatchId, closed: false, gone: true };
   }
   const { snapshot, findPane } = await import("./herdr.js");
@@ -129,8 +140,7 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
     if (!pane) {
       // A successful snapshot with no pane is a vanished worker; a failed
       // snapshot above stays pending instead of claiming success.
-      await finalizeCancelled(dispatchId, duringPlacement);
-      await removeDispatchClone(cleanupPaths);
+      await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
       return { ok: true, dispatch: dispatchId, closed: false, gone: true };
     }
     const paneSession = typeof pane.sessionId === "string" ? pane.sessionId : typeof pane.session_id === "string" ? pane.session_id : undefined;
@@ -154,8 +164,7 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
     let after: Json;
     try { after = await snapshot(target.server); } catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
     if (!findPane(after, target)) {
-      await finalizeCancelled(dispatchId, duringPlacement);
-      await removeDispatchClone(cleanupPaths);
+      await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
       return { ok: true, dispatch: dispatchId, closed: true };
     }
   }

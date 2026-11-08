@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
@@ -28,6 +28,23 @@ export function dispatchClonePaths(dispatchId: string): DispatchClonePaths {
   };
 }
 
+const managedRoot = () => path.join(bridgeRoot(), "clones");
+async function canonicalManagedRoot(): Promise<string> {
+  const root = managedRoot();
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  return realpath(root);
+}
+/** Canonical path inside the managed clone root, or a refusal. */
+export async function assertManagedClonePath(candidate: string): Promise<string> {
+  const root = await canonicalManagedRoot();
+  const resolved = await realpath(candidate).catch(() => path.resolve(candidate));
+  const rel = path.relative(root, resolved);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new BridgeError(403, "The keyed clone path is outside Phren's managed clone folder.");
+  }
+  return resolved;
+}
+
 export interface DispatchClone extends DispatchClonePaths {
   /** Where the agent starts: the same folder inside the clone as the project folder in its repository. */
   cwd: string;
@@ -52,6 +69,7 @@ async function userValue(checkout: string, key: "user.name" | "user.email"): Pro
 
 /** Only the keys a keyed worker may inherit: no user URL-specific overrides. */
 export async function writeManagedConfig(file: string, domain: string, checkout: string): Promise<void> {
+  await assertManagedClonePath(file);
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const lines = [
     "[credential]",
@@ -74,6 +92,21 @@ export async function writeManagedConfig(file: string, domain: string, checkout:
   await chmod(file, 0o600);
 }
 
+/** The start folder inside the clone, refusing a symlink or a path that escapes it. */
+export async function cloneStartDirectory(cloneDir: string, root: string, checkout: string): Promise<string> {
+  const clone = await realpath(cloneDir);
+  const inside = path.relative(root, await realpath(checkout));
+  if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) return clone;
+  const candidate = path.join(clone, inside);
+  const info = await lstat(candidate).catch(() => undefined);
+  if (!info) return clone;
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new BridgeError(409, "The project folder in the keyed clone is a symlink or not a directory.");
+  const real = await realpath(candidate);
+  const rel = path.relative(clone, real);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) throw new BridgeError(403, "The project folder in the keyed clone points outside it.");
+  return real;
+}
+
 /** A fresh clone with only our managed global config, never the user's checkout config. */
 export async function createDispatchClone(checkout: string, request: { branch: string; dispatchId: string; paths?: DispatchClonePaths }): Promise<DispatchClone> {
   const root = await gitRoot(checkout);
@@ -82,6 +115,9 @@ export async function createDispatchClone(checkout: string, request: { branch: s
   if (host.kind !== "gitboy" || !host.domain) throw new BridgeError(409, "A keyed worktree dispatch needs a gitboy checkout.");
   const url = credentialFreeRemote(host);
   const paths = request.paths ?? dispatchClonePaths(request.dispatchId);
+  await assertManagedClonePath(paths.cloneDir);
+  await assertManagedClonePath(paths.gitConfigFile);
+  await assertManagedClonePath(paths.agentTokenFile);
   if (await stat(paths.cloneDir).then(() => true, () => false)) throw new BridgeError(409, "This dispatch's clone folder already exists.");
   await mkdir(path.dirname(paths.cloneDir), { recursive: true, mode: 0o700 });
   await writeManagedConfig(paths.gitConfigFile, host.domain, checkout);
@@ -102,17 +138,14 @@ export async function createDispatchClone(checkout: string, request: { branch: s
     throw new BridgeError(409, `Git could not create the keyed clone${detail ? `: ${detail.replace(/^fatal:\s*/, "")}` : "."}`);
   }
   const clone = await realpath(paths.cloneDir);
-  const inside = path.relative(root, await realpath(checkout));
-  const start = inside && !inside.startsWith("..") ? path.join(clone, inside) : clone;
-  const cwd = await stat(start).then(value => value.isDirectory(), () => false) ? start : clone;
+  const cwd = await cloneStartDirectory(clone, root, checkout);
   return {
     ...paths,
     cwd,
     path: clone,
     branch: request.branch,
     async discard() {
-      await rm(clone, { recursive: true, force: true });
-      await unlink(paths.gitConfigFile).catch(() => undefined);
+      await removeDispatchClone(paths);
     },
   };
 }
@@ -120,11 +153,22 @@ export async function createDispatchClone(checkout: string, request: { branch: s
 /** Remove a dispatch's clone, managed config and token file; only paths this Hook made. */
 export async function removeDispatchClone(paths: Partial<DispatchClonePaths> | undefined): Promise<void> {
   if (!paths) return;
-  const root = path.join(bridgeRoot(), "clones");
-  const cloneDir = paths.cloneDir;
-  const id = cloneDir && path.dirname(cloneDir) === root ? path.basename(cloneDir) : undefined;
-  if (cloneDir && id && /^[a-f0-9-]{36}$/i.test(id)) await rm(cloneDir, { recursive: true, force: true }).catch(() => undefined);
-  const config = paths.gitConfigFile;
-  if (config && path.dirname(config) === root && /^[a-f0-9-]{36}\.gitconfig$/i.test(path.basename(config))) await unlink(config).catch(() => undefined);
-  await removeAgentTokenFile(paths.agentTokenFile);
+  const remove = async (candidate: string | undefined, removeOne: (canonical: string) => Promise<void>) => {
+    if (!candidate) return;
+    try { await removeOne(await assertManagedClonePath(candidate)); } catch { /* outside the managed root: never touch it */ }
+  };
+  await remove(paths.cloneDir, canonical => rm(canonical, { recursive: true, force: true }));
+  await remove(paths.gitConfigFile, canonical => unlink(canonical));
+  await remove(paths.agentTokenFile, canonical => removeAgentTokenFile(canonical));
+}
+
+/** Keep the clone (recoverable work) but remove the token and managed config immediately. */
+export async function removeDispatchSecrets(paths: Partial<DispatchClonePaths> | undefined): Promise<void> {
+  if (!paths) return;
+  const remove = async (candidate: string | undefined, removeOne: (canonical: string) => Promise<void>) => {
+    if (!candidate) return;
+    try { await removeOne(await assertManagedClonePath(candidate)); } catch { /* outside the managed root: never touch it */ }
+  };
+  await remove(paths.gitConfigFile, canonical => unlink(canonical));
+  await remove(paths.agentTokenFile, canonical => removeAgentTokenFile(canonical));
 }
