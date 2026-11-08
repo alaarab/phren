@@ -8,7 +8,7 @@ import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 import { originPaneSchema, reconcileIdempotencyKey, settleCancelledReservation, updateReceipt, type Receipt } from "./dispatch.js";
-import { idempotencyKeySchema, withIdempotencyKeyLock } from "./dispatch-idempotency.js";
+import { idempotencyKeySchema, withIdempotencyKeyLock, type IdempotencyRecord } from "./dispatch-idempotency.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
 type ClosedTarget = Target | StartingTarget;
 const closedTargetSchema = z.union([targetSchema, startingTargetSchema]);
@@ -119,8 +119,10 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
   // answers with the id it named.
   if (!dispatchId) return { ok: true, closed: false };
   if (!receipt) {
-    if (record && (record.phase === "reserved" || record.phase === "launching")) {
-      await settleCancelledReservation(record);
+    // Assigned inside the lock callback, so read it through its declared type.
+    const reserved = record as IdempotencyRecord | undefined;
+    if (reserved && (reserved.phase === "reserved" || reserved.phase === "launching")) {
+      await settleCancelledReservation(reserved);
       return { ok: true, dispatch: dispatchId, closed: false };
     }
     return { ok: true, dispatch: dispatchId, closed: false };

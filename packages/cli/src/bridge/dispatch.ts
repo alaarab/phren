@@ -348,9 +348,11 @@ async function lookupKeyedDispatch(key: string): Promise<Json | undefined> {
         return true;
       }, { duringPlacement: true }).catch(() => undefined);
     });
-    receipt = await readReceipt(record.dispatchId).catch(() => receipt);
+    const reread = await readReceipt(record.dispatchId).catch(() => undefined);
+    if (reread) receipt = reread;
   }
-  return { ok: receipt.state === "accepted", ...receipt, dispatch: receipt.id, existing: true };
+  const settled: Receipt = receipt;
+  return { ok: settled.state === "accepted", ...settled, dispatch: settled.id, existing: true };
 }
 
 /** A key cancelled before its receipt existed: settle it as failed/cancelled without launching. */
