@@ -105,6 +105,7 @@ describe("dispatch receipts and selection", () => {
     const calls = vi.mocked(peerRequest).mock.calls;
     // The brief is offered with the launch; this Hook did not take it there, so it is typed, once per delivery id.
     expect(calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2]).toEqual({ project: "phren", kind: "codex", label: "Tests", model: undefined,
+      startingToken: expect.stringMatching(/^[a-f0-9]{64}$/),
       brief: { id: result.id, text: brief.prompt } });
     expect(calls.filter(call => call[1] === "/v1/prompt").map(call => call[2])).toEqual([{ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` }]);
     expect(result.brief).toBe("typed");

@@ -430,6 +430,23 @@ runs the close path immediately when a cancel is pending. Its `wait` then ends
 dispatch answers `{"dispatch":"<id>","closed":false}` and exits 0; an unknown key
 answers `{"closed":false}` with no id.
 
+Every dispatch records a `startingToken` before its launch request, and the
+pane the launch creates carries it. A launch whose reply was lost is
+`launchOutcome: "ambiguous"` (timeouts including 504, 5xx, network or socket
+errors, a lost reply or a crash). A refusal before anything was created
+(`harness_unavailable`, policy or validation errors) is `"not-started"`, and a
+known target or arrival makes it `"started"`. The runner still sees a failed
+return for an ambiguous launch, but cancel and cleanup never treat it as gone
+without proof: `close` recovers the binding from the arrival record, then scans
+a successful snapshot for the starting token. A pane carrying it is adopted and
+closed; a successful snapshot with no pane carrying it confirms no worker, so
+the launch finalizes and its token is removed. A failed snapshot, or a launch
+still placing, stays pending and keeps the token. Interrupted-launch
+reconciliation marks the receipt failed for the runner but removes secrets only
+for `"not-started"` or after 24 hours of successful scans with no pane carrying
+the token; until then it keeps `launchOutcome: "ambiguous"` and rescans on later
+passes.
+
 A dispatch with an idempotency key follows an execution policy enforced by the
 Hook:
 

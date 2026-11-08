@@ -7,7 +7,7 @@ import path from "node:path";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { defaultPhrenPath } from "../phren-paths.js";
-import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
+import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, seedStartingToken, servers, snapshot } from "./herdr.js";
 import { type AgentStart, agentNotReady, terminalKind, terminalName, terminalProvider } from "./terminal.js";
 import { tmuxScroll } from "./terminal-tmux.js";
 import { intervalFromEnv } from "./limits.js";
@@ -430,6 +430,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
   if (brief && role === "conductor") throw new BridgeError(400, "A conductor starts with its own brief.");
+  // A launch's own token, so an ambiguous outcome can later be resolved by
+  // looking for the pane that carries it.
+  const suppliedStartingToken = data.startingToken === undefined || data.startingToken === null ? undefined : z.string().regex(/^[a-f0-9]{64}$/).parse(data.startingToken);
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
   // the label a person typed is not, so derive one from it.
   const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
@@ -484,7 +487,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
   const dispatchId = options.dispatchId ?? brief?.id;
-  const variables = { ...askpassEnv(), ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
+  const variables = { ...askpassEnv(), ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}),
+    ...(suppliedStartingToken ? { PHREN_STARTING_TOKEN: suppliedStartingToken } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
@@ -536,6 +540,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     keyedEnv = keyedExplicitEnv(process.env, {
       ...(keyedGitboy?.env ?? {}),
       ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}),
+      ...(suppliedStartingToken ? { PHREN_STARTING_TOKEN: suppliedStartingToken } : {}),
       ...(home ? claudeLaunchEnv(home) : {}),
     });
   }
@@ -563,6 +568,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     } else await new Promise(resolve => setTimeout(resolve, 200));
   }
   if (!created) { await removeAgentTokenFile(agentTokenFile); throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`); }
+  if (suppliedStartingToken) seedStartingToken(server, { workspace_id: created.workspaceId, tab_id: created.tabId, pane_id: created.paneId }, suppliedStartingToken);
   const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
   await options.onPlaced?.({ server, ...place, source: kind });
   // The pane identity variables are ours (Herdr/tmux), not the caller's, and

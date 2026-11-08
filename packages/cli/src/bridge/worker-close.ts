@@ -3,11 +3,11 @@ import { lstat, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json, type Target, type StartingTarget, targetSchema, startingTargetSchema } from "./protocol.js";
-import { validateTarget, paneChatState } from "./herdr.js";
+import { validateTarget, paneChatState, paneStartingToken, clearStartingToken, clearStartingTokenByToken } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
-import { originPaneSchema, reconcileIdempotencyKey, settleCancelledReservation, updateReceipt, type Receipt } from "./dispatch.js";
+import { originPaneSchema, reconcileIdempotencyKey, scanStartingToken, settleCancelledReservation, startingTargetFromPane, updateReceipt, type Receipt } from "./dispatch.js";
 import { idempotencyKeySchema, withIdempotencyKeyLock, type IdempotencyRecord } from "./dispatch-idempotency.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
 type ClosedTarget = Target | StartingTarget;
@@ -148,16 +148,46 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
     const { briefArrival } = await import("./launch-brief.js");
     const arrival = await briefArrival(dispatchId).catch(() => undefined);
     target = arrival?.accepted?.target ?? arrival?.started?.target;
+    if (target) {
+      receipt.target = target;
+      receipt.launchOutcome = "started";
+      await updateReceipt(dispatchId, value => {
+        if (!value.target) value.target = target;
+        value.launchOutcome = "started";
+        return true;
+      }, { duringPlacement: true }).catch(() => undefined);
+    }
   }
-  if (!target) {
-    // Still no binding. If the launch outcome is unknown, a worker may be
-    // running that we can't find: stay pending and keep its secrets. Only a
-    // dispatch that never reached a launch is finalized as gone.
-    const outcomeUnknown = duringPlacement || receipt.state === "uncertain";
-    if (outcomeUnknown) return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+  if (!target && receipt.launchOutcome === "not-started") {
+    // The launch request was never sent (or was refused before creating
+    // anything): no worker can be running, so finalize without a scan.
     await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
+    clearStartingTokenByToken(receipt.startingToken ?? "");
     return { ok: true, dispatch: dispatchId, closed: false, gone: true };
   }
+  if (!target) {
+    // The launch's own starting token is the proof: a successful snapshot
+    // with no pane carrying it, and no recovered session, means no worker.
+    const scan = await scanStartingToken(receipt);
+    if (scan.ok && scan.pane) {
+      const adopted = startingTargetFromPane(receipt, scan.pane);
+      if (adopted) {
+        target = adopted;
+        receipt.target = adopted;
+        receipt.launchOutcome = "started";
+        await updateReceipt(dispatchId, value => {
+          if (!value.target) value.target = adopted;
+          value.launchOutcome = "started";
+          return true;
+        }, { duringPlacement: true }).catch(() => undefined);
+      }
+    } else if (scan.ok && !duringPlacement) {
+      await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
+      clearStartingTokenByToken(receipt.startingToken ?? "");
+      return { ok: true, dispatch: dispatchId, closed: false, gone: true };
+    }
+  }
+  if (!target) return { ok: true, dispatch: dispatchId, closed: false, pending: true };
   const { snapshot, findPane } = await import("./herdr.js");
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt) await new Promise(resolve => setTimeout(resolve, attempt === 1 ? 100 : 300));
@@ -168,16 +198,18 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
       // A successful snapshot with no pane is a vanished worker; a failed
       // snapshot above stays pending instead of claiming success.
       await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
+      clearStartingTokenByToken(receipt.startingToken ?? "");
       return { ok: true, dispatch: dispatchId, closed: false, gone: true };
     }
     const paneSession = typeof pane.sessionId === "string" ? pane.sessionId : typeof pane.session_id === "string" ? pane.session_id : undefined;
-    const paneToken = typeof pane.startingToken === "string" ? pane.startingToken : undefined;
+    const paneToken = typeof pane.startingToken === "string" ? pane.startingToken : paneStartingToken(target.server, pane);
     let chat: Json = {};
     if (!paneSession && !paneToken) {
       try { chat = await paneChatState(target.server, pane, { tokenWhenIdentified: false }); }
       catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
     }
-    const binding = paneBinding(target, pane, chat);
+    const observed = paneToken && typeof pane.startingToken !== "string" ? { ...pane, startingToken: paneToken } : pane;
+    const binding = paneBinding(target, observed, chat);
     if (binding === "different") {
       // A replacement session now owns the pane: never close it.
       return { ok: true, dispatch: dispatchId, closed: false };
@@ -192,6 +224,7 @@ export async function closeVerifiedWorker(receipt: Receipt): Promise<Json> {
     try { after = await snapshot(target.server); } catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
     if (!findPane(after, target)) {
       await retainCancelled(dispatchId, duringPlacement, cleanupPaths);
+      clearStartingTokenByToken(receipt.startingToken ?? "");
       return { ok: true, dispatch: dispatchId, closed: true };
     }
   }
@@ -236,6 +269,7 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
     throw error;
   }
   await releaseClosedFiles(data.dispatch);
+  clearStartingToken(data.target.server, pane);
   return { ok: true, closed: true };
 }
 

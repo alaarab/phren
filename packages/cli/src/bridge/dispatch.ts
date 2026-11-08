@@ -1,7 +1,7 @@
 import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { integratorSchema, prsSchema } from "./return-contract.js";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -110,6 +110,12 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   gitConfigFile: z.string().max(4096).optional().describe("The keyed dispatch's managed global Git config; removed with the clone or as soon as a failed/cancelled worker ends."),
   retainedUntil: timestamp.optional().describe("When a failed, cancelled or keep-open clone may be removed by reconciliation."),
   endedAt: timestamp.optional().describe("When the worker was observed gone or closed; retention is measured from here."),
+  launchOutcome: z.enum(["not-started", "ambiguous", "started"]).optional()
+    .describe("Whether the launch request was never sent, was sent with an unknown outcome, or produced a target or arrival."),
+  startingToken: z.string().regex(/^[a-f0-9]{64}$/).optional()
+    .describe("The launch's own starting token, recorded before the request and carried by its pane."),
+  launchServer: z.string().max(200).optional().describe("The terminal server the launch request targeted."),
+  scanSince: timestamp.optional().describe("When a successful snapshot first found no pane carrying this launch's starting token."),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
     background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
@@ -176,7 +182,7 @@ function save(receipt: Receipt, originWindow: DispatchOriginWindow): Promise<voi
   });
 }
 
-const PLACEMENT_FIELDS = ["state", "error", "brief", "target", "account", "accountChoice", "agentTokenFile", "cloneDir", "gitConfigFile", "returned", "closedAt"] as const;
+const PLACEMENT_FIELDS = ["state", "error", "brief", "target", "account", "accountChoice", "agentTokenFile", "cloneDir", "gitConfigFile", "returned", "closedAt", "launchOutcome"] as const;
 
 /** Every placement write re-reads the receipt under the lock, so a concurrent cancelRequestedAt is never lost. */
 async function persistReceipt(receipt: Receipt, originWindow: DispatchOriginWindow, change: (value: Receipt) => void = () => undefined): Promise<void> {
@@ -342,6 +348,62 @@ export async function clearWorkerEnded(id: string): Promise<void> {
   }).catch(() => undefined);
 }
 
+export type StartingScan = { ok: true; pane?: Json } | { ok: false };
+
+/**
+ * A successful terminal snapshot on the launch's server, and the pane carrying
+ * this launch's starting token. `ok: false` means the snapshot or an identity
+ * read failed, so no conclusion can be drawn.
+ */
+export async function scanStartingToken(receipt: Receipt): Promise<StartingScan> {
+  const token = receipt.startingToken;
+  const server = receipt.launchServer ?? receipt.target?.server;
+  if (!token || !server) return { ok: false };
+  try {
+    const { paneChatState, paneStartingToken } = await import("./herdr.js");
+    const { terminalProvider } = await import("./terminal.js");
+    const snapshot = await terminalProvider().snapshot(server);
+    const panes = objects(snapshot.panes);
+    for (const pane of panes) {
+      if (pane.startingToken === token || paneStartingToken(server, pane) === token) return { ok: true, pane };
+    }
+    for (const pane of panes) {
+      if (typeof pane.agent === "string" && pane.agent) {
+        const chat = await paneChatState(server, pane).catch(() => undefined);
+        if (!chat) return { ok: false };
+        if (chat.startingToken === token) return { ok: true, pane };
+      }
+    }
+    return { ok: true };
+  } catch { return { ok: false }; }
+}
+
+/** The exact binding for a pane that carries the launch's starting token. */
+export function startingTargetFromPane(receipt: Receipt, pane: Json): Target | StartingTarget | undefined {
+  const server = receipt.launchServer ?? receipt.target?.server;
+  const source = provider.safeParse(pane.agent);
+  if (!server || !source.success || !id.safeParse(pane.workspace_id).success || !id.safeParse(pane.tab_id).success || !id.safeParse(pane.pane_id).success) return undefined;
+  const binding = { server, workspace: String(pane.workspace_id), tab: String(pane.tab_id), pane: String(pane.pane_id), source: source.data };
+  const session = typeof pane.sessionId === "string" ? pane.sessionId : typeof pane.session_id === "string" ? pane.session_id : undefined;
+  if (session) return { ...binding, session };
+  const token = typeof pane.startingToken === "string" ? pane.startingToken : receipt.startingToken;
+  return token ? { ...binding, starting: true, startingToken: token } : undefined;
+}
+
+/** A launch error before any target: an explicit 4xx refusal is not-started;
+ * timeouts, 5xx and transport errors leave the outcome unknown. */
+function launchFailureOutcome(error: unknown): "not-started" | "ambiguous" {
+  if (!(error instanceof BridgeError)) return "ambiguous";
+  if (error.status === 504 || error.status >= 500) return "ambiguous";
+  if (error.status >= 400 && error.status < 500) {
+    const code = typeof error.details?.code === "string" ? error.details.code : undefined;
+    if (code === "harness_unavailable" || code === "account_unavailable" || code === "outside_set" || code === "account_pool") return "not-started";
+    if ([400, 401, 403, 404, 422].includes(error.status)) return "not-started";
+    return "ambiguous";
+  }
+  return "ambiguous";
+}
+
 /** A keyed lookup, after reconciling a launch that was interrupted. */
 async function lookupKeyedDispatch(key: string): Promise<Json | undefined> {
   const record = await findIdempotencyKey(key);
@@ -381,6 +443,8 @@ export async function settleCancelledReservation(record: IdempotencyRecord): Pro
     state: "failed",
     error: "cancelled",
     returned: { state: "failed", at, error: "cancelled", read: false },
+    launchOutcome: "not-started",
+    ...(record.startingToken ? { startingToken: record.startingToken } : {}),
     endedAt: at,
     retainedUntil: new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString(),
     ...(record.cloneDir ? { cloneDir: record.cloneDir } : {}),
@@ -391,6 +455,63 @@ export async function settleCancelledReservation(record: IdempotencyRecord): Pro
   await removeDispatchSecrets({ cloneDir: record.cloneDir, gitConfigFile: record.gitConfigFile, agentTokenFile: record.agentTokenFile });
   await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
   return receipt;
+}
+
+/**
+ * An interrupted launch keeps its token until a successful scan proves no
+ * pane carries it. A not-started launch is certain immediately; an ambiguous
+ * one is confirmed only after 24 hours of successful scans with no token.
+ */
+async function confirmInterruptedLaunch(receipt: Receipt): Promise<void> {
+  const paths = { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
+  const clearSeed = async () => {
+    if (receipt.startingToken) (await import("./herdr.js")).clearStartingTokenByToken(receipt.startingToken);
+  };
+  if (receipt.launchOutcome === "not-started") {
+    await removeDispatchSecrets(paths);
+    await clearSeed();
+    const at = new Date().toISOString();
+    await updateReceipt(receipt.id, value => {
+      if (!value.endedAt) value.endedAt = at;
+      if (!value.retainedUntil) value.retainedUntil = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+      return true;
+    }, { duringPlacement: true }).catch(() => undefined);
+    const until = receipt.retainedUntil ? Date.parse(receipt.retainedUntil) : NaN;
+    if (Number.isFinite(until) && Date.now() >= until) await removeDispatchClone(paths);
+    return;
+  }
+  if (!receipt.startingToken) return;
+  const scan = await scanStartingToken(receipt);
+  if (!scan.ok) return;
+  if (scan.pane) {
+    const target = startingTargetFromPane(receipt, scan.pane);
+    if (!target) return;
+    await updateReceipt(receipt.id, value => {
+      if (!value.target) value.target = target;
+      value.launchOutcome = "started";
+      return true;
+    }, { duringPlacement: true }).catch(() => undefined);
+    return;
+  }
+  const since = receipt.scanSince;
+  if (!since) {
+    await updateReceipt(receipt.id, value => {
+      if (!value.scanSince) value.scanSince = new Date().toISOString();
+      return true;
+    }, { duringPlacement: true }).catch(() => undefined);
+    return;
+  }
+  if (!Number.isFinite(Date.parse(since)) || Date.now() - Date.parse(since) < 24 * 60 * 60_000) return;
+  await removeDispatchSecrets(paths);
+  await clearSeed();
+  const at = new Date().toISOString();
+  await updateReceipt(receipt.id, value => {
+    if (!value.endedAt) value.endedAt = at;
+    if (!value.retainedUntil) value.retainedUntil = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+    return true;
+  }).catch(() => undefined);
+  const until = receipt.retainedUntil ? Date.parse(receipt.retainedUntil) : NaN;
+  if (Number.isFinite(until) && Date.now() >= until) await removeDispatchClone(paths);
 }
 
 /**
@@ -413,6 +534,12 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
     // Retention starts only once a fresh snapshot confirms the worker gone;
     // a failed return alone never removes its token.
     if (state === "failed" || state === "gone" || (terminal.closedAt && !done)) {
+      if (!terminal.target) {
+        // An ambiguous launch has no binding to snapshot: its own starting
+        // token decides whether a worker runs.
+        await confirmInterruptedLaunch(terminal);
+        return;
+      }
       if (!await boundWorkerGone(terminal)) {
         await clearWorkerEnded(terminal.id);
         return;
@@ -513,24 +640,31 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       return;
     }
     if (receipt.returned && ["done", "failed", "gone"].includes(receipt.returned.state)) {
+      if (receipt.returned.state !== "done" && !receipt.target) await confirmInterruptedLaunch(receipt);
       await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
       return;
     }
     // A stale receipt can still say launching/sending; the ordinary writer
     // refuses those, so reconcile it under the receipt lock directly.
-    await serializeReceiptUpdate(async () => {
+    const interrupted = await serializeReceiptUpdate(async () => {
       const current = await readReceipt(receipt.id);
-      if (!current || current.target || current.closedAt) return;
-      if (current.returned && ["done", "failed", "gone"].includes(current.returned.state)) return;
+      if (!current || current.target || current.closedAt) return undefined;
+      if (current.returned && ["done", "failed", "gone"].includes(current.returned.state)) return current;
       current.state = "failed";
       current.error = "launch interrupted";
       current.updatedAt = new Date().toISOString();
       current.returned = { state: "failed", at: current.updatedAt, error: "launch interrupted", read: false };
-      current.retainedUntil = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+      if (!current.startingToken && record.startingToken) current.startingToken = record.startingToken;
+      if (!current.launchServer) current.launchServer = localHost().server;
+      current.launchOutcome = current.launchOutcome ?? (record.phase === "reserved" ? "not-started" : "ambiguous");
+      if (current.launchOutcome === "not-started") {
+        current.endedAt = current.updatedAt;
+        current.retainedUntil = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+      }
       await saveReceipt(current);
+      return current;
     }).catch(() => undefined);
-    await removeDispatchSecrets({ cloneDir: record.cloneDir ?? receipt.cloneDir, gitConfigFile: record.gitConfigFile ?? receipt.gitConfigFile,
-      agentTokenFile: record.agentTokenFile ?? receipt.agentTokenFile });
+    if (interrupted) await confirmInterruptedLaunch(interrupted);
     await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
     return;
   }
@@ -559,6 +693,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
   }
   // The process died after reserving but before its first receipt write.
   const at = new Date().toISOString();
+  const outcome = record.phase === "reserved" ? "not-started" : "ambiguous";
   const fallback: Receipt = {
     id: record.dispatchId,
     computer: (record.computer as Receipt["computer"] | undefined) ?? "local",
@@ -570,13 +705,16 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
     state: "failed",
     error: "launch interrupted",
     returned: { state: "failed", at, error: "launch interrupted", read: false },
-    retainedUntil: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
+    launchOutcome: outcome,
+    launchServer: localHost().server,
+    ...(record.startingToken ? { startingToken: record.startingToken } : {}),
+    ...(outcome === "not-started" ? { endedAt: at, retainedUntil: new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString() } : {}),
     ...(record.cloneDir ? { cloneDir: record.cloneDir } : {}),
     ...(record.gitConfigFile ? { gitConfigFile: record.gitConfigFile } : {}),
     ...(record.agentTokenFile ? { agentTokenFile: record.agentTokenFile } : {}),
   };
   await saveReceipt(fallback);
-  await removeDispatchSecrets({ cloneDir: record.cloneDir, gitConfigFile: record.gitConfigFile, agentTokenFile: record.agentTokenFile });
+  await confirmInterruptedLaunch(fallback);
   await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
 }
 
@@ -928,8 +1066,9 @@ export class DispatchService {
     }
     const owner = randomUUID();
     const paths = data.worktree === true ? dispatchClonePaths(dispatchId) : undefined;
+    const startingToken = randomBytes(32).toString("hex");
     const reservation = await reserveIdempotencyKey(key, dispatchId, owner,
-      { project: data.project, harness: data.harness, label: data.label, computer: data.computer, ...(paths ?? {}) });
+      { project: data.project, harness: data.harness, label: data.label, computer: data.computer, startingToken, ...(paths ?? {}) });
     if (!reservation.reserved) {
       const record = await waitForIdempotencyKey(key);
       if (!record) throw new BridgeError(503, "Another dispatch with this idempotency key did not settle; try again.");
@@ -938,7 +1077,7 @@ export class DispatchService {
       return receipt;
     }
     try {
-      const result = await this.place(data, dispatchId, originValue, continues, { key, owner, ...(paths ? { paths } : {}) });
+      const result = await this.place(data, dispatchId, originValue, continues, { key, owner, startingToken, ...(paths ? { paths } : {}) });
       return { ...result, existing: false };
     } catch (error) {
       // A placement that never saved a receipt gives the key back; once a
@@ -952,7 +1091,7 @@ export class DispatchService {
   }
 
   private async place(data: DispatchInput, dispatchId: string, originValue?: unknown, continues?: string,
-    keyed?: { key: string; owner: string; paths?: DispatchClonePaths }): Promise<Json> {
+    keyed?: { key: string; owner: string; paths?: DispatchClonePaths; startingToken?: string }): Promise<Json> {
     if (data.idempotencyKey) {
       if (data.harness !== "claude" && data.harness !== "codex") {
         throw new BridgeError(400, "A dispatch with an idempotency key may run only claude or codex; copilot, opencode and other harnesses are refused.");
@@ -1075,8 +1214,10 @@ export class DispatchService {
       // A fresh worktree per dispatch: the caller may name its branch (gitboy's
       // brief does), otherwise it is derived from the idempotency key or the id.
       const worktree = data.worktree === true ? (data.branch ?? worktreeBranchFor(data.idempotencyKey, dispatchId)) : undefined;
+      const startingToken = keyed?.startingToken ?? randomBytes(32).toString("hex");
       const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: dispatchId,
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
+        startingToken, launchServer: peer.server, launchOutcome: "not-started",
         ...(worktree ? { branch: worktree } : {}),
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
@@ -1128,10 +1269,13 @@ export class DispatchService {
           throw new BridgeError(409, "This dispatch no longer owns its idempotency key.");
         }
         if (await keyCancelled()) return { ok: false, ...receipt, dispatch: receipt.id, existing: false };
+        // The request is about to be sent: from here its outcome may be unknown.
+        receipt.launchOutcome = "ambiguous";
+        await persistReceipt(receipt, originWindow);
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey, dispatchId: receipt.id, ...(keyed?.paths ? { phrenPaths: keyed.paths } : {}) } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), startingToken, ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey, dispatchId: receipt.id, ...(keyed?.paths ? { phrenPaths: keyed.paths } : {}) } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
         const parsedLaunched = remoteTarget.safeParse(launched.target);
         if (typeof launched.cloneDir === "string") receipt.cloneDir = launched.cloneDir;
         if (typeof launched.gitConfigFile === "string") receipt.gitConfigFile = launched.gitConfigFile;
@@ -1139,6 +1283,7 @@ export class DispatchService {
         // Persist the binding and cleanup paths before any snapshot or arrival wait.
         if (parsedLaunched.success && parsedLaunched.data.source === data.harness && parsedLaunched.data.server === peer.server) {
           receipt.target = parsedLaunched.data;
+          receipt.launchOutcome = "started";
           await persistReceipt(receipt, originWindow);
         }
         if (keyed) await updateIdempotencyPhase(keyed.key, keyed.owner, "launched").catch(() => undefined);
@@ -1177,6 +1322,7 @@ export class DispatchService {
         const target = remoteTarget.parse(settled.target);
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
+        receipt.launchOutcome = "started";
         receipt.state = "sending";
         await persistReceipt(receipt, originWindow);
         if (!("starting" in target)) {
@@ -1190,11 +1336,14 @@ export class DispatchService {
         if (error instanceof StartupScreen) {
           // Known, not uncertain: the brief never reached the pane. Say where
           // the owner answers, and let the returns loop tell the conductor once.
+          receipt.launchOutcome = "started";
           const question = `${data.harness} in "${data.label}" on ${peer.name} is waiting on a startup screen (folder trust or sign-in).`.slice(0, 200);
           receipt.state = "failed";
           receipt.error = `${question} The brief was not sent. Answer that screen in the pane (the phone can), then hand the brief off to the new session.`.slice(0, 500);
           receipt.returned = { state: "needs-you", at: new Date().toISOString(), question, read: false };
         } else {
+          if (receipt.target) receipt.launchOutcome = "started";
+          else receipt.launchOutcome = launchFailureOutcome(error);
           receipt.state = receipt.state === "launching" && error instanceof BridgeError && [400, 404, 429, 504].includes(error.status) ? "failed" : "uncertain";
           receipt.error = error instanceof BridgeError ? error.message.slice(0, 500) : "Remote delivery was not confirmed. Inspect this dispatch before retrying.";
         }
@@ -1272,6 +1421,7 @@ export class DispatchService {
     const arrived = (session?: string) => {
       const full = session ? targetSchema.safeParse({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source, session }) : undefined;
       if (full?.success) receipt.target = full.data;
+      receipt.launchOutcome = "started";
       receipt.state = "accepted";
     };
     for (let attempt = 1; ; attempt++) {
@@ -1309,14 +1459,14 @@ export class DispatchService {
    */
   private async confirmLaunched(peer: DispatchHost, receipt: Receipt, launched: Json, originWindow: DispatchOriginWindow): Promise<void> {
     const known = remoteTarget.safeParse(launched.target);
-    if (known.success && known.data.source === receipt.harness && known.data.server === peer.server) receipt.target = known.data;
+    if (known.success && known.data.source === receipt.harness && known.data.server === peer.server) { receipt.target = known.data; receipt.launchOutcome = "started"; }
     receipt.state = "sending";
     await persistReceipt(receipt, originWindow);
     const held = (status: unknown) => ["blocked", "waiting"].includes(String(status));
     const arrival = held(launched.agentStatus) ? await arrivalOf(peer, receipt.id).catch(() => undefined) ?? {}
       : await awaitArrival(peer, receipt.id, this.settleIntervalMs);
     const named = arrival.accepted?.target ?? arrival.started?.target;
-    if (named && named.source === receipt.harness && named.server === peer.server) receipt.target = named;
+    if (named && named.source === receipt.harness && named.server === peer.server) { receipt.target = named; receipt.launchOutcome = "started"; }
     if (arrival.accepted) { receipt.state = "accepted"; return; }
     const status = held(launched.agentStatus) ? String(launched.agentStatus) : await paneStatus(peer, launched);
     receipt.state = "uncertain";

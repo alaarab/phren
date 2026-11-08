@@ -193,6 +193,21 @@ intent for a later retry. An unknown key, or a dispatch already gone, prints
 `{"closed":false}` (with `dispatch` when the key still names one). `--follow` is
 accepted as a no-op by `wait`.
 
+A dispatch records `startingToken` before its launch request, and the pane the
+launch creates carries it. A launch whose reply was lost is
+`launchOutcome: "ambiguous"` (timeouts including 504, 5xx, network or socket
+errors, a lost reply or a crash); a refusal before anything was created is
+`"not-started"`; a known target or arrival is `"started"`. The runner still
+sees a failed return for an ambiguous launch, but cancel and cleanup never treat
+it as gone without proof. `close` recovers the binding from the arrival record,
+then scans a successful snapshot for the starting token: a pane carrying it is
+adopted and closed, and a successful snapshot with no pane carrying it confirms
+no worker, finalizes the launch and removes its token. A failed snapshot, or a
+launch still placing, stays pending and keeps the token. Interrupted-launch
+reconciliation marks the receipt failed for the runner but removes secrets only
+for `"not-started"` or after 24 hours of successful scans with no pane carrying
+the token.
+
 ### `dispatch_returns`
 
 List unread returns from dispatched workers, oldest first, and mark them read.

@@ -1007,6 +1007,19 @@ export class DispatchReturns {
       // Keyed dispatches are local-only; never use a peer path for one.
       if (receipt.idempotencyKey && !local) continue;
       if (local && (state === "failed" || state === "gone")) {
+        // A launch that never reached its request has no worker: its secrets
+        // go immediately. Any other outcome waits for confirmed termination.
+        if (!receipt.target && receipt.launchOutcome === "not-started") {
+          await removeDispatchSecrets(paths);
+          const at = receipt.closedAt ?? new Date(this.now()).toISOString();
+          const until = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+          await updateReceipt(receipt.id, value => {
+            if (!value.endedAt) value.endedAt = at;
+            if (!value.retainedUntil) value.retainedUntil = until;
+            return true;
+          }).catch(() => undefined);
+          continue;
+        }
         // Retention and token removal wait for confirmed termination: a failed
         // return alone does not prove the pane stopped.
         if (receipt.endedAt) {

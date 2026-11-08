@@ -460,4 +460,104 @@ describe("local dispatch", () => {
       expect(close).toHaveBeenCalled();
     } finally { restoreLive(); }
   });
+
+  const ambiguousReceipt = async (key: string, outcome: "ambiguous" | "not-started" = "ambiguous") => {
+    const id = randomUUID();
+    const paths = dispatchClonePaths(id);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.gitConfigFile, "managed config\n");
+    await writeFile(paths.agentTokenFile, "token\n");
+    const at = new Date().toISOString();
+    const startingToken = "c".repeat(64);
+    await reserveIdempotencyKey(key, id, randomUUID(), { project: "phren", harness: "codex", label: "Ambiguous",
+      computer: "local", startingToken, cloneDir: paths.cloneDir, gitConfigFile: paths.gitConfigFile, agentTokenFile: paths.agentTokenFile });
+    await atomicInPrivateDir(path.join(root, "dispatches", `${id}.json`), {
+      id, computer: "local", project: "phren", harness: "codex", label: "Ambiguous", idempotencyKey: key,
+      createdAt: at, updatedAt: at, state: "uncertain", launchOutcome: outcome, launchServer: "default", startingToken,
+      returned: { state: "failed", at, error: "504", read: false },
+      cloneDir: paths.cloneDir, gitConfigFile: paths.gitConfigFile, agentTokenFile: paths.agentTokenFile,
+    });
+    return { id, paths, startingToken };
+  };
+
+  it("records a starting token before the launch request", async () => {
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:starting-token" });
+    const body = launches()[0][1] as Json;
+    expect(body.startingToken).toMatch(/^[a-f0-9]{64}$/);
+    expect((await dispatchStatus()).find(row => row.id === placed.id)?.startingToken).toBe(body.startingToken);
+  });
+
+  it("keeps a 504 launch pending until a successful scan proves no worker, then removes its token", async () => {
+    const { id, paths } = await ambiguousReceipt("gitboy:host:504");
+    const failing = setTerminalProvider({ snapshot: async () => { throw new Error("snapshot down"); }, closePane: vi.fn() } as unknown as TerminalProvider);
+    try {
+      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: false, pending: true });
+      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+    } finally { failing(); }
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }), closePane: vi.fn() } as unknown as TerminalProvider);
+    try {
+      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: false, gone: true });
+      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("adopts a pane carrying the launch's starting token and closes it", async () => {
+    const { id, paths, startingToken } = await ambiguousReceipt("gitboy:host:adopt");
+    let panes = [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", terminal_id: "term-9", agent: "codex",
+      agent_status: "working", startingToken }];
+    const closePane = vi.fn(async () => { panes = []; });
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes }), closePane } as unknown as TerminalProvider);
+    try {
+      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: true });
+      expect(closePane).toHaveBeenCalled();
+      expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({
+        launchOutcome: "started", target: { pane: "p9" },
+      });
+      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("finalizes a not-started refusal without scanning", async () => {
+    const { id, paths } = await ambiguousReceipt("gitboy:host:not-started", "not-started");
+    const snapshot = vi.fn(async () => { throw new Error("must not scan"); });
+    const restore = setTerminalProvider({ snapshot, closePane: vi.fn() } as unknown as TerminalProvider);
+    try {
+      expect(await cancelDispatch({ dispatch: id })).toMatchObject({ dispatch: id, closed: false, gone: true });
+      expect(snapshot).not.toHaveBeenCalled();
+      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("reconcile keeps an ambiguous token until a scan, and removes it after 24 hours", async () => {
+    const { id, paths } = await ambiguousReceipt("gitboy:host:reconcile-504");
+    const failing = setTerminalProvider({ snapshot: async () => { throw new Error("snapshot down"); } } as unknown as TerminalProvider);
+    try {
+      await reconcileInterruptedDispatches();
+      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+    } finally { failing(); }
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }) } as unknown as TerminalProvider);
+    try {
+      await reconcileInterruptedDispatches();
+      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+      expect((await dispatchStatus()).find(row => row.id === id)?.scanSince).toEqual(expect.any(String));
+      await updateReceipt(id, value => { value.scanSince = new Date(Date.now() - 25 * 60 * 60_000).toISOString(); return true; });
+      await reconcileInterruptedDispatches();
+      expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("reconcile adopts a pane carrying the launch's starting token", async () => {
+    const { id, paths, startingToken } = await ambiguousReceipt("gitboy:host:reconcile-adopt");
+    const panes = [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", terminal_id: "term-9", agent: "codex",
+      agent_status: "working", startingToken }];
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes }) } as unknown as TerminalProvider);
+    try {
+      await reconcileInterruptedDispatches();
+      expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({
+        launchOutcome: "started", target: { pane: "p9" },
+      });
+      expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
+    } finally { restore(); }
+  });
+
 });

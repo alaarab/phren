@@ -34,6 +34,7 @@ const recordSchema = z.object({
   cloneDir: z.string().max(4096).optional(),
   gitConfigFile: z.string().max(4096).optional(),
   agentTokenFile: z.string().max(4096).optional(),
+  startingToken: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   cancelRequestedAt: z.string().datetime().optional(),
 }).strict();
 export type IdempotencyRecord = z.infer<typeof recordSchema>;
@@ -137,6 +138,7 @@ export interface KeySeed {
   cloneDir?: string;
   gitConfigFile?: string;
   agentTokenFile?: string;
+  startingToken?: string;
 }
 
 /** Reserve `key` for this caller, with its dispatch id, atomically. */
