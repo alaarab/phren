@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, reconcileInterruptedDispatches } from "./dispatch.js";
 import { findIdempotencyKey, idempotencyKeyFile, idempotencyLockFile, reserveIdempotencyKey, updateIdempotencyPhase } from "./dispatch-idempotency.js";
-import { recordBriefArrival } from "./launch-brief.js";
+import { recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { closeRequestFromArgs, dispatchInputFromArgs } from "./dispatch-command.js";
 import { waitForDispatch } from "./dispatch-wait.js";
 import { cancelDispatch, paneBinding, paneRunsTarget } from "./worker-close.js";
@@ -156,6 +156,7 @@ describe("local dispatch", () => {
     await reserveIdempotencyKey(key, id, randomUUID(), { project: "phren", harness: "codex", label: "Arrived", computer: "local" },
       Date.now() - 6 * 60_000);
     const arrived = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", starting: true, startingToken: "b".repeat(64) };
+    await writeLaunchBrief({ id, text: "brief" });
     await recordBriefArrival(id, "SessionStart", arrived);
     await reconcileInterruptedDispatches();
     expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({ state: "accepted", target: arrived });

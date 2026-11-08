@@ -127,9 +127,12 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
       return { ok: true, dispatch: dispatchId, closed: false, gone: true };
     }
     const paneSession = typeof pane.sessionId === "string" ? pane.sessionId : typeof pane.session_id === "string" ? pane.session_id : undefined;
-    let chat: Json;
-    try { chat = paneSession ? {} : await paneChatState(target.server, pane, { tokenWhenIdentified: false }); }
-    catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
+    const paneToken = typeof pane.startingToken === "string" ? pane.startingToken : undefined;
+    let chat: Json = {};
+    if (!paneSession && !paneToken) {
+      try { chat = await paneChatState(target.server, pane, { tokenWhenIdentified: false }); }
+      catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
+    }
     const binding = paneBinding(target, pane, chat);
     if (binding === "different") {
       // A replacement session now owns the pane: never close it.
