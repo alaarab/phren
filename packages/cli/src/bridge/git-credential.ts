@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { countGit } from "./metrics.js";
-import { detectHost } from "./git-hosts.js";
+import { detectHost, type GitHost } from "./git-hosts.js";
 import { resolveAgentToken } from "./git-host-auth.js";
 import { BridgeError } from "./protocol.js";
 
@@ -14,6 +14,25 @@ import { BridgeError } from "./protocol.js";
  * config answers git, and the agent environment carries the same token for the
  * API. The token never enters argv, a remote URL or a log.
  */
+
+/** Variables a keyed worker must never inherit from the Hook or the caller. */
+export const KEYED_ENV_STRIP = ["GITBOY_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN", "GIT_ASKPASS", "SSH_ASKPASS",
+  "SSH_AUTH_SOCK", "GIT_SSH", "GIT_SSH_COMMAND"] as const;
+const KEYED_ENV_KEEP = new Set(["GITBOY_HOST", "GITBOY_TOKEN_FILE"]);
+
+/**
+ * Empty-value overlay for a keyed launch. Empty values are what tmux `-e NAME=`
+ * and Herdr/Codex env overlays understand, and they carry no secret. GITBOY_*
+ * and GIT_CONFIG_* names are discovered from the Hook's own environment.
+ */
+export function keyedEnvScrub(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const names = new Set<string>(KEYED_ENV_STRIP);
+  for (const key of Object.keys(base)) {
+    if (KEYED_ENV_KEEP.has(key)) continue;
+    if (key.startsWith("GITBOY_") || key.startsWith("GIT_CONFIG_")) names.add(key);
+  }
+  return Object.fromEntries([...names].map(key => [key, ""]));
+}
 
 const exec = promisify(execFile);
 
@@ -29,9 +48,29 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
  * helper for this host, add the Hook's helper, and keep git from applying the
  * path-specific matching that could send the token to another repository path.
  */
-async function configureWorktreeForHost(worktreePath: string, domain: string): Promise<void> {
+/** The credential-free HTTPS remote for a gitboy host, or a refusal when owner/repo cannot be derived. */
+export function credentialFreeRemote(host: Pick<GitHost, "domain" | "webUrl">): string {
+  if (!host.domain || !host.webUrl) throw new BridgeError(409, "This gitboy checkout has no owner/repository in its remote URL, so a keyed dispatch cannot use it.");
+  let pathname: string;
+  try { pathname = new URL(host.webUrl).pathname; } catch { throw new BridgeError(409, "This gitboy checkout's remote URL cannot be parsed."); }
+  const parts = pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "").split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) throw new BridgeError(409, "This gitboy checkout has no owner/repository in its remote URL, so a keyed dispatch cannot use it.");
+  return `https://${host.domain}/${parts[0]}/${parts[1]}.git`;
+}
+
+async function configureWorktreeForHost(worktreePath: string, host: Pick<GitHost, "domain" | "webUrl" | "remote">): Promise<void> {
+  if (!host.domain) throw new BridgeError(409, "This checkout has no gitboy host.");
+  const url = credentialFreeRemote(host);
   await git(worktreePath, "config", "--local", "extensions.worktreeConfig", "true");
-  const key = `credential.https://${domain}`;
+  // The agent may only push over HTTPS with the stored token; an SSH origin
+  // would use the owner's identity, so rewrite both URL forms and disable SSH.
+  for (const remote of new Set(["origin", host.remote ?? "origin"])) {
+    await git(worktreePath, "config", "--worktree", `remote.${remote}.url`, url);
+    await git(worktreePath, "config", "--worktree", `remote.${remote}.pushurl`, url);
+  }
+  await git(worktreePath, "config", "--worktree", "core.sshCommand", "false");
+  await git(worktreePath, "config", "--worktree", `http.https://${host.domain}/.extraHeader`, "");
+  const key = `credential.https://${host.domain}`;
   await git(worktreePath, "config", "--worktree", "--add", `${key}.helper`, "");
   await git(worktreePath, "config", "--worktree", "--add", `${key}.helper`, "!phren bridge git-credential");
   await git(worktreePath, "config", "--worktree", `${key}.useHttpPath`, "false");
@@ -40,7 +79,7 @@ async function configureWorktreeForHost(worktreePath: string, domain: string): P
 export async function configureGitboyWorktree(worktreePath: string, branch = ""): Promise<boolean> {
   const host = await detectHost(worktreePath, branch);
   if (host.kind !== "gitboy" || !host.domain) return false;
-  await configureWorktreeForHost(worktreePath, host.domain);
+  await configureWorktreeForHost(worktreePath, host);
   return true;
 }
 
@@ -84,7 +123,7 @@ export async function prepareKeyedGitboy(cwd: string, worktreePath?: string): Pr
     const domain = host.domain ?? "this checkout's host";
     throw new BridgeError(409, `No gitboy agent token for ${domain}. Run phren bridge git-host set ${domain} gitboy with a gba_ token.`);
   }
-  if (worktreePath) await configureWorktreeForHost(worktreePath, host.domain);
+  if (worktreePath) await configureWorktreeForHost(worktreePath, host);
   const tokenFile = await writeAgentTokenFile(cwd, stored.token);
   return { env: { GITBOY_HOST: host.domain, GITBOY_TOKEN_FILE: tokenFile, GIT_TERMINAL_PROMPT: "0" }, tokenFile };
 }

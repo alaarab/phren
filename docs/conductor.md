@@ -327,13 +327,18 @@ stores key to dispatch id under `<bridge>/idempotency/<sha256>.json` (0600), so
 it survives a restart and expires after 30 days. The dispatch id is generated
 before the reservation; the full record is written to a temp file and published
 with `link`, which is atomic and never lets a concurrent caller reclaim an empty
-or half-written file. Expiry and replacement happen only under a per-key lock
-with a 60 s stale-lock limit, and updates/deletes check the owner nonce.
+or half-written file. Expiry and replacement happen only under a per-key lock,
+and updates/deletes check the owner nonce. A lock is never unlinked by another
+caller: its lease expiry is written in the lock file, and a stale lock fails
+closed with a retryable "locked by a stale owner" error.
 
 A reservation that stays `reserved` or `launching` for five minutes with no
-recorded target and no live worker is reconciled to a failed receipt with
-`error: "launch interrupted"`; nothing is relaunched automatically. A repeated
-key returns that receipt with `existing: true` and `state: "failed"`.
+recorded target and no live worker is reconciled. Before declaring it
+interrupted, the Hook looks for the launch's arrival record and live starting
+token; if either names the worker, its target is recovered and the dispatch
+continues as launched. Only with no evidence does it become a failed receipt
+with `error: "launch interrupted"`; nothing is relaunched automatically. A
+repeated key returns that receipt with `existing: true` and `state: "failed"`.
 
 `--worktree` starts the worker in a fresh `git worktree add` of the project's
 checkout on a new branch, never reused. The branch is
@@ -348,7 +353,12 @@ dispatch. LFS files stay as pointers until the agent fetches them itself.
 In a keyed dispatch's gitboy worktree, the worktree's own config (never the
 global config) clears inherited helpers for that host and sets
 `credential.https://<host>.helper = !phren bridge git-credential` and
-`credential.https://<host>.useHttpPath = false`. The helper answers HTTPS `get`
+`credential.https://<host>.useHttpPath = false`. It also rewrites
+`remote.origin.url` and `remote.origin.pushurl` to the credential-free
+`https://<host>/<owner>/<repo>.git`, sets `core.sshCommand=false`, and clears
+`http.https://<host>/.extraHeader`, so an SSH origin cannot use the owner's
+identity and no inherited HTTP header can carry a token. A remote whose
+owner/repository cannot be derived is refused. The helper answers HTTPS `get`
 from this computer's stored gitboy token with `username=x-token` and
 `password=<token>`; `store` and `erase` do nothing. Only a `gba_` token stored
 with the `agent: true` marker is used; if it is missing the dispatch fails with
@@ -389,14 +399,19 @@ result is final it acknowledges only that dispatch's return
 `close` cancels a running dispatch by id, or by its idempotency key with
 `--idempotency-key`: the Hook looks the key up in the same durable store,
 records `cancelRequestedAt`, and closes the pane only after re-resolving it and
-confirming it still runs the dispatch's recorded session. It retries the close
-up to three times with backoff, and writes `closedAt` and the terminal
-`cancelled` return only after the pane is confirmed gone. A close that cannot be
-confirmed answers `{"dispatch":"<id>","closed":false,"pending":true}` and exits
-1, leaving the intent for a later retry; a replacement session is never closed.
-Its `wait` then ends `failed` with `error: "cancelled"`. Closing an already-closed
-or vanished dispatch answers `{"dispatch":"<id>","closed":false}` and exits 0; an
-unknown key answers `{"closed":false}` with no id.
+confirming the exact recorded binding (session id, or a starting target's
+starting token). Missing identity evidence fails closed and stays pending; a
+different session is never closed. It retries the close up to three times with
+backoff, and writes `closedAt` and the terminal `cancelled` return only after a
+successful snapshot shows the pane gone. A failed snapshot stays pending. A
+close that cannot be confirmed answers
+`{"dispatch":"<id>","closed":false,"pending":true}` and exits 1, leaving the
+intent for a later retry. A cancellation during placement records the intent on
+the receipt; the launcher closes the pane it just created and finalizes it, and
+the close call reports pending until a later close confirms. Its `wait` then
+ends `failed` with `error: "cancelled"`. Closing an already-closed or vanished
+dispatch answers `{"dispatch":"<id>","closed":false}` and exits 0; an unknown key
+answers `{"closed":false}` with no id.
 
 A dispatch with an idempotency key follows an execution policy enforced by the
 Hook:
@@ -412,7 +427,12 @@ Hook:
   JSON, and `startSession` (`packages/cli/src/bridge/server-launch.ts`) builds
   the agent's environment itself from the sudo askpass, `PHREN_DISPATCH_ID`, the
   served OpenCode environment and the Claude account home. The runner's
-  variables never cross the Hook's HTTP socket.
+  variables never cross the Hook's HTTP socket. A keyed launch also scrubs the
+  Hook's own `GITBOY_TOKEN`, every other `GITBOY_*` except `GITBOY_HOST` and
+  `GITBOY_TOKEN_FILE`, `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GIT_ASKPASS`,
+  `SSH_ASKPASS`, `SSH_AUTH_SOCK`, `GIT_CONFIG_*`, `GIT_SSH` and `GIT_SSH_COMMAND`
+  from what the worker would inherit on every launch path (tmux `-e NAME=`,
+  Herdr/Codex env overlays).
 - In a keyed dispatch's gitboy checkout the worker gets this computer's stored
   `phren-agent` token for Git and the API, and no other: `gitHostLaunchEnv`
   (`packages/cli/src/bridge/git-credential.ts`) reads `git-hosts.json` with

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { configureGitboyWorktree, gitCredentialCommand, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { configureGitboyWorktree, gitCredentialCommand, keyedEnvScrub, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
 import { resolveAgentToken, resolveHostToken, writeHostToken } from "./git-host-auth.js";
 import { createLaunchWorktree } from "./launch-worktree.js";
 
@@ -22,16 +22,17 @@ describe("the gitboy credential helper", () => {
   });
   afterEach(async () => { delete process.env.PHREN_BRIDGE_HOME; delete process.env.GIT_CONFIG_GLOBAL; await rm(root, { recursive: true, force: true }); });
 
-  async function repo(domain = "gitboy.example.com"): Promise<string> {
+  async function repoFrom(remote: string): Promise<string> {
     const dir = path.join(root, `repo-${Math.random().toString(16).slice(2)}`);
     await mkdir(dir, { recursive: true });
     await git(dir, "init", "-q", "-b", "main");
-    await git(dir, "remote", "add", "origin", `https://${domain}/o/r.git`);
+    await git(dir, "remote", "add", "origin", remote);
     await writeFile(path.join(dir, "a"), "x\n");
     await git(dir, "add", ".");
     await git(dir, "commit", "-qm", "start");
     return dir;
   }
+  const repo = (domain = "gitboy.example.com") => repoFrom(`https://${domain}/o/r.git`);
 
   it("answers get for https on a stored gitboy host and nothing else", async () => {
     expect(await gitCredentialCommand("get", "protocol=https\nhost=gitboy.example.com\n\n")).toBe("username=x-token\npassword=gba_test\n");
@@ -40,6 +41,30 @@ describe("the gitboy credential helper", () => {
     expect(await gitCredentialCommand("get", "protocol=http\nhost=gitboy.example.com\n\n")).toBeUndefined();
     expect(await gitCredentialCommand("store", "protocol=https\nhost=gitboy.example.com\n\n")).toBeUndefined();
     expect(await gitCredentialCommand("erase", "protocol=https\nhost=gitboy.example.com\n\n")).toBeUndefined();
+  });
+
+  it("scrubs inherited token and git variables from a keyed launch", () => {
+    const scrub = keyedEnvScrub({ GITBOY_TOKEN: "secret", GITBOY_HOST: "keep", GITBOY_OTHER: "x", GIT_CONFIG_COUNT: "1", GH_TOKEN: "t", PATH: "/bin" });
+    expect(scrub).toMatchObject({ GITBOY_TOKEN: "", GITBOY_OTHER: "", GIT_CONFIG_COUNT: "", GH_TOKEN: "", GIT_ASKPASS: "", SSH_AUTH_SOCK: "", GIT_SSH_COMMAND: "" });
+    expect(scrub).not.toHaveProperty("GITBOY_HOST");
+    expect(scrub).not.toHaveProperty("PATH");
+    expect(Object.values(scrub).every(value => value === "")).toBe(true);
+  });
+
+  it("rewrites an SSH origin to credential-free HTTPS and disables SSH", async () => {
+    const dir = await repoFrom("git@gitboy.example.com:o/r.git");
+    const worktree = await createLaunchWorktree(dir, { branch: "agent/ssh" });
+    expect(await configureGitboyWorktree(worktree.path, worktree.branch)).toBe(true);
+    expect((await git(worktree.path, "config", "--worktree", "--get", "remote.origin.url")).trim()).toBe("https://gitboy.example.com/o/r.git");
+    expect((await git(worktree.path, "config", "--worktree", "--get", "remote.origin.pushurl")).trim()).toBe("https://gitboy.example.com/o/r.git");
+    expect((await git(worktree.path, "config", "--worktree", "--get", "core.sshCommand")).trim()).toBe("false");
+    expect((await git(worktree.path, "config", "--worktree", "--get", "http.https://gitboy.example.com/.extraHeader")).trim()).toBe("");
+  });
+
+  it("refuses a gitboy remote whose owner and repository cannot be derived", async () => {
+    const dir = await repoFrom("https://gitboy.example.com/only-one-segment.git");
+    const worktree = await createLaunchWorktree(dir, { branch: "agent/bad-remote" });
+    await expect(configureGitboyWorktree(worktree.path, worktree.branch)).rejects.toMatchObject({ status: 409 });
   });
 
   it("uses only an agent-marked gba_ token and carries the marker through resolveHostToken", async () => {

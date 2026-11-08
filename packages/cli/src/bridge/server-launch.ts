@@ -19,7 +19,7 @@ import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
 import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
-import { prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { keyedEnvScrub, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -516,7 +516,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     keyedGitboy = await prepareKeyedGitboy(cwd, worktree?.path);
     agentTokenFile = keyedGitboy?.tokenFile;
   }
-  const envVariables = { ...variables, ...(keyedGitboy?.env ?? {}) };
+  const envVariables = { ...variables, ...(keyedGitboy ? keyedEnvScrub() : {}), ...(keyedGitboy?.env ?? {}) };
   const env = Object.keys(envVariables).length ? envVariables : undefined;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
   // agent too; a folder the Hook picked or just created is trusted up front.

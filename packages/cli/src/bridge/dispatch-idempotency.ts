@@ -38,7 +38,7 @@ export type IdempotencyPhase = z.infer<typeof phaseSchema>;
 const keyRoot = () => path.join(bridgeRoot(), "idempotency");
 const hashOf = (key: string) => createHash("sha256").update(key).digest("hex");
 export const idempotencyKeyFile = (key: string) => path.join(keyRoot(), `${hashOf(key)}.json`);
-const lockFile = (key: string) => path.join(keyRoot(), `${hashOf(key)}.lock`);
+export const idempotencyLockFile = (key: string) => path.join(keyRoot(), `${hashOf(key)}.lock`);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function expired(record: IdempotencyRecord, now = Date.now()): boolean {
@@ -72,25 +72,35 @@ async function publish(key: string, record: IdempotencyRecord): Promise<boolean>
 }
 
 interface KeyLock { key: string; owner: string }
+/**
+ * A lock is never unlinked unless its owner releases it. A lock whose lease
+ * has expired is reported as stale; the caller retries rather than racing a
+ * replacement against another process that may still hold it.
+ */
 async function acquireLock(key: string, owner: string, now: number): Promise<KeyLock | undefined> {
-  const file = lockFile(key);
+  const file = idempotencyLockFile(key);
   const deadline = Date.now() + 2_000;
+  const leaseUntil = new Date(now + IDEMPOTENCY_LOCK_STALE_MS).toISOString();
   for (;;) {
     try {
       const handle = await open(file, "wx", 0o600);
-      try { await handle.writeFile(JSON.stringify({ owner, createdAt: new Date(now).toISOString() })); await handle.sync(); } finally { await handle.close(); }
+      try { await handle.writeFile(JSON.stringify({ owner, createdAt: new Date(now).toISOString(), expiresAt: leaseUntil })); await handle.sync(); } finally { await handle.close(); }
       return { key, owner };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      let held: { owner?: unknown; expiresAt?: unknown } | undefined;
+      try { held = JSON.parse(await readFile(file, "utf8")) as { owner?: unknown; expiresAt?: unknown }; } catch { /* unreadable: wait briefly */ }
+      const expiry = typeof held?.expiresAt === "string" ? Date.parse(held.expiresAt) : NaN;
       const info = await lstat(file).catch(() => undefined);
-      if (info && Date.now() - info.mtimeMs > IDEMPOTENCY_LOCK_STALE_MS) { await unlink(file).catch(() => undefined); continue; }
+      const expired = (Number.isFinite(expiry) && Date.now() >= expiry) || (info && Date.now() - info.mtimeMs > IDEMPOTENCY_LOCK_STALE_MS);
+      if (expired) throw new BridgeError(503, "The idempotency key is locked by a stale owner; retry.");
       if (Date.now() >= deadline) return undefined;
       await sleep(50);
     }
   }
 }
 async function releaseLock(lock: KeyLock): Promise<void> {
-  const file = lockFile(lock.key);
+  const file = idempotencyLockFile(lock.key);
   let held: { owner?: unknown } | undefined;
   try { held = JSON.parse(await readFile(file, "utf8")) as { owner?: unknown }; } catch { return; }
   if (held.owner === lock.owner) await unlink(file).catch(() => undefined);

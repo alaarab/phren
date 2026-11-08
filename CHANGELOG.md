@@ -16,7 +16,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - The gitboy agent token is passed to a keyed worker only as `GITBOY_TOKEN_FILE` in its private git directory, never in the environment or argv, and is removed when the dispatch closes or finishes.
 - Keyed worktrees are created with `--no-checkout` and populated with `--attr-source` set to Git's empty tree, so repository hooks and smudge/process filters cannot run; Git 2.40 is required.
 - `dispatch wait` bounds every inconsistent state: five minutes for a launch with no target or return, and one five-minute deadline for any polled route's failures. It polls live worker state even when a return exists, so a historical needs-you return no longer masks a resumed worker.
-- `dispatch close` records the cancellation intent, verifies the pane still runs the dispatch's recorded session, retries up to three times, and reports `pending` until the pane is confirmed gone; a replacement session is never closed.
+- `dispatch close` records the cancellation intent, verifies the exact recorded session or starting token, retries up to three times, and reports `pending` until a successful snapshot confirms the pane gone; missing evidence and failed snapshots stay pending, a replacement session is never closed, and a cancellation during placement is completed by the launcher.
+- Keyed gitboy worktrees rewrite SSH remotes to credential-free HTTPS, disable SSH, and clear host HTTP headers so pushes cannot use the owner's identity or keychain.
+- Keyed launches scrub inherited gitboy, GitHub, GitLab, askpass, SSH and Git config variables from the tmux, Herdr and Codex launch paths.
+- Crash reconciliation recovers a launch from its arrival record or starting token before declaring it interrupted.
+- A stale idempotency lock now fails closed with a retryable error instead of being unlinked by another caller.
 - Dispatches with an idempotency key run in the harness's standard permission mode (`full-access` is refused), never inherit the caller's environment, use only this computer's stored gitboy token through a Git credential helper for Git and the API, and create worktrees without running repository hooks.
 - `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
 - Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.

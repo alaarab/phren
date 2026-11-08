@@ -7,7 +7,7 @@ import { validateTarget, paneChatState } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
-import { dispatchStatus, originPaneSchema, reconcileIdempotencyKey, updateReceipt } from "./dispatch.js";
+import { originPaneSchema, reconcileIdempotencyKey, updateReceipt } from "./dispatch.js";
 import { idempotencyKeySchema } from "./dispatch-idempotency.js";
 import { removeAgentTokenFile } from "./git-credential.js";
 type ClosedTarget = Target | StartingTarget;
@@ -32,12 +32,25 @@ export async function markPaneClosed(server: string, pane: Json): Promise<void> 
 }
 
 /** Whether this pane still runs the session (or starting binding) the dispatch recorded. */
-export function paneRunsTarget(target: Target | StartingTarget, pane: Json | undefined, chat: Json): boolean {
-  if (!pane || pane.agent !== target.source) return false;
+export type PaneBinding = "match" | "different" | "unknown";
+
+/** The exact recorded binding: the session id, or a starting target's starting token. */
+export function paneBinding(target: Target | StartingTarget, pane: Json | undefined, chat: Json): PaneBinding {
+  if (!pane || pane.agent !== target.source) return "different";
   const paneSession = typeof pane.sessionId === "string" ? pane.sessionId : typeof pane.session_id === "string" ? pane.session_id : undefined;
-  if ("session" in target) return (paneSession ?? chat.sessionId) === target.session;
-  if (paneSession || (typeof chat.sessionId === "string" && chat.sessionId)) return true;
-  return chat.startingToken === undefined || chat.startingToken === target.startingToken;
+  if ("session" in target) {
+    const actual = paneSession ?? (typeof chat.sessionId === "string" ? chat.sessionId : undefined);
+    if (!actual) return "unknown";
+    return actual === target.session ? "match" : "different";
+  }
+  const token = typeof pane.startingToken === "string" ? pane.startingToken
+    : typeof chat.startingToken === "string" ? chat.startingToken : undefined;
+  if (!token) return "unknown";
+  return token === target.startingToken ? "match" : "different";
+}
+
+export function paneRunsTarget(target: Target | StartingTarget, pane: Json | undefined, chat: Json): boolean {
+  return paneBinding(target, pane, chat) === "match";
 }
 
 async function finalizeCancelled(dispatchId: string): Promise<boolean> {
@@ -67,24 +80,31 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
     z.object({ idempotencyKey: idempotencyKeySchema }).strict(),
   ]).parse(input);
   let dispatchId: string | undefined;
+  let record: Awaited<ReturnType<typeof reconcileIdempotencyKey>> = undefined;
   if ("dispatch" in data) dispatchId = data.dispatch;
-  else dispatchId = (await reconcileIdempotencyKey(data.idempotencyKey))?.dispatchId;
+  else { record = await reconcileIdempotencyKey(data.idempotencyKey); dispatchId = record?.dispatchId; }
   // An unknown key names no dispatch; a known one whose receipt is gone still
   // answers with the id it named.
   if (!dispatchId) return { ok: true, closed: false };
-  let receipt = (await dispatchStatus()).find(row => row.id === dispatchId);
-  if (!receipt) return { ok: true, dispatch: dispatchId, closed: false };
-  if (receipt.closedAt) return { ok: true, dispatch: dispatchId, closed: false };
-  if (["launching", "sending"].includes(receipt.state)) throw new BridgeError(409, "This dispatch is still being placed; try closing it again in a moment.");
-  if (!receipt.cancelRequestedAt) {
-    const at = new Date().toISOString();
-    await updateReceipt(dispatchId, value => {
-      if (value.cancelRequestedAt) return false;
-      value.cancelRequestedAt = at;
-      return true;
-    });
-    receipt = (await dispatchStatus()).find(row => row.id === dispatchId) ?? receipt;
+  let placement = false;
+  const receipt = await updateReceipt(dispatchId, value => {
+    // This callback runs under the receipt lock and sees the durable phase,
+    // including launching/sending that dispatchStatus() reports as uncertain.
+    placement = value.state === "launching" || value.state === "sending";
+    if (value.cancelRequestedAt) return false;
+    value.cancelRequestedAt = new Date().toISOString();
+    return true;
+  }, { duringPlacement: true });
+  if (!receipt) {
+    if (record && (record.phase === "reserved" || record.phase === "launching")) {
+      return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+    }
+    return { ok: true, dispatch: dispatchId, closed: false };
   }
+  if (receipt.closedAt) return { ok: true, dispatch: dispatchId, closed: false };
+  // The launcher sees cancelRequestedAt and closes the pane it just created;
+  // this call reports the intent as pending.
+  if (placement) return { ok: true, dispatch: dispatchId, closed: false, pending: true };
   const target = receipt.target;
   const tokenFile = receipt.agentTokenFile;
   if (!target) {
@@ -96,24 +116,34 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
   const { snapshot, findPane } = await import("./herdr.js");
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt) await new Promise(resolve => setTimeout(resolve, attempt === 1 ? 100 : 300));
-    const before = await snapshot(target.server).catch(() => undefined);
-    const pane = before ? findPane(before, target) : undefined;
+    let before: Json;
+    try { before = await snapshot(target.server); } catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
+    const pane = findPane(before, target);
     if (!pane) {
-      // A vanished worker is finalized without touching anything.
+      // A successful snapshot with no pane is a vanished worker; a failed
+      // snapshot above stays pending instead of claiming success.
       await finalizeCancelled(dispatchId);
       await removeAgentTokenFile(tokenFile);
       return { ok: true, dispatch: dispatchId, closed: false, gone: true };
     }
     const paneSession = typeof pane.sessionId === "string" ? pane.sessionId : typeof pane.session_id === "string" ? pane.session_id : undefined;
-    const chat = paneSession ? {} : await paneChatState(target.server, pane, { tokenWhenIdentified: false }).catch(() => ({}));
-    if (!paneRunsTarget(target, pane, chat)) {
+    let chat: Json;
+    try { chat = paneSession ? {} : await paneChatState(target.server, pane, { tokenWhenIdentified: false }); }
+    catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
+    const binding = paneBinding(target, pane, chat);
+    if (binding === "different") {
       // A replacement session now owns the pane: never close it.
       return { ok: true, dispatch: dispatchId, closed: false };
     }
+    if (binding === "unknown") {
+      // Missing identity evidence: fail closed and retry later.
+      return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+    }
     await markPaneClosed(target.server, pane).catch(() => undefined);
     await terminalProvider().closePane(target.server, target.pane).catch(() => undefined);
-    const after = await snapshot(target.server).catch(() => undefined);
-    if (after && !findPane(after, target)) {
+    let after: Json;
+    try { after = await snapshot(target.server); } catch { return { ok: true, dispatch: dispatchId, closed: false, pending: true }; }
+    if (!findPane(after, target)) {
       await finalizeCancelled(dispatchId);
       await removeAgentTokenFile(tokenFile);
       return { ok: true, dispatch: dispatchId, closed: true };

@@ -21,12 +21,15 @@ import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { object, atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
+import { findPane, snapshot } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { limitedBy, limitKey, readAccountLimits, type AccountRoom, type WindowRoom } from "./account-choice.js";
 import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplies, poolRefusal, projectRule, withPolicy, type PolicyRoom, type PoolRule } from "./account-policy.js";
-import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
+import { arrivalSchema, briefArrival, type BriefArrival } from "./launch-brief.js";
 import { worktreeBranch } from "./launch-worktree.js";
+import { removeAgentTokenFile } from "./git-credential.js";
 import { findIdempotencyKey, idempotencyKeySchema, LAUNCH_INTERRUPTED_MS, listIdempotencyRecords, releaseIdempotencyKey, reserveIdempotencyKey, updateIdempotencyPhase, waitForIdempotencyKey, worktreeBranchFor, type IdempotencyRecord } from "./dispatch-idempotency.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -186,8 +189,9 @@ let receiptUpdates: Promise<unknown> = Promise.resolve();
  * when `change` returns true. Updates run one at a time in this process, and a
  * receipt still being placed (launching or sending) is never touched.
  */
-export function updateReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
-  return serializeReceiptUpdate(() => changeReceipt(receiptID, change));
+export function updateReceipt(receiptID: string, change: (receipt: Receipt) => boolean,
+  options: { duringPlacement?: boolean } = {}): Promise<Receipt | undefined> {
+  return serializeReceiptUpdate(() => changeReceipt(receiptID, change, options.duringPlacement === true));
 }
 
 function serializeReceiptUpdate<T>(change: () => Promise<T>): Promise<T> {
@@ -207,9 +211,9 @@ async function readReceipt(receiptID: string): Promise<Receipt | undefined> {
 }
 
 /** Caller holds receiptUpdates; ordinary polling never edits a placing receipt. */
-async function changeReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
+async function changeReceipt(receiptID: string, change: (receipt: Receipt) => boolean, duringPlacement = false): Promise<Receipt | undefined> {
   const receipt = await readReceipt(receiptID);
-  if (!receipt || ["launching", "sending"].includes(receipt.state)) return undefined;
+  if (!receipt || (!duringPlacement && ["launching", "sending"].includes(receipt.state))) return undefined;
   if (!change(receipt)) return receipt;
   receipt.updatedAt = new Date().toISOString();
   await saveReceipt(receiptSchema.parse(receipt));
@@ -311,6 +315,21 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       await updateIdempotencyPhase(record.key, record.owner, "launched").catch(() => undefined);
       return;
     }
+    // The launch's own arrival record names the pane or session it created,
+    // even when the receipt died before saving the target.
+    const arrival = await briefArrival(record.dispatchId).catch(() => undefined);
+    const arrived = arrival?.accepted?.target ?? arrival?.started?.target;
+    if (arrived) {
+      await serializeReceiptUpdate(async () => {
+        const current = await readReceipt(record.dispatchId);
+        if (!current || current.target) return;
+        current.target = remoteTarget.parse(arrived);
+        current.updatedAt = new Date().toISOString();
+        await saveReceipt(current);
+      }).catch(() => undefined);
+      await updateIdempotencyPhase(record.key, record.owner, "launched").catch(() => undefined);
+      return;
+    }
     const worker = receipt.worker;
     const workerLive = worker && ["working", "blocked", "needs-you"].includes(worker.state)
       && Number.isFinite(Date.parse(worker.checkedAt)) && Date.now() - Date.parse(worker.checkedAt) < LAUNCH_INTERRUPTED_MS;
@@ -332,6 +351,26 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       await saveReceipt(current);
     }).catch(() => undefined);
     await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
+    return;
+  }
+  // The launch may have recorded its arrival even if the receipt write was lost.
+  const arrival = await briefArrival(record.dispatchId).catch(() => undefined);
+  const arrived = arrival?.accepted?.target ?? arrival?.started?.target;
+  if (arrived) {
+    const at = new Date().toISOString();
+    const recovered: Receipt = {
+      id: record.dispatchId,
+      computer: (record.computer as Receipt["computer"] | undefined) ?? "local",
+      project: record.project ?? "unknown",
+      harness: (record.harness as Receipt["harness"] | undefined) ?? "claude",
+      label: record.label ?? "gitboy agent",
+      createdAt: record.createdAt,
+      updatedAt: at,
+      state: "accepted",
+      target: remoteTarget.parse(arrived),
+    };
+    await saveReceipt(recovered);
+    await updateIdempotencyPhase(record.key, record.owner, "launched").catch(() => undefined);
     return;
   }
   // The process died after reserving but before its first receipt write.
@@ -848,6 +887,56 @@ export class DispatchService {
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
           { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
+        const parsedLaunched = remoteTarget.safeParse(launched.target);
+        // A cancellation recorded while the launch was in flight wins before
+        // any target save overwrites it.
+        if (peer.local && (await readReceipt(receipt.id))?.cancelRequestedAt) {
+          const at = new Date().toISOString();
+          const binding = parsedLaunched.success && parsedLaunched.data.server === peer.server
+            ? { server: peer.server, workspace: parsedLaunched.data.workspace, tab: parsedLaunched.data.tab, pane: parsedLaunched.data.pane, source: data.harness }
+            : typeof launched.workspaceId === "string" && typeof launched.tabId === "string" && typeof launched.paneId === "string"
+              ? { server: peer.server, workspace: launched.workspaceId, tab: launched.tabId, pane: launched.paneId, source: data.harness }
+              : undefined;
+          if (binding) {
+            let before: Json;
+            try { before = await snapshot(peer.server); }
+            catch { return { ok: false, ...receipt, dispatch: receipt.id, existing: false, error: "cancel requested" }; }
+            const pane = findPane(before, binding);
+            let gone = !pane;
+            if (pane) {
+              await terminalProvider().closePane(peer.server, binding.pane).catch(() => undefined);
+              const after = await snapshot(peer.server).catch(() => undefined);
+              gone = !!after && !findPane(after, binding);
+            }
+            if (gone) {
+              const cancelled = await updateReceipt(receipt.id, value => {
+                if (value.closedAt) return false;
+                value.closedAt = at;
+                value.state = "failed";
+                value.error = "cancelled";
+                value.returned = { state: "failed", at, error: "cancelled", read: false };
+                return true;
+              }, { duringPlacement: true });
+              if (keyed) await updateIdempotencyPhase(keyed.key, keyed.owner, "failed").catch(() => undefined);
+              if (typeof launched.agentTokenFile === "string") await removeAgentTokenFile(launched.agentTokenFile);
+              return { ok: false, ...(cancelled ?? receipt), dispatch: receipt.id, existing: false };
+            }
+          }
+          // Not confirmed: keep the intent and any binding for a later close.
+          const durable = await readReceipt(receipt.id).catch(() => undefined);
+          if (durable?.cancelRequestedAt) receipt.cancelRequestedAt = durable.cancelRequestedAt;
+          if (parsedLaunched.success && parsedLaunched.data.source === data.harness && parsedLaunched.data.server === peer.server) receipt.target = parsedLaunched.data;
+          // The launcher is done; a later close can retry the pane instead of
+          // treating this as a placement that is still in flight.
+          receipt.state = "uncertain";
+          await save(receipt, originWindow);
+          return { ok: false, ...receipt, dispatch: receipt.id, existing: false, error: "cancel requested" };
+        }
+        // Persist the binding the launch returned before marking the key launched.
+        if (parsedLaunched.success && parsedLaunched.data.source === data.harness && parsedLaunched.data.server === peer.server) {
+          receipt.target = parsedLaunched.data;
+          await save(receipt, originWindow);
+        }
         if (keyed) await updateIdempotencyPhase(keyed.key, keyed.owner, "launched").catch(() => undefined);
         if (typeof launched.agentTokenFile === "string") receipt.agentTokenFile = launched.agentTokenFile;
         // Placed: the brief is confirmed outside the lock.

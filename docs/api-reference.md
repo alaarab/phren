@@ -107,10 +107,14 @@ earlier one). Keys are durable under `<bridge>/idempotency/` (0600, 30 days).
 The dispatch id is generated first; the full reservation is published with an
 atomic `link`, so concurrent same-key calls start one agent and an empty or
 unreadable reservation is never reclaimed. Expiry and replacement run under a
-per-key lock (60 s stale limit), and updates/deletes check the owner nonce. A
-reservation stuck in `reserved`/`launching` for five minutes with no target and
-no live worker becomes a failed receipt (`error: "launch interrupted"`), and is
-never relaunched. See
+per-key lock, and updates/deletes check the owner nonce. A stale lock is never
+unlinked by another caller: its lease expiry is written in the lock file, and a
+stale lock fails closed with a retryable "locked by a stale owner" error. A
+reservation stuck in `reserved`/`launching` for five minutes is reconciled
+using its arrival record and starting token; if they name a live worker, its
+target is recovered and it continues as launched. Only with no evidence does it
+become a failed receipt (`error: "launch interrupted"`), and it is never
+relaunched. See
 [Conductor](conductor.md#local-idempotent-dispatches-gitboys-runner) for the
 full execution policy.
 
@@ -137,26 +141,37 @@ or allow-all flags in the resolved arguments.
 For a keyed dispatch with `--worktree` in a gitboy checkout, the worktree's own
 config (never the global config) clears any inherited helper for that host and
 adds `credential.https://<host>.helper = !phren bridge git-credential` plus
-`credential.https://<host>.useHttpPath = false`. The helper answers HTTPS `get`
-from the Hook's stored gitboy agent token only; an ordinary token, or one not
-marked `agent: true`, never answers. The worktree is created with
+`credential.https://<host>.useHttpPath = false`. It also rewrites
+`remote.origin.url`/`pushurl` to credential-free
+`https://<host>/<owner>/<repo>.git`, sets `core.sshCommand=false`, and clears
+`http.https://<host>/.extraHeader`; an underivable owner/repo is refused. The
+helper answers HTTPS `get` from the Hook's stored gitboy agent token only; an
+ordinary token, or one not marked `agent: true`, never answers. The worktree is
+created with
 `--no-checkout` and populated with `--attr-source` set to Git's empty tree, so no
 repository hook or smudge/process filter runs; this needs Git 2.40 or newer.
 LFS files remain pointers until the agent fetches them.
 
 The agent gets the token for the API only as `GITBOY_TOKEN_FILE`, a 0600 file in
-the worktree's git dir; no token is placed in the environment or argv. The file
-is removed when the dispatch closes or finishes. A missing agent token fails
-closed with `No gitboy agent token for <domain>...`.
+the worktree's git dir; no token is placed in the environment or argv. A keyed
+launch also empties inherited `GITBOY_TOKEN`, other `GITBOY_*` (except
+`GITBOY_HOST`/`GITBOY_TOKEN_FILE`), `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`,
+`GIT_ASKPASS`, `SSH_ASKPASS`, `SSH_AUTH_SOCK`, `GIT_CONFIG_*`, `GIT_SSH` and
+`GIT_SSH_COMMAND` on the tmux, Herdr and Codex launch paths. The file is removed
+when the dispatch closes or finishes. A missing agent token fails closed with
+`No gitboy agent token for <domain>...`.
 
 `close` calls `POST /v1/dispatch/cancel` with exactly one of
 `{ "dispatch": "<uuid>" }` or `{ "idempotencyKey": "<key>" }`: the Hook looks
 the key up in the same durable store, records `cancelRequestedAt`, re-resolves
-the pane, and closes it only while it still runs the recorded session. It
-retries up to three times, writes `closedAt` and the terminal `cancelled`
-return only after the pane is confirmed gone, and never closes a replacement
-session. It exits 0 and prints `{"dispatch":"<id>","closed":true}` when it
-cancels; an unconfirmed close prints
+the pane, and closes it only while it still matches the exact recorded binding
+(session id or starting token). Missing evidence fails closed and stays pending;
+a different session is never closed. It retries up to three times, writes
+`closedAt` and the terminal `cancelled` return only after a successful snapshot
+shows the pane gone, and a failed snapshot stays pending. A cancellation during
+placement records the intent on the receipt; the launcher closes the pane it
+created and finalizes it. It exits 0 and prints
+`{"dispatch":"<id>","closed":true}` when it cancels; an unconfirmed close prints
 `{"dispatch":"<id>","closed":false,"pending":true}` and exits 1, leaving the
 intent for a later retry. An unknown key, or a dispatch already gone, prints
 `{"closed":false}` (with `dispatch` when the key still names one). `--follow` is

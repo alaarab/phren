@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, reconcileInterruptedDispatches } from "./dispatch.js";
-import { findIdempotencyKey, idempotencyKeyFile, reserveIdempotencyKey, updateIdempotencyPhase } from "./dispatch-idempotency.js";
+import { findIdempotencyKey, idempotencyKeyFile, idempotencyLockFile, reserveIdempotencyKey, updateIdempotencyPhase } from "./dispatch-idempotency.js";
+import { recordBriefArrival } from "./launch-brief.js";
 import { closeRequestFromArgs, dispatchInputFromArgs } from "./dispatch-command.js";
 import { waitForDispatch } from "./dispatch-wait.js";
-import { cancelDispatch, paneRunsTarget } from "./worker-close.js";
+import { cancelDispatch, paneBinding, paneRunsTarget } from "./worker-close.js";
 import { hookRequest } from "./client.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
@@ -126,6 +127,15 @@ describe("local dispatch", () => {
       .rejects.toMatchObject({ status: 503, message: expect.stringContaining("unreadable") });
   });
 
+  it("fails closed on a stale idempotency lock instead of unlinking it", async () => {
+    const key = "gitboy:host:stale-lock";
+    await reserveIdempotencyKey(key, randomUUID(), randomUUID(), {}, Date.now() - 31 * 24 * 60 * 60_000);
+    await writeFile(idempotencyLockFile(key), JSON.stringify({ owner: randomUUID(), createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() }));
+    await expect(reserveIdempotencyKey(key, randomUUID(), randomUUID()))
+      .rejects.toMatchObject({ status: 503, message: expect.stringContaining("stale owner") });
+    expect(await readFile(idempotencyLockFile(key), "utf8")).toContain("owner");
+  });
+
   it("turns a stale reservation into a failed interrupted launch and never relaunches", async () => {
     const key = "gitboy:host:interrupted";
     const id = randomUUID();
@@ -140,10 +150,22 @@ describe("local dispatch", () => {
     expect(launches()).toHaveLength(0);
   });
 
+  it("recovers an interrupted launch from its arrival record", async () => {
+    const key = "gitboy:host:arrived";
+    const id = randomUUID();
+    await reserveIdempotencyKey(key, id, randomUUID(), { project: "phren", harness: "codex", label: "Arrived", computer: "local" },
+      Date.now() - 6 * 60_000);
+    const arrived = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", starting: true, startingToken: "b".repeat(64) };
+    await recordBriefArrival(id, "SessionStart", arrived);
+    await reconcileInterruptedDispatches();
+    expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({ state: "accepted", target: arrived });
+    expect((await findIdempotencyKey(key))?.phase).toBe("launched");
+  });
+
   it("closes a running dispatch once and its wait ends cancelled", async () => {
     const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:close" });
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
-      terminal_id: "term-1", agent: target.source, agent_status: "working" }];
+      terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes }),
@@ -170,7 +192,7 @@ describe("local dispatch", () => {
     const key = "gitboy:host:close-key";
     const placed = await service().dispatch({ ...brief, idempotencyKey: key });
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
-      terminal_id: "term-1", agent: target.source, agent_status: "working" }];
+      terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes }),
@@ -190,7 +212,7 @@ describe("local dispatch", () => {
   it("leaves an unconfirmed close pending and retries it later", async () => {
     const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:pending" });
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
-      terminal_id: "term-1", agent: target.source, agent_status: "working" }];
+      terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     let remove = false;
     const closePane = vi.fn(async () => { if (remove) panes = []; });
     const restore = setTerminalProvider({ snapshot: async () => ({ panes }), closePane } as unknown as TerminalProvider);
@@ -214,9 +236,52 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("does not treat a replacement session as the recorded worker", () => {
+  it("does not treat a replacement session or missing evidence as the recorded worker", () => {
     const recorded = { ...target, session: "s-recorded" };
     expect(paneRunsTarget(recorded as never, { agent: "codex" }, { sessionId: "s-other" })).toBe(false);
     expect(paneRunsTarget(recorded as never, { agent: "codex" }, { sessionId: "s-recorded" })).toBe(true);
+    expect(paneBinding(target as never, { agent: "codex" }, {})).toBe("unknown");
+  });
+
+  it("keeps a cancellation pending when the pane snapshot fails", async () => {
+    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:snapshot" });
+    const restore = setTerminalProvider({ snapshot: async () => { throw new Error("snapshot down"); }, closePane: vi.fn() } as unknown as TerminalProvider);
+    try {
+      expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
+      expect((await dispatchStatus()).find(row => row.id === placed.id)).toMatchObject({ cancelRequestedAt: expect.any(String) });
+      expect((await dispatchStatus()).find(row => row.id === placed.id)?.closedAt).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("records cancelRequestedAt during placement instead of reporting gone", async () => {
+    const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:placing" });
+    const file = path.join(root, "dispatches", `${placed.id}.json`);
+    const receipt = JSON.parse(await readFile(file, "utf8"));
+    await writeFile(file, JSON.stringify({ ...receipt, state: "launching" }));
+    expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
+    expect(JSON.parse(await readFile(file, "utf8")).cancelRequestedAt).toEqual(expect.any(String));
+  });
+
+  it("lets the launcher close a pane cancelled during placement", async () => {
+    let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
+      terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
+    const closePane = vi.fn(async () => { panes = []; });
+    const restore = setTerminalProvider({ snapshot: async () => ({ panes }), closePane } as unknown as TerminalProvider);
+    vi.mocked(hookRequest).mockImplementation(async (route, data) => {
+      if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 };
+      if (route.startsWith("/v1/workspaces/launch")) {
+        const file = path.join(root, "dispatches", `${String((data?.brief as Json).id)}.json`);
+        const receipt = JSON.parse(await readFile(file, "utf8"));
+        await writeFile(file, JSON.stringify({ ...receipt, cancelRequestedAt: new Date().toISOString() }));
+        return { ok: true, target };
+      }
+      return { ok: true };
+    });
+    try {
+      const result = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:launcher-cancel" });
+      expect(result).toMatchObject({ state: "failed", error: "cancelled" });
+      expect(closePane).toHaveBeenCalled();
+      expect((await findIdempotencyKey("gitboy:host:launcher-cancel"))?.phase).toBe("failed");
+    } finally { restore(); }
   });
 });
