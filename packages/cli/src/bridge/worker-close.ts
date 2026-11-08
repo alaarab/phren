@@ -136,20 +136,19 @@ export async function cancelDispatch(input: unknown): Promise<Json> {
   return closeVerifiedWorker(receipt);
 }
 
-/** The pane whose foreground process is the recorded worker PID, if any. */
-async function paneRunningPid(server: string, pid: number): Promise<Json | undefined> {
+/** Close the recorded pane only after the worker is gone and the pane is just its shell. */
+async function closeIdlePane(server: string, target: Target | StartingTarget): Promise<void> {
   try {
     const snapshot = await terminalProvider().snapshot(server);
-    for (const pane of objects(snapshot.panes)) {
-      const paneId = typeof pane.pane_id === "string" ? pane.pane_id : undefined;
-      if (!paneId) continue;
-      try {
-        const info = await terminalProvider().processes(server, paneId);
-        if (info.foregroundPids.includes(pid)) return pane;
-      } catch { /* this pane cannot be read; try the next */ }
-    }
-  } catch { /* no snapshot: the PID path still applies */ }
-  return undefined;
+    const pane = objects(snapshot.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace);
+    if (!pane || typeof pane.pane_id !== "string") return;
+    const info = await terminalProvider().processes(server, pane.pane_id).catch(() => undefined);
+    // A replacement session in this pane is running something other than the
+    // shell; never close it. Only a bare shell prompt is safe to close.
+    if (!info || info.shellPid === undefined || info.foregroundPids.length === 0) return;
+    if (!info.foregroundPids.every(pid => pid === info.shellPid)) return;
+    await terminalProvider().closePane(server, pane.pane_id).catch(() => undefined);
+  } catch { /* leave the pane */ }
 }
 
 /** A keyed worker is closed by its durable process identity, never by a pane's inherited token. */
@@ -161,25 +160,23 @@ async function closeKeyedWorker(receipt: Receipt, duringPlacement: boolean, clea
     clearStartingTokenByToken(receipt.startingToken ?? "");
     return { ok: true, dispatch: dispatchId, closed, ...(closed ? {} : { gone: true }) };
   };
-  const alive = await workerAlive(dispatchId, receipt.workerFile);
+  const alive = await workerAlive(dispatchId, receipt.workerFile, receipt.submittedAt);
   if (alive === "unknown") return { ok: true, dispatch: dispatchId, closed: false, pending: true };
-  if (alive === "gone") return finalize(false);
+  const closePaneIfIdle = async () => {
+    const server = receipt.launchServer ?? receipt.target?.server;
+    if (server && receipt.target) await closeIdlePane(server, receipt.target);
+  };
+  if (alive === "gone") { await closePaneIfIdle(); return finalize(false); }
   const worker = await workerPid(dispatchId, receipt.workerFile);
   if (!worker) return { ok: true, dispatch: dispatchId, closed: false, pending: true };
-  const server = receipt.launchServer ?? receipt.target?.server;
-  if (server) {
-    const pane = await paneRunningPid(server, worker.pid);
-    if (pane) {
-      // The pane still runs the recorded process: close it through the provider.
-      await terminalProvider().closePane(server, String(pane.pane_id)).catch(() => undefined);
-      if (await workerAlive(dispatchId, receipt.workerFile) === "gone") return finalize(true);
-    }
-  }
-  // A replacement session in the pane has another PID; only the recorded
-  // process is signalled, after re-checking its start time.
+  // Terminate through the recorded process identity first; never signal or
+  // close based on a PID match alone.
   await terminateWorker(worker.pid, worker.start);
-  if (await workerAlive(dispatchId, receipt.workerFile) === "gone") return finalize(true);
-  return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+  if (await workerAlive(dispatchId, receipt.workerFile, receipt.submittedAt) !== "gone") {
+    return { ok: true, dispatch: dispatchId, closed: false, pending: true };
+  }
+  await closePaneIfIdle();
+  return finalize(true);
 }
 
 /** The one close path: exact binding, confirmed snapshot, terminal return only after it is gone. */

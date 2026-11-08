@@ -22,7 +22,7 @@ import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { keyedExplicitEnv, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
 import { createDispatchClone, dispatchClonePaths, type DispatchClonePaths } from "./dispatch-clone.js";
-import { acquireLaunchLock, releaseLaunchLock, type LaunchLock } from "./worker-identity.js";
+import { acquireLaunchLock, markSubmitted, releaseLaunchLock, type LaunchLock } from "./worker-identity.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -610,6 +610,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   }
   const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
     ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
+  if (keyedDispatchId) await markSubmitted(keyedDispatchId);
   try {
     await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(launchEnv ? { env: launchEnv } : {}), ...(keyedEnv ? { envExact: true, freshPane: !options.into } : {}) });
   } catch (error) {

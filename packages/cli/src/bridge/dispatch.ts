@@ -28,7 +28,7 @@ import { allowedRooms, choosePolicyAccount, computerRule, openRoom, policyApplie
 import { arrivalSchema, briefArrival, type BriefArrival } from "./launch-brief.js";
 import { worktreeBranch } from "./launch-worktree.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets, type DispatchClonePaths } from "./dispatch-clone.js";
-import { launchInProgress, removeWorkerFile, workerAlive } from "./worker-identity.js";
+import { launchInProgress, markSubmitted, removeWorkerFile, workerAlive } from "./worker-identity.js";
 import { findIdempotencyKey, idempotencyKeySchema, LAUNCH_INTERRUPTED_MS, listIdempotencyRecords, releaseIdempotencyKey, reserveIdempotencyKey, updateIdempotencyPhase, waitForIdempotencyKey, withIdempotencyKeyLock, worktreeBranchFor, type IdempotencyRecord } from "./dispatch-idempotency.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -118,6 +118,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     .describe("The launch's own starting token, recorded before the request and carried by its pane."),
   launchServer: z.string().max(200).optional().describe("The terminal server the launch request targeted."),
   scanSince: timestamp.optional().describe("When a successful snapshot first found no pane carrying this launch's starting token."),
+  submittedAt: timestamp.optional().describe("When the launch command was submitted; a missing worker file is only gone after its grace period."),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
     background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
@@ -184,7 +185,7 @@ function save(receipt: Receipt, originWindow: DispatchOriginWindow): Promise<voi
   });
 }
 
-const PLACEMENT_FIELDS = ["state", "error", "brief", "target", "account", "accountChoice", "agentTokenFile", "cloneDir", "gitConfigFile", "workerFile", "returned", "closedAt", "launchOutcome"] as const;
+const PLACEMENT_FIELDS = ["state", "error", "brief", "target", "account", "accountChoice", "agentTokenFile", "cloneDir", "gitConfigFile", "workerFile", "returned", "closedAt", "launchOutcome", "submittedAt"] as const;
 
 /** Every placement write re-reads the receipt under the lock, so a concurrent cancelRequestedAt is never lost. */
 async function persistReceipt(receipt: Receipt, originWindow: DispatchOriginWindow, change: (value: Receipt) => void = () => undefined): Promise<void> {
@@ -485,7 +486,7 @@ async function confirmInterruptedLaunch(receipt: Receipt): Promise<void> {
     if (Number.isFinite(until) && Date.now() >= until) await removeDispatchClone(paths);
   };
   if (receipt.idempotencyKey) {
-    const alive = await workerAlive(receipt.id, receipt.workerFile ?? dispatchClonePaths(receipt.id).workerFile);
+    const alive = await workerAlive(receipt.id, receipt.workerFile ?? dispatchClonePaths(receipt.id).workerFile, receipt.submittedAt);
     if (alive === "unknown") return;
     if (alive === "alive") {
       await updateReceipt(receipt.id, value => {
@@ -554,7 +555,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
     // a failed return alone never removes its token.
     if (state === "failed" || state === "gone" || (terminal.closedAt && !done)) {
       if (terminal.idempotencyKey) {
-        const alive = await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile);
+        const alive = await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile, terminal.submittedAt);
         if (alive !== "gone") { await clearWorkerEnded(terminal.id); return; }
         await removeDispatchSecrets(paths);
         await removeWorkerFile(terminal.id);
@@ -579,7 +580,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
           }).catch(() => undefined);
         }
         if (retainedUntil && Number.isFinite(Date.parse(retainedUntil)) && Date.now() >= Date.parse(retainedUntil)) {
-          if (await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile) === "gone") await removeDispatchClone(paths);
+          if (await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile, terminal.submittedAt) === "gone") await removeDispatchClone(paths);
         }
         return;
       }
@@ -625,7 +626,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       if (terminal.idempotencyKey) {
         if (terminal.closedAt) { await removeDispatchClone(paths); return; }
         if (keepOpen) { await clearWorkerEnded(terminal.id); return; }
-        const alive = await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile);
+        const alive = await workerAlive(terminal.id, terminal.workerFile ?? paths.workerFile, terminal.submittedAt);
         if (alive === "gone") { await removeDispatchClone(paths); return; }
         await clearWorkerEnded(terminal.id);
         return;
@@ -701,6 +702,16 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       await updateIdempotencyPhase(record.key, record.owner, "failed").catch(() => undefined);
       return;
     }
+    // Never publish an interrupted-launch failure while a launch lock is live
+    // or the durable process proof says the worker may still run.
+    let lockLive = false;
+    try { lockLive = await launchInProgress(record.dispatchId); } catch { lockLive = true; }
+    if (lockLive) return;
+    let alive: Awaited<ReturnType<typeof workerAlive>> = "unknown";
+    try {
+      alive = await workerAlive(record.dispatchId, receipt.workerFile ?? record.workerFile ?? dispatchClonePaths(record.dispatchId).workerFile, receipt.submittedAt);
+    } catch { return; }
+    if (alive !== "gone") return;
     // A stale receipt can still say launching/sending; the ordinary writer
     // refuses those, so reconcile it under the receipt lock directly.
     const interrupted = await serializeReceiptUpdate(async () => {
@@ -751,6 +762,14 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
   }
   // The process died after reserving but before its first receipt write.
   const at = new Date().toISOString();
+  // A no-receipt reservation is only an interrupted launch once the lock is
+  // over and the durable process proof says no worker is running.
+  let lockLive = false;
+  try { lockLive = await launchInProgress(record.dispatchId); } catch { lockLive = true; }
+  if (lockLive) return;
+  let alive: Awaited<ReturnType<typeof workerAlive>> = "unknown";
+  try { alive = await workerAlive(record.dispatchId, record.workerFile ?? dispatchClonePaths(record.dispatchId).workerFile); } catch { return; }
+  if (alive !== "gone") return;
   const outcome = record.phase === "reserved" ? "not-started" : "ambiguous";
   const fallback: Receipt = {
     id: record.dispatchId,
@@ -1331,6 +1350,11 @@ export class DispatchService {
         }
         if (await keyCancelled()) return { ok: false, ...receipt, dispatch: receipt.id, existing: false };
         // The request is about to be sent: from here its outcome may be unknown.
+        if (data.idempotencyKey) {
+          const submittedAt = new Date().toISOString();
+          await markSubmitted(dispatchId, new Date(submittedAt));
+          receipt.submittedAt = submittedAt;
+        }
         receipt.launchOutcome = "ambiguous";
         await persistReceipt(receipt, originWindow);
         // The brief goes with the launch: a Hook that can start the harness

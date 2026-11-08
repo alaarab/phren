@@ -153,13 +153,48 @@ describe("local dispatch", () => {
       .rejects.toMatchObject({ status: 503, message: expect.stringContaining("unreadable") });
   });
 
-  it("fails closed on a stale idempotency lock instead of unlinking it", async () => {
+  it("reclaims a crashed owner's idempotency lock, but never a live owner's", async () => {
     const key = "gitboy:host:stale-lock";
     await reserveIdempotencyKey(key, randomUUID(), randomUUID(), {}, Date.now() - 31 * 24 * 60 * 60_000);
-    await writeFile(idempotencyLockFile(key), JSON.stringify({ owner: randomUUID(), createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() }));
-    await expect(reserveIdempotencyKey(key, randomUUID(), randomUUID()))
-      .rejects.toMatchObject({ status: 503, message: expect.stringContaining("stale owner") });
-    expect(await readFile(idempotencyLockFile(key), "utf8")).toContain("owner");
+    const dead = JSON.stringify({ owner: randomUUID(), pid: 999999, start: "gone", nonce: "dead",
+      createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() });
+    await writeFile(idempotencyLockFile(key), dead);
+    expect((await reserveIdempotencyKey(key, randomUUID(), randomUUID())).reserved).toBe(true);
+    expect(await readFile(idempotencyLockFile(key), "utf8").catch(() => "")).not.toBe(dead);
+
+    const liveKey = "gitboy:host:live-lock";
+    await reserveIdempotencyKey(liveKey, randomUUID(), randomUUID(), {}, Date.now() - 31 * 24 * 60 * 60_000);
+    const start = await processStartTime(process.pid);
+    const live = JSON.stringify({ owner: randomUUID(), pid: process.pid, ...(start ? { start } : {}), nonce: "live",
+      createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() });
+    await writeFile(idempotencyLockFile(liveKey), live);
+    await expect(reserveIdempotencyKey(liveKey, randomUUID(), randomUUID())).rejects.toMatchObject({ status: 503 });
+    expect(await readFile(idempotencyLockFile(liveKey), "utf8")).toBe(live);
+  });
+
+  it("lets two concurrent reclaimers end with exactly one owner", async () => {
+    const key = "gitboy:host:race-reclaim";
+    await reserveIdempotencyKey(key, randomUUID(), randomUUID(), {}, Date.now() - 31 * 24 * 60 * 60_000);
+    await writeFile(idempotencyLockFile(key), JSON.stringify({ owner: randomUUID(), pid: 999999, start: "gone", nonce: "dead",
+      createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() }));
+    const results = await Promise.allSettled([
+      reserveIdempotencyKey(key, randomUUID(), randomUUID()),
+      reserveIdempotencyKey(key, randomUUID(), randomUUID()),
+    ]);
+    expect(results.filter(result => result.status === "fulfilled" && result.value.reserved)).toHaveLength(1);
+  });
+
+  it("publishes no interrupted-launch failure while a live launch lock is held", async () => {
+    const key = "gitboy:host:live-lock-6m";
+    const id = randomUUID();
+    await reserveIdempotencyKey(key, id, randomUUID(), { project: "phren", harness: "codex", label: "Live", computer: "local" }, Date.now() - 6 * 60_000);
+    const lock = await acquireLaunchLock(id);
+    try {
+      await reconcileInterruptedDispatches();
+      expect((await dispatchStatus()).find(row => row.id === id)).toBeUndefined();
+    } finally { await releaseLaunchLock(lock); }
+    await reconcileInterruptedDispatches();
+    expect((await dispatchStatus()).find(row => row.id === id)).toMatchObject({ state: "failed", error: "launch interrupted" });
   });
 
   it("turns a stale reservation into a failed interrupted launch and never relaunches", async () => {
@@ -215,6 +250,7 @@ describe("local dispatch", () => {
     await writeFile(paths.agentTokenFile, "token\n");
     await updateReceipt(placed.id, value => {
       value.returned = { state: "failed", at: new Date().toISOString(), error: "boom", read: false };
+      value.submittedAt = new Date(Date.now() - 130_000).toISOString();
       return true;
     });
     const returns = new DispatchReturns({ now: () => Date.now(), request: async () => ({}), peers: async () => [],
@@ -263,6 +299,7 @@ describe("local dispatch", () => {
     await writeFile(paths.agentTokenFile, "token\n");
     await updateReceipt(placed.id, value => {
       value.returned = { state: "failed", at: new Date().toISOString(), error: "usage limit", read: false };
+      value.submittedAt = new Date(Date.now() - 130_000).toISOString();
       value.endedAt = new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString();
       value.retainedUntil = new Date(Date.now() - 1_000).toISOString();
       return true;
@@ -334,13 +371,13 @@ describe("local dispatch", () => {
 
   it("closes a running dispatch once and its wait ends cancelled", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:close" });
-    const pid = await liveWorker(placed.id);
+    await liveWorker(placed.id);
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes }),
-      processes: async () => ({ foregroundPids: [pid] }),
+      processes: async () => ({ shellPid: 777, foregroundPids: [777] }),
       closePane,
     } as unknown as TerminalProvider);
     try {
@@ -363,13 +400,13 @@ describe("local dispatch", () => {
   it("closes by idempotency key, refuses both forms, and an unknown key closes nothing", async () => {
     const key = "gitboy:host:close-key";
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
-    const pid = await liveWorker(placed.id);
+    await liveWorker(placed.id);
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes }),
-      processes: async () => ({ foregroundPids: [pid] }),
+      processes: async () => ({ shellPid: 777, foregroundPids: [777] }),
       closePane,
     } as unknown as TerminalProvider);
     try {
@@ -385,6 +422,7 @@ describe("local dispatch", () => {
 
   it("keeps a cancel pending while a live launch lock is held, and ignores a stale one", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:pending" });
+    await updateReceipt(placed.id, value => { value.submittedAt = new Date(Date.now() - 130_000).toISOString(); return true; });
     const lock = await acquireLaunchLock(placed.id);
     try {
       expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
@@ -395,12 +433,14 @@ describe("local dispatch", () => {
     expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false });
     // A stale lock (its owner process is gone) on a fresh dispatch is ignored.
     const second = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:stale-lock" });
+    await updateReceipt(second.id, value => { value.submittedAt = new Date(Date.now() - 130_000).toISOString(); return true; });
     await writeFile(launchLockFile(second.id), JSON.stringify({ pid: 999999, start: "gone", nonce: "stale" }), { mode: 0o600 });
     expect(await cancelDispatch({ dispatch: second.id })).toMatchObject({ dispatch: second.id, closed: false, gone: true });
   });
 
   it("finalizes a vanished worker without closing a pane", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:gone" });
+    await updateReceipt(placed.id, value => { value.submittedAt = new Date(Date.now() - 130_000).toISOString(); return true; });
     const closePane = vi.fn(async () => undefined);
     const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }), closePane } as unknown as TerminalProvider);
     try {
@@ -443,15 +483,14 @@ describe("local dispatch", () => {
   it("lets the launcher close a pane cancelled during placement", async () => {
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
-    let workerPid: number | undefined;
     const closePane = vi.fn(async () => { panes = []; });
     const restore = setTerminalProvider({ snapshot: async () => ({ panes }),
-      processes: async () => ({ foregroundPids: workerPid ? [workerPid] : [] }), closePane } as unknown as TerminalProvider);
+      processes: async () => ({ shellPid: 777, foregroundPids: [777] }), closePane } as unknown as TerminalProvider);
     vi.mocked(hookRequest).mockImplementation(async (route, data) => {
       if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 };
       if (route.startsWith("/v1/workspaces/launch")) {
         const id = String((data?.brief as Json).id);
-        workerPid = await liveWorker(id);
+        await liveWorker(id);
         const file = path.join(root, "dispatches", `${id}.json`);
         const receipt = JSON.parse(await readFile(file, "utf8"));
         await writeFile(file, JSON.stringify({ ...receipt, cancelRequestedAt: new Date().toISOString() }));
@@ -467,7 +506,7 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("keeps a keyed lost-reply launch pending under its lock, then closes by worker identity", async () => {
+  it("keeps a keyed lost-reply launch pending under its lock, then terminates by worker identity", async () => {
     const id = randomUUID();
     const base = { id, computer: "local", project: "phren", harness: "codex", label: "Lost reply", idempotencyKey: `gitboy:host:${id}`,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "uncertain", launchServer: "default" } as unknown as Parameters<typeof closeVerifiedWorker>[0];
@@ -478,13 +517,14 @@ describe("local dispatch", () => {
     } finally { await releaseLaunchLock(lock); }
 
     // A fresh module state still finds the live worker through its file.
-    const pid = await liveWorker(id);
+    await liveWorker(id);
     const closePane = vi.fn(async () => undefined);
     const restore = setTerminalProvider({ snapshot: async () => ({ panes: [{ pane_id: "p9", workspace_id: "w9", tab_id: "t9", agent: "codex" }] }),
-      processes: async () => ({ foregroundPids: [pid] }), closePane } as unknown as TerminalProvider);
+      processes: async () => ({ shellPid: 777, foregroundPids: [777] }), closePane } as unknown as TerminalProvider);
     try {
       expect(await closeVerifiedWorker(base)).toMatchObject({ closed: true });
-      expect(closePane).toHaveBeenCalled();
+      // No recorded target: the worker is terminated, but no pane is touched.
+      expect(closePane).not.toHaveBeenCalled();
     } finally { restore(); }
   });
 
@@ -527,13 +567,29 @@ describe("local dispatch", () => {
     expect((await dispatchStatus()).find(row => row.id === id)?.endedAt).toEqual(expect.any(String));
   });
 
-  it("does not kill a replacement process in the same pane", async () => {
-    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:replacement" });
-    const pid = await liveWorker(placed.id);
+  it("never signals a reused PID and never closes its pane", async () => {
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:reused" });
+    // The worker file names this test process, but with another start time.
+    await writeFile(workerFilePath(placed.id), `${process.pid} Thu Jan  1 00:00:00 1970\n`, { mode: 0o600 });
     const closePane = vi.fn(async () => undefined);
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: target.source }] }),
-      processes: async () => ({ foregroundPids: [process.pid] }),
+      processes: async () => ({ shellPid: 777, foregroundPids: [process.pid] }),
+      closePane,
+    } as unknown as TerminalProvider);
+    try {
+      expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, gone: true });
+      expect(closePane).not.toHaveBeenCalled();
+    } finally { restore(); }
+  });
+
+  it("does not kill a replacement process in the same pane", async () => {
+    const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:replacement" });
+    await liveWorker(placed.id);
+    const closePane = vi.fn(async () => undefined);
+    const restore = setTerminalProvider({
+      snapshot: async () => ({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: target.source }] }),
+      processes: async () => ({ shellPid: 777, foregroundPids: [process.pid] }),
       closePane,
     } as unknown as TerminalProvider);
     try {

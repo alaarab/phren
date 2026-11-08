@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, lstat, mkdir, open, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomic, BridgeError, bridgeRoot } from "./protocol.js";
+import { processMatches, processStartTime } from "./worker-identity.js";
 
 /**
  * Idempotency keys for local dispatches (`phren dispatch local ... --idempotency-key`).
@@ -77,29 +78,78 @@ async function publish(key: string, record: IdempotencyRecord): Promise<boolean>
   }
 }
 
-interface KeyLock { key: string; owner: string }
+interface KeyLock { key: string; owner: string; nonce: string }
+const lockSchema = z.object({
+  owner: z.string().optional(),
+  pid: z.number().int().positive().optional(),
+  start: z.string().optional(),
+  lstart: z.string().optional(),
+  nonce: z.string().optional(),
+  createdAt: z.string().optional(),
+  expiresAt: z.string().optional(),
+}).strict();
+
+async function readLock(file: string): Promise<{ owner?: string; pid?: number; start?: string; lstart?: string; nonce?: string; createdAt?: string; expiresAt?: string } | undefined> {
+  const text = await readFile(file, "utf8").catch(() => undefined);
+  if (text === undefined) return undefined;
+  try { return lockSchema.parse(JSON.parse(text)); } catch { return undefined; }
+}
+
+/** A lock is stale only when its owner process is absent or its start time differs. */
+async function lockOwnerGone(held: { pid?: number; start?: string; lstart?: string } | undefined): Promise<boolean | undefined> {
+  if (!held || !Number.isSafeInteger(held.pid)) return undefined;
+  const start = held.start ?? held.lstart;
+  const state = await processMatches(held.pid!, start);
+  if (state === "gone") return true;
+  if (state === "alive") return false;
+  return undefined;
+}
+
+/** Park a stale lock with an atomic rename, confirm it is the same record, then remove it. */
+async function reclaimLock(key: string, nonce: string, expected: string): Promise<boolean> {
+  const file = idempotencyLockFile(key);
+  const parked = `${file}.reclaim-${nonce}`;
+  try { await rename(file, parked); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  const moved = await readFile(parked, "utf8").catch(() => undefined);
+  if (moved !== expected) {
+    // The owner changed between our read and the rename: put it back if we can,
+    // otherwise fail closed rather than steal a live lock.
+    try { await rename(parked, file); } catch { /* leave the parked file */ }
+    throw new BridgeError(503, "The idempotency key is busy; retry.");
+  }
+  await unlink(parked).catch(() => undefined);
+  return true;
+}
+
 /**
- * A lock is never unlinked unless its owner releases it. A lock whose lease
- * has expired is reported as stale; the caller retries rather than racing a
- * replacement against another process that may still hold it.
+ * A lock records its owner PID, start time and nonce. A stale lock (owner
+ * absent or a different process at that PID) is reclaimed by an atomic rename;
+ * a live owner is never reclaimed. The 60 s lease is only a hint, never proof.
  */
 async function acquireLock(key: string, owner: string, now: number): Promise<KeyLock | undefined> {
   const file = idempotencyLockFile(key);
   const deadline = Date.now() + 2_000;
+  const start = await processStartTime(process.pid).catch(() => undefined);
+  const nonce = randomUUID();
   const leaseUntil = new Date(now + IDEMPOTENCY_LOCK_STALE_MS).toISOString();
+  const body = JSON.stringify({ owner, pid: process.pid, ...(start ? { start, lstart: start } : {}), nonce, createdAt: new Date(now).toISOString(), expiresAt: leaseUntil });
   for (;;) {
     try {
       const handle = await open(file, "wx", 0o600);
-      try { await handle.writeFile(JSON.stringify({ owner, createdAt: new Date(now).toISOString(), expiresAt: leaseUntil })); await handle.sync(); } finally { await handle.close(); }
-      return { key, owner };
+      try { await handle.writeFile(body); await handle.sync(); } finally { await handle.close(); }
+      return { key, owner, nonce };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      let held: { owner?: unknown; expiresAt?: unknown } | undefined;
-      try { held = JSON.parse(await readFile(file, "utf8")) as { owner?: unknown; expiresAt?: unknown }; } catch { /* unreadable: wait briefly */ }
-      const expiry = typeof held?.expiresAt === "string" ? Date.parse(held.expiresAt) : NaN;
-      const info = await lstat(file).catch(() => undefined);
-      const expired = (Number.isFinite(expiry) && Date.now() >= expiry) || (info && Date.now() - info.mtimeMs > IDEMPOTENCY_LOCK_STALE_MS);
-      if (expired) throw new BridgeError(503, "The idempotency key is locked by a stale owner; retry.");
+      const text = await readFile(file, "utf8").catch(() => undefined);
+      const held = text === undefined ? undefined : (() => { try { return lockSchema.parse(JSON.parse(text)); } catch { return undefined; } })();
+      const gone = await lockOwnerGone(held);
+      if (gone === true && text !== undefined) {
+        if (await reclaimLock(key, nonce, text)) continue;
+        throw new BridgeError(503, "The idempotency key is busy; retry.");
+      }
       if (Date.now() >= deadline) return undefined;
       await sleep(50);
     }
@@ -107,9 +157,8 @@ async function acquireLock(key: string, owner: string, now: number): Promise<Key
 }
 async function releaseLock(lock: KeyLock): Promise<void> {
   const file = idempotencyLockFile(lock.key);
-  let held: { owner?: unknown } | undefined;
-  try { held = JSON.parse(await readFile(file, "utf8")) as { owner?: unknown }; } catch { return; }
-  if (held.owner === lock.owner) await unlink(file).catch(() => undefined);
+  const held = await readLock(file);
+  if (held?.nonce === lock.nonce) await unlink(file).catch(() => undefined);
 }
 
 async function replaceExpired(key: string, fresh: IdempotencyRecord, now: number): Promise<KeyReservation> {

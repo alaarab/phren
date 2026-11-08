@@ -18,12 +18,35 @@ const dispatchId = z.string().uuid();
 
 export interface LaunchLock { file: string; nonce: string; pid: number; start?: string }
 export type WorkerLiveness = "alive" | "gone" | "unknown";
+export const SUBMITTED_GRACE_MS = 120_000;
 
 export function workerFilePath(id: string): string {
   return path.join(bridgeRoot(), "clones", `${dispatchId.parse(id)}.worker`);
 }
 export function launchLockFile(id: string): string {
   return path.join(bridgeRoot(), "clones", `${dispatchId.parse(id)}.launching`);
+}
+export function submittedFilePath(id: string): string {
+  return path.join(bridgeRoot(), "clones", `${dispatchId.parse(id)}.submitted`);
+}
+
+/** Mark a launch as submitted before its command is typed or spawned. */
+export async function markSubmitted(id: string, at = new Date()): Promise<string> {
+  const file = submittedFilePath(id);
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, at.toISOString(), { mode: 0o600 });
+  return at.toISOString();
+}
+
+async function submittedTime(id: string, fallback?: string): Promise<string | undefined> {
+  const text = await readFile(submittedFilePath(id), "utf8").catch(() => undefined);
+  const value = text?.trim();
+  if (value) {
+    const ms = /^\d+$/.test(value) ? Number(value) : Date.parse(value);
+    if (Number.isFinite(ms)) return new Date(ms).toISOString();
+  }
+  if (fallback && Number.isFinite(Date.parse(fallback))) return fallback;
+  return undefined;
 }
 
 /** Normalize `ps -o lstart=` and the wrapper's `tr -s " "` output to one form. */
@@ -91,20 +114,78 @@ export async function launchInProgress(id: string): Promise<boolean> {
   return await processMatches(lock.pid, lock.start) !== "gone";
 }
 
+/** Whether a `ps -E` command line carries exactly our worker-file marker. */
+function carriesMarker(command: string, file: string): boolean {
+  const marker = `PHREN_WORKER_ID_FILE=${file}`;
+  const at = command.indexOf(marker);
+  if (at < 0) return false;
+  const before = at === 0 ? " " : command[at - 1];
+  const after = command[at + marker.length] ?? " ";
+  return /\s/.test(before) && /\s/.test(after);
+}
+
+const PS_LINE = /^\s*(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/;
+
+/** A successful same-user process scan: the worker carrying our marker, if any. */
+async function scanWorker(file: string): Promise<{ ok: true; worker?: { pid: number; start: string } } | { ok: false }> {
+  try {
+    if (process.platform === "darwin") {
+      const { stdout } = await exec("ps", ["-axww", "-E", "-o", "pid=,lstart=,command="], { timeout: 5_000, maxBuffer: 16_777_216 });
+      for (const line of stdout.split("\n")) {
+        const match = PS_LINE.exec(line);
+        if (!match || !carriesMarker(match[3], file)) continue;
+        return { ok: true, worker: { pid: Number(match[1]), start: normalize(match[2]) } };
+      }
+      return { ok: true };
+    }
+    if (process.platform === "linux") {
+      const { stdout } = await exec("ps", ["-eww", "-o", "pid=,lstart=,args="], { timeout: 5_000, maxBuffer: 16_777_216 });
+      const marker = `PHREN_WORKER_ID_FILE=${file}`;
+      for (const line of stdout.split("\n")) {
+        const match = PS_LINE.exec(line);
+        if (!match) continue;
+        const pid = Number(match[1]);
+        const environ = await readFile(`/proc/${pid}/environ`).catch(() => undefined);
+        if (!environ || !environ.includes(`${marker}\0`)) continue;
+        return { ok: true, worker: { pid, start: normalize(match[2]) } };
+      }
+      return { ok: true };
+    }
+    return { ok: false };
+  } catch { return { ok: false }; }
+}
+
 /**
- * The worker's liveness. While a live launch lock is held, no conclusion can be
- * drawn yet. With no file after the launch finished, the worker never started.
+ * The worker's liveness. A present identity file is authoritative. Without one,
+ * a same-user process carrying this launch's worker-file marker is adopted;
+ * otherwise the submitted marker and the launch lock decide whether no worker
+ * can still be starting.
  */
-export async function workerAlive(id: string, file = workerFilePath(id)): Promise<WorkerLiveness> {
-  try { if (await launchInProgress(id)) return "unknown"; } catch { return "unknown"; }
-  let text: string;
+export async function workerAlive(id: string, file = workerFilePath(id), submittedAt?: string): Promise<WorkerLiveness> {
+  let lockLive = false;
+  try { lockLive = await launchInProgress(id); } catch { return "unknown"; }
+  let text: string | undefined;
   try { text = await readFile(file, "utf8"); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "gone";
-    return "unknown";
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "unknown";
   }
-  const worker = parseWorker(text);
-  if (!worker) return "unknown";
-  return processMatches(worker.pid, worker.start);
+  if (text !== undefined) {
+    const worker = parseWorker(text);
+    return worker ? processMatches(worker.pid, worker.start) : "unknown";
+  }
+  if (lockLive) return "unknown";
+  const scan = await scanWorker(file);
+  if (!scan.ok) return "unknown";
+  if (scan.worker) {
+    try {
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      await writeFile(file, `${scan.worker.pid} ${scan.worker.start}\n`, { mode: 0o600 });
+    } catch { return "unknown"; }
+    return processMatches(scan.worker.pid, scan.worker.start);
+  }
+  const submitted = await submittedTime(id, submittedAt);
+  if (!submitted) return "gone";
+  if (Date.now() - Date.parse(submitted) > SUBMITTED_GRACE_MS) return "gone";
+  return "unknown";
 }
 
 /** Hold the launch lock for one keyed dispatch; a stale lock is replaced. */
@@ -154,5 +235,9 @@ export async function terminateWorker(pid: number, start: string): Promise<void>
   }
   if (await processMatches(pid, start) !== "alive") return;
   try { process.kill(pid, "SIGKILL"); } catch { return; }
-  await new Promise(resolve => setTimeout(resolve, 300));
+  const killDeadline = Date.now() + 5_000;
+  while (Date.now() < killDeadline) {
+    if (await processMatches(pid, start) !== "alive") return;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
 }
