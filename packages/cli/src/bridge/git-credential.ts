@@ -76,10 +76,13 @@ export interface KeyedGitboy {
  */
 export async function prepareKeyedGitboy(cwd: string, worktreePath?: string): Promise<KeyedGitboy | undefined> {
   const host = await detectHost(cwd, "");
-  if (host.kind !== "gitboy" || !host.domain) return undefined;
-  const stored = await resolveAgentToken(host.domain);
-  if (!stored) {
-    throw new BridgeError(409, `No gitboy agent token for ${host.domain}. Run phren bridge git-host set ${host.domain} gitboy with a gba_ token.`);
+  // Keyed dispatches exist for gitboy's runner. A checkout Phren can't place
+  // on a gitboy host with an agent token is refused, never launched with
+  // whatever git credentials the computer happens to have.
+  const stored = host.domain ? await resolveAgentToken(host.domain) : undefined;
+  if (!host.domain || !stored) {
+    const domain = host.domain ?? "this checkout's host";
+    throw new BridgeError(409, `No gitboy agent token for ${domain}. Run phren bridge git-host set ${domain} gitboy with a gba_ token.`);
   }
   if (worktreePath) await configureWorktreeForHost(worktreePath, host.domain);
   const tokenFile = await writeAgentTokenFile(cwd, stored.token);
