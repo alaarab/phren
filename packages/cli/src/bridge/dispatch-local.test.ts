@@ -88,7 +88,7 @@ describe("local dispatch", () => {
   });
 
   it("returns the dispatch a key already started, and one concurrent pair starts one agent", async () => {
-    const key = "gitboy:gitboy.dev:session-1";
+    const key = "gitboy:gitboy.example.com:session-1";
     const first = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
     expect(first).toMatchObject({ existing: false, dispatch: first.id, id: first.id });
     expect((await findIdempotencyKey(key))?.phase).toBe("launched");
@@ -96,7 +96,7 @@ describe("local dispatch", () => {
     expect(again).toMatchObject({ existing: true, dispatch: first.id, id: first.id });
     expect(launches()).toHaveLength(1);
 
-    const other = "gitboy:gitboy.dev:session-2";
+    const other = "gitboy:gitboy.example.com:session-2";
     const [a, b] = await Promise.all([
       service().dispatch({ ...brief, worktree: true, idempotencyKey: other }),
       service().dispatch({ ...brief, worktree: true, idempotencyKey: other }),
@@ -107,16 +107,16 @@ describe("local dispatch", () => {
   });
 
   it("survives a reload of the store and names the worktree branch", async () => {
-    const key = "gitboy:gitboy.dev:session-3";
+    const key = "gitboy:gitboy.example.com:session-3";
     const first = await service().dispatch({ ...brief, idempotencyKey: key, worktree: true });
-    expect(first).toMatchObject({ existing: false, branch: "agent/gitboy-gitboy.dev-session-3" });
-    expect(launches()[0][1]).toMatchObject({ worktree: { branch: "agent/gitboy-gitboy.dev-session-3" } });
+    expect(first).toMatchObject({ existing: false, branch: "agent/gitboy-gitboy.example.com-session-3" });
+    expect(launches()[0][1]).toMatchObject({ worktree: { branch: "agent/gitboy-gitboy.example.com-session-3" } });
 
     const reloaded = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
     expect(reloaded).toMatchObject({ existing: true, id: first.id });
     expect(launches()).toHaveLength(1);
 
-    const named = await service().dispatch({ ...brief, idempotencyKey: "gitboy:gitboy.dev:session-4", worktree: true, branch: "agent/42-1a2b3c4d" });
+    const named = await service().dispatch({ ...brief, idempotencyKey: "gitboy:gitboy.example.com:session-4", worktree: true, branch: "agent/42-1a2b3c4d" });
     expect(named.branch).toBe("agent/42-1a2b3c4d");
     expect(launches()[1][1]).toMatchObject({ worktree: { branch: "agent/42-1a2b3c4d" } });
   });

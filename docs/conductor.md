@@ -394,7 +394,7 @@ unread for a conductor on the same Hook:
 ```json
 {"dispatch":"<id>","state":"running","at":"2026-11-08T10:00:00.000Z"}
 {"dispatch":"<id>","state":"needs_you","question":"Which branch?","at":"2026-11-08T10:01:00.000Z"}
-{"dispatch":"<id>","state":"done","final":true,"final_reply":"All checks passed","prs":[{"url":"https://gitboy.dev/o/r/pulls/1","repo":"o/r","branch":"agent/42","tests":"passing"}]}
+{"dispatch":"<id>","state":"done","final":true,"final_reply":"All checks passed","prs":[{"url":"https://gitboy.example.com/o/r/pulls/1","repo":"o/r","branch":"agent/42","tests":"passing"}]}
 ```
 
 `needs_you` is not final: the agent waits for an answer in Phren, and `wait`

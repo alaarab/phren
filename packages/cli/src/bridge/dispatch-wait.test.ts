@@ -24,7 +24,7 @@ describe("dispatch wait", () => {
         if (reads === 1) return { returns: [{ id: other, state: "failed", error: "other worker", at }] };
         if (reads === 2) return { returns: [{ id: other, state: "failed", error: "other worker", at }, { id, state: "needs-you", question: "Which branch?", at }] };
         return { returns: [{ id: other, state: "failed", error: "other worker", at },
-          { id, state: "done", reply: "All checks passed", prs: [{ url: "https://gitboy.dev/a/b/pulls/1", repo: "a/b", branch: "agent/42", tests: "passing" }], at }] };
+          { id, state: "done", reply: "All checks passed", prs: [{ url: "https://gitboy.example.com/a/b/pulls/1", repo: "a/b", branch: "agent/42", tests: "passing" }], at }] };
       }
       if (route === "/v1/dispatch/returns/ack") { acked.push(data ?? {}); return { ok: true }; }
       return { workers: [{ state: "idle" }] };
@@ -33,7 +33,7 @@ describe("dispatch wait", () => {
     expect(lines.map(line => line.state)).toEqual(["running", "needs_you", "done"]);
     expect(lines[1]).toMatchObject({ dispatch: id, state: "needs_you", question: "Which branch?" });
     expect(lines.at(-1)).toMatchObject({ dispatch: id, state: "done", final: true, final_reply: "All checks passed",
-      prs: [{ url: "https://gitboy.dev/a/b/pulls/1", repo: "a/b", branch: "agent/42", tests: "passing" }] });
+      prs: [{ url: "https://gitboy.example.com/a/b/pulls/1", repo: "a/b", branch: "agent/42", tests: "passing" }] });
     expect(acked).toEqual([{ dispatch: id }]);
   });
 
