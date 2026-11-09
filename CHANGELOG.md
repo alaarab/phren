@@ -7,6 +7,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `phren dispatch local <project>` places a worker on this computer with `--prompt-file -` (stdin, never argv), `--idempotency-key` (durable for 30 days; a repeated key returns the same dispatch with `existing: true`), and `--worktree [--branch <name>]` (a fresh worktree per dispatch, created with repository hooks disabled).
+- `phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]` follows one dispatch as NDJSON (running, needs_you, then a final done, failed, gone or timeout line), peeks at returns so a conductor's stay unread, and acknowledges only its own. Exit codes 0 done, 1 failed or gone, 124 timeout.
+- `phren dispatch close <dispatch-id>` cancels a running dispatch, stops its agent, closes its pane, and ends its wait `failed` with `error: "cancelled"`; `--idempotency-key <key>` closes by the durable key instead, a repeated close answers `closed: false`, and `phren dispatch wait` accepts `--follow` as a no-op.
+- A gitboy `gba_` agent token is stored and listed as an agent token: `phren bridge git-host set` reports its identity and expiry, and `list` marks it. Keyed dispatches in a gitboy worktree configure `phren bridge git-credential` in that worktree's own config (clearing inherited helpers for the host) so Git uses only the stored agent token, never the user's keychain or an ordinary token.
+- Idempotency reservations are published atomically with `link` and guarded by owner nonces and a per-key lock; a launch interrupted for five minutes becomes a failed receipt instead of a stranded key, and a repeated key never relaunches.
+- Keyed dispatches run only Claude or Codex in supervised mode; the launch boundary refuses skip-approval and allow-all flags.
+- The gitboy agent token is passed to a keyed worker only as `GITBOY_TOKEN_FILE` in its private git directory, never in the environment or argv, and is removed only once the worker is confirmed gone (a verified close or a fresh snapshot).
+- Keyed worktrees are created with `--no-checkout` and populated with `--attr-source` set to Git's empty tree, so repository hooks and smudge/process filters cannot run; Git 2.40 is required.
+- `dispatch wait` bounds every inconsistent state: five minutes for a launch with no target or return, and one five-minute deadline for any polled route's failures. It polls live worker state even when a return exists, so a historical needs-you return no longer masks a resumed worker.
+- `dispatch close` records the cancellation intent, verifies the exact recorded session or starting token, retries up to three times, and reports `pending` until a successful snapshot confirms the pane gone; missing evidence and failed snapshots stay pending, a replacement session is never closed, and a cancellation during placement is completed by the launcher.
+- Keyed gitboy worktrees rewrite SSH remotes to credential-free HTTPS, disable SSH, and clear host HTTP headers so pushes cannot use the owner's identity or keychain.
+- Keyed launches scrub inherited gitboy, GitHub, GitLab, askpass, SSH and Git config variables from the tmux, Herdr and Codex launch paths.
+- Crash reconciliation recovers a launch from its arrival record or starting token before declaring it interrupted.
+- A stale idempotency lock now fails closed with a retryable error instead of being unlinked by another caller.
+- Keyed `--worktree` dispatches now use a fresh clone with a per-dispatch managed global Git config and explicit environment, so user URL-specific credentials, SSH identities and inherited tokens cannot reach the worker. The clone, config and token file are registered before launch and cleaned up on close, finish, or seven-day reconciliation.
+- Cancellation uses one verified close path for both `dispatch close` and placement-time cancellation; every receipt write preserves `cancelRequestedAt`, and reconcile settles and closes recovered launches with a pending cancel.
+- Herdr keyed launches run the same `exec env -i` command as tmux, with the created pane's identity variables added to the explicit environment.
+- A cancel before the first receipt is persisted on the idempotency reservation, settles the key and receipt as cancelled, and never launches.
+- Clone cleanup follows retention: completed clones are deleted only after confirmed pane closure and unless keep-open; failed/cancelled/interrupted clones stay for seven days, with secrets removed only once a fresh snapshot confirms the worker gone.
+- Keyed clone paths are derived from the dispatch UUID and confined to the managed root; symlinked project folders that escape the clone are refused.
+- Successful clones expire only after `closedAt` or a fresh snapshot proves the worker gone; keep-open clones wait for closure, and failed/cancelled retention is measured from `endedAt`.
+- First-receipt creation and cancel markers are serialized under the idempotency key lock, so a cancel cannot disappear during placement.
+- Keyed dispatches require `--worktree`, so their token always lives in the managed clone root.
+- Peer clone files are cleaned only by the Hook that created them; the dispatching computer never touches a peer's filesystem.
+- The explicit tmux/Herdr command keeps chosen account config dirs literal, and Herdr keyed launches type only into a fresh, idle sh/bash/zsh pane after clearing the line.
+- Keyed dispatches are local-only: a keyed dispatch to a peer, or an `anywhere` placement that resolves to a peer, is refused with "Keyed dispatches run on this computer only."
+- A failed or interrupted return never starts retention or removes the token; reconcile re-checks a fresh snapshot before deleting and clears `endedAt` when the worker is still alive.
+- Dispatches record a `startingToken` before the launch request, and an ambiguous launch (`launchOutcome: "ambiguous"`) stays pending until a successful snapshot proves no pane carries the token; a pane carrying it is adopted and closed, and interrupted-launch reconciliation removes secrets only after 24 hours of successful no-token scans.
+- Keyed workers now prove liveness by a durable PID and process start time written before the harness execs, not an in-memory starting token. Cancel waits for a held launch lock, closes only the pane whose foreground process is the recorded PID, otherwise signals that PID with SIGTERM then SIGKILL, and never touches a replacement process in the same pane.
+- A submitted launch without a worker file is found by a same-user process scan of the exact `PHREN_WORKER_ID_FILE` marker and adopted; a recent submission stays unknown for 120 seconds, and an old one with no match is gone. Interrupted-launch reconciliation publishes no failure while a launch lock is live or the worker may run, and idempotency locks record owner PID/start time and are reclaimed only when that owner is gone.
+- Dispatches with an idempotency key run in the harness's standard permission mode (`full-access` is refused), never inherit the caller's environment, use only this computer's stored gitboy token through a Git credential helper for Git and the API, and create worktrees without running repository hooks.
 - `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
 - Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.
 

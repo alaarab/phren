@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROVIDERS } from "./git-hosts.js";
 import { gitPulls, gitStatus } from "./git.js";
 import { gitHostToken, gitMergeRequest, gitPullRequest } from "./git-publish.js";
+import { listHostTokens } from "./git-host-auth.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -301,6 +302,17 @@ describe("GitLab and gitboy providers", () => {
 
     expect(await gitHostToken(repo, { token: "" })).toMatchObject({ ok: true, disconnected: true });
     expect(await gitPulls(repo)).toMatchObject({ available: false, reason: "auth" });
+  });
+
+  it("reports and stores a gitboy agent token with its agent identity", async () => {
+    host = await fakeHost(({ path: p }) => p === "/api/v1/user"
+      ? { json: { username: "phren-agent", agent_token: { name: "gitboy-runner", repo_ids: ["repo-1"], expires_at: "2026-12-31T00:00:00Z" } } }
+      : undefined);
+    const repo = await repository("git@gitboy.example.com:sam/app.git", "gitboy.example.com", `${host.origin}/api/v1`);
+    expect(await gitHostToken(repo, { token: "gba_test" })).toMatchObject({ ok: true, user: "phren-agent", agent: true });
+    const file = path.join(process.env.PHREN_BRIDGE_HOME!, "git-hosts.json");
+    expect(JSON.parse(await readFile(file, "utf8")).hosts["gitboy.example.com"]).toMatchObject({ kind: "gitboy", token: "gba_test", user: "phren-agent", agent: true });
+    expect(await listHostTokens()).toEqual([expect.objectContaining({ domain: "gitboy.example.com", kind: "gitboy", user: "phren-agent", agent: true })]);
   });
 });
 

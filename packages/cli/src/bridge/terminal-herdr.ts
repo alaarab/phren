@@ -6,7 +6,7 @@ import { browserEnv } from "./browser-env.js";
 import { herdrSocketPath, rpc, snapshot } from "./herdr.js";
 import { BridgeError, object, objects, type Json } from "./protocol.js";
 import type { AgentStart, PaneProcesses, TerminalPane, TerminalProvider } from "./terminal.js";
-import { agentFromCommand } from "./terminal-tmux.js";
+import { agentFromCommand, explicitAgentCommand } from "./terminal-tmux.js";
 
 const text = (value: unknown): string | undefined => typeof value === "string" && value ? value : undefined;
 
@@ -71,6 +71,56 @@ async function startPhren(server: string, pane: string, { name, args, timeoutMs 
   }
   await rpc(server, "pane.report_agent", { pane_id: pane, source: PHREN_REPORT_SOURCE, agent: "phren", state: "idle" });
   await rpc(server, "agent.rename", { target: pane, name }).catch(() => undefined);
+}
+
+/** The exact command Herdr types for a keyed launch. */
+export function herdrExplicitCommand(agent: AgentStart): string {
+  return explicitAgentCommand(agent.kind, agent.args, agent.env ?? {});
+}
+
+/** sh, bash or zsh only: the keyed wrapper is a POSIX shell command line. */
+export function shellFromProcessInfo(info: Json): string | undefined {
+  const shellPid = info.shell_pid;
+  const processes = objects(info.foreground_processes);
+  const shell = processes.find(p => p.pid === shellPid) ?? processes[0];
+  const command = typeof shell?.cmdline === "string" ? shell.cmdline.trim().split(/\s+/)[0] : "";
+  const name = command.split("/").pop()?.replace(/^-/, "");
+  return name && ["sh", "bash", "zsh"].includes(name) ? name : undefined;
+}
+
+/** Keyed launches: type our explicit `env -i` command at the pane's fresh shell. */
+async function startExplicit(server: string, pane: string, { kind, args, timeoutMs, env, freshPane }: AgentStart): Promise<void> {
+  if (!freshPane) throw new BridgeError(409, "A keyed Herdr launch needs a pane this launch just created; refusing to type into a reused pane.");
+  const readyBy = Date.now() + Math.min(timeoutMs, 15_000);
+  let stable = "", stableSince = 0;
+  for (;;) {
+    const info = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
+    const shellPid = info.shell_pid;
+    const processes = objects(info.foreground_processes);
+    const pids = processes.map(p => p.pid);
+    const foreground = Number.isSafeInteger(shellPid) && info.foreground_process_group_id === shellPid;
+    const shell = shellFromProcessInfo(info);
+    if (foreground && !shell) throw new BridgeError(409, "Herdr: keyed launches support only sh, bash and zsh pane shells; this shell is not supported.");
+    const idle = foreground && !!shell && pids.length > 0 && pids.every(pid => pid === shellPid);
+    if (idle) {
+      const key = JSON.stringify([shellPid, pids]);
+      if (key !== stable) { stable = key; stableSince = Date.now(); }
+      if (Date.now() - stableSince >= 300) break;
+    } else { stable = ""; stableSince = 0; }
+    if (Date.now() >= readyBy) throw new BridgeError(409, `Herdr: agent target pane ${pane} did not reach an idle shell prompt.`, { herdrCode: "agent_pane_busy" });
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["ctrl+u"] });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  await rpc(server, "pane.send_text", { pane_id: pane, text: herdrExplicitCommand({ name: "", kind, args, timeoutMs, env, freshPane }) });
+  await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["Enter"] });
+  const deadline = Date.now() + Math.min(timeoutMs, 30_000);
+  for (;;) {
+    const info = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
+    if (objects(info.foreground_processes).some(p => typeof p.cmdline === "string" && agentFromCommand(p.cmdline) === kind)) return;
+    if (Date.now() >= deadline) throw new BridgeError(504, `${kind} did not start in the Herdr pane. Check that it is installed and on the login shell's PATH.`);
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
 }
 
 /** A Herdr snapshot's panes in the provider's shape; Herdr's agent report becomes hints. */
@@ -149,6 +199,7 @@ export const herdrTerminal: TerminalProvider = {
   async startAgent(server, pane, agent) {
     const { name, kind, args, timeoutMs } = agent;
     if (kind === "phren") { await startPhren(server, pane, agent); return; }
+    if (agent.envExact) { await startExplicit(server, pane, agent); return; }
     // Herdr waits up to `timeout_ms` for the agent to become ready; the socket waits a little longer.
     await rpc(server, "agent.start", { name, kind, pane_id: pane, timeout_ms: timeoutMs, ...(args.length ? { args } : {}) }, undefined, timeoutMs + 5_000);
   },

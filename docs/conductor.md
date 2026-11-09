@@ -294,6 +294,194 @@ does the harness submits the brief itself. An unconfirmed brief is asked about
 again on each returns poll, so the receipt turns `accepted` when the worker
 confirms it. Briefs are kept for seven days (at most 256).
 
+### Local, idempotent dispatches (gitboy's runner)
+
+gitboy's runner starts one agent on the computer that runs Phren and follows
+that dispatch to its end:
+
+```sh
+phren dispatch local gitboy --harness claude --idempotency-key "gitboy:<host>:<session id>" \
+  --worktree --prompt-file -
+phren dispatch wait <dispatch-id> --json
+phren dispatch close <dispatch-id>
+phren dispatch close --idempotency-key "gitboy:<host>:<session id>"
+```
+
+`local` is this computer, the same placement as its own name or `local` in the
+general form. `--prompt-file -` reads the brief from stdin (a path reads that
+file); exactly one of `--prompt` and `--prompt-file` is allowed, and a brief
+over the 32768-character schema limit is refused. The brief is never put in
+argv. For `local`, `--label` defaults to the first 60 characters of the
+idempotency key, or `gitboy agent` without a key.
+
+The output is the receipt plus a stable `dispatch` field (the id) and
+`existing` (`false` for the placement that started the agent, `true` when a key
+returned an earlier one):
+
+```json
+{ "dispatch": "<uuid>", "existing": false, "id": "<uuid>", "state": "accepted", "...": "receipt fields" }
+```
+
+`--idempotency-key` is 1 to 200 characters of `[A-Za-z0-9:._@/-]`. The Hook
+stores key to dispatch id under `<bridge>/idempotency/<sha256>.json` (0600), so
+it survives a restart and expires after 30 days. The dispatch id is generated
+before the reservation; the full record is written to a temp file and published
+with `link`, which is atomic and never lets a concurrent caller reclaim an empty
+or half-written file. Expiry and replacement happen only under an in-process
+per-key mutex in the Hook server, and updates/deletes check the owner nonce.
+Leftover lock files from an older Hook are deleted on start.
+
+A reservation that stays `reserved` or `launching` for five minutes with no
+recorded target and no live worker is reconciled. Before declaring it
+interrupted, the Hook looks for the launch's arrival record and live starting
+token; if either names the worker, its target is recovered and the dispatch
+continues as launched. Only with no evidence does it become a failed receipt
+with `error: "launch interrupted"`; nothing is relaunched automatically. A
+repeated key returns that receipt with `existing: true` and `state: "failed"`.
+
+`--worktree` starts an unkeyed worker in a fresh `git worktree add` of the
+project's checkout, never reused. A keyed `--worktree` dispatch instead gets a
+fresh clone under `<bridge>/clones/<dispatch id>`, created with
+`git clone --no-checkout --reference-if-able <checkout> --dissociate` and
+checked out with `--attr-source` set to Git's empty tree, so no repository hook,
+smudge filter or process filter can run before the agent starts. LFS files stay
+as pointers until the agent fetches them itself. The branch is
+`agent/<key-slug or dispatch id>`, or `--branch <name>` when the caller names it
+(gitboy's brief does; it is validated as a Git branch name).
+
+The clone uses a per-dispatch managed global Git config (0600) containing only
+a cleared `credential.helper`, the host's `!phren bridge git-credential` helper,
+`useHttpPath=false`, `core.sshCommand=false`, `core.hooksPath=/dev/null`, and
+the user's `user.name`/`user.email` values. Its environment is
+`GIT_CONFIG_GLOBAL=<that file>` with `GIT_CONFIG_NOSYSTEM=1`, so the user's
+global, system or repository URL-specific helpers and headers cannot apply. The
+clone's own `.git/config` is ours; its remote is the credential-free
+`https://<host>/<owner>/<repo>.git`, and a remote whose owner/repository cannot
+be derived is refused. The helper answers HTTPS `get` from this computer's
+stored gitboy token with `username=x-token` and `password=<token>`; `store` and
+`erase` do nothing. Only a `gba_` token stored with the `agent: true` marker is
+used; if it is missing the dispatch fails with `No gitboy agent token for
+<domain>. Run phren bridge git-host set <domain> gitboy with a gba_ token.`
+The token never goes into argv, a remote URL or a log. For the API the agent
+gets only `GITBOY_TOKEN_FILE`, a 0600 file in the clone's git dir. A keyed
+dispatch requires `--worktree` and runs on this computer only: a keyed dispatch
+to a peer, or an `anywhere` placement that resolves to one, is refused with
+`Keyed dispatches run on this computer only.` Its clone, managed config and
+token file are registered before the worker starts. A keyed launch writes a
+durable worker identity file `<clone>.worker` before the harness execs: the
+explicit command records the shell's PID and start time, then `exec`s the
+harness, so the recorded PID is the harness's. The launch handler holds
+`<clone>.launching` from before clone preparation until it returns or fails.
+Cancel and reconciliation never finalize while that lock's owner is alive: a
+live worker is closed only when the pane's foreground process is the recorded
+PID; otherwise the recorded PID is sent SIGTERM, then SIGKILL after 10 s, after
+re-checking its start time. A replacement process in the same pane has another
+PID or start time and is never touched. A gone worker finalizes and its token
+is removed; an unknown liveness keeps the token and stays pending. The token is
+removed only on confirmed termination; a failed or interrupted return alone
+never removes it. A completed clone is removed only when `closedAt` is set or
+the worker is confirmed gone, and never for a keep-open dispatch before it is
+closed. Failed, cancelled and interrupted clones are kept as recoverable work;
+`retainedUntil` starts from `endedAt`, recorded only once the worker is
+confirmed gone. The Hook that created the clone owns this cleanup; a
+dispatching computer never touches a peer's files. A gitboy `gba_` token is
+stored as an agent token: `phren bridge git-host set` prints the agent identity
+and expiry, and `phren bridge git-host list` marks it `agent token`.
+
+`wait` prints NDJSON, one line per state change, and leaves every other return
+unread for a conductor on the same Hook:
+
+```json
+{"dispatch":"<id>","state":"running","at":"2026-11-08T10:00:00.000Z"}
+{"dispatch":"<id>","state":"needs_you","question":"Which branch?","at":"2026-11-08T10:01:00.000Z"}
+{"dispatch":"<id>","state":"done","final":true,"final_reply":"All checks passed","prs":[{"url":"https://gitboy.example.com/o/r/pulls/1","repo":"o/r","branch":"agent/42","tests":"passing"}]}
+```
+
+`needs_you` is not final: the agent waits for an answer in Phren, and `wait`
+keeps following. A needs-you return from before the worker was last seen
+working is historical: live worker state is polled on every tick, and a worker
+that resumed emits `running` again. `--json` and `--follow` are accepted, and
+the output is always JSON. `prs` comes from the worker's `phren dispatch
+report`. It polls about every 2 s at first, backing off to 10 s with jitter,
+peeks at `/v1/dispatch/returns?peek=1`, and reads `/v1/dispatch/workers` to tell
+a gone pane from one still working. It survives transient Hook errors, but
+failures of any polled route count toward one 5-minute continuous-unavailability
+deadline, then it ends `failed`. A targetless or pending receipt keeps
+`running`: only the Hook's terminal return (done, failed or gone), or the
+receipt's settled terminal state, ends the wait. An id the Hook does not know
+after a 30 s grace period ends `failed` with `error: "unknown dispatch"`. The
+timeout defaults to none and is capped at 7 days. Exit codes: 0 `done`, 1
+`failed` or `gone`, 124 `timeout`. When the result is final it acknowledges only
+that dispatch's return (`POST /v1/dispatch/returns/ack`).
+
+`close` cancels a running dispatch by id, or by its idempotency key with
+`--idempotency-key`: the Hook looks the key up in the same durable store,
+records `cancelRequestedAt`, and closes the pane only after re-resolving it and
+confirming the exact recorded binding (session id, or a starting target's
+starting token). Missing identity evidence fails closed and stays pending; a
+different session is never closed. It retries the close up to three times with
+backoff, and writes `closedAt` and the terminal `cancelled` return only after a
+successful snapshot shows the pane gone. A failed snapshot stays pending. A
+close that cannot be confirmed answers
+`{"dispatch":"<id>","closed":false,"pending":true}` and exits 1, leaving the
+intent for a later retry. Every placement write re-reads the receipt under its
+lock, so `cancelRequestedAt` is never lost; after each placement step the
+launcher uses the same close path as `dispatch close`. A cancellation during
+placement records the intent on the receipt; the launcher closes the pane it
+just created and finalizes it, and the close call reports pending until a later
+close confirms. Reconcile settles any leftover launching/sending receipt and
+runs the close path immediately when a cancel is pending. Its `wait` then ends
+`failed` with `error: "cancelled"`. Closing an already-closed or vanished
+dispatch answers `{"dispatch":"<id>","closed":false}` and exits 0; an unknown key
+answers `{"closed":false}` with no id.
+
+Every dispatch records a `startingToken` before its launch request, and the
+pane the launch creates carries it. A launch whose reply was lost is
+`launchOutcome: "ambiguous"` (timeouts including 504, 5xx, network or socket
+errors, a lost reply or a crash). A refusal before anything was created
+(`harness_unavailable`, policy or validation errors) is `"not-started"`, and a
+known target or arrival makes it `"started"`. The runner still sees a failed
+return for an ambiguous launch, but cancel and cleanup never treat it as gone
+without proof: `close` recovers the binding from the arrival record, then scans
+a successful snapshot for the starting token. A pane carrying it is adopted and
+closed; a successful snapshot with no pane carrying it confirms no worker, so
+the launch finalizes and its token is removed. A failed snapshot, or a launch
+still placing, stays pending and keeps the token. Interrupted-launch
+reconciliation marks the receipt failed for the runner but removes secrets only
+for `"not-started"` or after 24 hours of successful scans with no pane carrying
+the token; until then it keeps `launchOutcome: "ambiguous"` and rescans on later
+passes.
+
+A dispatch with an idempotency key follows an execution policy enforced by the
+Hook:
+
+- It runs only `claude` or `codex`, in that harness's supervised, approval-requiring
+  mode (`--permission-mode supervised`, Claude's `default`, Codex's untrusted
+  read-only). Any other harness or permission mode is refused with 400. The
+  receiving launch boundary checks the resolved arguments again and refuses
+  skip-approval or allow-all flags (`--dangerously-*`, `--allow-all*`,
+  `--yolo`, `--full-auto`, `bypassPermissions`, Codex `-a never` /
+  `danger-full-access`) before spawning.
+- The agent does not inherit the caller's environment. The launch request is
+  JSON, and `startSession` (`packages/cli/src/bridge/server-launch.ts`) builds
+  the agent's environment itself from the sudo askpass, `PHREN_DISPATCH_ID`, the
+  served OpenCode environment and the Claude account home. The runner's
+  variables never cross the Hook's HTTP socket. A keyed launch gets an explicit
+  environment only: `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `LANG`,
+  `LC_ALL`, `TMPDIR`, the harness config dirs when set, and our
+  `GITBOY_HOST`, `GITBOY_TOKEN_FILE`, `GIT_CONFIG_GLOBAL`,
+  `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`. tmux runs the harness as
+  `exec env -i ...` after shell init; Herdr and the Codex server receive that
+  exact set. Nothing else from the Hook's or caller's environment is inherited.
+- In a keyed dispatch's gitboy checkout the worker gets this computer's stored
+  `phren-agent` token for Git and the API, and no other: `gitHostLaunchEnv`
+  (`packages/cli/src/bridge/git-credential.ts`) reads `git-hosts.json` with
+  `resolveHostToken("gitboy", domain, { env: {}, cli: false })` and sets
+  `GITBOY_HOST`/`GITBOY_TOKEN`; a fresh worktree also gets the credential helper
+  in its own config (see above), with inherited helpers for that host cleared
+  first.
+- A worktree is created with repository hooks disabled, as above.
+
 ### Copilot workers
 
 `harness: "copilot"` starts GitHub Copilot CLI in the new pane, the same way the

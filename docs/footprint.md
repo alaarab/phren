@@ -288,6 +288,12 @@ nothing to that checkout.
   changes remove aliases pointing elsewhere. The Hook ignores legacy
   `<bridge>/dispatch-origin-handovers.json` files.
 - `<bridge>/dispatches/` holds dispatch receipts without prompt text;
+  `<bridge>/idempotency/<sha256>.json` (0600) holds each local dispatch
+  idempotency key's dispatch id for 30 days; a keyed gitboy dispatch gets
+  `<bridge>/clones/<dispatch id>/` and its managed
+  `<bridge>/clones/<dispatch id>.gitconfig` (0600), plus
+  `<clone git dir>/phren-agent-token` (0600); all three are removed when it
+  closes or finishes, or on reconciliation after seven days;
   on the computer that runs a dispatched Claude or Codex worker (or a
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
   and what the worker's hooks reported (`arrival.json`), kept seven days and

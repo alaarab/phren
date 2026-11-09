@@ -1,4 +1,6 @@
 import { intentionallyClosed } from "./worker-close.js";
+import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
+import { removeWorkerFile, workerAlive } from "./worker-identity.js";
 import { workerPrs, readIntegrator } from "./worker-reports.js";
 import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
@@ -8,7 +10,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { logger } from "../logger.js";
-import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
+import { arrivalOf, boundWorkerGone, clearWorkerEnded, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
 import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
 import { codexServers, LOST_TURN, type LostTurn } from "./codex-servers.js";
 import { findGrant } from "./grants.js";
@@ -997,6 +999,79 @@ export class DispatchReturns {
 
   async cleanup(): Promise<void> {
     for (const receipt of await dispatchStatus()) {
+      const paths = receipt.idempotencyKey
+        ? dispatchClonePaths(receipt.id)
+        : { cloneDir: receipt.cloneDir, gitConfigFile: receipt.gitConfigFile, agentTokenFile: receipt.agentTokenFile };
+      const state = receipt.returned?.state;
+      // Only the Hook that created the clone/token owns their filesystem.
+      const local = this.isSelf(receipt) || this.isLocal(receipt.computer);
+      // Keyed dispatches are local-only; never use a peer path for one.
+      if (receipt.idempotencyKey && !local) continue;
+      if (local && (state === "failed" || state === "gone")) {
+        if (receipt.idempotencyKey) {
+          // A keyed worker's durable PID/start time decides, not its return.
+          const alive = await workerAlive(receipt.id, receipt.workerFile ?? dispatchClonePaths(receipt.id).workerFile, receipt.submittedAt);
+          if (alive !== "gone") { await clearWorkerEnded(receipt.id); continue; }
+          await removeDispatchSecrets(paths);
+          await removeWorkerFile(receipt.id);
+          const at = receipt.closedAt ?? new Date(this.now()).toISOString();
+          const until = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+          await updateReceipt(receipt.id, value => {
+            if (!value.endedAt) value.endedAt = at;
+            if (!value.retainedUntil) value.retainedUntil = until;
+            return true;
+          }).catch(() => undefined);
+          continue;
+        }
+        // A launch that never reached its request has no worker: its secrets
+        // go immediately. Any other outcome waits for confirmed termination.
+        if (!receipt.target && receipt.launchOutcome === "not-started") {
+          await removeDispatchSecrets(paths);
+          const at = receipt.closedAt ?? new Date(this.now()).toISOString();
+          const until = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+          await updateReceipt(receipt.id, value => {
+            if (!value.endedAt) value.endedAt = at;
+            if (!value.retainedUntil) value.retainedUntil = until;
+            return true;
+          }).catch(() => undefined);
+          continue;
+        }
+        // Retention and token removal wait for confirmed termination: a failed
+        // return alone does not prove the pane stopped.
+        if (receipt.endedAt) {
+          const until = receipt.retainedUntil ? Date.parse(receipt.retainedUntil) : NaN;
+          if (!Number.isFinite(until) || this.now() < until) continue;
+          if (!await boundWorkerGone(receipt)) { await clearWorkerEnded(receipt.id); continue; }
+          continue;
+        }
+        if (!await boundWorkerGone(receipt)) { await clearWorkerEnded(receipt.id); continue; }
+        await removeDispatchSecrets(paths);
+        const at = receipt.closedAt ?? new Date(this.now()).toISOString();
+        const until = new Date(Date.parse(at) + 7 * 24 * 60 * 60_000).toISOString();
+        await updateReceipt(receipt.id, value => {
+          if (!value.endedAt) value.endedAt = at;
+          if (!value.retainedUntil) value.retainedUntil = until;
+          return true;
+        }).catch(() => undefined);
+        continue;
+      }
+      if (local && state === "done") {
+        if (receipt.idempotencyKey) {
+          if (receipt.closedAt) { await removeDispatchClone(paths); continue; }
+          if (receipt.closeOnFinish === false) { await clearWorkerEnded(receipt.id); continue; }
+          const alive = await workerAlive(receipt.id, receipt.workerFile ?? dispatchClonePaths(receipt.id).workerFile, receipt.submittedAt);
+          if (alive === "gone") { await removeDispatchClone(paths); continue; }
+          await clearWorkerEnded(receipt.id);
+        } else {
+          if (receipt.closedAt) { await removeDispatchClone(paths); continue; }
+          if (receipt.closeOnFinish === false) {
+            // Keep-open work stays alive; it has no termination time yet.
+            await clearWorkerEnded(receipt.id);
+            continue;
+          }
+          // A done worker's pane may still run: keep its token until the verified close.
+        }
+      }
       if (!receipt.closePending || receipt.closedAt || receipt.returned?.at !== receipt.closePending.at || receipt.returned.state !== "done" || !receipt.returned.read) continue;
       const peer = this.isSelf(receipt) ? undefined : (await this.peers().catch(() => [])).find(peer => peer.name === receipt.computer);
       if (!this.isSelf(receipt) && receipt.moves?.some(move => move.to.computer) && (!peer || !await this.verifiedMovedPeer(receipt, peer))) continue;
@@ -1009,9 +1084,30 @@ export class DispatchReturns {
     }
   }
   private async closeRemote(receipt: Receipt, verifiedPeer?: HookPeer): Promise<Json> {
+    // Keyed dispatches are local-only; never close one over a peer path.
+    if (receipt.idempotencyKey) return { closed: false };
     const peer = verifiedPeer ?? (await this.peers()).find(peer => peer.name === receipt.computer);
     if (!peer) return { closed: false };
     return this.request(peer, "/v1/dispatch/close", { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn });
+  }
+
+  /**
+   * Mark one dispatch's return read, leaving every other return untouched:
+   * `phren dispatch wait` follows one worker and must not consume a
+   * conductor's returns on the same Hook.
+   */
+  async acknowledgeOne(id: string): Promise<Json> {
+    let acknowledged = false;
+    await updateReceipt(id, value => {
+      if (!value.returned || value.returned.read) return false;
+      value.returned.read = true;
+      if (value.returned.state === "done" && value.closeOnFinish !== false && !value.returned.background && value.returned.turn && !value.closedAt)
+        value.closePending = { at: value.returned.at, turn: value.returned.turn };
+      acknowledged = true;
+      return true;
+    }).catch(() => undefined);
+    if (acknowledged) { await this.forwardPrs(); await this.cleanup(); }
+    return { ok: true, dispatch: id, acknowledged };
   }
 
   /** A remote successor acknowledges only the exact return version it received. */

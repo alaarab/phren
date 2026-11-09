@@ -46,6 +46,9 @@ export interface LaunchWorktree {
   discard(): Promise<void>;
 }
 
+/** Git's empty tree: an attribute source that cannot name a repository .gitattributes. */
+export const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 /** Creates the worktree, or refuses with a message the phone shows as is. */
 export async function createLaunchWorktree(cwd: string, request: LaunchWorktreeRequest): Promise<LaunchWorktree> {
   const branch = request.branch;
@@ -64,7 +67,9 @@ export async function createLaunchWorktree(cwd: string, request: LaunchWorktreeR
     throw new BridgeError(409, `The folder .claude/worktrees/${worktreeFolderName(branch)} already exists. Choose another branch name.`);
   }
   await mkdir(path.dirname(worktree), { recursive: true });
-  try { await git(root, "worktree", "add", "-b", branch, worktree, head); }
+  // No repository-selected hook or script runs before the agent starts:
+  // `git worktree add` would otherwise run the checkout's post-checkout hook.
+  try { await git(root, "-c", "core.hooksPath=/dev/null", "worktree", "add", "-b", branch, worktree, head); }
   catch (error) {
     const detail = error instanceof Error && "stderr" in error ? String((error as { stderr?: unknown }).stderr ?? "").trim().split("\n").at(-1) : "";
     throw new BridgeError(409, `Git could not create the worktree${detail ? `: ${detail.replace(/^fatal:\s*/, "")}` : "."}`);

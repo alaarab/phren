@@ -12,6 +12,7 @@ import { hookRequest } from "./client.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { DispatchReturns } from "./dispatch-returns.js";
 import { clearConductor, recordConductor, resetRoleState } from "./conductor-role.js";
+import { markHookServerProcess } from "./dispatch-idempotency.js";
 
 vi.mock("./peers.js", () => {
   const hookPeers = vi.fn();
@@ -29,6 +30,7 @@ describe("dispatch receipts and selection", () => {
   let root: string;
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    markHookServerProcess();
     vi.mocked(hookPeers).mockResolvedValue(["Desk", "Devbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
     vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1 }
@@ -105,12 +107,39 @@ describe("dispatch receipts and selection", () => {
     const calls = vi.mocked(peerRequest).mock.calls;
     // The brief is offered with the launch; this Hook did not take it there, so it is typed, once per delivery id.
     expect(calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2]).toEqual({ project: "phren", kind: "codex", label: "Tests", model: undefined,
+      startingToken: expect.stringMatching(/^[a-f0-9]{64}$/),
       brief: { id: result.id, text: brief.prompt } });
     expect(calls.filter(call => call[1] === "/v1/prompt").map(call => call[2])).toEqual([{ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` }]);
     expect(result.brief).toBe("typed");
     const stored = await readFile(path.join(root, `dispatches/${result.id}.json`), "utf8");
     expect(stored).not.toContain(brief.prompt);
     expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", computer: "Devbox" });
+  });
+
+  it("refuses a keyed dispatch to a named peer, and one that anywhere resolves to a peer", async () => {
+    await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", worktree: true, idempotencyKey: "gitboy:host:peer" }))
+      .rejects.toMatchObject({ status: 400, message: "Keyed dispatches run on this computer only." });
+    await expect(new DispatchService().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:anywhere-peer" }))
+      .rejects.toMatchObject({ status: 400, message: "Keyed dispatches run on this computer only." });
+    expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(false);
+  });
+
+  it("keeps a keyed dispatch that anywhere resolves to this computer local", async () => {
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 10 } : { ok: true });
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:anywhere-local" });
+    expect(result).toMatchObject({ state: "accepted", computer: "Laptop" });
+    expect(vi.mocked(hookRequest).mock.calls.some(call => call[0].startsWith("/v1/workspaces/launch"))).toBe(true);
+    expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(false);
+  });
+
+  it("leaves the unkeyed peer path unchanged", async () => {
+    const result = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ state: "accepted", computer: "Desk" });
+    expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(true);
   });
 
   it("places a Claude worker by pools and roles: skips a computer with no account it may use and names the account it chose", async () => {

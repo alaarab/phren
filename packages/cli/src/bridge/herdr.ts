@@ -524,6 +524,25 @@ const startingKey = randomBytes(32);
 interface StartingBinding { process: string; token: string; wasStarting: boolean; sessionId?: string; identifiedAt?: number }
 const startingBindings = new Map<string, StartingBinding>();
 const startingPaneKey = (server: string, pane: Json) => JSON.stringify([server, pane.workspace_id, pane.tab_id, pane.pane_id, pane.terminal_id, pane.agent]);
+const seededPaneKey = (server: string, pane: Json) => JSON.stringify([server, pane.workspace_id, pane.tab_id, pane.pane_id]);
+/** Tokens supplied by a launch, keyed by pane coordinates, so an ambiguous
+ * launch can be resolved by finding the pane that carries its token. */
+const seededStartingTokens = new Map<string, string>();
+export function seedStartingToken(server: string, pane: Json, token: string): void {
+  if (!/^[a-f0-9]{64}$/.test(token)) return;
+  seededStartingTokens.set(seededPaneKey(server, pane), token);
+  const binding = startingBindings.get(startingPaneKey(server, pane));
+  if (binding) binding.token = token;
+}
+export function paneStartingToken(server: string, pane: Json): string | undefined {
+  return seededStartingTokens.get(seededPaneKey(server, pane));
+}
+export function clearStartingToken(server: string, pane: Json): void {
+  seededStartingTokens.delete(seededPaneKey(server, pane));
+}
+export function clearStartingTokenByToken(token: string): void {
+  for (const [key, value] of seededStartingTokens) if (value === token) seededStartingTokens.delete(key);
+}
 const startingToken = (process: string) => createHmac("sha256", startingKey).update(process).update(randomBytes(32)).digest("hex");
 /** Remember the first identified conversation even when an overview skips the
  * PID probe. A later conversation in the same process retires its old token. */
@@ -561,7 +580,8 @@ export async function paneChatState(server: string, pane: Json, options: { token
     // Lost identity, changed process, or newly ambiguous evidence requires a
     // new token. Never revive a previous conversation's first-send permission.
     if (!binding || binding.process !== process || (!sessionId && (!!binding.sessionId || binding.wasStarting !== starting))) {
-      binding = { process, token: startingToken(process), wasStarting: starting,
+      const seeded = seededStartingTokens.get(seededPaneKey(server, pane));
+      binding = { process, token: seeded ?? startingToken(process), wasStarting: starting,
         ...(sessionId ? { sessionId, identifiedAt: Date.now() } : {}) };
       if (startingBindings.size >= 256) startingBindings.delete(startingBindings.keys().next().value!);
       startingBindings.set(key, binding);
