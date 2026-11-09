@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, readFile, symlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { homeDir } from "../home-paths.js";
-import { claudeHome, claudeHomes, DEFAULT_ACCOUNT, isAccountSlug, setAccountLabel } from "./claude-accounts.js";
+import { claudeHome, claudeHomes, DEFAULT_ACCOUNT, forgetClaudeHomes, isAccountSlug, setAccountLabel } from "./claude-accounts.js";
 import { atomic } from "./protocol.js";
 
 /** Entries of the default home every account shares by symlink. */
@@ -104,6 +104,7 @@ export async function addClaudeAccount(slug: string, opts: { label?: string; ema
   if (keychain === "locked") throw new Error(keychainLockedMessage(slug, opts.label));
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700); // An existing home keeps its login: tighten it too.
+  if (created) forgetClaudeHomes();
   const linked: string[] = [];
   for (const name of SHARED_ENTRIES) {
     const target = path.join(source.dir, name), link = path.join(dir, name);

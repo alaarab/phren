@@ -253,6 +253,9 @@ export function claudeLoginFingerprint(home: ClaudeHome): string | undefined {
 export const CODEX_ACCOUNT: AccountRef = { id: DEFAULT_ACCOUNT, label: "Codex", key: "codex" };
 
 /** Only for tests. */
+/** Drop the cached home listing, so a home made in this process is seen at once. */
+export function forgetClaudeHomes(): void { homesCache.clear(); }
+
 export function clearAccountCaches(): void { identityCache.clear(); authCache.clear(); homesCache.clear(); }
 
 // ── sign-in state (`claude auth status --json`, cached) ─────────────────────
