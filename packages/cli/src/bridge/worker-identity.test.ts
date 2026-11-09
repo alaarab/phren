@@ -5,6 +5,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acquireLaunchLock, launchInProgress, markSubmitted, processStartTime, releaseLaunchLock, setWorkerProcessScan, workerAlive, workerFilePath } from "./worker-identity.js";
 
+// Worker identity reads the process start time with `ps -o lstart`, which Windows lacks.
+const noProcessStart = process.platform === "win32";
+
 const id = "60000000-0000-4000-8000-000000000001";
 
 describe("keyed worker identity", () => {
@@ -30,7 +33,7 @@ describe("keyed worker identity", () => {
     return { pid: spawned.pid!, start: (await processStartTime(spawned.pid!))! };
   };
 
-  it("tracks a real child process, then reports it gone and rejects a reused PID", async () => {
+  it.skipIf(noProcessStart)("tracks a real child process, then reports it gone and rejects a reused PID", async () => {
     const worker = await child();
     await writeFile(workerFilePath(id), `${worker.pid} ${worker.start}\n`, { mode: 0o600 });
     expect(await workerAlive(id)).toBe("alive");
@@ -42,7 +45,7 @@ describe("keyed worker identity", () => {
     expect(await workerAlive(id)).toBe("gone");
   });
 
-  it("is unknown while a live launch lock is held, and ignores a stale one", async () => {
+  it.skipIf(noProcessStart)("is unknown while a live launch lock is held, and ignores a stale one", async () => {
     const lock = await acquireLaunchLock(id);
     expect(await launchInProgress(id)).toBe(true);
     expect(await workerAlive(id)).toBe("unknown");
@@ -58,7 +61,7 @@ describe("keyed worker identity", () => {
     expect(await workerAlive(id)).toBe("unknown");
   });
 
-  it("finds a submitted launch by its process environment and adopts it", async () => {
+  it.skipIf(noProcessStart)("finds a submitted launch by its process environment and adopts it", async () => {
     await markSubmitted(id);
     const worker = await child({ PHREN_WORKER_ID_FILE: workerFilePath(id) });
     setWorkerProcessScan(async () => ({ ok: true, worker: { pid: worker.pid, start: worker.start } }));

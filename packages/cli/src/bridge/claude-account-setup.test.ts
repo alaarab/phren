@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { accountLabel, clearAccountCaches } from "./claude-accounts.js";
+import { accountLabel, claudeHomes, clearAccountCaches } from "./claude-accounts.js";
 import { addClaudeAccount, sshKeychainState, suggestAccountSlug, syncAccountMcpServers } from "./claude-account-setup.js";
 
 let home = "";
@@ -51,6 +51,14 @@ it("rejects bad slugs and syncs extra homes only", async () => {
   expect(await syncAccountMcpServers()).toEqual(["work"]);
   expect(json(".claude-work/.claude.json").mcpServers).toEqual({ phren: { command: "new" } });
   expect(await syncAccountMcpServers()).toEqual([]);
+});
+
+it("sees a home finished by add right away, even when its folder was left by an interrupted add", async () => {
+  mkdirSync(path.join(home, ".claude-work"));
+  expect(claudeHomes().map(h => h.id)).toEqual(["default"]);
+  await addClaudeAccount("work");
+  writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { phren: { command: "new" } } }));
+  expect(await syncAccountMcpServers()).toEqual(["work"]);
 });
 
 it("answers a bad slug with one that works, from the account's email when known", async () => {

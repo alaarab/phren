@@ -19,6 +19,9 @@ import { hookPeers, peerRequest } from "./peers.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 import { atomicInPrivateDir, type Json } from "./protocol.js";
 
+// Worker identity reads the process start time with `ps -o lstart`, which Windows lacks.
+const noProcessStart = process.platform === "win32";
+
 vi.mock("./peers.js", () => {
   const hookPeers = vi.fn();
   return { hookPeers, peerRequest: vi.fn(), optionalHookPeers: async () => ({ peers: await hookPeers().catch(() => []) }) };
@@ -192,7 +195,7 @@ describe("local dispatch", () => {
     expect(await readFile(path.join(dir, `${hash}.lock.reclaim-old`), "utf8").catch(() => "")).toBe("");
   });
 
-  it("publishes no interrupted-launch failure while a live launch lock is held", async () => {
+  it.skipIf(noProcessStart)("publishes no interrupted-launch failure while a live launch lock is held", async () => {
     const key = "gitboy:host:live-lock-6m";
     const id = randomUUID();
     await reserveIdempotencyKey(key, id, randomUUID(), { project: "phren", harness: "codex", label: "Live", computer: "local" }, Date.now() - 6 * 60_000);
@@ -277,7 +280,7 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("keeps a failed clone and token while its pane still runs, even after retention", async () => {
+  it.skipIf(noProcessStart)("keeps a failed clone and token while its pane still runs, even after retention", async () => {
     const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:failed-alive", worktree: true });
     const paths = dispatchClonePaths(placed.id);
     await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
@@ -342,7 +345,7 @@ describe("local dispatch", () => {
     expect(await stat(paths.agentTokenFile).then(() => true, () => false)).toBe(true);
   });
 
-  it("does not delete a done clone while its worker is still bound", async () => {
+  it.skipIf(noProcessStart)("does not delete a done clone while its worker is still bound", async () => {
     const placed = await service().dispatch({ ...brief, idempotencyKey: "gitboy:host:live-done", worktree: true });
     const paths = dispatchClonePaths(placed.id);
     await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
@@ -379,7 +382,7 @@ describe("local dispatch", () => {
     expect(launches()).toHaveLength(0);
   });
 
-  it("closes a running dispatch once and its wait ends cancelled", async () => {
+  it.skipIf(noProcessStart)("closes a running dispatch once and its wait ends cancelled", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:close" });
     await liveWorker(placed.id);
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
@@ -407,7 +410,7 @@ describe("local dispatch", () => {
     expect(lines.at(-1)).toMatchObject({ dispatch: placed.id, state: "failed", final: true, error: "cancelled" });
   });
 
-  it("closes by idempotency key, refuses both forms, and an unknown key closes nothing", async () => {
+  it.skipIf(noProcessStart)("closes by idempotency key, refuses both forms, and an unknown key closes nothing", async () => {
     const key = "gitboy:host:close-key";
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: key });
     await liveWorker(placed.id);
@@ -430,7 +433,7 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("keeps a cancel pending while a live launch lock is held, and ignores a stale one", async () => {
+  it.skipIf(noProcessStart)("keeps a cancel pending while a live launch lock is held, and ignores a stale one", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:pending" });
     await updateReceipt(placed.id, value => { value.submittedAt = new Date(Date.now() - 130_000).toISOString(); return true; });
     await markSubmitted(placed.id, new Date(Date.now() - 130_000));
@@ -493,7 +496,7 @@ describe("local dispatch", () => {
     expect(JSON.parse(await readFile(file, "utf8")).cancelRequestedAt).toEqual(expect.any(String));
   });
 
-  it("lets the launcher close a pane cancelled during placement", async () => {
+  it.skipIf(noProcessStart)("lets the launcher close a pane cancelled during placement", async () => {
     let panes = [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       terminal_id: "term-1", agent: target.source, agent_status: "working", startingToken: target.startingToken }];
     const closePane = vi.fn(async () => { panes = []; });
@@ -519,7 +522,7 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("keeps a keyed lost-reply launch pending under its lock, then terminates by worker identity", async () => {
+  it.skipIf(noProcessStart)("keeps a keyed lost-reply launch pending under its lock, then terminates by worker identity", async () => {
     const id = randomUUID();
     const base = { id, computer: "local", project: "phren", harness: "codex", label: "Lost reply", idempotencyKey: `gitboy:host:${id}`,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "uncertain", launchServer: "default" } as unknown as Parameters<typeof closeVerifiedWorker>[0];
@@ -567,7 +570,7 @@ describe("local dispatch", () => {
     expect((await dispatchStatus()).find(row => row.id === placed.id)?.startingToken).toBe(body.startingToken);
   });
 
-  it("reconcile keeps secrets while a keyed worker is alive and removes them once it is gone", async () => {
+  it.skipIf(noProcessStart)("reconcile keeps secrets while a keyed worker is alive and removes them once it is gone", async () => {
     const { id, paths } = await ambiguousReceipt("gitboy:host:reconcile-alive");
     await liveWorker(id);
     await reconcileInterruptedDispatches();
@@ -596,7 +599,7 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("does not kill a replacement process in the same pane", async () => {
+  it.skipIf(noProcessStart)("does not kill a replacement process in the same pane", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:replacement" });
     await liveWorker(placed.id);
     await markSubmitted(placed.id, new Date(Date.now() - 130_000));
@@ -613,7 +616,7 @@ describe("local dispatch", () => {
     } finally { restore(); }
   });
 
-  it("finds a live worker through its durable file after a simulated Hook restart", async () => {
+  it.skipIf(noProcessStart)("finds a live worker through its durable file after a simulated Hook restart", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:restart" });
     await liveWorker(placed.id);
     await markSubmitted(placed.id, new Date(Date.now() - 130_000));
