@@ -126,8 +126,17 @@ function carriesMarker(command: string, file: string): boolean {
 
 const PS_LINE = /^\s*(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/;
 
+export type WorkerScan = { ok: true; worker?: { pid: number; start: string } } | { ok: false };
+type ProcessScanner = (file: string) => Promise<WorkerScan>;
+let processScanner: ProcessScanner | undefined;
+/** Only for tests: replace the real same-user process scan. */
+export function setWorkerProcessScan(scanner: ProcessScanner | undefined): void {
+  processScanner = scanner;
+}
+
 /** A successful same-user process scan: the worker carrying our marker, if any. */
-async function scanWorker(file: string): Promise<{ ok: true; worker?: { pid: number; start: string } } | { ok: false }> {
+async function scanWorker(file: string): Promise<WorkerScan> {
+  if (processScanner) return processScanner(file);
   try {
     if (process.platform === "darwin") {
       const { stdout } = await exec("ps", ["-axww", "-E", "-o", "pid=,lstart=,command="], { timeout: 5_000, maxBuffer: 16_777_216 });

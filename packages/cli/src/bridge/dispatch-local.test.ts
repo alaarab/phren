@@ -13,7 +13,7 @@ import { recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { closeRequestFromArgs, dispatchInputFromArgs } from "./dispatch-command.js";
 import { waitForDispatch } from "./dispatch-wait.js";
 import { cancelDispatch, closeVerifiedWorker, paneBinding, paneRunsTarget } from "./worker-close.js";
-import { acquireLaunchLock, launchLockFile, processStartTime, releaseLaunchLock, workerFilePath } from "./worker-identity.js";
+import { acquireLaunchLock, launchLockFile, markSubmitted, processStartTime, releaseLaunchLock, setWorkerProcessScan, workerFilePath } from "./worker-identity.js";
 import { hookRequest } from "./client.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
@@ -41,10 +41,14 @@ describe("local dispatch", () => {
     vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    // A successful scan with no marker: a missing worker file after the
+    // submitted grace is gone, independent of the host's real process table.
+    setWorkerProcessScan(async () => ({ ok: true }));
   });
   afterEach(async () => {
     for (const child of children) child.kill("SIGKILL");
     children.length = 0;
+    setWorkerProcessScan(undefined);
     vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true });
   });
 
@@ -253,6 +257,7 @@ describe("local dispatch", () => {
       value.submittedAt = new Date(Date.now() - 130_000).toISOString();
       return true;
     });
+    await markSubmitted(placed.id, new Date(Date.now() - 130_000));
     const returns = new DispatchReturns({ now: () => Date.now(), request: async () => ({}), peers: async () => [],
       isLocal: () => true, localWorkers: async () => ({ workers: [] }) });
     const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }) } as unknown as TerminalProvider);
@@ -304,6 +309,7 @@ describe("local dispatch", () => {
       value.retainedUntil = new Date(Date.now() - 1_000).toISOString();
       return true;
     });
+    await markSubmitted(placed.id, new Date(Date.now() - 130_000));
     const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }) } as unknown as TerminalProvider);
     try {
       await reconcileInterruptedDispatches();
@@ -423,6 +429,7 @@ describe("local dispatch", () => {
   it("keeps a cancel pending while a live launch lock is held, and ignores a stale one", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:pending" });
     await updateReceipt(placed.id, value => { value.submittedAt = new Date(Date.now() - 130_000).toISOString(); return true; });
+    await markSubmitted(placed.id, new Date(Date.now() - 130_000));
     const lock = await acquireLaunchLock(placed.id);
     try {
       expect(await cancelDispatch({ dispatch: placed.id })).toMatchObject({ dispatch: placed.id, closed: false, pending: true });
@@ -434,6 +441,7 @@ describe("local dispatch", () => {
     // A stale lock (its owner process is gone) on a fresh dispatch is ignored.
     const second = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:stale-lock" });
     await updateReceipt(second.id, value => { value.submittedAt = new Date(Date.now() - 130_000).toISOString(); return true; });
+    await markSubmitted(second.id, new Date(Date.now() - 130_000));
     await writeFile(launchLockFile(second.id), JSON.stringify({ pid: 999999, start: "gone", nonce: "stale" }), { mode: 0o600 });
     expect(await cancelDispatch({ dispatch: second.id })).toMatchObject({ dispatch: second.id, closed: false, gone: true });
   });
@@ -441,6 +449,7 @@ describe("local dispatch", () => {
   it("finalizes a vanished worker without closing a pane", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:gone" });
     await updateReceipt(placed.id, value => { value.submittedAt = new Date(Date.now() - 130_000).toISOString(); return true; });
+    await markSubmitted(placed.id, new Date(Date.now() - 130_000));
     const closePane = vi.fn(async () => undefined);
     const restore = setTerminalProvider({ snapshot: async () => ({ panes: [] }), closePane } as unknown as TerminalProvider);
     try {
@@ -586,6 +595,7 @@ describe("local dispatch", () => {
   it("does not kill a replacement process in the same pane", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:replacement" });
     await liveWorker(placed.id);
+    await markSubmitted(placed.id, new Date(Date.now() - 130_000));
     const closePane = vi.fn(async () => undefined);
     const restore = setTerminalProvider({
       snapshot: async () => ({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: target.source }] }),
@@ -602,9 +612,11 @@ describe("local dispatch", () => {
   it("finds a live worker through its durable file after a simulated Hook restart", async () => {
     const placed = await service().dispatch({ ...brief, worktree: true, idempotencyKey: "gitboy:host:restart" });
     await liveWorker(placed.id);
+    await markSubmitted(placed.id, new Date(Date.now() - 130_000));
     vi.resetModules();
     const fresh = await import("./worker-close.js");
     const identity = await import("./worker-identity.js");
+    identity.setWorkerProcessScan(async () => ({ ok: true }));
     const terminal = await import("./terminal.js");
     const dispatch = await import("./dispatch.js");
     terminal.setTerminalProvider({ snapshot: async () => ({ panes: [] }), processes: async () => ({ foregroundPids: [] }),
