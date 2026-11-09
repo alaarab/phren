@@ -23,9 +23,8 @@ import { readFile } from "node:fs/promises";
 import { stripTerminal } from "../terminal-text.js";
 import { bindingPath } from "./agent-hook-stores.js";
 import { claudeQuestionDialog } from "./claude-question-dialog.js";
-import { confirmDialogRead, DIALOG_READ_MS } from "./dialog-observation.js";
+import { confirmDialogRead, dialogHasClosed, DIALOG_READ_MS } from "./dialog-observation.js";
 import { object } from "./protocol.js";
-import { claudeFooterMode } from "./claude-footer-mode.js";
 import { claudePermissionDialog, opencodePermissionDialog, visibleTerminalChoice } from "./terminal-choice.js";
 
 const EVENT_STATUS: Record<string, string> = {
@@ -113,20 +112,7 @@ export function screenDialog(agent: string, screen: string): boolean {
  * Only a newer composer or the harness's working hint proves disappearance. */
 export function screenDialogState(agent: string, screen: string): "shown" | "gone" | "unknown" {
   if (screenDialog(agent, screen)) return "shown";
-  const lines = stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const composer = (line: string) => /^[❯›](?!\s*\d+[.)])(?:\s|$)/.test(line);
-  const chrome = (line: string) => /^[─━═]+$/.test(line) || claudeFooterMode(line) !== undefined
-    || /^(?:[←→?].*(?:agents|shortcuts)|(?:gpt-|GPT-|claude-|Claude ).*)/i.test(line);
-  const liveTail = (index: number) => lines.slice(index + 1).every(line => composer(line) || chrome(line));
-  let cue = -1;
-  for (let index = 0; index < lines.length; index++) {
-    if (/^(?:[>❯›]?\s*\d+[.)]|Do you want|Would you like|Ready to code|Allow\b|Trust\b|Teach auto|△\s*Permission|[☐☒]|.*Esc to cancel)/i.test(lines[index])) cue = index;
-  }
-  for (let index = lines.length - 1; index > cue; index--) {
-    if (/\besc to interrupt\b/i.test(lines[index]) && liveTail(index)) return "gone";
-    if (index >= lines.length - 3 && composer(lines[index]) && liveTail(index)) return "gone";
-  }
-  return "unknown";
+  return dialogHasClosed(screen) ? "gone" : "unknown";
 }
 
 interface Dialog { terminal: string; generation?: object; readAt: number; reading?: Promise<void>; shown?: { at: number; seq: number }; cleared?: number }

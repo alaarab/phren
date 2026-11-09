@@ -1,3 +1,5 @@
+import { claudeFooterMode } from "./claude-footer-mode.js";
+import { dialogHasClosed } from "./dialog-observation.js";
 import { joinDialogFooters } from "./terminal-dialog-text.js";
 import { BridgeError } from "./protocol.js";
 
@@ -11,7 +13,7 @@ import { BridgeError } from "./protocol.js";
  * submits. Blind key sequences drift onto the wrong tab, so every step reads
  * the pane first and checks the result before the next. */
 
-interface Row { number: number; label: string; checked?: boolean; answered: boolean; cursor: boolean }
+interface Row { number: number; label: string; checked?: boolean; answered: boolean; cursor: boolean; wrapped?: boolean }
 export interface ClaudeQuestionScreen {
   kind: "question";
   /** Headers from the tab bar, without the trailing Submit tab. */
@@ -24,7 +26,7 @@ export interface ClaudeQuestionScreen {
   /** The row number under the cursor, or "next" on a multi-select Next/Submit row. */
   cursor?: number | "next";
 }
-export interface ClaudeReviewScreen { kind: "review"; tabs: string[]; answers: { question: string; answer: string }[] }
+export interface ClaudeReviewScreen { kind: "review"; tabs: string[]; answers: { question: string; answer: string; wrapped?: boolean }[] }
 export type ClaudeDialogScreen = ClaudeQuestionScreen | ClaudeReviewScreen;
 
 const TAB_BAR = /^\s*(?:←\s+)?((?:[☐☒]\s+\S[^☐☒✔→]*?\s*)+)(?:✔\s+Submit\s*)?(?:→\s*)?$/;
@@ -37,12 +39,6 @@ export const sameTitle = (shown: string, asked: string) => {
   const want = normalize(asked);
   if (shown === want) return true;
   return shown.endsWith("…") && shown.length > 200 && want.startsWith(shown.slice(0, -1).trimEnd());
-};
-/** Claude collapses runs of whitespace in a label, and the Hook reads only the
- * first line of one it wraps, so a long label matches by its head. */
-export const sameLabel = (shown: string, asked: string) => {
-  const want = normalize(asked);
-  return shown === want || (shown.length >= 30 && want.startsWith(shown));
 };
 /** Claude Code (2.1.284) draws a question that has a line break or is wider
  * than 80 columns inside a dimmed left border, "│ " before each line, on its
@@ -91,14 +87,14 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
   const content = body.map(line => line.replace(GUTTER, "$1").trim()).filter(line => line && !/^─+$/.test(line));
   if (content[0] === "Review your answers") {
     if (!body.some(line => /^\s*❯?\s*1\.\s+Submit answers\s*$/.test(line))) return undefined;
-    const answers: { question: string; answer: string }[] = [];
+    const answers: { question: string; answer: string; wrapped?: boolean }[] = [];
     for (const line of content.slice(1)) {
       if (/^Ready to submit/.test(line)) break;
       const question = /^●\s+(.+)$/.exec(line), answer = /^→\s+(.+)$/.exec(line), last = answers[answers.length - 1];
       if (question) answers.push({ question: question[1], answer: "" });
       else if (answer && last) last.answer = answer[1];
       // A long question or answer wraps onto the next line.
-      else if (last) { if (last.answer) last.answer += " " + line; else last.question += " " + line; }
+      else if (last) { if (last.answer) { last.answer += " " + line; last.wrapped = true; } else last.question += " " + line; }
     }
     return { kind: "review", tabs, answers };
   }
@@ -124,6 +120,11 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
   // The last row above "Chat about this" is the typed answer ("Type
   // something." until something is typed there).
   const other = rows.pop()!;
+  const otherLine = body.findIndex(line => Number(ROW.exec(line)?.[2]) === other.number);
+  for (const line of body.slice(otherLine + 1)) {
+    if (NEXT.test(line) || ROW.test(line) || /^─+$/.test(line.trim())) break;
+    if (line.trim()) other.wrapped = true;
+  }
   return { kind: "question", tabs, title, multiSelect: rows.some(row => row.checked !== undefined), options: rows, other, ...(cursor !== undefined ? { cursor } : {}) };
 }
 
@@ -151,15 +152,23 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
   const from = options.from ?? 0, submit = options.submit ?? true;
   let sent = false;
   const changed = (message: string) => refusal(message, sent);
+  if (submit && (from !== 0 || answers.length !== questions.length)) {
+    throw changed("Cannot verify the full review from a partial answer set; send all answers together or finish in the terminal.");
+  }
   const realKeys = io.keys.bind(io);
   io = { ...io, keys: async keys => { sent = true; await realKeys(keys); } };
   const sleep = io.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const matches = (screen: ClaudeDialogScreen | undefined, index: number): screen is ClaudeQuestionScreen =>
     screen?.kind === "question" && sameTitle(screen.title, questions[index].question);
   // Claude redraws a moment after a key; poll until the expected screen shows.
-  const settle = async <T>(check: (screen: ClaudeDialogScreen | undefined) => T | undefined, ms = 2_000): Promise<T | undefined> => {
+  const settle = async <T>(check: (screen: ClaudeDialogScreen | undefined, closed: boolean) => T | undefined, ms = 2_000): Promise<T | undefined> => {
     for (let waited = 0; ; waited += 120) {
-      const value = check(claudeQuestionDialog(await io.read()));
+      const text = await io.read(), screen = claudeQuestionDialog(text);
+      // A bare cursor can itself be a partial question redraw. Closure must
+      // also have Claude's live footer or working hint, after the dialog cues.
+      const closed = !screen && dialogHasClosed(text)
+        && (claudeFooterMode(text) !== undefined || /\besc to interrupt\b/i.test(text));
+      const value = check(screen, closed);
       if (value !== undefined || waited >= ms) return value;
       await sleep(120);
     }
@@ -174,6 +183,49 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
   // draws its own header. The tabs must be this set's, in this order.
   if (initial.tabs.length !== questions.length) throw changed("The terminal is asking a different set of questions.");
 
+  const moveCursor = async (index: number, screen: ClaudeQuestionScreen, to: number | "next") => {
+    const position = (value: number | "next" | undefined) => value === "next" ? screen.other!.number + 1 : value;
+    while (screen.cursor !== to) {
+      const at = position(screen.cursor), target = position(to);
+      if (at === undefined || target === undefined) throw changed("Could not locate the terminal cursor.");
+      const next = at + (target > at ? 1 : -1);
+      const expected = next === screen.other!.number + 1 ? "next" : next;
+      await io.keys([target > at ? "down" : "up"]);
+      const moved = await settle(value => matches(value, index) && value.cursor === expected ? value : undefined);
+      if (!moved) throw changed("Could not move and verify the terminal cursor.");
+      screen = moved;
+    }
+    return screen;
+  };
+  const commandCursor = async (index: number, screen: ClaudeQuestionScreen) => {
+    if (screen.other && screen.cursor === screen.other.number) screen = await moveCursor(index, screen, screen.other.number - 1);
+    if (!screen.options.some(row => row.number === screen.cursor) && !(screen.multiSelect && screen.cursor === "next")) {
+      throw changed("The terminal cursor is not on an option or Next row.");
+    }
+    return screen;
+  };
+  const enterText = async (index: number, screen: ClaudeQuestionScreen, text: string) => {
+    screen = await moveCursor(index, screen, screen.other!.number);
+    const existing = screen.other!.label;
+    if (screen.other!.wrapped) throw changed("The existing typed answer is wrapped and cannot be verified; edit it in the terminal.");
+    const placeholder = existing === (screen.multiSelect ? "Type something" : "Type something.");
+    // The terminal capture cannot prove an editor shortcut cleared a field,
+    // or distinguish a literal placeholder answer from an empty field. Refuse
+    // those cases rather than append to a draft or submit an empty answer.
+    if ((placeholder && text === existing) || (!placeholder && existing !== text)) {
+      throw changed("The existing typed answer differs from the phone's answer or cannot be verified; clear it in the terminal first.");
+    }
+    if (placeholder) {
+      // Claude's numeric shortcuts can still select a row in an empty Other
+      // field. Until text owns the input, a leading digit is unsafe.
+      if (/^[0-9]/.test(text)) throw changed("A typed answer starting with a digit cannot be entered safely; answer it in the terminal.");
+      await io.keys(typedKeys(text));
+    }
+    const shown = await settle(value => matches(value, index) && value.cursor === screen.other!.number
+      && !value.other?.wrapped && value.other?.label === text && (!screen.multiSelect || value.other.checked) ? value : undefined);
+    if (!shown) throw changed("The full typed answer did not appear exactly in the terminal.");
+    return shown;
+  };
   const reach = async (index: number): Promise<ClaudeQuestionScreen> => {
     const screen = await settle(value => value);
     if (screen?.kind === "question" && sameTitle(screen.title, questions[index].question)) return screen;
@@ -181,14 +233,18 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
       : screen?.kind === "question" ? questions.findIndex(question => sameTitle(screen.title, question.question)) : -1;
     if (at < 0) throw changed("The terminal is showing a different question.");
     // Arrow keys would edit a typed answer; step off that row first.
-    if (screen?.kind === "question" && screen.other && screen.cursor === screen.other.number) await io.keys(["up"]);
+    if (screen?.kind === "question") await commandCursor(at, screen);
     await io.keys(Array<string>(Math.abs(index - at)).fill(index > at ? "right" : "left"));
     const moved = await settle(value => matches(value, index) ? value : undefined);
     if (!moved) throw changed("Could not move the terminal to the question being answered.");
     return moved;
   };
-  const leaves = (index: number) => (value: ClaudeDialogScreen | undefined) =>
-    value === undefined ? "gone" : !matches(value, index) ? "moved" : undefined;
+  const leaves = (index: number, mayClose: boolean) => (value: ClaudeDialogScreen | undefined, closed: boolean) => {
+    if (mayClose && closed) return "gone";
+    if (index + 1 < questions.length && matches(value, index + 1)) return "moved";
+    if (index + 1 === questions.length && value?.kind === "review") return "moved";
+    return undefined;
+  };
 
   for (const [offset, answer] of answers.entries()) {
     const index = from + offset, question = questions[index];
@@ -196,67 +252,64 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
     const typed = answer.text?.trim() ?? "";
     let screen: ClaudeQuestionScreen = await reach(index);
     if (screen.multiSelect !== !!question.multiSelect || screen.options.length !== question.options.length
-      || screen.options.some((row, position) => !sameLabel(row.label, question.options[position].label))) {
+      || screen.options.some((row, position) => row.label !== normalize(question.options[position].label))) {
       throw changed("The terminal's options differ from the question being answered.");
     }
     if (!screen.multiSelect) {
       if (typed) {
-        const other = screen.other!;
-        await io.keys([String(other.number)]);
-        const focused = await settle(value => matches(value, index) && value.cursor === other.number ? value : undefined);
-        if (!focused) throw changed("Could not open the typed answer.");
-        await io.keys(typedKeys(typed));
-        const shown = await settle(value => matches(value, index) && value.other && normalize(value.other.label).startsWith(normalize(typed).slice(0, 20)) ? value : undefined);
-        if (!shown) throw changed("The typed answer did not appear in the terminal.");
+        await enterText(index, screen, typed);
         await io.keys(["enter"]);
       } else {
+        screen = await commandCursor(index, screen);
         await io.keys([String(screen.options[answer.options[0]].number)]);
       }
-      if (!await settle(leaves(index), ANSWERED_MS)) throw changed("The terminal did not take the answer.");
+      if (!await settle(leaves(index, questions.length === 1), ANSWERED_MS)) throw changed("The terminal did not confirm taking the answer.");
       continue;
     }
+    screen = await commandCursor(index, screen);
     // Multi-select: toggle only the boxes that differ, one key per write
     // (Ink reads "13" in one write as a single input and toggles nothing),
     // and check each box before the next.
     const rows = [...screen.options, ...(screen.other ? [screen.other] : [])];
     for (const [position, row] of rows.entries()) {
-      const wanted = position < screen.options.length ? answer.options.includes(position) : !!row.checked && !!typed;
+      const wanted = position < screen.options.length ? answer.options.includes(position) : !!typed && row.label === typed;
       if (wanted === !!row.checked) continue;
       const box = (value: ClaudeDialogScreen | undefined) => matches(value, index)
         ? !!(position < value.options.length ? value.options[position] : value.other)?.checked : undefined;
-      // A key that lands while the tab is still drawing can be dropped; the
-      // box itself says whether one more press is needed.
-      for (let attempt = 0; attempt < 2 && box(screen) !== wanted; attempt++) {
-        await io.keys([String(row.number)]);
-        screen = await settle(value => box(value) === wanted ? value as ClaudeQuestionScreen : undefined, 1_000) ?? screen;
-      }
-      if (box(screen) !== wanted) throw changed("The terminal's checkboxes did not match the answer.");
+      screen = await commandCursor(index, screen);
+      await io.keys([String(row.number)]);
+      const toggled = await settle(value => box(value) === wanted ? value as ClaudeQuestionScreen : undefined);
+      if (!toggled) throw changed("The terminal's checkboxes did not match the answer.");
+      screen = toggled;
     }
     if (typed) {
-      const other = screen.other!, cursor = typeof screen.cursor === "number" ? screen.cursor : 1;
-      if (cursor !== other.number) await io.keys(Array<string>(Math.abs(other.number - cursor)).fill(other.number > cursor ? "down" : "up"));
-      if (!await settle(value => matches(value, index) && value.cursor === other.number ? value : undefined)) throw changed("Could not reach the typed answer row.");
-      await io.keys(typedKeys(typed));
-      const shown = await settle(value => matches(value, index) && value.other?.checked && normalize(value.other.label).startsWith(normalize(typed).slice(0, 20)) ? value : undefined);
-      if (!shown) throw changed("The typed answer did not appear in the terminal.");
+      screen = await enterText(index, screen, typed);
       // Tab moves from the typed row to Next; Enter there leaves the question.
       await io.keys(["tab"]);
       if (!await settle(value => matches(value, index) && value.cursor === "next" ? value : undefined)) throw changed("Could not reach the question's Next row.");
       await io.keys(["enter"]);
     } else {
       // Tab from the typed row would stop on Next instead of leaving.
-      await io.keys(screen.other && screen.cursor === screen.other.number ? ["up", "tab"] : ["tab"]);
+      screen = await commandCursor(index, screen);
+      await io.keys(["tab"]);
     }
-    if (!await settle(leaves(index), ANSWERED_MS)) throw changed("The terminal did not move past the question.");
+    if (!await settle(leaves(index, false), ANSWERED_MS)) throw changed("The terminal did not move past the question.");
   }
   if (!submit) return;
-  const review = await settle(value => value?.kind === "review" ? value : value === undefined ? "gone" as const : undefined, ANSWERED_MS);
+  const review = await settle((value, closed) => value?.kind === "review" ? value
+    : questions.length === 1 && !questions[0].multiSelect && closed ? "gone" as const : undefined, ANSWERED_MS);
   // A lone single-select question submits on its digit.
   if (review === "gone") return;
   if (!review) throw changed("The terminal did not reach the review of the answers.");
   if (review.answers.length !== questions.length || review.answers.some((row, position) => !sameTitle(normalize(row.question), questions[position].question) || !row.answer)) {
-    throw changed("Not every question has an answer in the terminal.");
+    throw changed("The terminal's review does not contain every expected question and answer.");
+  }
+  for (const [offset, answer] of answers.entries()) {
+    const index = from + offset, question = questions[index], text = answer.text?.trim() ?? "";
+    const labels = question.options.filter((_, position) => answer.options.includes(position)).map(option => normalize(option.label));
+    const expected = question.multiSelect ? [...labels, ...(text ? [text] : [])].join(", ") : text || labels[0];
+    if (review.answers[index]?.wrapped || review.answers[index]?.answer !== expected) throw changed("The terminal's review does not exactly match the phone's answers.");
   }
   await io.keys(["1"]);
-  if (await settle(value => value === undefined ? "gone" : undefined, ANSWERED_MS) !== "gone") throw changed("The terminal did not submit the answers.");
+  if (await settle((_value, closed) => closed ? "gone" : undefined, ANSWERED_MS) !== "gone") throw changed("The terminal did not submit the answers.");
 }
