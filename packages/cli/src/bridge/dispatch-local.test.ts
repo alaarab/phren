@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, reconcileInterruptedDispatches, updateReceipt } from "./dispatch.js";
-import { findIdempotencyKey, idempotencyKeyFile, idempotencyLockFile, requestIdempotencyCancel, reserveIdempotencyKey, updateIdempotencyPhase } from "./dispatch-idempotency.js";
+import { cleanupIdempotencyLocks, findIdempotencyKey, idempotencyKeyFile, markHookServerProcess, requestIdempotencyCancel, reserveIdempotencyKey, updateIdempotencyPhase, withIdempotencyKeyLock } from "./dispatch-idempotency.js";
 import { DispatchReturns } from "./dispatch-returns.js";
 import { dispatchClonePaths } from "./dispatch-clone.js";
 import { recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
@@ -36,6 +36,7 @@ describe("local dispatch", () => {
   const children: ChildProcess[] = [];
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-local-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    markHookServerProcess();
     vi.mocked(hookPeers).mockResolvedValue([]);
     vi.mocked(peerRequest).mockResolvedValue({ ok: true });
     vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
@@ -148,6 +149,8 @@ describe("local dispatch", () => {
     expect([a.reserved, b.reserved].sort()).toEqual([false, true]);
     const record = await findIdempotencyKey(key);
     expect(record).toBeDefined();
+    const names = await readdir(path.dirname(idempotencyKeyFile(key)));
+    expect(names.some(name => name.endsWith(".lock") || name.includes(".lock.reclaim-"))).toBe(false);
     expect(await updateIdempotencyPhase(key, randomUUID(), "failed")).toBe(false);
 
     const corrupt = "gitboy:host:corrupt";
@@ -157,35 +160,36 @@ describe("local dispatch", () => {
       .rejects.toMatchObject({ status: 503, message: expect.stringContaining("unreadable") });
   });
 
-  it("reclaims a crashed owner's idempotency lock, but never a live owner's", async () => {
-    const key = "gitboy:host:stale-lock";
-    await reserveIdempotencyKey(key, randomUUID(), randomUUID(), {}, Date.now() - 31 * 24 * 60 * 60_000);
-    const dead = JSON.stringify({ owner: randomUUID(), pid: 999999, start: "gone", nonce: "dead",
-      createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() });
-    await writeFile(idempotencyLockFile(key), dead);
-    expect((await reserveIdempotencyKey(key, randomUUID(), randomUUID())).reserved).toBe(true);
-    expect(await readFile(idempotencyLockFile(key), "utf8").catch(() => "")).not.toBe(dead);
-
-    const liveKey = "gitboy:host:live-lock";
-    await reserveIdempotencyKey(liveKey, randomUUID(), randomUUID(), {}, Date.now() - 31 * 24 * 60 * 60_000);
-    const start = await processStartTime(process.pid);
-    const live = JSON.stringify({ owner: randomUUID(), pid: process.pid, ...(start ? { start } : {}), nonce: "live",
-      createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() });
-    await writeFile(idempotencyLockFile(liveKey), live);
-    await expect(reserveIdempotencyKey(liveKey, randomUUID(), randomUUID())).rejects.toMatchObject({ status: 503 });
-    expect(await readFile(idempotencyLockFile(liveKey), "utf8")).toBe(live);
+  it("serializes withIdempotencyKeyLock operations for the same key", async () => {
+    const key = "gitboy:host:mutex";
+    await reserveIdempotencyKey(key, randomUUID(), randomUUID());
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const first = withIdempotencyKeyLock(key, async () => {
+      order.push("first-start");
+      await gate;
+      order.push("first-end");
+    });
+    const second = withIdempotencyKeyLock(key, async () => { order.push("second"); });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(order).toEqual(["first-start"]);
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(["first-start", "first-end", "second"]);
   });
 
-  it("lets two concurrent reclaimers end with exactly one owner", async () => {
-    const key = "gitboy:host:race-reclaim";
-    await reserveIdempotencyKey(key, randomUUID(), randomUUID(), {}, Date.now() - 31 * 24 * 60 * 60_000);
-    await writeFile(idempotencyLockFile(key), JSON.stringify({ owner: randomUUID(), pid: 999999, start: "gone", nonce: "dead",
-      createdAt: new Date(Date.now() - 120_000).toISOString(), expiresAt: new Date(Date.now() - 60_000).toISOString() }));
-    const results = await Promise.allSettled([
-      reserveIdempotencyKey(key, randomUUID(), randomUUID()),
-      reserveIdempotencyKey(key, randomUUID(), randomUUID()),
-    ]);
-    expect(results.filter(result => result.status === "fulfilled" && result.value.reserved)).toHaveLength(1);
+  it("cleans leftover lock and reclaim files on Hook start", async () => {
+    const key = "gitboy:host:leftover";
+    await reserveIdempotencyKey(key, randomUUID(), randomUUID());
+    const file = idempotencyKeyFile(key);
+    const hash = path.basename(file, ".json");
+    const dir = path.dirname(file);
+    await writeFile(path.join(dir, `${hash}.lock`), "old");
+    await writeFile(path.join(dir, `${hash}.lock.reclaim-old`), "old");
+    await cleanupIdempotencyLocks();
+    expect(await readFile(path.join(dir, `${hash}.lock`), "utf8").catch(() => "")).toBe("");
+    expect(await readFile(path.join(dir, `${hash}.lock.reclaim-old`), "utf8").catch(() => "")).toBe("");
   });
 
   it("publishes no interrupted-launch failure while a live launch lock is held", async () => {
@@ -625,6 +629,13 @@ describe("local dispatch", () => {
     expect(await identity.workerAlive(placed.id)).toBe("alive");
     expect(await fresh.closeVerifiedWorker(receipt)).toMatchObject({ dispatch: placed.id, closed: true });
     expect(await identity.workerAlive(placed.id)).toBe("gone");
+  });
+
+  it("refuses withIdempotencyKeyLock outside the Hook server process", async () => {
+    vi.resetModules();
+    const fresh = await import("./dispatch-idempotency.js");
+    await expect(fresh.withIdempotencyKeyLock("gitboy:host:guard", async () => undefined))
+      .rejects.toMatchObject({ status: 403 });
   });
 
 });

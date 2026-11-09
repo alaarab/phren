@@ -327,10 +327,9 @@ stores key to dispatch id under `<bridge>/idempotency/<sha256>.json` (0600), so
 it survives a restart and expires after 30 days. The dispatch id is generated
 before the reservation; the full record is written to a temp file and published
 with `link`, which is atomic and never lets a concurrent caller reclaim an empty
-or half-written file. Expiry and replacement happen only under a per-key lock,
-and updates/deletes check the owner nonce. A lock is never unlinked by another
-caller: its lease expiry is written in the lock file, and a stale lock fails
-closed with a retryable "locked by a stale owner" error.
+or half-written file. Expiry and replacement happen only under an in-process
+per-key mutex in the Hook server, and updates/deletes check the owner nonce.
+Leftover lock files from an older Hook are deleted on start.
 
 A reservation that stays `reserved` or `launching` for five minutes with no
 recorded target and no live worker is reconciled. Before declaring it
@@ -407,13 +406,13 @@ report`. It polls about every 2 s at first, backing off to 10 s with jitter,
 peeks at `/v1/dispatch/returns?peek=1`, and reads `/v1/dispatch/workers` to tell
 a gone pane from one still working. It survives transient Hook errors, but
 failures of any polled route count toward one 5-minute continuous-unavailability
-deadline, then it ends `failed`. A receipt with no target and no return for five
-minutes after it was created ends `failed` with `error: "launch did not
-complete"`. An id the Hook does not know after a 30 s grace period ends `failed`
-with `error: "unknown dispatch"`. The timeout defaults to none and is capped at
-7 days. Exit codes: 0 `done`, 1 `failed` or `gone`, 124 `timeout`. When the
-result is final it acknowledges only that dispatch's return
-(`POST /v1/dispatch/returns/ack`).
+deadline, then it ends `failed`. A targetless or pending receipt keeps
+`running`: only the Hook's terminal return (done, failed or gone), or the
+receipt's settled terminal state, ends the wait. An id the Hook does not know
+after a 30 s grace period ends `failed` with `error: "unknown dispatch"`. The
+timeout defaults to none and is capped at 7 days. Exit codes: 0 `done`, 1
+`failed` or `gone`, 124 `timeout`. When the result is final it acknowledges only
+that dispatch's return (`POST /v1/dispatch/returns/ack`).
 
 `close` cancels a running dispatch by id, or by its idempotency key with
 `--idempotency-key`: the Hook looks the key up in the same durable store,

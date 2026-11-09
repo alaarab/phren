@@ -128,11 +128,12 @@ so a conductor's returns stay unread, reads
 with `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }`. Exit codes: 0
 `done`, 1 `failed` or `gone`, 124 `timeout` (no timeout by default, capped at 7
 days). Failures of any polled route count toward one 5-minute
-continuous-unavailability deadline. A receipt with no target and no return for
-five minutes ends `failed` with `error: "launch did not complete"`, and an
-unknown id after a 30 s grace period ends `failed`. Live worker state is polled
-even when a return exists: a needs-you return from before the worker last ran
-is historical, and a resumed worker emits `running` again.
+continuous-unavailability deadline. A targetless or pending receipt keeps
+`running`; only the Hook's terminal return (done, failed or gone), or the
+receipt's settled terminal state, ends the wait. An unknown id after a 30 s
+grace period ends `failed`. Live worker state is polled even when a return
+exists: a needs-you return from before the worker last ran is historical, and a
+resumed worker emits `running` again.
 
 A keyed dispatch runs only `claude` or `codex` in supervised mode; any other
 harness or permission mode is refused. The launch boundary refuses skip-approval

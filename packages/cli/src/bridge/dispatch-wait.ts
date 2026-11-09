@@ -15,8 +15,6 @@ import type { Json } from "./protocol.js";
 export const WAIT_GRACE_MS = 30_000;
 /** Continuous Hook unavailability before the wait ends failed. */
 export const WAIT_UNAVAILABLE_MS = 5 * 60_000;
-/** A receipt with no target and no return this old did not complete its launch. */
-export const WAIT_LAUNCH_MS = 5 * 60_000;
 /** Longest wait a caller may ask for. */
 export const WAIT_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -131,12 +129,6 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
     // A placement that failed before any worker existed has no return of its own.
     if (!returned && receipt?.state === "failed") {
       final("failed", { ...(typeof receipt.error === "string" ? { error: receipt.error } : {}) });
-      return 1;
-    }
-    // A receipt that never gained a target or a return is a launch that did not complete.
-    if (!returned && receipt && !receipt.target && Number.isFinite(Date.parse(String(receipt.createdAt)))
-      && now() - Date.parse(String(receipt.createdAt)) >= WAIT_LAUNCH_MS) {
-      final("failed", { error: "launch did not complete" });
       return 1;
     }
     const state = typeof returned?.state === "string" ? returned.state : undefined;

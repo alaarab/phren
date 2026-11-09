@@ -12,6 +12,7 @@ import { hookRequest } from "./client.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { DispatchReturns } from "./dispatch-returns.js";
 import { clearConductor, recordConductor, resetRoleState } from "./conductor-role.js";
+import { markHookServerProcess } from "./dispatch-idempotency.js";
 
 vi.mock("./peers.js", () => {
   const hookPeers = vi.fn();
@@ -29,6 +30,7 @@ describe("dispatch receipts and selection", () => {
   let root: string;
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    markHookServerProcess();
     vi.mocked(hookPeers).mockResolvedValue(["Desk", "Devbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
     vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1 }

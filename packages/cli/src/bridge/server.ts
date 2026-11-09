@@ -9,6 +9,7 @@ import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
+import { cleanupIdempotencyLocks, markHookServerProcess } from "./dispatch-idempotency.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { handOff } from "./hand-off.js";
@@ -87,6 +88,8 @@ export { herdrAgentName, launchSession } from "./server-launch.js";
 
 export async function serve(version: string, options: { modelCatalog?: ModelCatalog; accountUsage?: AccountUsageReader } = {}): Promise<void> {
   process.umask(0o077);
+  markHookServerProcess();
+  await cleanupIdempotencyLocks().catch(error => logger.warn("dispatch", `Could not clean leftover idempotency locks: ${error instanceof Error ? error.message : String(error)}`));
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook")) throw new BridgeError(404, disabledHint("hook"));
   const activeCapabilities = capabilitiesForModules(modules);

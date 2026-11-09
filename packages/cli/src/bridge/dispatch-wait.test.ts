@@ -65,14 +65,23 @@ describe("dispatch wait", () => {
     expect(unknownLines.at(-1)).toMatchObject({ state: "failed", final: true, error: "unknown dispatch" });
   });
 
-  it("fails a launch with no target and no return after five minutes", async () => {
+  it("keeps a pending targetless receipt running past ten minutes and ends only on the Hook's terminal return", async () => {
+    let clock = Date.parse("2026-11-08T10:10:00.000Z");
+    let reads = 0;
     const lines: Json[] = [];
-    const code = await waitForDispatch(id, { intervalMs: 1, jitter: false, out: line => lines.push(line),
-      request: async route => route === "/v1/dispatch"
-        ? { dispatches: [{ id, state: "launching", createdAt: new Date(Date.now() - 6 * 60_000).toISOString() }] }
-        : { returns: [] } });
+    const code = await waitForDispatch(id, { intervalMs: 1, jitter: false, now: () => clock,
+      sleep: async ms => { clock += ms; }, out: line => lines.push(line),
+      request: async route => {
+        if (route === "/v1/dispatch") return { dispatches: [{ id, state: "launching", createdAt: "2026-11-08T10:00:00.000Z" }] };
+        if (route.startsWith("/v1/dispatch/returns?")) {
+          reads++;
+          return { returns: reads < 3 ? [] : [{ id, state: "failed", error: "launch interrupted", at: new Date(clock).toISOString() }] };
+        }
+        return { ok: true };
+      } });
     expect(code).toBe(1);
-    expect(lines.at(-1)).toMatchObject({ state: "failed", final: true, error: "launch did not complete" });
+    expect(lines.slice(0, -1).every(line => line.state === "running" && line.final !== true)).toBe(true);
+    expect(lines.at(-1)).toMatchObject({ state: "failed", final: true, error: "launch interrupted" });
   });
 
   it("counts every polled route's failures toward one unavailability deadline", async () => {
