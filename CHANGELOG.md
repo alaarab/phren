@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Answers sent from the phone to Claude's questions are checked in full before submission; unexpected cursor positions, existing text, and incomplete redraws now stop with a clear error.
+
 ## [0.3.73] - 2026-11-08
 
 ### Added
