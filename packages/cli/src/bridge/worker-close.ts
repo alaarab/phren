@@ -314,7 +314,14 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
     if (remaining && findPane(remaining, data.target)?.terminal_id === pane.terminal_id) await rm(file(data.target), { force: true });
     throw error;
   }
-  await releaseClosedFiles(data.dispatch);
+  // Clean up files only for the dispatch durably bound to this exact pane and
+  // session: a request naming another dispatch must never delete its clone.
+  const owner = await updateReceipt(data.dispatch, () => false).catch(() => undefined);
+  const bound = owner?.target && owner.target.server === data.target.server && owner.target.pane === data.target.pane
+    && owner.target.workspace === data.target.workspace && owner.target.tab === data.target.tab
+    // A starting target has no session yet: the binding can't be proven, so no cleanup.
+    && "session" in owner.target && owner.target.session === data.target.session;
+  if (bound) await releaseClosedFiles(data.dispatch);
   clearStartingToken(data.target.server, pane);
   return { ok: true, closed: true };
 }

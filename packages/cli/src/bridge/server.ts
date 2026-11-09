@@ -142,7 +142,6 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       return true;
     },
   }) : undefined;
-  if (dispatches) await reconcileInterruptedDispatches().catch(error => logger.warn("dispatch", `Could not reconcile interrupted dispatches: ${error instanceof Error ? error.message : String(error)}`));
   // Push is offered only once an APNs sender loaded; phones may still register.
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
@@ -264,6 +263,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     if (live) throw new Error("Phren Hook is already running.");
     await unlink(socketPath());
   }
+  // Only the Hook that owns the socket reconciles dispatch state: a second
+  // `bridge serve` stops above before touching any receipt or key record.
+  if (dispatches) await reconcileInterruptedDispatches().catch(error => logger.warn("dispatch", `Could not reconcile interrupted dispatches: ${error instanceof Error ? error.message : String(error)}`));
 
   const storePulls = new StorePulls(scheduleStore);
   const gitboyWebhooks = new GitboyWebhooks(root, storeId => storePulls.request(storeId), undefined,
