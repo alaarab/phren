@@ -509,6 +509,42 @@ describe("phren prompt-hook context", () => {
     expect(visibleClaudeEvent(queued("prompt"))).toEqual({ type: "phren_turn_input", timestamp: "t", notification: false });
     expect(visibleClaudeEvent(queued("task-notification"))).toEqual({ type: "phren_turn_input", timestamp: "t", notification: true });
   });
+  // Claude Code 2026-11: shapes copied from real transcripts. An agent's
+  // message lands once: a hidden user row when idle, a queued_command mid-turn.
+  describe("messages from other agents", () => {
+    const envelope = '<cross-session-message from="uds:/tmp/cc-socks/46366.sock" from-name="alaarab-4e" from-mode="prompting">\nRC is green.\n</cross-session-message>';
+    const crossSession = { kind: "peer", from: "uds:/tmp/cc-socks/46366.sock", verifiedPeerPid: "46366", msg_id: "c6de", name: "alaarab-4e", fromMode: "prompting", body: "RC is green." };
+    const frame = "[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output, NOT a message from the user. The report follows:\n";
+    const handback = { kind: "peer", from: "acaf7033dc2737a6b", senderTaskId: "acaf7033dc2737a6b", name: "general-purpose", handback: true,
+      body: frame + "  **Verdict:** holds.\n  \n  - one gap" };
+
+    it("shows an idle delivery as the sender's name and words, without the envelope", () => {
+      const row = { type: "user", isMeta: true, uuid: "u9", timestamp: "t", origin: crossSession,
+        message: { role: "user", content: "Another Claude session sent a message:\n" + envelope } };
+      expect(visibleClaudeEvent(row)).toEqual({ type: "phren_peer_message", timestamp: "t", uuid: "u9", name: "alaarab-4e", text: "RC is green." });
+    });
+    it("shows a mid-turn delivery the same way", () => {
+      const row = { type: "attachment", uuid: "u8", timestamp: "t",
+        attachment: { type: "queued_command", commandMode: "prompt", prompt: envelope, origin: crossSession } };
+      expect(visibleClaudeEvent(row)).toEqual({ type: "phren_peer_message", timestamp: "t", uuid: "u8", name: "alaarab-4e", text: "RC is green." });
+    });
+    it("shows a subagent's hand-back as its report, without the harness frame", () => {
+      const row = (origin: Json) => ({ type: "user", isMeta: true, timestamp: "t", origin, message: { role: "user", content: "<agent-message>" } });
+      const expected = { type: "phren_peer_message", timestamp: "t", name: "general-purpose", handback: true, text: "**Verdict:** holds.\n\n- one gap" };
+      expect(visibleClaudeEvent(row(handback))).toEqual(expected);
+      expect(visibleClaudeEvent(row({ ...handback, handbackReportText: "**Verdict:** holds.\n\n- one gap" }))).toEqual(expected);
+    });
+    it("keeps a subagent's own inbox and an empty message private", () => {
+      const row = { type: "user", isMeta: true, isSidechain: true, timestamp: "t", origin: crossSession, message: { role: "user", content: envelope } };
+      expect(visibleClaudeEvent(row)).toBeUndefined();
+      expect(visibleClaudeEvent({ ...row, isSidechain: false, origin: { ...crossSession, body: "  " } })).toBeUndefined();
+    });
+    it("names an unnamed sender plainly and folds control characters out of a name", () => {
+      const row = (name: unknown) => ({ type: "user", isMeta: true, timestamp: "t", origin: { ...crossSession, name }, message: { role: "user", content: envelope } });
+      expect(visibleClaudeEvent(row(undefined))?.name).toBe("agent");
+      expect(visibleClaudeEvent(row("safety\u202e-20\n"))?.name).toBe("safety -20");
+    });
+  });
   it("names a picture sent mid-turn so its receipt can match, keeping its queue key", () => {
     // Claude Code 2026-09-27: a phone picture sent while the conductor worked.
     const content = "[Image #7]Attached files on this computer:";
