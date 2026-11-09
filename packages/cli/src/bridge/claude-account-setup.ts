@@ -104,7 +104,6 @@ export async function addClaudeAccount(slug: string, opts: { label?: string; ema
   if (keychain === "locked") throw new Error(keychainLockedMessage(slug, opts.label));
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await chmod(dir, 0o700); // An existing home keeps its login: tighten it too.
-  if (created) forgetClaudeHomes();
   const linked: string[] = [];
   for (const name of SHARED_ENTRIES) {
     const target = path.join(source.dir, name), link = path.join(dir, name);
@@ -113,6 +112,8 @@ export async function addClaudeAccount(slug: string, opts: { label?: string; ema
     linked.push(name);
   }
   await mergeMcpServers(path.join(dir, ".claude.json"), await mcpServersOf(source.configFile));
+  // The listing may predate this home or its .claude.json (an interrupted add): list again.
+  forgetClaudeHomes();
   if (opts.label) await setAccountLabel(slug, opts.label);
   return { id: slug, dir, linked, created, ...(keychain === "unknown" ? { warning: KEYCHAIN_UNKNOWN_WARNING } : {}) };
 }

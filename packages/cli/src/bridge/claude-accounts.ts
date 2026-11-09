@@ -44,15 +44,18 @@ const homesCache = new Map<string, { at: number; home: number; candidates: { dir
 /** How long a listing stands even when its folders changed: Claude rewrites each `.claude.json` through
  * temp files beside it every few seconds, so their mtimes alone would rarely let a listing be reused. */
 const HOMES_REUSE_MS = 2_000;
+/** The longest a listing stands on unchanged mtimes: a home made within one coarse mtime tick of the
+ * last listing would otherwise stay unseen until another folder changed. */
+const HOMES_MAX_AGE_MS = 60_000;
 
 /** Every Claude home on this computer, default first, then by slug. The Hook asks several times per pane
  * per overview, so a listing is reused for HOMES_REUSE_MS, and after that while the home folder and
- * every `.claude-*` folder in it are unchanged. */
+ * every `.claude-*` folder in it are unchanged, up to HOMES_MAX_AGE_MS. */
 export function claudeHomes(env: NodeJS.ProcessEnv = process.env): ClaudeHome[] {
   const first = defaultHome(env), home = homeDir(env), key = `${home}\0${first.dir}\0${first.configFile}`;
   const cached = homesCache.get(key), now = Date.now();
   if (cached && (now - cached.at < HOMES_REUSE_MS
-      || (mtimeOf(home) === cached.home && cached.candidates.every(candidate => mtimeOf(candidate.dir) === candidate.mtime)))) return [...cached.homes];
+      || (now - cached.at < HOMES_MAX_AGE_MS && mtimeOf(home) === cached.home && cached.candidates.every(candidate => mtimeOf(candidate.dir) === candidate.mtime)))) return [...cached.homes];
   const homeMtime = mtimeOf(home);
   const homes = listClaudeHomes(first, home);
   homesCache.set(key, { at: now, home: homeMtime, candidates: homes.candidates, homes: homes.homes });
