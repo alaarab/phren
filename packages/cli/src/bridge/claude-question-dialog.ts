@@ -113,13 +113,16 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
     if (match[1]) cursor = number;
     if (/^Chat about this$/.test(match[4])) { chat = true; continue; }
     const answered = !match[3] && / ✔$/.test(match[4]);
-    rows.push({ number, label: answered ? match[4].slice(0, -2).trim() : match[4], answered, cursor: !!match[1],
+    rows.push({ number, label: match[4], answered, cursor: !!match[1],
       ...(match[3] ? { checked: match[3] === "✔" } : {}) });
   }
   if (!title || !chat || cursor === undefined || rows.length < 2) return undefined;
   // The last row above "Chat about this" is the typed answer ("Type
   // something." until something is typed there).
   const other = rows.pop()!;
+  // Only option labels have a removable selection marker. Other is user
+  // input: preserving its raw value prevents "Teal ✔" reconciling as "Teal".
+  for (const row of rows) if (row.answered) row.label = row.label.slice(0, -2).trim();
   const otherLine = body.findIndex(line => Number(ROW.exec(line)?.[2]) === other.number);
   for (const line of body.slice(otherLine + 1)) {
     if (NEXT.test(line) || ROW.test(line) || /^─+$/.test(line.trim())) break;
@@ -207,6 +210,7 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
   const enterText = async (index: number, screen: ClaudeQuestionScreen, text: string) => {
     screen = await moveCursor(index, screen, screen.other!.number);
     const existing = screen.other!.label;
+    if (screen.other!.answered) throw changed("The existing typed answer ends with an ambiguous selection marker; edit it in the terminal.");
     if (screen.other!.wrapped) throw changed("The existing typed answer is wrapped and cannot be verified; edit it in the terminal.");
     const placeholder = existing === (screen.multiSelect ? "Type something" : "Type something.");
     // The terminal capture cannot prove an editor shortcut cleared a field,
@@ -215,15 +219,27 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
     if ((placeholder && text === existing) || (!placeholder && existing !== text)) {
       throw changed("The existing typed answer differs from the phone's answer or cannot be verified; clear it in the terminal first.");
     }
+    const verifyText = async (expected: string) => {
+      const shown = await settle(value => matches(value, index) && value.cursor === screen.other!.number
+        && !value.other?.wrapped && value.other?.label === expected && (!screen.multiSelect || value.other.checked) ? value : undefined);
+      if (!shown) throw changed("The full typed answer did not appear exactly in the terminal.");
+      return shown;
+    };
     if (placeholder) {
-      // Claude's numeric shortcuts can still select a row in an empty Other
-      // field. Until text owns the input, a leading digit is unsafe.
-      if (/^[0-9]/.test(text)) throw changed("A typed answer starting with a digit cannot be entered safely; answer it in the terminal.");
-      await io.keys(typedKeys(text));
+      if (/^[0-9]/.test(text)) {
+        // Current Claude versions type digits into Other. Older versions may
+        // select (and immediately submit) an option if the field is empty,
+        // so establish text ownership without ever probing it with a digit.
+        await io.keys(["."]);
+        await verifyText(".");
+        await io.keys(typedKeys(text));
+        await verifyText("." + text);
+        // These editor keys cannot submit. If movement/deletion is unsupported
+        // or dropped, exact readback refuses before Enter can send the prefix.
+        await io.keys(["home", "right", "backspace"]);
+      } else await io.keys(typedKeys(text));
     }
-    const shown = await settle(value => matches(value, index) && value.cursor === screen.other!.number
-      && !value.other?.wrapped && value.other?.label === text && (!screen.multiSelect || value.other.checked) ? value : undefined);
-    if (!shown) throw changed("The full typed answer did not appear exactly in the terminal.");
+    const shown = await verifyText(text);
     return shown;
   };
   const reach = async (index: number): Promise<ClaudeQuestionScreen> => {

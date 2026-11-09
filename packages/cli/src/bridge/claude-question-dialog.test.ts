@@ -117,12 +117,22 @@ describe("answering Claude's question dialog", () => {
       "Which tools?": ["Vim", "Emacs", "VSCode", ...(typed ? ["Nano editor"] : [])] });
   });
 
-  it.each([false, true])("reuses identical focused Other text without appending (multiSelect: %s)", async multiSelect => {
+  it.each([[false, "Teal 123"], [true, "Teal 123"], [true, "Teal ✔"]] as const)("reuses identical focused Other text without appending (multiSelect: %s, text: %s)", async (multiSelect, text) => {
     const questions = [{ ...set[0], multiSelect }], claude = new FakeClaude(questions);
-    claude.cursor = 4; claude.typed[0] = "Teal 123"; claude.typedOn[0] = multiSelect;
-    await answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text: "Teal 123" }]);
-    expect(claude.result).toEqual({ "Which color?": multiSelect ? ["Teal 123"] : "Teal 123" });
-    expect(claude.typed[0]).toBe("Teal 123");
+    claude.cursor = 4; claude.typed[0] = text; claude.typedOn[0] = multiSelect;
+    await answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text }]);
+    expect(claude.result).toEqual({ "Which color?": multiSelect ? [text] : text });
+    expect(claude.typed[0]).toBe(text);
+  });
+
+  it.each(["Teal", "Teal ✔"])("does not reconcile a single-select Other checkmark suffix with %s", async text => {
+    const questions = [set[0]], claude = new FakeClaude(questions);
+    claude.cursor = 4; claude.typed[0] = "Teal ✔";
+    await expect(answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text }]))
+      .rejects.toMatchObject({ status: 409 });
+    expect(claude.typed[0]).toBe("Teal ✔");
+    expect(claude.sent).toEqual([]);
+    expect(claude.result).toBeUndefined();
   });
 
   it.each([false, true])("refuses differing existing Other text without editing it (multiSelect: %s)", async multiSelect => {
@@ -227,12 +237,32 @@ describe("answering Claude's question dialog", () => {
     expect(claude.sent).toEqual([]);
   });
 
-  it("refuses a leading digit in an empty Other field before it can select an option", async () => {
-    const questions = [set[0]], claude = new FakeClaude(questions);
-    await expect(answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text: "123 teal" }]))
-      .rejects.toMatchObject({ status: 409, message: expect.stringContaining("starting with a digit") });
+  it.each([
+    [false, "text", "123 teal"], [true, "text", "123 teal"],
+    [false, "shortcut", "123 teal"], [true, "shortcut", "123 teal"],
+    [false, "text", "1"], [false, "shortcut", "1"],
+    [false, "text", "123"], [false, "shortcut", "123"],
+  ] as const)("enters digit-leading Other exactly (multiSelect: %s, digit behavior: %s, text: %s)", async (multiSelect, otherDigits, text) => {
+    const questions = [{ ...set[0], multiSelect }], claude = new FakeClaude(questions, { otherDigits });
+    await answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text }]);
+    expect(claude.result).toEqual({ "Which color?": multiSelect ? [text] : text });
+    expect(claude.typed[0]).toBe(text);
+  });
+
+  it.each(["prefix", "digits", "removal"])("stops before Enter if digit entry fails during %s", async step => {
+    const questions = [set[0]], claude = new FakeClaude(questions, { otherDigits: "shortcut" }), io = claude.io();
+    let injected = false;
+    await expect(answerClaudeQuestionDialog({ ...io, keys: async keys => {
+      if (step === "prefix" && keys.length === 1 && keys[0] === ".") { injected = true; claude.sent.push(keys); return; }
+      if (step === "removal" && keys.includes("backspace")) { injected = true; claude.sent.push(keys); return; }
+      await io.keys(keys);
+      if (step === "digits" && claude.typed[0].startsWith(".123")) { injected = true; claude.typed[0] = ".123 wrong"; }
+    } }, questions, [{ options: [], text: "123 teal" }]))
+      .rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" } });
     expect(claude.result).toBeUndefined();
-    expect(claude.sent.flat()).not.toContain("1");
+    expect(claude.sent.flat()).not.toContain("enter");
+    expect(injected).toBe(true);
+    if (step === "prefix") expect(claude.sent.flat()).not.toContain("1");
   });
 
   it("the old blind digits-then-Tab walk skips the next question and never submits", async () => {
