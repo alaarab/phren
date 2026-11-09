@@ -33,7 +33,7 @@ import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
 import { stripTerminal } from "../terminal-text.js";
 import { JobRegistry } from "./job-registry.js";
-import { atomic, BridgeError, id, type Json, launchEfforts, object, objects, PERMISSION_MODES, provider } from "./protocol.js";
+import { atomic, BridgeError, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
 import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./settings-switch.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
