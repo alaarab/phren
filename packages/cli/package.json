@@ -207,7 +207,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
     "chalk": "^6.0.1",
-    "glob": "^13.0.6",
+    "glob": "^14.0.2",
     "inquirer": "^14.2.3",
     "js-yaml": "^5.4.2",
     "sql.js-fts5": "^1.4.0",
