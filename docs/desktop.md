@@ -26,7 +26,8 @@ Download the newest build from the
   Run it; it installs for your user. The build is not code-signed yet, so
   SmartScreen asks first: choose **More info**, then **Run anyway**. Uses
   Windows' own OpenSSH client, which has no connection sharing, so each Hook
-  request opens its own connection.
+  request opens its own connection. With the Hook in WSL, see
+  [WSL](#wsl).
 - Linux, x86-64:
   [Phren-linux-x86_64.AppImage](https://github.com/alaarab/phren/releases/latest/download/Phren-linux-x86_64.AppImage).
   `chmod +x` it and run it. AppImages need FUSE 2 (`fuse2` on Arch).
@@ -100,6 +101,17 @@ node packages/desktop/dist/src/main.js list
 ed25519 host key in `<bridge>/desktop.yaml`. Settings › Computers can also
 link and revoke computers. Without `desktop.yaml`, the desktop falls back to
 the Hook's `hooks.yaml` peers and the dispatch key.
+
+### WSL
+
+On Windows the Hook runs inside WSL, so the desktop finds it there the way VS
+Code's WSL option does. Each WSL distribution with the Hook installed
+(`~/.local/share/phren/bridge/dispatch`) is a computer named `WSL: <distro>`.
+The desktop runs the Hook's gateway commands with `wsl.exe -d <distro>`, the
+same commands SSH would carry, so there is no key, no sshd and nothing to
+link or revoke. Docker Desktop's distributions are skipped. When WSL has a
+Hook and Windows does not, the "This computer" row is left out.
+`PHREN_DESKTOP_WSL=off` turns discovery off.
 
 ## Sections
 
