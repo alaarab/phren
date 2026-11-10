@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Index globs must stay inside each project folder: `phren config index` and `set_config` refuse an absolute pattern, `..` or a backslash, and a stored policy holding one is ignored.
 - Desktop: a store path from a linked computer is checked under Windows path rules too before it is laid out in the local mirror.
 - Phren agent: the Python syntax check after an edit runs Python in isolated mode, so it loads only the interpreter's own modules.
+- Dependencies with published advisories moved to their fixed releases: DOMPurify 3.4.17 (the desktop's editor), ip-address 10.7.6 (through the MCP SDK), Vite 8.3.7 and @azure/msal-node 7.2.1 (build tools).
 
 ## [0.3.74] - 2026-11-09
 
