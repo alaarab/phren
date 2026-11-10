@@ -54,6 +54,12 @@ describe("syntax check after edits", () => {
     expect(syntaxCheckNote("c.tsx", null, "export const C = () => <div>{(</div>;\n")).toBeNull();
   });
 
+  it.runIf(hasPython)("checks Python with the interpreter's own modules, not files the project names the same", () => {
+    for (const name of ["ast.py", "json.py"]) fs.writeFileSync(name, "open('ran', 'w').close()\nraise SystemExit(0)\n");
+    expect(syntaxCheckNote("p.py", null, "def f(:\n    pass\n")).toContain("Syntax check");
+    expect(fs.existsSync("ran")).toBe(false);
+  });
+
   it.runIf(hasStrip)("write_file and apply_patch check what they wrote", async () => {
     const write = await writeFileTool.execute({ path: "new.mjs", content: "export const z = () => {\n" });
     expect(write.output).toContain("Syntax check");

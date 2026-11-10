@@ -107,6 +107,20 @@ describe("mcp-session tool contract", () => {
     expect(endRes.data.sessionId).toBe(started.data.sessionId);
   });
 
+  it("treats an id that is not a session id as no session, and leaves other files alone", async () => {
+    // A JSON file outside the sessions folder that such an id would otherwise resolve to.
+    const outside = path.join(tmp.path, ".runtime", "session-outside.json");
+    const before = JSON.stringify({ sessionId: "outside", startedAt: "2026-01-01T00:00:00.000Z", findingsAdded: 0, tasksCompleted: 0 });
+    fs.mkdirSync(path.dirname(outside), { recursive: true });
+    fs.writeFileSync(outside, before);
+
+    for (const sessionId of ["x/../../session-outside", "x\\..\\..\\session-outside", "a/b", ".."]) {
+      expect(parseResult(await server.call("session_context", { sessionId })).error).toContain("No active session");
+      expect(parseResult(await server.call("session_end", { sessionId, summary: "rewritten" }))).toMatchObject({ ok: false, error: expect.stringContaining("No active session") });
+    }
+    expect(fs.readFileSync(outside, "utf8")).toBe(before);
+  });
+
   it("writes task checkpoints on session_end and surfaces them on next session_start", async () => {
     const demoDir = path.join(tmp.path, "demo");
     fs.mkdirSync(demoDir, { recursive: true });

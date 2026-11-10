@@ -44,6 +44,10 @@ it("refuses outside paths, control characters, metadata and symlinks before fall
     ".git/config", "../.git/../Main.swift", "bad\u0000name", "bad\nname", "C:\\repo\\Main.swift"]) {
     await expect(resolveFilePath(root, cwd, requested)).rejects.toThrow();
   }
+  // Another spelling of the metadata folder, present on this volume: refused, not resolved.
+  await mkdir(path.join(cwd, ".GIT"), { recursive: true });
+  await writeFile(path.join(cwd, ".GIT", "config"), "[remote]");
+  await expect(resolveFilePath(root, cwd, ".GIT/config")).rejects.toMatchObject({ status: 400 });
   await expect(resolveFilePath(root, scratch, "Main.swift")).rejects.toMatchObject({ status: 403 });
   await expect(resolveFilePath(root, cwd, "missing.ts")).rejects.toMatchObject({ status: 404 });
   await expect(resolveFilePath(root, cwd, "apps")).rejects.toMatchObject({ status: 400 });

@@ -60,14 +60,24 @@ export function blobSha(content: Buffer): string {
   return createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
 }
 
-/** Normalize a store-relative path, refusing absolute paths and `..`. */
+/** Normalize a store-relative path, refusing absolute paths and `..`. A
+ * store's tree comes from another computer and is laid out on this one, so
+ * the path is read both ways: `\` separates folders on Windows and a drive
+ * or share is absolute there. The answer is the same on every platform. */
 export function safeStorePath(rel: string): string {
-  if (!rel || rel.startsWith("/") || path.posix.isAbsolute(rel)) throw new MemoryHttpError(400, "Invalid store path.");
-  const normalized = path.posix.normalize(rel);
-  if (normalized === ".." || normalized.startsWith("../") || normalized.split("/").includes("..") || normalized.includes("\0")) {
-    throw new MemoryHttpError(400, "Invalid store path.");
+  if (!rel || rel.includes("\0")) throw new MemoryHttpError(400, "Invalid store path.");
+  for (const rules of [path.posix, path.win32]) {
+    if (rules.isAbsolute(rel) || /^[A-Za-z]:/.test(rel) || rules.normalize(rel).split(rules.sep).includes("..")) {
+      throw new MemoryHttpError(400, "Invalid store path.");
+    }
   }
-  return normalized;
+  return path.posix.normalize(rel);
+}
+
+/** `rel` under `dir`, or undefined when it would land anywhere else. */
+function mirrorFile(dir: string, rel: string): string | undefined {
+  const dest = path.resolve(dir, rel), back = path.relative(dir, dest);
+  return back && !back.startsWith("..") && !path.isAbsolute(back) ? dest : undefined;
 }
 
 function isMemoryPath(rel: string): boolean {
@@ -287,7 +297,8 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
     for (const [rel, blobSha] of next) {
       // Unknown or oversized blobs stay out of the mirror.
       if (!existsSync(path.join(blobsDir, blobSha))) { next.delete(rel); continue; }
-      const dest = path.join(dir, rel);
+      const dest = mirrorFile(dir, rel);
+      if (!dest) { next.delete(rel); continue; }
       if (state.blobShas.get(rel) !== blobSha || !existsSync(dest)) {
         await mkdir(path.dirname(dest), { recursive: true });
         await copyFile(path.join(blobsDir, blobSha), dest);
