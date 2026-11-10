@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Computer, HookRequest, HookResponse } from "./contract.js";
-import { blobSha, createMemoryService } from "./memory.js";
+import { blobSha, createMemoryService, safeStorePath } from "./memory.js";
 
 const B: Computer = { name: "B", local: false, address: "b", username: "me", port: 22, hostKey: "k", server: "default", keyFile: "/k" };
 
@@ -114,6 +114,22 @@ afterEach(async () => {
 function service(store: FakeStore, cacheDir = path.join(dir, "cache")) {
   return createMemoryService({ hookRequest: store.request, computers: [B], cacheDir, home, syncMs: 0 });
 }
+
+describe("a store path from another computer", () => {
+  it("is kept when it stays inside the store on every platform", () => {
+    expect(safeStorePath("app/FINDINGS.md")).toBe("app/FINDINGS.md");
+    expect(safeStorePath("app/./reference/a b.md")).toBe("app/reference/a b.md");
+  });
+
+  it.each([
+    "../out/FINDINGS.md", "app/../../out/FINDINGS.md", "/etc/FINDINGS.md",
+    // The same three, as Windows reads them.
+    "..\\out\\FINDINGS.md", "app\\..\\..\\out/FINDINGS.md", "\\\\server\\share\\FINDINGS.md",
+    "C:\\out\\FINDINGS.md", "C:/out/FINDINGS.md", "c:FINDINGS.md", "app/FINDINGS.md\0", "",
+  ])("refuses %j", rel => {
+    expect(() => safeStorePath(rel)).toThrow("Invalid store path.");
+  });
+});
 
 describe("remote mirror", () => {
   it("lays out the memory files and counts the projects", async () => {

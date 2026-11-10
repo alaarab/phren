@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
+import { isGitDirName } from "./git-dir-name.js";
 import { BridgeError } from "./protocol.js";
 
 const MAX_BYTES = 2_097_152;
@@ -8,7 +9,7 @@ const MAX_BYTES = 2_097_152;
 /** Read-only browsing beneath a root selected and verified by the server. */
 export async function browseFiles(root: string, relative: string) {
   if (relative.length > 4096 || relative.includes("\0") || relative.includes("\\") || path.isAbsolute(relative)
-      || relative.split("/").some(part => part === ".." || part === ".git")) {
+      || relative.split("/").some(part => part === ".." || isGitDirName(part))) {
     throw new BridgeError(400, "Invalid repository path.");
   }
   const base = await realpath(root);
@@ -22,7 +23,7 @@ export async function browseFiles(root: string, relative: string) {
   const metadata = await lstat(resolved);
   if (metadata.isDirectory()) {
     const entries = (await readdir(resolved, { withFileTypes: true }))
-      .filter(entry => entry.name !== ".git" && (entry.isDirectory() || entry.isFile()))
+      .filter(entry => !isGitDirName(entry.name) && (entry.isDirectory() || entry.isFile()))
       .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
     return { path: relative, kind: "directory", truncated: entries.length > 500,
       entries: entries.slice(0, 500).map(entry => ({ name: entry.name, path: path.posix.join(relative, entry.name), kind: entry.isDirectory() ? "directory" : "file" })) };

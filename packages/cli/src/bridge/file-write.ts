@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { lstat, open, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileVersion, MAX_FILE_RANGE } from "./file-range.js";
+import { isGitDirName } from "./git-dir-name.js";
 import { BridgeError } from "./protocol.js";
 
 /**
@@ -35,7 +36,7 @@ export async function writeRepoFile(root: string, requested: string, content: st
 
 async function writeRepoFileNow(root: string, requested: string, content: string, expectedVersion?: string) {
   if (typeof requested !== "string" || !requested || requested.length > 4096 || path.isAbsolute(requested)
-      || /[\x00-\x1f\x7f\\]/.test(requested) || requested.split("/").some(part => part === ".." || part.toLowerCase() === ".git" || part === "")) {
+      || /[\x00-\x1f\x7f\\]/.test(requested) || requested.split("/").some(part => part === ".." || isGitDirName(part) || part === "")) {
     throw new BridgeError(400, "Invalid file path.");
   }
   if (typeof content !== "string") throw new BridgeError(400, "Supply the file's text.");

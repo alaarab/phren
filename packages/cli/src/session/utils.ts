@@ -36,8 +36,19 @@ export function runtimeSessionsDir(phrenPath: string): string {
   return dir;
 }
 
-export function sessionFileForId(phrenPath: string, sessionId: string): string {
-  return path.join(runtimeSessionsDir(phrenPath), `session-${sessionId}.json`);
+/** A session id is one plain name. phren's own are UUIDs; one handed in by a
+ * tool call is used only in this shape, so the file it names is always
+ * inside the sessions folder. */
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+export function isSessionId(value: unknown): value is string {
+  return typeof value === "string" && SESSION_ID.test(value);
+}
+
+/** `session-<id><suffix>.json` in the sessions folder. Throws for anything
+ * that is not a session id; callers taking an id from outside check first. */
+export function sessionFileForId(phrenPath: string, sessionId: string, suffix = ""): string {
+  if (!isSessionId(sessionId)) throw new Error("That is not a session id.");
+  return path.join(runtimeSessionsDir(phrenPath), `session-${sessionId}${suffix}.json`);
 }
 
 export function isSessionStateFileName(name: string): boolean {

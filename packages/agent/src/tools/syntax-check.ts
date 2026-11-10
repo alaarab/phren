@@ -59,7 +59,9 @@ function pythonErrors(content: string): SyntaxError[] | null {
     "    print(json.dumps([{'line': e.lineno or 1, 'column': e.offset or 1, 'message': e.msg}]))",
   ].join("\n");
   try {
-    const out = execFileSync("python3", ["-c", script], { input: content, encoding: "utf-8", timeout: 5_000, stdio: ["pipe", "pipe", "ignore"] });
+    // -I: only the interpreter's own modules. Without it Python looks in the
+    // working directory first, so a project's ast.py or json.py would run here.
+    const out = execFileSync("python3", ["-I", "-c", script], { input: content, encoding: "utf-8", timeout: 5_000, stdio: ["pipe", "pipe", "ignore"] });
     return JSON.parse(out) as SyntaxError[];
   } catch {
     return null;

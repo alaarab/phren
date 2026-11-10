@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { withFileLock } from "../governance/locks.js";
+import { isGitDirName } from "./git-dir-name.js";
 import { BridgeError, bridgeRoot, type Json } from "./protocol.js";
 
 // The phone reads memory from a paired computer through these routes, in the
@@ -181,7 +182,7 @@ function catFile(store: string, mode: "--batch" | "--batch-check", shas: string[
 export async function storeFile(store: string, relative: string): Promise<string> {
   const normalized = path.posix.normalize(relative);
   if (!relative || relative !== normalized || normalized.startsWith("../") || normalized === ".." || path.posix.isAbsolute(normalized)
-      || normalized.split("/").some(part => part === ".git" || part === "" || part === ".") || /[\0\r\n]/.test(normalized)) {
+      || normalized.split("/").some(part => isGitDirName(part) || part === "" || part === ".") || /[\0\r\n]/.test(normalized)) {
     throw new BridgeError(400, "Invalid store path.");
   }
   const root = await realpath(store);

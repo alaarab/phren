@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook: the routes only the owner may use (changing the release authority policy, answering a sudo request, sending or withdrawing queued messages, changing a session's permission mode, linking a computer) now also refuse a request that arrives through another computer's key. They already refused an agent's call.
 - Hook on tmux: session, window and folder names that contain `#` are passed to tmux as plain text. tmux reads these arguments as formats, so a name could be read as a tmux variable or command instead of being used as written.
+- Hook file routes and the store routes treat every spelling of a repository's `.git` folder as `.git` (other letter case, `GIT~1`, trailing dots or spaces), not only the exact name.
+- `session_end` and `session_context` take only a session id: anything else names no session.
+- Index globs must stay inside each project folder: `phren config index` and `set_config` refuse an absolute pattern, `..` or a backslash, and a stored policy holding one is ignored.
+- Desktop: a store path from a linked computer is checked under Windows path rules too before it is laid out in the local mirror.
+- Phren agent: the Python syntax check after an edit runs Python in isolated mode, so it loads only the interpreter's own modules.
 
 ## [0.3.74] - 2026-11-09
 

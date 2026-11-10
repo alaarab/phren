@@ -24,7 +24,7 @@ import {
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import {
   debugError, scanSessionFiles,
-  type SessionState, runtimeSessionsDir, sessionFileForId,
+  type SessionState, runtimeSessionsDir, isSessionId, sessionFileForId,
   readSessionStateFile, writeSessionStateFile,
 } from "../session/utils.js";
 import { getRuntimeHealth } from "../governance/policy.js";
@@ -181,6 +181,8 @@ function findMostRecentSummaryWithProject(phrenPath: string): { summary: string 
 function resolveSessionFile(phrenPath: string, sessionId?: string, connectionId?: string): { file: string; state: SessionState } | null {
   const effectiveId = sessionId ?? (connectionId ? _sessionMap.get(connectionId) : undefined);
   if (effectiveId) {
+    // An id that is not one of ours names no session.
+    if (!isSessionId(effectiveId)) return null;
     const file = sessionFileForId(phrenPath, effectiveId);
     const state = readSessionStateFile(file);
     if (!state) return null;
