@@ -14,9 +14,15 @@ GitHub release notes, and the app shows them when that version is available.
 - **Changes review**: mark files reviewed and step to the next unreviewed one ("N of M reviewed"), leave notes on diff lines and send them to the agent together, and Changes refreshes while an agent edits. Changes › Workers removes a worker checkout safely and shows the session already open in a worktree.
 - **CI preview** in Forge: runs and their job logs, read-only, where the Hook offers them.
 
+### Improved
+
+- **Replies arrive smoothly.** A reply used to land in a block about twice a second; now it flows in at the pace it is being written, in one row that grows in place. Bold, code, links, lists, tables and code blocks appear already formed, never as raw `**` or half a table row. With Reduce Motion on, text still appears as it lands.
+- **Chat Markdown reads the way it was written.** Italics work mid-sentence, quotes are drawn as quotes, lists nest, numbered steps keep counting across a code block, task boxes show as boxes, `~~struck~~` text and rules render, and a bare link is clickable. Names like `__init__` and patterns like `src/**/*.ts` stay as typed. Headings, lists and tables have room to breathe, and wide table cells wrap instead of scrolling.
+
 ### Fixed
 
 - A scrolled-up chat reader stays where they are while replies stream in; only Latest messages, sending, or scrolling to the end brings them down.
+- The "N previous messages" line at the top of a chat keeps keyboard focus while a reply streams (it was rebuilt on every update).
 - The Changes panel fits a 320 px window.
 
 ## [0.1.14] - 2026-10-24
