@@ -1139,6 +1139,37 @@ the password: deny what you did not expect. The chain check stops a program
 from simply collecting the password; one that attaches a debugger to the
 askpass process is beyond what a Hook running as you can prevent.
 
+### Other password prompts from the phone
+
+Some commands read a password on stdin rather than through sudo, such as
+`fdesetup disable -inputplist` or `sysadminctl ... -password -`. For those:
+
+```bash
+phren secret-exec --prompt "Login password for FileVault" --plist Password --field Username=me -- sudo -A fdesetup disable -inputplist
+phren secret-exec --prompt "Login password" -- sudo -A sysadminctl -autologin set -userName me -password -
+```
+
+`secret-exec` starts the command with a fresh pipe on its stdin, then runs
+`<bridge>/askpass --secret-exec` with its stdout on that pipe and closes its
+own copy, so the agent that ran it never holds the pipe. The helper asks the
+Hook, which checks the chain before asking the phone: the helper is the Hook's
+node running its bundle as `askpass --secret-exec`, its parent is the
+installed script, that script has exactly one sibling (the command), and no
+process of yours reads the pipe except that command and what it started. The
+phone shows the computer, the command line as the Hook read it from the
+process table, the agent's prompt text (as the agent's words), how the secret
+is written (a line, or a plist key and its other fields) and the session that
+asked, and needs an approval each run. The helper writes the secret, or the
+plist with it, into the pipe and wipes its buffer; the secret never reaches
+the agent's output, the Hook's log, a frame or a file. Deny, a timeout or the
+command exiting first stops the command, and `secret-exec` exits 1.
+
+Only a phone app that subscribes to these requests (`secrets=1` on the
+overview socket) can answer, and there is no push: with none open the request
+is refused at once. The same caveat as sudo applies, more so: the phone shows
+what will read the secret, and a command such as `sh -c 'cat > file'` would
+keep it. Approve only commands you recognise.
+
 ### Spoken replies for talk mode
 
 The phone's talk mode reads an agent's replies aloud. `POST /v1/speech` with
