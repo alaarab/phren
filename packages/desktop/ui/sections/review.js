@@ -163,7 +163,7 @@ export function mountReview(root) {
     editor: null,
     send: null,            // { key, status, note }
     visible: false,
-    detailSig: "",
+    detailSig: null, // null until the first draw, so an empty queue still draws its empty state
     error: "",
     mode: "queue",         // "queue" | "trains"
     trains: null,          // the Trains view's handle once mounted
@@ -387,9 +387,12 @@ export function mountReview(root) {
   function renderDetail() {
     const item = selectedItem();
     closeComment();
+    // With nothing selected the header and the comment tray have nothing to say, so they are not drawn as empty bars.
+    headEl.hidden = !item;
+    trayEl.hidden = !item;
     if (!item) {
       headEl.replaceChildren();
-      bodyEl.replaceChildren(el("div", "review-empty", "Select a return to review."));
+      bodyEl.replaceChildren(el("div", "review-empty", state.items.length ? "Select a return to review." : "Work that dispatched agents hand back appears here to review."));
       renderTray();
       return;
     }

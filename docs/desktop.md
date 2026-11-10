@@ -191,7 +191,12 @@ Herdr's key names apply, so overrides in `~/.config/herdr/config.toml` (and
 
 ⌘\ and ⌘⇧\ split too. You can drag a tab onto a tile's edge to split there.
 **Mirror tab** rebuilds the tiles like the focused session's Herdr tab. The
-layout is saved and restored.
+layout is saved and restored, and the window itself opens where you left it,
+at the size you left it.
+
+A reply appears as it is written: the text flows in at the pace it arrives
+rather than in blocks, already formatted. With Reduce Motion on it appears as
+it lands.
 
 ## Desk first
 

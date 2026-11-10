@@ -23,7 +23,11 @@
   --border-strong: rgba(255, 255, 255, 0.14);
 
   --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
-  --prose: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  /* One face for the whole interface on every computer: the system's own. Prose reads in the same face. */
+  --ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --prose: var(--ui);
+  /* Keyboard focus, drawn inside the control so a clipped or scrolling edge never cuts it off. */
+  --focus-ring: 2px solid var(--accent);
 
   /* Density: the phone's Row/Radius/Space constants. Colours above are the
      Charcoal defaults; shell/theme.js overwrites both from tokens.json. */
@@ -51,9 +55,28 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--ui);
   font-size: 13px;
 }
+
+/* Controls take the interface's face. Left alone, a button with no font of its own is drawn in the
+   browser's (Arial on Linux and Windows), so icon buttons and menus looked foreign there. */
+button, input, select, textarea { font-family: inherit; }
+
+/* One focus ring for everything reached with the keyboard. `:where` keeps this at no specificity, so a
+   control that draws its own focus (a text field's border, a row's bar) still wins. */
+:where(button, a[href], summary, select, [role="button"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="switch"], [role="checkbox"], [role="radio"], [tabindex]:not([tabindex="-1"]), input[type="checkbox"], input[type="radio"]):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* What opens over the page arrives rather than appears. Reduce Motion turns these off below. */
+@keyframes overlay-in { from { opacity: 0; } }
+@keyframes surface-in { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-3px); } }
+:where(.palette-backdrop, .launch-backdrop, .pause-backdrop, .cd-backdrop, .pj-backdrop, .sch-overlay) { animation: overlay-in .12s ease-out; }
+:where(.palette, .launch-sheet, .cd-sheet, .sch-sheet, .keys-sheet) { animation: surface-in .16s cubic-bezier(.2, .8, .2, 1); }
+:where(.sb-menu, .chat-menu, .tasks-menu, .cd-menu, .home-snooze-menu, .chg-row-menu, .update-pop, .usage-pop, .pc-popover, .chat-popover) { animation: menu-in .1s ease-out; }
 
 /* thin dark scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--raised) transparent; }
@@ -422,7 +445,7 @@ button.settings-summon-key.recording { color: var(--text); border-color: var(--a
 /* Command palette (⌘K): one ranked list over sessions, files, commands and sections. */
 .palette-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: flex-start; justify-content: center; padding-top: 15vh; z-index: 90; }
 .palette { width: 640px; max-width: 92vw; max-height: 70vh; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,0.55); overflow: hidden; }
-.palette-input { height: 44px; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--border); background: var(--sunken); color: var(--text); font: 15px system-ui; padding: 0 16px; outline: none; }
+.palette-input { flex: none; height: 44px; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--border); background: var(--sunken); color: var(--text); font: 15px system-ui; padding: 0 16px; outline: none; }
 .palette-input::placeholder { color: var(--dim); }
 .palette-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
 .palette-group { padding: 8px 12px 4px; color: var(--muted); font: 600 11px system-ui; letter-spacing: 0.08em; text-transform: uppercase; }

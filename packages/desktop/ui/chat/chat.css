@@ -52,8 +52,9 @@
   overflow: hidden;
 }
 .chat-project { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-branch { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
-.chat-computer { color: var(--muted); white-space: nowrap; }
+/* When the header is short of room these give way with an ellipsis, the computer first, rather than being cut mid-word. */
+.chat-branch { flex: 0 2 auto; min-width: 0; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-computer { flex: 0 4 auto; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-sub > span:empty { display: none; }
 .chat-branch::before,
 .chat-computer::before { content: "\00a0·\00a0"; }

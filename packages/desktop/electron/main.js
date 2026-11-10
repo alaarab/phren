@@ -2,7 +2,7 @@
 // a checkout the daemon runs on the system Node; the installed app runs it on
 // Electron's own Node (ELECTRON_RUN_AS_NODE), which loads node-pty's N-API
 // binary too, so an install needs no Node of its own.
-import { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, ipcMain, nativeImage, session, shell } from "electron";
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, globalShortcut, ipcMain, nativeImage, screen, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runUpdateAction, startUpdates } from "./updates.js";
+import { readWindowState, restoredBounds, trackWindowState } from "./window-state.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const daemonPath = path.resolve(here, "../dist/src/main.js");
@@ -49,9 +50,11 @@ function baseWindowOptions() {
     backgroundColor: "#1E1E1E",
     show: false,
     title: "Phren",
+    // The app has its own title bar. On a Mac the window buttons sit inside it; elsewhere the menu
+    // bar stays out of the way above it until Alt is pressed (its shortcuts keep working).
     ...(process.platform === "darwin"
       ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 14, y: 14 } }
-      : {}),
+      : { autoHideMenuBar: true }),
   };
 }
 
@@ -96,8 +99,13 @@ function allowedSubframe(target, port) {
 }
 
 function createWindow(url) {
+  // The window comes back where it was left, at the size it was left.
+  const base = baseWindowOptions();
+  const stateFile = path.join(app.getPath("userData"), "window-state.json");
+  const placed = restoredBounds(readWindowState(stateFile), screen.getAllDisplays().map((display) => display.workArea), base);
   const win = new BrowserWindow({
-    ...baseWindowOptions(),
+    ...base,
+    ...placed.bounds,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -125,6 +133,9 @@ function createWindow(url) {
     }
     return { action: "deny" };
   });
+  // Maximized again just before it is shown, so it never appears at its smaller size first.
+  if (placed.maximized) win.once("ready-to-show", () => win.maximize());
+  trackWindowState(win, stateFile);
   win.loadURL(url);
   return showOnReady(win);
 }
