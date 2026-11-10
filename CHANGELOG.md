@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Messages that other agents send a Claude session (teammates, subagent hand-backs, other sessions) now reach the phone's chat view with the sender's name, as the terminal shows them.
+
 ### Fixed
 
 - Answers sent from the phone to Claude's questions are checked in full before submission; unexpected cursor positions, existing text, and incomplete redraws now stop with a clear error.
