@@ -52,7 +52,7 @@ console, agents and workers shortcuts (`.pc-low`) fold away so send never clips.
 
 - **Typeface.** `--ui` is the interface's face (the system's) and `--prose` is the same; `--mono` is for code, paths and commands. `button, input, select, textarea` inherit the family, so a new control never falls back to the browser's. Set a size or weight, not a family.
 - **Focus.** Buttons, links, tabs, menu items, options, switches and anything with a `tabindex` get `outline: var(--focus-ring)` at `outline-offset: -2px` on `:focus-visible`, from one `:where()` rule with no specificity. Do not add a ring to a new control; override it only where the control draws focus another way (a text field's border, a row's bar).
-- **Motion.** Backdrops fade in (`overlay-in`, 120 ms), sheets and the palette rise in (`surface-in`, 160 ms) and menus and popovers drop in (`menu-in`, 100 ms), by the class lists in `theme.css`; add a new overlay's class there. Everything stops under `prefers-reduced-motion`.
+- **Motion.** The palette and the New agent sheet rise in over a fading backdrop (`surface-in` 160 ms, `overlay-in` 120 ms) and the chat, tab and sidebar row menus drop in (`menu-in`, 100 ms), by the class lists in `theme.css`. Add an overlay's class there only after checking it is made once per opening: one rebuilt while open (the Changes row menu, on every refresh) replays its entrance and blinks. Everything stops under `prefers-reduced-motion`.
 - **Rows with hover actions** stay one line: the actions are `display: none` until the row is hovered or holds focus, then take the place of secondary text (Changes: the +/- counts) while the name shrinks. Never lay actions over a row's name or badges.
 
 ## Window (`electron/window-state.js`)

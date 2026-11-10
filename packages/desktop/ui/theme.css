@@ -74,9 +74,11 @@ button, input, select, textarea { font-family: inherit; }
 @keyframes overlay-in { from { opacity: 0; } }
 @keyframes surface-in { from { opacity: 0; transform: translateY(-6px) scale(.985); } }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-3px); } }
-:where(.palette-backdrop, .launch-backdrop, .pause-backdrop, .cd-backdrop, .pj-backdrop, .sch-overlay) { animation: overlay-in .12s ease-out; }
-:where(.palette, .launch-sheet, .cd-sheet, .sch-sheet, .keys-sheet) { animation: surface-in .16s cubic-bezier(.2, .8, .2, 1); }
-:where(.sb-menu, .chat-menu, .tasks-menu, .cd-menu, .home-snooze-menu, .chg-row-menu, .update-pop, .usage-pop, .pc-popover, .chat-popover) { animation: menu-in .1s ease-out; }
+/* Only surfaces that are made once per opening: one that is rebuilt while it is open (the Changes row menu, on
+   every refresh) would play its entrance again each time and blink. */
+:where(.palette-backdrop, .launch-backdrop) { animation: overlay-in .12s ease-out; }
+:where(.palette, .launch-sheet) { animation: surface-in .16s cubic-bezier(.2, .8, .2, 1); }
+:where(.sb-menu, .chat-menu) { animation: menu-in .1s ease-out; }
 
 /* thin dark scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--raised) transparent; }
