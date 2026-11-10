@@ -206,6 +206,31 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     expect(await role()).toBeUndefined();
   }, 60_000);
 
+  it("takes names and folders holding tmux format characters as plain text", async () => {
+    // tmux reads the names and start directories it is given as formats.
+    const odd = path.join(folder, "d #{pane_id}");
+    await mkdir(odd);
+    const label = "it #{pane_id} #(echo ran)";
+    const made = await tmuxTerminal.create(server, { label, cwd: odd });
+    const pane = made!.pane, mine = (s: Awaited<ReturnType<typeof tmuxSnapshot>>) => objects(s.panes).find(p => p.pane_id === pane);
+    const opened = await until(() => tmuxSnapshot(server), s => mine(s)?.cwd === odd);
+    expect(mine(opened)?.cwd).toBe(odd);
+    expect(objects(opened.workspaces).find(w => w.workspace_id === made!.workspace)?.label).toBe(label);
+    expect(objects(opened.tabs).find(t => t.tab_id === made!.tab)?.label).toBe(label);
+
+    await tmuxTerminal.groupAction(server, "rename", { tab: made!.tab }, "tab #{window_id}");
+    await tmuxTerminal.groupAction(server, "rename", { workspace: made!.workspace }, "set #{session_id}");
+    const renamed = await tmuxSnapshot(server);
+    expect(objects(renamed.tabs).find(t => t.tab_id === made!.tab)?.label).toBe("tab #{window_id}");
+    expect(objects(renamed.workspaces).find(w => w.workspace_id === made!.workspace)?.label).toBe("set #{session_id}");
+
+    // An agent starts in the folder its pane is in, whatever that folder is called.
+    await tmuxTerminal.startAgent(server, pane, { name: "it-odd", kind: "claude", args: [], timeoutMs: 15_000 });
+    const started = await until(() => tmuxSnapshot(server), s => mine(s)?.agent === "claude" && mine(s)?.cwd === odd);
+    expect(mine(started)).toMatchObject({ agent: "claude", cwd: odd });
+    await tmuxTerminal.groupAction(server, "close", { workspace: made!.workspace });
+  }, 60_000);
+
   it("keeps this test's running server out of the owner's servers and reports tmux's health", async () => {
     // Running, with sessions: but a test's, so never on the phone.
     await tmuxTerminal.ping(server);

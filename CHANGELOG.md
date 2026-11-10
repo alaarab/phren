@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Security
 
 - Hook: the routes only the owner may use (changing the release authority policy, answering a sudo request, sending or withdrawing queued messages, changing a session's permission mode, linking a computer) now also refuse a request that arrives through another computer's key. They already refused an agent's call.
+- Hook on tmux: session, window and folder names that contain `#` are passed to tmux as plain text. tmux reads these arguments as formats, so a name could be read as a tmux variable or command instead of being used as written.
 
 ## [0.3.74] - 2026-11-09
 

@@ -372,6 +372,13 @@ function loginShell(): string {
   return shell && /^(sh|bash|zsh|ksh|dash)$/.test(path.basename(shell)) && existsSync(shell) ? shell : "/bin/sh";
 }
 
+/** tmux reads the names and directories it is handed as formats, so `#(…)`
+ * would run a command and `#{…}` read a variable. A doubled `#` is a literal
+ * one. Option values (`set-option`) are not formats and take text as it is. */
+export function tmuxLiteral(text: string): string {
+  return text.replace(/#/g, "##");
+}
+
 /** A session name tmux accepts: no "." or ":" and nothing unprintable. */
 function sessionName(label: string | undefined, taken: Set<string>): string {
   const base = (label ?? "phren").replace(/[.:\x00-\x1f\x7f]/g, "_").trim().slice(0, 60) || "phren";
@@ -422,8 +429,8 @@ export const tmuxTerminal: TerminalProvider = {
     await tmux(server, ["send-keys", "-t", target, "Enter"], { signal });
   },
   async create(server, { workspace, label, cwd }) {
-    const directory = cwd && path.isAbsolute(cwd) ? ["-c", cwd] : [];
-    const name = label ? ["-n", label.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 100)] : [];
+    const directory = cwd && path.isAbsolute(cwd) ? ["-c", tmuxLiteral(cwd)] : [];
+    const name = label ? ["-n", tmuxLiteral(label.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 100))] : [];
     // `-P -F` prints the new pane's ids, so the caller knows it without diffing the pane list.
     const printed = ["-P", "-F", "#{session_id} #{window_id} #{pane_id}"];
     const created = (output: string) => {
@@ -432,7 +439,7 @@ export const tmuxTerminal: TerminalProvider = {
     };
     if (workspace) return created(await tmux(server, ["new-window", "-d", ...printed, "-t", `${toTmuxId(workspace, "s")}:`, ...directory, ...name]));
     const taken = new Set((await tmux(server, ["list-sessions", "-F", "#{session_name}"]).catch(() => "")).split("\n").filter(Boolean));
-    return created(await tmux(server, ["new-session", "-d", ...printed, "-s", sessionName(label, taken), "-x", "200", "-y", "50", ...directory, ...name]));
+    return created(await tmux(server, ["new-session", "-d", ...printed, "-s", tmuxLiteral(sessionName(label, taken)), "-x", "200", "-y", "50", ...directory, ...name]));
   },
   async startAgent(server, pane, { name, kind, args, timeoutMs, env, envExact }) {
     if (!["claude", "codex", "copilot", "opencode", "phren"].includes(kind)) throw new BridgeError(400, "This agent cannot be started in tmux.");
@@ -447,12 +454,12 @@ export const tmuxTerminal: TerminalProvider = {
     const shell = loginShell();
     if (envExact) {
       const command = explicitAgentCommand(kind, args, env ?? {});
-      await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []),
+      await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", tmuxLiteral(row.pane_current_path)] : []),
         "--", shell, "-l", "-c", command]);
     } else {
       // Variables for the agent alone (a dispatch id) ride on the respawn.
       const variables = Object.entries(env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
-      await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []), ...variables,
+      await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", tmuxLiteral(row.pane_current_path)] : []), ...variables,
         "--", shell, "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l', "phren", shell, kind, ...args]);
     }
     // Started once the harness is the pane's foreground program.
@@ -487,7 +494,7 @@ export const tmuxTerminal: TerminalProvider = {
     if (tab) {
       const target = toTmuxId(tab, "w");
       if (operation === "focus") await tmux(server, ["select-window", "-t", target]);
-      else if (operation === "rename") await tmux(server, ["rename-window", "-t", target, (label ?? "").replace(/[\x00-\x1f\x7f]/g, " ")]);
+      else if (operation === "rename") await tmux(server, ["rename-window", "-t", target, tmuxLiteral((label ?? "").replace(/[\x00-\x1f\x7f]/g, " "))]);
       else await tmux(server, ["kill-window", "-t", target]);
       return;
     }
@@ -495,7 +502,7 @@ export const tmuxTerminal: TerminalProvider = {
     const target = toTmuxId(workspace, "s");
     // A session has no focus of its own without an attached client.
     if (operation === "focus") return;
-    if (operation === "rename") await tmux(server, ["rename-session", "-t", target, sessionName(label, new Set())]);
+    if (operation === "rename") await tmux(server, ["rename-session", "-t", target, tmuxLiteral(sessionName(label, new Set()))]);
     else await tmux(server, ["kill-session", "-t", target]);
   },
 };
