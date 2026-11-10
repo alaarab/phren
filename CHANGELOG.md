@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.74] - 2026-11-09
+
 ### Added
 
 - Messages that other agents send a Claude session (teammates, subagent hand-backs, other sessions) now reach the phone's chat view with the sender's name, as the terminal shows them.
