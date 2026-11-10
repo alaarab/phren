@@ -8,7 +8,8 @@ import { closeAllPreviews, openPreview } from "./web-preview.js";
 
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(), sshArgs: vi.fn(), kill: vi.fn() }));
 vi.mock("node:child_process", async (importOriginal) => ({ ...await importOriginal<typeof import("node:child_process")>(), spawn: mocks.spawn }));
-vi.mock("./hosts.js", () => ({ masterKey: (c: Computer) => `key-${c.name}`, sshArgs: mocks.sshArgs }));
+vi.mock("./hosts.js", () => ({ masterKey: (c: Computer) => `key-${c.name}`, sshArgs: mocks.sshArgs,
+  gatewayCommand: (c: Computer, command: string, opts?: { tty?: boolean; slot?: number }) => ({ file: "ssh", args: mocks.sshArgs(c, command, opts) }) }));
 
 const REMOTE: Computer = { name: "Pool preview", local: false, server: "default" };
 const key = "key-Pool preview";
