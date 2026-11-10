@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- Hook: the routes only the owner may use (changing the release authority policy, answering a sudo request, sending or withdrawing queued messages, changing a session's permission mode, linking a computer) now also refuse a request that arrives through another computer's key. They already refused an agent's call.
+
 ## [0.3.74] - 2026-11-09
 
 ### Added

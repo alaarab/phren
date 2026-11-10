@@ -1,3 +1,4 @@
+import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import { type Computer, computerLabel, readComputers } from "./computer-identity.js";
 import { localNames } from "./computer-names.js";
@@ -7,6 +8,7 @@ import { listsCaller } from "./health.js";
 import { type LinkResult, linkComputer } from "./link.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import { BridgeError, type Json, object } from "./protocol.js";
+import { ownerRequest } from "./request-origin.js";
 import { localConductor } from "./server-launch.js";
 
 /** The Hook routes for linked computer sets (docs/conductor-sets.md). */
@@ -86,8 +88,8 @@ let linking: string | undefined;
 /** `POST /v1/sets/link`: the phone's one-tap `phren bridge link <name>`. Runs
  * on the computer whose set lists `name` as indirect or one-way, over this
  * computer's own ssh login, one link at a time. */
-export async function linkSetMember(data: Json, link: typeof linkComputer = linkComputer): Promise<LinkResult> {
-  if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner links computers, from the phone or `phren bridge link` in their own terminal.");
+export async function linkSetMember(data: Json, request: Pick<IncomingMessage, "headers">, link: typeof linkComputer = linkComputer): Promise<LinkResult> {
+  if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner links computers, from the phone or `phren bridge link` in their own terminal.");
   const { name } = linkInput.parse(data);
   if (linking) throw new BridgeError(409, `Already linking ${linking}. Try again when it finishes.`);
   linking = name;

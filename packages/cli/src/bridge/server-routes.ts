@@ -1073,8 +1073,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           const { origin, ...grant } = data;
           result = await conductorCall("grants-add", grant, origin, async () => ({ ok: true, grant: await addGrant(grant) }));
         } else if (url.pathname === "/v1/authority" || url.pathname === "/v1/authority/confirm") {
-          // The owner writes the policy from the phone; an agent's call names its pane.
-          if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
+          // The owner writes the policy from the phone; an agent's call names its
+          // pane and a peer computer's arrives through its key's scope.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
           result = url.pathname === "/v1/authority" ? { ok: true, authority: await setProjectAuthority(data, "phone") }
             : { ok: true, confirmation: await confirmAuthority(data, "phone") };
         } else if (url.pathname === "/v1/conductor/make") {
@@ -1087,13 +1088,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/sets/name") {
           result = await nameSet(data);
         } else if (url.pathname === "/v1/sets/link") {
-          result = await linkSetMember(data) as unknown as Json;
+          result = await linkSetMember(data, request) as unknown as Json;
         } else if (url.pathname === "/v1/push/register") {
           // Registration is kept for when a key is added; the reply says whether push works now.
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
         } else if (url.pathname === "/v1/sudo/answer") {
-          // The owner answers from the phone; an agent's call names its pane.
-          if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner answers a sudo request, from the phone.");
+          // The owner answers from the phone; an agent's call names its pane and
+          // a peer computer's arrives through its key's scope.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner answers a sudo request, from the phone.");
           let parsed: ReturnType<typeof sudoAnswer>;
           try { parsed = sudoAnswer(data); } catch { throw new BridgeError(400, "Send an id and a password, or deny."); }
           const answered = agentHooks.sudo.answer(parsed.id, parsed.answer);
@@ -1161,7 +1163,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         if (url.pathname === "/v1/approval-rules") {
           result = await changeApprovalRule(data, "DELETE");
         } else if (url.pathname === "/v1/authority") {
-          if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
           result = { ok: true, authority: await clearProjectAuthority(data, "phone") };
         } else result = { ok: true, grant: await removeGrant(data) };
       } else throw new BridgeError(405, "Unsupported request method.");

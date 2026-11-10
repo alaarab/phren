@@ -706,9 +706,10 @@ footer confirmed. A working agent or an open permission prompt/dialog is 409;
 another harness, or a mode this session does not offer, is 422. This is the
 owner's own choice, so the authority `maxPermissionMode` ceiling does not apply.
 Only the owner may make it: a request that names a pane as `origin` (an agent's
-call) is refused with 403, whatever the mode, so no agent can lift itself or
-another pane past its ceiling or into `bypassPermissions`. Same rule as
-`/v1/sudo/answer`.
+call), or that arrives through another computer's key, is refused with 403,
+whatever the mode, so neither can lift a pane past its ceiling or into
+`bypassPermissions`. Same rule as `/v1/sudo/answer`, `/v1/prompt/queue`,
+changes to `/v1/authority` and `/v1/sets/link`.
 
 The footer read is also published on the chat status frame as
 `agentStatus.permissionMode` (`default`, `acceptEdits`, `plan` or `auto`) beside
