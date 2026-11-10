@@ -9,7 +9,8 @@ import { exhausted } from "../shell/usage-windows.js";
 
 import * as kit from "/vendor/kit/index.js";
 import { parsePatch, wordSegments } from "../patch.js";
-import { renderMarkdownInto } from "./markdown.js";
+import { createMarkdownView, renderMarkdownInto } from "./markdown.js";
+import { createReveal } from "./stream-reveal.js";
 import { hookGet } from "../api.js";
 import { createOutline } from "./outline.js";
 import { countOf } from "../text.js";
@@ -183,7 +184,7 @@ export function createTimelineView(container, ctx = {}) {
   /** @type {Map<string, { el: HTMLElement, key: string, live?: () => void }>} */
   const rows = new Map();
   let jobsEl = null;
-  let previewRow = null;
+  let previewView = null;     // the reply still arriving: { row, turn, reveal }
   let atBottom = true;
   let reader = { following: true, touching: false };
   let readerIntent = false;
@@ -499,11 +500,8 @@ export function createTimelineView(container, ctx = {}) {
     });
     for (const [id, row] of [...rows]) if (!seen.has(id)) { row.cleanup?.(); row.el.remove(); rows.delete(id); }
 
-    if (previewRow) { previewRow.remove(); previewRow = null; }
-    if (preview && preview.text) {
-      previewRow = buildPreview(preview);
-      ordered.push(previewRow);
-    }
+    const previewRow = previewRowFor(preview);
+    if (previewRow) ordered.push(previewRow);
     reconcile(ordered);
 
     liveUpdaters = live;
@@ -546,18 +544,21 @@ export function createTimelineView(container, ctx = {}) {
     outline.jumpToId(id);
   }
 
-  /** The fold row at the top of the column: N previous messages, or hide earlier. */
+  /** The fold row at the top of the column: N previous messages, or hide earlier. One button for the
+   *  timeline's life, relabelled in place, so a render never takes the focus or the pointer off it. */
+  let foldButton = null;
   function buildFold(count) {
-    const button = h("button", "ct-fold");
-    button.type = "button";
-    button.textContent = expandedAll
-      ? "Hide earlier messages ‹"
-      : `${countOf(count, "previous message")} ›`;
-    button.addEventListener("click", () => {
-      expandedAll = !expandedAll;
-      render(lastPreparation, lastPreview);
-    });
-    return button;
+    if (!foldButton) {
+      foldButton = h("button", "ct-fold");
+      foldButton.type = "button";
+      foldButton.addEventListener("click", () => {
+        expandedAll = !expandedAll;
+        render(lastPreparation, lastPreview);
+      });
+    }
+    const label = expandedAll ? "Hide earlier messages ‹" : `${countOf(count, "previous message")} ›`;
+    if (foldButton.textContent !== label) foldButton.textContent = label;
+    return foldButton;
   }
 
   /** Rendered markdown, cut to a bounded preview with a Show more toggle. */
@@ -789,13 +790,54 @@ export function createTimelineView(container, ctx = {}) {
     return box;
   }
 
-  function buildPreview(preview) {
+  /** The row for the reply still arriving, kept across renders so its text grows in place; null when there is none. */
+  function previewRowFor(preview) {
+    if (!preview || !preview.text) { dropPreview(); return null; }
+    // A new turn's reply starts from nothing; the same turn's next message carries on from what the two share.
+    if (!previewView || previewView.turn !== preview.turnStartedAt) { dropPreview(); previewView = buildPreview(preview.turnStartedAt); }
+    previewView.reveal.set(preview.text);
+    return previewView.row;
+  }
+
+  function dropPreview() {
+    if (!previewView) return;
+    previewView.reveal.stop();
+    previewView.row.remove();
+    previewView = null;
+  }
+
+  function buildPreview(turn) {
     const row = h("div", "ct-msg-row ct-assistant-row ct-preview");
     const body = h("div", "ct-md ct-preview-md");
-    renderMarkdown(body, preview.text);
-    body.append(h("span", "ct-caret", "▍"));
+    const caret = h("span", "ct-caret");
+    caret.setAttribute("aria-hidden", "true");
+    body.append(caret);
     row.append(body);
-    return row;
+    const view = createMarkdownView(body, {
+      onBlock: (block) => { if (ctx.openFile) for (const code of block.querySelectorAll("code.ct-md-code")) linkCodePath(code); },
+    });
+    const reveal = createReveal({
+      show(text) {
+        view.set(text);
+        // The caret ends the last line of text; under a code block or a table it sits on its own.
+        (caretHost(view.last()) ?? body).append(caret);
+      },
+    });
+    return { row, turn, reveal };
+  }
+
+  /** The element whose text the caret should follow, or null when the last block is not prose. */
+  function caretHost(block) {
+    if (!block) return null;
+    if (block.matches(".ct-md-p, .ct-md-h")) return block;
+    if (block.matches(".ct-md-quote")) return caretHost(block.lastElementChild);
+    if (block.matches(".ct-md-list")) {
+      const item = block.lastElementChild;
+      const last = item?.lastElementChild;
+      if (last?.matches(".ct-md-list, .ct-md-p, .ct-md-quote")) return caretHost(last);
+      return last?.matches(".ct-md-pre, .ct-md-table-wrap, .ct-md-hr") ? null : item;
+    }
+    return null;
   }
 
   function buildActivity(activity, registerLive) {
@@ -1382,6 +1424,7 @@ export function createTimelineView(container, ctx = {}) {
     onScrollTop(fn) { onTop.push(fn); },
     destroy() {
       clearInterval(tick);
+      dropPreview();
       window.removeEventListener("phren:chat-send", onSend);
       follow.disconnect();
       outlineObserver.disconnect();
