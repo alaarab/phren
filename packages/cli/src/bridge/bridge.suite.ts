@@ -2517,11 +2517,17 @@ schedules:
       expect(second).toMatchObject({ questionIndex: 1,
         choice: { title: "Which screens?", options: [{ label: "Chat", key: "1" }, { label: "Agents", key: "2" },
           { label: "Settings", key: "3" }, { label: "Done", key: "Enter" }] } });
-      // The last question toggles its box, leaves with Tab and submits from
-      // the review, then clears the prompt.
+      // The last digit would submit the set, and the Hook only submits a
+      // review it can check against every answer (both apps send the whole
+      // set to /v1/questions/answer). So it refuses with nothing typed, and
+      // finishing in the terminal clears the prompt.
       const beforeCleared = frames.length;
-      expect((await api("/v1/keys", { target: claude, keys: ["1"] })).status).toBe(200);
-      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).slice(1)).toEqual([["1"], ["tab"], ["1"]]);
+      const refused = await api("/v1/keys", { target: claude, keys: ["1"] });
+      expect(refused.status).toBe(409);
+      expect(refused.data.code).toBe("question-not-shown");
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["2"]]);
+      for (const key of ["1", "tab", "1"]) fakeClaude.press(key);
+      paneLines = fakeClaude.render();
       expect(fakeClaude.result).toEqual({ "Which accent?": "Lavender", "Which screens?": ["Chat"] });
       const cleared = () => frames.slice(beforeCleared).some(f => f.agentStatus && f.agentStatus.terminalPrompt === undefined);
       await waitFor(cleared, 5_000);
