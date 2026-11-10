@@ -111,6 +111,11 @@ describe("permission-mode route", () => {
       await expect(paneRouteOnce(context, url, { target, mode, origin }, {} as never, () => {})).rejects.toMatchObject({ status: 403 });
     }
     await expect(paneRouteOnce(context, url, { target, mode: "auto", origin: null }, {} as never, () => {})).rejects.toMatchObject({ status: 403 });
+    // A peer computer's call names no pane; its key's gateway marks the request instead.
+    const peer = { "x-phren-origin": "peer" };
+    await expect(paneRouteOnce(context, url, { target, mode: "auto" }, {} as never, () => {}, peer)).rejects.toMatchObject({ status: 403 });
+    await expect(paneRouteOnce(context, new URL("http://phren.local/v1/prompt/queue"), { target, action: "withdraw" }, {} as never, () => {}, peer))
+      .rejects.toMatchObject({ status: 403, message: expect.stringContaining("queued messages") });
     expect(keys.length).toBe(before);
   });
 });

@@ -552,12 +552,14 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       tabs: [tabInfo("w1", "w1:t1", "1", 1), ...extraTabs].map(t => ({ ...t, agent_status: status(p => p.tab_id === t.tab_id) })),
       panes, layouts: [], agents: panes.filter(p => p.agent).map(agentInfo) };
   }
-  function api(url: string, body?: unknown, method?: string): Promise<{ status: number; data: any }> {
+  /** What a peer key's gateway puts on every request it lets through. */
+  const asPeer = { "X-Phren-Origin": "peer" };
+  function api(url: string, body?: unknown, method?: string, extra: Record<string, string> = {}): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
       const verb = method ?? (payload === undefined ? "GET" : "POST");
       const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: url, method: verb,
-        headers: payload ? { "Content-Length": Buffer.byteLength(payload), "Content-Type": "application/json" } : {} }, res => {
+        headers: { ...extra, ...(payload ? { "Content-Length": Buffer.byteLength(payload), "Content-Type": "application/json" } : {}) } }, res => {
         let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode!, data: JSON.parse(data) }));
       });
       req.on("error", reject); req.end(payload);
@@ -2733,6 +2735,7 @@ schedules:
         expect(spoof).toEqual({ status: 400, body: JSON.stringify({ error: "Only askpass itself may ask for its password." }) });
         expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
       }
+      expect(await api("/v1/sudo/answer", { id: asked.id, deny: true }, "POST", asPeer)).toEqual({ status: 403, data: { error: "Only the owner answers a sudo request, from the phone." } });
       expect(await api("/v1/sudo/answer", { id: asked.id, password: "correct horse\nnext line" })).toEqual({ status: 400, data: { error: "Send an id and a password, or deny." } });
       expect(await api("/v1/sudo/answer", { id: asked.id, password: "correct horse 9!" })).toEqual({ status: 200, data: { ok: true } });
       expect(await approved).toEqual({ code: 0, out: "correct horse 9!", err: "" });
@@ -2910,7 +2913,7 @@ schedules:
       expect((await api("/v1/conductor/grants", { scope: "global" }, "DELETE")).status).toBe(404);
     });
 
-    it("reads the release authority policy for anyone and takes changes only without an agent pane", async () => {
+    it("reads the release authority policy for anyone and takes changes only from the owner", async () => {
       const listed = await api("/v1/authority");
       expect(listed.status).toBe(200);
       expect(listed.data).toMatchObject({ source: "defaults", confirmations: [], projects: [] });
@@ -2920,6 +2923,11 @@ schedules:
       expect((await api("/v1/authority", { project: "harbor", origin: agent })).status).toBe(403);
       expect((await api("/v1/authority/confirm", { project: "harbor", actions: ["merge"], origin: agent })).status).toBe(403);
       expect((await api("/v1/authority", { project: "harbor", origin: agent }, "DELETE")).status).toBe(403);
+      // Nor from a peer computer, whose call names no pane.
+      const refused = { status: 403, data: { error: expect.stringContaining("release authority") } };
+      expect(await api("/v1/authority", { project: "harbor", default: "go" }, "POST", asPeer)).toMatchObject(refused);
+      expect(await api("/v1/authority/confirm", { project: "harbor", actions: ["merge"] }, "POST", asPeer)).toMatchObject(refused);
+      expect(await api("/v1/authority", { project: "beacon" }, "DELETE", asPeer)).toMatchObject(refused);
       const set = await api("/v1/authority", { project: "harbor", default: "ask", actions: { merge: "go" } });
       expect(set.status).toBe(200);
       expect(set.data.authority).toMatchObject({ go: ["merge"], maxPermissionMode: "auto-edits" });
