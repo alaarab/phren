@@ -9,7 +9,7 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 import { Duplex } from "node:stream";
 import { sideChannelPool, type AcquiredChannel } from "./channel-pool.js";
 import type { Computer } from "./contract.js";
-import { masterKey, sshArgs } from "./hosts.js";
+import { gatewayCommand, masterKey } from "./hosts.js";
 
 const IDLE_MS = 30 * 60_000;
 const MAX_HEAD = 16 * 1024;
@@ -146,8 +146,10 @@ class Relay {
       if (destroyed) { release(); throw new Error("Preview connection closed."); }
       let spawned: ChildProcess;
       try {
-        spawned = spawn("ssh", sshArgs(computer, `phren-hook v1 web 127.0.0.1 ${port}`, { slot: acquired.slot }), {
+        const { file, args } = gatewayCommand(computer, `phren-hook v1 web 127.0.0.1 ${port}`, { slot: acquired.slot });
+        spawned = spawn(file, args, {
           stdio: ["pipe", "pipe", "pipe"],
+          windowsHide: true,
         });
       } catch (error) {
         release();

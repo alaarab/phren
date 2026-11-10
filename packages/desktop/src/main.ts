@@ -184,7 +184,7 @@ async function run(): Promise<void> {
     }
     case "list": {
       for (const c of await loadComputers()) {
-        process.stdout.write(c.local ? `${c.name}\tlocal\n` : `${c.name}\t${c.username}@${c.address}:${c.port}\t${c.keyFile?.endsWith("id_ed25519_desktop") ? "desktop key" : "dispatch key (hooks.yaml)"}\n`);
+        process.stdout.write(c.local ? `${c.name}\tlocal\n` : c.wsl ? `${c.name}\twsl.exe -d ${c.wsl}\n` : `${c.name}\t${c.username}@${c.address}:${c.port}\t${c.keyFile?.endsWith("id_ed25519_desktop") ? "desktop key" : "dispatch key (hooks.yaml)"}\n`);
       }
       return;
     }

@@ -9,7 +9,7 @@ import { Duplex } from "node:stream";
 import { WebSocket } from "ws";
 import type { Computer, HookRequest, HookResponse, HookWebSocket, OpenHookPipe } from "./contract.js";
 import { channelPool } from "./channel-pool.js";
-import { bridgeRoot, masterKey, sshArgs } from "./hosts.js";
+import { bridgeRoot, gatewayCommand, masterKey } from "./hosts.js";
 import { recordHttp, recordWebSocket } from "./trace.js";
 
 const MAX_BODY = 16 * 1024 * 1024;
@@ -44,7 +44,8 @@ async function remotePipe(c: Computer, signal?: AbortSignal): Promise<Duplex> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn("ssh", sshArgs(c, "phren-hook v1 pipe", { slot: channel.slot }), { stdio: ["pipe", "pipe", "pipe"] });
+      const { file, args } = gatewayCommand(c, "phren-hook v1 pipe", { slot: channel.slot });
+      child = spawn(file, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     } catch (error) {
       release();
       reject(error);
@@ -73,7 +74,7 @@ async function remotePipe(c: Computer, signal?: AbortSignal): Promise<Duplex> {
     child.on("exit", code => {
       release();
       if (code === 0 || sawData) return;
-      const error = new Error(stderrLine(diagnostic) || `ssh exited with code ${code ?? "unknown"}.`);
+      const error = new Error(stderrLine(diagnostic) || `${c.wsl ? "wsl.exe" : "ssh"} exited with code ${code ?? "unknown"}.`);
       if (!settled) { settled = true; reject(error); } else pipe.destroy(error);
     });
   });

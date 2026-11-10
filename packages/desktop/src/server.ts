@@ -551,6 +551,7 @@ export const startServer: StartServer = async (o) => {
         username: c.username,
         port: c.port,
         server: c.server,
+        wsl: c.wsl,
       }));
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(computers));

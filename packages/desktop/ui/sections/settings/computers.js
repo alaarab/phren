@@ -252,8 +252,9 @@ function computerCard(initial, meta, rerender) {
   const actions = el("div", "settings-actions");
   const refresh = button("Refresh");
   const revoke = button("Revoke", "danger");
-  // This computer talks to its Hook over the local socket: there is no key to revoke.
-  if (initial.computer === "This computer") actions.append(refresh); else actions.append(refresh, revoke);
+  // This computer talks to its Hook over the local socket and a WSL distribution
+  // through wsl.exe: neither has a key to revoke.
+  if (initial.computer === "This computer" || meta.get(initial.computer)?.wsl) actions.append(refresh); else actions.append(refresh, revoke);
   head.append(toggle, actions);
   // Whether this computer can dispatch and hand off to each linked computer; empty until its health has loaded.
   const peerRow = el("div", "comp-peer-row");
@@ -304,7 +305,7 @@ function computerCard(initial, meta, rerender) {
     version.classList.toggle("behind", behind);
     version.title = behind ? updateCommand(drift.newest) : "";
     version.hidden = !v;
-    addrText.textContent = info.address ? `${info.username ? info.username + "@" : ""}${info.address}${info.port && Number(info.port) !== 22 ? ":" + info.port : ""}` : (info.local ? "local socket" : "");
+    addrText.textContent = info.wsl ? `wsl.exe -d ${info.wsl}` : info.address ? `${info.username ? info.username + "@" : ""}${info.address}${info.port && Number(info.port) !== 22 ? ":" + info.port : ""}` : (info.local ? "local socket" : "");
     store.capabilities(c.computer).then((caps) => {
       const n = Object.values(caps ?? {}).filter(Boolean).length;
       toggle.title = n ? `${n} Hook capabilities` : "";

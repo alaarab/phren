@@ -23,6 +23,10 @@ export interface Computer {
    * computers in desktop.yaml, `<bridge>/id_ed25519_dispatch` for the hooks.yaml
    * fallback. Absent when local. */
   keyFile?: string;
+  /** A WSL distribution on this Windows computer: its Hook is reached through
+   * `wsl.exe -d <distro>` running the same gateway commands SSH would, with no
+   * key or sshd. Set only on Windows; SSH fields are absent. */
+  wsl?: string;
 }
 
 /** A Hook pane target, exactly the Hook's `targetSchema` (protocol.ts). */

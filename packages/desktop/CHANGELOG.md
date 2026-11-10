@@ -8,6 +8,7 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### New
 
+- **WSL on Windows**, like VS Code's WSL option: each WSL distribution with a Phren Hook shows up as its own computer ("WSL: Ubuntu"), reached through `wsl.exe` with no SSH key, sshd or linking. When the Hook lives only in WSL, the offline "This computer" row is gone. `PHREN_DESKTOP_WSL=off` turns it off.
 - **Browsers** under Fleet (and in ⌘K): see the Playwright browsers your agents are running on every computer, watch one live with its URL and navigation, take control and hand it back, answer an agent's request for help, and replay a recording with its navigation and handoff markers.
 - **After this turn** in the chat composer: a message sent while the agent is working can be held by the Hook until the turn ends, and held messages can be edited, cancelled or sent now. They survive closing and reopening the chat.
 - Large pastes become a text attachment, a turn ends with a **Worked for** row, Home's Needs you cards say how long they've waited, and a turn that opened a pull request adds a quiet "PR #N opened · View" line.
