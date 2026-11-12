@@ -9,6 +9,13 @@ allowBuilds:
   esbuild: true
   node-pty: true
 
+# A version must be public for a day before it can be installed. Most
+# malicious releases are pulled from the registry inside that window. pnpm 12
+# already applies this by default, to frozen installs too; it is stated here so
+# it does not depend on that default. In minutes. Three days was tried and
+# refused a two-day-old security fix already in the lockfile.
+minimumReleaseAge: 1440
+
 # Exact release-age exceptions recorded by pnpm for this dependency refresh.
 minimumReleaseAgeExclude:
   - "@inquirer/ansi@2.0.9"
