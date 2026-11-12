@@ -125,6 +125,9 @@ overrides:
   vite: ^8.3.3
   # monaco-editor and the monaco-vscode packages pin an exact dompurify.
   dompurify: ^3.4.17
+  # GHSA-3g3m-2fjr-6pw4, reached through the published @phren/cli that
+  # packages/code depends on.
+  "glob@>=9.0.0 <14.0.2": ^14.0.2
   uuid: ^14.0.2
   tmp: ">=0.2.7"
   ws: ">=8.22.0"
