@@ -38,8 +38,9 @@ terminal asks you to allow the phone (its key check is on the phone's screen)
 before adding its key.
 
 The QR code carries the computer's Tailscale and LAN addresses, the SSH user,
-the SSH host key fingerprint (pinned by the phone) and a one-time code. The code
-never crosses the network: the phone proves it with an HMAC over its public key,
+the SSH host key fingerprint (pinned by the phone), a one-time code and a longer
+scan secret that only a phone that scanned can prove. Neither
+crosses the network: the phone proves it with an HMAC over its public key,
 and the computer answers with an HMAC over its host fingerprint, so a phone that
 typed the code by hand pins the right host key too. The listener (port 47291)
 accepts one phone, closes after five wrong codes, and times out after five
@@ -47,6 +48,14 @@ minutes (`--minutes` up to 30). SSH itself must be on: Remote Login on macOS,
 `sshd` on Linux. Under WSL, Windows can also block inbound 47291 and SSH from
 the phone; `phren pair` then prints the one-time admin PowerShell
 `New-NetFirewallHyperVRule` that allows both.
+
+To remove a phone, run `phren unpair`. It lists the paired phones by key
+fingerprint; `phren unpair <number>` (or the fingerprint, or `--all`) takes that
+phone's line out of `~/.ssh/authorized_keys` and ends the open SSH connections
+that run only Phren. Removing the line by hand is not enough on its own: a
+connection the phone already has open keeps working until it drops. Phones and
+computers that are still paired reconnect on their own. Notifications the phone
+registered for are not withdrawn yet.
 
 The manual route still works: in Phren, choose **Enter details** under Add
 computer and type the address, port and user. Then choose how this phone gets in:

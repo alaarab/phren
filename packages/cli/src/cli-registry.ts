@@ -217,6 +217,11 @@ export const REGISTRY: Command[] = [
     ],
     run: async args => { const { runBrowser } = await import("./bridge/browser-env.js"); return runBrowser(args); } },
   {
+    name: "unpair", topic: "setup", usage: "phren unpair [<number> | SHA256:<fingerprint> | --all]",
+    summary: "List the phones paired with this computer, or remove one and end its open connections",
+    run: async args => { const { runUnpair } = await import("./bridge/unpair.js"); return runUnpair(args); },
+  },
+  {
     name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read|gitboy-write --key <public-key-file|->",
     summary: "Connect your phone with a pairing QR code, or authorize a scoped key for gitboy (gitboy-read: project memory; gitboy-write: save findings)",
     run: async args => {
