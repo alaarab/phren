@@ -43,7 +43,9 @@ scan secret that only a phone that scanned can prove. Neither
 crosses the network: the phone proves it with an HMAC over its public key,
 and the computer answers with an HMAC over its host fingerprint, so a phone that
 typed the code by hand pins the right host key too. The listener (port 47291)
-accepts one phone, closes after five wrong codes, and times out after five
+accepts one phone, stops taking typed codes after five wrong ones (a scan
+still pairs, so nobody on the network can cancel pairing), refuses requests
+from web pages, and times out after five
 minutes (`--minutes` up to 30). SSH itself must be on: Remote Login on macOS,
 `sshd` on Linux. Under WSL, Windows can also block inbound 47291 and SSH from
 the phone; `phren pair` then prints the one-time admin PowerShell

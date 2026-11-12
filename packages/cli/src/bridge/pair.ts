@@ -142,7 +142,7 @@ export interface PairingSession { port: number; done: Promise<Paired>; close(): 
 /** A phone that typed the code, waiting for the person at the computer to allow it. */
 export interface PairingApproval { device: "ios" | "android"; name?: string; check: string | null }
 
-/** Listen for one phone. Resolves once its key is authorized; rejects on timeout or too many bad proofs. */
+/** Listen for one phone. Resolves once its key is authorized; rejects on timeout. */
 export async function startPairing(options: {
   code: string; user: string; sshPort: number; fingerprint?: string; name: string;
   port?: number; timeoutMs?: number; sshDirectory?: string;
@@ -155,6 +155,8 @@ export async function startPairing(options: {
    * typed pairing is refused.
    */
   approve?: (phone: PairingApproval) => Promise<boolean>;
+  /** Called once, when wrong codes have turned typed pairing off for this session. */
+  onTypedOff?: () => void;
 }): Promise<PairingSession> {
   let failures = 0, finished = false, claimed = false, timer: NodeJS.Timeout | undefined;
   let approvals: Promise<unknown> = Promise.resolve();
@@ -174,6 +176,9 @@ export async function startPairing(options: {
     try {
       if (finished) throw new BridgeError(410, "Pairing is closed. Run phren pair again.");
       if (incoming.method !== "POST" || incoming.url !== "/v1/pair") throw new BridgeError(404, "Not found.");
+      // The phone apps send neither header; a web page's request always carries
+      // one. Refused before it can count as a wrong code.
+      if (incoming.headers.origin !== undefined || incoming.headers["sec-fetch-site"] !== undefined) throw new BridgeError(403, "Pair from the Phren app.");
       let size = 0; const chunks: Buffer[] = [];
       for await (const chunk of incoming) { size += chunk.length; if (size > 4096) throw new BridgeError(413, "Request is too large."); chunks.push(chunk); }
       const input = request.parse(JSON.parse(Buffer.concat(chunks).toString() || "{}"));
@@ -181,11 +186,15 @@ export async function startPairing(options: {
       const scanned = options.scanSecret !== undefined
         && sameProof(scanProof(options.code, options.scanSecret, "phone", publicKey), input.proof);
       if (!scanned && !sameProof(pairingProof(options.code, "phone", publicKey), input.proof)) {
-        failures++;
-        if (failures >= MAX_FAILURES) setImmediate(() => finish(new Error("Too many wrong pairing codes; pairing closed. Run phren pair again.")));
+        // Wrong codes bound how often the short code can be guessed. They no
+        // longer close the session: anyone who could reach the port could
+        // cancel pairing with five requests. They turn typed pairing off, and a
+        // phone that scans still pairs, since the scan secret cannot be guessed.
+        if (++failures === MAX_FAILURES) options.onTypedOff?.();
         throw new BridgeError(403, "That pairing code doesn't match this computer.");
       }
       if (!scanned) {
+        if (failures >= MAX_FAILURES) throw new BridgeError(403, "Too many wrong codes were tried on this computer. Scan the pairing code, or run phren pair again.");
         // The code alone never authorizes a key, whatever the request says
         // about itself: `typed` only tells a phone that will wait for the
         // answer from an app that scanned before the scan secret existed and
@@ -362,7 +371,8 @@ export async function runPair(args: string[], version: string): Promise<number> 
   if (!hosts.length) { console.error("No network address found. Connect to Wi-Fi or Tailscale and try again."); return 1; }
   let cancelPairing = () => {};
   const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000, scanSecret,
-    approve: phone => askToAllow(phone, () => cancelPairing()) });
+    approve: phone => askToAllow(phone, () => cancelPairing()),
+    onTypedOff: () => console.log("\n⚠ Five wrong codes were tried, so typing the code is off for this pairing. Scanning still works; run phren pair again to type a code.") });
   cancelPairing = () => session.close();
   const url = pairingURL({ hosts, port: session.port, user, sshPort, fingerprint, code, name, secret: scanSecret });
   const { renderUnicodeCompact } = await import("uqr");
