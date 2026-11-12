@@ -33,6 +33,10 @@ GitHub release notes, and the app shows them when that version is available.
 - A chat header short of room ends its branch and computer with an ellipsis rather than cutting them mid-word.
 - The Changes panel fits a 320 px window.
 
+### Security
+
+- **Web previews** refuse requests that another website sends to a preview's local port. A page on any site could reach an open preview and, through it, a server that only listens on the previewed computer. The preview's own page, the app's frame and opening it in a browser tab work as before.
+
 ## [0.1.14] - 2026-10-24
 
 ### New
