@@ -67,6 +67,12 @@ it("makes unambiguous codes and a phren:// link with everything the phone needs"
   expect(Object.fromEntries(url.searchParams)).toEqual({ v: "1", h: "box.tail.ts.net,100.64.0.1", p: "47291", u: "me", s: "22", c: "ABC234", n: "box", fp: "SHA256:x", k: "c2Nhbi1zZWNyZXQ" });
 });
 
+it("scan proofs match the values the phone apps test against", () => {
+  // The same reference values as PhonePairingTests.testAScannedOfferProvesTheQRSecretFirst (phren-apps).
+  expect(scanProof("abc-234", "c2Nhbi1zZWNyZXQtMQ", "phone", "ssh-ed25519 AAAAC3Nza")).toBe("-ZKA4yPv_PzFFQ9lg5y6KX3RTJbbjrq2XfUJwZNnOMQ");
+  expect(scanProof("ABC234", "c2Nhbi1zZWNyZXQtMQ", "computer", "SHA256:x", "ssh-ed25519 AAAAC3Nza")).toBe("hn-F9hPdTf0FeuACnfJiznw_wlo2ZkaDaABYLVXUxfc");
+});
+
 it("the typed-code check is the host key fingerprint's first eight characters", () => {
   expect(pairingCheckCode("SHA256:AbCdEfGh1234567890abcdefghijklmnopqrstuvw")).toBe("AbCd EfGh");
   expect(pairingCheckCode(undefined)).toBeNull();
