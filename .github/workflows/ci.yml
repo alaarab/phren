@@ -62,6 +62,29 @@ jobs:
         if: env.PHREN_RC != 'true'
         run: echo 'Build passed. Tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"
 
+  # Known-vulnerable dependencies fail the build: every push, PR, nightly and
+  # RC asks the registry about the lockfile, so a new high or critical advisory
+  # shows up within a day without anyone pushing. Fix it with a bump or an
+  # `overrides` entry in pnpm-workspace.yaml. Moderate and low are reported in
+  # the job summary and do not fail.
+  advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 26
+      - name: No high or critical advisories in the lockfile
+        run: |
+          set -o pipefail
+          pnpm audit --audit-level high | tee audit.txt || status=$?
+          { echo '```'; tail -n 40 audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "${status:-0}"
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
