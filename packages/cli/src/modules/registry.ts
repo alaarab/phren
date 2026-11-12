@@ -93,7 +93,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages", "/v1/sessions/move", "/v1/sessions/moves", "/v1/sessions/move/computers", "/v1/sessions/move/availability", "/v1/sessions/move/intent", "/v1/sessions/move/launch", "/v1/dispatch/relocation", "/v1/dispatch/arrival",
       ]),
       ...routes("POST", [
-        "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
+        "/v1/push/register", "/v1/push/forget", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/sessions/rename", "/v1/sessions/seen", "/v1/sessions/move", "/v1/accounts/claude/add", "/v1/accounts/claude/settings", "/v1/accounts/allowed-pools", "/v1/sessions/move/abort", "/v1/sessions/move/launch", "/v1/prompt", "/v1/prompt/status", "/v1/prompt/after-turn", "/v1/prompt/after-turn/list", "/v1/prompt/after-turn/edit", "/v1/prompt/after-turn/cancel", "/v1/prompt/queue", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",

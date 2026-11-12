@@ -54,8 +54,12 @@ fingerprint; `phren unpair <number>` (or the fingerprint, or `--all`) takes that
 phone's line out of `~/.ssh/authorized_keys` and ends the open SSH connections
 that run only Phren. Removing the line by hand is not enough on its own: a
 connection the phone already has open keeps working until it drops. Phones and
-computers that are still paired reconnect on their own. Notifications the phone
-registered for are not withdrawn yet.
+computers that are still paired reconnect on their own. It also removes this
+computer's notification registrations, so the removed phone gets no more alerts
+from it; a registration is not tied to a key, so they all go, and phones that
+are still paired register again within an hour of opening Phren.
+An alert already on its way when you run it can still arrive.
+`phren unpair --notifications` does only that step.
 
 The manual route still works: in Phren, choose **Enter details** under Add
 computer and type the address, port and user. Then choose how this phone gets in:
