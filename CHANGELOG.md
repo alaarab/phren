@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- `phren unpair` lists the phones paired with a computer and removes one. It takes the phone's key out of `authorized_keys` and ends the open SSH connections that run only Phren, so a connection the removed phone already held stops working too; before, removing the line by hand left such a connection usable until it dropped. Phones and computers that are still paired reconnect on their own.
+
 ## [0.3.75] - 2026-11-12
 
 ### Security

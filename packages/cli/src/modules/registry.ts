@@ -72,7 +72,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     tools: [],
     cliCommands: [
       "bridge", "bridge install", "bridge update", "bridge uninstall", "bridge rollback", "bridge status",
-      "browser", "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh", "pair",
+      "browser", "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh", "pair", "unpair",
       "bridge fanouts archive", "bridge accounts", "bridge askpass", "canary", "computers", "computers mcp", "usage", "sudo",
     ],
     agentHooks: [

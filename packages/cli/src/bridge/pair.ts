@@ -383,7 +383,7 @@ export async function runPair(args: string[], version: string): Promise<number> 
   try {
     const paired = await session.done;
     console.log(`\n✓ Paired ${paired.name ?? "your phone"}. It can reach Phren Hook on ${name} as ${user}.`);
-    console.log(`  To revoke it later, remove its ${paired.device === "android" ? "phren-android" : "phren-iphone"} line from ${path.join(homedir(), ".ssh/authorized_keys")}.`);
+    console.log("  To remove it later, run: phren unpair");
     return 0;
   } catch (error) {
     console.error(`\n${(error as Error).message}`);
