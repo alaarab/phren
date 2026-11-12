@@ -1,15 +1,16 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { hookRequest } from "./client.js";
 import { removeAuthorizedKeys } from "./computers.js";
 import { forcedCommand } from "./install.js";
 import { bridgeRoot } from "./protocol.js";
 
 const exec = promisify(execFile);
-export const UNPAIR_USAGE = "phren unpair [<number> | SHA256:<fingerprint> | --all]";
+export const UNPAIR_USAGE = "phren unpair [<number> | SHA256:<fingerprint> | --all | --notifications]";
 
 export interface PhoneKey { line: string; device: "ios" | "android"; fingerprint: string }
 
@@ -86,11 +87,44 @@ export async function endGatewayConnections(root = bridgeRoot(), pauseMs = 1500)
   return ended;
 }
 
+/**
+ * Push registrations are not tied to an SSH key, so the removed phone's cannot
+ * be told from the others: the Hook drops them all. With no Hook running, the
+ * saved list goes and the next Hook starts without it.
+ */
+export async function forgetPushRegistrations(root = bridgeRoot()): Promise<number> {
+  try {
+    const reply = await hookRequest("/v1/push/forget", {}, undefined, 10_000);
+    return typeof reply.removed === "number" ? reply.removed : 0;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ECONNREFUSED") throw error;
+    const file = path.join(root, "push-devices.json");
+    const saved = await readFile(file, "utf8").then(text => JSON.parse(text) as unknown).catch(() => []);
+    await rm(file, { force: true });
+    return Array.isArray(saved) ? saved.length : 0;
+  }
+}
+
 const deviceName = (key: PhoneKey) => key.device === "android" ? "Android phone" : "iPhone";
 
-export async function runUnpair(args: string[], options: { sshDirectory?: string; endConnections?: () => Promise<number> } = {}): Promise<number> {
+export async function runUnpair(args: string[], options: { sshDirectory?: string; endConnections?: () => Promise<number>; forgetPush?: () => Promise<number> } = {}): Promise<number> {
   if (args.length > 1 || args[0] === "--help" || args[0] === "-h") { console.error(`Usage: ${UNPAIR_USAGE}`); return 1; }
   if (!["darwin", "linux"].includes(process.platform)) { console.error("phren unpair supports macOS and Linux."); return 1; }
+  const forgetPush = async (): Promise<number> => {
+    try {
+      const removed = await (options.forgetPush ?? forgetPushRegistrations)();
+      console.log(removed
+        ? `Removed ${removed} notification registration${removed === 1 ? "" : "s"}, so a removed phone gets no more alerts from this computer. Phones that are still paired register again within an hour of opening Phren.`
+        : "No notification registrations to remove.");
+      return 0;
+    } catch (error) {
+      console.error(`Could not remove notification registrations (${(error as Error).message}). A removed phone may still get alerts from this computer; run phren bridge update, then phren unpair --notifications.`);
+      return 1;
+    }
+  };
+  // On its own: after a key was removed by hand, or to finish a removal whose last step failed.
+  if (args[0] === "--notifications") return forgetPush();
   const sshDirectory = options.sshDirectory ?? path.join(homedir(), ".ssh");
   const keys = phoneKeys(await readFile(path.join(sshDirectory, "authorized_keys"), "utf8").catch(() => ""));
   if (!keys.length) { console.log("No phone is paired with this computer."); return args.length ? 1 : 0; }
@@ -119,6 +153,5 @@ export async function runUnpair(args: string[], options: { sshDirectory?: string
     console.error(`Could not end open connections (${(error as Error).message}). A connection the phone already had open may keep working until it drops; restart SSH or this computer to be sure.`);
     return 1;
   }
-  console.log("If the phone was set up for notifications, it can still receive them until it is removed from push; that is not done here yet.");
-  return 0;
+  return forgetPush();
 }

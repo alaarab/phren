@@ -217,8 +217,8 @@ export const REGISTRY: Command[] = [
     ],
     run: async args => { const { runBrowser } = await import("./bridge/browser-env.js"); return runBrowser(args); } },
   {
-    name: "unpair", topic: "setup", usage: "phren unpair [<number> | SHA256:<fingerprint> | --all]",
-    summary: "List the phones paired with this computer, or remove one and end its open connections",
+    name: "unpair", topic: "setup", usage: "phren unpair [<number> | SHA256:<fingerprint> | --all | --notifications]",
+    summary: "List the phones paired with this computer, or remove one, end its open connections and stop its notifications",
     run: async args => { const { runUnpair } = await import("./bridge/unpair.js"); return runUnpair(args); },
   },
   {

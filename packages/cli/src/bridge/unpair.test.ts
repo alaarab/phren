@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { gatewayConnections, parseProcessRows, phoneKeys, runUnpair } from "./unpair.js";
+import { forgetPushRegistrations, gatewayConnections, parseProcessRows, phoneKeys, runUnpair } from "./unpair.js";
 
 const KEY_A = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g";
 const KEY_B = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj9A";
@@ -40,17 +40,18 @@ describe("phren unpair", () => {
 
   it("removes the chosen phone, leaves every other line as it was, and ends open connections", async () => {
     let ended = 0;
-    expect(await runUnpair(["1"], { sshDirectory: directory, endConnections: async () => { ended++; return 2; } })).toBe(0);
+    expect(await runUnpair(["1"], { sshDirectory: directory, endConnections: async () => { ended++; return 2; }, forgetPush: async () => 3 })).toBe(0);
     expect(await file()).toBe(FILE.replace(`${PHONE} ${KEY_A} phren-iphone\n`, ""));
     expect(ended).toBe(1);
     expect(log.join("\n")).toContain("Ended 2 open Phren connections");
+    expect(log.join("\n")).toContain("Removed 3 notification registrations");
   });
 
   it("removes by fingerprint and with --all, and never touches a computer or personal key", async () => {
     const android = phoneKeys(FILE)[1].fingerprint;
-    expect(await runUnpair([android], { sshDirectory: directory, endConnections: async () => 0 })).toBe(0);
+    expect(await runUnpair([android], { sshDirectory: directory, endConnections: async () => 0, forgetPush: async () => 0 })).toBe(0);
     expect(phoneKeys(await file()).map(key => key.device)).toEqual(["ios"]);
-    expect(await runUnpair(["--all"], { sshDirectory: directory, endConnections: async () => 0 })).toBe(0);
+    expect(await runUnpair(["--all"], { sshDirectory: directory, endConnections: async () => 0, forgetPush: async () => 0 })).toBe(0);
     const left = await file();
     expect(phoneKeys(left)).toEqual([]);
     expect(left).toContain("me@laptop");
@@ -69,6 +70,32 @@ describe("phren unpair", () => {
     expect(await runUnpair(["1"], { sshDirectory: directory, endConnections: async () => { throw new Error("ps failed"); } })).toBe(1);
     expect(phoneKeys(await file()).length).toBe(1);
     expect(errors.join("\n")).toContain("may keep working");
+  });
+});
+
+describe("notification registrations", () => {
+  let root: string;
+  beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-unpair-push-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
+  afterEach(async () => { vi.unstubAllEnvs(); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); });
+
+  it("with no Hook running, drops the saved registrations so the next Hook starts without them", async () => {
+    const file = path.join(root, "push-devices.json");
+    await writeFile(file, JSON.stringify([{ deviceID: "a" }, { deviceID: "b" }]));
+    expect(await forgetPushRegistrations(root)).toBe(2);
+    await expect(readFile(file, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await forgetPushRegistrations(root)).toBe(0);
+  });
+
+  it("a removal whose notification step fails says so and exits non-zero; --notifications retries only that step", async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation((...parts) => { errors.push(parts.join(" ")); });
+    await writeFile(path.join(root, "authorized_keys"), FILE, { mode: 0o600 });
+    expect(await runUnpair(["1"], { sshDirectory: root, endConnections: async () => 0, forgetPush: async () => { throw new Error("Hook rejected the request."); } })).toBe(1);
+    expect(errors.join("\n")).toContain("may still get alerts");
+    const never = async () => { throw new Error("must not end connections"); };
+    expect(await runUnpair(["--notifications"], { sshDirectory: root, endConnections: never, forgetPush: async () => 1 })).toBe(0);
+    expect(phoneKeys(await readFile(path.join(root, "authorized_keys"), "utf8")).length).toBe(1);
   });
 });
 

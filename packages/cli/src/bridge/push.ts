@@ -259,6 +259,15 @@ export class ApprovalPushService {
     this.devices = upsertPushDevice(this.devices, value);
     await atomic(this.devicesFile, JSON.stringify(this.devices));
   }
+  /** Drop every registration; returns how many went. Registrations carry no
+   *  SSH key, so removing a phone cannot pick out its own: all go, and the
+   *  phones still paired register again the next time Phren renews (hourly, on open). */
+  async forgetAll(): Promise<number> {
+    const removed = this.devices.length;
+    this.devices = [];
+    await atomic(this.devicesFile, JSON.stringify(this.devices));
+    return removed;
+  }
   /** One phone: the relay when it registered through one, otherwise direct. */
   private async send(device: PushDevice, payload: Record<string, unknown>, headers: { expiration: string; collapseId: string }): Promise<boolean> {
     if (device.relay) {

@@ -1092,6 +1092,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/push/register") {
           // Registration is kept for when a key is added; the reply says whether push works now.
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
+        } else if (url.pathname === "/v1/push/forget") {
+          // `phren unpair` ends a removed phone's notifications with this.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner removes notification registrations.");
+          result = { ok: true, removed: await agentHooks.push.forgetAll() };
         } else if (url.pathname === "/v1/sudo/answer") {
           // The owner answers from the phone; an agent's call names its pane and
           // a peer computer's arrives through its key's scope.
