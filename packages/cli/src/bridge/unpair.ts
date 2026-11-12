@@ -53,9 +53,13 @@ export function gatewayConnections(rows: ProcessRow[], options: { uid: number; r
   const ancestors = new Set<number>();
   for (let pid: number | undefined = options.self, hops = 0; pid && pid > 1 && hops < 64; pid = byPid.get(pid)?.ppid, hops++) ancestors.add(pid);
   const gateway = (command: string) => command.includes(`${options.root}/`) || command.includes("/.local/share/phren/bridge/dispatch");
+  // "sshd: user" before the first channel, "sshd: user@notty" or "@pts/3" after;
+  // the root-owned "[priv]" monitor fails the uid check and goes with its child.
+  // An internal-sftp child carries the same title and is someone's transfer.
+  const session = /^sshd(?:-session)?: [^\s@]+(?:@(?!internal-sftp)\S+)?\s*$/;
   const sessions: number[] = [], children: number[] = [];
   for (const row of rows) {
-    if (row.uid !== options.uid || ancestors.has(row.pid) || !/^sshd(?:-session)?: \S+@\S+/.test(row.command)) continue;
+    if (row.uid !== options.uid || ancestors.has(row.pid) || !session.test(row.command)) continue;
     const own = rows.filter(child => child.ppid === row.pid);
     if (!own.every(child => child.uid === options.uid && gateway(child.command))) continue;
     sessions.push(row.pid);
@@ -64,13 +68,21 @@ export function gatewayConnections(rows: ProcessRow[], options: { uid: number; r
   return { sessions, children };
 }
 
-/** End them; returns how many connections were ended. */
-export async function endGatewayConnections(root = bridgeRoot()): Promise<number> {
-  const { stdout } = await exec("ps", ["-Aww", "-o", "pid=,ppid=,uid=,command="], { timeout: 5000, maxBuffer: 16_777_216 });
-  const { sessions, children } = gatewayConnections(parseProcessRows(stdout), { uid: userInfo().uid, root, self: process.pid });
+/**
+ * End them; returns how many connections were ended. A sign-in that was accepted
+ * just before the key went can still be finishing, so the scan runs again after
+ * a pause until one pass finds nothing.
+ */
+export async function endGatewayConnections(root = bridgeRoot(), pauseMs = 1500): Promise<number> {
   let ended = 0;
-  for (const pid of children) { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
-  for (const pid of sessions) { try { process.kill(pid, "SIGTERM"); ended++; } catch { /* already gone */ } }
+  for (let pass = 0; pass < 4; pass++) {
+    if (pass) await new Promise(resolve => setTimeout(resolve, pauseMs));
+    const { stdout } = await exec("ps", ["-Aww", "-o", "pid=,ppid=,uid=,command="], { timeout: 5000, maxBuffer: 16_777_216 });
+    const { sessions, children } = gatewayConnections(parseProcessRows(stdout), { uid: userInfo().uid, root, self: process.pid });
+    if (pass && !sessions.length) break;
+    for (const pid of children) { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
+    for (const pid of sessions) { try { process.kill(pid, "SIGTERM"); ended++; } catch { /* already gone */ } }
+  }
   return ended;
 }
 

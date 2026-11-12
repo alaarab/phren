@@ -95,11 +95,17 @@ describe("the SSH connections unpair ends", () => {
     "  601   600   501 sshd-session: me@notty",
     `  602   601   501 nc -U ${root}/hook.sock`,
     "  603   601   501 /usr/libexec/sftp-server",
+    "  700     1     0 sshd-session: me [priv]",
+    "  701   700   501 sshd-session: me",
+    "  800     1     0 sshd: me [priv]",
+    "  801   800   501 sshd: me@notty",
+    "  802   801   501 sshd: me@internal-sftp",
   ].join("\n"));
 
   it("ends connections running only the Phren gateway or nothing, and no one else's", () => {
     const { sessions, children } = gatewayConnections(rows, { uid: 501, root, self: 203 });
-    expect(sessions).toEqual([101, 301, 401]);
+    // 701 signed in and has not opened a channel yet; 801/802 is an SFTP transfer.
+    expect(sessions).toEqual([101, 301, 401, 701]);
     expect(children).toEqual([102, 402]);
   });
 
