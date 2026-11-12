@@ -8,6 +8,8 @@ import { BrowserRecordings } from "./browser-recordings.js";
 
 export interface BrowserPage { id: string; url: string; title: string; width: number; height: number; live: boolean }
 export interface BrowserHelp { reason: string; t: number }
+/** Pages one browser lists, open and closed. */
+export const MAX_PAGES = 200;
 export interface BrowserSession { id: string; session: string; cwd: string; engine: string; headless: boolean; startedAt: number; endedAt: number | null; live: boolean; pages: BrowserPage[]; control: { held: boolean; since: number | null }; help: BrowserHelp | null }
 const MAX_INPUT_BACKLOG = 1024 * 1024;
 export class BrowserRegistry extends EventEmitter {
@@ -41,7 +43,15 @@ export class BrowserRegistry extends EventEmitter {
         const p = message.data;
         let page = browser.pages.find(page => page.id === p.pageId);
         if (page && !page.live) throw new Error("Closed page");
-        if (!page) { page = { id: p.pageId, url: p.url, title: p.title, width: p.width, height: p.height, live: true }; browser.pages.push(page); }
+        if (!page) {
+          // A page that opens and closes popups in a loop must not grow this list: the oldest closed pages go first.
+          while (browser.pages.length >= MAX_PAGES) {
+            const closed = browser.pages.findIndex(page => !page.live);
+            if (closed < 0) throw new Error("Too many pages");
+            browser.pages.splice(closed, 1);
+          }
+          page = { id: p.pageId, url: p.url, title: p.title, width: p.width, height: p.height, live: true }; browser.pages.push(page);
+        }
         Object.assign(page, { url: p.url, title: p.title, width: p.width, height: p.height });
         this.recordings.page(p);
       } else if (message.type === 3) {

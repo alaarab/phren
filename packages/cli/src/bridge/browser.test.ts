@@ -86,6 +86,59 @@ it("keeps each navigation as it was and completes an entry when its title arrive
   expect(meta.pages).toHaveLength(1); expect(meta.pages[0]).toMatchObject({ url: "https://b.test/", title: "B" });
 });
 
+it("a page that opens and closes popups in a loop does not grow the browser's page list", () => {
+  const r = registry(), owner = {};
+  r.accept(owner, { type: 1, data: hello }); r.accept(owner, { type: 2, data: page });
+  for (let n = 0; n < 1000; n++) {
+    const pageId = `popup_page_${n}`;
+    r.accept(owner, { type: 2, data: { ...page, pageId } });
+    r.accept(owner, { type: 4, data: { browserId: hello.browserId, pageId } });
+  }
+  const pages = r.list()[0].pages;
+  expect(pages).toHaveLength(200);
+  // The page still open is kept, however many closed ones went.
+  expect(pages.filter(p => p.live).map(p => p.id)).toEqual([page.pageId]);
+});
+
+it("a page that navigates in a loop cannot grow the recording's metadata past its limits", () => {
+  const recordings = new BrowserRecordings(root()); recordings.start(hello, 0);
+  const file = path.join(recordings.root, hello.browserId, "meta.json");
+  // 100 distinct navigations in one second: the timeline keeps the first ten, the page entry follows the last.
+  for (let n = 0; n < 100; n++) recordings.page({ ...page, url: `https://loop.test/${n}`, title: "t" }, 5000 + n);
+  // Then far more than the timeline holds, spread over time, with a URL and title far past their sizes.
+  for (let n = 0; n < 2000; n++) recordings.page({ ...page, url: `https://loop.test/slow/${n}/${"u".repeat(8000)}`, title: "T".repeat(8000) }, 10_000 + n * 1000);
+  // And more pages than a recording lists.
+  for (let n = 0; n < 300; n++) recordings.page({ ...page, pageId: `page_extra_${n}`, url: "https://tab.test/", title: "" }, 3_000_000 + n * 1000);
+  recordings.end(hello.browserId, 4_000_000);
+  const meta = JSON.parse(fs.readFileSync(file, "utf8"));
+  expect(meta.navigations.slice(0, 11).map((n: { url: string }) => n.url)).toEqual([...Array.from({ length: 10 }, (_, n) => `https://loop.test/${n}`), `https://loop.test/slow/0/${"u".repeat(8000)}`.slice(0, 1024)]);
+  expect(meta.navigations).toHaveLength(500);
+  expect(meta.pages).toHaveLength(100);
+  expect(Math.max(...meta.navigations.map((n: { url: string; title: string }) => n.url.length))).toBe(1024);
+  expect(Math.max(...meta.navigations.map((n: { title: string }) => n.title.length))).toBe(200);
+  expect(fs.statSync(file).size).toBeLessThan(1_048_576);
+});
+
+it("writes frame counters at most once a second while recording, in full at the end, and recovers them after a crash", () => {
+  vi.useFakeTimers({ now: 1_000_000 });
+  try {
+    const recordings = new BrowserRecordings(root()); recordings.start(hello, 0);
+    const file = path.join(recordings.root, hello.browserId, "meta.json");
+    const read = () => JSON.parse(fs.readFileSync(file, "utf8"));
+    const frameAt = (t: number, byte: number) => recordings.frame({ browserId: hello.browserId, pageId: page.pageId, t, width: 1, height: 1 }, Buffer.from([0xff, 0xd8, byte, 0xff, 0xd9]));
+    frameAt(1000, 1); frameAt(1300, 2); frameAt(1600, 3);
+    expect(read().frames).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(read()).toMatchObject({ frames: 3, bytes: 15 });
+    frameAt(2000, 4);
+    // A crash here: the file still says three frames, the index has four and a torn fifth line.
+    fs.appendFileSync(path.join(recordings.root, hello.browserId, "index.jsonl"), '{"t":2300,"pageId":"pa');
+    const reopened = new BrowserRecordings(recordings.root); reopened.recover(9000);
+    expect(read()).toMatchObject({ frames: 4, bytes: 20, endedAt: 9000 });
+    expect(reopened.frameAt(hello.browserId, 3)).toEqual(Buffer.from([0xff, 0xd8, 4, 0xff, 0xd9]));
+  } finally { vi.useRealTimers(); }
+});
+
 it("retains newest recordings within the byte budget and removes recordings after 24 hours", () => {
   const recordings = new BrowserRecordings(root());
   for (const [id, t] of [["browser_old", 0], ["browser_new", 1000]] as const) {
