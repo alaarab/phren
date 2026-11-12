@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash, createHmac, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { connect } from "node:net";
@@ -14,10 +14,11 @@ import { type GatewayScope, isGatewayScope, SCOPE_KEY_COMMENT } from "./scoped-g
 import { BridgeError, bridgeRoot } from "./protocol.js";
 
 // `phren pair` connects a phone in one scan. The QR code carries where to
-// reach this computer, its SSH host key fingerprint and a one-time code. The
-// phone makes its own key and posts the public half here with an HMAC keyed
-// by the code, so the code itself never crosses the network; this computer
-// answers with an HMAC over its fingerprint, which lets a phone that typed
+// reach this computer, its SSH host key fingerprint, a one-time code and a
+// scan secret. The phone makes its own key and posts the public half here
+// with an HMAC keyed by the code and the secret (a phone that typed the code
+// has only the code, and waits to be allowed at the computer), so neither
+// crosses the network; this computer answers with an HMAC over its fingerprint, which lets a phone that typed
 // the code by hand trust the host key too. One success, five bad proofs or
 // the time limit closes the listener.
 
@@ -37,6 +38,22 @@ export function normalizeCode(code: string): string {
 
 export function pairingProof(code: string, label: "phone" | "computer", ...parts: string[]): string {
   return createHmac("sha256", `phren-pair-v1:${normalizeCode(code)}`).update([label, ...parts].join("\n")).digest("base64url");
+}
+
+/**
+ * The secret only the QR code and the phren://pair link carry: 128 random
+ * bits, never typed and never sent. The six-character code can be recovered
+ * from one captured request (about 30 bits, checked offline against its
+ * proof), so a proof made with the code alone always needs the person at the
+ * computer; a proof made with this secret shows the phone read the screen.
+ */
+export function newScanSecret(): string {
+  return randomBytes(16).toString("base64url");
+}
+
+/** The proof of a phone that scanned: keyed by the code and the scan secret together. */
+export function scanProof(code: string, secret: string, label: "phone" | "computer", ...parts: string[]): string {
+  return createHmac("sha256", `phren-pair-v2:${normalizeCode(code)}:${secret}`).update([label, ...parts].join("\n")).digest("base64url");
 }
 
 function sameProof(expected: string, received: string): boolean {
@@ -99,6 +116,8 @@ export async function computerDisplayName(): Promise<string> {
 
 export interface PairingOffer {
   hosts: string[]; port: number; user: string; sshPort: number; fingerprint?: string; code: string; name: string;
+  /** The scan secret (`k`); see `newScanSecret`. */
+  secret?: string;
 }
 
 /** The QR payload; the phone opens phren://pair links from the camera too. */
@@ -106,6 +125,7 @@ export function pairingURL(offer: PairingOffer): string {
   const query = new URLSearchParams({ v: "1", h: offer.hosts.join(","), p: String(offer.port), u: offer.user,
     s: String(offer.sshPort), c: offer.code, n: offer.name });
   if (offer.fingerprint) query.set("fp", offer.fingerprint);
+  if (offer.secret) query.set("k", offer.secret);
   return `phren://pair?${query.toString()}`;
 }
 
@@ -126,11 +146,13 @@ export interface PairingApproval { device: "ios" | "android"; name?: string; che
 export async function startPairing(options: {
   code: string; user: string; sshPort: number; fingerprint?: string; name: string;
   port?: number; timeoutMs?: number; sshDirectory?: string;
+  /** The secret in the QR code. A phone that proves it is authorized at once; without one, no phone is. */
+  scanSecret?: string;
   /**
-   * Asked before a phone that typed the code is authorized: a typed code can
-   * be cracked from a captured request, so the person at the computer allows
-   * the phone whose key check matches the one it shows. Without it, typed
-   * pairing is refused.
+   * Asked before a phone that proved only the code is authorized: the code
+   * can be cracked from a captured request, so the person at the computer
+   * allows the phone whose key check matches the one it shows. Without it,
+   * typed pairing is refused.
    */
   approve?: (phone: PairingApproval) => Promise<boolean>;
 }): Promise<PairingSession> {
@@ -156,12 +178,19 @@ export async function startPairing(options: {
       for await (const chunk of incoming) { size += chunk.length; if (size > 4096) throw new BridgeError(413, "Request is too large."); chunks.push(chunk); }
       const input = request.parse(JSON.parse(Buffer.concat(chunks).toString() || "{}"));
       const publicKey = publicComputerKey(input.publicKey);
-      if (!sameProof(pairingProof(options.code, "phone", publicKey), input.proof)) {
+      const scanned = options.scanSecret !== undefined
+        && sameProof(scanProof(options.code, options.scanSecret, "phone", publicKey), input.proof);
+      if (!scanned && !sameProof(pairingProof(options.code, "phone", publicKey), input.proof)) {
         failures++;
         if (failures >= MAX_FAILURES) setImmediate(() => finish(new Error("Too many wrong pairing codes; pairing closed. Run phren pair again.")));
         throw new BridgeError(403, "That pairing code doesn't match this computer.");
       }
-      if (input.typed) {
+      if (!scanned) {
+        // The code alone never authorizes a key, whatever the request says
+        // about itself: `typed` only tells a phone that will wait for the
+        // answer from an app that scanned before the scan secret existed and
+        // gives up in seconds.
+        if (!input.typed) throw new BridgeError(403, "This version of the Phren app can't pair by scanning with this computer. Update the app, or choose Enter code and type the code.");
         // One question at a time, each bound to its own phone: a single answer
         // never allows two keys.
         const ask = approvals.then(() => finished || claimed || incoming.socket.destroyed ? false
@@ -185,7 +214,8 @@ export async function startPairing(options: {
       } catch (error) { claimed = false; throw error; }
       reply(response, 200, {
         v: 1, name: options.name, user: options.user, sshPort: options.sshPort, fingerprint: options.fingerprint ?? null,
-        proof: pairingProof(options.code, "computer", options.fingerprint ?? "", publicKey),
+        proof: scanned ? scanProof(options.code, options.scanSecret!, "computer", options.fingerprint ?? "", publicKey)
+          : pairingProof(options.code, "computer", options.fingerprint ?? "", publicKey),
       });
       setImmediate(() => finish(undefined, { device: input.device, name: input.name, publicKey }));
     } catch (error) {
@@ -326,15 +356,15 @@ export async function runPair(args: string[], version: string): Promise<number> 
   }
   const sshPort = 22;
   if (!await sshListening(sshPort)) console.log(`\n⚠ SSH isn't answering on this computer. ${sshHint()}\n  Pairing can finish now; the phone connects once SSH is on.`);
-  const code = newPairingCode();
+  const code = newPairingCode(), scanSecret = newScanSecret();
   const name = await computerDisplayName(), user = userInfo().username, fingerprint = await hostFingerprint();
   const hosts = await pairingHosts();
   if (!hosts.length) { console.error("No network address found. Connect to Wi-Fi or Tailscale and try again."); return 1; }
   let cancelPairing = () => {};
-  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000,
+  const session = await startPairing({ code, user, sshPort, fingerprint, name, port, timeoutMs: minutes * 60_000, scanSecret,
     approve: phone => askToAllow(phone, () => cancelPairing()) });
   cancelPairing = () => session.close();
-  const url = pairingURL({ hosts, port: session.port, user, sshPort, fingerprint, code, name });
+  const url = pairingURL({ hosts, port: session.port, user, sshPort, fingerprint, code, name, secret: scanSecret });
   const { renderUnicodeCompact } = await import("uqr");
   console.log(`\nConnect your phone to ${name}`);
   console.log("  In the Phren app: Agents → Add computer → Scan pairing code\n");
