@@ -108,7 +108,9 @@ export class BrowserRecordings {
   index(id: string): { meta: RecordingMeta; frames: IndexFrame[] } {
     const dir = this.dir(id);
     try {
-      return { meta: JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8")), frames: fs.readFileSync(path.join(dir, "index.jsonl"), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line) as IndexFrame) };
+      return { meta: JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8")), 
+        // A crash during an append leaves a torn last line; the complete rows before it still play.
+        frames: fs.readFileSync(path.join(dir, "index.jsonl"), "utf8").split("\n").filter(Boolean).flatMap(line => { try { return [JSON.parse(line) as IndexFrame]; } catch { return []; } }) };
     } catch { throw new BridgeError(404, "Recording not found."); }
   }
   frameAt(id: string, n: number): Buffer {

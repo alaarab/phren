@@ -86,6 +86,20 @@ it("keeps each navigation as it was and completes an entry when its title arrive
   expect(meta.pages).toHaveLength(1); expect(meta.pages[0]).toMatchObject({ url: "https://b.test/", title: "B" });
 });
 
+it("a page that opens and closes popups in a loop does not grow the browser's page list", () => {
+  const r = registry(), owner = {};
+  r.accept(owner, { type: 1, data: hello }); r.accept(owner, { type: 2, data: page });
+  for (let n = 0; n < 1000; n++) {
+    const pageId = `popup_page_${n}`;
+    r.accept(owner, { type: 2, data: { ...page, pageId } });
+    r.accept(owner, { type: 4, data: { browserId: hello.browserId, pageId } });
+  }
+  const pages = r.list()[0].pages;
+  expect(pages).toHaveLength(200);
+  // The page still open is kept, however many closed ones went.
+  expect(pages.filter(p => p.live).map(p => p.id)).toEqual([page.pageId]);
+});
+
 it("a page that navigates in a loop cannot grow the recording's metadata past its limits", () => {
   const recordings = new BrowserRecordings(root()); recordings.start(hello, 0);
   const file = path.join(recordings.root, hello.browserId, "meta.json");
@@ -117,9 +131,11 @@ it("writes frame counters at most once a second while recording, in full at the 
     vi.advanceTimersByTime(1000);
     expect(read()).toMatchObject({ frames: 3, bytes: 15 });
     frameAt(2000, 4);
-    // A crash here: the file still says three frames, the index has four.
+    // A crash here: the file still says three frames, the index has four and a torn fifth line.
+    fs.appendFileSync(path.join(recordings.root, hello.browserId, "index.jsonl"), '{"t":2300,"pageId":"pa');
     const reopened = new BrowserRecordings(recordings.root); reopened.recover(9000);
     expect(read()).toMatchObject({ frames: 4, bytes: 20, endedAt: 9000 });
+    expect(reopened.frameAt(hello.browserId, 3)).toEqual(Buffer.from([0xff, 0xd8, 4, 0xff, 0xd9]));
   } finally { vi.useRealTimers(); }
 });
 
