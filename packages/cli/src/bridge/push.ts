@@ -238,8 +238,17 @@ export class ApprovalPushService {
   private devices: PushDevice[] = [];
   private sender?: APNsSender;
   private readonly devicesFile = path.join(bridgeRoot(), "push-devices.json");
+  /** Loading, registering, forgetting and dropping a gone phone each read or
+   *  write the list and its file; one at a time, so an older write never lands
+   *  over a newer one and a load never brings back what was just forgotten. */
+  private changes: Promise<unknown> = Promise.resolve();
+  private change<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.changes.then(work, work);
+    this.changes = next.catch(() => {});
+    return next;
+  }
   async start() {
-    this.devices = await secureJSON(this.devicesFile, z.array(deviceSchema).max(16)) ?? [];
+    await this.change(async () => { this.devices = await secureJSON(this.devicesFile, z.array(deviceSchema).max(16)) ?? []; });
     const configFile = process.env.PHREN_APNS_CONFIG || path.join(bridgeRoot(), "apns.json");
     const config = await secureJSON(configFile, configSchema);
     if (!config) return;
@@ -256,25 +265,31 @@ export class ApprovalPushService {
       devices: this.devices.length, relay };
   }
   async register(value: unknown) {
-    this.devices = upsertPushDevice(this.devices, value);
-    await atomic(this.devicesFile, JSON.stringify(this.devices));
+    await this.change(async () => {
+      this.devices = upsertPushDevice(this.devices, value);
+      await atomic(this.devicesFile, JSON.stringify(this.devices));
+    });
   }
   /** Drop every registration; returns how many went. Registrations carry no
    *  SSH key, so removing a phone cannot pick out its own: all go, and the
    *  phones still paired register again the next time Phren renews (hourly, on open). */
   async forgetAll(): Promise<number> {
-    const removed = this.devices.length;
-    this.devices = [];
-    await atomic(this.devicesFile, JSON.stringify(this.devices));
-    return removed;
+    return this.change(async () => {
+      const removed = this.devices.length;
+      this.devices = [];
+      await atomic(this.devicesFile, JSON.stringify(this.devices));
+      return removed;
+    });
   }
   /** One phone: the relay when it registered through one, otherwise direct. */
   private async send(device: PushDevice, payload: Record<string, unknown>, headers: { expiration: string; collapseId: string }): Promise<boolean> {
     if (device.relay) {
       const result = await sendThroughRelay(device.relay, payload, headers);
       if (result === "gone") {
-        this.devices = this.devices.filter(item => item.deviceID !== device.deviceID);
-        await atomic(this.devicesFile, JSON.stringify(this.devices)).catch(() => {});
+        await this.change(async () => {
+          this.devices = this.devices.filter(item => item.deviceID !== device.deviceID);
+          await atomic(this.devicesFile, JSON.stringify(this.devices));
+        }).catch(() => {});
       }
       return result === "sent";
     }

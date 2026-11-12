@@ -3216,6 +3216,9 @@ schedules:
     it("forgets every push registration for the owner only, and they stay gone", async () => {
       await api("/v1/push/register", { deviceID: "8a3f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", hostID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9",
         token: "ab".repeat(32), environment: "development" });
+      const device = { deviceID: "9b4f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", hostID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9", token: "cd".repeat(32), environment: "development" };
+      expect(await api("/v1/push/register", device, "POST", asPeer)).toEqual({ status: 403, data: { error: "Only the owner's phone registers for notifications." } });
+      expect(await api("/v1/push/register", { ...device, origin: "agent" })).toMatchObject({ status: 403 });
       expect(await api("/v1/push/forget", { origin: "agent" })).toEqual({ status: 403, data: { error: "Only the owner removes notification registrations." } });
       expect(await api("/v1/push/forget", {}, "POST", { "x-phren-origin": "peer" })).toMatchObject({ status: 403 });
       expect((await api("/v1/push/status")).data).toMatchObject({ devices: 1 });

@@ -102,7 +102,10 @@ export async function forgetPushRegistrations(root = bridgeRoot()): Promise<numb
     const file = path.join(root, "push-devices.json");
     const saved = await readFile(file, "utf8").then(text => JSON.parse(text) as unknown).catch(() => []);
     await rm(file, { force: true });
-    return Array.isArray(saved) ? saved.length : 0;
+    // A Hook that started in between may have read the list before it went: ask again.
+    // One that starts after this finds no file.
+    const late = await hookRequest("/v1/push/forget", {}, undefined, 10_000).then(reply => typeof reply.removed === "number" ? reply.removed : 0, () => 0);
+    return Math.max(Array.isArray(saved) ? saved.length : 0, late);
   }
 }
 

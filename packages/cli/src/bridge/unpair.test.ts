@@ -141,3 +141,28 @@ describe("the SSH connections unpair ends", () => {
     expect(gatewayConnections(own, { uid: 501, root, self: 702 }).sessions).toEqual([]);
   });
 });
+
+describe("push registration changes", () => {
+  it("a registration that started before a forget cannot bring the forgotten phones back", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-push-order-"));
+    vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    try {
+      const { ApprovalPushService } = await import("./push.js");
+      const service = new ApprovalPushService();
+      await service.start();
+      const device = (id: string) => ({ deviceID: `${id}a3f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b`, hostID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9", token: "ab".repeat(32), environment: "development" });
+      await service.register(device("1"));
+      // Not awaited: the registration's write is still on its way when forget is asked for.
+      const registering = service.register(device("2"));
+      const removed = await service.forgetAll();
+      await registering;
+      expect(removed).toBe(2);
+      expect(service.status.devices).toBe(0);
+      expect(JSON.parse(await readFile(path.join(root, "push-devices.json"), "utf8"))).toEqual([]);
+      // A Hook started afterwards loads nothing.
+      const next = new ApprovalPushService();
+      await next.start();
+      expect(next.status.devices).toBe(0);
+    } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+  });
+});
