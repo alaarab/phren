@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.75] - 2026-11-12
+
 ### Security
 
 - `phren pair`: the six-character code alone no longer authorizes a phone. The QR code and pairing link now carry a second, long secret that is never typed or sent, and only a phone that proves it pairs at once. A phone that proves just the code waits for you to allow it at the computer, whatever its request says; before, a request that left out the "typed" mark skipped that question, so someone who captured one pairing request on the network could work out the code and add their own phone. Scanning needs Phren for iPhone 1.0.59 or later; an older app is told to update or to choose Enter code, which still works.
