@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - `phren unpair` lists the phones paired with a computer and removes one. It takes the phone's key out of `authorized_keys` and ends the open SSH connections that run only Phren, so a connection the removed phone already held stops working too; before, removing the line by hand left such a connection usable until it dropped. Phones and computers that are still paired reconnect on their own.
 - `phren unpair` also removes the computer's notification registrations, so a removed phone stops getting approval, sudo and schedule alerts from it. Before, a phone whose key was removed kept receiving them. A registration is not tied to a key, so all of them go; phones that are still paired register again within an hour of opening Phren. `phren unpair --notifications` does only this step.
+- Browser watch: a page in a watched browser can no longer grow a recording's metadata without limit. The recording keeps at most 500 navigations (ten new ones a second) and 100 pages, cuts each URL to 1,024 characters and each title to 200, and writes its frame counters at most once a second, not on every frame. Before, a page that navigated in a loop made the Hook rewrite an ever larger file each time.
 - Hook: only the owner's phone can register for notifications. A linked computer or an agent could register its own destination and receive this computer's approval alerts.
 
 ## [0.3.75] - 2026-11-12
