@@ -26,6 +26,27 @@ export function hostMatches(head: string, port: number): boolean {
   const hosts = head.split("\r\n").slice(1).filter((line) => /^host:/i.test(line));
   return hosts.length === 1 && hosts[0].slice(5).trim().toLowerCase() === `127.0.0.1:${port}`;
 }
+
+/**
+ * Whether the browser says another website sent this request. A page on any
+ * site can address 127.0.0.1:<port>; this keeps it from using the preview to
+ * reach the previewed server (often loopback-only on a remote computer, and
+ * often answering with permissive CORS). Refused: a request whose Origin is not
+ * a loopback page, and a cross-site request that is not a plain navigation. A
+ * navigation stays allowed because the app's own frame and "open in browser"
+ * are cross-site navigations too; the other site cannot read what it loads.
+ * A client that sends neither header (curl, an old browser) is not a website
+ * request and passes. Exported for tests.
+ */
+export function fromAnotherSite(head: string): boolean {
+  const values = (name: string): string[] => head.split("\r\n").slice(1)
+    .filter((line) => line.toLowerCase().startsWith(`${name}:`)).map((line) => line.slice(name.length + 1).trim().toLowerCase());
+  const origins = values("origin");
+  if (origins.length > 1 || origins.some((origin) => !/^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/.test(origin))) return true;
+  const sites = values("sec-fetch-site");
+  if (sites.length > 1) return true;
+  return sites[0] === "cross-site" && values("sec-fetch-mode").join() !== "navigate";
+}
 const SWEEP_MS = 60_000;
 
 /** One open preview, the shape `/api/previews` answers with. */
@@ -88,6 +109,11 @@ class Relay {
       socket.pause();
       if (end < 0 || !hostMatches(head.subarray(0, end).toString("latin1"), this.localPort)) {
         socket.end("HTTP/1.1 421 Misdirected Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        socket.on("close", release);
+        return;
+      }
+      if (fromAnotherSite(head.subarray(0, end).toString("latin1"))) {
+        socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         socket.on("close", release);
         return;
       }

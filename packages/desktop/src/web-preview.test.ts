@@ -1,7 +1,7 @@
 import { connect, createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Computer } from "./contract.js";
-import { closeAllPreviews, closePreview, getPreview, isUpgrade, listPreviews, openPreview } from "./web-preview.js";
+import { closeAllPreviews, closePreview, fromAnotherSite, getPreview, isUpgrade, listPreviews, openPreview } from "./web-preview.js";
 
 const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
 
@@ -40,6 +40,20 @@ function exchange(port: number, text: string): Promise<string> {
     socket.on("connect", () => socket.write(text));
     socket.on("data", (chunk: string) => (received += chunk));
     socket.on("error", () => undefined);
+    socket.on("close", () => resolve(received));
+  });
+}
+
+/** Write `text` and resolve with everything received until the far end finishes its reply. */
+function replyTo(port: number, text: string): Promise<string> {
+  return new Promise((resolve) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    let received = "";
+    socket.setEncoding("utf8");
+    socket.on("connect", () => socket.write(text));
+    socket.on("data", (chunk: string) => (received += chunk));
+    socket.on("error", () => undefined);
+    socket.on("end", () => socket.destroy());
     socket.on("close", () => resolve(received));
   });
 }
@@ -88,6 +102,40 @@ describe("openPreview", () => {
       const doubled = await exchange(preview.localPort, `GET / HTTP/1.1\r\nHost: 127.0.0.1:${preview.localPort}\r\nHost: localhost:${preview.localPort}\r\n\r\n`);
       expect(doubled.startsWith("HTTP/1.1 421")).toBe(true);
       expect(connected).toBe(0);
+    } finally {
+      await new Promise<void>((done) => upstream.close(() => done()));
+    }
+  });
+
+  it("refuses a connection another website opens, and relays the app's frame, the page's own requests and non-browser clients", async () => {
+    let connected = 0;
+    const upstream = createServer((socket) => { connected += 1; socket.resume(); socket.end("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"); });
+    await new Promise<void>((done) => upstream.listen(0, "127.0.0.1", done));
+    const address = upstream.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    try {
+      const preview = await openPreview(LOCAL, port);
+      // Until the reply ends: a refused request is closed by the relay, a relayed one by the upstream.
+      const request = (headers: string[], method = "GET") => replyTo(preview.localPort, `${method} / HTTP/1.1\r\nHost: 127.0.0.1:${preview.localPort}\r\n${headers.map((line) => `${line}\r\n`).join("")}\r\n`);
+      const refused = [
+        ["Origin: https://evil.example", "Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: cors"],        // fetch() from another site
+        ["Origin: https://evil.example", "Upgrade: websocket", "Connection: Upgrade"],                 // its WebSocket
+        ["Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: no-cors", "Sec-Fetch-Dest: script"],           // <script src> on another site
+        ["Origin: https://evil.example", "Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: navigate"],    // a form it posts
+        ["Origin: null", "Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: navigate"],                    // the same from a sandboxed frame
+        [`Origin: http://127.0.0.1:${preview.localPort}`, "Origin: https://evil.example"],
+      ];
+      for (const headers of refused) expect((await request(headers, "POST")).startsWith("HTTP/1.1 403"), headers.join(", ")).toBe(true);
+      expect(connected).toBe(0);
+      const relayed = [
+        ["Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: navigate", "Sec-Fetch-Dest: iframe"],          // the app's frame
+        ["Sec-Fetch-Site: none", "Sec-Fetch-Mode: navigate", "Sec-Fetch-Dest: document"],              // opened in a browser tab
+        [`Origin: http://127.0.0.1:${preview.localPort}`, "Sec-Fetch-Site: same-origin", "Sec-Fetch-Mode: cors"], // the page's own fetch
+        [`Origin: http://127.0.0.1:${preview.localPort}`, "Upgrade: websocket", "Connection: Upgrade"], // its hot-reload socket
+        [],                                                                                             // curl
+      ];
+      for (const headers of relayed) expect((await request(headers)).startsWith("HTTP/1.1 204"), headers.join(", ")).toBe(true);
+      expect(connected).toBe(relayed.length);
     } finally {
       await new Promise<void>((done) => upstream.close(() => done()));
     }
