@@ -651,7 +651,8 @@ describe.skipIf(process.platform === "win32")("short credentials", () => {
     await f.mover.settled(from.server, from.pane);
     expect(await readMove(move.id)).toMatchObject({ state: "moved" });
     const prompt = String(f.brief()?.text);
-    expect(prompt).not.toMatch(/hunter2|x1|abc123|abc|xyz|tiny|\bsecret\b|--password -p secret|api_key=k|X-API-Key: k/);
+    // Whole words: the hand-off carries the move's random hex id, which can contain "abc" by chance.
+    expect(prompt).not.toMatch(/hunter2|\bx1\b|abc123|\babc\b|\bxyz\b|\btiny\b|\bsecret\b|--password -p secret|api_key=k|X-API-Key: k/);
     expect(prompt).toContain("--password [redacted]");
   });
 });
