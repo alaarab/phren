@@ -16,7 +16,8 @@ const FILE = [
   "",
 ].join("\n");
 
-describe("phren unpair", () => {
+// phren unpair refuses to run on Windows, where phones pair with WSL or not at all.
+describe.skipIf(process.platform === "win32")("phren unpair", () => {
   let directory: string, log: string[], errors: string[];
   beforeEach(async () => {
     directory = await mkdtemp(path.join(tmpdir(), "phren-unpair-"));
@@ -86,7 +87,7 @@ describe("notification registrations", () => {
     expect(await forgetPushRegistrations(root)).toBe(0);
   });
 
-  it("a removal whose notification step fails says so and exits non-zero; --notifications retries only that step", async () => {
+  it.skipIf(process.platform === "win32")("a removal whose notification step fails says so and exits non-zero; --notifications retries only that step", async () => {
     const errors: string[] = [];
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation((...parts) => { errors.push(parts.join(" ")); });
