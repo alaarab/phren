@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.78] - 2026-11-14
+
 ### New
 
 - `phren secret-exec [--prompt <text>] [--plist <key> [--field K=V]...] -- <command...>` answers a password prompt that is not sudo's from the phone, such as `fdesetup disable -inputplist` or `sysadminctl ... -password -`. The command gets the secret on its stdin (one line, or a plist with the secret under `<key>`); the agent that ran it never sees it. The phone shows the exact command (read from the process table), the agent's prompt, the input format and the session, and asks each time. The Hook checks that the secret can only reach that command, again right before it is sent. Needs a phone app with secret requests (`secrets=1` on the overview socket); with none open the request is refused.
