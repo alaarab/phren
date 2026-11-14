@@ -3,10 +3,10 @@ import { secretName, secretPatch } from "./changes.js";
 
 it("withholds diffs of credential files the phone has no business showing", () => {
   for (const name of [".env", ".env.local", "prod.env", "AuthKey_ABC123.p8", "release.jks", "app.keystore", "id_ecdsa", "id_ed25519_dispatch",
-    "credentials", ".git-credentials", ".credentials", ".pgpass", "prod.tfvars", "kubeconfig", "server.key", "dir/.npmrc"]) {
+    "id_ed25519.pub", "id_rsa.pub", "credentials", ".git-credentials", ".credentials", ".pgpass", "prod.tfvars", "kubeconfig", "server.key", "dir/.npmrc"]) {
     expect(secretName(name), name).toBe(true);
   }
-  for (const name of ["id_ed25519.pub", "id_ed25519_dispatch.pub", "environment.ts", "keys.swift", "README.md", "package-lock.json"]) {
+  for (const name of ["identity.ts", "environment.ts", "keys.swift", "README.md", "package-lock.json"]) {
     expect(secretName(name), name).toBe(false);
   }
 });
