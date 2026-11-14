@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook: approval and sudo alerts hide more kinds of credentials, matching the phone: `curl -u name:password`, other `Authorization` schemes, key, token and cookie headers, `sshpass -p`, registry logins and passwords in form data.
 - Hook: what an agent changed is no longer shown on the phone when the change holds a credential. A diff with a private key, a known token format (AWS, GitHub, Slack, npm, JWT and others) or a password or token assigned in code is withheld and the file shows as redacted, and changes saved earlier are checked the same way. More secret files are recognised by name too: `.p8` keys, `id_ecdsa` and other SSH keys, `prod.env`, `.git-credentials`, `.pgpass`, keystores, `.tfvars` and `kubeconfig`.
+- Dependencies: `@hono/node-server`, which the MCP SDK brings in, is now 2.1.8, past two moderate advisories (GHSA-jpvv-r467-5p4w, a backslash in a request path read as a separator; GHSA-qv5m-9pm6-hqp3, an unhandled connection reset during a WebSocket upgrade).
 
 ## [0.3.76] - 2026-11-13
 
