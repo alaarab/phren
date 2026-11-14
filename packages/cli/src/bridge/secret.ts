@@ -191,7 +191,26 @@ async function defaultVerify(pid: number, hookFd: number | undefined, delivery?:
     bundles: [...new Set([path.join(bridgeRoot(), "current/bridge-hook.mjs"), ...running])],
     connection: linux ? asker => listenerHolders(asker, inode!) : asker => connectionHolders(asker, hookFd) });
   if ("refused" in result) return result;
-  return { command: result.command, deliver: linux ? secret => deliverToListener(pid, start!, delivery!, inode!, secret) : async secret => ({ password: secret }) };
+  const send = linux ? (secret: string) => deliverToListener(pid, start!, delivery!, inode!, secret) : async (secret: string) => ({ password: secret });
+  // The answer can come minutes after the check. On Linux any process of the
+  // owner's can open /proc/<helper>/fd/1 meanwhile and read the pipe, so who
+  // holds it is checked again right before the secret goes in.
+  return { command: result.command, deliver: async secret => {
+    const still = await stillOnlyTheCommand(pid, result.commandPid);
+    return still ? send(secret) : { status: 409, error: "Something else opened the command's input; the secret was not sent." };
+  } };
+}
+
+/** Whether, now, only the command and what it started hold the helper's stdout. */
+export async function stillOnlyTheCommand(pid: number, commandPid: number,
+  check: Pick<SecretCheck, "processes" | "table" | "holders"> = { processes: readProcess, table: processTable, holders: pipeHolders }): Promise<boolean> {
+  const asker = await check.processes(pid).catch(() => undefined);
+  const table = await check.table().catch(() => undefined);
+  if (!asker || !table) return false;
+  const holders = await check.holders(pid, [asker.ppid]);
+  if (!holders) return false;
+  const allowed = descendantsIn(table, commandPid);
+  return holders.every(holder => allowed.has(holder));
 }
 
 interface Pending { view: SecretRequestView; respond: (reply: SudoReply | Promise<SudoReply>) => void; deliver: SecretVerified["deliver"]; timer: NodeJS.Timeout }

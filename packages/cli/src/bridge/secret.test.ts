@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProcessRecord, SudoReply } from "./sudo.js";
 import { readProcess } from "./sudo.js";
 import {
-  pipeHolders, processTable, runSecretExec, SecretBroker, secretAnswer, secretExecArgs, secretPayload, secretSpec, verifySecretAsker,
+  pipeHolders, processTable, runSecretExec, SecretBroker, secretAnswer, secretExecArgs, secretPayload, secretSpec, stillOnlyTheCommand, verifySecretAsker,
   type SecretRequestView,
 } from "./secret.js";
 
@@ -55,6 +55,15 @@ describe("secret-exec arguments and payload", () => {
       try { secretAnswer(bad as never); } catch (error) { message = (error as Error).message; }
       expect(message).toBe("Send an id and a secret, or deny.");
     }
+  });
+});
+
+describe("stillOnlyTheCommand", () => {
+  // The phone answers minutes later; on Linux a process of the owner's can open /proc/<helper>/fd/1 meanwhile.
+  it("checks the pipe's holders again right before the secret goes in", async () => {
+    expect(await stillOnlyTheCommand(HELPER, COMMAND, check({ holders: [COMMAND, GRANDCHILD] }))).toBe(true);
+    expect(await stillOnlyTheCommand(HELPER, COMMAND, check({ holders: [COMMAND, PARENT] }))).toBe(false);
+    expect(await stillOnlyTheCommand(HELPER, COMMAND, check({ holders: undefined }))).toBe(false);
   });
 });
 
