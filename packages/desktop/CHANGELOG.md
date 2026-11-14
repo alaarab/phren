@@ -4,6 +4,12 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## [Unreleased]
+
+### Security
+
+- **Web previews** open at a secret address of their own, `http://<random>.localhost:<port>/`, and the preview answers nothing else. Before, it answered anyone who found its local port, so another account on the same computer could reach the previewed server through your tunnel.
+
 ## [0.1.15] - 2026-11-14
 
 ### New
