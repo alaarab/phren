@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.77] - 2026-11-14
+
 ### Security
 
 - Hook: approval and sudo alerts hide more kinds of credentials, matching the phone: `curl -u name:password`, other `Authorization` schemes, key, token and cookie headers, `sshpass -p`, registry logins and passwords in form data.
