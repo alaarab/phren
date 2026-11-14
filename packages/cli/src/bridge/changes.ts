@@ -21,7 +21,7 @@ export const changedFileSchema = z.object({ root: z.string(), path: z.string(), 
   added: z.number().int().nonnegative(), removed: z.number().int().nonnegative(), redacted: z.boolean().optional(), binary: z.boolean().optional(), truncated: z.boolean().optional() });
 export type ChangedFile = z.infer<typeof changedFileSchema>;
 const changeRowSchema = z.object({ toolUseId: z.string(), files: z.array(changedFileSchema) });
-export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.env|.*\.(?:pem|key|p8|p12|pfx|jks|keystore|keychain-db|tfstate|tfvars|ovpn)|id_(?:rsa|dsa|ecdsa|ed25519)(?:_.*)?(?<!\.pub)|(?:.*\.)?credentials(?:\.json)?|\.credentials|\.git-credentials|\.netrc|\.npmrc|\.pypirc|\.pgpass|kubeconfig)$/i.test(path.basename(file));
+export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.env|.*\.(?:pem|key|p8|p12|pfx|jks|keystore|keychain-db|tfstate|tfvars|ovpn)|id_(?:rsa|dsa|ecdsa|ed25519)(?:[_.].*)?|(?:.*\.)?credentials(?:\.json)?|\.credentials|\.git-credentials|\.netrc|\.npmrc|\.pypirc|\.pgpass|kubeconfig)$/i.test(path.basename(file));
 /** A patch that holds anything credential-shaped (a key block, a known token
  * format, a password assignment) is withheld whole, as the Hook's logs are:
  * the phone shows the file as redacted rather than a half-scrubbed diff. */
