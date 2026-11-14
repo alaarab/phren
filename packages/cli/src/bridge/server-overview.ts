@@ -26,7 +26,9 @@ import { streamCloseReason } from "./server-stream.js";
  * gets `{ type: "resources", resources }` after the first overview, then at
  * `OVERVIEW_RESOURCES_MS` intervals (an older phone never asks, so never meets it).
  * One that asks with `sudo=1` gets `{ type: "sudo", requests }` after the first
- * overview and whenever the pending sudo requests change.
+ * overview and whenever the pending sudo requests change, and one that asks
+ * with `secrets=1` gets `{ type: "secrets", requests }` the same way for
+ * `phren secret-exec` (an older phone never asks, so never sees them).
  */
 export const OVERVIEW_TICK_MS = intervalFromEnv("PHREN_OVERVIEW_TICK_MS", 5_000, 250, 60_000);
 export const OVERVIEW_REFRESH_MS = intervalFromEnv("PHREN_OVERVIEW_REFRESH_MS", 10_000, 1_000, 120_000);
@@ -41,6 +43,8 @@ export interface OverviewStreamOptions {
   renew: (server: string) => void;
   /** Pending sudo requests (`GET /v1/sudo`), for phones that ask with `sudo=1`. */
   sudo?: { list(): unknown[]; subscribe(listener: (requests: unknown[]) => void): () => void };
+  /** Pending secret-exec requests (`GET /v1/secrets`), for phones that ask with `secrets=1`. */
+  secrets?: { list(): unknown[]; subscribe(listener: (requests: unknown[]) => void): () => void };
   /** This computer's resources (`GET /v1/resources`), for phones that ask. */
   resources?: () => Promise<unknown>;
   snapshot?: (server: string, maxAgeMs: number) => Promise<Json>;
@@ -81,11 +85,13 @@ export function overviewStream(options: OverviewStreamOptions) {
 
   /** Streams one server's overview until the client closes. Returns the
    * tick function, for tests that drive time themselves. */
-  return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false, typedMux = false, withSudo = false) {
+  return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false, typedMux = false, withSudo = false, withSecrets = false) {
     let closed = false, busy = false, resourcesPending = false, first = true, overviewSent = false;
     // Subscribed at once, so the phone counts as able to answer while the first overview builds.
     const unsubscribe = withSudo && options.sudo
       ? options.sudo.subscribe(requests => { if (!closed && overviewSent) send(client, { type: "sudo", requests }); }) : undefined;
+    const unsubscribeSecrets = withSecrets && options.secrets
+      ? options.secrets.subscribe(requests => { if (!closed && overviewSent) send(client, { type: "secrets", requests }); }) : undefined;
     let snapshotKey = "", builtAt = 0, sentKey = "", sentAt = 0, resourcesAt = -Infinity;
     const collectResources = () => {
       const at = now();
@@ -118,6 +124,7 @@ export function overviewStream(options: OverviewStreamOptions) {
             if (send(client, { type: "overview", ...overview })) {
               sentKey = rowsKey; sentAt = at;
               if (!overviewSent && unsubscribe) send(client, { type: "sudo", requests: options.sudo!.list() });
+              if (!overviewSent && unsubscribeSecrets) send(client, { type: "secrets", requests: options.secrets!.list() });
               overviewSent = true;
             }
             first = false;
@@ -140,7 +147,7 @@ export function overviewStream(options: OverviewStreamOptions) {
       }
     };
     const timer = setInterval(() => { void tick(); }, tickMs);
-    const stop = () => { closed = true; clearInterval(timer); unsubscribe?.(); };
+    const stop = () => { closed = true; clearInterval(timer); unsubscribe?.(); unsubscribeSecrets?.(); };
     client.once("close", stop);
     client.once("error", stop);
     void tick();

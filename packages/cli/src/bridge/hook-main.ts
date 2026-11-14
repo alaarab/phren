@@ -5,6 +5,10 @@ async function main(): Promise<number> {
   const args = process.argv.slice(2);
   // sudo starts a fresh process for every password attempt. It needs only
   // the askpass client, rather than initializing the Hook server and tools.
+  if (args[0] === "askpass" && args[1] === "--secret-exec" && args.length === 2) {
+    const { secretAskpass } = await import("./secret.js");
+    return secretAskpass();
+  }
   if (args[0] === "askpass") {
     const { askpass } = await import("./sudo.js");
     return askpass(args[1]);

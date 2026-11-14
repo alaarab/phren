@@ -42,6 +42,7 @@ import { recordClaudeStatusLine } from "./usage.js";
 import { briefId, briefIdInPrompt, briefLabel, recordBriefArrival } from "./launch-brief.js";
 import { appServerApproval, appServerDecision, conductorCall, OPENCODE_APPROVAL_OPTIONS, opencodePermissionReply, type ConductorCall } from "./agent-hook-asks.js";
 import { SudoBroker } from "./sudo.js";
+import { SecretBroker } from "./secret.js";
 import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
 import { codexServers } from "./codex-servers.js";
 import { paneClient, paneKey, PaneServerWatcher, rootSession, servedPane, type PaneAsks } from "./opencode-panes.js";
@@ -277,13 +278,14 @@ export class AgentHooks {
   private computerName = hostname().replace(/\.local$/i, "").split(".")[0] || "Computer";
   /** sudo -A requests from askpass, answered from the phone (sudo.ts). */
   readonly sudo: SudoBroker;
+  /** phren secret-exec requests, answered from the phone (secret.ts). */
+  readonly secrets: SecretBroker;
   constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot, deliveriesFile?: string) {
     this.deliveries = new PromptDeliveries(deliveriesFile);
     // A push held while the owner was at the desktop is sent only if still unanswered.
     push.stillPending = binding => this.pushTarget(binding) !== undefined;
     void computerDisplayName().then(name => { this.computerName = name; }, () => {});
-    this.sudo = new SudoBroker({ computer: () => this.computerName, push, label: briefLabel,
-      describe: async place => {
+    const describe = async (place: { server: string; workspace: string; tab: string; pane: string }) => {
         const s = await snapshot(place.server);
         const pane = findPane(s, place);
         if (!pane) return undefined;
@@ -291,7 +293,9 @@ export class AgentHooks {
         const workspace = objects(s.workspaces).find(item => item.workspace_id === place.workspace);
         const label = [tab?.label, workspace?.label].find(value => typeof value === "string" && value.trim()) as string | undefined;
         return { ...(typeof pane.agent === "string" ? { source: pane.agent } : {}), ...(label ? { label } : {}) };
-      } });
+      };
+    this.sudo = new SudoBroker({ computer: () => this.computerName, push, label: briefLabel, describe });
+    this.secrets = new SecretBroker({ computer: () => this.computerName, label: briefLabel, describe });
   }
   private approvalsDirectory(): string { return path.join(phrenStoreRoot(), ".runtime", "approvals"); }
   private scheduleOpencodeSweep() {
@@ -1456,6 +1460,7 @@ export class AgentHooks {
       res.setHeader("Content-Type", "application/json");
       try {
         if (req.method === "POST" && req.url === "/sudo") { await this.sudo.handle(req, res); return; }
+        if (req.method === "POST" && req.url === "/secret") { await this.secrets.handle(req, res); return; }
         if (req.method !== "POST" || !["/hook", "/conductor-context", "/usage-statusline"].includes(req.url ?? "")) throw new Error("Invalid callback");
         let size = 0; const chunks: Buffer[] = [];
         for await (const bytes of req) { size += bytes.length; if (size > 1_048_576) throw new Error("Oversized hook"); chunks.push(bytes); }
@@ -1723,6 +1728,7 @@ export class AgentHooks {
     this.deferredSubmissions.clear();
     this.closed = true;
     this.sudo.close();
+    this.secrets.close();
     void this.changes.close().catch(() => {});
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();

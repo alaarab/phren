@@ -171,7 +171,7 @@ export async function readProcess(pid: number): Promise<ProcessRecord | undefine
 
 /** Linux: whether any process of the owner's other than `exclude` holds a
  * descriptor that links to `target` (`pipe:[n]`, `socket:[n]`). */
-async function heldElsewhere(target: string, exclude: number[]): Promise<boolean> {
+export async function heldElsewhere(target: string, exclude: number[]): Promise<boolean> {
   const holders = (await readdir("/proc")).map(Number).filter(holder => Number.isInteger(holder) && !exclude.includes(holder));
   let next = 0, other = false;
   // Busy machines can have thousands of descriptors. Bound the process
@@ -319,7 +319,7 @@ export interface AskerCheck { processes: (pid: number) => Promise<ProcessRecord 
   node: string; bundles: string[]; script: string; unprivilegedSudo?: boolean }
 
 /** What would run other code in the shell script (which drops the rest) or in node. */
-const PRELOADS = ["LD_PRELOAD", "DYLD_INSERT_LIBRARIES"], NODE_LOADERS = [...PRELOADS, "NODE_OPTIONS"];
+export const PRELOADS = ["LD_PRELOAD", "DYLD_INSERT_LIBRARIES"], NODE_LOADERS = [...PRELOADS, "NODE_OPTIONS"];
 /** The chain from askpass up to sudo, or why it is refused. */
 export async function verifyAsker(pid: number, check: AskerCheck): Promise<{ sudo: ProcessRecord; sudoPid: number } | { refused: string }> {
   const asker = await check.processes(pid);
@@ -365,7 +365,7 @@ export interface SudoBrokerOptions {
 }
 
 const placeName = /^[A-Za-z0-9_.:%@-]{1,128}$/;
-function placeFrom(value: unknown) {
+export function placeFrom(value: unknown) {
   const item = object(value);
   const fields = ["server", "workspace", "tab", "pane"] as const;
   if (!fields.every(key => typeof item[key] === "string" && placeName.test(item[key] as string))) return undefined;
@@ -515,7 +515,7 @@ export class SudoBroker {
   }
 }
 
-function userName(): string | undefined { try { return userInfo().username || undefined; } catch { return undefined; } }
+export function userName(): string | undefined { try { return userInfo().username || undefined; } catch { return undefined; } }
 
 /** A password as sudo reads it from askpass: one line, nothing it would cut. */
 export function sudoAnswer(data: Json): { id: string; answer: { password: string } | { deny: true }; outcome: boolean } {
@@ -547,11 +547,11 @@ export async function askpass(prompt: string | undefined, env: NodeJS.ProcessEnv
   } finally { listener?.close(); }
 }
 
-interface DeliveryListener { delivery: AskpassDelivery; printed: () => boolean; close: () => void }
+export interface DeliveryListener { delivery: AskpassDelivery; printed: () => boolean; close: () => void }
 /** An abstract socket that takes one password from a connection that sends
  * the nonce first, prints it to stdout, and acknowledges. Any other
  * connection is dropped without an answer. */
-function deliveryListener(): Promise<DeliveryListener> {
+export function deliveryListener(take: (secret: string) => void = secret => { process.stdout.write(`${secret}\n`); }): Promise<DeliveryListener> {
   const delivery = newDelivery(), expected = Buffer.from(delivery.nonce);
   let printed = false;
   const server = createServer(socket => {
@@ -567,7 +567,7 @@ function deliveryListener(): Promise<DeliveryListener> {
       const nonce = Buffer.from(lines[0]);
       if (nonce.length !== expected.length || !timingSafeEqual(nonce, expected) || !lines[1]) { socket.destroy(); return; }
       printed = true;
-      process.stdout.write(`${lines[1]}\n`);
+      take(lines[1]);
       text = "";
       socket.end("ok\n");
       server.close();
