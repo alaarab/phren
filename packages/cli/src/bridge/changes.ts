@@ -10,6 +10,7 @@ import { z } from "zod";
 import { ProcessPool } from "./limits.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { countGit, countTick } from "./metrics.js";
+import { scanForSecrets } from "../content/secrets.js";
 
 const exec = promisify(execFile);
 
@@ -20,7 +21,15 @@ export const changedFileSchema = z.object({ root: z.string(), path: z.string(), 
   added: z.number().int().nonnegative(), removed: z.number().int().nonnegative(), redacted: z.boolean().optional(), binary: z.boolean().optional(), truncated: z.boolean().optional() });
 export type ChangedFile = z.infer<typeof changedFileSchema>;
 const changeRowSchema = z.object({ toolUseId: z.string(), files: z.array(changedFileSchema) });
-export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|keychain-db|tfstate)|id_rsa.*|id_ed25519.*|(?:.*\.)?credentials\.json|\.netrc|\.npmrc|\.pypirc)$/i.test(path.basename(file));
+export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.env|.*\.(?:pem|key|p8|p12|pfx|jks|keystore|keychain-db|tfstate|tfvars|ovpn)|id_(?:rsa|dsa|ecdsa|ed25519)(?:_.*)?(?<!\.pub)|(?:.*\.)?credentials(?:\.json)?|\.credentials|\.git-credentials|\.netrc|\.npmrc|\.pypirc|\.pgpass|kubeconfig)$/i.test(path.basename(file));
+/** A patch that holds anything credential-shaped (a key block, a known token
+ * format, a password assignment) is withheld whole, as the Hook's logs are:
+ * the phone shows the file as redacted rather than a half-scrubbed diff. */
+/** Lockfile integrity hashes and embedded data are long base64 by nature, so
+ * the detector's shape-only base64 rule would withhold every lockfile diff;
+ * the known formats and name-based rules still apply. */
+export const secretPatch = (patch: string): boolean =>
+  scanForSecrets(patch.replace(/(?=[A-Za-z0-9+/]*[+/])[A-Za-z0-9+/]{40,}={0,2}/g, "")) !== null;
 /** Two Git jobs at a time: one repository's tree read (shared by every call
  * waiting for it), one call's diff, or a repository lookup. Each holds its slot
  * for all of its Git processes, so under load jobs finish in turn rather than
@@ -197,7 +206,7 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
     const specs = [...new Set([original, file])].map(name => `:(literal)${name}`);
     const counts = (await git(root, [...NO_DIFF, "--numstat", before, after, "--", ...specs], env, signal)).split("\t");
     const binary = counts[0] === "-" || counts[1] === "-";
-    const redacted = secretName(original) || secretName(file) || binary;
+    let redacted = secretName(original) || secretName(file) || binary;
     let overflowed = false;
     let patch = redacted ? "" : await git(root, [...NO_DIFF, before, after, "--", ...specs], env, signal).catch(error => {
       // One patch past Git's output buffer is shown truncated, not as a failed capture.
@@ -205,6 +214,7 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
       if (failure.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") throw error;
       overflowed = true; return String(failure.stdout ?? "");
     });
+    if (patch && secretPatch(patch)) { patch = ""; redacted = true; }
     const truncated = overflowed || patch.length > 200_000;
     if (truncated) patch = patch.slice(0, 200_000) + "\n… (truncated)\n";
     const added = Number(counts[0]) || 0, removed = Number(counts[1]) || 0;
@@ -556,7 +566,7 @@ export class ToolChanges {
         try {
           const row = changeRowSchema.parse(JSON.parse(line));
           // Also sanitize old records made before patch redaction existed.
-          entry.files.set(row.toolUseId, row.files.map(file => secretName(file.path) || file.redacted || /^(?:Binary files |GIT binary patch)/m.test(file.patch)
+          entry.files.set(row.toolUseId, row.files.map(file => secretName(file.path) || file.redacted || /^(?:Binary files |GIT binary patch)/m.test(file.patch) || secretPatch(file.patch)
             ? { ...file, patch: "", redacted: true } : file));
         } catch { /* Torn or invalid rows are not transcript events. */ }
       }
