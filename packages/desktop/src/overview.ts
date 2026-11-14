@@ -52,7 +52,7 @@ function isHostKeyError(message?: string): boolean {
  * pointing at the wrong machine (a relink after a "verify" state, say). */
 function sshChanged(a: Computer, b: Computer): boolean {
   return a.address !== b.address || a.port !== b.port || a.hostKey !== b.hostKey || a.keyFile !== b.keyFile
-    || a.username !== b.username || a.server !== b.server;
+    || a.username !== b.username || a.server !== b.server || a.wsl !== b.wsl;
 }
 
 function frameText(data: RawData): string {

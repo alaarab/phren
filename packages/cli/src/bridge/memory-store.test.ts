@@ -98,7 +98,7 @@ it("rejects oversized blobs with an actionable size error before reading their c
 
 it("refuses paths outside the store, into .git, or through symlinks", async () => {
   await symlink(root, path.join(store, "escape"));
-  for (const bad of ["../x.md", "/etc/passwd", ".git/config", "demo/../../x", "escape/x.md", "demo//x.md", "./demo/x.md"]) {
+  for (const bad of ["../x.md", "/etc/passwd", ".git/config", ".GIT/config", "demo/.git./x", "demo/../../x", "escape/x.md", "demo//x.md", "./demo/x.md"]) {
     await expect(putStoreFile(store, { path: bad, content: "", sha: null })).rejects.toMatchObject({ status: 400 });
   }
   await expect(storeBlob(store, "not-a-sha")).rejects.toMatchObject({ status: 400 });

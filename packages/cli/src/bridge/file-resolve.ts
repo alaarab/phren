@@ -1,6 +1,7 @@
 import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { readFileRange } from "./file-range.js";
+import { isGitDirName } from "./git-dir-name.js";
 import { BridgeError } from "./protocol.js";
 
 function beneath(root: string, file: string): boolean {
@@ -18,7 +19,7 @@ export async function resolveFilePath(root: string, cwd: string, requested: stri
   if (process.platform === "win32") requested = requested.replaceAll("\\", "/");
   if (!requested || requested.length > 4096 || /[\x00-\x1f\x7f\\]/.test(requested)
       || /^[A-Za-z]:[^/]/.test(requested)
-      || requested.split("/").includes(".git") || path.win32.isAbsolute(requested) && !path.isAbsolute(requested)) {
+      || requested.split("/").some(isGitDirName) || path.win32.isAbsolute(requested) && !path.isAbsolute(requested)) {
     throw new BridgeError(400, "Invalid file path.");
   }
   const base = await realpath(root), folder = await realpath(cwd);

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { answerClaudeQuestionDialog, sameLabel, sameTitle, claudeQuestionDialog, type DialogQuestion } from "./claude-question-dialog.js";
+import { answerClaudeQuestionDialog, sameTitle, claudeQuestionDialog, type DialogQuestion } from "./claude-question-dialog.js";
 import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 
 // Panes captured from Claude Code 2.1 drawing AskUserQuestion in Herdr.
@@ -117,6 +117,154 @@ describe("answering Claude's question dialog", () => {
       "Which tools?": ["Vim", "Emacs", "VSCode", ...(typed ? ["Nano editor"] : [])] });
   });
 
+  it.each([[false, "Teal 123"], [true, "Teal 123"], [true, "Teal ✔"]] as const)("reuses identical focused Other text without appending (multiSelect: %s, text: %s)", async (multiSelect, text) => {
+    const questions = [{ ...set[0], multiSelect }], claude = new FakeClaude(questions);
+    claude.cursor = 4; claude.typed[0] = text; claude.typedOn[0] = multiSelect;
+    await answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text }]);
+    expect(claude.result).toEqual({ "Which color?": multiSelect ? [text] : text });
+    expect(claude.typed[0]).toBe(text);
+  });
+
+  it.each(["Teal", "Teal ✔"])("does not reconcile a single-select Other checkmark suffix with %s", async text => {
+    const questions = [set[0]], claude = new FakeClaude(questions);
+    claude.cursor = 4; claude.typed[0] = "Teal ✔";
+    await expect(answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text }]))
+      .rejects.toMatchObject({ status: 409 });
+    expect(claude.typed[0]).toBe("Teal ✔");
+    expect(claude.sent).toEqual([]);
+    expect(claude.result).toBeUndefined();
+  });
+
+  it.each([false, true])("refuses differing existing Other text without editing it (multiSelect: %s)", async multiSelect => {
+    const questions = [{ ...set[0], multiSelect }], claude = new FakeClaude(questions);
+    claude.cursor = 4; claude.typed[0] = "Old draft";
+    await expect(answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text: "New answer" }]))
+      .rejects.toMatchObject({ status: 409, message: expect.stringContaining("existing typed answer") });
+    expect(claude.typed[0]).toBe("Old draft");
+    expect(claude.result).toBeUndefined();
+  });
+
+  it.each([false, true])("leaves focused Other before selecting options (multiSelect: %s)", async multiSelect => {
+    const questions = [{ ...set[0], multiSelect }], claude = new FakeClaude(questions);
+    claude.cursor = 4; claude.typed[0] = "Draft"; claude.typedOn[0] = multiSelect;
+    await answerClaudeQuestionDialog(claude.io(), questions, [{ options: [1] }]);
+    expect(claude.result).toEqual({ "Which color?": multiSelect ? ["Green"] : "Green" });
+    expect(claude.typed[0]).toBe("Draft");
+  });
+
+  it("stops if leaving the text field does not move the cursor", async () => {
+    const questions = [set[0]], claude = new FakeClaude(questions), io = claude.io();
+    claude.cursor = 4; claude.typed[0] = "Draft";
+    await expect(answerClaudeQuestionDialog({ ...io, keys: async keys => {
+      if (keys.includes("up")) { claude.sent.push(keys); return; }
+      await io.keys(keys);
+    } }, questions, [{ options: [0] }])).rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" } });
+    expect(claude.typed[0]).toBe("Draft");
+    expect(claude.sent.flat()).not.toContain("1");
+  });
+
+  it("moves from Next to Other on a multi-select without guessing row one", async () => {
+    const questions = [set[1]], claude = new FakeClaude(questions);
+    claude.cursor = "next";
+    await answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text: "Nano" }]);
+    expect(claude.result).toEqual({ "Which tools?": ["Nano"] });
+  });
+
+  it("waits through unreadable redraws between questions and after review submission", async () => {
+    const claude = new FakeClaude(set), io = claude.io();
+    let unreadable = 0;
+    await answerClaudeQuestionDialog({ ...io,
+      keys: async keys => { const tab = claude.tab; await io.keys(keys); unreadable = claude.tab !== tab || claude.gone ? 22 : 4; },
+      read: async () => unreadable-- > 0 ? "\n← ☒ color  ✔ Sub" : io.read(),
+    }, set, [{ options: [1] }, { options: [0, 2], text: "Nano" }, { options: [1] }]);
+    expect(unreadable).toBeLessThan(0);
+    expect(claude.result).toEqual({ "Which color?": "Green", "Which tools?": ["Vim", "VSCode", "Nano"], "Which size?": "Large" });
+  });
+
+  it.each([[false, "redrawing…"], [true, "redrawing…"], [false, "❯"], [true, "❯"]])("never treats an unreadable redraw as completion (review: %s, frame: %s)", async (review, frame) => {
+    const questions = [review ? set[1] : set[0]], claude = new FakeClaude(questions), io = claude.io();
+    await expect(answerClaudeQuestionDialog({ ...io, read: async () => claude.gone ? String(frame) : io.read() }, questions, [{ options: [0] }]))
+      .rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" } });
+  });
+
+  it("refuses a typed answer whose suffix was lost, even when its first 20 characters match", async () => {
+    const questions = [set[0]], claude = new FakeClaude(questions), io = claude.io();
+    const text = "A long answer with the correct suffix";
+    await expect(answerClaudeQuestionDialog({ ...io, keys: async keys => {
+      await io.keys(keys);
+      if (claude.typed[0]) claude.typed[0] = text.slice(0, 25);
+    } }, questions, [{ options: [], text }])).rejects.toMatchObject({ status: 409 });
+    expect(claude.result).toBeUndefined();
+  });
+
+  it.each(["wrong option", "missing selection", "extra selection", "wrong text suffix"])("refuses review with %s before submitting", async mismatch => {
+    const claude = new FakeClaude(set), io = claude.io();
+    const text = "A long answer with the correct suffix";
+    await expect(answerClaudeQuestionDialog({ ...io, read: async () => {
+      const frame = await io.read();
+      if (claude.tab !== set.length) return frame;
+      if (mismatch === "wrong option") return frame.replace("→ Green", "→ Red");
+      if (mismatch === "missing selection") return frame.replace("→ Vim, VSCode,", "→ Vim,");
+      if (mismatch === "extra selection") return frame.replace("→ Vim, VSCode,", "→ Vim, Emacs, VSCode,");
+      return frame.replace(text, text.slice(0, -6) + "WRONG");
+    } }, set, [{ options: [1] }, { options: [0, 2], text }, { options: [1] }]))
+      .rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" }, message: expect.stringContaining("review") });
+    expect(claude.result).toBeUndefined();
+    expect(claude.tab).toBe(set.length);
+  });
+
+  it("refuses a wrapped Other field whose first line equals the phone answer", async () => {
+    const questions = [set[0]], claude = new FakeClaude(questions), io = claude.io();
+    claude.cursor = 4; claude.typed[0] = "Teal";
+    await expect(answerClaudeQuestionDialog({ ...io, read: async () => (await io.read()).replace("4. Teal", "4. Teal\n     extra text") },
+      questions, [{ options: [], text: "Teal" }])).rejects.toMatchObject({ status: 409 });
+    expect(claude.sent).toEqual([]);
+  });
+
+  it("refuses ambiguous wrapped answer text on review", async () => {
+    const questions = [set[1]], claude = new FakeClaude(questions), io = claude.io();
+    await expect(answerClaudeQuestionDialog({ ...io, read: async () => (await io.read()).replace("→ Vim, VSCode", "→ Vim,\n     VSCode") },
+      questions, [{ options: [0, 2] }])).rejects.toMatchObject({ status: 409, message: expect.stringContaining("review") });
+    expect(claude.result).toBeUndefined();
+  });
+
+  it("refuses a label with an unverified suffix before sending a single-select shortcut", async () => {
+    const label = "A very long label shared by two different choices";
+    const questions = [{ question: "Pick?", options: [{ label: label + " WRONG" }, { label: "B" }] }];
+    const claude = new FakeClaude(questions), io = claude.io();
+    await expect(answerClaudeQuestionDialog({ ...io, read: async () => (await io.read()).replaceAll(label + " WRONG", label) },
+      questions, [{ options: [0] }])).rejects.toMatchObject({ status: 409, details: { code: "question-not-shown" } });
+    expect(claude.sent).toEqual([]);
+  });
+
+  it.each([
+    [false, "text", "123 teal"], [true, "text", "123 teal"],
+    [false, "shortcut", "123 teal"], [true, "shortcut", "123 teal"],
+    [false, "text", "1"], [false, "shortcut", "1"],
+    [false, "text", "123"], [false, "shortcut", "123"],
+  ] as const)("enters digit-leading Other exactly (multiSelect: %s, digit behavior: %s, text: %s)", async (multiSelect, otherDigits, text) => {
+    const questions = [{ ...set[0], multiSelect }], claude = new FakeClaude(questions, { otherDigits });
+    await answerClaudeQuestionDialog(claude.io(), questions, [{ options: [], text }]);
+    expect(claude.result).toEqual({ "Which color?": multiSelect ? [text] : text });
+    expect(claude.typed[0]).toBe(text);
+  });
+
+  it.each(["prefix", "digits", "removal"])("stops before Enter if digit entry fails during %s", async step => {
+    const questions = [set[0]], claude = new FakeClaude(questions, { otherDigits: "shortcut" }), io = claude.io();
+    let injected = false;
+    await expect(answerClaudeQuestionDialog({ ...io, keys: async keys => {
+      if (step === "prefix" && keys.length === 1 && keys[0] === ".") { injected = true; claude.sent.push(keys); return; }
+      if (step === "removal" && keys.includes("backspace")) { injected = true; claude.sent.push(keys); return; }
+      await io.keys(keys);
+      if (step === "digits" && claude.typed[0].startsWith(".123")) { injected = true; claude.typed[0] = ".123 wrong"; }
+    } }, questions, [{ options: [], text: "123 teal" }]))
+      .rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" } });
+    expect(claude.result).toBeUndefined();
+    expect(claude.sent.flat()).not.toContain("enter");
+    expect(injected).toBe(true);
+    if (step === "prefix") expect(claude.sent.flat()).not.toContain("1");
+  });
+
   it("the old blind digits-then-Tab walk skips the next question and never submits", async () => {
     const claude = new FakeClaude(set);
     for (const keys of [["2", "tab"], ["1", "3", "tab"], ["2", "enter"]]) await claude.io().keys(keys);
@@ -172,13 +320,14 @@ describe("answering Claude's question dialog", () => {
     expect(claude.result).toEqual({ "Which tools?": ["Vim", "Emacs"] });
   });
 
-  it("answers an older phone's single question without submitting early", async () => {
+  it("lets an older phone advance individual questions but refuses to submit an unverifiable partial review", async () => {
     const claude = new FakeClaude(set);
     await answerClaudeQuestionDialog(claude.io(), set, [{ options: [0] }], { from: 0, submit: false });
     await answerClaudeQuestionDialog(claude.io(), set, [{ options: [1] }], { from: 1, submit: false });
     expect(claude.result).toBeUndefined();
-    await answerClaudeQuestionDialog(claude.io(), set, [{ options: [0] }], { from: 2, submit: true });
-    expect(claude.result).toEqual({ "Which color?": "Red", "Which tools?": ["Emacs"], "Which size?": "Small" });
+    await expect(answerClaudeQuestionDialog(claude.io(), set, [{ options: [0] }], { from: 2, submit: true }))
+      .rejects.toMatchObject({ status: 409, details: { code: "question-not-shown" }, message: expect.stringContaining("partial answer set") });
+    expect(claude.result).toBeUndefined();
   });
 
   it("sends nothing to a pane asking a different set of questions", async () => {
@@ -195,18 +344,15 @@ describe("answering Claude's question dialog", () => {
     await expect(answerClaudeQuestionDialog(before.io(), set.slice(0, 2), [{ options: [0] }, { options: [0] }]))
       .rejects.toMatchObject({ status: 409, details: { code: "question-not-shown" }, message: expect.stringContaining("Nothing was sent") });
     const after = new FakeClaude(set);
-    await expect(answerClaudeQuestionDialog(after.io(), [set[0], { ...set[1], question: "Which tool?" }, set[2]], [{ options: [0] }, { options: [0] }]))
+    await expect(answerClaudeQuestionDialog(after.io(), [set[0], { ...set[1], question: "Which tool?" }, set[2]], [{ options: [0] }, { options: [0] }, { options: [0] }]))
       .rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" }, message: expect.stringContaining("already sent") });
     expect(after.sent.length).toBeGreaterThan(0);
   });
 
-  it("matches a question Claude cut at 2000 characters and a label it collapsed or wrapped", () => {
+  it("matches a question Claude cut at 2000 characters or collapsed whitespace", () => {
     const long = "word ".repeat(600).trim();
     expect(sameTitle(long.slice(0, 1999).trimEnd() + "…", long)).toBe(true);
     expect(sameTitle("Short?…", "Short? Yes")).toBe(false);
     expect(sameTitle("Which color?", "Which   color?")).toBe(true);
-    expect(sameLabel("Red", " Red ")).toBe(true);
-    expect(sameLabel("Use the new onboarding banner for", "Use the new onboarding banner for every  theme")).toBe(true);
-    expect(sameLabel("Red", "Redder")).toBe(false);
   });
 });

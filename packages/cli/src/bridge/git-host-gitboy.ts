@@ -284,6 +284,13 @@ export const gitboy: GitHostProvider = {
     if (!host.domain) throw new HostApiError("failed", "This repository has no gitboy remote.");
     const api = checkedApi ?? await apiRoot(root, host.domain, `https://${host.domain}/api/v1`);
     const { json } = await hostJson<Json>(`${api}/user`, { token, scheme: "bearer" });
-    return { user: String(obj(json).username ?? "") };
+    const user = obj(json);
+    const agent = obj(user.agent_token);
+    const identity = {
+      ...(typeof agent.name === "string" && agent.name ? { name: agent.name } : {}),
+      ...(Array.isArray(agent.repo_ids) ? { repo_ids: agent.repo_ids } : {}),
+      ...(typeof agent.expires_at === "string" && agent.expires_at ? { expires_at: agent.expires_at } : {}),
+    };
+    return { user: String(user.username ?? ""), ...(Object.keys(agent).length ? { agent: identity, agent_token: identity } : {}) };
   },
 };

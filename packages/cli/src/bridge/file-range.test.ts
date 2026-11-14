@@ -50,6 +50,10 @@ it("refuses traversal, outside absolute paths, .git, directories and symlink esc
   for (const file of ["../secret", "video/../../secret", path.join(scratch, "secret"), "link", "outside/secret", ".git/config", "video", "bad\0path", "video\\secret"]) {
     await expect(readFileRange(root, file, 0, 1)).rejects.toThrow();
   }
+  // Another spelling of the metadata folder, present on this volume: still refused, not read.
+  await mkdir(path.join(root, ".Git"), { recursive: true });
+  await writeFile(path.join(root, ".Git", "config"), "[remote]");
+  await expect(readFileRange(root, ".Git/config", 0, 1)).rejects.toMatchObject({ status: 400 });
   await expect(readFileRange(root, "missing", 0, 0)).rejects.toMatchObject({ status: 404 });
 });
 

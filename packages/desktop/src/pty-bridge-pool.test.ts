@@ -7,7 +7,8 @@ import { attachShell, attachTerminal } from "./pty-bridge.js";
 const mocks = vi.hoisted(() => ({ sshArgs: vi.fn() }));
 vi.mock("node-pty", () => ({ spawn: vi.fn() }));
 vi.mock("node:fs", async (original) => ({ ...await original<object>(), existsSync: () => false }));
-vi.mock("./hosts.js", () => ({ masterKey: (c: Computer) => `key-${c.name}`, sshArgs: mocks.sshArgs }));
+vi.mock("./hosts.js", () => ({ masterKey: (c: Computer) => `key-${c.name}`, sshArgs: mocks.sshArgs,
+  gatewayCommand: (c: Computer, command: string, opts?: { tty?: boolean; slot?: number }) => ({ file: "ssh", args: mocks.sshArgs(c, command, opts) }) }));
 
 const REMOTE: Computer = { name: "Pool terminal", local: false, server: "default" };
 const key = "key-Pool terminal";

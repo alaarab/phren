@@ -6,7 +6,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
 import { sideChannelPool, type AcquiredChannel } from "./channel-pool.js";
-import { masterKey, sshArgs } from "./hosts.js";
+import { gatewayCommand, masterKey } from "./hosts.js";
 import type { AttachTerminal, Computer, TerminalSession } from "./contract.js";
 
 // No leading dot or dash: the name is an argv entry for tmux or herdr.
@@ -122,7 +122,8 @@ function pooledSession(c: Computer, command: string, cols: number, rows: number)
     channel = acquired;
     if (ended) { release(); return; }
     try {
-      p = spawnPty("ssh", sshArgs(c, command, { tty: true, slot: acquired.slot }), size.cols, size.rows, false);
+      const { file, args } = gatewayCommand(c, command, { tty: true, slot: acquired.slot });
+      p = spawnPty(file, args, size.cols, size.rows, false);
     } catch {
       end(1);
       return;

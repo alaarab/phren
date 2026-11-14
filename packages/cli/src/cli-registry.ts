@@ -217,6 +217,11 @@ export const REGISTRY: Command[] = [
     ],
     run: async args => { const { runBrowser } = await import("./bridge/browser-env.js"); return runBrowser(args); } },
   {
+    name: "unpair", topic: "setup", usage: "phren unpair [<number> | SHA256:<fingerprint> | --all | --notifications]",
+    summary: "List the phones paired with this computer, or remove one, end its open connections and stop its notifications",
+    run: async args => { const { runUnpair } = await import("./bridge/unpair.js"); return runUnpair(args); },
+  },
+  {
     name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read|gitboy-write --key <public-key-file|->",
     summary: "Connect your phone with a pairing QR code, or authorize a scoped key for gitboy (gitboy-read: project memory; gitboy-write: save findings)",
     run: async args => {
@@ -226,7 +231,7 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|git-host|speech-key set|speech-voice|speech-model|speech-region>",
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|git-host|git-credential|speech-key set|speech-voice|speech-model|speech-region>",
     summary: "Install Phren Hook and enroll phone or computer connections",
     subcommands: [
       { name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" },
@@ -247,9 +252,11 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode|copilot] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
+      { name: "wait", usage: "phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json] [--follow]", summary: "Follow one local dispatch to its end as NDJSON; exits 0 done, 1 failed or gone, 124 timeout" },
+      { name: "close", usage: "phren dispatch close <dispatch-id> | phren dispatch close --idempotency-key <key>", summary: "Cancel a running local dispatch by id or idempotency key: stop its agent and close its pane" },
       { name: "returns", usage: "phren dispatch returns [--watch [--json] [--consume]]", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read; --watch prints them as they land until Ctrl-C, leaving them unread unless --consume" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" },
       { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" },

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { noteBrowserLaunch } from "./browser-watch.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, mkdtemp, readFile, realpath, rmdir } from "node:fs/promises";
@@ -6,7 +7,7 @@ import path from "node:path";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { defaultPhrenPath } from "../phren-paths.js";
-import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
+import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, seedStartingToken, servers, snapshot } from "./herdr.js";
 import { type AgentStart, agentNotReady, terminalKind, terminalName, terminalProvider } from "./terminal.js";
 import { tmuxScroll } from "./terminal-tmux.js";
 import { intervalFromEnv } from "./limits.js";
@@ -19,6 +20,9 @@ import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
 import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
+import { keyedExplicitEnv, prepareKeyedGitboy, removeAgentTokenFile } from "./git-credential.js";
+import { createDispatchClone, dispatchClonePaths, type DispatchClonePaths } from "./dispatch-clone.js";
+import { acquireLaunchLock, markSubmitted, releaseLaunchLock, type LaunchLock } from "./worker-identity.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -49,6 +53,17 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
   // phren-agent takes low to xhigh, and max as xhigh.
   if (kind === "phren") return ["--reasoning", effort];
   return [];
+}
+
+/** Refuse a keyed launch whose resolved arguments would skip approvals or allow everything. */
+export function assertKeyedLaunchArgs(kind: string, args: readonly string[]): void {
+  const line = args.join(" ");
+  const unsafe = /--dangerously|--allow-all|--yolo|--full-auto|bypassPermissions/.test(line)
+    || /(?:^|\s)-a\s+never(?:\s|$)/.test(line)
+    || /(?:^|\s)-s\s+danger-full-access(?:\s|$)/.test(line)
+    || /--ask-for-approval(?:=|\s+)never/.test(line)
+    || /--sandbox(?:=|\s+)danger-full-access/.test(line);
+  if (unsafe) throw new BridgeError(400, `A keyed ${kind} launch may not use skip-approval or allow-all flags.`);
 }
 
 /** phren's own agent runs as `phren agent`: the subcommand and its interactive TUI lead its arguments. */
@@ -394,7 +409,16 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const kind = z.enum(launchKinds).parse(data.kind);
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
   const named = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
-  const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
+  let permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
+  if (data.idempotencyKey) {
+    if (kind !== "claude" && kind !== "codex") {
+      throw new BridgeError(400, "A dispatch with an idempotency key may run only claude or codex; this harness is refused.");
+    }
+    if (permissionMode && permissionMode !== "supervised") {
+      throw new BridgeError(400, `A dispatch with an idempotency key runs supervised; --permission-mode ${permissionMode} is refused.`);
+    }
+    permissionMode = "supervised";
+  }
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
   if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
   if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
@@ -407,6 +431,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
   if (brief && role === "conductor") throw new BridgeError(400, "A conductor starts with its own brief.");
+  // A launch's own token, so an ambiguous outcome can later be resolved by
+  // looking for the pane that carries it.
+  const suppliedStartingToken = data.startingToken === undefined || data.startingToken === null ? undefined : z.string().regex(/^[a-f0-9]{64}$/).parse(data.startingToken);
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
   // the label a person typed is not, so derive one from it.
   const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
@@ -446,10 +473,13 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const args = role === "conductor" ? [...await prepareConductor(kind, effort, model), ...(kind === "phren" ? phrenArgs : [])]
     : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(resumeClaude ? ["--resume", resumeClaude] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
+  if (data.idempotencyKey) assertKeyedLaunchArgs(kind, args);
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
   // first turn. The typed arguments below stay the fallback.
-  const structured = kind === "codex" && role === "agent" && !options.canary && codexAppServerEnabled();
+  // A keyed Codex worker uses the typed explicit command so its durable
+  // worker identity file is written before the harness execs.
+  const structured = kind === "codex" && role === "agent" && !options.canary && !data.idempotencyKey && codexAppServerEnabled();
   // OpenCode serves its own API on a port of its own (opencode-panes.ts): the
   // Hook sends its prompts, answers its asks and interrupts it over HTTP, and
   // the pane stays the owner's view. A brief goes the same way once it
@@ -460,14 +490,28 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
   const dispatchId = options.dispatchId ?? brief?.id;
-  const variables = { ...askpassEnv(), ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
-  const env = Object.keys(variables).length ? variables : undefined;
+  const variables = { ...askpassEnv(), ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}),
+    ...(suppliedStartingToken ? { PHREN_STARTING_TOKEN: suppliedStartingToken } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
   // Created last, once nothing else can refuse the launch, so a refusal
-  // never leaves a worktree or branch behind.
-  const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory!, worktreeRequest) : undefined;
+  // never leaves a checkout or branch behind. A keyed dispatch gets a fresh
+  // clone with its own managed global config; an unkeyed launch keeps the
+  // ordinary worktree of the user's checkout.
+  const keyed = role === "agent" && !!data.idempotencyKey;
+  if (keyed && !worktreeRequest) throw new BridgeError(400, "A dispatch with an idempotency key requires --worktree: keyed workers run only in a Phren-managed clone.");
+  const keyedDispatchId = keyed ? z.string().uuid().parse(data.dispatchId ?? brief?.id ?? randomUUID()) : undefined;
+  const keyedWorkerFile = keyed ? dispatchClonePaths(keyedDispatchId!).workerFile : undefined;
+  let launchLock: LaunchLock | undefined;
+  if (keyed) launchLock = await acquireLaunchLock(keyedDispatchId!);
+  try {
+  let worktree: (LaunchWorktree & Partial<DispatchClonePaths>) | undefined;
+  if (worktreeRequest) {
+    worktree = keyed
+      ? await createDispatchClone(projectDirectory!, { branch: worktreeRequest.branch, dispatchId: keyedDispatchId!, paths: dispatchClonePaths(keyedDispatchId!) })
+      : await createLaunchWorktree(projectDirectory!, worktreeRequest);
+  }
   // The same root as the conductor, chosen by this computer's PHREN_PATH.
   // mkdtemp keeps simultaneous chats with the same title isolated.
   let scratch: string | undefined;
@@ -486,13 +530,36 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     scratch = await mkdtemp(path.join(agents, `${new Date().toISOString().slice(0, 10)}-${herdrAgentName(label)}-`));
   }
   const cwd = scratch ?? worktree?.cwd ?? projectDirectory!;
+  // A keyed dispatch uses only the stored agent token and the clone's managed
+  // config. Its environment is an explicit allowlist, never an overlay on the
+  // Hook's own environment.
+  let keyedGitboy: Awaited<ReturnType<typeof prepareKeyedGitboy>>;
+  let agentTokenFile: string | undefined;
+  let keyedEnv: Record<string, string> | undefined;
+  if (keyed) {
+    try {
+      keyedGitboy = await prepareKeyedGitboy(cwd, { tokenFile: worktree!.agentTokenFile!, gitConfigFile: worktree!.gitConfigFile });
+    } catch (error) {
+      await worktree?.discard();
+      throw error;
+    }
+    agentTokenFile = keyedGitboy?.tokenFile;
+    keyedEnv = keyedExplicitEnv(process.env, {
+      ...(keyedGitboy?.env ?? {}),
+      ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}),
+      ...(keyedWorkerFile ? { PHREN_WORKER_ID_FILE: keyedWorkerFile } : {}),
+      ...(home ? claudeLaunchEnv(home) : {}),
+    });
+  }
+  const envVariables = keyedEnv ?? { ...variables };
+  const env = Object.keys(envVariables).length ? envVariables : undefined;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
   // agent too; a folder the Hook picked or just created is trusted up front.
   if (scratch || worktree || options.trustFolder) await pretrustFolder(kind, cwd, scratch ? "new agent folder" : worktree ? `new worktree for ${worktree.branch}` : "project folder",
     home ? { ...process.env, ...claudeLaunchEnv(home) } : process.env);
   if (!options.into) {
     try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
-    catch (error) { await worktree?.discard(); if (scratch) await rmdir(scratch).catch(() => undefined); throw error; }
+    catch (error) { await removeAgentTokenFile(agentTokenFile); await worktree?.discard(); if (scratch) await rmdir(scratch).catch(() => undefined); throw error; }
   }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined = options.into;
   for (let attempt = 0; attempt < 25 && !created; attempt++) {
@@ -507,11 +574,19 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
       created = { workspaceId: String(tab.workspace_id), tabId: String(tab.tab_id), paneId: String(pane.pane_id) };
     } else await new Promise(resolve => setTimeout(resolve, 200));
   }
-  if (!created) throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
+  if (!created) { await removeAgentTokenFile(agentTokenFile); throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`); }
+  if (suppliedStartingToken) seedStartingToken(server, { workspace_id: created.workspaceId, tab_id: created.tabId, pane_id: created.paneId }, suppliedStartingToken);
   const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
   await options.onPlaced?.({ server, ...place, source: kind });
+  // The pane identity variables are ours (Herdr/tmux), not the caller's, and
+  // the worker's hooks need them under the explicit keyed environment too.
+  const paneEnv = terminalProvider().paneEnv?.(server, place) ?? {};
+  const identityEnv = Object.fromEntries(Object.entries(paneEnv)
+    .filter(([key]) => /^(?:HERDR_(?:ENV|SOCKET_PATH|WORKSPACE_ID|TAB_ID|PANE_ID)|TMUX|TMUX_PANE)$/.test(key)));
+  const launchEnv = keyedEnv ? { ...keyedEnv, ...identityEnv } : env;
   const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
-    ...(data.effort === undefined ? {} : { effort }), env: { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) },
+    ...(data.effort === undefined ? {} : { effort }),
+    env: keyedEnv ? { ...(launchEnv ?? {}) } : { ...paneEnv, ...(env ?? {}) }, envExact: !!keyedEnv,
     ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief, ...(permissionMode ? { remoteArgs: codexModeFlags(permissionMode) } : {}) }).catch(error => {
     const note = `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`;
     if (error instanceof AppServerUnsupportedError) logger.debug("launch", note); else logger.warn("launch", note);
@@ -535,8 +610,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   }
   const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
     ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
+  if (keyedDispatchId) await markSubmitted(keyedDispatchId);
   try {
-    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
+    await (kind === "codex" ? startCodex : startWhenShellReady)(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(launchEnv ? { env: launchEnv } : {}), ...(keyedEnv ? { envExact: true, freshPane: !options.into } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
     if (error instanceof BridgeError && error.message.startsWith("Codex exited at start:")) throw error;
@@ -545,6 +621,10 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     // that screen from the chat instead of stranding the workspace.
     const blocked = agentNotReady(error);
     if (!blocked) {
+    // A keyed worker may have started before the error (a snapshot read can
+    // fail after the harness runs): its token stays for the confirmed-
+    // termination cleanup, which knows the path from the receipt.
+    if (!keyedEnv) await removeAgentTokenFile(agentTokenFile);
     const host = terminalName(server);
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time"
       : error instanceof BridgeError && error.message.startsWith(`${host}: `) ? error.message.slice(host.length + 2) : `${host} reported an error`;
@@ -591,7 +671,12 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
       briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
-    ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
+    ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}), ...(agentTokenFile ? { agentTokenFile } : {}),
+    ...(worktree?.cloneDir ? { cloneDir: worktree.cloneDir, gitConfigFile: worktree.gitConfigFile } : {}),
+    ...(worktree?.workerFile ? { workerFile: worktree.workerFile } : {}) };
+  } finally {
+    if (launchLock) await releaseLaunchLock(launchLock);
+  }
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
   if (!["focus", "rename", "create", "close", "scroll"].includes(operation)) throw new BridgeError(400, "Unsupported Herdr action.");

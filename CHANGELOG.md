@@ -5,8 +5,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.77] - 2026-11-14
+
+### Security
+
+- Hook: approval and sudo alerts hide more kinds of credentials, matching the phone: `curl -u name:password`, other `Authorization` schemes, key, token and cookie headers, `sshpass -p`, registry logins and passwords in form data.
+- Hook: what an agent changed is no longer shown on the phone when the change holds a credential. A diff with a private key, a known token format (AWS, GitHub, Slack, npm, JWT and others) or a password or token assigned in code is withheld and the file shows as redacted, and changes saved earlier are checked the same way. More secret files are recognised by name too: `.p8` keys, `id_ecdsa` and other SSH keys, `prod.env`, `.git-credentials`, `.pgpass`, keystores, `.tfvars` and `kubeconfig`.
+- Dependencies: `@hono/node-server`, which the MCP SDK brings in, is now 2.1.8, past two moderate advisories (GHSA-jpvv-r467-5p4w, a backslash in a request path read as a separator; GHSA-qv5m-9pm6-hqp3, an unhandled connection reset during a WebSocket upgrade).
+
+## [0.3.76] - 2026-11-13
+
+### Security
+
+- `phren unpair` lists the phones paired with a computer and removes one. It takes the phone's key out of `authorized_keys` and ends the open SSH connections that run only Phren, so a connection the removed phone already held stops working too; before, removing the line by hand left such a connection usable until it dropped. Phones and computers that are still paired reconnect on their own.
+- `phren unpair` also removes the computer's notification registrations, so a removed phone stops getting approval, sudo and schedule alerts from it. Before, a phone whose key was removed kept receiving them. A registration is not tied to a key, so all of them go; phones that are still paired register again within an hour of opening Phren. `phren unpair --notifications` does only this step.
+- Browser watch: a page in a watched browser can no longer grow a recording's metadata without limit. The recording keeps at most 500 navigations (ten new ones a second) and 100 pages, cuts each URL to 1,024 characters and each title to 200, and writes its frame counters at most once a second, not on every frame. Before, a page that navigated in a loop made the Hook rewrite an ever larger file each time.
+- `phren pair`: nobody on the network can cancel pairing any more. Five wrong codes used to close the listener, so five requests from anyone who could reach the port ended it. They now turn off typing the code for that pairing, and a phone that scans still pairs. Requests from a web page are refused and not counted.
+- Hook: only the owner's phone can register for notifications. A linked computer or an agent could register its own destination and receive this computer's approval alerts.
+
+## [0.3.75] - 2026-11-12
+
+### Security
+
+- `phren pair`: the six-character code alone no longer authorizes a phone. The QR code and pairing link now carry a second, long secret that is never typed or sent, and only a phone that proves it pairs at once. A phone that proves just the code waits for you to allow it at the computer, whatever its request says; before, a request that left out the "typed" mark skipped that question, so someone who captured one pairing request on the network could work out the code and add their own phone. Scanning needs Phren for iPhone 1.0.59 or later; an older app is told to update or to choose Enter code, which still works.
+- Hook: the routes only the owner may use (changing the release authority policy, answering a sudo request, sending or withdrawing queued messages, changing a session's permission mode, linking a computer) now also refuse a request that arrives through another computer's key. They already refused an agent's call.
+- Hook on tmux: session, window and folder names that contain `#` are passed to tmux as plain text. tmux reads these arguments as formats, so a name could be read as a tmux variable or command instead of being used as written.
+- Hook file routes and the store routes treat every spelling of a repository's `.git` folder as `.git` (other letter case, `GIT~1`, trailing dots or spaces), not only the exact name.
+- `session_end` and `session_context` take only a session id: anything else names no session.
+- Index globs must stay inside each project folder: `phren config index` and `set_config` refuse an absolute pattern, `..` or a backslash, and a stored policy holding one is ignored.
+- Desktop: a store path from a linked computer is checked under Windows path rules too before it is laid out in the local mirror.
+- Phren agent: the Python syntax check after an edit runs Python in isolated mode, so it loads only the interpreter's own modules.
+- Dependencies with published advisories moved to their fixed releases: DOMPurify 3.4.17 (the desktop's editor), ip-address 10.7.6 (through the MCP SDK), Vite 8.3.7 and @azure/msal-node 7.2.1 (build tools).
+
+## [0.3.74] - 2026-11-09
+
 ### Added
 
+- Messages that other agents send a Claude session (teammates, subagent hand-backs, other sessions) now reach the phone's chat view with the sender's name, as the terminal shows them.
+
+### Fixed
+
+- Answers sent from the phone to Claude's questions are checked in full before submission; unexpected cursor positions, existing text, and incomplete redraws now stop with a clear error.
+
+## [0.3.73] - 2026-11-08
+
+### Added
+
+- `phren dispatch local <project>` places a worker on this computer, with the prompt from stdin (`--prompt-file -`), a durable `--idempotency-key` (a repeated key returns the same dispatch with `existing: true`), and `--worktree [--branch <name>]` for a fresh isolated clone per dispatch.
+- `phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json]` streams one dispatch as NDJSON (`running`, `needs_you`, then a final `done`, `failed`, `gone` or `timeout`) and exits 0, 1 or 124.
+- `phren dispatch close <dispatch-id>` (or `--idempotency-key <key>`) cancels a dispatch, stops its agent and closes its pane; a repeated close answers `closed: false`.
+- Keyed dispatches are built for gitboy's runner: local only, Claude or Codex in supervised mode, a clean environment with no inherited tokens, SSH keys or credential helpers, and Git authenticated only by a stored gitboy `gba_` agent token passed as a file. Launches survive crashes without relaunching, and clones are cleaned up once the worker is confirmed gone (failed ones are kept for seven days). Requires Git 2.40.
 - `phren browser env` takes `--session`, `--json` and `--fish`, so sessions started before a Hook update can opt in to browser watching. The prompt hook suggests it once per session when a prompt mentions Playwright or a browser.
 - Live session rows report `browserWatch` (`on`, `off` or `unknown`) so the phone can tell whether an agent's browsers will stream.
 

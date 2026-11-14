@@ -64,8 +64,9 @@ export interface GitHostProvider {
    * tool picks it rather than the remote (gh prefers an `upstream` or its `repo set-default`). Without it,
    * the remote's `webUrl` is that repository. Null when it cannot be told. */
   repository?(root: string, host: GitHost): Promise<string | null>;
-  /** Who a token signs in as, for Connect; HTTP hosts only. */
-  whoami?(root: string, host: GitHost, token: string, api?: string): Promise<{ user: string }>;
+  /** Who a token signs in as, for Connect; HTTP hosts only. A gitboy agent
+   * token also reports the agent identity the host attached to it. */
+  whoami?(root: string, host: GitHost, token: string, api?: string): Promise<{ user: string; agent?: { name?: string; repo_ids?: unknown[]; expires_at?: string }; agent_token?: { name?: string; repo_ids?: unknown[]; expires_at?: string } }>;
 }
 
 export type MergeMethod = "merge" | "squash" | "rebase";

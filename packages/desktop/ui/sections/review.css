@@ -109,6 +109,13 @@
 .review-report-text .ct-md-table { border-collapse: collapse; font-size: 12px; }
 .review-report-text .ct-md-table th, .review-report-text .ct-md-table td { padding: 4px 10px; border: 1px solid var(--border); text-align: left; }
 .review-report-text .ct-md-link { color: var(--link); }
+.review-report-text .ct-md-list li > .ct-md-list { margin: 2px 0 0; }
+.review-report-text .ct-md-task { list-style: none; position: relative; }
+.review-report-text .ct-md-check { position: absolute; left: -18px; top: .3em; width: 12px; height: 12px; box-sizing: border-box; border: 1.5px solid var(--dim); border-radius: 4px; }
+.review-report-text .ct-md-check.done { border-color: var(--done); background: var(--done); }
+.review-report-text .ct-md-quote { margin: 8px 0; padding: 1px 0 1px 12px; border-left: 2px solid var(--border-strong); color: var(--text-2); }
+.review-report-text .ct-md-hr { height: 0; margin: 12px 0; border: 0; border-top: 1px solid var(--border-strong); }
+.review-report-text del { color: var(--muted); }
 
 .review-files-list { display: grid; gap: 2px; margin-bottom: 12px; }
 .review-files-row { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .18s ease; }

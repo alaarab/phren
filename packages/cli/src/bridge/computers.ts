@@ -73,6 +73,33 @@ export async function acceptComputer(name: string, input: string, sshDirectory =
 }
 
 /**
+ * Remove every authorized_keys line `matches` picks, under the enrollment lock.
+ * Returns how many lines went. Every other line, comments and blank lines
+ * included, is written back as it was.
+ */
+export async function removeAuthorizedKeys(matches: (line: string) => boolean, sshDirectory = path.join(homedir(), ".ssh")): Promise<number> {
+  const directory = await lstat(sshDirectory).catch(() => undefined);
+  if (!directory) return 0;
+  if (!directory.isDirectory() || directory.isSymbolicLink()) throw new BridgeError(409, "Refusing an unexpected SSH directory.");
+  const lock = path.join(sshDirectory, ".phren-enroll.lock");
+  try { await mkdir(lock, { mode: 0o700 }); }
+  catch { throw new BridgeError(409, "SSH enrollment is already running; inspect .phren-enroll.lock if interrupted."); }
+  const file = path.join(sshDirectory, "authorized_keys");
+  const temporary = path.join(lock, "authorized_keys");
+  try {
+    if (!await regularFile(file)) return 0;
+    const before = await readFile(file, "utf8");
+    const lines = before.split("\n");
+    const kept = lines.filter(line => !matches(line));
+    if (kept.length === lines.length) return 0;
+    await writeFile(temporary, kept.join("\n"), { mode: 0o600, flag: "wx" });
+    if (await readFile(file, "utf8") !== before) throw new BridgeError(409, "authorized_keys changed while removing the key. Try again.");
+    await rename(temporary, file);
+    return lines.length - kept.length;
+  } finally { await rm(lock, { recursive: true, force: true }); }
+}
+
+/**
  * Append one authorized_keys line under a lock, refusing when `conflicts`
  * matches an existing line and leaving an identical line in place.
  */

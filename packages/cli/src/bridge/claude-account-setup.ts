@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, readFile, symlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { homeDir } from "../home-paths.js";
-import { claudeHome, claudeHomes, DEFAULT_ACCOUNT, isAccountSlug, setAccountLabel } from "./claude-accounts.js";
+import { claudeHome, claudeHomes, DEFAULT_ACCOUNT, forgetClaudeHomes, isAccountSlug, setAccountLabel } from "./claude-accounts.js";
 import { atomic } from "./protocol.js";
 
 /** Entries of the default home every account shares by symlink. */
@@ -112,6 +112,8 @@ export async function addClaudeAccount(slug: string, opts: { label?: string; ema
     linked.push(name);
   }
   await mergeMcpServers(path.join(dir, ".claude.json"), await mcpServersOf(source.configFile));
+  // The listing may predate this home or its .claude.json (an interrupted add): list again.
+  forgetClaudeHomes();
   if (opts.label) await setAccountLabel(slug, opts.label);
   return { id: slug, dir, linked, created, ...(keychain === "unknown" ? { warning: KEYCHAIN_UNKNOWN_WARNING } : {}) };
 }

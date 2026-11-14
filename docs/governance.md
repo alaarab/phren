@@ -181,6 +181,10 @@ phren config index get
 phren config index set --include="**/*.md" --exclude="**/node_modules/**"
 ```
 
+Include globs are matched inside each project folder. A pattern that is
+absolute, or holds `..` or a backslash, is refused, and one already stored is
+ignored.
+
 ## Running the governance checks
 
 ```bash

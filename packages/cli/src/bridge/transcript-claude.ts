@@ -682,6 +682,35 @@ const QUEUED_IMAGE_LABEL = /\[Image #\d+\]/;
 const QUEUED_IMAGE_LABELS = /\[Image #\d+\]/g;
 const ATTACHED_FILES_FOOTER = /Attached files on this computer:\s*$/;
 
+/** How much of one agent's message crosses: the terminal folds it too. */
+const PEER_MESSAGE_LIMIT = 32_768;
+const HANDBACK_FRAME = /^\[Subagent hand-back\][\s\S]*?The report follows:\n/;
+
+/** A message another agent sent this session (a teammate, a subagent's
+ * hand-back or another Claude session), which Claude Code delivers as a hidden
+ * user row when the agent is idle, or a queued_command attachment mid-turn,
+ * both naming it with `origin.kind: "peer"`. The terminal shows it as
+ * "Message from @name"; only the sender's name and the words cross, never the
+ * envelope, socket path or ids. */
+export function peerMessage(raw: Json, includeSidechain = false): Json | undefined {
+  if (raw.isSidechain && !includeSidechain) return undefined;
+  const attachment = object(raw.attachment);
+  const origin = raw.type === "user" ? object(raw.origin)
+    : raw.type === "attachment" && attachment.type === "queued_command" ? object(attachment.origin) : {};
+  if (origin.kind !== "peer" || typeof origin.body !== "string") return undefined;
+  const handback = origin.handback === true;
+  // A hand-back's body opens with the harness's framing and indents the
+  // report two spaces; the report itself is carried alongside when it fits.
+  const text = handback && typeof origin.handbackReportText === "string" ? origin.handbackReportText
+    : handback && HANDBACK_FRAME.test(origin.body) ? origin.body.replace(HANDBACK_FRAME, "").replace(/^ {2}/gm, "")
+    : origin.body;
+  if (!text.trim()) return undefined;
+  const name = typeof origin.name === "string" ? origin.name.replace(/[\p{Cc}\p{Cf}]+/gu, " ").trim().slice(0, 80) : "";
+  return { type: "phren_peer_message", timestamp: raw.timestamp, ...(typeof raw.uuid === "string" ? { uuid: raw.uuid } : {}),
+    name: name || "agent", ...(handback ? { handback: true } : {}),
+    text: text.length > PEER_MESSAGE_LIMIT ? text.slice(0, PEER_MESSAGE_LIMIT) + "\n…" : text };
+}
+
 /** A phren UserPromptSubmit injection, as `{ type: "phren_hook_context",
  * parentUuid, content }`, or undefined for any other row. */
 export function phrenHookContext(raw: Json, includeSidechain = false): Json | undefined {
@@ -691,6 +720,8 @@ export function phrenHookContext(raw: Json, includeSidechain = false): Json | un
   // its hook output. Only whether it was a background notification crosses,
   // so the phone can leave a notification's injection out.
   if (attachment.type === "queued_command") {
+    const peer = peerMessage(raw, includeSidechain);
+    if (peer) return peer;
     return { type: "phren_turn_input", timestamp: raw.timestamp, notification: attachment.commandMode === "task-notification" };
   }
   if (attachment.type !== "hook_success" || attachment.hookEvent !== "UserPromptSubmit") return undefined;
@@ -830,6 +861,7 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
   // origin says "task-notification" (sometimes wrapped in a system reminder).
   // It is a notice, not a prompt: normalize only its public envelope and never
   // let established notification provenance fall through as ordinary user text.
+  if (raw.type === "user" && object(raw.origin).kind === "peer") return peerMessage(raw, includeSidechain);
   if (raw.type === "user") {
     const content = object(raw.message).content;
     const text = typeof content === "string" ? content

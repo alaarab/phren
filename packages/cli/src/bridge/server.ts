@@ -9,6 +9,7 @@ import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
+import { cleanupIdempotencyLocks, markHookServerProcess } from "./dispatch-idempotency.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { handOff } from "./hand-off.js";
@@ -37,7 +38,7 @@ import { approvalPushCapability } from "./push.js";
 import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
-import { DispatchService } from "./dispatch.js";
+import { DispatchService, reconcileInterruptedDispatches } from "./dispatch.js";
 import { DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { findPane, paneChatState, paneIdentity, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
@@ -79,6 +80,7 @@ import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.j
 import { localNames } from "./computer-names.js";
 import { startStoreSyncLoop } from "../sync/store-sync.js";
 import { SocketBudget, socketIdentity, socketKind } from "./socket-budget.js";
+import { logger } from "../logger.js";
 
 export { capabilities, capabilitiesForModules, requireRoute } from "./server-routes.js";
 export { streamCloseReason } from "./server-stream.js";
@@ -86,6 +88,8 @@ export { herdrAgentName, launchSession } from "./server-launch.js";
 
 export async function serve(version: string, options: { modelCatalog?: ModelCatalog; accountUsage?: AccountUsageReader } = {}): Promise<void> {
   process.umask(0o077);
+  markHookServerProcess();
+  await cleanupIdempotencyLocks().catch(error => logger.warn("dispatch", `Could not clean leftover idempotency locks: ${error instanceof Error ? error.message : String(error)}`));
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook")) throw new BridgeError(404, disabledHint("hook"));
   const activeCapabilities = capabilitiesForModules(modules);
@@ -120,6 +124,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     localWorkers: hookWorkers(agentHooks),
     close: async (receipt, verifiedPeer) => {
       const data = { target: receipt.target, dispatch: receipt.moves?.slice().reverse().find(move => move.to.computer)?.id ?? receipt.id, turn: receipt.closePending!.turn };
+      // Keyed dispatches are local-only: close on this Hook, never over a peer.
+      if (receipt.idempotencyKey) return closeFinishedWorker(data, handOffs);
       if (receipt.computerId === computerID) return closeFinishedWorker(data, handOffs);
       const peer = verifiedPeer ?? (await hookPeers().catch(() => [])).find(peer => peer.name === receipt.computer);
       if (peer) return peerRequest(peer, "/v1/dispatch/close", data);
@@ -257,6 +263,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     if (live) throw new Error("Phren Hook is already running.");
     await unlink(socketPath());
   }
+  // Only the Hook that owns the socket reconciles dispatch state: a second
+  // `bridge serve` stops above before touching any receipt or key record.
+  if (dispatches) await reconcileInterruptedDispatches().catch(error => logger.warn("dispatch", `Could not reconcile interrupted dispatches: ${error instanceof Error ? error.message : String(error)}`));
 
   const storePulls = new StorePulls(scheduleStore);
   const gitboyWebhooks = new GitboyWebhooks(root, storeId => storePulls.request(storeId), undefined,

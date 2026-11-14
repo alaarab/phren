@@ -23,6 +23,7 @@ import { AppServerRpcError } from "./codex-app-server.js";
 import { CodexServerUnavailable, codexServers } from "./codex-servers.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { PERMISSION_MODE_VALUES, refuseAgentOrigin, type PermissionModeSwitcher } from "./permission-mode.js";
+import { ownerRequest } from "./request-origin.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import { sessionWebServers } from "./session-servers.js";
 import { type PromptGuards, takesPrompt } from "./session-activity.js";
@@ -436,9 +437,9 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     if (EXPECTED_REPOSITORY_REQUIRED) throw new BridgeError(400, "This app is too old to change Git safely. Update it.", { code: "expected-repository-required" });
   }
   if (["/v1/diff", "/v1/git/status", "/v1/git/worktrees"].includes(url.pathname)) {
-    return withGitReadDeadline(() => paneRouteOnce(ctx, url, data, response, () => {}));
+    return withGitReadDeadline(() => paneRouteOnce(ctx, url, data, response, () => {}, headers));
   }
-  if (url.pathname !== "/v1/prompt") return paneRouteOnce(ctx, url, data, response, () => {});
+  if (url.pathname !== "/v1/prompt") return paneRouteOnce(ctx, url, data, response, () => {}, headers);
   // A retried send carries its first attempt's id; the Hook answers it with
   // that attempt's reply instead of typing the message a second time.
   const id = deliveryIdSchema.parse(data.deliveryId);
@@ -449,10 +450,10 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
   const known = id ? deliveryReply(ctx.agentHooks, id, object(data.target), String(data.text ?? "")) : undefined;
   if (known && known.state !== "failed") return { ...known, replayed: true };
   if (known) promptOnce.forget(id!);
-  return promptOnce.run(id, scope, async typing => object(await paneRouteOnce(ctx, url, data, response, typing)));
+  return promptOnce.run(id, scope, async typing => object(await paneRouteOnce(ctx, url, data, response, typing, headers)));
 }
 
-export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void | Promise<void>): Promise<unknown> {
+export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void | Promise<void>, headers: IncomingHttpHeaders = {}): Promise<unknown> {
   const { agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions } = ctx;
   let result: unknown;
   if (url.pathname === "/v1/git/worktrees/remove/preview" || url.pathname === "/v1/git/worktrees/remove") {
@@ -666,8 +667,9 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // The messages a busy agent holds in its own queue: sent to the running
     // turn now, or withdrawn unsent. Only Claude Code's queue can be reached;
     // a pane the Hook types into for any other harness has none it can act on.
-    // The owner's words: an agent may not send or discard another pane's queue.
-    if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner sends or cancels queued messages, from the phone.");
+    // The owner's words: neither an agent nor a peer computer may send or
+    // discard a pane's queue.
+    if (!ownerRequest({ headers }, data)) throw new BridgeError(403, "Only the owner sends or cancels queued messages, from the phone.");
     const action = z.enum(["send-now", "withdraw"]).parse(data.action);
     if (target.source !== "claude") throw new BridgeError(409, "Only Claude Code's queued messages can be sent now or withdrawn.", { code: "queue-unsupported" });
     const guards = promptGuards(agentHooks, target);
@@ -682,9 +684,10 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     result = await settingsSwitcher.switch(target, data);
   } else if (url.pathname === "/v1/agents/permission-mode") {
     // The owner's own choice from the phone: no authority ceiling applies.
-    // An agent's call carries its pane as `origin` and is refused, so no
-    // agent can raise its own or another pane's mode past its ceiling.
-    refuseAgentOrigin(data && typeof data === "object" && "origin" in data ? data.origin ?? null : undefined);
+    // An agent's call carries its pane as `origin`, a peer computer's
+    // arrives through its key's scope, and both are refused, so neither can
+    // raise a pane's mode past its ceiling.
+    refuseAgentOrigin(ownerRequest({ headers }, data) ? undefined : data.origin ?? "peer");
     result = await permissionModeSwitcher.set(target, z.enum(PERMISSION_MODE_VALUES).parse(data.mode));
   } else if (url.pathname === "/v1/keys" && await agentHooks.servedKeys(target, z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys), String(pane.agent_status))) {
     // A served OpenCode pane: Esc aborts its turn or declines its question,

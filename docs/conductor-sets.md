@@ -80,7 +80,7 @@ All under the `conductor` module.
 | `POST /v1/conductor/make` | `{ workspaceId?, tabId?, paneId }` (and `?mux=`): make that live agent pane this computer's conductor. 409 with `computer` and `target` when the set already has one; making the current conductor again is a no-op. |
 | `POST /v1/conductor/stop` | Ends this computer's conductor role. Optional `{ paneId }` must match. Returns `{ ok, stopped }`. |
 | `POST /v1/sets/name` | `{ name }` (1 to 60 characters, or `null` to clear). Returns `{ ok, name, told, unreachable }`. |
-| `POST /v1/sets/link` | `{ name }`: the owner's `phren bridge link <name>` on this computer, over its own ssh login. Returns the link result (`name`, `as`, `local`, `remote`, `reachable`, `error`). 403 for an agent's call, 409 while another link runs, 409 or 503 with the reason when ssh or the other Hook refuses. |
+| `POST /v1/sets/link` | `{ name }`: the owner's `phren bridge link <name>` on this computer, over its own ssh login. Returns the link result (`name`, `as`, `local`, `remote`, `reachable`, `error`). 403 for an agent's call or another computer's, 409 while another link runs, 409 or 503 with the reason when ssh or the other Hook refuses. |
 
 `GET /v1/sets`:
 

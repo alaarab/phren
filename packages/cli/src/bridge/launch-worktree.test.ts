@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { createLaunchWorktree, launchWorktreeSchema, worktreeFolderName } from "./launch-worktree.js";
-import { launchSession } from "./server-launch.js";
+import { assertKeyedLaunchArgs, launchSession } from "./server-launch.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -62,6 +62,24 @@ describe("launch worktrees", () => {
     expect(launchWorktreeSchema.safeParse({ branch: "x", path: "/tmp" }).success).toBe(false);
     expect(worktreeFolderName("phren/fix-login")).toBe("phren-fix-login");
     expect(worktreeFolderName("release/1.0")).toBe("release-1-0");
+  });
+
+  it("creates the worktree with repository hooks disabled", async () => {
+    const root = await repository();
+    const marker = path.join(root, "hook-ran");
+    await writeFile(path.join(root, ".git", "hooks", "post-checkout"), `#!/bin/sh\ntouch "${marker}"\n`, { mode: 0o755 });
+    const worktree = await createLaunchWorktree(root, { branch: "phren/no-hooks" });
+    expect(await stat(marker).catch(() => undefined)).toBeUndefined();
+    await worktree.discard();
+  });
+
+  it("refuses unsafe keyed launch flags and a keyed copilot at the launch boundary", async () => {
+    expect(() => assertKeyedLaunchArgs("codex", ["--dangerously-bypass-approvals-and-sandbox"])).toThrow();
+    expect(() => assertKeyedLaunchArgs("claude", ["--permission-mode", "bypassPermissions"])).toThrow();
+    expect(() => assertKeyedLaunchArgs("codex", ["-a", "untrusted", "-s", "read-only"])).not.toThrow();
+    const root = await repository();
+    await expect(launchSession("default", { cwd: root, label: "c", kind: "copilot", idempotencyKey: "k" }))
+      .rejects.toMatchObject({ status: 400 });
   });
 
   it("refuses a conductor in a worktree before asking Herdr for anything", async () => {

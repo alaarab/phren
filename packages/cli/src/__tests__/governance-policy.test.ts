@@ -254,9 +254,23 @@ describe("getIndexPolicy", () => {
     const policy = getIndexPolicy(phrenPath);
     expect(policy.includeGlobs).toEqual(["**/*.md"]);
   });
+
+  it("ignores stored include globs that would leave the project folder", () => {
+    writeGovJson(phrenPath, "index-policy.json", {
+      includeGlobs: ["**/*.md", "../**/*.md", "notes/../../*.md", "/etc/*.conf", "~/notes/*.md", "C:/Users/**", "a\\b/*.md", "{..,x}/*.md"],
+    });
+    expect(getIndexPolicy(phrenPath).includeGlobs).toEqual(["**/*.md"]);
+  });
 });
 
 describe("updateIndexPolicy", () => {
+  it("refuses include globs that would leave the project folder, and keeps the stored policy", () => {
+    updateIndexPolicy(phrenPath, { includeGlobs: ["**/*.py"] });
+    const result = updateIndexPolicy(phrenPath, { includeGlobs: ["**/*.md", "../../other/**/*.md"] });
+    expect(result.ok).toBe(false);
+    expect(getIndexPolicy(phrenPath).includeGlobs).toEqual(["**/*.py"]);
+  });
+
   it("filters empty strings from patched globs", () => {
     const result = updateIndexPolicy(phrenPath, { includeGlobs: ["**/*.rs", "", "  "] });
     expect(result.ok).toBe(true);

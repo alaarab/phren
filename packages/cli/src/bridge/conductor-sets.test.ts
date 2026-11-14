@@ -92,23 +92,25 @@ describe("POST /v1/sets/name", () => {
 
 describe("POST /v1/sets/link", () => {
   const linked = { name: "Server", as: "Workstation", local: { added: true }, remote: { added: true, reachable: true }, reachable: true };
+  const owner = { headers: {} };
 
   it("links the named computer from the owner's call, one link at a time", async () => {
     let finish!: () => void;
     const link = vi.fn(async () => { await new Promise<void>(resolve => { finish = resolve; }); return linked; });
-    const first = linkSetMember({ name: " Server " }, link);
-    await expect(linkSetMember({ name: "Desk" }, link)).rejects.toMatchObject({ status: 409 });
+    const first = linkSetMember({ name: " Server " }, owner, link);
+    await expect(linkSetMember({ name: "Desk" }, owner, link)).rejects.toMatchObject({ status: 409 });
     finish();
     expect(await first).toEqual(linked);
     expect(link).toHaveBeenCalledWith("Server");
     expect(link).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses an agent's call and anything that is not a host name", async () => {
+  it("refuses an agent's call, a peer computer's call and anything that is not a host name", async () => {
     const link = vi.fn(async () => linked);
-    await expect(linkSetMember({ name: "Server", origin: { paneId: "w1:p1" } }, link)).rejects.toMatchObject({ status: 403 });
-    await expect(linkSetMember({ name: "-oProxyCommand=x" }, link)).rejects.toThrow();
-    await expect(linkSetMember({ name: "a b" }, link)).rejects.toThrow();
+    await expect(linkSetMember({ name: "Server", origin: { paneId: "w1:p1" } }, owner, link)).rejects.toMatchObject({ status: 403 });
+    await expect(linkSetMember({ name: "Server" }, { headers: { "x-phren-origin": "peer" } }, link)).rejects.toMatchObject({ status: 403 });
+    await expect(linkSetMember({ name: "-oProxyCommand=x" }, owner, link)).rejects.toThrow();
+    await expect(linkSetMember({ name: "a b" }, owner, link)).rejects.toThrow();
     expect(link).not.toHaveBeenCalled();
   });
 });

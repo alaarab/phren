@@ -230,8 +230,9 @@ export async function gitHostToken(cwd: string, data: unknown): Promise<Json> {
   try {
     const identity = await provider.whoami(root, host, token.trim(), api);
     const user = identity.user.replaceAll(token.trim(), "[redacted]");
-    await writeHostToken(host.domain, kind, token.trim(), user || undefined);
-    return { ok: true, domain: host.domain, kind, ...(user ? { user } : {}), host };
+    const agent = identity.agent ?? identity.agent_token;
+    await writeHostToken(host.domain, kind, token.trim(), user || undefined, undefined, !!agent);
+    return { ok: true, domain: host.domain, kind, ...(user ? { user } : {}), ...(agent ? { agent: true } : {}), host };
   } catch (error) {
     if (error instanceof HostApiError) return { ok: false, reason: error.reason, message: error.reason === "auth" ? `${host.name} refused that token.` : `${host.name} could not validate that token.`, host };
     throw error;

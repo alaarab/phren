@@ -13,7 +13,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 it("waits for installation and relevant prompts, then claims once per session", () => {
-  expect(browserHint(root, "Playwright", "s1", "high")).toBeUndefined();
+  // Windows Hooks listen on a named pipe, so there is no socket file to wait for.
+  if (process.platform !== "win32") expect(browserHint(root, "Playwright", "s1", "high")).toBeUndefined();
   writeFileSync(path.join(root, "browser.sock"), "");
   expect(browserHint(root, "fix lint", "s1", "high")).toBeUndefined();
   expect(browserHint(root, "Playwright", undefined, "high")).toBeUndefined();

@@ -20,8 +20,10 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
+const hasShell = (shell: string) => spawnSync(shell, ["--version"]).status === 0;
+
 describe("browser env command", () => {
-  it.each(["bash", "zsh"])("round trips hostile values through %s without executing them", async shell => {
+  it.each(["bash", "zsh"].filter(hasShell))("round trips hostile values through %s without executing them", async shell => {
     const session = "pane ' \" $() `touch SHOULD_NOT_EXIST` \\ with\nnewlines";
     expect(await runBrowser(["env", "--session", session])).toBe(0);
     const env = browserEnv(session);
@@ -32,7 +34,8 @@ describe("browser env command", () => {
     expect(env.NODE_OPTIONS).toMatch(/^--trace-warnings --require=/);
     expect(env).not.toHaveProperty("BUN_OPTIONS");
   });
-  it("keeps installed shim paths with spaces and quotes evaluable and offers the Bun CLI fallback", async () => {
+  // Windows paths cannot hold a double quote.
+  it.skipIf(process.platform === "win32")("keeps installed shim paths with spaces and quotes evaluable and offers the Bun CLI fallback", async () => {
     const bridge = path.join(root, "with ' \" $() ` spaces");
     const shim = path.join(bridge, "current/bridge/browser-shim/phren-playwright.cjs");
     mkdirSync(path.dirname(shim), { recursive: true });

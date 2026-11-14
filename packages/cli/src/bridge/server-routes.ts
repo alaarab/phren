@@ -18,7 +18,7 @@ import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMo
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
-import { closeFinishedWorker, closeOwnPane } from "./worker-close.js";
+import { cancelDispatch, closeFinishedWorker, closeOwnPane } from "./worker-close.js";
 import { reportWorker, readIntegrator, setIntegrator } from "./worker-reports.js";
 import { sessionStalls } from "./stalls.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
@@ -39,7 +39,7 @@ import type { AgentHooks } from "./agent-hooks.js";
 import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeRoutes } from "./code-routes.js";
 import type { WorkspaceContextUsage } from "./context.js";
-import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema } from "./dispatch.js";
+import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema, reconcileInterruptedDispatches } from "./dispatch.js";
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId, briefRoot, launchesWithBrief, readLaunchBrief } from "./launch-brief.js";
@@ -528,7 +528,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/terminals/resolve": result = await resolveTerminalReference(url.searchParams.get("ref"),
             { computer: info.computer, from: url.searchParams.get("from") }); break;
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
-          case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
+          case "/v1/dispatch": await reconcileInterruptedDispatches(); result = { dispatches: await dispatchStatus() }; break;
           // A session move (session-move.ts) by its id, or this computer's recent moves.
           case "/v1/conductor/move/launch": {
             if (!ctx.succession) throw new BridgeError(503, "Conductor succession is unavailable.");
@@ -1033,6 +1033,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await reportWorker(data);
         } else if (url.pathname === "/v1/dispatch/close") {
           result = await closeFinishedWorker(data, ctx.handOffs);
+        } else if (url.pathname === "/v1/dispatch/cancel") {
+          // Cancel a running dispatch by id: stop its agent and close its pane.
+          if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "A peer cannot cancel a dispatch on this computer.");
+          result = await cancelDispatch(data);
         } else if (url.pathname === "/v1/dispatch/close-self") {
           result = await closeOwnPane(data);
         } else if (url.pathname === "/v1/hand-off") {
@@ -1048,6 +1052,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await conductorCall("dispatch", brief, origin, () => dispatches!.dispatch(brief, origin));
         } else if (url.pathname === "/v1/dispatch/workers") {
           result = await hookWorkers(agentHooks)(data);
+        } else if (url.pathname === "/v1/dispatch/returns/ack") {
+          // `phren dispatch wait` acknowledges only the dispatch it followed,
+          // never the other returns a conductor on this Hook still needs.
+          if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
+          const body = z.object({ dispatch: z.string().uuid() }).strict().parse(data);
+          result = await ctx.returns!.acknowledgeOne(body.dispatch);
         } else if (url.pathname === "/v1/dispatch/returns" && url.searchParams.get("peek") === "1") {
           // The unread returns, left unread: a watcher (`phren dispatch returns --watch`) beside an agent
           // conductor, which still takes them. Read here, never forwarded to a successor, which would take them.
@@ -1065,8 +1075,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           const { origin, ...grant } = data;
           result = await conductorCall("grants-add", grant, origin, async () => ({ ok: true, grant: await addGrant(grant) }));
         } else if (url.pathname === "/v1/authority" || url.pathname === "/v1/authority/confirm") {
-          // The owner writes the policy from the phone; an agent's call names its pane.
-          if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
+          // The owner writes the policy from the phone; an agent's call names its
+          // pane and a peer computer's arrives through its key's scope.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
           result = url.pathname === "/v1/authority" ? { ok: true, authority: await setProjectAuthority(data, "phone") }
             : { ok: true, confirmation: await confirmAuthority(data, "phone") };
         } else if (url.pathname === "/v1/conductor/make") {
@@ -1079,13 +1090,20 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/sets/name") {
           result = await nameSet(data);
         } else if (url.pathname === "/v1/sets/link") {
-          result = await linkSetMember(data) as unknown as Json;
+          result = await linkSetMember(data, request) as unknown as Json;
         } else if (url.pathname === "/v1/push/register") {
           // Registration is kept for when a key is added; the reply says whether push works now.
+          // The owner's phone only: a linked computer or an agent must not add a destination for this computer's alerts.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner's phone registers for notifications.");
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
+        } else if (url.pathname === "/v1/push/forget") {
+          // `phren unpair` ends a removed phone's notifications with this.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner removes notification registrations.");
+          result = { ok: true, removed: await agentHooks.push.forgetAll() };
         } else if (url.pathname === "/v1/sudo/answer") {
-          // The owner answers from the phone; an agent's call names its pane.
-          if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner answers a sudo request, from the phone.");
+          // The owner answers from the phone; an agent's call names its pane and
+          // a peer computer's arrives through its key's scope.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner answers a sudo request, from the phone.");
           let parsed: ReturnType<typeof sudoAnswer>;
           try { parsed = sudoAnswer(data); } catch { throw new BridgeError(400, "Send an id and a password, or deny."); }
           const answered = agentHooks.sudo.answer(parsed.id, parsed.answer);
@@ -1159,7 +1177,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         if (url.pathname === "/v1/approval-rules") {
           result = await changeApprovalRule(data, "DELETE");
         } else if (url.pathname === "/v1/authority") {
-          if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
           result = { ok: true, authority: await clearProjectAuthority(data, "phone") };
         } else result = { ok: true, grant: await removeGrant(data) };
       } else throw new BridgeError(405, "Unsupported request method.");

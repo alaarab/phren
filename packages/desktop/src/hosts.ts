@@ -17,15 +17,58 @@ export function bridgeRoot(): string {
 
 const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
 
-/** This computer, then desktop.yaml's computers (desktop key), else the
- * hooks.yaml peers with the dispatch key (phase 0 fallback). */
+/** This computer, its WSL distributions with a Hook (Windows), then
+ * desktop.yaml's computers (desktop key), else the hooks.yaml peers with the
+ * dispatch key (phase 0 fallback). On Windows the Hook runs inside WSL, so
+ * "This computer" is left out when WSL has one and Windows itself does not. */
 export const loadComputers: LoadComputers = async () => {
   const root = bridgeRoot();
+  const wsl = await wslComputers();
+  const local = wsl.length > 0 && !existsSync(path.join(root, "hook.sock")) ? wsl : [LOCAL, ...wsl];
   const desktop = await readPeers(path.join(root, "desktop.yaml"));
-  if (desktop) return [LOCAL, ...parseComputers(desktop.doc, desktop.file, desktopKeyPath())];
+  if (desktop) return [...local, ...parseComputers(desktop.doc, desktop.file, desktopKeyPath())];
   const hooks = await readPeers(path.join(root, "hooks.yaml"));
-  return hooks ? [LOCAL, ...parseComputers(hooks.doc, hooks.file, path.join(root, "id_ed25519_dispatch"))] : [LOCAL];
+  return hooks ? [...local, ...parseComputers(hooks.doc, hooks.file, path.join(root, "id_ed25519_dispatch"))] : local;
 };
+
+/** The Hook gateway inside a WSL distribution, relative to its user's home.
+ * It reads the command from SSH_ORIGINAL_COMMAND, as under sshd. */
+const WSL_DISPATCH = ".local/share/phren/bridge/dispatch";
+
+/** The display name of a WSL distribution, VS Code's "WSL: Ubuntu". */
+export const wslName = (distro: string): string => `WSL: ${distro}`;
+
+/** Distribution names from `wsl.exe --list --quiet`, which prints UTF-16LE
+ * unless WSL_UTF8 is set. Docker Desktop's own distributions are skipped. */
+export function parseWslList(output: Buffer): string[] {
+  const text = output.includes(0) ? output.toString("utf16le") : output.toString("utf8");
+  return text.replace(/^\uFEFF/, "").split(/\r?\n/).map(line => line.replace(/\0/g, "").trim())
+    .filter(name => name && /^[A-Za-z0-9_.-]{1,64}$/.test(name) && !/^docker-desktop(-data)?$/i.test(name));
+}
+
+/** WSL distributions on this Windows computer whose Hook is installed.
+ * `PHREN_DESKTOP_WSL=off` turns discovery off. */
+async function wslComputers(): Promise<Computer[]> {
+  if (!WINDOWS || process.env.PHREN_DESKTOP_WSL === "off") return [];
+  let listed: Buffer;
+  try {
+    listed = (await exec("wsl.exe", ["--list", "--quiet"], { timeout: 10_000, encoding: "buffer", windowsHide: true })).stdout;
+  } catch {
+    return [];
+  }
+  const found = await Promise.all(parseWslList(listed).map(distro =>
+    exec("wsl.exe", ["-d", distro, "--cd", "~", "--exec", "test", "-f", WSL_DISPATCH], { timeout: 30_000, windowsHide: true })
+      .then(() => distro, () => undefined)));
+  return found.filter((distro): distro is string => distro !== undefined)
+    .map(distro => ({ name: wslName(distro), local: false, wsl: distro, server: "default" }));
+}
+
+/** The program and argv that run one Hook gateway command on a remote
+ * computer: `ssh` with the pinned key, or `wsl.exe` into a WSL distribution. */
+export function gatewayCommand(c: Computer, command: string, opts?: { tty?: boolean; slot?: number }): { file: string; args: string[] } {
+  if (c.wsl) return { file: "wsl.exe", args: ["-d", c.wsl, "--cd", "~", "--exec", "env", `SSH_ORIGINAL_COMMAND=${command}`, "sh", WSL_DISPATCH] };
+  return { file: "ssh", args: sshArgs(c, command, opts) };
+}
 
 export const desktopKeyPath = (): string => path.join(bridgeRoot(), "id_ed25519_desktop");
 
@@ -76,6 +119,7 @@ const NULL_DEVICE = WINDOWS ? "NUL" : "/dev/null";
 
 /** OpenSSH argv (no leading "ssh") to run a remote command under a pinned key. */
 export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
+  if (c.wsl) throw new Error("sshArgs cannot run on a WSL distribution; use gatewayCommand.");
   if (c.local) throw new Error("sshArgs cannot run on the local computer; use the Hook socket.");
   if (!c.address || !c.username || !c.hostKey || !c.keyFile) throw new Error(`Computer ${c.name} is missing SSH details.`);
   const root = bridgeRoot();
@@ -152,7 +196,7 @@ function exitArgs(c: Computer, socketPath: string): string[] {
 
 /** Best-effort teardown of every master slot for `c`; failures are ignored. */
 export async function closeMasters(c: Computer): Promise<void> {
-  if (c.local || WINDOWS) return;
+  if (c.local || c.wsl || WINDOWS) return;
   try {
     const owner = masterOwner(c);
     const opened = masters.get(owner);
@@ -170,6 +214,7 @@ export async function closeMasters(c: Computer): Promise<void> {
  * a channel pool just as they share masters. */
 export function masterKey(c: Computer): string {
   if (c.local) return c.name;
+  if (c.wsl) return `wsl-${c.wsl}`;
   if (!c.keyFile) throw new Error(`Computer ${c.name} is missing its SSH key.`);
   // Read every time so even same-size rotations with unchanged mtimes and
   // stale .pub sidecars get new masters. The private digest stays in memory;

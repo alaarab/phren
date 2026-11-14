@@ -1,6 +1,7 @@
 import { constants, type Stats } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
+import { isGitDirName } from "./git-dir-name.js";
 import { BridgeError } from "./protocol.js";
 
 export const MAX_FILE_RANGE = 4 * 1024 * 1024;
@@ -35,7 +36,7 @@ export function rangeInteger(value: string | null, fallback: number): number {
  * Reject every symlink component, matching the repository browser policy. */
 export async function readFileRange(root: string, requested: string, offset: number, length: number, expectedVersion?: string) {
   if (!requested || requested.length > 4096 || /[\x00-\x1f\x7f\\]/.test(requested)
-      || requested.split("/").some(part => part === ".." || part === ".git")) throw new BridgeError(400, "Invalid file path.");
+      || requested.split("/").some(part => part === ".." || isGitDirName(part))) throw new BridgeError(400, "Invalid file path.");
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 0 || length > MAX_FILE_RANGE) {
     throw new BridgeError(400, "File ranges must be between 0 and 4 MiB.");
   }

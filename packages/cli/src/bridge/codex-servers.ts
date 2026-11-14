@@ -185,6 +185,8 @@ export interface LaunchOptions {
   remoteArgs?: string[];
   /** Layered over the Hook's environment for the server and its hooks. */
   env?: Record<string, string>;
+  /** `env` is the complete environment; do not inherit the Hook's process env. */
+  envExact?: boolean;
   dispatchId?: string;
 }
 
@@ -236,7 +238,7 @@ export class CodexServers {
     await mkdir(codexServersRoot(), { recursive: true, mode: 0o700 });
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const spawnOptions = { socketPath: socket, cwd: options.cwd, detached: true, logFile: path.join(directory, "server.log"),
-      config: serverConfig(), replaceEnv: true, env: serverEnvironment(process.env, { ...(options.env ?? {}), [CODEX_SERVER_ENV]: serverId }) };
+      config: serverConfig(), replaceEnv: true, env: serverEnvironment(options.envExact ? {} : process.env, { ...(options.env ?? {}), [CODEX_SERVER_ENV]: serverId }) };
     const scope = this.deps.scope?.(serverId);
     const handle = await (scope
       // No systemd-run, or no user manager to ask: the server runs in the

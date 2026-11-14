@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import { noteTurn } from "./turn-records.js";
 import { recordBriefArrival } from "./launch-brief.js";
 import { handOff } from "./hand-off.js";
 import { recentUncommitted } from "./worker-unfinished.js";
+import { dispatchClonePaths } from "./dispatch-clone.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), sharedSnapshot: vi.fn(), paneIdentity: vi.fn(), validateTarget: vi.fn() }));
@@ -184,6 +185,17 @@ describe("finished worker lifecycle", () => {
     // Read clean, the same turn closes.
     vi.mocked(recentUncommitted).mockResolvedValue(0);
     expect(await closeFinishedWorker({ target, dispatch, turn: value.returned!.turn })).toEqual({ ok: true, closed: true });
+  });
+  it("removes the clone and token on the Hook that launched the worker", async () => {
+    const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now()); await save(value);
+    const paths = dispatchClonePaths(dispatch);
+    await mkdir(path.join(paths.cloneDir, ".git"), { recursive: true });
+    await writeFile(paths.gitConfigFile, "managed config\n");
+    await writeFile(paths.agentTokenFile, "token\n");
+    expect(await closeFinishedWorker({ target, dispatch, turn: value.returned!.turn })).toEqual({ ok: true, closed: true });
+    expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
+    expect(await stat(paths.gitConfigFile).catch(() => undefined)).toBeUndefined();
+    expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
   });
   it("refuses to close a different completed turn", async () => {
     const wrong = createHash("sha256").update("wrong turn").digest("hex").slice(0, 16);

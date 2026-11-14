@@ -792,10 +792,19 @@ function patchedWorkflowPolicy(current: WorkflowPolicy, patch: Partial<WorkflowP
   return next;
 }
 
+/** An index glob is matched from each project's folder and stays inside it:
+ * relative, with no `..` and no backslash (an escape in a glob, a separator
+ * on Windows). Blank entries are not globs. */
+export function isProjectGlob(glob: unknown): glob is string {
+  return typeof glob === "string" && glob.trim().length > 0
+    && !/^([/~]|[A-Za-z]:)/.test(glob.trim()) && !glob.includes("..") && !glob.includes("\\");
+}
+
 export function getIndexPolicy(phrenPath: string): IndexPolicy {
   const parsed = readJsonFile<Partial<IndexPolicy>>(govFile(phrenPath, "index-policy"), {});
   const merged = withDefaults(parsed, DEFAULT_INDEX_POLICY);
-  merged.includeGlobs = merged.includeGlobs.filter((glob) => typeof glob === "string" && glob.trim().length > 0);
+  // The file syncs with the store, so what it holds is checked on every read.
+  merged.includeGlobs = merged.includeGlobs.filter(isProjectGlob);
   merged.excludeGlobs = merged.excludeGlobs.filter((glob) => typeof glob === "string" && glob.trim().length > 0);
   if (!merged.includeGlobs.length) merged.includeGlobs = DEFAULT_INDEX_POLICY.includeGlobs;
   if (!merged.excludeGlobs.length) merged.excludeGlobs = DEFAULT_INDEX_POLICY.excludeGlobs;
@@ -803,6 +812,11 @@ export function getIndexPolicy(phrenPath: string): IndexPolicy {
 }
 
 export function updateIndexPolicy(phrenPath: string, patch: Partial<IndexPolicy>): PhrenResult<IndexPolicy> {
+  const outside = Array.isArray(patch.includeGlobs)
+    ? patch.includeGlobs.filter(glob => typeof glob === "string" && glob.trim().length > 0 && !isProjectGlob(glob)) : [];
+  if (outside.length) {
+    return phrenErr(`Index globs are matched inside each project folder: use a relative pattern with no ".." or backslash. Not accepted: ${outside.join(", ")}`, PhrenError.VALIDATION_ERROR);
+  }
   const file = govFile(phrenPath, "index-policy");
   const next = withFileLock(file, () => {
     const merged = patchedIndexPolicy(getIndexPolicy(phrenPath), patch);

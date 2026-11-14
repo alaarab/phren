@@ -1,6 +1,6 @@
 {
   "name": "@phren/desktop",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "description": "Phren desktop: a client of every computer's Phren Hook",
   "type": "module",
@@ -40,7 +40,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/ws": "^8.18.1",
-    "electron": "^44.7.0",
+    "electron": "^44.9.1",
     "electron-builder": "^26.15.3"
   },
   "license": "MIT",

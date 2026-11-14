@@ -56,7 +56,7 @@ function normalizeSummary(summary?: string): string | undefined {
 }
 
 function sessionMessagesFileForId(phrenPath: string, sessionId: string): string {
-  return path.join(  runtimeSessionsDir(phrenPath), `session-${sessionId}-messages.json`);
+  return sessionFileForId(phrenPath, sessionId, "-messages");
 }
 
 function inferProjectForSession(phrenPath: string, sessionId: string): string | undefined {

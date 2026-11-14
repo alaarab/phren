@@ -35,11 +35,22 @@ export function redactApproval(value: string): string {
     })
     .replace(/\bAuthorization\s*:\s*Bearer\s+(\S+)/gi, (_whole, token: string) => `Authorization: Bearer …${/["']$/.test(token) ? token.slice(-1) : ""}`)
     .replace(/(^|\s)(--(?:token|password|secret|api-key|access-token))(?:\s+|=)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1$2 …")
+    // HTTP basic auth: curl -u name:password, wget/http --user. The name goes too; it is half of the credential.
+    .replace(/(\b(?:curl|wget|https?|httpie|xh)\b[^\n]*?\s(?:-u|--user|--proxy-user)(?:=|\s+))(?:"[^"]*"|'[^']*'|\S+)/gi, "$1…")
+    // Other Authorization schemes, and the headers that carry a key, token or session, up to the closing quote.
+    .replace(/(Authorization:\s*(?!Bearer\s)[A-Za-z]+\s+)[^\s"']+/gi, "$1…")
+    .replace(/(\b(?:proxy-authorization|cookie|set-cookie|x-api-key|api-key|apikey|x-auth-token|x-[a-z-]*(?:token|key|secret)[a-z-]*):\s*)[^"'\n]+/gi, "$1…")
+    // sshpass -p and registry logins take the password as the next word.
+    .replace(/(\bsshpass\b[^\n]*?\s-p\s*)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1…")
+    .replace(/(\b(?:docker|podman|helm|npm)\s+login\b[^\n]*?\s-p(?:=|\s+))(?:"[^"]*"|'[^']*'|\S+)/gi, "$1…")
+    // Form and query fields inside a quoted body: -d 'user=a&password=b'.
+    .replace(/(\b(?:password|passwd|pwd|pass|secret|token|api[_-]?key|access[_-]?token|client[_-]?secret|auth)=)[^&\s"']+/gi, "$1…")
     // -p is a password only for MySQL-style clients (-pSECRET); elsewhere it is
     // mkdir -p, ssh -p 22, git log -p, claude -p.
     .replace(/(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n]*?\s-p)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1…")
     // Environment assignments only: a word after a separator, not a --flag=value.
-    .replace(/(^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(?:"[^"]*"|'[^']*'|[^\s;]+)/g, "$1$2=…")
+    // An & counts when it follows a space or another &, not inside a=1&b=2.
+    .replace(/(^|[\s;|(]|(?<![^\s&])&)([A-Za-z_][A-Za-z0-9_]*)=(?:"[^"]*"|'[^']*'|[^\s;]+)/g, "$1$2=…")
     .replace(/\b(?:gh[po]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|xox[abp]-[A-Za-z0-9-]+|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|[A-Fa-f0-9]{32,}|[A-Za-z0-9_-]{32,})\b/g, "…");
 }
 

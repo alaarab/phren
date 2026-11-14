@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
-import { knownHostsPath, loadComputers, masterExitArgs, masterKey, sshArgs } from "./hosts.js";
+import { gatewayCommand, knownHostsPath, loadComputers, masterExitArgs, masterKey, parseWslList, sshArgs } from "./hosts.js";
 
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 let root: string;
@@ -145,5 +145,22 @@ describe.skipIf(process.platform === "win32")("masterExitArgs", () => {
 
   it("refuses the local computer", () => {
     expect(() => masterExitArgs({ name: "This computer", local: true, server: "default" }, 0)).toThrow(/local/);
+  });
+});
+
+describe("WSL", () => {
+  it("reads wsl.exe's UTF-16 distribution list and skips Docker Desktop's", () => {
+    const listed = Buffer.from("\uFEFFUbuntu\r\ndocker-desktop\r\nDebian\r\ndocker-desktop-data\r\n", "utf16le");
+    expect(parseWslList(listed)).toEqual(["Ubuntu", "Debian"]);
+    expect(parseWslList(Buffer.from("Ubuntu-24.04\n"))).toEqual(["Ubuntu-24.04"]);
+  });
+
+  it("runs gateway commands through wsl.exe in the distribution's home, with no SSH", () => {
+    const wsl = { name: "WSL: Ubuntu", local: false, wsl: "Ubuntu", server: "default" };
+    expect(gatewayCommand(wsl, "phren-hook v1 pipe")).toEqual({
+      file: "wsl.exe",
+      args: ["-d", "Ubuntu", "--cd", "~", "--exec", "env", "SSH_ORIGINAL_COMMAND=phren-hook v1 pipe", "sh", ".local/share/phren/bridge/dispatch"],
+    });
+    expect(() => sshArgs(wsl, "phren-hook v1 pipe")).toThrow(/WSL/);
   });
 });

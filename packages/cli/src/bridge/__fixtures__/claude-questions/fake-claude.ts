@@ -11,7 +11,8 @@ export class FakeClaude {
   tab = 0; cursor: number | "next" = 1;
   picked: (string | undefined)[]; boxes: boolean[][]; typed: string[]; typedOn: boolean[];
   result?: Record<string, string | string[]>; cancelled = false; sent: string[][] = [];
-  constructor(readonly questions: DialogQuestion[]) {
+  private editCursor?: number;
+  constructor(readonly questions: DialogQuestion[], readonly behavior: { otherDigits?: "text" | "shortcut" } = {}) {
     this.picked = questions.map(() => undefined); this.boxes = questions.map(q => q.options.map(() => false));
     this.typed = questions.map(() => ""); this.typedOn = questions.map(() => false);
   }
@@ -24,7 +25,7 @@ export class FakeClaude {
     return [...values, ...(this.typedOn[index] && this.typed[index] ? [this.typed[index]] : [])];
   }
   private advance() {
-    this.tab += 1; this.cursor = 1;
+    this.tab += 1; this.cursor = 1; this.editCursor = undefined;
     if (!this.review && this.tab >= this.questions.length) this.submit();
   }
   private submit() { this.result = Object.fromEntries(this.questions.map((q, i) => [q.question, this.value(i)!])); }
@@ -37,14 +38,24 @@ export class FakeClaude {
       return;
     }
     const q = this.questions[this.tab], n = q.options.length, other = n + 1;
+    if (this.cursor === other && key === "home") { this.editCursor = 0; return; }
+    if (this.cursor === other && key === "right" && this.editCursor !== undefined) { this.editCursor = Math.min(this.typed[this.tab].length, this.editCursor + 1); return; }
+    if (this.cursor === other && key === "backspace") {
+      const at = this.editCursor ?? this.typed[this.tab].length;
+      if (at > 0) this.typed[this.tab] = this.typed[this.tab].slice(0, at - 1) + this.typed[this.tab].slice(at);
+      this.editCursor = Math.max(0, at - 1); return;
+    }
     if (key === "right" || key === "left") { this.tab = Math.max(0, Math.min(this.questions.length - (this.review ? 0 : 1), this.tab + (key === "right" ? 1 : -1))); this.cursor = 1; return; }
     if (key === "up" || key === "down") {
       const at = this.cursor === "next" ? other + 1 : this.cursor, to = Math.max(1, Math.min(q.multiSelect ? other + 1 : other, at + (key === "down" ? 1 : -1)));
       this.cursor = to === other + 1 ? "next" : to; return;
     }
     if (key === "tab") { if (q.multiSelect && this.cursor === other) this.cursor = "next"; else this.advance(); return; }
-    if (this.cursor === other && (key === "space" || !/^(enter|[1-9])$/.test(key) || (this.typed[this.tab] && /^[1-9]$/.test(key)))) {
-      this.typed[this.tab] += key === "space" ? " " : key;
+    if (this.cursor === other && (key === "space" || !/^(enter|[1-9])$/.test(key) || ((this.behavior.otherDigits !== "shortcut" || this.typed[this.tab]) && /^[1-9]$/.test(key)))) {
+      const at = this.editCursor ?? this.typed[this.tab].length;
+      const text = key === "space" ? " " : key;
+      this.typed[this.tab] = this.typed[this.tab].slice(0, at) + text + this.typed[this.tab].slice(at);
+      if (this.editCursor !== undefined) this.editCursor += text.length;
       if (q.multiSelect) this.typedOn[this.tab] = true;
       return;
     }
@@ -93,7 +104,9 @@ export class FakeClaude {
         if (options.redrawMs) stale = { text: this.render(), until: now + options.redrawMs };
         this.sent.push(keys);
         // Ink reads several digits in one write as one input and ignores it.
-        if (keys.length > 1 && keys.every(key => /^[1-9]$/.test(key))) return;
+        const otherInput = this.tab < this.questions.length && this.cursor === this.questions[this.tab].options.length + 1
+          && (this.behavior.otherDigits !== "shortcut" || !!this.typed[this.tab]);
+        if (!otherInput && keys.length > 1 && keys.every(key => /^[1-9]$/.test(key))) return;
         for (const key of keys) this.press(key);
       },
       sleep: async (ms: number) => { now += ms; },

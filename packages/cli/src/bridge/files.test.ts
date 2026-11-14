@@ -11,9 +11,13 @@ afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 it("lists folders before files, hides git metadata, and reads exact bytes", async () => {
   await mkdir(path.join(root, "src"));
   await mkdir(path.join(root, ".git"));
+  // Another spelling of the same folder on a volume that ignores case.
+  await mkdir(path.join(root, ".GIT"), { recursive: true });
+  await writeFile(path.join(root, ".GIT", "config"), "[remote]");
   await writeFile(path.join(root, "a.md"), "hello 世界");
   const listing = await browseFiles(root, "");
   expect(listing.entries?.map(entry => entry.name)).toEqual(["src", "a.md"]);
+  await expect(browseFiles(root, ".GIT/config")).rejects.toMatchObject({ status: 400 });
   const file = await browseFiles(root, "a.md");
   expect(Buffer.from(file.data!, "base64").toString()).toBe("hello 世界");
 });

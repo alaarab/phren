@@ -552,12 +552,14 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       tabs: [tabInfo("w1", "w1:t1", "1", 1), ...extraTabs].map(t => ({ ...t, agent_status: status(p => p.tab_id === t.tab_id) })),
       panes, layouts: [], agents: panes.filter(p => p.agent).map(agentInfo) };
   }
-  function api(url: string, body?: unknown, method?: string): Promise<{ status: number; data: any }> {
+  /** What a peer key's gateway puts on every request it lets through. */
+  const asPeer = { "X-Phren-Origin": "peer" };
+  function api(url: string, body?: unknown, method?: string, extra: Record<string, string> = {}): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
       const verb = method ?? (payload === undefined ? "GET" : "POST");
       const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: url, method: verb,
-        headers: payload ? { "Content-Length": Buffer.byteLength(payload), "Content-Type": "application/json" } : {} }, res => {
+        headers: { ...extra, ...(payload ? { "Content-Length": Buffer.byteLength(payload), "Content-Type": "application/json" } : {}) } }, res => {
         let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode!, data: JSON.parse(data) }));
       });
       req.on("error", reject); req.end(payload);
@@ -2517,11 +2519,17 @@ schedules:
       expect(second).toMatchObject({ questionIndex: 1,
         choice: { title: "Which screens?", options: [{ label: "Chat", key: "1" }, { label: "Agents", key: "2" },
           { label: "Settings", key: "3" }, { label: "Done", key: "Enter" }] } });
-      // The last question toggles its box, leaves with Tab and submits from
-      // the review, then clears the prompt.
+      // The last digit would submit the set, and the Hook only submits a
+      // review it can check against every answer (both apps send the whole
+      // set to /v1/questions/answer). So it refuses with nothing typed, and
+      // finishing in the terminal clears the prompt.
       const beforeCleared = frames.length;
-      expect((await api("/v1/keys", { target: claude, keys: ["1"] })).status).toBe(200);
-      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).slice(1)).toEqual([["1"], ["tab"], ["1"]]);
+      const refused = await api("/v1/keys", { target: claude, keys: ["1"] });
+      expect(refused.status).toBe(409);
+      expect(refused.data.code).toBe("question-not-shown");
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["2"]]);
+      for (const key of ["1", "tab", "1"]) fakeClaude.press(key);
+      paneLines = fakeClaude.render();
       expect(fakeClaude.result).toEqual({ "Which accent?": "Lavender", "Which screens?": ["Chat"] });
       const cleared = () => frames.slice(beforeCleared).some(f => f.agentStatus && f.agentStatus.terminalPrompt === undefined);
       await waitFor(cleared, 5_000);
@@ -2727,6 +2735,7 @@ schedules:
         expect(spoof).toEqual({ status: 400, body: JSON.stringify({ error: "Only askpass itself may ask for its password." }) });
         expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
       }
+      expect(await api("/v1/sudo/answer", { id: asked.id, deny: true }, "POST", asPeer)).toEqual({ status: 403, data: { error: "Only the owner answers a sudo request, from the phone." } });
       expect(await api("/v1/sudo/answer", { id: asked.id, password: "correct horse\nnext line" })).toEqual({ status: 400, data: { error: "Send an id and a password, or deny." } });
       expect(await api("/v1/sudo/answer", { id: asked.id, password: "correct horse 9!" })).toEqual({ status: 200, data: { ok: true } });
       expect(await approved).toEqual({ code: 0, out: "correct horse 9!", err: "" });
@@ -2948,7 +2957,7 @@ schedules:
       expect((await api("/v1/conductor/grants", { scope: "global" }, "DELETE")).status).toBe(404);
     });
 
-    it("reads the release authority policy for anyone and takes changes only without an agent pane", async () => {
+    it("reads the release authority policy for anyone and takes changes only from the owner", async () => {
       const listed = await api("/v1/authority");
       expect(listed.status).toBe(200);
       expect(listed.data).toMatchObject({ source: "defaults", confirmations: [], projects: [] });
@@ -2958,6 +2967,11 @@ schedules:
       expect((await api("/v1/authority", { project: "harbor", origin: agent })).status).toBe(403);
       expect((await api("/v1/authority/confirm", { project: "harbor", actions: ["merge"], origin: agent })).status).toBe(403);
       expect((await api("/v1/authority", { project: "harbor", origin: agent }, "DELETE")).status).toBe(403);
+      // Nor from a peer computer, whose call names no pane.
+      const refused = { status: 403, data: { error: expect.stringContaining("release authority") } };
+      expect(await api("/v1/authority", { project: "harbor", default: "go" }, "POST", asPeer)).toMatchObject(refused);
+      expect(await api("/v1/authority/confirm", { project: "harbor", actions: ["merge"] }, "POST", asPeer)).toMatchObject(refused);
+      expect(await api("/v1/authority", { project: "beacon" }, "DELETE", asPeer)).toMatchObject(refused);
       const set = await api("/v1/authority", { project: "harbor", default: "ask", actions: { merge: "go" } });
       expect(set.status).toBe(200);
       expect(set.data.authority).toMatchObject({ go: ["merge"], maxPermissionMode: "auto-edits" });
@@ -3241,6 +3255,20 @@ schedules:
         token: "ab".repeat(32), environment: "development" });
       expect(reply.data).toEqual({ ok: true, configured: false });
       expect((await api("/v1/push/status")).data).toMatchObject({ configured: false, devices: 1 });
+    });
+
+    it("forgets every push registration for the owner only, and they stay gone", async () => {
+      await api("/v1/push/register", { deviceID: "8a3f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", hostID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9",
+        token: "ab".repeat(32), environment: "development" });
+      const device = { deviceID: "9b4f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", hostID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9", token: "cd".repeat(32), environment: "development" };
+      expect(await api("/v1/push/register", device, "POST", asPeer)).toEqual({ status: 403, data: { error: "Only the owner's phone registers for notifications." } });
+      expect(await api("/v1/push/register", { ...device, origin: "agent" })).toMatchObject({ status: 403 });
+      expect(await api("/v1/push/forget", { origin: "agent" })).toEqual({ status: 403, data: { error: "Only the owner removes notification registrations." } });
+      expect(await api("/v1/push/forget", {}, "POST", { "x-phren-origin": "peer" })).toMatchObject({ status: 403 });
+      expect((await api("/v1/push/status")).data).toMatchObject({ devices: 1 });
+      expect((await api("/v1/push/forget", {})).data).toEqual({ ok: true, removed: 1 });
+      expect((await api("/v1/push/status")).data).toMatchObject({ devices: 0 });
+      expect(JSON.parse(await readFile(path.join(root, "bridge/push-devices.json"), "utf8"))).toEqual([]);
     });
 
     it("runs the canary: launches and closes its own conductor, reads an idle transcript, never types into a pane", async () => {
