@@ -36,6 +36,7 @@ GitHub release notes, and the app shows them when that version is available.
 ### Security
 
 - **Web previews** refuse requests that another website sends to a preview's local port. A page on any site could reach an open preview and, through it, a server that only listens on the previewed computer. The preview's own page, the app's frame and opening it in a browser tab work as before.
+- **Windows:** the app no longer puts macOS and Linux tool folders such as `/bin` and `/usr/bin` at the front of the search path for `ssh`, `wsl.exe` and the terminal. On Windows those mean `C:\bin` and `C:\usr\bin`, folders any account on the PC can create, so another user could have planted an `ssh.exe` that ran as you.
 
 ## [0.1.14] - 2026-10-24
 

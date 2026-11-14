@@ -181,10 +181,13 @@ function loginShellNode() {
 }
 
 /** An app started from the Dock gets a bare PATH; the daemon still needs ssh,
- * herdr and tmux, so put node's own folder and the usual tool folders first. */
+ * herdr and tmux, so put node's own folder and the usual tool folders first.
+ * Not on Windows: there "/bin" means C:\bin, which any local user may create,
+ * so a planted ssh.exe or wsl.exe would run as the owner. */
 function daemonPath_(nodePath) {
   const nodeDir = app.isPackaged ? [] : [path.dirname(nodePath)];
-  const extra = [...nodeDir, "/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin"), "/usr/bin", "/bin"];
+  const unixDirs = process.platform === "win32" ? [] : ["/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin"), "/usr/bin", "/bin"];
+  const extra = [...nodeDir, ...unixDirs];
   const current = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
   return [...new Set([...extra, ...current])].join(path.delimiter);
 }
