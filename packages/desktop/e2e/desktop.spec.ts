@@ -8,7 +8,7 @@ import type { Computer, MergedOverview, OverviewHub } from "../src/contract.js";
 import { hookRequest, hookWebSocket } from "../src/hook-client.js";
 import { createOverviewHub } from "../src/overview.js";
 import { startServer } from "../src/server.js";
-import { SAMPLE_FINDING, SAMPLE_STALE_FINDINGS, startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
+import { earlierToday, SAMPLE_FINDING, SAMPLE_STALE_FINDINGS, startFakeHook, type FakeHook } from "../src/testing/fake-hook.js";
 
 const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
 const TOKEN = "desktop-smoke-token";
@@ -98,7 +98,7 @@ const FORGE = {
   current: { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", base: "main", draft: false, state: "OPEN", checks: "failing",
     checkRuns: [{ name: "test", state: "failing", detail: "3 failed", url: "https://git.example.com/you/phren/actions/7" }, { name: "lint", state: "passing" }] },
   pulls: [
-    { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", author: "you", updated: new Date(Date.now() - 3_600_000).toISOString(), checks: "failing" },
+    { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", author: "you", updated: earlierToday(60), checks: "failing" },
     { number: 41, title: "Faster store sync", url: "https://git.example.com/you/phren/pulls/41", head: "perf/sync", author: "you", draft: true, updated: new Date(Date.now() - 86_400_000).toISOString(), checks: "passing" },
   ],
 };
@@ -543,7 +543,8 @@ test("Home's Saved today card lists today's findings and tasks and each row open
   // Tasks carry a time and lead, newest first; findings (date only) follow.
   const rows = card.locator(".home-saved-row");
   await expect(rows.nth(0)).toContainText("tidy the release checklist");
-  await expect(rows.nth(0)).toContainText(/task.*phren.*12m ago/);
+  // 12 minutes ago, or less just after midnight (the fixture stays today).
+  await expect(rows.nth(0)).toContainText(/task.*phren.*(\d+m ago|now)/);
   await expect(rows.nth(1)).toContainText("compress the hero image");
   await expect(rows.nth(2)).toContainText(/finding.*today/);
   await expect(card.locator(".home-more")).toBeHidden();
