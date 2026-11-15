@@ -1,4 +1,11 @@
 {
+  "computer": {
+    "id": "5c1d9a2e-3b4f-4a6c-8d7e-9f0a1b2c3d4e",
+    "name": "mini.local",
+    "aliases": [
+      "mini"
+    ]
+  },
   "schema": 1,
   "revision": "9c1e4f0a2b7d3e58",
   "generatedAt": "2026-11-15T18:30:00.000Z",
@@ -32,8 +39,16 @@
       "detail": "The CPU is saturated.",
       "since": "2026-11-15T18:00:00.000Z",
       "fix": "Pause or stop the heaviest jobs listed under Heavy.",
-      "pane": { "target": { "server": "default", "workspace": "w2T", "tab": "w2T:t1", "pane": "w2T:p3" }, "label": "ios-rc" },
-      "session": "39d3b5c4-b9df-43e1-87af-0c1d3f55f547",
+      "pane": {
+        "target": {
+          "server": "default",
+          "workspace": "w2T",
+          "tab": "w2T:t1",
+          "pane": "w2T:p3"
+        },
+        "label": "ios-rc"
+      },
+      "session": "0b6f3c2a-7d41-4e9b-9a55-3f2e8c1d4a60",
       "notify": true
     },
     {
@@ -52,9 +67,17 @@
       "area": "worktrees",
       "kind": "worktree",
       "title": "phren-fix-handoff",
-      "target": { "path": "/Users/alaarab/Projects/phren-fix-handoff", "repo": "/Users/alaarab/Projects/phren", "branch": "fix/handoff" },
+      "target": {
+        "path": "/Users/sam/Projects/phren-fix-handoff",
+        "repo": "/Users/sam/Projects/phren",
+        "branch": "fix/handoff"
+      },
       "reason": "Merged into main, clean and pushed.",
-      "evidence": ["Branch fix/handoff is merged into origin/main", "No uncommitted changes", "No process or pane is using it"],
+      "evidence": [
+        "Branch fix/handoff is merged into origin/main",
+        "No uncommitted changes",
+        "No process or pane is using it"
+      ],
       "sizeBytes": 1288490188,
       "actionLabel": "Remove worktree",
       "since": "2026-11-14T22:00:00.000Z"
@@ -64,9 +87,15 @@
       "area": "simulators",
       "kind": "simulator",
       "title": "iPhone 17 Pro (os-ux)",
-      "target": { "udid": "8B1F2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D", "name": "iPhone 17 Pro (os-ux)" },
+      "target": {
+        "udid": "8B1F2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D",
+        "name": "iPhone 17 Pro (os-ux)"
+      },
       "reason": "Booted for 3 hours with no build or pane using it.",
-      "evidence": ["No xcodebuild running", "No pane started it"],
+      "evidence": [
+        "No xcodebuild running",
+        "No pane started it"
+      ],
       "actionLabel": "Shut down simulator",
       "since": "2026-11-15T15:30:00.000Z"
     },
@@ -75,9 +104,13 @@
       "area": "docker",
       "kind": "docker",
       "title": "Docker build cache",
-      "target": { "name": "builder-cache" },
+      "target": {
+        "name": "builder-cache"
+      },
       "reason": "Build cache older than 7 days.",
-      "evidence": ["docker system df: 11.2 GB build cache"],
+      "evidence": [
+        "docker system df: 11.2 GB build cache"
+      ],
       "sizeBytes": 12025908428,
       "actionLabel": "Prune build cache",
       "since": "2026-11-15T12:00:00.000Z"
@@ -87,9 +120,14 @@
       "area": "disk",
       "kind": "tmp",
       "title": "/private/tmp/apps-train",
-      "target": { "path": "/private/tmp/apps-train" },
+      "target": {
+        "path": "/private/tmp/apps-train"
+      },
       "reason": "Not touched in 9 days and nothing is using it.",
-      "evidence": ["Last modified 2026-11-06", "Not a git worktree"],
+      "evidence": [
+        "Last modified 2026-11-06",
+        "Not a git worktree"
+      ],
       "sizeBytes": 3221225472,
       "actionLabel": "Delete folder",
       "since": "2026-11-13T08:00:00.000Z"
@@ -100,7 +138,11 @@
       "id": "77aa1c0e9b3d2f10",
       "area": "worktrees",
       "title": "gitboy-apps-onboarding",
-      "target": { "path": "/Users/alaarab/Projects/gitboy-apps-onboarding", "repo": "/Users/alaarab/Projects/gitboy-apps", "branch": "feat/onboarding" },
+      "target": {
+        "path": "/Users/sam/Projects/gitboy-apps-onboarding",
+        "repo": "/Users/sam/Projects/gitboy-apps",
+        "branch": "feat/onboarding"
+      },
       "reason": "It has commits that aren't on any remote."
     }
   ],
@@ -111,7 +153,9 @@
       "area": "disk",
       "kind": "cache",
       "title": "DerivedData/Phren-abcdef",
-      "target": { "path": "/Users/alaarab/Library/Developer/Xcode/DerivedData/Phren-abcdef" },
+      "target": {
+        "path": "/Users/sam/Library/Developer/Xcode/DerivedData/Phren-abcdef"
+      },
       "freedBytes": 7516192768,
       "reportedBytes": 8375186227,
       "by": "auto"
@@ -122,7 +166,11 @@
       "area": "worktrees",
       "kind": "worktree",
       "title": "phren-sweep-hook-perf",
-      "target": { "path": "/Users/alaarab/Projects/sw-hook-perf", "repo": "/Users/alaarab/Projects/phren", "branch": "sweep/hook-perf" },
+      "target": {
+        "path": "/Users/sam/Projects/sw-hook-perf",
+        "repo": "/Users/sam/Projects/phren",
+        "branch": "sweep/hook-perf"
+      },
       "freedBytes": 943718400,
       "reportedBytes": 1073741824,
       "by": "phone"

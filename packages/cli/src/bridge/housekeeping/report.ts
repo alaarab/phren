@@ -51,6 +51,8 @@ export const cleanedSchema = z.object({
 });
 export const dismissedSchema = z.object({ id: z.string(), section: z.enum(["warnings", "suggestions", "kept"]), area, title: z.string(), dismissedAt: iso });
 export const viewSchema = z.object({
+  /** Which Hook answered (added by the route). */
+  computer: z.object({ id: z.string(), name: z.string(), aliases: z.array(z.string()) }).optional(),
   schema: z.literal(SCHEMA),
   revision: z.string(),
   generatedAt: iso,
