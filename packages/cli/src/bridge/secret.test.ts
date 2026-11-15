@@ -124,7 +124,8 @@ describe("SecretBroker", () => {
   });
 });
 
-describe("phren secret-exec processes", () => {
+// The Hook runs on macOS, Linux and WSL; native Windows has no askpass script, ps or lsof.
+describe.skipIf(process.platform === "win32")("phren secret-exec processes", () => {
   let dir: string;
   beforeEach(async () => { dir = await mkdtemp(path.join(tmpdir(), "phren-secret-")); });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
