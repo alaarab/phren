@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import { cpus, freemem, homedir, loadavg, totalmem } from "node:os";
 import * as path from "node:path";
-import { promisify } from "node:util";
 import * as yaml from "js-yaml";
 
-const exec = promisify(execFile);
 const GB = 1024 ** 3;
 
 /** What this computer can take right now. */
@@ -59,23 +56,13 @@ export function readBudget(totalBytes: number, env: NodeJS.ProcessEnv = process.
     minFreeBytes: minFree ? minFree * GB : budget.minFreeBytes, maxLoadPerCore: load ?? budget.maxLoadPerCore };
 }
 
-/** /proc/meminfo's MemAvailable in bytes. */
-export function memAvailable(meminfo: string): number | undefined {
-  const match = /^MemAvailable:\s+(\d+)\s*kB/m.exec(meminfo);
-  return match ? Number(match[1]) * 1024 : undefined;
-}
-
+/** Memory comes from the resources gauge's reader (bridge/resources.ts), so the budget and the Hook's gauge agree. */
 export async function readPressure(platform: NodeJS.Platform = process.platform): Promise<Pressure> {
-  const totalBytes = totalmem(), cores = cpus().length || 1, load1 = loadavg()[0];
-  let availableBytes: number | undefined;
-  if (platform === "linux") availableBytes = memAvailable(await fs.promises.readFile("/proc/meminfo", "utf8").catch(() => ""));
-  else if (platform === "darwin") {
-    // os.freemem() leaves out the file cache macOS gives back at once; the
-    // kernel's own "available" level is the share Activity Monitor's pressure uses.
-    const level = Number((await exec("/usr/sbin/sysctl", ["-n", "kern.memorystatus_level"], { timeout: 2_000 }).catch(() => ({ stdout: "" }))).stdout.trim());
-    if (Number.isFinite(level) && level > 0 && level <= 100) availableBytes = Math.round(totalBytes * level / 100);
-  }
-  return { totalBytes, availableBytes: availableBytes ?? freemem(), load1, cores };
+  const { readMemory } = await import("../bridge/resources.js");
+  const memory = await readMemory(platform).catch(() => ({ totalBytes: totalmem(), availablePercent: undefined }));
+  const totalBytes = memory.totalBytes || totalmem();
+  return { totalBytes, availableBytes: memory.availablePercent === undefined ? freemem() : Math.round(totalBytes * memory.availablePercent / 100),
+    load1: loadavg()[0], cores: cpus().length || 1 };
 }
 
 const gb = (bytes: number) => `${(bytes / GB).toFixed(1)} GB`;
