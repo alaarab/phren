@@ -8,6 +8,8 @@ import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
+import { Housekeeper, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
+import { liveProcessCwds } from "./housekeeping/safety.js";
 import { closeFinishedWorker } from "./worker-close.js";
 import { cleanupIdempotencyLocks, markHookServerProcess } from "./dispatch-idempotency.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
@@ -17,7 +19,7 @@ import { sessionStalls } from "./stalls.js";
 import { TurnQueue } from "./turn-queue.js";
 import { turnQueuePaneReader } from "./turn-queue-pane.js";
 import { HandOffQueue } from "./hand-off-queue.js";
-import { paneRouteOnce, promptGuards } from "./server-pane-routes.js";
+import { allPaneSessions, paneRouteOnce, promptGuards } from "./server-pane-routes.js";
 import { FanoutMessages } from "./fanout-messages.js";
 import { activateModules as moduleSnapshot } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
@@ -146,7 +148,12 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
   }
-  const inbox = dispatches ? new OwnerInbox(() => ownerInboxSources(agentHooks)) : undefined;
+  // Assigned once resources exist below; the inbox only reads it on its ticks.
+  let housekeeper: Housekeeper | undefined;
+  const inbox = dispatches ? new OwnerInbox(async () => {
+    const observed = await ownerInboxSources(agentHooks);
+    return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? []] };
+  }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
@@ -216,6 +223,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // A Claude launch that names no account runs under the one with the most room (account-choice.ts).
   setChoiceReaders({ usage: () => accountUsage.limits(true) });
   const resources = new ResourceMonitor();
+  // Housekeeping (housekeeping/): a report every 15 minutes and on a fresh low-disk or stressed edge.
+  housekeeper = new Housekeeper({ computer: hostname(), resources: () => resources.read(), processes: () => liveProcessCwds(),
+    panes: async () => (await allPaneSessions()).map(session => ({ pane: session.pane, cwd: session.cwd, title: session.title })) });
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions(undefined, codexServers);
   const scheduleStore = defaultPhrenPath();
@@ -281,14 +291,15 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     read: workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage, turnQueue }),
     info: () => ({ ...info, capabilities: info.capabilities }),
     renew: server => agentHooks.overview.renew(server),
-    resources: () => resources.read(),
+    // The overview's resources frame carries the housekeeping badge; the phone re-fetches /v1/housekeeping when its revision changes.
+    resources: async () => { const value = await resources.read(); const badge = await housekeeper?.badge().catch(() => undefined); return badge ? { ...value, housekeeping: badge } : value; },
     sudo: agentHooks.sudo,
     secrets: agentHooks.secrets,
   });
   const gitWatch = new GitWatch();
   // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
   const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
-    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
+    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, housekeeper, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams, returns, handOffs, inbox, mover, succession, storePulls, gitboyWebhooks, turnQueue, browsers }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
@@ -351,7 +362,12 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const canaryTimer = setInterval(() => { countTick("canary"); void dailyCanaryDue().then(due => due ? canary("daily") : undefined).catch(() => {}); }, 10 * 60_000);
   // A new high machine health finding reaches the phone once (machine-health-alerts.ts).
   const healthAlerts = new HealthAlerts(finding => agentHooks.push.notifyMachineHealth({ computer: hostname(), ...finding }));
-  const healthTimer = setInterval(() => { countTick("health"); void resources.read().then(value => healthAlerts.observe(value.health, Date.now())).catch(() => {}); }, ALERT_CHECK_MS);
+  const healthTimer = setInterval(() => { countTick("health"); void resources.read().then(value => {
+    healthAlerts.observe(value.health, Date.now());
+    void housekeeper?.observe(value)?.catch(() => {});
+  }).catch(() => {}); }, ALERT_CHECK_MS);
+  const housekeepingTimer = setInterval(() => { countTick("housekeeping"); void housekeeper?.run().catch(() => {}); }, HOUSEKEEPING_TICK_MS);
+  setTimeout(() => { void housekeeper?.run().catch(() => {}); }, 60_000).unref();
   let recording = false;
   const activityTimer = setInterval(() => {
     countTick("activity");
@@ -400,7 +416,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(dreamTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(dreamTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(housekeepingTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

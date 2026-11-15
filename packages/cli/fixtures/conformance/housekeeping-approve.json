@@ -1,0 +1,10 @@
+{
+  "results": [
+    { "id": "c0ffee0123456789", "status": "done", "freedBytes": 1180696576 },
+    { "id": "7e7e7e7e01234567", "status": "refused", "reason": "A process is using it now." },
+    { "id": "d0c4e7b1f2a39856", "status": "started" },
+    { "id": "5a5a5a5a12345678", "status": "failed", "reason": "simctl did not answer within 30 seconds." },
+    { "id": "0123456789abcdef", "status": "gone" }
+  ],
+  "revision": "4b2d9e7f0a1c3e65"
+}

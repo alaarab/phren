@@ -76,6 +76,30 @@ export type BlockerCode =
 
 export interface Blocker { code: BlockerCode; detail: string }
 
+const PLAIN: Record<BlockerCode, string> = {
+  "not-a-checkout": "It isn't a checkout Phren can inspect.",
+  symlink: "It is a symbolic link; Phren never follows one.",
+  "inspection-failed": "Phren couldn't check it, so it stays.",
+  "main-checkout": "It is the repository's main checkout.",
+  "linked-worktrees": "Other worktrees depend on it.",
+  locked: "The worktree is locked.",
+  "uncommitted-changes": "It has uncommitted changes.",
+  "untracked-files": "It has untracked files.",
+  "unpushed-commits": "It has commits that aren't on any remote.",
+  stash: "The repository has stashed changes.",
+  "in-progress-operation": "A rebase, merge or similar is in progress.",
+  "dirty-submodule": "A submodule has uncommitted changes.",
+  "unpushed-submodule": "A submodule has commits that aren't on any remote.",
+  "live-process": "A process is using it now.",
+  "bound-pane": "An agent pane is working in it.",
+  "in-use": "Something is using it now.",
+};
+
+/** One plain sentence for the first blocker, for the phone. */
+export function plainReason(blockers: readonly Blocker[]): string {
+  return blockers.length ? PLAIN[blockers[0].code] : "";
+}
+
 /** A process and the folder it runs in. */
 export interface LiveProcess { pid: number; cwd: string; command?: string }
 /** A pane and the folder its agent runs in. */
@@ -303,10 +327,13 @@ export async function cacheDecision(target: string, context: CacheContext): Prom
 }
 
 /** Delete an allow-listed cache entry, re-deciding against fresh state first.
- * Refuses (returns the decision) unless the decision is `auto` now. */
-export async function removeCacheEntry(target: string, context: CacheContext): Promise<{ removed: boolean; decision: CacheDecision }> {
+ * Refuses (returns the decision) unless the decision is `auto` now, or the
+ * owner approved it and the only thing short of `auto` is its age: an owner
+ * may clear a recent cache entry, never a path outside the cache roots. */
+export async function removeCacheEntry(target: string, context: CacheContext, ownerApproved = false): Promise<{ removed: boolean; decision: CacheDecision }> {
   const decision = await cacheDecision(target, context);
-  if (decision.verdict !== "auto") return { removed: false, decision };
+  const approvedRecent = ownerApproved && decision.verdict === "suggest" && decision.reason === "too-recent";
+  if (decision.verdict !== "auto" && !approvedRecent) return { removed: false, decision };
   await rm(target, { recursive: true, force: false, maxRetries: 0 });
   return { removed: true, decision };
 }
