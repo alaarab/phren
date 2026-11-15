@@ -276,6 +276,11 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./heavy/command.js")).runHeavy(args),
   },
   {
+    name: "reap", topic: "core", standalone: true, usage: "phren reap [--all] [--json]",
+    summary: "List dev servers, build daemons, test watchers, wait loops and test database clones agents left running, with age, idle time, memory and the command that stops each; stops nothing itself",
+    run: async args => (await import("./heavy/reap.js")).runReap(args),
+  },
+  {
     name: "secret-exec", topic: "core", standalone: true, usage: "phren secret-exec [--prompt <text>] [--plist <key> [--field K=V]...] -- <command...>",
     summary: "Run a command with a secret typed on your phone on its stdin (a line, or a plist field); the phone shows the exact command and the secret never reaches the agent",
     run: async args => (await import("./bridge/secret.js")).runSecretExec(args),
