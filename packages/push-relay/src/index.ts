@@ -14,6 +14,10 @@ export interface RelayServerOptions {
   sendLimit?: RateLimiter;
   /** Registrations per client address per minute. */
   registerLimit?: RateLimiter;
+  /** Notifications to Apple per minute across every phone, so registrations
+   * (free, one per made-up token) cannot turn the relay's APNs key into a
+   * spam source. */
+  sendBudget?: RateLimiter;
   now?: () => number;
 }
 
@@ -27,6 +31,16 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** The client's address: the last X-Forwarded-For entry, which the proxy in
+ * front (Caddy, nginx, Cloud Run) appended itself. Earlier entries are whatever
+ * the client sent, so reading the first let anyone pick a new address per
+ * request. Without the header, the socket's address. */
+export function clientAddress(request: Pick<IncomingMessage, "headers" | "socket">): string {
+  const forwarded = request.headers["x-forwarded-for"];
+  const entries = (Array.isArray(forwarded) ? forwarded.join(",") : forwarded ?? "").split(",").map(entry => entry.trim()).filter(Boolean);
+  return entries.at(-1) ?? request.socket.remoteAddress ?? "";
+}
+
 function reply(response: ServerResponse, status: number, value: Record<string, unknown>) {
   response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   response.end(JSON.stringify(value));
@@ -37,6 +51,7 @@ export function createRelayServer(options: RelayServerOptions): Server {
   const now = options.now ?? Date.now;
   const sendLimit = options.sendLimit ?? new RateLimiter(60, 60_000);
   const registerLimit = options.registerLimit ?? new RateLimiter(20, 60_000);
+  const sendBudget = options.sendBudget ?? new RateLimiter(Number(process.env.PHREN_RELAY_SENDS_PER_MINUTE ?? 6_000), 60_000);
   const replay = new ReplayGuard();
   return createServer(async (request, response) => {
     try {
@@ -44,8 +59,7 @@ export function createRelayServer(options: RelayServerOptions): Server {
       if (request.method === "GET" && url.pathname === "/health") return reply(response, 200, { ok: true });
       if (request.method !== "POST") throw new RelayError(404, "Not found.");
       if (url.pathname === "/v1/register") {
-        // Behind a proxy, its forwarded address; directly, the socket's.
-        const client = String(request.headers["x-forwarded-for"] ?? request.socket.remoteAddress ?? "").split(",")[0].trim();
+        const client = clientAddress(request);
         if (!registerLimit.allow(`register:${client}`, now())) throw new RelayError(429, "Too many registrations; try again shortly.");
         const body = JSON.parse(await readBody(request) || "{}") as { deviceToken?: unknown; environment?: unknown };
         const environment: Environment = body.environment === "sandbox" ? "sandbox" : "production";
@@ -59,6 +73,7 @@ export function createRelayServer(options: RelayServerOptions): Server {
         const body = await readBody(request);
         options.relay.verify(relayId, timestamp, body, signature, now());
         if (!sendLimit.allow(relayId, now())) throw new RelayError(429, "Too many notifications for this phone; slow down.");
+        if (!sendBudget.allow("all", now())) throw new RelayError(503, "The relay is busy; try again shortly.");
         replay.check(signature, now());
         const send = parseSend(body);
         const result = await options.send(target.deviceToken, target.environment, apnsPayload(send),

@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- Push relay: the per-address registration limit reads the address the proxy wrote, not one the client sent, so it can no longer be dodged per request; all phones together are capped at `PHREN_RELAY_SENDS_PER_MINUTE` sends a minute (default 6,000), so free registrations can't turn the relay's APNs key into a spam source; and the replay memory is bounded.
+
 ## [0.3.78] - 2026-11-14
 
 ### New

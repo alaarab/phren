@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { apnsPayload, createRelayServer, MAX_SKEW_SECONDS, parseSend, RateLimiter, Relay, RelayError, ReplayGuard, signRequest } from "./index.js";
+import { apnsPayload, clientAddress, createRelayServer, MAX_SKEW_SECONDS, parseSend, RateLimiter, Relay, RelayError, ReplayGuard, signRequest } from "./index.js";
 import type { ApnsSend } from "./apns.js";
 
 const token = "a".repeat(64);
@@ -96,5 +96,40 @@ describe("relay server", () => {
     expect((await fetch(`${base}/health`)).status).toBe(200);
     const big = await fetch(`${base}/v1/register`, { method: "POST", body: "x".repeat(9000) });
     expect(big.status).toBe(413);
+  });
+
+  it("limits registrations by the address the proxy saw, not one the client wrote", async () => {
+    const server = createRelayServer({ relay, send: async () => ({ ok: true, status: 200 }), registerLimit: new RateLimiter(2, 60_000) });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    close = () => server.close();
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const register = (spoof: string) => fetch(`${base}/v1/register`, { method: "POST",
+      headers: { "x-forwarded-for": `${spoof}, 203.0.113.9` }, body: JSON.stringify({ deviceToken: token }) });
+    expect((await register("1.1.1.1")).status).toBe(200);
+    expect((await register("2.2.2.2")).status).toBe(200);
+    expect((await register("3.3.3.3")).status).toBe(429);
+    expect(clientAddress({ headers: {}, socket: { remoteAddress: "127.0.0.1" } } as never)).toBe("127.0.0.1");
+  });
+
+  it("caps notifications to Apple across all phones, and refuses rather than forget a replay when full", async () => {
+    const delivered: string[] = [];
+    const server = createRelayServer({ relay, sendBudget: new RateLimiter(1, 60_000),
+      send: async deviceToken => { delivered.push(deviceToken); return { ok: true, status: 200 }; } });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    close = () => server.close();
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const sendTo = (deviceToken: string) => {
+      const { relayId, secret } = relay.register(deviceToken, "production");
+      const body = JSON.stringify({ kind: "alert", ciphertext: "Q2lwaGVydGV4dC1ibG9iLTEy" });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      return fetch(`${base}/v1/send`, { method: "POST", body,
+        headers: { "x-phren-relay": relayId, "x-phren-timestamp": timestamp, "x-phren-signature": signRequest(secret, timestamp, body) } });
+    };
+    expect((await sendTo("b".repeat(64))).status).toBe(200);
+    expect((await sendTo("c".repeat(64))).status).toBe(503);
+    expect(delivered).toHaveLength(1);
+    const guard = new ReplayGuard(1);
+    guard.check("one");
+    expect(() => guard.check("two")).toThrow(RelayError);
   });
 });
