@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import { parseEtime, parsePs, withStartTimes, type ProcessRow } from "../bridge/resources.js";
+import { parseEtime, parsePs, withStartTimes, type PaneRef, type ProcessRow } from "../bridge/resources.js";
 import { minutes, slotsRoot } from "./slots.js";
 
 const exec = promisify(execFile);
@@ -14,7 +14,8 @@ const exec = promisify(execFile);
  * the exact command that would stop it, and the owner runs the ones they want.
  */
 export type ReapKind = "dev server" | "build daemon" | "test watcher" | "headless browser" | "wait loop";
-export interface ReapRow { kind: ReapKind; name: string; pid: number; ageMs?: number; idleMs?: number; cpuShare?: number; rssBytes: number; by: string; cwd?: string; stop: string }
+/** `ancestors` is the pid chain above the row, nearest first; `pane` the terminal pane whose shell or foreground process is the row or one of them. */
+export interface ReapRow { kind: ReapKind; name: string; pid: number; startedAt?: number; ancestors: number[]; pane?: PaneRef; ageMs?: number; idleMs?: number; cpuShare?: number; rssBytes: number; by: string; cwd?: string; stop: string }
 export interface ReapDatabase { name: string; template: string; bytes?: number; connections: number; stop: string }
 
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "ksh"]);
@@ -68,7 +69,9 @@ export interface Sample { cpuSeconds: number; since: number }
  * parent is gone) is listed.
  */
 export function reapRows(rows: ProcessRow[], options: { now: number; cpu: Map<number, number>; samples: Record<string, Sample>; all?: boolean;
-  env?: (pid: number) => string | undefined; cwd?: (pid: number) => string | undefined; self?: number }): { rows: ReapRow[]; samples: Record<string, Sample> } {
+  env?: (pid: number) => string | undefined; cwd?: (pid: number) => string | undefined; self?: number;
+  /** Pane pids (bridge/resources.ts `paneOwners()`), to name the pane each row runs in. */
+  owners?: Map<number, PaneRef> }): { rows: ReapRow[]; samples: Record<string, Sample> } {
   const byPid = new Map(rows.map(row => [row.pid, row])), children = new Map<number, ProcessRow[]>();
   for (const row of rows) children.set(row.ppid, [...children.get(row.ppid) ?? [], row]);
   const env = options.env ?? (() => undefined), samples: Record<string, Sample> = {}, found: ReapRow[] = [];
@@ -96,7 +99,10 @@ export function reapRows(rows: ProcessRow[], options: { now: number; cpu: Map<nu
     }
     const ageMs = row.startedAt ? options.now - row.startedAt : undefined;
     const cwd = options.cwd?.(row.pid);
-    found.push({ ...kind, pid: row.pid, ...(ageMs !== undefined ? { ageMs } : {}), ...(idleMs !== undefined ? { idleMs } : {}),
+    const ancestors: number[] = [];
+    for (let up = byPid.get(row.ppid); up && ancestors.length < 64; up = byPid.get(up.ppid)) ancestors.push(up.pid);
+    const pane = [row.pid, ...ancestors].map(pid => options.owners?.get(pid)).find(Boolean);
+    found.push({ ...kind, pid: row.pid, ...(row.startedAt ? { startedAt: row.startedAt } : {}), ancestors, ...(pane ? { pane } : {}), ...(ageMs !== undefined ? { ageMs } : {}), ...(idleMs !== undefined ? { idleMs } : {}),
       ...(ageMs && cpuSeconds !== undefined ? { cpuShare: Math.min(1, cpuSeconds * 1000 / ageMs) } : {}),
       rssBytes: rss, by: by ?? "you", ...(cwd ? { cwd } : {}), stop: `kill ${row.pid}` });
   }

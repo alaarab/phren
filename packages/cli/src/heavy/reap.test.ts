@@ -33,6 +33,10 @@ it("lists what agents left running with memory, age and the stop command, never 
   const second = reapRows(table, { now: now + 3_600_000, cpu: new Map([[20, 40], [30, 700]]), samples: first.samples, self: 61 });
   expect(second.rows.find(r => r.pid === 20)?.idleMs).toBe(3_600_000);
   expect(second.rows.find(r => r.pid === 30)?.idleMs).toBe(0);
+  // Each row carries its pid chain and, given the panes' pids, the pane it runs in.
+  const pane = { server: "default", pane: "w1:p2", agent: "claude" };
+  expect(reapRows(table, { now, cpu: new Map(), samples: {}, self: 61, owners: new Map([[10, pane]]) }).rows.find(r => r.pid === 20))
+    .toMatchObject({ ancestors: [10], pane, startedAt: now - 7 * day });
   // The person's own dev server shows only when asked for everything.
   expect(reapRows(table, { now, cpu: new Map(), samples: {}, self: 61, all: true }).rows.map(r => r.pid)).toContain(40);
 });
