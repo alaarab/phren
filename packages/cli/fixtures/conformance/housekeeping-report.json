@@ -190,6 +190,48 @@
     "durationMs": 41250,
     "worktrees": [
       {
+        "id": "f1e2d3c4b5a69788",
+        "repo": "/Users/sam/Projects/phren-apps",
+        "branch": "feat/screen",
+        "path": "/Users/sam/Projects/apps-screen",
+        "main": false,
+        "sizeBytes": 3758096384,
+        "lastCommitAt": "2026-11-15T18:01:00.000Z",
+        "dirty": 4,
+        "untracked": 1,
+        "unpushed": 2,
+        "stashes": 1,
+        "inProgress": "MERGE_HEAD",
+        "sessions": [
+          {
+            "pane": {
+              "target": {
+                "server": "default",
+                "workspace": "w2T",
+                "tab": "w2T:t1",
+                "pane": "w2T:p3"
+              },
+              "label": "ios-rc"
+            },
+            "agent": "claude",
+            "title": "housekeeping screen"
+          }
+        ],
+        "processes": [
+          {
+            "pid": 4242,
+            "command": "xcodebuild"
+          }
+        ],
+        "action": {
+          "id": "77aa1c0e9b3d2f10",
+          "kind": "remove-worktree",
+          "label": "Remove worktree",
+          "allowed": false,
+          "reason": "It has uncommitted changes."
+        }
+      },
+      {
         "id": "3c1a9e0f7b2d4c11",
         "repo": "/Users/sam/Projects/phren",
         "branch": "main",
@@ -231,48 +273,6 @@
           "label": "Remove worktree",
           "allowed": true,
           "confirm": "Removes the folder. The branch fix/handoff stays, and its commits are on a remote."
-        }
-      },
-      {
-        "id": "f1e2d3c4b5a69788",
-        "repo": "/Users/sam/Projects/phren-apps",
-        "branch": "feat/screen",
-        "path": "/Users/sam/Projects/apps-screen",
-        "main": false,
-        "sizeBytes": 3758096384,
-        "lastCommitAt": "2026-11-15T18:01:00.000Z",
-        "dirty": 4,
-        "untracked": 1,
-        "unpushed": 2,
-        "stashes": 1,
-        "inProgress": "MERGE_HEAD",
-        "sessions": [
-          {
-            "pane": {
-              "target": {
-                "server": "default",
-                "workspace": "w2T",
-                "tab": "w2T:t1",
-                "pane": "w2T:p3"
-              },
-              "label": "ios-rc"
-            },
-            "agent": "claude",
-            "title": "housekeeping screen"
-          }
-        ],
-        "processes": [
-          {
-            "pid": 4242,
-            "command": "xcodebuild"
-          }
-        ],
-        "action": {
-          "id": "77aa1c0e9b3d2f10",
-          "kind": "remove-worktree",
-          "label": "Remove worktree",
-          "allowed": false,
-          "reason": "It has uncommitted changes."
         }
       }
     ],

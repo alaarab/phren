@@ -311,6 +311,11 @@ describe("the /v1/housekeeping contract", () => {
     const schema = name.includes("approve") ? approveResultSchema : viewSchema;
     expect(schema.parse(fixture)).toEqual(fixture);
     if (name === "housekeeping-report.json") {
+      // In the documented order: worktrees by path, space largest first, sessions most idle first.
+      const { worktrees, space, sessions } = fixture.inventory;
+      expect(worktrees.map((row: { path: string }) => row.path)).toEqual(worktrees.map((row: { path: string }) => row.path).sort());
+      expect(space.map((row: { sizeBytes: number }) => row.sizeBytes)).toEqual(space.map((row: { sizeBytes: number }) => row.sizeBytes).sort((a: number, b: number) => b - a));
+      expect(sessions.map((row: { idleSeconds?: number }) => row.idleSeconds ?? 0)).toEqual(sessions.map((row: { idleSeconds?: number }) => row.idleSeconds ?? 0).sort((a: number, b: number) => b - a));
       // The phone decodes a disabled row in every section.
       for (const rows of [fixture.inventory.worktrees, fixture.inventory.space, fixture.inventory.sessions])
         expect(rows.some((row: { action?: { allowed: boolean; reason?: string } }) => row.action && !row.action.allowed && row.action.reason)).toBe(true);
