@@ -394,6 +394,7 @@ const signalCode = (code: number | null, signal: NodeJS.Signals | null) =>
  * secret was not given (the command is stopped then). */
 export async function runSecretExec(args: string[], options: { script?: string } = {}): Promise<number> {
   if (!args.length || args[0] === "--help" || args[0] === "-h") { console.log(SECRET_EXEC_USAGE); return args.length ? 0 : 1; }
+  if (process.platform === "win32") throw new Error("phren secret-exec runs where Phren Hook runs: macOS, Linux or WSL.");
   const { spec, command } = secretExecArgs(args);
   const script = options.script ?? askpassPath();
   if (!options.script && !askpassInstalled()) throw new Error("Phren Hook's askpass helper is missing. Run phren bridge install.");
