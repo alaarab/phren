@@ -70,6 +70,17 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
   mode 0600 through a temporary sibling and atomic rename; the file is local
   configuration, independent of its HTTP port and the Phren store.
 
+### Computer budget and heavy jobs
+
+- `$XDG_CONFIG_HOME/phren/budget.yaml` (default `~/.config/phren/budget.yaml`):
+  read only, written by the owner; this computer's worker and heavy-job budget.
+- `$XDG_STATE_HOME/phren/slots/<pool>/` (default `~/.local/state/phren/slots/`,
+  `PHREN_SLOTS_DIR`): one mode-0600 ticket per job waiting or running under
+  `phren fanout run` (`workers`) or `phren heavy` (`heavy`), removed when the
+  job ends and dropped by the next reader once its process is gone.
+- `~/.local/state/phren/reap-samples.json`: CPU times `phren reap` saw last, so
+  the next report can say how long each leftover has been idle.
+
 ### Store (all presets)
 - `~/.phren/`, the store: projects, `global/`, `profiles/`, `.config/`,
   `.runtime/`, `.sessions/`, `.env` (feature flags), `machines.yaml`,

@@ -71,7 +71,8 @@ function decide(tickets: readonly Ticket[], id: string, slots: number, pressure:
 }
 
 export function minutes(ms: number): string {
-  const m = Math.max(0, Math.round(ms / 60_000));
+  if (ms < 60_000) return `${Math.max(0, Math.round(ms / 1000))}s`;
+  const m = Math.round(ms / 60_000);
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 

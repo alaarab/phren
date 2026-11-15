@@ -42,7 +42,7 @@ describe("heavy-job slots", () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     const release = take("release", { priority: PRIORITIES.release }).then(held => { order.push("release"); return held; });
     await new Promise(resolve => setTimeout(resolve, 20));
-    expect(messages).toContain("normal: queued: all 1 slot busy: first (pid " + process.pid + ", 0m)");
+    expect(messages).toContain("normal: queued: all 1 slot busy: first (pid " + process.pid + ", 0s)");
     first.release();
     (await release).release();
     (await normal).release();
