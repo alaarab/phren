@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.79] - 2026-11-15
+
 ### Security
 
 - Owner-only Hook actions (release authority and its confirmations, raising a pane's permission mode, making or stopping the conductor, registering for alerts, linking computers) accept a request signed by the paired phone's key (`X-Phren-Owner-Proof`, capability `ownerProof`). After the Hook has seen one valid signature it refuses unsigned requests to those routes, so an agent on the same computer can no longer raise its own permission mode or change release authority through `hook.sock`. Phones that don't sign yet keep working until then. After the switch, make these changes from the phone; the terminal commands (`phren authority`, `phren bridge link`) are refused.
