@@ -58,6 +58,22 @@ key. The process checks establish the pane's foreground processes, not the
 identity of the process sending the callback. Local transcript files, agent
 configuration, and binaries also remain under that user's control.
 
+### Owner proof
+
+Owner-only routes (`POST`/`DELETE /v1/authority`, `POST /v1/authority/confirm`,
+`POST /v1/agents/permission-mode`, `POST /v1/conductor/make|stop`,
+`POST /v1/push/register`, `POST /v1/sets/link`) accept an
+`X-Phren-Owner-Proof` header: base64url JSON `{ payload, signature, publicKey }`,
+where `payload` is base64 of `{ domain: "phren-owner-request-v1", nonce (uuid),
+at (ISO time), method, path, body (sha256 hex of the raw body) }` signed with the
+Ed25519 key of a `phren-iphone` or `phren-android` dispatch key. The Hook checks
+the key, the signature, method, path and body, a five-minute window, and that the
+nonce is new. After the first valid proof it writes `owner-proof.json` (0600) and
+refuses unsigned owner requests to those routes with 403 `owner-proof-required`.
+Requests with an agent or peer origin are refused by the routes as before. A
+process that can rewrite `authorized_keys` or the bridge root can still get
+around this; the proof stops an agent from simply calling `hook.sock`.
+
 ## Conversation identity and delivery
 
 Targets contain `server`, `workspace`, `tab`, `pane`, `source`, and `session`.

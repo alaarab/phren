@@ -14,6 +14,7 @@ import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { ownerRequest, requestPeer, type PeerIdentity } from "./request-origin.js";
+import { bodyDigest, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
@@ -194,7 +195,7 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
 export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -220,6 +221,9 @@ async function codePackageStatus(store: string, enabled: boolean): Promise<Recor
   return code && from ? { loadedFrom: from } : { missing: true };
 }
 
+/** Owner-only actions need the paired phone's signature once it has signed one (owner-proof.ts). */
+const ownerProof = new OwnerProof();
+const bodyDigests = new WeakMap<IncomingMessage, string>();
 async function body(request: IncomingMessage, cap = 11_500_000): Promise<Json> {
   let size = 0; const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -227,7 +231,9 @@ async function body(request: IncomingMessage, cap = 11_500_000): Promise<Json> {
     if (size > cap) throw new BridgeError(413, "Request is too large.");
     chunks.push(chunk);
   }
-  return object(JSON.parse(Buffer.concat(chunks).toString() || "{}"));
+  const raw = Buffer.concat(chunks);
+  bodyDigests.set(request, bodyDigest(raw));
+  return object(JSON.parse(raw.toString() || "{}"));
 }
 
 export function selectedServer(url: URL): string {
@@ -857,6 +863,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request, url.pathname === "/v1/schedules/events" ? SCHEDULE_EVENT_BODY_CAP : undefined);
+        await ownerProof.check(request, url.pathname, data, bodyDigests.get(request));
         if (url.pathname.startsWith("/v1/conductor/move/")) await ctx.succession!.authorize(z.string().uuid().parse(data.id), requestPeer(request), url.pathname.endsWith("/prepare") ? z.string().uuid().parse(data.originId) : undefined);
         const executeConductor: ConductorExecutor = async (action, payload, origin, remote = false) => {
           if (action === "dispatch") return dispatches!.dispatch(payload, { server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane });
@@ -1173,6 +1180,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "DELETE") {
         if (url.pathname !== "/v1/conductor/grants" && url.pathname !== "/v1/authority" && url.pathname !== "/v1/approval-rules") throw new BridgeError(404, "Unknown Phren Hook route.");
         const data = await body(request);
+        await ownerProof.check(request, url.pathname, data, bodyDigests.get(request));
         if (url.pathname === "/v1/conductor/grants" && request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
         if (url.pathname === "/v1/approval-rules") {
           result = await changeApprovalRule(data, "DELETE");
