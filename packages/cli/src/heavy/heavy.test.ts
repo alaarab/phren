@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
 import { defaultBudget, readBudget, type Pressure } from "./budget.js";
 import { acquire, PRIORITIES, poolStatus, QueueTimeout } from "./slots.js";
+import { runHeavy } from "./command.js";
 
 const GB = 1024 ** 3;
 const budget = defaultBudget(31 * GB);
@@ -75,4 +76,13 @@ describe("heavy-job slots", () => {
     expect(poolStatus("heavy", temp!.path).map(t => t.label)).toEqual(["first"]);
     held.release();
   });
+});
+
+it("phren heavy runs the command, returns its exit code and frees the slot", async () => {
+  temp = makeTempDir("heavy-command-");
+  vi.stubEnv("PHREN_SLOTS_DIR", temp.path);
+  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  expect(await runHeavy(["--label", "exit three", "--", process.execPath, "-e", "process.exit(3)"])).toBe(3);
+  expect(poolStatus("heavy", temp.path)).toEqual([]);
+  await expect(runHeavy(["--slots", "0", "--", "true"])).rejects.toThrow("--slots");
 });
