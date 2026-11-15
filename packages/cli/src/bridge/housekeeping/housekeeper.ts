@@ -11,7 +11,8 @@ import {
   type ActionKind, type ApproveResult, type Area, type Badge, badgeOf, buildReport, type Cleaned, healthOf, type HousekeepingView,
   type ItemDraft, type StoredItem, type StoredReport, type Trigger, viewOf,
 } from "./report.js";
-import { type Inventory, type InventoryOptions, type InventorySession, scanInventory } from "./inventory.js";
+import { type Inventory, type InventoryOptions, type InventorySession, type InventorySpace, type InventoryWorktree, scanInventory } from "./inventory.js";
+import { findRow, type Section, type SectionView, sectionView } from "./inventory-view.js";
 import { type DeletionContext, type InUseSources, type PaneDispatch, paneCloseBlock, plainReason, removeApprovedPath, removeWorktreeSafely } from "./safety.js";
 
 
@@ -231,12 +232,18 @@ export class Housekeeper {
     const report = await this.latest();
     if (!report) return undefined;
     const scanned = await this.latestInventory();
-    const inventory = scanned ? { ...scanned, ...(this.scanning ? { scanning: true } : {}),
-      ...(this.now() - Date.parse(scanned.collectedAt) > STALE_MS ? { stale: true } : {}) } : undefined;
+    const inventory = scanned ? { collectedAt: scanned.collectedAt, scanning: Boolean(this.scanning),
+      ids: [...scanned.worktrees, ...scanned.space, ...scanned.sessions].map(row => row.action?.id ?? row.id) } : undefined;
     const view = viewOf(report, { cleaned: await this.store.cleaned(this.now()), dismissed: await this.store.dismissed(), includeDismissed,
       nextCheckAt: new Date(Date.parse(report.generatedAt) + TICK_MS).toISOString(), ...(inventory ? { inventory } : {}) });
     if (!includeDismissed) this.cachedView = view;
     return view;
+  }
+
+  /** One inventory section for the phone; undefined until the first scan finishes. */
+  async section(section: Section): Promise<SectionView | undefined> {
+    const inventory = await this.latestInventory();
+    return inventory ? sectionView(inventory, section, Boolean(this.scanning) || this.now() - Date.parse(inventory.collectedAt) > STALE_MS) : undefined;
   }
 
   /** The overview badge, from the cached view: no pass, no git. */
@@ -347,7 +354,7 @@ export class Housekeeper {
       freedBytes, ...(item.sizeBytes !== undefined ? { reportedBytes: item.sizeBytes } : {}), by }, this.now());
     // The row is gone from what the phone sees until the next scan confirms it.
     if (this.inventory) {
-      const keep = <T extends { action?: { id: string } }>(rows: T[]) => rows.filter(row => row.action?.id !== item.id);
+      const keep = <T extends { action?: { id: string } }>(rows: T[]) => rows.filter(row => row.action?.id !== item.fingerprint);
       this.inventory = { ...this.inventory, worktrees: keep(this.inventory.worktrees), space: keep(this.inventory.space), sessions: keep(this.inventory.sessions) };
       await this.store.setInventory(this.inventory);
     }
@@ -355,23 +362,29 @@ export class Housekeeper {
     return { status: "done", freedBytes };
   }
 
-  /** An inventory row's action as an approvable item; it is re-checked live by its executor. */
+  /** An inventory row (prefixed id) as an approvable item; it is re-checked live by its executor. */
   private async inventoryItem(id: string): Promise<StoredItem | undefined> {
     const inventory = await this.latestInventory();
-    if (!inventory) return undefined;
-    const since = inventory.collectedAt;
-    const base = { section: "suggestion" as const, fingerprint: id, since, id, reason: "" };
-    const tree = inventory.worktrees.find(row => row.action.id === id);
-    if (tree) return { ...base, area: "worktrees", kind: "worktree", title: path.basename(tree.path), target: { path: tree.path, repo: tree.repo, ...(tree.branch ? { branch: tree.branch } : {}) },
-      action: "remove-worktree", ...(tree.sizeBytes !== undefined ? { sizeBytes: tree.sizeBytes } : {}) };
-    const room = inventory.space.find(row => row.action?.id === id);
-    if (room?.action) return { ...base, area: room.area, kind: room.kind === "simulator" ? "simulator" : room.kind === "docker" ? "docker" : room.kind === "tmp" ? "tmp" : "cache",
-      title: room.title, target: { ...(room.path ? { path: room.path } : {}), ...(room.udid ? { udid: room.udid } : {}), ...(room.kind === "docker" ? { name: "builder" } : {}) },
-      action: room.action.kind as ActionKind, sizeBytes: room.sizeBytes };
-    const session = inventory.sessions.find(row => row.action.id === id);
-    if (session) return { ...base, area: "sessions", kind: "pane", title: session.title ?? session.pane.label ?? session.pane.target.pane,
+    const found = inventory ? findRow(inventory, id) : undefined;
+    if (!inventory || !found) return undefined;
+    // The fingerprint holds the row's own action id, which is how a handled row leaves the inventory.
+    const base = { section: "suggestion" as const, since: inventory.collectedAt, id, reason: "" };
+    if (found.section === "worktrees") {
+      const tree = found.row as InventoryWorktree;
+      return { ...base, fingerprint: tree.action.id, area: "worktrees", kind: "worktree", title: path.basename(tree.path),
+        target: { path: tree.path, repo: tree.repo, ...(tree.branch ? { branch: tree.branch } : {}) }, action: "remove-worktree",
+        ...(tree.sizeBytes !== undefined ? { sizeBytes: tree.sizeBytes } : {}) };
+    }
+    if (found.section === "space") {
+      const room = found.row as InventorySpace;
+      if (!room.action) return undefined;
+      return { ...base, fingerprint: room.action.id, area: room.area, kind: room.kind === "simulator" ? "simulator" : room.kind === "docker" ? "docker" : room.kind === "tmp" ? "tmp" : "cache",
+        title: room.title, target: { ...(room.path ? { path: room.path } : {}), ...(room.udid ? { udid: room.udid } : {}), ...(room.kind === "docker" ? { name: "builder" } : {}) },
+        action: room.action.kind as ActionKind, sizeBytes: room.sizeBytes };
+    }
+    const session = found.row as InventorySession;
+    return { ...base, fingerprint: session.action.id, area: "sessions", kind: "pane", title: session.pane.label ?? session.title ?? session.pane.target.pane,
       target: { name: `${session.pane.target.server}/${session.pane.target.pane}` }, action: "close-pane", pane: session.pane };
-    return undefined;
   }
 
   /** Live state for executors: fresh sessions and dispatches, never the scan's copy. */

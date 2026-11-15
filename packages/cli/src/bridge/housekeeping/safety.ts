@@ -442,7 +442,7 @@ export async function removeApprovedPath(target: string, context: DeletionContex
 // Panes.
 
 export interface PaneState { server: string; pane: string; status?: string; role?: string }
-export interface PaneDispatch { server: string; pane: string; returned?: { read: boolean }; closedAt?: string }
+export interface PaneDispatch { id?: string; server: string; pane: string; returned?: { read: boolean }; closedAt?: string }
 
 /** Why a pane must stay open, or undefined if the owner may close it. A
  * pane whose dispatch return is unread keeps the evidence (the 2026-11-08

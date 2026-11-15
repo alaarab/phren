@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { Housekeeper, HousekeepingStore } from "./housekeeper.js";
 import { type InventoryOptions, parseDockerSize, scanInventory, type SessionRow, sessionRowsFromOverview } from "./inventory.js";
-import { viewSchema } from "./report.js";
+import { sectionSchema } from "./inventory-view.js";
 import type { PaneDispatch } from "./safety.js";
 
 const created: string[] = [];
@@ -139,12 +139,12 @@ describe("handling inventory rows", () => {
       { closePane: async (_server: string, pane: string) => { closed.push(pane); } });
     await housekeeper.run();
     await housekeeper.scan();
-    const view = viewSchema.parse((await housekeeper.view())!);
-    const inventory = view.inventory!;
-    const id = (rows: Array<{ path?: string; action?: { id: string } }>, p: string) => rows.find(row => row.path === p)!.action!.id;
-    const cleanId = id(inventory.worktrees, machine.clean);
-    const tmpId = id(inventory.space, path.join(machine.scratch, "train-old"));
-    const paneId = inventory.sessions[0].action.id;
+    const section = async (name: "worktrees" | "space" | "sessions") => sectionSchema.parse(await housekeeper.section(name)).rows as Array<{ id: string; path?: string; action?: unknown }>;
+    const id = (rows: Array<{ id: string; path?: string }>, p: string) => rows.find(row => row.path === p)!.id;
+    const cleanId = id(await section("worktrees"), machine.clean);
+    const tmpId = id(await section("space"), path.join(machine.scratch, "train-old"));
+    const paneId = (await section("sessions"))[0].id;
+    expect([cleanId, tmpId, paneId].map(value => value.slice(0, 3))).toEqual(["wt:", "sp:", "ss:"]);
 
     // Between scan and approve the scratch folder gets used and the agent starts working.
     await writeFile(path.join(machine.scratch, "train-old", "g"), "new");
@@ -162,9 +162,8 @@ describe("handling inventory rows", () => {
     status = "idle";
     expect((await housekeeper.approve([paneId], "phone")).results).toEqual([{ id: paneId, status: "done", freedBytes: 0 }]);
     expect(closed).toEqual(["p1"]);
-    const after = (await housekeeper.view())!;
-    expect(after.inventory!.worktrees.map(row => row.path)).not.toContain(machine.clean);
-    expect(after.inventory!.sessions).toEqual([]);
-    expect(after.cleaned.map(entry => [entry.area, entry.by])).toEqual([["worktrees", "phone"], ["sessions", "phone"]]);
+    expect((await section("worktrees")).map(row => row.path)).not.toContain(machine.clean);
+    expect(await section("sessions")).toEqual([]);
+    expect((await housekeeper.view())!.cleaned.map(entry => [entry.area, entry.by])).toEqual([["worktrees", "phone"], ["sessions", "phone"]]);
   });
 });

@@ -34,11 +34,15 @@ export interface InventoryWorktree {
 export type SpaceKind = "cache" | "derived-data" | "xctest-devices" | "device-support" | "simulator" | "docker" | "tmp" | "node_modules";
 export interface InventorySpace {
   id: string; area: Area; kind: SpaceKind; title: string; path?: string; udid?: string; sizeBytes: number; lastUsedAt?: string; action?: InventoryAction;
+  /** Who is using it now, when that is why it stays. */
+  inUse?: string;
+  /** Why a row with no action is never handled here. */
+  never?: string;
 }
 
 export interface InventorySession {
   id: string; pane: PaneLink; agent?: string; title?: string; project?: string; status?: string; idleSeconds?: number; cwd?: string;
-  dispatch?: string; action: InventoryAction;
+  dispatch?: string; role?: string; receipt?: { id: string; returnRead: boolean }; action: InventoryAction;
 }
 
 export interface Inventory {
@@ -177,7 +181,9 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
     const size = await sizeOf(target);
     if (size === undefined || size === 0) return;
     const decision = withAction ? await deletionDecision(target, context) : undefined;
+    const user = decision && !decision.allowed ? decision.blockers?.find(b => b.code === "live-process" || b.code === "bound-pane") : undefined;
     space.push({ id: actionId("delete-path", target, "row"), area, kind, title, path: target, sizeBytes: size, lastUsedAt: new Date(info.mtimeMs).toISOString(),
+      ...(user ? { inUse: user.detail } : {}), ...(!withAction ? { never: "Phren clears this cache by age on its own." } : {}),
       ...(decision ? { action: action("delete-path", target, [size, info.mtimeMs], decision.allowed ? undefined : decision.reason, kind === "node_modules" ? "Delete node_modules" : kind === "tmp" ? "Delete folder" : "Clear cache") } : {}) });
   };
   const KINDS: Record<string, SpaceKind> = { "derived-data": "derived-data", "xctest-devices": "xctest-devices", "ios-device-support": "device-support" };
@@ -218,13 +224,15 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
       for (const row of await options.docker()) {
         if (!row.sizeBytes) continue;
         const build = /build cache/i.test(row.type);
+        const never = /volume/i.test(row.type) ? "Phren never deletes docker volumes: they hold data."
+          : /image/i.test(row.type) ? "Phren doesn't remove docker images." : "Phren doesn't remove docker containers.";
         space.push({ id: actionId("prune-docker-builder", row.type, "row"), area: "docker", kind: "docker", title: `Docker ${row.type.toLowerCase()}`, sizeBytes: row.sizeBytes,
-          ...(build ? { action: action("prune-docker-builder", "builder", [row.sizeBytes], row.reclaimableBytes ? undefined : "Nothing in it can be pruned.") } : {}) });
+          ...(build ? { action: action("prune-docker-builder", "builder", [row.sizeBytes], row.reclaimableBytes ? undefined : "Nothing in it can be pruned.") } : { never }) });
       }
     } catch (error) { errors.push({ check: "space:docker", message: String(error) }); }
   }
   space.sort((a, b) => b.sizeBytes - a.sizeBytes);
-  space.splice(options.spaceLimit ?? 60);
+  space.splice(options.spaceLimit ?? 500);
 
   // Sessions.
   const dispatches = await (options.dispatches?.() ?? Promise.resolve([] as PaneDispatch[])).catch(() => undefined);
@@ -234,11 +242,18 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
     const target = `${row.pane.target.server}/${row.pane.target.pane}`;
     return { id: actionId("close-pane", target, "row"), pane: row.pane, ...(row.agent ? { agent: row.agent } : {}), ...(row.title ? { title: row.title } : {}),
       ...(row.project ? { project: row.project } : {}), ...(row.status ? { status: row.status } : {}), ...(row.idleSeconds !== undefined ? { idleSeconds: row.idleSeconds } : {}),
-      ...(row.cwd ? { cwd: row.cwd } : {}), ...(row.dispatch ? { dispatch: row.dispatch } : {}),
+      ...(row.cwd ? { cwd: row.cwd } : {}), ...(row.dispatch ? { dispatch: row.dispatch } : {}), ...(row.role ? { role: row.role } : {}),
+      ...receiptOf(row, dispatches),
       action: action("close-pane", target, [row.status, block], block) };
   }).sort((a, b) => (b.idleSeconds ?? 0) - (a.idleSeconds ?? 0));
 
   return { collectedAt: new Date(now).toISOString(), durationMs: Date.now() - started, worktrees, space, sessions, ...(errors.length ? { errors } : {}) };
+}
+
+/** The pane's open dispatch, newest first, as the phone shows it. */
+function receiptOf(row: SessionRow, dispatches: PaneDispatch[] | undefined): { receipt?: { id: string; returnRead: boolean } } {
+  const receipt = [...dispatches ?? []].reverse().find(d => d.id && !d.closedAt && d.server === row.pane.target.server && d.pane === row.pane.target.pane);
+  return receipt?.id ? { receipt: { id: receipt.id, returnRead: receipt.returned?.read ?? false } } : {};
 }
 
 /** Simulators with their data folders (macOS). */

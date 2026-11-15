@@ -232,7 +232,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
         const name = String(server.session);
         return sessionRowsFromOverview(await readWorkspaces(name, await sharedSnapshot(name, 4000), false));
       }))).flat(),
-      dispatches: async () => (await dispatchStatus()).flatMap(receipt => receipt.target ? [{ server: receipt.target.server, pane: receipt.target.pane,
+      dispatches: async () => (await dispatchStatus()).flatMap(receipt => receipt.target ? [{ id: receipt.id, server: receipt.target.server, pane: receipt.target.pane,
         ...(receipt.returned ? { returned: { read: receipt.returned.read } } : {}), ...(receipt.closedAt ? { closedAt: receipt.closedAt } : {}) }] : []),
       ...(process.platform === "darwin" ? { simulators: () => listSimulators(), xcodebuildRunning } : {}),
       docker: dockerUsage,

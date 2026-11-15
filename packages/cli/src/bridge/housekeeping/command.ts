@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import { hookRequest } from "../client.js";
 import type { Json } from "../protocol.js";
+import type { SectionView } from "./inventory-view.js";
 import type { HousekeepingView } from "./report.js";
 
 /**
@@ -21,16 +22,23 @@ export function formatView(name: string, view: HousekeepingView | undefined): st
   for (const k of view.kept) lines.push(`  kept ${k.title}: ${k.reason}`);
   const freed = view.cleaned.reduce((sum, c) => sum + c.freedBytes, 0);
   if (view.cleaned.length) lines.push(`  cleaned ${view.cleaned.length} item(s) in 14 days, ${size(freed)} freed`);
-  const inv = view.inventory;
-  if (inv) {
-    const mark = (a?: { allowed: boolean; reason?: string }) => !a ? "" : a.allowed ? "  [can remove]" : `  [kept: ${a.reason}]`;
-    lines.push(`  inventory ${inv.collectedAt}${inv.scanning ? " (scanning)" : ""}${inv.stale ? " (stale)" : ""}: ${inv.worktrees.length} worktree(s), ${inv.sessions.length} pane(s)`);
-    for (const w of inv.worktrees) lines.push(`    ${w.path}${w.branch ? ` [${w.branch}]` : ""}${w.sizeBytes !== undefined ? ` ${size(w.sizeBytes)}` : ""}${w.main ? " main" : ""}${mark(w.main ? undefined : w.action)}  ${w.action.id}`);
-    for (const r of inv.space.slice(0, 15)) lines.push(`    ${size(r.sizeBytes).padStart(9)} ${r.title}${mark(r.action)}${r.action ? `  ${r.action.id}` : ""}`);
-    for (const p of inv.sessions) lines.push(`    pane ${p.pane.label ?? p.pane.target.pane} ${p.agent ?? ""} ${p.status ?? ""}${p.idleSeconds !== undefined ? ` idle ${Math.round(p.idleSeconds / 60)}m` : ""}${mark(p.action)}  ${p.action.id}`);
-  }
   if (lines.length === 1) lines.push("  Nothing to do.");
   for (const error of view.errors ?? []) lines.push(`  check ${error.check} failed: ${error.message}`);
+  return lines.join("\n");
+}
+
+/** The inventory sections, one line per row with its approve id. */
+export function formatSections(sections: SectionView[]): string {
+  const lines: string[] = [];
+  const mark = (row: { action?: { label: string }; kept?: string }) => row.action ? `  [${row.action.label}]` : `  [kept: ${row.kept}]`;
+  for (const view of sections) {
+    lines.push(`  ${view.section} (${view.rows.length}, measured ${view.measuredAt}${view.partial ? ", measuring" : ""})`);
+    for (const row of view.rows.slice(0, view.section === "space" ? 20 : 200)) {
+      const sized = row.sizeBytes !== undefined ? ` ${size(row.sizeBytes)}` : "";
+      const extra = "idleSeconds" in row ? ` ${row.state}, idle ${Math.round(row.idleSeconds / 60)}m` : "branch" in row && row.branch ? ` [${row.branch}]` : "";
+      lines.push(`    ${row.title}${extra}${sized}${mark(row)}  ${row.id}`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -75,7 +83,13 @@ export async function runHousekeeping(args: string[]): Promise<number> {
   }
   if (json) { console.log(JSON.stringify(answer, null, 2)); return 0; }
   const name = (value: unknown, fallback: string) => typeof (value as { name?: unknown })?.name === "string" ? String((value as { name: string }).name) : fallback;
-  const blocks = [formatView(name(answer.computer, hostname()), answer as unknown as HousekeepingView)];
+  const sections: SectionView[] = [];
+  for (const section of ["worktrees", "space", "sessions"]) {
+    const view = await hookRequest(`/v1/housekeeping/inventory?section=${section}`, undefined, undefined, 30_000).catch(() => undefined);
+    if (view) sections.push(view as unknown as SectionView);
+  }
+  const blocks = [formatView(name(answer.computer, hostname()), answer as unknown as HousekeepingView)
+    + (sections.length ? `\n${formatSections(sections)}` : "\n  Inventory: the first scan is still running.")];
   for (const peer of Array.isArray(answer.peers) ? answer.peers as Json[] : []) {
     const peerName = name(peer.computer, String(peer.name ?? "peer"));
     blocks.push(typeof peer.error === "string" ? `${peerName}\n  unavailable: ${peer.error}` : formatView(peerName, peer as unknown as HousekeepingView));
