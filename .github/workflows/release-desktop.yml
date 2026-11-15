@@ -79,13 +79,16 @@ jobs:
 
       # Signing and notarization turn on when these secrets exist; without
       # them the app is signed ad hoc and macOS asks to confirm the first open.
+      # Only a release (tag or dispatch) gets them: a pull request's packaging
+      # code and dependencies are not trusted with the Developer ID certificate,
+      # so its build is signed ad hoc.
       - name: Package
         env:
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ github.event_name != 'pull_request' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
         run: node packages/desktop/scripts/package.mjs ${{ matrix.target }}
 
       # The terminal needs node-pty's native build to load in the packaged
