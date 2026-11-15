@@ -1,0 +1,140 @@
+{
+  "schema": 1,
+  "revision": "9c1e4f0a2b7d3e58",
+  "generatedAt": "2026-11-15T18:30:00.000Z",
+  "nextCheckAt": "2026-11-15T18:45:00.000Z",
+  "health": {
+    "load1": 61.2,
+    "cores": 10,
+    "memoryUsedBytes": 27917287424,
+    "memoryTotalBytes": 34359738368,
+    "memoryPressure": "warn",
+    "diskFreeBytes": 15032385536,
+    "diskTotalBytes": 494384795648,
+    "tmpBytes": 4294967296
+  },
+  "warnings": [
+    {
+      "id": "disk",
+      "area": "disk",
+      "severity": "warn",
+      "title": "14.0 GB free on the home volume",
+      "detail": "Getting close to the 10 GB floor.",
+      "since": "2026-11-15T18:15:00.000Z",
+      "fix": "Free space: clear simulator clones (xcrun simctl delete unavailable), DerivedData, caches and old swap.",
+      "notify": true
+    },
+    {
+      "id": "load:cpu",
+      "area": "memory",
+      "severity": "warn",
+      "title": "Load 61.2 on 10 cores",
+      "detail": "The CPU is saturated.",
+      "since": "2026-11-15T18:00:00.000Z",
+      "fix": "Pause or stop the heaviest jobs listed under Heavy.",
+      "pane": { "target": { "server": "default", "workspace": "w2T", "tab": "w2T:t1", "pane": "w2T:p3" }, "label": "ios-rc" },
+      "session": "39d3b5c4-b9df-43e1-87af-0c1d3f55f547",
+      "notify": true
+    },
+    {
+      "id": "orphan:node",
+      "area": "sessions",
+      "severity": "warn",
+      "title": "4 orphaned node processes",
+      "detail": "Oldest running 2d with no parent (pid 812, 813, 990, 1201).",
+      "since": "2026-11-14T09:00:00.000Z",
+      "fix": "End them with phren's job cleanup."
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "c0ffee0123456789",
+      "area": "worktrees",
+      "kind": "worktree",
+      "title": "phren-fix-handoff",
+      "target": { "path": "/Users/alaarab/Projects/phren-fix-handoff", "repo": "/Users/alaarab/Projects/phren", "branch": "fix/handoff" },
+      "reason": "Merged into main, clean and pushed.",
+      "evidence": ["Branch fix/handoff is merged into origin/main", "No uncommitted changes", "No process or pane is using it"],
+      "sizeBytes": 1288490188,
+      "actionLabel": "Remove worktree",
+      "since": "2026-11-14T22:00:00.000Z"
+    },
+    {
+      "id": "5a5a5a5a12345678",
+      "area": "simulators",
+      "kind": "simulator",
+      "title": "iPhone 17 Pro (os-ux)",
+      "target": { "udid": "8B1F2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D", "name": "iPhone 17 Pro (os-ux)" },
+      "reason": "Booted for 3 hours with no build or pane using it.",
+      "evidence": ["No xcodebuild running", "No pane started it"],
+      "actionLabel": "Shut down simulator",
+      "since": "2026-11-15T15:30:00.000Z"
+    },
+    {
+      "id": "d0c4e7b1f2a39856",
+      "area": "docker",
+      "kind": "docker",
+      "title": "Docker build cache",
+      "target": { "name": "builder-cache" },
+      "reason": "Build cache older than 7 days.",
+      "evidence": ["docker system df: 11.2 GB build cache"],
+      "sizeBytes": 12025908428,
+      "actionLabel": "Prune build cache",
+      "since": "2026-11-15T12:00:00.000Z"
+    },
+    {
+      "id": "7e7e7e7e01234567",
+      "area": "disk",
+      "kind": "tmp",
+      "title": "/private/tmp/apps-train",
+      "target": { "path": "/private/tmp/apps-train" },
+      "reason": "Not touched in 9 days and nothing is using it.",
+      "evidence": ["Last modified 2026-11-06", "Not a git worktree"],
+      "sizeBytes": 3221225472,
+      "actionLabel": "Delete folder",
+      "since": "2026-11-13T08:00:00.000Z"
+    }
+  ],
+  "kept": [
+    {
+      "id": "77aa1c0e9b3d2f10",
+      "area": "worktrees",
+      "title": "gitboy-apps-onboarding",
+      "target": { "path": "/Users/alaarab/Projects/gitboy-apps-onboarding", "repo": "/Users/alaarab/Projects/gitboy-apps", "branch": "feat/onboarding" },
+      "reason": "It has commits that aren't on any remote."
+    }
+  ],
+  "cleaned": [
+    {
+      "id": "aa11bb22cc33dd44",
+      "at": "2026-11-15T04:30:00.000Z",
+      "area": "disk",
+      "kind": "cache",
+      "title": "DerivedData/Phren-abcdef",
+      "target": { "path": "/Users/alaarab/Library/Developer/Xcode/DerivedData/Phren-abcdef" },
+      "freedBytes": 7516192768,
+      "reportedBytes": 8375186227,
+      "by": "auto"
+    },
+    {
+      "id": "ee55ff6600778899",
+      "at": "2026-11-14T20:10:00.000Z",
+      "area": "worktrees",
+      "kind": "worktree",
+      "title": "phren-sweep-hook-perf",
+      "target": { "path": "/Users/alaarab/Projects/sw-hook-perf", "repo": "/Users/alaarab/Projects/phren", "branch": "sweep/hook-perf" },
+      "freedBytes": 943718400,
+      "reportedBytes": 1073741824,
+      "by": "phone"
+    }
+  ],
+  "dismissed": [
+    {
+      "id": "1234abcd5678ef90",
+      "section": "suggestions",
+      "area": "worktrees",
+      "title": "mutter-experiment",
+      "dismissedAt": "2026-11-15T10:00:00.000Z"
+    }
+  ]
+}
