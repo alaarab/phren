@@ -17,7 +17,10 @@ It keeps no state and can't read notifications:
   share. Apple receives a generic "phren · New activity" alert plus the
   ciphertext, and the phone's notification extension decrypts it.
 - Requests older than five minutes, replays, bad signatures and more than 60
-  sends a minute per phone are refused. A `410` means Apple no longer knows
+  sends a minute per phone are refused. All phones together get at most
+  `PHREN_RELAY_SENDS_PER_MINUTE` (default 6,000) sends a minute, since a
+  registration is free; registrations are limited per client address, taken
+  from the last `X-Forwarded-For` entry (the one the proxy wrote). A `410` means Apple no longer knows
   the phone; the Hook stops and the phone registers again.
 
 ## The Hook and the phone

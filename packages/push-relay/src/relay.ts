@@ -149,9 +149,13 @@ export class RateLimiter {
 /** Signatures seen inside the skew window: a captured request can't be replayed. */
 export class ReplayGuard {
   private readonly seen = new Map<string, number>();
+  /** Bounded so a flood of signed sends (a registration is free) cannot exhaust
+   * memory; when full the relay refuses rather than forget a signature. */
+  constructor(private readonly max = 200_000) {}
   check(signature: string, now = Date.now()): void {
     for (const [key, at] of this.seen) { if (now - at > MAX_SKEW_SECONDS * 1000) this.seen.delete(key); else break; }
     if (this.seen.has(signature)) throw new RelayError(409, "This request was already delivered.");
+    if (this.seen.size >= this.max) throw new RelayError(503, "The relay is busy; try again shortly.");
     this.seen.set(signature, now);
   }
 }
