@@ -1022,6 +1022,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/sessions/seen") {
           result = await markSessionSeen(data);
+        } else if (url.pathname === "/v1/housekeeping/scan") {
+          // Owner-only: a fresh inventory (sizes take a while); the answer comes back through the view's revision.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner starts a housekeeping scan.");
+          if (!ctx.housekeeper) throw new BridgeError(404, "Housekeeping is not running on this Hook.");
+          void ctx.housekeeper.scan().catch(() => {});
+          result = { started: true };
         } else if (url.pathname === "/v1/housekeeping/approve" || url.pathname === "/v1/housekeeping/dismiss" || url.pathname === "/v1/housekeeping/restore") {
           // Owner-only, and owner-proof signed once the phone signs (owner-proof.ts): agents and peers never apply housekeeping.
           if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner applies or dismisses housekeeping.");

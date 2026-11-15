@@ -21,6 +21,14 @@ export function formatView(name: string, view: HousekeepingView | undefined): st
   for (const k of view.kept) lines.push(`  kept ${k.title}: ${k.reason}`);
   const freed = view.cleaned.reduce((sum, c) => sum + c.freedBytes, 0);
   if (view.cleaned.length) lines.push(`  cleaned ${view.cleaned.length} item(s) in 14 days, ${size(freed)} freed`);
+  const inv = view.inventory;
+  if (inv) {
+    const mark = (a?: { allowed: boolean; reason?: string }) => !a ? "" : a.allowed ? "  [can remove]" : `  [kept: ${a.reason}]`;
+    lines.push(`  inventory ${inv.collectedAt}${inv.scanning ? " (scanning)" : ""}${inv.stale ? " (stale)" : ""}: ${inv.worktrees.length} worktree(s), ${inv.sessions.length} pane(s)`);
+    for (const w of inv.worktrees) lines.push(`    ${w.path}${w.branch ? ` [${w.branch}]` : ""}${w.sizeBytes !== undefined ? ` ${size(w.sizeBytes)}` : ""}${w.main ? " main" : ""}${mark(w.main ? undefined : w.action)}  ${w.action.id}`);
+    for (const r of inv.space.slice(0, 15)) lines.push(`    ${size(r.sizeBytes).padStart(9)} ${r.title}${mark(r.action)}${r.action ? `  ${r.action.id}` : ""}`);
+    for (const p of inv.sessions) lines.push(`    pane ${p.pane.label ?? p.pane.target.pane} ${p.agent ?? ""} ${p.status ?? ""}${p.idleSeconds !== undefined ? ` idle ${Math.round(p.idleSeconds / 60)}m` : ""}${mark(p.action)}  ${p.action.id}`);
+  }
   if (lines.length === 1) lines.push("  Nothing to do.");
   for (const error of view.errors ?? []) lines.push(`  check ${error.check} failed: ${error.message}`);
   return lines.join("\n");
@@ -42,6 +50,18 @@ export async function runHousekeeping(args: string[]): Promise<number> {
     const view = viewOf(report, { cleaned: [], dismissed: new Map() });
     console.log(json ? JSON.stringify(view, null, 2) : formatView(hostname(), view));
     return 0;
+  }
+  const apply = args.includes("--apply") ? args[args.indexOf("--apply") + 1] : undefined;
+  if (args.includes("--apply") || flag(args, "--scan")) {
+    if (args.includes("--apply") && (!apply || apply.startsWith("-"))) { console.error("--apply takes comma-separated action ids."); return 1; }
+    try {
+      const result = flag(args, "--scan") ? await hookRequest("/v1/housekeeping/scan", {}, undefined, 30_000)
+        : await hookRequest("/v1/housekeeping/approve", { ids: apply!.split(",").filter(Boolean), by: "cli" }, undefined, 90_000);
+      if (json || flag(args, "--scan")) { console.log(flag(args, "--scan") ? "Scan started; `phren housekeeping` shows it when it lands." : JSON.stringify(result, null, 2)); return 0; }
+      for (const row of Array.isArray(result.results) ? result.results as Json[] : [])
+        console.log(`${row.id}  ${row.status}${row.reason ? `: ${row.reason}` : ""}${typeof row.freedBytes === "number" && row.freedBytes ? ` (${size(row.freedBytes)} freed)` : ""}`);
+      return 0;
+    } catch (error) { console.error(error instanceof Error ? error.message : String(error)); return 1; }
   }
   let answer: Json;
   try { answer = await hookRequest(`/v1/housekeeping${flag(args, "--local") ? "" : "?peers=1"}`, undefined, undefined, 30_000); }

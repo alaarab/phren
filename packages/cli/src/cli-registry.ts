@@ -289,8 +289,8 @@ export const REGISTRY: Command[] = [
   },
   {
     name: "housekeeping", topic: "core", standalone: true,
-    usage: "phren housekeeping [--dry-run] [--local] [--json]",
-    summary: "The Hook's housekeeping report (disk, load, caches, worktrees) for this and every linked computer; --dry-run runs a pass here without storing or acting",
+    usage: "phren housekeeping [--dry-run] [--local] [--json] | --scan | --apply <action ids>",
+    summary: "The Hook's housekeeping report and inventory (worktrees, space, panes) for this and every linked computer; --apply removes or closes what you name, after a safety re-check",
     run: async args => (await import("./bridge/housekeeping/command.js")).runHousekeeping(args),
   },
   {

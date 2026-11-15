@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { lstat, mkdir, readdir, readFile, statfs, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { HealthCheck } from "../machine-health.js";
 import type { InboxSource } from "../owner-inbox.js";
 import { atomicInPrivateDir, bridgeRoot } from "../protocol.js";
@@ -9,7 +11,9 @@ import {
   type ActionKind, type ApproveResult, type Area, type Badge, badgeOf, buildReport, type Cleaned, healthOf, type HousekeepingView,
   type ItemDraft, type StoredItem, type StoredReport, type Trigger, viewOf,
 } from "./report.js";
-import { type InUseSources, plainReason, removeCacheEntry, removeWorktreeSafely } from "./safety.js";
+import { type Inventory, type InventoryOptions, type InventorySession, scanInventory } from "./inventory.js";
+import { type DeletionContext, type InUseSources, type PaneDispatch, paneCloseBlock, plainReason, removeApprovedPath, removeWorktreeSafely } from "./safety.js";
+
 
 /**
  * The Hook's housekeeping pass: every TICK_MS, and at once when free disk
@@ -26,6 +30,10 @@ export const RETAIN_DAYS = 14;
 export const DISK_FLOOR_BYTES = 20 * 1024 ** 3;
 /** Approve answers within this; later work comes back `started` and lands in `cleaned`. */
 export const APPROVE_BUDGET_MS = 45_000;
+/** The inventory scan (sizes are slow) runs hourly and on request. */
+export const SCAN_MS = 60 * 60_000;
+/** An inventory older than this is marked stale. */
+const STALE_MS = 2 * SCAN_MS;
 const MAX_REPORTS = 2000;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DAY = 86_400_000;
@@ -107,6 +115,14 @@ export class HousekeepingStore {
     await atomicInPrivateDir(path.join(this.dir, "cleaned.json"), kept);
   }
 
+  async inventory(): Promise<Inventory | undefined> {
+    return readJson<Inventory | undefined>(path.join(this.dir, "inventory.json"), undefined);
+  }
+
+  async setInventory(inventory: Inventory): Promise<void> {
+    await atomicInPrivateDir(path.join(this.dir, "inventory.json"), inventory);
+  }
+
   async dismissed(): Promise<Map<string, { fingerprint: string; at: string }>> {
     return new Map(Object.entries(await readJson<Record<string, { fingerprint: string; at: string }>>(path.join(this.dir, "dismissed.json"), {})));
   }
@@ -126,6 +142,12 @@ export interface HousekeeperOptions extends InUseSources {
   now?: () => number;
   /** Free bytes on the volume actions free space on; statfs of the home folder by default. */
   freeBytes?: () => Promise<number>;
+  /** Inventory sources beyond processes and panes (sessions, dispatches, simulators, docker, roots). */
+  inventory?: Omit<InventoryOptions, "processes" | "panes">;
+  /** Close a pane through the terminal provider. */
+  closePane?: (server: string, pane: string) => Promise<void>;
+  /** Runs simctl and docker for approved actions; execFile by default. */
+  command?: (file: string, args: string[]) => Promise<void>;
 }
 
 type Outcome = { status: "done"; freedBytes: number } | { status: "refused" | "failed"; reason: string };
@@ -137,6 +159,9 @@ export class Housekeeper {
   private queue: Promise<unknown> = Promise.resolve();
   private cachedView: HousekeepingView | undefined;
   private lastEdge = { lowDisk: false, stressed: false };
+  private inventory: Inventory | undefined;
+  private inventoryLoaded = false;
+  private scanning: Promise<Inventory> | undefined;
   private readonly store: HousekeepingStore;
   private readonly now: () => number;
 
@@ -181,13 +206,35 @@ export class Housekeeper {
     return report;
   }
 
+  private async latestInventory(): Promise<Inventory | undefined> {
+    if (!this.inventoryLoaded) { this.inventory ??= await this.store.inventory(); this.inventoryLoaded = true; }
+    return this.inventory;
+  }
+
+  /** Scan the inventory in the background; concurrent callers share the scan. */
+  scan(): Promise<Inventory> {
+    if (this.scanning) return this.scanning;
+    const run = (async () => {
+      const inventory = await scanInventory({ ...this.options.inventory, processes: this.options.processes, panes: this.options.panes, now: this.now() });
+      await this.store.setInventory(inventory);
+      this.inventory = inventory; this.inventoryLoaded = true;
+      return inventory;
+    })().finally(() => { this.scanning = undefined; this.cachedView = undefined; });
+    this.scanning = run;
+    this.cachedView = undefined;
+    return run;
+  }
+
   /** The phone's view of the newest report; undefined before the first pass. */
   async view(includeDismissed = false): Promise<HousekeepingView | undefined> {
     if (!includeDismissed && this.cachedView) return this.cachedView;
     const report = await this.latest();
     if (!report) return undefined;
+    const scanned = await this.latestInventory();
+    const inventory = scanned ? { ...scanned, ...(this.scanning ? { scanning: true } : {}),
+      ...(this.now() - Date.parse(scanned.collectedAt) > STALE_MS ? { stale: true } : {}) } : undefined;
     const view = viewOf(report, { cleaned: await this.store.cleaned(this.now()), dismissed: await this.store.dismissed(), includeDismissed,
-      nextCheckAt: new Date(Date.parse(report.generatedAt) + TICK_MS).toISOString() });
+      nextCheckAt: new Date(Date.parse(report.generatedAt) + TICK_MS).toISOString(), ...(inventory ? { inventory } : {}) });
     if (!includeDismissed) this.cachedView = view;
     return view;
   }
@@ -263,7 +310,7 @@ export class Housekeeper {
       const later: StoredItem[] = [];
       let acted = false;
       for (const id of ids) {
-        const item = items.get(id);
+        const item = items.get(id) ?? await this.inventoryItem(id);
         if (!item) { results.push({ id, status: "gone" }); continue; }
         if (item.section === "kept") { results.push({ id, status: "refused", reason: plainReason(item.blockers ?? []) || item.reason }); continue; }
         if (item.section === "warning") { results.push({ id, status: "refused", reason: "This is a warning; there is nothing to apply." }); continue; }
@@ -288,27 +335,81 @@ export class Housekeeper {
   private async apply(item: StoredItem, by: Cleaned["by"]): Promise<Outcome> {
     const before = await this.freeBytes();
     let outcome: Outcome;
-    try { outcome = await EXECUTORS[item.action!]!(item, this.options); }
+    // The same roots the scan used, so a row is judged at approval by the rules that listed it.
+    const inv = this.options.inventory;
+    const context = { processes: this.options.processes, panes: this.options.panes, ...(inv?.rules ? { rules: inv.rules } : {}), ...(inv?.tmpRoots ? { tmpRoots: inv.tmpRoots } : {}) };
+    try { outcome = await EXECUTORS[item.action!]!(item, context, this.fresh()); }
     catch (error) { outcome = { status: "failed", reason: error instanceof Error ? error.message.slice(0, 300) : String(error) }; }
     if (outcome.status !== "done") return outcome;
     // What the volume really gained, not what the item estimated.
     const freedBytes = Math.max(0, (await this.freeBytes()) - before);
     await this.store.addCleaned({ id: item.id, at: new Date(this.now()).toISOString(), area: item.area, kind: item.kind, title: item.title, target: item.target,
       freedBytes, ...(item.sizeBytes !== undefined ? { reportedBytes: item.sizeBytes } : {}), by }, this.now());
+    // The row is gone from what the phone sees until the next scan confirms it.
+    if (this.inventory) {
+      const keep = <T extends { action?: { id: string } }>(rows: T[]) => rows.filter(row => row.action?.id !== item.id);
+      this.inventory = { ...this.inventory, worktrees: keep(this.inventory.worktrees), space: keep(this.inventory.space), sessions: keep(this.inventory.sessions) };
+      await this.store.setInventory(this.inventory);
+    }
     this.cachedView = undefined;
     return { status: "done", freedBytes };
   }
+
+  /** An inventory row's action as an approvable item; it is re-checked live by its executor. */
+  private async inventoryItem(id: string): Promise<StoredItem | undefined> {
+    const inventory = await this.latestInventory();
+    if (!inventory) return undefined;
+    const since = inventory.collectedAt;
+    const base = { section: "suggestion" as const, fingerprint: id, since, id, reason: "" };
+    const tree = inventory.worktrees.find(row => row.action.id === id);
+    if (tree) return { ...base, area: "worktrees", kind: "worktree", title: path.basename(tree.path), target: { path: tree.path, repo: tree.repo, ...(tree.branch ? { branch: tree.branch } : {}) },
+      action: "remove-worktree", ...(tree.sizeBytes !== undefined ? { sizeBytes: tree.sizeBytes } : {}) };
+    const room = inventory.space.find(row => row.action?.id === id);
+    if (room?.action) return { ...base, area: room.area, kind: room.kind === "simulator" ? "simulator" : room.kind === "docker" ? "docker" : room.kind === "tmp" ? "tmp" : "cache",
+      title: room.title, target: { ...(room.path ? { path: room.path } : {}), ...(room.udid ? { udid: room.udid } : {}), ...(room.kind === "docker" ? { name: "builder" } : {}) },
+      action: room.action.kind as ActionKind, sizeBytes: room.sizeBytes };
+    const session = inventory.sessions.find(row => row.action.id === id);
+    if (session) return { ...base, area: "sessions", kind: "pane", title: session.title ?? session.pane.label ?? session.pane.target.pane,
+      target: { name: `${session.pane.target.server}/${session.pane.target.pane}` }, action: "close-pane", pane: session.pane };
+    return undefined;
+  }
+
+  /** Live state for executors: fresh sessions and dispatches, never the scan's copy. */
+  private fresh(): ExecutorDeps {
+    const inv = this.options.inventory;
+    return {
+      sessions: async () => (await inv?.sessions?.()) ?? [],
+      dispatches: async () => { if (!inv?.dispatches) throw new Error("dispatches unavailable"); return inv.dispatches(); },
+      closePane: this.options.closePane,
+      command: this.options.command ?? (async (file, args) => { await promisify(execFile)(file, args, { timeout: 120_000 }); }),
+      xcodebuildRunning: inv?.xcodebuildRunning ?? (async () => false),
+      simulators: inv?.simulators,
+    };
+  }
 }
 
-type Executor = (item: StoredItem, sources: InUseSources) => Promise<Outcome>;
+interface ExecutorDeps {
+  sessions: () => Promise<Array<Pick<InventorySession, "pane" | "status"> & { role?: string }>>;
+  dispatches: () => Promise<PaneDispatch[]>;
+  closePane?: (server: string, pane: string) => Promise<void>;
+  command: (file: string, args: string[]) => Promise<void>;
+  xcodebuildRunning: () => Promise<boolean>;
+  simulators?: InventoryOptions["simulators"];
+}
 
-const DECISION_REASON: Record<string, string> = {
-  "protected-path": "It is under a folder Phren never touches.",
-  "outside-allowlist": "Phren only deletes cache folders.",
-  symlink: "It is a symbolic link; Phren never follows one.",
-  missing: "It is already gone.",
-  "too-recent": "It is too recent to remove.",
-};
+type Executor = (item: StoredItem, sources: DeletionContext, deps: ExecutorDeps) => Promise<Outcome>;
+
+async function simulatorAction(item: StoredItem, deps: ExecutorDeps, verb: "shutdown" | "delete"): Promise<Outcome> {
+  const udid = item.target.udid;
+  if (!udid || !/^[A-F0-9-]{36}$/i.test(udid)) return { status: "refused", reason: "The item names no simulator." };
+  if (await deps.xcodebuildRunning()) return { status: "refused", reason: "An Xcode build or test is running." };
+  const sim = (await deps.simulators?.() ?? []).find(row => row.udid === udid.toUpperCase());
+  if (!sim) return { status: "refused", reason: "The simulator is already gone." };
+  if (verb === "delete" && sim.state !== "Shutdown") return { status: "refused", reason: "It is running; shut it down first." };
+  if (verb === "shutdown" && sim.state !== "Booted") return { status: "refused", reason: "It isn't running." };
+  await deps.command("/usr/bin/xcrun", ["simctl", verb, udid]);
+  return { status: "done", freedBytes: 0 };
+}
 
 /** What each action does once approved; every one goes through safety.ts. */
 const EXECUTORS: Partial<Record<ActionKind, Executor>> = {
@@ -319,10 +420,26 @@ const EXECUTORS: Partial<Record<ActionKind, Executor>> = {
   },
   "delete-path": async (item, sources) => {
     if (!item.target.path) return { status: "refused", reason: "The item names no path." };
-    const result = await removeCacheEntry(item.target.path, sources, true);
-    if (result.removed) return { status: "done", freedBytes: 0 };
-    const decision = result.decision;
-    const reason = decision.verdict === "auto" ? "" : decision.blockers?.length ? plainReason(decision.blockers) : DECISION_REASON[decision.reason] ?? "Phren won't remove it.";
-    return { status: "refused", reason };
+    const result = await removeApprovedPath(item.target.path, sources);
+    return result.removed ? { status: "done", freedBytes: 0 } : { status: "refused", reason: result.decision.allowed ? "" : result.decision.reason };
+  },
+  "close-pane": async (item, _sources, deps) => {
+    const pane = item.pane?.target;
+    if (!pane || !deps.closePane) return { status: "refused", reason: "This computer's Hook can't close panes." };
+    const live = (await deps.sessions()).find(row => row.pane.target.server === pane.server && row.pane.target.pane === pane.pane);
+    if (!live) return { status: "refused", reason: "The pane is already closed." };
+    const dispatches = await deps.dispatches().catch(() => undefined);
+    if (!dispatches) return { status: "refused", reason: "Phren couldn't check its dispatches, so it stays open." };
+    const block = paneCloseBlock({ server: pane.server, pane: pane.pane, status: live.status, role: live.role }, dispatches);
+    if (block) return { status: "refused", reason: block };
+    await deps.closePane(pane.server, pane.pane);
+    return { status: "done", freedBytes: 0 };
+  },
+  "shutdown-simulator": async (item, _sources, deps) => simulatorAction(item, deps, "shutdown"),
+  "delete-simulator": async (item, _sources, deps) => simulatorAction(item, deps, "delete"),
+  "prune-docker-builder": async (_item, _sources, deps) => {
+    // Build cache only, older than a week; never images, containers or volumes.
+    await deps.command("docker", ["builder", "prune", "--force", "--filter", "until=168h"]);
+    return { status: "done", freedBytes: 0 };
   },
 };

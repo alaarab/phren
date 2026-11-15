@@ -24,7 +24,7 @@ These are enforced in one module, `packages/cli/src/bridge/housekeeping/safety.t
 
 1. **Never delete work.** A worktree or repository is kept when it has uncommitted tracked changes, untracked files that aren't ignored, commits on no remote branch (HEAD for a worktree; HEAD and every local branch for a repository), any stash, a rebase, merge, cherry-pick, revert or bisect in progress, a dirty or unpushed submodule, a live process or a pane whose folder is inside it, or a lock. A repository with linked worktrees is kept too. If any of these can't be inspected, it is kept.
 2. **Never discard with git.** Housekeeping runs git only through `housekeepingGit`. It allows read-only commands plus `git worktree remove` (never `--force`) and `git worktree prune`. It refuses `reset`, `checkout`, `restore`, `switch`, `clean`, `push`, `branch`, stash changes, `update-ref`, `gc`, any `--force` and any global option. If git refuses a removal, the item stays a suggestion.
-3. **Suggest by default.** Only an entry inside an allow-listed cache root (`~/phren-ci-builds` older than 7 days, npm `_cacache` 30 d, `XCTestDevices` 2 d, `DerivedData` 14 d, `iOS DeviceSupport` 90 d, the SwiftPM cache 30 d) that has no process or pane in it can be removed without the owner. Nothing under a protected root is ever touched: `~/Library/Developer/CoreDevice` (DeviceFS is a live view of booted simulators), docker volumes, `~/.phren`, `~/Projects`, `~/Sites` and `~/.ssh`. Symlinks are never followed. Each removal decides again, against fresh state, just before it acts.
+3. **Suggest by default.** Only an entry inside an allow-listed cache root (`~/phren-ci-builds` older than 7 days, npm `_cacache` 30 d, `XCTestDevices` 2 d, `DerivedData` 14 d, `iOS DeviceSupport` 90 d, the SwiftPM cache 30 d) that has no process or pane in it can be removed without the owner. Nothing under a protected root is ever touched: `~/Library/Developer/CoreDevice` (DeviceFS is a live view of booted simulators), docker volumes, `~/.phren`, `~/Projects`, `~/Sites` and `~/.ssh`. Symlinks are never followed. Beyond the caches, the owner (never the Hook by itself) may approve deleting a scratch folder they own that has been untouched for a day and is not a checkout, or a checkout's top-level `node_modules` while nothing runs in that checkout. Each removal decides again, against fresh state, just before it acts.
 
 A report's items are clamped the same way: only a cache may be cleaned without the owner, so any other item proposed as automatic becomes a suggestion.
 
@@ -69,11 +69,41 @@ interface Target { path?: string; repo?: string; branch?: string; pid?: number; 
 - **`notify: true`** marks the warnings worth waking the owner for: the `disk` warning while free disk is under the 20 GB floor, from its first pass; `swap`, `load`, `memory-hog` and `memory-leak` once they were already there on the previous pass; and, from slice 3, a failed auto-clean. Suggestions never notify. Use the warning's `id` as the notification id. A future APNs push will use category `housekeeping` with `{computer, id}`.
 - **Gone items** (no longer found, or dismissed) are left out.
 
+### Inventory
+
+`inventory` lists everything on this computer the owner may want to see and handle, not only what crossed a threshold. It is absent until the first scan finishes. Measuring sizes is slow, so the Hook scans in the background (niced) a few minutes after it starts, then hourly, and on `POST /v1/housekeeping/scan`. The view serves the last scan, with `scanning: true` while a new one runs and `stale: true` once it is over 2 hours old. A finished scan changes `revision`.
+
+```ts
+interface Inventory {
+  collectedAt: string; durationMs: number; scanning?: true; stale?: true;
+  worktrees: Array<{ id: string; repo: string; branch?: string; path: string; main: boolean; sizeBytes?: number; lastCommitAt?: string;
+    dirty: number; untracked: number; unpushed: number; stashes: number; inProgress?: string; locked?: true;
+    sessions: Array<{ pane: PaneLink; agent?: string; title?: string }>; processes: Array<{ pid: number; command?: string }>;
+    action: Action }>;
+  space: Array<{ id: string; area: Area; kind: "cache" | "derived-data" | "xctest-devices" | "device-support" | "simulator" | "docker" | "tmp" | "node_modules";
+    title: string; path?: string; udid?: string; sizeBytes: number; lastUsedAt?: string; action?: Action }>;   // largest first, at most 60
+  sessions: Array<{ id: string; pane: PaneLink; agent?: string; title?: string; project?: string; status?: string; idleSeconds?: number;
+    cwd?: string; dispatch?: string; action: Action }>;                                                        // most idle first
+  errors?: Array<{ check: string; message: string }>;
+}
+interface Action { id: string; kind: "remove-worktree" | "delete-path" | "close-pane" | "shutdown-simulator" | "delete-simulator" | "prune-docker-builder";
+  label: string; allowed: boolean; reason?: string }
+```
+
+- **Worktrees** are every checkout directly under `~/Projects`, `~/Sites`, `~/.cache/fanout-*` and the scratch root (`/private/tmp` or `/tmp`), each repository's linked worktrees, and `.claude/worktrees`. Each comes with the counts from the safety inspection, the agent panes and processes running in it, and `remove-worktree`. That action is allowed only when the safety rules find nothing to lose. A main checkout is listed with `allowed: false`.
+- **Space** lists the largest users: entries in the cache roots (DerivedData, XCTestDevices, phren-ci-builds, DeviceSupport; the npm and SwiftPM caches as one row each, with no action), folders this user owns in the scratch root, each checkout's `node_modules`, simulators (macOS) and docker. Actions:
+  - `delete-path` is allowed for a cache entry, for a scratch folder untouched for a day that is not a checkout, and for a checkout's top-level `node_modules` with nothing running in that checkout.
+  - `shutdown-simulator` (booted) and `delete-simulator` (shut down) are allowed while no xcodebuild runs.
+  - `prune-docker-builder` prunes build cache older than a week. Images, containers and volumes are listed with no action.
+- **Sessions** are this computer's agent panes, with `close-pane`. It is refused for the conductor, a working or waiting agent, a pane whose dispatched work hasn't returned, and a pane whose return hasn't been read: the evidence stays (the 2026-11-08 lesson). If the dispatch receipts can't be read, every pane stays.
+- `allowed: false` always comes with a plain `reason`. Show the control disabled with it.
+- `action.id` hashes the row's kind, target and state, and goes to the same `POST /v1/housekeeping/approve`. The row is found in the last scan, and its action re-checks against the disk, the panes and the receipts at that moment. If something changed, it is `refused` with the reason. A handled row drops out of the inventory at once and appears in `cleaned`.
+
 ### Owner actions
 
-These are owner-only. They are listed in `owner-proof.ts` ROUTES, so once a phone signs, unsigned requests are refused, and agent (`X-Phren-Origin`) and peer origins always get 403. Bodies: `{ ids: string[] (1 to 200), revision?: string, by?: "phone" | "cli" }`.
+These are owner-only (approve, dismiss, restore and `POST /v1/housekeeping/scan`, which returns `{ started: true }`). They are listed in `owner-proof.ts` ROUTES, so once a phone signs, unsigned requests are refused, and agent (`X-Phren-Origin`) and peer origins always get 403. Bodies: `{ ids: string[] (1 to 200), revision?: string, by?: "phone" | "cli" }`.
 
-- `POST /v1/housekeeping/approve` returns `{ results: [{ id, status: "done" | "refused" | "failed" | "gone" | "started", reason?, freedBytes? }], revision }`. A fresh pass runs first, and each id is judged against it, not against the report the phone holds. An id that is no longer present (its state changed) is `gone`, even on a stale `revision`. A kept item or a warning is `refused` with a plain reason. The action then re-checks safety against the disk as it runs ("It has commits that aren't on any remote.", "A process is using it now."). `freedBytes` is the statfs delta of the home volume, before and after. Work that would run past 45 s comes back `started`, and its result lands in `cleaned`. Actions available now: `remove-worktree` (plain `git worktree remove`) and `delete-path` (cache roots only). Others are `refused` with "This computer's Hook can't do that yet." until their slice ships. The conductor's MCP approve (slice 7) uses the same code with `by: "conductor"`.
+- `POST /v1/housekeeping/approve` returns `{ results: [{ id, status: "done" | "refused" | "failed" | "gone" | "started", reason?, freedBytes? }], revision }`. A fresh pass runs first, and each id is judged against it, not against the report the phone holds. An id that is no longer present (its state changed) is `gone`, even on a stale `revision`. A kept item or a warning is `refused` with a plain reason. The action then re-checks safety against the disk as it runs ("It has commits that aren't on any remote.", "A process is using it now."). `freedBytes` is the statfs delta of the home volume, before and after. Work that would run past 45 s comes back `started`, and its result lands in `cleaned`. Actions: `remove-worktree` (plain `git worktree remove`), `delete-path` (cache entries, old scratch folders, a checkout's `node_modules`), `close-pane`, `shutdown-simulator`, `delete-simulator` and `prune-docker-builder`; each re-checks first (see Inventory). `end-job` is refused with "This computer's Hook can't do that yet." until slice 5. The conductor's MCP approve (slice 7) uses the same code with `by: "conductor"`.
 - `POST /v1/housekeeping/dismiss` returns `{ revision }`. The items stay hidden until their state changes (for a warning, its severity). Unknown ids are ignored.
 - `POST /v1/housekeeping/restore` returns `{ revision }` and undoes a dismissal. `GET /v1/housekeeping?dismissed=1` lists the hidden items in `dismissed`.
 
@@ -91,4 +121,4 @@ Each warning with `notify: true` appears in the owner inbox as a `needs-you` ent
 
 ## CLI
 
-`phren housekeeping` prints the newest report for this computer and every linked one (`--local` for this one only, `--json` for the raw answer). `phren housekeeping --dry-run` runs a pass in the current process without the Hook. It stores nothing and acts on nothing, and since the panes are the Hook's to list, it sees processes only.
+`phren housekeeping` prints the newest report and inventory for this computer and every linked one, with each row's action id (`--local` for this one only, `--json` for the raw answer). `phren housekeeping --apply <id,id>` approves rows from the terminal (`by: "cli"`), with the same re-checks. `--scan` starts a scan. `phren housekeeping --dry-run` runs a pass in the current process without the Hook. It stores nothing and acts on nothing, and since the panes are the Hook's to list, it sees processes only.

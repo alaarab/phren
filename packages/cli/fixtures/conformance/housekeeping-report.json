@@ -32,7 +32,15 @@
       "detail": "The CPU is saturated.",
       "since": "2026-11-15T18:00:00.000Z",
       "fix": "Pause or stop the heaviest jobs listed under Heavy.",
-      "pane": { "target": { "server": "default", "workspace": "w2T", "tab": "w2T:t1", "pane": "w2T:p3" }, "label": "ios-rc" },
+      "pane": {
+        "target": {
+          "server": "default",
+          "workspace": "w2T",
+          "tab": "w2T:t1",
+          "pane": "w2T:p3"
+        },
+        "label": "ios-rc"
+      },
       "session": "39d3b5c4-b9df-43e1-87af-0c1d3f55f547",
       "notify": true
     },
@@ -52,9 +60,17 @@
       "area": "worktrees",
       "kind": "worktree",
       "title": "phren-fix-handoff",
-      "target": { "path": "/Users/alaarab/Projects/phren-fix-handoff", "repo": "/Users/alaarab/Projects/phren", "branch": "fix/handoff" },
+      "target": {
+        "path": "/Users/alaarab/Projects/phren-fix-handoff",
+        "repo": "/Users/alaarab/Projects/phren",
+        "branch": "fix/handoff"
+      },
       "reason": "Merged into main, clean and pushed.",
-      "evidence": ["Branch fix/handoff is merged into origin/main", "No uncommitted changes", "No process or pane is using it"],
+      "evidence": [
+        "Branch fix/handoff is merged into origin/main",
+        "No uncommitted changes",
+        "No process or pane is using it"
+      ],
       "sizeBytes": 1288490188,
       "actionLabel": "Remove worktree",
       "since": "2026-11-14T22:00:00.000Z"
@@ -64,9 +80,15 @@
       "area": "simulators",
       "kind": "simulator",
       "title": "iPhone 17 Pro (os-ux)",
-      "target": { "udid": "8B1F2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D", "name": "iPhone 17 Pro (os-ux)" },
+      "target": {
+        "udid": "8B1F2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D",
+        "name": "iPhone 17 Pro (os-ux)"
+      },
       "reason": "Booted for 3 hours with no build or pane using it.",
-      "evidence": ["No xcodebuild running", "No pane started it"],
+      "evidence": [
+        "No xcodebuild running",
+        "No pane started it"
+      ],
       "actionLabel": "Shut down simulator",
       "since": "2026-11-15T15:30:00.000Z"
     },
@@ -75,9 +97,13 @@
       "area": "docker",
       "kind": "docker",
       "title": "Docker build cache",
-      "target": { "name": "builder-cache" },
+      "target": {
+        "name": "builder-cache"
+      },
       "reason": "Build cache older than 7 days.",
-      "evidence": ["docker system df: 11.2 GB build cache"],
+      "evidence": [
+        "docker system df: 11.2 GB build cache"
+      ],
       "sizeBytes": 12025908428,
       "actionLabel": "Prune build cache",
       "since": "2026-11-15T12:00:00.000Z"
@@ -87,9 +113,14 @@
       "area": "disk",
       "kind": "tmp",
       "title": "/private/tmp/apps-train",
-      "target": { "path": "/private/tmp/apps-train" },
+      "target": {
+        "path": "/private/tmp/apps-train"
+      },
       "reason": "Not touched in 9 days and nothing is using it.",
-      "evidence": ["Last modified 2026-11-06", "Not a git worktree"],
+      "evidence": [
+        "Last modified 2026-11-06",
+        "Not a git worktree"
+      ],
       "sizeBytes": 3221225472,
       "actionLabel": "Delete folder",
       "since": "2026-11-13T08:00:00.000Z"
@@ -100,7 +131,11 @@
       "id": "77aa1c0e9b3d2f10",
       "area": "worktrees",
       "title": "gitboy-apps-onboarding",
-      "target": { "path": "/Users/alaarab/Projects/gitboy-apps-onboarding", "repo": "/Users/alaarab/Projects/gitboy-apps", "branch": "feat/onboarding" },
+      "target": {
+        "path": "/Users/alaarab/Projects/gitboy-apps-onboarding",
+        "repo": "/Users/alaarab/Projects/gitboy-apps",
+        "branch": "feat/onboarding"
+      },
       "reason": "It has commits that aren't on any remote."
     }
   ],
@@ -111,7 +146,9 @@
       "area": "disk",
       "kind": "cache",
       "title": "DerivedData/Phren-abcdef",
-      "target": { "path": "/Users/alaarab/Library/Developer/Xcode/DerivedData/Phren-abcdef" },
+      "target": {
+        "path": "/Users/alaarab/Library/Developer/Xcode/DerivedData/Phren-abcdef"
+      },
       "freedBytes": 7516192768,
       "reportedBytes": 8375186227,
       "by": "auto"
@@ -122,7 +159,11 @@
       "area": "worktrees",
       "kind": "worktree",
       "title": "phren-sweep-hook-perf",
-      "target": { "path": "/Users/alaarab/Projects/sw-hook-perf", "repo": "/Users/alaarab/Projects/phren", "branch": "sweep/hook-perf" },
+      "target": {
+        "path": "/Users/alaarab/Projects/sw-hook-perf",
+        "repo": "/Users/alaarab/Projects/phren",
+        "branch": "sweep/hook-perf"
+      },
       "freedBytes": 943718400,
       "reportedBytes": 1073741824,
       "by": "phone"
@@ -136,5 +177,232 @@
       "title": "mutter-experiment",
       "dismissedAt": "2026-11-15T10:00:00.000Z"
     }
-  ]
+  ],
+  "inventory": {
+    "collectedAt": "2026-11-15T18:05:00.000Z",
+    "durationMs": 41250,
+    "worktrees": [
+      {
+        "id": "3c1a9e0f7b2d4c11",
+        "repo": "/Users/alaarab/Projects/phren",
+        "branch": "main",
+        "path": "/Users/alaarab/Projects/phren",
+        "main": true,
+        "sizeBytes": 2147483648,
+        "lastCommitAt": "2026-11-15T17:40:00.000Z",
+        "dirty": 0,
+        "untracked": 0,
+        "unpushed": 0,
+        "stashes": 0,
+        "sessions": [],
+        "processes": [],
+        "action": {
+          "id": "a0b1c2d3e4f50617",
+          "kind": "remove-worktree",
+          "label": "Remove worktree",
+          "allowed": false,
+          "reason": "It is the repository's main checkout."
+        }
+      },
+      {
+        "id": "8d2e7f3a1b4c5d60",
+        "repo": "/Users/alaarab/Projects/phren",
+        "branch": "fix/handoff",
+        "path": "/Users/alaarab/Projects/phren-fix-handoff",
+        "main": false,
+        "sizeBytes": 1288490188,
+        "lastCommitAt": "2026-11-12T09:15:00.000Z",
+        "dirty": 0,
+        "untracked": 0,
+        "unpushed": 0,
+        "stashes": 0,
+        "sessions": [],
+        "processes": [],
+        "action": {
+          "id": "c0ffee0123456789",
+          "kind": "remove-worktree",
+          "label": "Remove worktree",
+          "allowed": true
+        }
+      },
+      {
+        "id": "f1e2d3c4b5a69788",
+        "repo": "/Users/alaarab/Projects/phren-apps",
+        "branch": "feat/housekeeping-screen",
+        "path": "/Users/alaarab/Projects/apps-housekeeping",
+        "main": false,
+        "sizeBytes": 3758096384,
+        "lastCommitAt": "2026-11-15T18:01:00.000Z",
+        "dirty": 4,
+        "untracked": 1,
+        "unpushed": 2,
+        "stashes": 0,
+        "inProgress": "MERGE_HEAD",
+        "sessions": [
+          {
+            "pane": {
+              "target": {
+                "server": "default",
+                "workspace": "w2T",
+                "tab": "w2T:t1",
+                "pane": "w2T:p3"
+              },
+              "label": "ios-rc"
+            },
+            "agent": "claude",
+            "title": "housekeeping screen"
+          }
+        ],
+        "processes": [
+          {
+            "pid": 4242,
+            "command": "xcodebuild"
+          }
+        ],
+        "action": {
+          "id": "77aa1c0e9b3d2f10",
+          "kind": "remove-worktree",
+          "label": "Remove worktree",
+          "allowed": false,
+          "reason": "It has uncommitted changes."
+        }
+      }
+    ],
+    "space": [
+      {
+        "id": "5e5e5e5e00000001",
+        "area": "docker",
+        "kind": "docker",
+        "title": "Docker build cache",
+        "sizeBytes": 12025908428,
+        "action": {
+          "id": "d0c4e7b1f2a39856",
+          "kind": "prune-docker-builder",
+          "label": "Prune build cache",
+          "allowed": true
+        }
+      },
+      {
+        "id": "5e5e5e5e00000002",
+        "area": "disk",
+        "kind": "derived-data",
+        "title": "DerivedData/Phren-abcdef",
+        "path": "/Users/alaarab/Library/Developer/Xcode/DerivedData/Phren-abcdef",
+        "sizeBytes": 8375186227,
+        "lastUsedAt": "2026-10-14T03:00:00.000Z",
+        "action": {
+          "id": "aa11bb22cc33dd45",
+          "kind": "delete-path",
+          "label": "Clear cache",
+          "allowed": true
+        }
+      },
+      {
+        "id": "5e5e5e5e00000003",
+        "area": "disk",
+        "kind": "node_modules",
+        "title": "phren/node_modules",
+        "path": "/Users/alaarab/Projects/phren/node_modules",
+        "sizeBytes": 1610612736,
+        "lastUsedAt": "2026-11-15T17:40:00.000Z",
+        "action": {
+          "id": "aa11bb22cc33dd46",
+          "kind": "delete-path",
+          "label": "Delete node_modules",
+          "allowed": false,
+          "reason": "A process is using it now."
+        }
+      },
+      {
+        "id": "5e5e5e5e00000004",
+        "area": "simulators",
+        "kind": "simulator",
+        "title": "iPhone 17 Pro (os-ux) (booted)",
+        "udid": "8B1F2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D",
+        "sizeBytes": 1073741824,
+        "action": {
+          "id": "5a5a5a5a12345678",
+          "kind": "shutdown-simulator",
+          "label": "Shut down simulator",
+          "allowed": true
+        }
+      },
+      {
+        "id": "5e5e5e5e00000005",
+        "area": "disk",
+        "kind": "tmp",
+        "title": "/private/tmp/apps-train",
+        "path": "/private/tmp/apps-train",
+        "sizeBytes": 3221225472,
+        "lastUsedAt": "2026-11-06T10:00:00.000Z",
+        "action": {
+          "id": "7e7e7e7e01234567",
+          "kind": "delete-path",
+          "label": "Delete folder",
+          "allowed": true
+        }
+      },
+      {
+        "id": "5e5e5e5e00000006",
+        "area": "disk",
+        "kind": "cache",
+        "title": "npm cache",
+        "path": "/Users/alaarab/.npm/_cacache",
+        "sizeBytes": 943718400,
+        "lastUsedAt": "2026-11-15T16:00:00.000Z"
+      }
+    ],
+    "sessions": [
+      {
+        "id": "9a9a9a9a00000001",
+        "pane": {
+          "target": {
+            "server": "default",
+            "workspace": "w5",
+            "tab": "w5:t1",
+            "pane": "w5:p1"
+          },
+          "label": "review-worker"
+        },
+        "agent": "codex",
+        "title": "Review #829",
+        "project": "phren",
+        "status": "done",
+        "idleSeconds": 14400,
+        "cwd": "/Users/alaarab/Projects/phren-review",
+        "dispatch": "58ddc81c-0000-4000-8000-000000000001",
+        "action": {
+          "id": "9b9b9b9b00000001",
+          "kind": "close-pane",
+          "label": "Close pane",
+          "allowed": true
+        }
+      },
+      {
+        "id": "9a9a9a9a00000002",
+        "pane": {
+          "target": {
+            "server": "default",
+            "workspace": "w2T",
+            "tab": "w2T:t1",
+            "pane": "w2T:p3"
+          },
+          "label": "ios-rc"
+        },
+        "agent": "claude",
+        "title": "housekeeping screen",
+        "project": "phren-apps",
+        "status": "working",
+        "idleSeconds": 20,
+        "cwd": "/Users/alaarab/Projects/apps-housekeeping",
+        "action": {
+          "id": "9b9b9b9b00000002",
+          "kind": "close-pane",
+          "label": "Close pane",
+          "allowed": false,
+          "reason": "Its agent is working."
+        }
+      }
+    ]
+  }
 }
