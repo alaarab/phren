@@ -756,20 +756,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             // The newest housekeeping report (docs/housekeeping.md); null before the first pass.
             // This computer only; the phone asks each computer itself. `peers=1` is for `phren housekeeping`.
             if (!ctx.housekeeper) throw new BridgeError(404, "Housekeeping is not running on this Hook.");
-            const dismissed = url.searchParams.get("dismissed") === "1";
+            const dismissed = url.searchParams.get("dismissed") === "1", inventory = url.searchParams.get("inventory") === "1";
             // Before the first scheduled pass, run one now so the answer always has the full shape.
-            const view = await ctx.housekeeper.view(dismissed) ?? (await ctx.housekeeper.run("manual"), await ctx.housekeeper.view(dismissed));
+            const view = await ctx.housekeeper.view(dismissed, inventory) ?? (await ctx.housekeeper.run("manual"), await ctx.housekeeper.view(dismissed, inventory));
+            // No scan yet: start one; `inventory` appears once it lands (the revision changes).
+            if (inventory && !view?.inventory) void ctx.housekeeper.scan().catch(() => {});
             result = { computer: info.computer, ...view } as unknown as Json;
             if (url.searchParams.get("peers") === "1") result = { ...result as Json, ...await fromPeers("/v1/housekeeping") };
-            break;
-          }
-          case "/v1/housekeeping/inventory": {
-            // One section of the last inventory scan (inventory-view.ts); 404 with code inventory-not-ready before the first scan.
-            if (!ctx.housekeeper) throw new BridgeError(404, "Housekeeping is not running on this Hook.");
-            const section = z.enum(["worktrees", "space", "sessions"]).parse(url.searchParams.get("section"));
-            const view = await ctx.housekeeper.section(section);
-            if (!view) { void ctx.housekeeper.scan().catch(() => {}); throw new BridgeError(404, "The first inventory scan is still running.", { code: "inventory-not-ready" }); }
-            result = view as unknown as Json;
             break;
           }
           case "/v1/push/status": result = agentHooks.push.status; break;

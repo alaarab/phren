@@ -69,36 +69,50 @@ interface Target { path?: string; repo?: string; branch?: string; pid?: number; 
 - **`notify: true`** marks the warnings worth waking the owner for: the `disk` warning while free disk is under the 20 GB floor, from its first pass; `swap`, `load`, `memory-hog` and `memory-leak` once they were already there on the previous pass; and, from slice 3, a failed auto-clean. Suggestions never notify. Use the warning's `id` as the notification id. Push: warnings are machine-health findings, and a new `high` finding already sends one APNs push (`PHREN_HEALTH`, at most 3 an hour). That push now carries `phren.housekeeping: { computer, id }`, so an app that knows housekeeping opens the item there, while an older one still opens Resources. There is no second push for the same finding.
 - **Gone items** (no longer found, or dismissed) are left out.
 
-### Inventory: `GET /v1/housekeeping/inventory?section=worktrees|space|sessions`
+### Inventory (`?inventory=1`)
 
-Everything on this computer the owner may want to see and handle, not only what crossed a threshold, one section per request. Capability: `capabilities.housekeepingInventory: 1`. Measuring sizes is slow, so the Hook scans in the background (niced) a few minutes after it starts, then hourly, and on `POST /v1/housekeeping/scan`. Until the first scan finishes, the route answers 404 with `code: "inventory-not-ready"` and starts one. A finished scan, or a handled row, changes the report's `revision` (and the overview badge's), which tells the phone to fetch the sections again.
+Everything on this computer the owner may want to see and handle, not only what crossed a threshold. Capability: `capabilities.housekeepingInventory: 1`. `GET /v1/housekeeping?inventory=1` adds `inventory`; without the flag it is left out, so the report stays small for the once-a-minute read. Measuring sizes is slow, so the Hook scans in the background (niced) a few minutes after it starts, then hourly, and on `POST /v1/housekeeping/scan`. A request with `?inventory=1` before the first scan has no `inventory` and starts one. A finished scan, or a handled row, changes `revision` and the overview badge's revision, which tells the phone to read it again.
 
-The schemas in `packages/cli/src/bridge/housekeeping/inventory-view.ts` are the contract. `fixtures/conformance/housekeeping-inventory.json` holds one response per section, with kept rows, and is tested against them.
+The fixture `fixtures/conformance/housekeeping-report.json` is a full `?inventory=1&dismissed=1` answer with a disabled row in every section. It is tested against `inventorySchema` in `report.ts`.
 
 ```ts
-interface Section<Row> { schema: 1; section: "worktrees" | "space" | "sessions"; revision: string; measuredAt: string; partial?: true; rows: Row[] }   // at most 500 rows
-// partial: a scan is running or the last one is over 2 hours old
-interface Common { id: string; title: string; sizeBytes?: number; action?: { label: string; confirm?: string }; kept?: string }   // exactly one of action / kept
-interface WorktreeRow extends Common { repo: string; path: string; branch?: string; lastCommitAt?: string; dirty: number; untracked: number; unpushed: number;
-  stash: boolean; operation?: "rebase" | "merge" | "cherry-pick" | "revert" | "bisect"; main: boolean;
-  sessions: Array<{ target: PaneTarget; label: string; harness?: string }>; processes: Array<{ pid: number; name: string }> }
-interface SpaceRow extends Common { sizeBytes: number; kind: "cache" | "derivedData" | "simulator" | "docker" | "tmp" | "nodeModules" | "archive" | "logs" | "other";
-  path?: string; lastUsedAt?: string; inUse?: string }                                            // largest first
-interface SessionRow extends Common { kind: "pane" | "tmux"; project?: string; harness?: string; target: PaneTarget; idleSeconds: number;
-  state: "working" | "waiting" | "idle" | "finished" | "exited" | "no-client"; dispatch?: { id: string; returnRead: boolean } }   // most idle first
+interface Inventory {
+  collectedAt: string; durationMs: number;
+  scanning?: true;           // a scan is running: disable "Measure now"
+  stale?: true;              // the scan is over 2 hours old
+  worktrees: Array<{ id: string; repo: string; branch?: string; path: string; main: boolean; sizeBytes?: number; lastCommitAt?: string;
+    dirty: number; untracked: number; unpushed: number; stashes: number; inProgress?: string; locked?: true;
+    sessions: Array<{ pane: PaneLink; agent?: string; title?: string }>; processes: Array<{ pid: number; command?: string }>;
+    action: Action }>;                                                                          // sorted by path
+  space: Array<{ id: string; area: Area; kind: "cache" | "derived-data" | "xctest-devices" | "device-support" | "simulator" | "docker" | "tmp" | "node_modules";
+    title: string; path?: string; udid?: string; sizeBytes: number; lastUsedAt?: string;
+    inUse?: string;          // who holds it, e.g. "pid 4242 (xcodebuild)": why allowed is false
+    note?: string;           // why a row with no action is never handled here
+    action?: Action }>;                                                                         // largest first, at most 500
+  sessions: Array<{ id: string; pane: PaneLink; agent?: string; title?: string; project?: string; status?: string; idleSeconds?: number;
+    cwd?: string; dispatch?: string; role?: string; receipt?: { id: string; returnRead: boolean }; action: Action }>;   // most idle first
+  errors?: Array<{ check: string; message: string }>;
+}
+interface Action {
+  id: string;                // goes to POST /v1/housekeeping/approve
+  kind: "remove-worktree" | "delete-path" | "close-pane" | "shutdown-simulator" | "delete-simulator" | "prune-docker-builder";
+  label: string;             // "Remove worktree", "Clear cache", "Delete folder", "Delete node_modules", "Close pane", ...
+  allowed: boolean;
+  reason?: string;           // when not allowed: a plain sentence; show the button disabled with it
+  confirm?: string;          // when allowed: what to show before approving
+}
 ```
 
-- **Ids** are prefixed `wt:`, `sp:` or `ss:`. They hash the row's kind, target and state, and go to the same `POST /v1/housekeeping/approve` as report suggestions. The row is found in the last scan, and its action re-checks against the disk, the panes and the dispatch receipts at that moment. If something changed, it is `refused` with the reason. A handled row drops out at once and appears in `cleaned`.
-- **`action.confirm`** is the sentence to show before approving. **`kept`** is the plain reason Phren won't touch the row.
-- **Worktrees** are every checkout directly under `~/Projects`, `~/Sites`, `~/.cache/fanout-*` and the scratch root (`/private/tmp` or `/tmp`), each repository's linked worktrees, and `.claude/worktrees`. Each has the counts from the safety inspection and the panes and processes running in it. "Remove worktree" is offered only when the safety rules find nothing to lose; a main checkout is always kept.
+- **Worktrees** are every checkout directly under `~/Projects`, `~/Sites`, `~/.cache/fanout-*` and the scratch root (`/private/tmp` or `/tmp`), each repository's linked worktrees, and `.claude/worktrees`. Each has the counts from the safety inspection and the panes and processes running in it. "Remove worktree" is allowed only when the safety rules find nothing to lose. A main checkout (`main: true`) is never allowed.
 - **Space** covers entries in the cache roots, scratch folders this user owns, each checkout's `node_modules`, simulators (macOS) and docker.
   - "Clear cache" covers DerivedData, XCTestDevices, phren-ci-builds and DeviceSupport entries.
   - "Delete folder" is for a scratch folder untouched for a day that is not a checkout.
   - "Delete node_modules" needs nothing running in that checkout.
   - "Shut down simulator" or "Delete simulator" needs no xcodebuild running; delete also needs the simulator shut down.
   - "Prune build cache" prunes docker build cache older than a week.
-  - The npm and SwiftPM caches, docker images, containers and volumes are kept rows with their reason. `inUse` names the process or pane holding a row.
-- **Sessions** are this computer's agent panes. "Close pane" is refused for the conductor, a working or waiting agent, dispatched work that hasn't returned, and a return that hasn't been read: the evidence stays (the 2026-11-08 lesson). If the receipts can't be read, every pane stays. `state` maps the agent's status: `blocked` or `waiting` is `waiting`, and `done` is `finished`.
+  - The npm and SwiftPM caches, docker images, containers and volumes have no action, and their `note` says why.
+- **Sessions** are this computer's agent panes. "Close pane" is refused for the conductor, a working or waiting agent, dispatched work that hasn't returned, and a return that hasn't been read (`receipt.returnRead: false`): the evidence stays (the 2026-11-08 lesson). If the receipts can't be read, every pane stays. `status` is an open set from the agent: `idle`, `working`, `blocked`, `done`, and so on.
+- **Approving:** the action is found in the last scan and re-checked against the disk, the panes and the dispatch receipts at that moment. If something changed, it is `refused` with the reason. A handled row drops out of `inventory` at once and appears in `cleaned`. The id hashes the row's kind, target and state, so a row that changed in a later scan has a new id, and the old one is `gone`.
 
 ### Owner actions
 

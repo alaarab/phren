@@ -1,7 +1,6 @@
 import { hostname } from "node:os";
 import { hookRequest } from "../client.js";
 import type { Json } from "../protocol.js";
-import type { SectionView } from "./inventory-view.js";
 import type { HousekeepingView } from "./report.js";
 
 /**
@@ -27,18 +26,13 @@ export function formatView(name: string, view: HousekeepingView | undefined): st
   return lines.join("\n");
 }
 
-/** The inventory sections, one line per row with its approve id. */
-export function formatSections(sections: SectionView[]): string {
-  const lines: string[] = [];
-  const mark = (row: { action?: { label: string }; kept?: string }) => row.action ? `  [${row.action.label}]` : `  [kept: ${row.kept}]`;
-  for (const view of sections) {
-    lines.push(`  ${view.section} (${view.rows.length}, measured ${view.measuredAt}${view.partial ? ", measuring" : ""})`);
-    for (const row of view.rows.slice(0, view.section === "space" ? 20 : 200)) {
-      const sized = row.sizeBytes !== undefined ? ` ${size(row.sizeBytes)}` : "";
-      const extra = "idleSeconds" in row ? ` ${row.state}, idle ${Math.round(row.idleSeconds / 60)}m` : "branch" in row && row.branch ? ` [${row.branch}]` : "";
-      lines.push(`    ${row.title}${extra}${sized}${mark(row)}  ${row.id}`);
-    }
-  }
+/** The inventory, one line per row with its approve id. */
+export function formatInventory(inv: NonNullable<HousekeepingView["inventory"]>): string {
+  const mark = (a?: { label: string; allowed: boolean; reason?: string }) => !a ? "" : a.allowed ? `  [${a.label}]` : `  [kept: ${a.reason}]`;
+  const lines = [`  inventory ${inv.collectedAt}${inv.scanning ? " (measuring)" : ""}${inv.stale ? " (stale)" : ""}`];
+  for (const w of inv.worktrees) lines.push(`    ${w.path}${w.branch ? ` [${w.branch}]` : ""}${w.sizeBytes !== undefined ? ` ${size(w.sizeBytes)}` : ""}${mark(w.action)}  ${w.action.id}`);
+  for (const r of inv.space.slice(0, 20)) lines.push(`    ${size(r.sizeBytes).padStart(9)} ${r.title}${mark(r.action)}${r.action ? `  ${r.action.id}` : r.note ? `  (${r.note})` : ""}`);
+  for (const p of inv.sessions) lines.push(`    pane ${p.pane.label ?? p.pane.target.pane} ${p.agent ?? ""} ${p.status ?? ""}${p.idleSeconds !== undefined ? ` idle ${Math.round(p.idleSeconds / 60)}m` : ""}${mark(p.action)}  ${p.action.id}`);
   return lines.join("\n");
 }
 
@@ -72,7 +66,7 @@ export async function runHousekeeping(args: string[]): Promise<number> {
     } catch (error) { console.error(error instanceof Error ? error.message : String(error)); return 1; }
   }
   let answer: Json;
-  try { answer = await hookRequest(`/v1/housekeeping${flag(args, "--local") ? "" : "?peers=1"}`, undefined, undefined, 30_000); }
+  try { answer = await hookRequest(`/v1/housekeeping?inventory=1${flag(args, "--local") ? "" : "&peers=1"}`, undefined, undefined, 30_000); }
   catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code;
     const message = code === "ENOENT" || code === "ECONNREFUSED" ? "Phren Hook is not running on this computer (phren bridge status). `phren housekeeping --dry-run` runs a pass without it."
@@ -83,13 +77,9 @@ export async function runHousekeeping(args: string[]): Promise<number> {
   }
   if (json) { console.log(JSON.stringify(answer, null, 2)); return 0; }
   const name = (value: unknown, fallback: string) => typeof (value as { name?: unknown })?.name === "string" ? String((value as { name: string }).name) : fallback;
-  const sections: SectionView[] = [];
-  for (const section of ["worktrees", "space", "sessions"]) {
-    const view = await hookRequest(`/v1/housekeeping/inventory?section=${section}`, undefined, undefined, 30_000).catch(() => undefined);
-    if (view) sections.push(view as unknown as SectionView);
-  }
-  const blocks = [formatView(name(answer.computer, hostname()), answer as unknown as HousekeepingView)
-    + (sections.length ? `\n${formatSections(sections)}` : "\n  Inventory: the first scan is still running.")];
+  const local = answer as unknown as HousekeepingView;
+  const blocks = [formatView(name(answer.computer, hostname()), local)
+    + (local.inventory ? `\n${formatInventory(local.inventory)}` : "\n  Inventory: the first scan is still running.")];
   for (const peer of Array.isArray(answer.peers) ? answer.peers as Json[] : []) {
     const peerName = name(peer.computer, String(peer.name ?? "peer"));
     blocks.push(typeof peer.error === "string" ? `${peerName}\n  unavailable: ${peer.error}` : formatView(peerName, peer as unknown as HousekeepingView));

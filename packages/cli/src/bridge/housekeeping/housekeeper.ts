@@ -8,11 +8,11 @@ import type { InboxSource } from "../owner-inbox.js";
 import { atomicInPrivateDir, bridgeRoot } from "../protocol.js";
 import type { ComputerResources } from "../resources.js";
 import {
-  type ActionKind, type ApproveResult, type Area, type Badge, badgeOf, buildReport, type Cleaned, healthOf, type HousekeepingView,
+  type ActionKind, type ApproveResult, type Area, type Badge, badgeOf, type InventoryView, buildReport, type Cleaned, healthOf, type HousekeepingView,
   type ItemDraft, type StoredItem, type StoredReport, type Trigger, viewOf,
 } from "./report.js";
 import { type Inventory, type InventoryOptions, type InventorySession, type InventorySpace, type InventoryWorktree, scanInventory } from "./inventory.js";
-import { findRow, type Section, type SectionView, sectionView } from "./inventory-view.js";
+
 import { type DeletionContext, type InUseSources, type PaneDispatch, paneCloseBlock, plainReason, removeApprovedPath, removeWorktreeSafely } from "./safety.js";
 
 
@@ -227,23 +227,19 @@ export class Housekeeper {
   }
 
   /** The phone's view of the newest report; undefined before the first pass. */
-  async view(includeDismissed = false): Promise<HousekeepingView | undefined> {
-    if (!includeDismissed && this.cachedView) return this.cachedView;
+  async view(includeDismissed = false, includeInventory = false): Promise<HousekeepingView | undefined> {
+    const plain = !includeDismissed && !includeInventory;
+    if (plain && this.cachedView) return this.cachedView;
     const report = await this.latest();
     if (!report) return undefined;
     const scanned = await this.latestInventory();
     const inventory = scanned ? { collectedAt: scanned.collectedAt, scanning: Boolean(this.scanning),
       ids: [...scanned.worktrees, ...scanned.space, ...scanned.sessions].map(row => row.action?.id ?? row.id) } : undefined;
     const view = viewOf(report, { cleaned: await this.store.cleaned(this.now()), dismissed: await this.store.dismissed(), includeDismissed,
-      nextCheckAt: new Date(Date.parse(report.generatedAt) + TICK_MS).toISOString(), ...(inventory ? { inventory } : {}) });
-    if (!includeDismissed) this.cachedView = view;
+      nextCheckAt: new Date(Date.parse(report.generatedAt) + TICK_MS).toISOString(), ...(inventory ? { inventory } : {}),
+      ...(includeInventory && scanned ? { include: inventoryOf(scanned, Boolean(this.scanning), this.now() - Date.parse(scanned.collectedAt) > STALE_MS) } : {}) });
+    if (plain) this.cachedView = view;
     return view;
-  }
-
-  /** One inventory section for the phone; undefined until the first scan finishes. */
-  async section(section: Section): Promise<SectionView | undefined> {
-    const inventory = await this.latestInventory();
-    return inventory ? sectionView(inventory, section, Boolean(this.scanning) || this.now() - Date.parse(inventory.collectedAt) > STALE_MS) : undefined;
   }
 
   /** The overview badge, from the cached view: no pass, no git. */
@@ -365,8 +361,12 @@ export class Housekeeper {
   /** An inventory row (prefixed id) as an approvable item; it is re-checked live by its executor. */
   private async inventoryItem(id: string): Promise<StoredItem | undefined> {
     const inventory = await this.latestInventory();
-    const found = inventory ? findRow(inventory, id) : undefined;
-    if (!inventory || !found) return undefined;
+    if (!inventory) return undefined;
+    const tree = inventory.worktrees.find(row => row.action.id === id);
+    const room = inventory.space.find(row => row.action?.id === id);
+    const pane = inventory.sessions.find(row => row.action.id === id);
+    const found = tree ? { section: "worktrees", row: tree } : room ? { section: "space", row: room } : pane ? { section: "sessions", row: pane } : undefined;
+    if (!found) return undefined;
     // The fingerprint holds the row's own action id, which is how a handled row leaves the inventory.
     const base = { section: "suggestion" as const, since: inventory.collectedAt, id, reason: "" };
     if (found.section === "worktrees") {
@@ -456,3 +456,9 @@ const EXECUTORS: Partial<Record<ActionKind, Executor>> = {
     return { status: "done", freedBytes: 0 };
   },
 };
+
+/** The inventory as the view carries it: the scan, its state, and nothing internal. */
+function inventoryOf(scan: Inventory, scanning: boolean, stale: boolean): InventoryView {
+  return { collectedAt: scan.collectedAt, durationMs: scan.durationMs, ...(scanning ? { scanning: true } : {}), ...(stale ? { stale: true } : {}),
+    worktrees: scan.worktrees, space: scan.space, sessions: scan.sessions, ...(scan.errors?.length ? { errors: scan.errors } : {}) };
+}

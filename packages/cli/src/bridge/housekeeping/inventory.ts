@@ -21,7 +21,7 @@ import {
 
 const exec = promisify(execFile);
 
-export interface InventoryAction { id: string; kind: ActionKind; label: string; allowed: boolean; reason?: string }
+export interface InventoryAction { id: string; kind: ActionKind; label: string; allowed: boolean; reason?: string; confirm?: string }
 
 export interface InventoryWorktree {
   id: string; repo: string; branch?: string; path: string; main: boolean; sizeBytes?: number; lastCommitAt?: string;
@@ -37,7 +37,7 @@ export interface InventorySpace {
   /** Who is using it now, when that is why it stays. */
   inUse?: string;
   /** Why a row with no action is never handled here. */
-  never?: string;
+  note?: string;
 }
 
 export interface InventorySession {
@@ -87,9 +87,19 @@ export function actionId(kind: ActionKind, target: string, state: unknown): stri
   return createHash("sha256").update(JSON.stringify([kind, target, state])).digest("hex").slice(0, 16);
 }
 
-function action(kind: ActionKind, target: string, state: unknown, block?: string, label = LABELS[kind]): InventoryAction {
-  return { id: actionId(kind, target, state), kind, label, allowed: !block, ...(block ? { reason: block } : {}) };
+function action(kind: ActionKind, target: string, state: unknown, block?: string, label = LABELS[kind], confirm?: string): InventoryAction {
+  return { id: actionId(kind, target, state), kind, label, allowed: !block, ...(block ? { reason: block } : confirm ? { confirm } : {}) };
 }
+
+/** What the owner is told before a destructive approve. */
+const CONFIRM: Partial<Record<SpaceKind, string>> = {
+  "derived-data": "Removes it. Xcode rebuilds it on the next build.",
+  "xctest-devices": "Removes the test clone. The next UI test run makes a new one.",
+  "device-support": "Removes it. Xcode copies it again when that device connects.",
+  cache: "Removes it. It is rebuilt when needed.",
+  tmp: "Removes the folder and everything in it.",
+  node_modules: "Removes it. pnpm install brings it back.",
+};
 
 export async function duBytes(target: string): Promise<number | undefined> {
   try {
@@ -167,7 +177,8 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
       ...(facts?.inProgress.length ? { inProgress: facts.inProgress[0] } : {}), ...(facts?.locked ? { locked: true as const } : {}),
       sessions: inPanes.map(row => ({ pane: row.pane, ...(row.agent ? { agent: row.agent } : {}), ...(row.title ? { title: row.title } : {}) })),
       processes: procs.map(proc => ({ pid: proc.pid, ...(proc.command ? { command: proc.command } : {}) })),
-      action: action("remove-worktree", dir, state, block),
+      action: action("remove-worktree", dir, state, block, LABELS["remove-worktree"],
+        `Removes the folder.${facts?.branch ? ` The branch ${facts.branch} stays, and its commits are on a remote.` : " Its commits are on a remote."}`),
     });
   }
   // Sizes last: the slow part, and a checkout nested in another is counted in both.
@@ -183,8 +194,8 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
     const decision = withAction ? await deletionDecision(target, context) : undefined;
     const user = decision && !decision.allowed ? decision.blockers?.find(b => b.code === "live-process" || b.code === "bound-pane") : undefined;
     space.push({ id: actionId("delete-path", target, "row"), area, kind, title, path: target, sizeBytes: size, lastUsedAt: new Date(info.mtimeMs).toISOString(),
-      ...(user ? { inUse: user.detail } : {}), ...(!withAction ? { never: "Phren clears this cache by age on its own." } : {}),
-      ...(decision ? { action: action("delete-path", target, [size, info.mtimeMs], decision.allowed ? undefined : decision.reason, kind === "node_modules" ? "Delete node_modules" : kind === "tmp" ? "Delete folder" : "Clear cache") } : {}) });
+      ...(user ? { inUse: user.detail.replace(/ runs in .*$/, "") } : {}), ...(!withAction ? { note: "Phren clears this cache by age on its own." } : {}),
+      ...(decision ? { action: action("delete-path", target, [size, info.mtimeMs], decision.allowed ? undefined : decision.reason, kind === "node_modules" ? "Delete node_modules" : kind === "tmp" ? "Delete folder" : "Clear cache", CONFIRM[kind]) } : {}) });
   };
   const KINDS: Record<string, SpaceKind> = { "derived-data": "derived-data", "xctest-devices": "xctest-devices", "ios-device-support": "device-support" };
   for (const rule of options.rules ?? cacheRules(home, platform)) {
@@ -215,7 +226,7 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
         const kind: ActionKind = booted ? "shutdown-simulator" : "delete-simulator";
         const block = building ? "An Xcode build or test is running." : undefined;
         space.push({ id: actionId(kind, sim.udid, "row"), area: "simulators", kind: "simulator", title: `${sim.name} (${sim.state.toLowerCase()})`, udid: sim.udid,
-          sizeBytes: size, action: action(kind, sim.udid, [sim.state, building], block) });
+          sizeBytes: size, action: action(kind, sim.udid, [sim.state, building], block, LABELS[kind], booted ? "Shuts the simulator down. Its data stays." : "Deletes the simulator and its data.") });
       }
     } catch (error) { errors.push({ check: "space:simulators", message: String(error) }); }
   }
@@ -224,10 +235,11 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
       for (const row of await options.docker()) {
         if (!row.sizeBytes) continue;
         const build = /build cache/i.test(row.type);
-        const never = /volume/i.test(row.type) ? "Phren never deletes docker volumes: they hold data."
+        const note = /volume/i.test(row.type) ? "Phren never deletes docker volumes: they hold data."
           : /image/i.test(row.type) ? "Phren doesn't remove docker images." : "Phren doesn't remove docker containers.";
         space.push({ id: actionId("prune-docker-builder", row.type, "row"), area: "docker", kind: "docker", title: `Docker ${row.type.toLowerCase()}`, sizeBytes: row.sizeBytes,
-          ...(build ? { action: action("prune-docker-builder", "builder", [row.sizeBytes], row.reclaimableBytes ? undefined : "Nothing in it can be pruned.") } : { never }) });
+          ...(build ? { action: action("prune-docker-builder", "builder", [row.sizeBytes], row.reclaimableBytes ? undefined : "Nothing in it can be pruned.", LABELS["prune-docker-builder"],
+          "Prunes build cache older than a week. Images, containers and volumes stay.") } : { note }) });
       }
     } catch (error) { errors.push({ check: "space:docker", message: String(error) }); }
   }
@@ -244,7 +256,7 @@ export async function scanInventory(options: InventoryOptions): Promise<Inventor
       ...(row.project ? { project: row.project } : {}), ...(row.status ? { status: row.status } : {}), ...(row.idleSeconds !== undefined ? { idleSeconds: row.idleSeconds } : {}),
       ...(row.cwd ? { cwd: row.cwd } : {}), ...(row.dispatch ? { dispatch: row.dispatch } : {}), ...(row.role ? { role: row.role } : {}),
       ...receiptOf(row, dispatches),
-      action: action("close-pane", target, [row.status, block], block) };
+      action: action("close-pane", target, [row.status, block], block, LABELS["close-pane"], "Closes the pane and stops its agent.") };
   }).sort((a, b) => (b.idleSeconds ?? 0) - (a.idleSeconds ?? 0));
 
   return { collectedAt: new Date(now).toISOString(), durationMs: Date.now() - started, worktrees, space, sessions, ...(errors.length ? { errors } : {}) };
