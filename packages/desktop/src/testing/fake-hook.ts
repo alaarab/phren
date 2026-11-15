@@ -85,6 +85,14 @@ export const SAMPLE_STALE_FINDINGS = [
 ];
 
 /** The local calendar day as the Hook writes a finding's date. */
+/** `minutes` before now, but never before today's local midnight (plus `order`
+ * seconds, so items keep their order): "saved today" fixtures stay today when
+ * a run starts just after midnight. */
+export function earlierToday(minutes: number, order = 0): string {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  return new Date(Math.max(Date.now() - minutes * 60_000, start.getTime() + order * 1_000)).toISOString();
+}
+
 function localToday() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -401,7 +409,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
           createdAt: new Date(Date.UTC(2026, 9, 15, 12 - i, project === "phren" ? 30 : 0)).toISOString(), responsibility: "agent", readiness: "ready" })),
         // Saved today (Home's "Saved today" card): created minutes ago, whatever the clock says.
         Queue: [{ id: "Q1", stableId: `${project}-today`, line: project === "phren" ? "Sample task saved today: tidy the release checklist" : "Sample task saved today: compress the hero image",
-          checked: false, createdAt: new Date(Date.now() - (project === "phren" ? 12 : 40) * 60_000).toISOString(), responsibility: "agent", readiness: "ready" }],
+          checked: false, createdAt: project === "phren" ? earlierToday(12, 2) : earlierToday(40, 1), responsibility: "agent", readiness: "ready" }],
         Done: [],
       } } };
     },
