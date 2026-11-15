@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { budgetFile, describePressure, readBudget, readPressure } from "./budget.js";
+import type { ComputerReport } from "../computers/read.js";
 import { acquire, minutes, poolStatus, pools, PRIORITIES, priorityName, QueueTimeout, type PriorityName } from "./slots.js";
 
 const USAGE = `Usage: phren heavy [--priority release|normal|low] [--slots N] [--pool NAME] [--label TEXT] [--timeout MINUTES] -- <command...>
@@ -33,10 +34,18 @@ export async function runHeavy(args: string[]): Promise<number> {
   if (timeout !== undefined && (!Number.isFinite(timeout) || timeout < 0)) throw new Error("--timeout takes minutes.");
   const label = (flags.label ?? command.join(" ")).replace(/\s+/g, " ").slice(0, 120);
   const say = (message: string) => process.stderr.write(`phren heavy: ${message}\n`);
-  let held;
+  let held, hinted = false;
+  const report = (message: string) => {
+    say(`${message} [${pool}: ${slots} slot${slots === 1 ? "" : "s"}, ${priority}]`);
+    // Held back by this computer's memory or load: name an enrolled computer with room, once.
+    if (hinted || !/^queued: .*(memory available|load \d)/.test(message)) return;
+    hinted = true;
+    void import("../computers/read.js").then(read => Promise.race([read.readComputers({ peers: true }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("slow")), 4_000).unref())]))
+      .then(({ computers }) => { const hint = elsewhereHint(computers, label); if (hint) say(hint); }).catch(() => undefined);
+  };
   try {
-    held = await acquire({ pool, slots, priority: PRIORITIES[priority], label, budget, pressure: () => readPressure(),
-      report: message => say(`${message} [${pool}: ${slots} slot${slots === 1 ? "" : "s"}, ${priority}]`),
+    held = await acquire({ pool, slots, priority: PRIORITIES[priority], label, budget, pressure: () => readPressure(), report,
       ...(timeout !== undefined ? { timeoutMs: timeout * 60_000 } : {}) });
   } catch (error) {
     if (error instanceof QueueTimeout) { say(`not started, ${error.message}`); return 75; }
@@ -70,4 +79,19 @@ async function status(args: string[]): Promise<number> {
     for (const t of tickets) console.log(`  ${t.state === "running" ? "running" : "waiting"}\t${minutes(now - (t.startedAt ?? t.createdAt))}\t${priorityName(t.priority)}\tpid ${t.pid}\t${t.label}`);
   }
   return 0;
+}
+
+/**
+ * Where this job could run instead. Phren cannot move a command yet, only an
+ * agent: a dispatched worker in a fresh worktree on that computer runs it and
+ * reports back (docs/fanout.md, "Heavy runs on another computer").
+ */
+export function elsewhereHint(computers: ComputerReport[], label: string): string | undefined {
+  const other = computers.filter(c => !c.local && c.online && c.resources && c.resources.level !== "stressed")
+    .sort((a, b) => a.resources!.pressure.overall - b.resources!.pressure.overall)[0];
+  if (!other) return undefined;
+  const r = other.resources!;
+  const free = r.memory.availablePercent === undefined ? "" : `${r.memory.availablePercent}% memory available, `;
+  return `${other.name} has room (${free}load ${r.cpu.load1} on ${r.cpu.cores} cores). To run it there instead, push your branch and have an agent dispatch it: ` +
+    `phren dispatch ${other.name} <project> --worktree --prompt "Check out <branch>, run ${label.replace(/"/g, "'")}, report the exit code and failures", then phren dispatch wait <id>.`;
 }

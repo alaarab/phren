@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
 import { defaultBudget, readBudget, type Pressure } from "./budget.js";
 import { acquire, PRIORITIES, poolStatus, QueueTimeout } from "./slots.js";
-import { runHeavy } from "./command.js";
+import { elsewhereHint, runHeavy } from "./command.js";
+import type { ComputerReport } from "../computers/read.js";
 
 const GB = 1024 ** 3;
 const budget = defaultBudget(31 * GB);
@@ -85,4 +86,12 @@ it("phren heavy runs the command, returns its exit code and frees the slot", asy
   expect(await runHeavy(["--label", "exit three", "--", process.execPath, "-e", "process.exit(3)"])).toBe(3);
   expect(poolStatus("heavy", temp.path)).toEqual([]);
   await expect(runHeavy(["--slots", "0", "--", "true"])).rejects.toThrow("--slots");
+});
+
+it("names the least pressed other computer that is not stressed for a job held back here", () => {
+  const computer = (name: string, local: boolean, overall: number, level = "ok") => ({ name, local, online: true,
+    resources: { level, pressure: { overall }, memory: { availablePercent: 60 }, cpu: { load1: 3, cores: 10 } } }) as unknown as ComputerReport;
+  const hint = elsewhereHint([computer("omarchy", true, 0.1), computer("Jets", false, 0.95, "stressed"), computer("MacBook", false, 0.4), computer("Mini", false, 0.5)], "pnpm test");
+  expect(hint).toMatch(/^MacBook has room \(60% memory available, load 3 on 10 cores\)\..*phren dispatch MacBook <project> --worktree --prompt "Check out <branch>, run pnpm test, /);
+  expect(elsewhereHint([computer("omarchy", true, 0.1), computer("Jets", false, 0.95, "stressed")], "pnpm test")).toBeUndefined();
 });
