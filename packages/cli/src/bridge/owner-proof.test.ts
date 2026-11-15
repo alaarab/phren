@@ -36,7 +36,8 @@ describe("owner proof", () => {
   it("lets unsigned owner actions through until the phone first signs, then refuses them", async () => {
     await expect(check(undefined)).resolves.toBeUndefined();
     await expect(check(signed(owner))).resolves.toBeUndefined();
-    expect((await stat(path.join(root, "owner-proof.json"))).mode & 0o077).toBe(0);
+    // Windows has no POSIX mode bits.
+    if (process.platform !== "win32") expect((await stat(path.join(root, "owner-proof.json"))).mode & 0o077).toBe(0);
     await expect(check(undefined)).rejects.toMatchObject({ status: 403, details: { code: "owner-proof-required" } });
     // A new Hook process reads the same state.
     const restarted = new OwnerProof({ root, keys: async () => new Set([owner.raw]), now: () => NOW });
