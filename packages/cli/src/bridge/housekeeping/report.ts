@@ -19,7 +19,7 @@ export type Area = typeof AREAS[number];
 export type ItemKind = "cache" | "worktree" | "tmp" | "pane" | "job" | "simulator" | "docker" | "health";
 export type Severity = "info" | "warn" | "high";
 export type Trigger = "tick" | "low-disk" | "high-load" | "manual" | "approve";
-export type ActionKind = "delete-path" | "remove-worktree" | "close-pane" | "end-job" | "shutdown-simulator" | "prune-docker-builder";
+export type ActionKind = "delete-path" | "remove-worktree" | "close-pane" | "end-job" | "shutdown-simulator" | "delete-simulator" | "prune-docker-builder";
 /** warning: an observation; suggestion: needs the owner; kept: a safety rule holds it; auto: the Hook does it itself. */
 export type Section = "warning" | "suggestion" | "kept" | "auto";
 
@@ -50,6 +50,28 @@ export const cleanedSchema = z.object({
   freedBytes: z.number(), reportedBytes: z.number().optional(), by: z.enum(["auto", "phone", "conductor", "cli"]),
 });
 export const dismissedSchema = z.object({ id: z.string(), section: z.enum(["warnings", "suggestions", "kept"]), area, title: z.string(), dismissedAt: iso });
+const actionSchema = z.object({ id: z.string(), kind: z.string(), label: z.string(), allowed: z.boolean(), reason: z.string().optional(), confirm: z.string().optional() });
+/** Everything on the computer the owner may handle, with `?inventory=1` (inventory.ts). */
+export const inventorySchema = z.object({
+  collectedAt: iso, durationMs: z.number(), scanning: z.boolean().optional(), stale: z.boolean().optional(),
+  worktrees: z.array(z.object({
+    id: z.string(), repo: z.string(), branch: z.string().optional(), path: z.string(), main: z.boolean(), sizeBytes: z.number().optional(), lastCommitAt: iso.optional(),
+    dirty: z.number(), untracked: z.number(), unpushed: z.number(), stashes: z.number(), inProgress: z.string().optional(), locked: z.literal(true).optional(),
+    sessions: z.array(z.object({ pane: paneSchema, agent: z.string().optional(), title: z.string().optional() })),
+    processes: z.array(z.object({ pid: z.number(), command: z.string().optional() })),
+    action: actionSchema,
+  })),
+  space: z.array(z.object({
+    id: z.string(), area, kind: z.string(), title: z.string(), path: z.string().optional(), udid: z.string().optional(), sizeBytes: z.number(),
+    lastUsedAt: iso.optional(), inUse: z.string().optional(), note: z.string().optional(), action: actionSchema.optional(),
+  })),
+  sessions: z.array(z.object({
+    id: z.string(), pane: paneSchema, agent: z.string().optional(), title: z.string().optional(), project: z.string().optional(), status: z.string().optional(),
+    idleSeconds: z.number().optional(), cwd: z.string().optional(), dispatch: z.string().optional(), role: z.string().optional(),
+    receipt: z.object({ id: z.string(), returnRead: z.boolean() }).optional(), action: actionSchema,
+  })),
+  errors: z.array(z.object({ check: z.string(), message: z.string() })).optional(),
+});
 export const viewSchema = z.object({
   /** Which Hook answered (added by the route). */
   computer: z.object({ id: z.string(), name: z.string(), aliases: z.array(z.string()) }).optional(),
@@ -66,6 +88,8 @@ export const viewSchema = z.object({
   kept: z.array(keptSchema),
   cleaned: z.array(cleanedSchema),
   dismissed: z.array(dismissedSchema).optional(),
+  /** Only with `?inventory=1`, and only once the first scan finished. */
+  inventory: inventorySchema.optional(),
   errors: z.array(z.object({ check: z.string(), message: z.string() })).optional(),
 });
 export const approveResultSchema = z.object({
@@ -81,6 +105,8 @@ export type Kept = z.infer<typeof keptSchema>;
 export type Cleaned = z.infer<typeof cleanedSchema>;
 export type ApproveResult = z.infer<typeof approveResultSchema>;
 export type Badge = z.infer<typeof badgeSchema>;
+export type InventoryView = z.infer<typeof inventorySchema>;
+
 export type ItemTarget = z.infer<typeof targetSchema>;
 export type PaneLink = z.infer<typeof paneSchema>;
 
@@ -176,7 +202,7 @@ export function buildReport(input: {
 const SECTION_NAME = { warning: "warnings", suggestion: "suggestions", kept: "kept" } as const;
 
 /** The phone's view: dismissed items left out (listed when asked), cleaned from the log, a revision over all of it. */
-export function viewOf(report: StoredReport, options: { cleaned: Cleaned[]; dismissed: Map<string, { fingerprint: string; at: string }>; includeDismissed?: boolean; nextCheckAt?: string }): HousekeepingView {
+export function viewOf(report: StoredReport, options: { cleaned: Cleaned[]; dismissed: Map<string, { fingerprint: string; at: string }>; includeDismissed?: boolean; nextCheckAt?: string; inventory?: { collectedAt: string; scanning?: boolean; ids: string[] }; include?: InventoryView }): HousekeepingView {
   const warnings: Warning[] = [], suggestions: Suggestion[] = [], kept: Kept[] = [], dismissed: z.infer<typeof dismissedSchema>[] = [];
   for (const item of report.items) {
     if (item.section === "auto") continue; // shown in `cleaned` once done, or as a warning if it failed
@@ -193,10 +219,13 @@ export function viewOf(report: StoredReport, options: { cleaned: Cleaned[]; dism
     else kept.push({ id: item.id, area: item.area, title: item.title, target: item.target, reason: item.reason });
   }
   const body = { warnings, suggestions, kept, cleaned: options.cleaned };
-  const revision = createHash("sha256").update(JSON.stringify([body, dismissed.map(d => d.id)])).digest("hex").slice(0, 16);
+  // The inventory counts by its scan time and action ids, not by every size it measured.
+  // A finished scan or a handled row changes the revision, so the badge tells the phone to re-fetch the inventory too.
+  const inventoryKey = options.inventory ? [options.inventory.collectedAt, options.inventory.scanning ?? false, options.inventory.ids] : null;
+  const revision = createHash("sha256").update(JSON.stringify([body, dismissed.map(d => d.id), inventoryKey])).digest("hex").slice(0, 16);
   return {
     schema: SCHEMA, revision, generatedAt: report.generatedAt, ...(options.nextCheckAt ? { nextCheckAt: options.nextCheckAt } : {}),
-    health: report.health, ...body, ...(options.includeDismissed ? { dismissed } : {}), ...(report.errors?.length ? { errors: report.errors } : {}),
+    health: report.health, ...body, ...(options.includeDismissed ? { dismissed } : {}), ...(options.include ? { inventory: options.include } : {}), ...(report.errors?.length ? { errors: report.errors } : {}),
   };
 }
 

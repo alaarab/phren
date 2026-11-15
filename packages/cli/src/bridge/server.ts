@@ -8,8 +8,9 @@ import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
-import { Housekeeper, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
+import { Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
 import { liveProcessCwds } from "./housekeeping/safety.js";
+import { dockerUsage, listSimulators, sessionRowsFromOverview, xcodebuildRunning } from "./housekeeping/inventory.js";
 import { closeFinishedWorker } from "./worker-close.js";
 import { cleanupIdempotencyLocks, markHookServerProcess } from "./dispatch-idempotency.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
@@ -40,7 +41,7 @@ import { approvalPushCapability } from "./push.js";
 import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
-import { DispatchService, reconcileInterruptedDispatches } from "./dispatch.js";
+import { DispatchService, dispatchStatus, reconcileInterruptedDispatches } from "./dispatch.js";
 import { DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { findPane, paneChatState, paneIdentity, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
@@ -225,7 +226,18 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const resources = new ResourceMonitor();
   // Housekeeping (housekeeping/): a report every 15 minutes and on a fresh low-disk or stressed edge.
   housekeeper = new Housekeeper({ computer: hostname(), resources: () => resources.read(), processes: () => liveProcessCwds(),
-    panes: async () => (await allPaneSessions()).map(session => ({ pane: session.pane, cwd: session.cwd, title: session.title })) });
+    panes: async () => (await allPaneSessions()).map(session => ({ pane: session.pane, cwd: session.cwd, title: session.title })),
+    inventory: {
+      sessions: async () => (await Promise.all((await recentServers()).map(async server => {
+        const name = String(server.session);
+        return sessionRowsFromOverview(await readWorkspaces(name, await sharedSnapshot(name, 4000), false));
+      }))).flat(),
+      dispatches: async () => (await dispatchStatus()).flatMap(receipt => receipt.target ? [{ id: receipt.id, server: receipt.target.server, pane: receipt.target.pane,
+        ...(receipt.returned ? { returned: { read: receipt.returned.read } } : {}), ...(receipt.closedAt ? { closedAt: receipt.closedAt } : {}) }] : []),
+      ...(process.platform === "darwin" ? { simulators: () => listSimulators(), xcodebuildRunning } : {}),
+      docker: dockerUsage,
+    },
+    closePane: (server, pane) => terminalProvider().closePane(server, pane) });
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions(undefined, codexServers);
   const scheduleStore = defaultPhrenPath();
@@ -286,9 +298,11 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
   const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, settingsSwitcher, info, activeCapabilities });
   const { stream } = streams;
+  // One workspaces reader for the overview stream and the housekeeping inventory's sessions.
+  const readWorkspaces = workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage, turnQueue });
   // The phone's overview, pushed over a WebSocket when it changes.
   const overview = overviewStream({
-    read: workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage, turnQueue }),
+    read: readWorkspaces,
     info: () => ({ ...info, capabilities: info.capabilities }),
     renew: server => agentHooks.overview.renew(server),
     // The overview's resources frame carries the housekeeping badge; the phone re-fetches /v1/housekeeping when its revision changes.
@@ -368,6 +382,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }).catch(() => {}); }, ALERT_CHECK_MS);
   const housekeepingTimer = setInterval(() => { countTick("housekeeping"); void housekeeper?.run().catch(() => {}); }, HOUSEKEEPING_TICK_MS);
   setTimeout(() => { void housekeeper?.run().catch(() => {}); }, 60_000).unref();
+  // The inventory (sizes are slow, niced): hourly, the first a few minutes after start.
+  const inventoryTimer = setInterval(() => { countTick("housekeeping-scan"); void housekeeper?.scan().catch(() => {}); }, HOUSEKEEPING_SCAN_MS);
+  setTimeout(() => { void housekeeper?.scan().catch(() => {}); }, 3 * 60_000).unref();
   let recording = false;
   const activityTimer = setInterval(() => {
     countTick("activity");
@@ -416,7 +433,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(dreamTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(housekeepingTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(dreamTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(housekeepingTimer); clearInterval(inventoryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

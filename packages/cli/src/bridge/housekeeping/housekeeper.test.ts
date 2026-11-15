@@ -285,11 +285,41 @@ describe("the /v1/housekeeping contract", () => {
     expect((await call(route, "GET", "/v1/housekeeping")).body.revision).toBe(dismissed.body.revision);
   });
 
+  it("adds the inventory only with ?inventory=1, starting a scan when there is none", async () => {
+    // Empty roots: the test never measures this machine's own folders.
+    const housekeeper = new Housekeeper({ computer: "mini", resources: async () => resources(), processes: async () => [], panes: async () => [], checks: [],
+      store: new HousekeepingStore(await temp()), freeBytes: async () => 0,
+      inventory: { roots: [], tmpRoots: [], rules: [], dispatches: async () => [],
+        sessions: async () => [{ pane: { target: { server: "default", pane: "w1:p1" }, label: "worker" }, agent: "codex", status: "done", idleSeconds: 600 }] } });
+    const route = handler(housekeeper);
+    const first = await call(route, "GET", "/v1/housekeeping?inventory=1");
+    expect(first.body.inventory).toBeUndefined();
+    await housekeeper.scan(); // the one the request started, shared
+    const plain = await call(route, "GET", "/v1/housekeeping");
+    expect(plain.body.inventory).toBeUndefined();
+    expect(plain.body.revision).not.toBe(first.body.revision);
+    const full = await call(route, "GET", "/v1/housekeeping?inventory=1&dismissed=1");
+    const { computer: _computer, ...view } = full.body;
+    expect(viewSchema.parse(view)).toEqual(view);
+    expect(view.inventory.sessions).toEqual([expect.objectContaining({ status: "done", idleSeconds: 600,
+      action: expect.objectContaining({ kind: "close-pane", allowed: true, confirm: "Closes the pane and stops its agent." }) })]);
+  });
+
   // The apps decode these fixtures in their own tests; they must match the schema the Hook serves.
   it.each(["housekeeping-report.json", "housekeeping-approve.json"])("fixture %s matches the schema", async name => {
     const fixture = JSON.parse(await readFile(new URL(`../../../fixtures/conformance/${name}`, import.meta.url), "utf8"));
     const schema = name.includes("approve") ? approveResultSchema : viewSchema;
     expect(schema.parse(fixture)).toEqual(fixture);
+    if (name === "housekeeping-report.json") {
+      // In the documented order: worktrees by path, space largest first, sessions most idle first.
+      const { worktrees, space, sessions } = fixture.inventory;
+      expect(worktrees.map((row: { path: string }) => row.path)).toEqual(worktrees.map((row: { path: string }) => row.path).sort());
+      expect(space.map((row: { sizeBytes: number }) => row.sizeBytes)).toEqual(space.map((row: { sizeBytes: number }) => row.sizeBytes).sort((a: number, b: number) => b - a));
+      expect(sessions.map((row: { idleSeconds?: number }) => row.idleSeconds ?? 0)).toEqual(sessions.map((row: { idleSeconds?: number }) => row.idleSeconds ?? 0).sort((a: number, b: number) => b - a));
+      // The phone decodes a disabled row in every section.
+      for (const rows of [fixture.inventory.worktrees, fixture.inventory.space, fixture.inventory.sessions])
+        expect(rows.some((row: { action?: { allowed: boolean; reason?: string } }) => row.action && !row.action.allowed && row.action.reason)).toBe(true);
+    }
     if (name.includes("report")) {
       const areas = new Set([...fixture.warnings, ...fixture.suggestions, ...fixture.kept, ...fixture.cleaned].map((item: { area: string }) => item.area));
       expect([...areas].sort()).toEqual(["disk", "docker", "memory", "sessions", "simulators", "worktrees"]);

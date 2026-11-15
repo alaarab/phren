@@ -154,23 +154,40 @@ async function submoduleBlockers(dir: string): Promise<Blocker[]> {
 
 export type CheckoutTarget = "worktree" | "repository";
 
+/** What a checkout holds, as the inventory shows it. */
+export interface CheckoutFacts {
+  main: boolean;
+  branch?: string;
+  /** The repository's main checkout (for a linked worktree, the one it belongs to). */
+  repo?: string;
+  dirty: number;
+  untracked: number;
+  unpushed: number;
+  stashes: number;
+  inProgress: string[];
+  locked: boolean;
+  lastCommitAt?: string;
+}
+
 /**
- * Every reason `dir` must not be deleted. Empty means nothing would be lost.
- * `worktree`: a linked worktree, removed with `git worktree remove`; only its
- * HEAD's commits matter, since its branch stays. `repository`: the whole
- * repository folder; every local branch counts, and linked worktrees block.
- * Stashes block either way: the owner's rule names them without exception.
+ * What `dir` holds and every reason it must not be deleted (no blockers means
+ * nothing would be lost). `worktree`: a linked worktree, removed with `git
+ * worktree remove`; only its HEAD's commits matter, since its branch stays.
+ * `repository`: the whole repository folder; every local branch counts, and
+ * linked worktrees block. Stashes block either way: the owner's rule names
+ * them without exception.
  */
-export async function checkoutBlockers(dir: string, target: CheckoutTarget, sources: InUseSources): Promise<Blocker[]> {
+export async function inspectCheckout(dir: string, target: CheckoutTarget, sources: InUseSources): Promise<{ facts?: CheckoutFacts; blockers: Blocker[] }> {
   const info = await lstat(dir).catch(() => undefined);
-  if (!info) return [{ code: "not-a-checkout", detail: `${dir} does not exist` }];
-  if (info.isSymbolicLink()) return [{ code: "symlink", detail: `${dir} is a symbolic link; housekeeping never follows one` }];
-  if (!info.isDirectory()) return [{ code: "not-a-checkout", detail: `${dir} is not a folder` }];
+  if (!info) return { blockers: [{ code: "not-a-checkout", detail: `${dir} does not exist` }] };
+  if (info.isSymbolicLink()) return { blockers: [{ code: "symlink", detail: `${dir} is a symbolic link; housekeeping never follows one` }] };
+  if (!info.isDirectory()) return { blockers: [{ code: "not-a-checkout", detail: `${dir} is not a folder` }] };
   const abs = await canonical(dir);
   const blockers: Blocker[] = [];
+  let facts: CheckoutFacts | undefined;
   try {
     const top = await canonical((await housekeepingGit(abs, "rev-parse", "--show-toplevel")).trim());
-    if (top !== abs) return [{ code: "not-a-checkout", detail: `${dir} is inside ${top}, not a checkout root` }];
+    if (top !== abs) return { blockers: [{ code: "not-a-checkout", detail: `${dir} is inside ${top}, not a checkout root` }] };
     const gitDir = await canonical(path.resolve(abs, (await housekeepingGit(abs, "rev-parse", "--git-dir")).trim()));
     const commonDir = await canonical(path.resolve(abs, (await housekeepingGit(abs, "rev-parse", "--git-common-dir")).trim()));
     const isMain = gitDir === commonDir;
@@ -195,26 +212,41 @@ export async function checkoutBlockers(dir: string, target: CheckoutTarget, sour
     if (untracked) blockers.push({ code: "untracked-files", detail: `${untracked} untracked path(s) not ignored` });
 
     const hasHead = await housekeepingGit(abs, "rev-parse", "--verify", "--quiet", "HEAD").then(() => true, () => false);
+    let unpushed = 0, lastCommitAt: string | undefined;
     if (hasHead) {
       const refs = target === "repository" ? ["HEAD", "--branches"] : ["HEAD"];
-      const unpushed = Number((await housekeepingGit(abs, "rev-list", "--count", ...refs, "--not", "--remotes")).trim()) || 0;
+      unpushed = Number((await housekeepingGit(abs, "rev-list", "--count", ...refs, "--not", "--remotes")).trim()) || 0;
       if (unpushed > 0) blockers.push({ code: "unpushed-commits", detail: `${unpushed} commit(s) on no remote branch` });
+      const stamp = (await housekeepingGit(abs, "log", "-1", "--format=%cI", "HEAD")).trim();
+      if (stamp) lastCommitAt = new Date(stamp).toISOString();
     }
 
     const stashes = (await housekeepingGit(abs, "stash", "list")).split("\n").filter(Boolean);
     if (stashes.length) blockers.push({ code: "stash", detail: `${stashes.length} stash entr${stashes.length === 1 ? "y" : "ies"}` });
 
+    const inProgress: string[] = [];
     for (const marker of IN_PROGRESS) {
-      if (await exists(path.join(gitDir, marker))) blockers.push({ code: "in-progress-operation", detail: `${marker} is present: an operation is in progress` });
+      if (await exists(path.join(gitDir, marker))) {
+        inProgress.push(marker);
+        blockers.push({ code: "in-progress-operation", detail: `${marker} is present: an operation is in progress` });
+      }
     }
     blockers.push(...await submoduleBlockers(abs));
+    const mainPath = worktrees[0] && !worktrees[0].bare ? worktrees[0].path : undefined;
+    facts = { main: isMain, ...(self?.branch ? { branch: self.branch } : {}), ...(mainPath ? { repo: mainPath } : {}),
+      dirty: tracked, untracked, unpushed, stashes: stashes.length, inProgress, locked: self?.locked !== undefined, ...(lastCommitAt ? { lastCommitAt } : {}) };
   } catch (error) {
     // Fail closed: what could not be inspected is kept.
     blockers.push({ code: "inspection-failed", detail: error instanceof Error ? error.message.slice(0, 300) : String(error) });
   }
   try { blockers.push(...await inUseBlockers(abs, sources)); }
   catch (error) { blockers.push({ code: "inspection-failed", detail: `could not list processes or panes: ${error instanceof Error ? error.message : error}` }); }
-  return blockers;
+  return { ...(facts ? { facts } : {}), blockers };
+}
+
+/** Every reason `dir` must not be deleted; see `inspectCheckout`. */
+export async function checkoutBlockers(dir: string, target: CheckoutTarget, sources: InUseSources): Promise<Blocker[]> {
+  return (await inspectCheckout(dir, target, sources)).blockers;
 }
 
 export interface WorktreeEntry { path: string; branch?: string; locked?: string; prunable?: string; bare?: boolean }
@@ -336,6 +368,95 @@ export async function removeCacheEntry(target: string, context: CacheContext, ow
   if (decision.verdict !== "auto" && !approvedRecent) return { removed: false, decision };
   await rm(target, { recursive: true, force: false, maxRetries: 0 });
   return { removed: true, decision };
+}
+
+// ---------------------------------------------------------------------------
+// Owner-approved deletions beyond the caches: /tmp entries and node_modules.
+
+/** Scratch roots whose direct children the owner may delete. */
+export function tmpRoots(platform: NodeJS.Platform = process.platform): string[] {
+  return platform === "darwin" ? ["/private/tmp"] : ["/tmp"];
+}
+
+const TMP_MIN_AGE_MS = 24 * 3_600_000;
+
+export type PathDecision = { allowed: true; rule: string } | { allowed: false; reason: string; blockers?: Blocker[] };
+
+export interface DeletionContext extends CacheContext {
+  tmpRoots?: string[];
+  uid?: number;
+}
+
+/**
+ * Whether the owner may delete `target`, decided now against the disk:
+ * - an entry inside an allow-listed cache root (any age, since the owner asked);
+ * - a direct child of a scratch root this user owns, untouched for a day, not
+ *   a git checkout (those go through the worktree rules), with nothing in it;
+ * - a checkout's own `node_modules` (it has package.json), with nothing
+ *   running in that checkout.
+ * Never a symlink, never under a protected root except that node_modules.
+ */
+export async function deletionDecision(target: string, context: DeletionContext): Promise<PathDecision> {
+  const info = await lstat(target).catch(() => undefined);
+  if (!info) return { allowed: false, reason: "It is already gone." };
+  if (info.isSymbolicLink()) return { allowed: false, reason: "It is a symbolic link; Phren never follows one." };
+  const parent = await canonical(path.dirname(target));
+  const abs = path.join(parent, path.basename(target));
+  const inUse = async (dir: string): Promise<PathDecision | undefined> => {
+    const blockers = await inUseBlockers(dir, context).catch(error => [{ code: "inspection-failed" as const, detail: String(error) }]);
+    return blockers.length ? { allowed: false, reason: plainReason(blockers), blockers } : undefined;
+  };
+
+  if (path.basename(abs) === "node_modules" && info.isDirectory()) {
+    if (!await exists(path.join(parent, "package.json")) || !await exists(path.join(parent, ".git")))
+      return { allowed: false, reason: "Phren only clears node_modules at the top of a checkout." };
+    return await inUse(parent) ?? { allowed: true, rule: "node-modules" };
+  }
+
+  const cache = await cacheDecision(target, context);
+  if (cache.verdict === "auto") return { allowed: true, rule: cache.rule };
+  if (cache.verdict === "suggest" && cache.rule) return { allowed: true, rule: cache.rule }; // only too recent; the owner asked
+  if (cache.verdict === "keep" && cache.reason !== "protected-path")
+    return { allowed: false, reason: cache.blockers?.length ? plainReason(cache.blockers) : "Phren won't remove it.", ...(cache.blockers ? { blockers: cache.blockers } : {}) };
+  if (cache.verdict === "keep") return { allowed: false, reason: "It is under a folder Phren never touches." };
+
+  for (const root of context.tmpRoots ?? tmpRoots()) {
+    if (parent !== await canonical(root)) continue;
+    if (info.uid !== (context.uid ?? process.getuid?.() ?? info.uid)) return { allowed: false, reason: "Another user owns it." };
+    if ((context.now ?? Date.now()) - info.mtimeMs < TMP_MIN_AGE_MS) return { allowed: false, reason: "It was changed in the last day." };
+    if (info.isDirectory() && await exists(path.join(abs, ".git"))) return { allowed: false, reason: "It is a git checkout; remove it as a worktree." };
+    return await inUse(abs) ?? { allowed: true, rule: "tmp" };
+  }
+  return { allowed: false, reason: "Phren only deletes caches, scratch folders and node_modules." };
+}
+
+/** Delete what the owner approved, deciding again just before. */
+export async function removeApprovedPath(target: string, context: DeletionContext): Promise<{ removed: boolean; decision: PathDecision }> {
+  const decision = await deletionDecision(target, context);
+  if (!decision.allowed) return { removed: false, decision };
+  await rm(target, { recursive: true, force: false, maxRetries: 0 });
+  return { removed: true, decision };
+}
+
+// ---------------------------------------------------------------------------
+// Panes.
+
+export interface PaneState { server: string; pane: string; status?: string; role?: string }
+export interface PaneDispatch { id?: string; server: string; pane: string; returned?: { read: boolean }; closedAt?: string }
+
+/** Why a pane must stay open, or undefined if the owner may close it. A
+ * pane whose dispatch return is unread keeps the evidence (the 2026-11-08
+ * lesson); a working or waiting agent and the conductor stay too. */
+export function paneCloseBlock(pane: PaneState, dispatches: readonly PaneDispatch[]): string | undefined {
+  if (pane.role === "conductor") return "It is the conductor.";
+  if (pane.status === "working") return "Its agent is working.";
+  if (pane.status === "blocked" || pane.status === "waiting") return "Its agent is waiting for an answer.";
+  for (const receipt of dispatches) {
+    if (receipt.closedAt || receipt.server !== pane.server || receipt.pane !== pane.pane) continue;
+    if (!receipt.returned) return "Its dispatched work hasn't returned yet.";
+    if (!receipt.returned.read) return "Its return hasn't been read yet.";
+  }
+  return undefined;
 }
 
 /** What an item of a given kind may be: only a cache can ever be `auto`. */

@@ -26,6 +26,16 @@ export function formatView(name: string, view: HousekeepingView | undefined): st
   return lines.join("\n");
 }
 
+/** The inventory, one line per row with its approve id. */
+export function formatInventory(inv: NonNullable<HousekeepingView["inventory"]>): string {
+  const mark = (a?: { label: string; allowed: boolean; reason?: string }) => !a ? "" : a.allowed ? `  [${a.label}]` : `  [kept: ${a.reason}]`;
+  const lines = [`  inventory ${inv.collectedAt}${inv.scanning ? " (measuring)" : ""}${inv.stale ? " (stale)" : ""}`];
+  for (const w of inv.worktrees) lines.push(`    ${w.path}${w.branch ? ` [${w.branch}]` : ""}${w.sizeBytes !== undefined ? ` ${size(w.sizeBytes)}` : ""}${mark(w.action)}  ${w.action.id}`);
+  for (const r of inv.space.slice(0, 20)) lines.push(`    ${size(r.sizeBytes).padStart(9)} ${r.title}${mark(r.action)}${r.action ? `  ${r.action.id}` : r.note ? `  (${r.note})` : ""}`);
+  for (const p of inv.sessions) lines.push(`    pane ${p.pane.label ?? p.pane.target.pane} ${p.agent ?? ""} ${p.status ?? ""}${p.idleSeconds !== undefined ? ` idle ${Math.round(p.idleSeconds / 60)}m` : ""}${mark(p.action)}  ${p.action.id}`);
+  return lines.join("\n");
+}
+
 const flag = (args: string[], name: string) => args.includes(name);
 
 export async function runHousekeeping(args: string[]): Promise<number> {
@@ -43,8 +53,20 @@ export async function runHousekeeping(args: string[]): Promise<number> {
     console.log(json ? JSON.stringify(view, null, 2) : formatView(hostname(), view));
     return 0;
   }
+  const apply = args.includes("--apply") ? args[args.indexOf("--apply") + 1] : undefined;
+  if (args.includes("--apply") || flag(args, "--scan")) {
+    if (args.includes("--apply") && (!apply || apply.startsWith("-"))) { console.error("--apply takes comma-separated action ids."); return 1; }
+    try {
+      const result = flag(args, "--scan") ? await hookRequest("/v1/housekeeping/scan", {}, undefined, 30_000)
+        : await hookRequest("/v1/housekeeping/approve", { ids: apply!.split(",").filter(Boolean), by: "cli" }, undefined, 90_000);
+      if (json || flag(args, "--scan")) { console.log(flag(args, "--scan") ? "Scan started; `phren housekeeping` shows it when it lands." : JSON.stringify(result, null, 2)); return 0; }
+      for (const row of Array.isArray(result.results) ? result.results as Json[] : [])
+        console.log(`${row.id}  ${row.status}${row.reason ? `: ${row.reason}` : ""}${typeof row.freedBytes === "number" && row.freedBytes ? ` (${size(row.freedBytes)} freed)` : ""}`);
+      return 0;
+    } catch (error) { console.error(error instanceof Error ? error.message : String(error)); return 1; }
+  }
   let answer: Json;
-  try { answer = await hookRequest(`/v1/housekeeping${flag(args, "--local") ? "" : "?peers=1"}`, undefined, undefined, 30_000); }
+  try { answer = await hookRequest(`/v1/housekeeping?inventory=1${flag(args, "--local") ? "" : "&peers=1"}`, undefined, undefined, 30_000); }
   catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code;
     const message = code === "ENOENT" || code === "ECONNREFUSED" ? "Phren Hook is not running on this computer (phren bridge status). `phren housekeeping --dry-run` runs a pass without it."
@@ -55,7 +77,9 @@ export async function runHousekeeping(args: string[]): Promise<number> {
   }
   if (json) { console.log(JSON.stringify(answer, null, 2)); return 0; }
   const name = (value: unknown, fallback: string) => typeof (value as { name?: unknown })?.name === "string" ? String((value as { name: string }).name) : fallback;
-  const blocks = [formatView(name(answer.computer, hostname()), answer as unknown as HousekeepingView)];
+  const local = answer as unknown as HousekeepingView;
+  const blocks = [formatView(name(answer.computer, hostname()), local)
+    + (local.inventory ? `\n${formatInventory(local.inventory)}` : "\n  Inventory: the first scan is still running.")];
   for (const peer of Array.isArray(answer.peers) ? answer.peers as Json[] : []) {
     const peerName = name(peer.computer, String(peer.name ?? "peer"));
     blocks.push(typeof peer.error === "string" ? `${peerName}\n  unavailable: ${peer.error}` : formatView(peerName, peer as unknown as HousekeepingView));

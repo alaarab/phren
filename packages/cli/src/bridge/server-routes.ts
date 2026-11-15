@@ -198,7 +198,7 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
 export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1 };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -756,9 +756,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             // The newest housekeeping report (docs/housekeeping.md); null before the first pass.
             // This computer only; the phone asks each computer itself. `peers=1` is for `phren housekeeping`.
             if (!ctx.housekeeper) throw new BridgeError(404, "Housekeeping is not running on this Hook.");
-            const dismissed = url.searchParams.get("dismissed") === "1";
+            const dismissed = url.searchParams.get("dismissed") === "1", inventory = url.searchParams.get("inventory") === "1";
             // Before the first scheduled pass, run one now so the answer always has the full shape.
-            const view = await ctx.housekeeper.view(dismissed) ?? (await ctx.housekeeper.run("manual"), await ctx.housekeeper.view(dismissed));
+            const view = await ctx.housekeeper.view(dismissed, inventory) ?? (await ctx.housekeeper.run("manual"), await ctx.housekeeper.view(dismissed, inventory));
+            // No scan yet: start one; `inventory` appears once it lands (the revision changes).
+            if (inventory && !view?.inventory) void ctx.housekeeper.scan().catch(() => {});
             result = { computer: info.computer, ...view } as unknown as Json;
             if (url.searchParams.get("peers") === "1") result = { ...result as Json, ...await fromPeers("/v1/housekeeping") };
             break;
@@ -1022,6 +1024,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/sessions/seen") {
           result = await markSessionSeen(data);
+        } else if (url.pathname === "/v1/housekeeping/scan") {
+          // Owner-only: a fresh inventory (sizes take a while); the answer comes back through the view's revision.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner starts a housekeeping scan.");
+          if (!ctx.housekeeper) throw new BridgeError(404, "Housekeeping is not running on this Hook.");
+          void ctx.housekeeper.scan().catch(() => {});
+          result = { started: true };
         } else if (url.pathname === "/v1/housekeeping/approve" || url.pathname === "/v1/housekeeping/dismiss" || url.pathname === "/v1/housekeeping/restore") {
           // Owner-only, and owner-proof signed once the phone signs (owner-proof.ts): agents and peers never apply housekeeping.
           if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner applies or dismisses housekeeping.");
