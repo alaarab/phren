@@ -575,3 +575,48 @@ describe("Hook proxy cancellation", () => {
     } finally { old.abort(); }
   });
 });
+
+describe("both loopbacks", () => {
+  const squat = async (port: number) => {
+    const { createServer } = await import("node:net");
+    const s = createServer();
+    await new Promise<void>((done, fail) => { s.once("error", fail); s.listen(port, "::1", () => done()); });
+    return s;
+  };
+  const hasIpv6 = async () => {
+    try { const s = await squat(0); s.close(); return true; } catch { return false; }
+  };
+
+  it("serves the app on ::1 as well, so no other process can hold that half of localhost", async () => {
+    if (!(await hasIpv6())) return;
+    const h = await startHarness();
+    const v6 = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest({ host: "::1", port: h.port, path: "/api/hosts", headers: { Host: `localhost:${h.port}` } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+      req.on("error", reject);
+      req.end();
+    });
+    const v4 = await rawRequest({ port: h.port, path: "/api/hosts", headers: { Host: `localhost:${h.port}` } });
+    expect(v6).toBe(v4.status);
+  });
+
+  it("refuses a fixed port another process holds on ::1, and moves off one it picked", async () => {
+    if (!(await hasIpv6())) return;
+    const { createServer } = await import("node:http");
+    const { listenLoopback } = await import("./server.js");
+    const taken = await squat(0);
+    const port = (taken.address() as { port: number }).port;
+    try {
+      const a = createServer(), b = createServer();
+      await expect(listenLoopback(a, b, port)).rejects.toThrow(/IPv6 loopback/);
+      expect(a.listening).toBe(false);
+
+      const c = createServer(), d = createServer();
+      const got = await listenLoopback(c, d, 0);
+      expect(got.ipv6).toBe(true);
+      expect(got.port).not.toBe(port);
+      c.close(); d.close();
+    } finally {
+      taken.close();
+    }
+  });
+});

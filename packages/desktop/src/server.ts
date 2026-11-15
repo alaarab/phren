@@ -1,6 +1,6 @@
 // HTTP + WebSocket server for the Phren desktop phase 0 spike.
 import { execFile } from "node:child_process";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createReadStream, existsSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -265,6 +265,41 @@ async function readBody(req: IncomingMessage): Promise<Buffer | null> {
     }
   }
   return overflow ? null : Buffer.concat(chunks);
+}
+
+const listenOn = (server: Server, port: number, host: string) =>
+  new Promise<void>((done, fail) => {
+    server.once("error", fail);
+    server.listen(port, host, () => {
+      server.off("error", fail);
+      done();
+    });
+  });
+
+/**
+ * Listens on 127.0.0.1 and ::1 at one port. The app is addressed as
+ * `localhost`, which Chromium may resolve to either loopback; a port held on
+ * only one of them leaves the other free for any local process to take and
+ * receive the token and cookie (security scan 2026-11-10). With no IPv6
+ * loopback nothing can listen there. When ::1 is taken at a port the OS
+ * picked, another port is tried; at a fixed port the daemon refuses to start.
+ * Returns the port and whether ::1 is held.
+ */
+export async function listenLoopback(v4: Server, v6: Server, port: number): Promise<{ port: number; ipv6: boolean }> {
+  for (let attempt = 0; ; attempt++) {
+    await listenOn(v4, port, "127.0.0.1");
+    const bound = (v4.address() as AddressInfo).port;
+    try {
+      await listenOn(v6, bound, "::1");
+      return { port: bound, ipv6: true };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EADDRNOTAVAIL" || code === "EAFNOSUPPORT") return { port: bound, ipv6: false };
+      await new Promise<void>((done) => v4.close(() => done()));
+      if (code !== "EADDRINUSE" || port !== 0 || attempt >= 4)
+        throw new Error(`Port ${bound} is taken on the IPv6 loopback (::1); Phren desktop will not serve its token where another process could receive it.`);
+    }
+  }
 }
 
 export const startServer: StartServer = async (o) => {
@@ -973,9 +1008,12 @@ export const startServer: StartServer = async (o) => {
     for (const ws of overviewSockets) sendOverview(ws, merged);
   });
 
-  await new Promise<void>((done) => server.listen(o.port, "127.0.0.1", done));
-  boundPort = (server.address() as AddressInfo).port;
-  // Bound to loopback only; named localhost so the editor's extension frame
+  // The same app on the IPv6 loopback, so no other process can hold that half of `localhost`.
+  const server6 = createServer(server.listeners("request")[0] as Parameters<typeof createServer>[0] & object);
+  for (const listener of server.listeners("upgrade")) server6.on("upgrade", listener as (...args: unknown[]) => void);
+  const bound = await listenLoopback(server, server6, o.port);
+  boundPort = bound.port;
+  // Bound to both loopbacks only; named localhost so the editor's extension frame
   // (on {{uuid}}.localhost) may load its worker from this origin.
   const url = `http://localhost:${boundPort}/?token=${encodeURIComponent(o.token)}`;
 
@@ -994,6 +1032,11 @@ export const startServer: StartServer = async (o) => {
       server.close(() => done());
       server.closeAllConnections();
     });
+    if (bound.ipv6)
+      await new Promise<void>((done) => {
+        server6.close(() => done());
+        server6.closeAllConnections();
+      });
   };
 
   return { url, close };
