@@ -413,6 +413,15 @@ describe("hardening", () => {
     expect(after.status).toBe(200);
   });
 
+  it("lets only the app frame its own pages", async () => {
+    const h = await startHarness();
+    const res = await rawRequest({ port: h.port, path: "/", headers: { Host: `localhost:${h.port}`, Cookie: `phren_desktop=${TOKEN}` } });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-security-policy"]).toContain("frame-ancestors 'self'");
+    expect(res.headers["x-frame-options"]).toBe("SAMEORIGIN");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+  });
+
   it("sandboxes every proxied Hook response", async () => {
     const h = await startHarness();
     const res = await rawRequest({ port: h.port, path: "/hosts/This%20computer/v1/files/range", headers: { Host: `localhost:${h.port}`, Cookie: `phren_desktop=${TOKEN}` } });

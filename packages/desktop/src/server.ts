@@ -42,6 +42,16 @@ const COOKIE = "phren_desktop";
 const HEARTBEAT_MS = 20_000;
 const VENDOR_PREFIXES = ["/vendor/xterm/", "/vendor/addon-fit/", "/vendor/addon-webgl/", "/vendor/monaco/", "/vendor/kit/"];
 
+/** The app's own files: only the app may frame them. Web previews
+ * (<secret>.localhost) and extension frames ({{uuid}}.localhost) are the same
+ * site as localhost, so the browser would send them the app's cookie in a frame
+ * of the app (clickjacking); frame-ancestors keeps them out. */
+export const APP_DOCUMENT_HEADERS = {
+  "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
+  "X-Frame-Options": "SAMEORIGIN",
+  "X-Content-Type-Options": "nosniff",
+} as const;
+
 /** Requests may only name the bound loopback authority; the editor and
  * extension frames additionally use `<uuid>.localhost` on public GET routes. */
 function hostAllowed(host: string, port: number, allowSubdomain: boolean): boolean {
@@ -959,7 +969,7 @@ export const startServer: StartServer = async (o) => {
       res.end("not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": contentType(file) });
+    res.writeHead(200, { "Content-Type": contentType(file), ...APP_DOCUMENT_HEADERS });
     createReadStream(file).on("error", () => res.destroy()).pipe(res);
   };
 
