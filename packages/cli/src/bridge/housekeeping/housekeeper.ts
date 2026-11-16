@@ -12,6 +12,7 @@ import {
   type ItemDraft, type StoredItem, type StoredReport, type Trigger, viewOf,
 } from "./report.js";
 import { type Inventory, type InventoryOptions, type InventorySession, type InventorySpace, type InventoryWorktree, scanInventory } from "./inventory.js";
+import { endProcess, type InventoryProcess, listProcesses, type ProcessSources } from "./processes.js";
 
 import { type DeletionContext, type InUseSources, type PaneDispatch, paneCloseBlock, plainReason, removeApprovedPath, removeWorktreeSafely } from "./safety.js";
 
@@ -149,6 +150,8 @@ export interface HousekeeperOptions extends InUseSources {
   closePane?: (server: string, pane: string) => Promise<void>;
   /** Runs simctl and docker for approved actions; execFile by default. */
   command?: (file: string, args: string[]) => Promise<void>;
+  /** The live process table and pane owners, for the Processes list and ending a hog (processes.ts). */
+  processSources?: ProcessSources;
 }
 
 type Outcome = { status: "done"; freedBytes: number } | { status: "refused" | "failed"; reason: string };
@@ -237,9 +240,15 @@ export class Housekeeper {
       ids: [...scanned.worktrees, ...scanned.space, ...scanned.sessions].map(row => row.action?.id ?? row.id) } : undefined;
     const view = viewOf(report, { cleaned: await this.store.cleaned(this.now()), dismissed: await this.store.dismissed(), includeDismissed,
       nextCheckAt: new Date(Date.parse(report.generatedAt) + TICK_MS).toISOString(), ...(inventory ? { inventory } : {}),
-      ...(includeInventory && scanned ? { include: inventoryOf(scanned, Boolean(this.scanning), this.now() - Date.parse(scanned.collectedAt) > STALE_MS) } : {}) });
+      ...(includeInventory && scanned ? { include: inventoryOf(scanned, Boolean(this.scanning), this.now() - Date.parse(scanned.collectedAt) > STALE_MS, await this.liveProcesses()) } : {}) });
     if (plain) this.cachedView = view;
     return view;
+  }
+
+  /** The Processes list, read now; omitted when the process table can't be read. */
+  private async liveProcesses(): Promise<InventoryProcess[] | undefined> {
+    if (!this.options.processSources) return undefined;
+    return listProcesses(this.options.processSources).catch(() => undefined);
   }
 
   /** The overview badge, from the cached view: no pass, no git. */
@@ -360,6 +369,9 @@ export class Housekeeper {
 
   /** An inventory row (prefixed id) as an approvable item; it is re-checked live by its executor. */
   private async inventoryItem(id: string): Promise<StoredItem | undefined> {
+    const running = this.options.processSources ? (await this.liveProcesses())?.find(row => row.id === id) : undefined;
+    if (running) return { section: "suggestion", since: new Date(this.now()).toISOString(), id, reason: "", fingerprint: id, area: "memory", kind: "process",
+      title: running.name, target: { name: `${running.name} (pid ${running.pid})` }, action: "end-process", sizeBytes: running.memoryBytes };
     const inventory = await this.latestInventory();
     if (!inventory) return undefined;
     const tree = inventory.worktrees.find(row => row.action.id === id);
@@ -397,6 +409,7 @@ export class Housekeeper {
       command: this.options.command ?? (async (file, args) => { await promisify(execFile)(file, args, { timeout: 120_000 }); }),
       xcodebuildRunning: inv?.xcodebuildRunning ?? (async () => false),
       simulators: inv?.simulators,
+      processSources: this.options.processSources,
     };
   }
 }
@@ -408,6 +421,7 @@ interface ExecutorDeps {
   command: (file: string, args: string[]) => Promise<void>;
   xcodebuildRunning: () => Promise<boolean>;
   simulators?: InventoryOptions["simulators"];
+  processSources?: ProcessSources;
 }
 
 type Executor = (item: StoredItem, sources: DeletionContext, deps: ExecutorDeps) => Promise<Outcome>;
@@ -448,6 +462,12 @@ const EXECUTORS: Partial<Record<ActionKind, Executor>> = {
     await deps.closePane(pane.server, pane.pane);
     return { status: "done", freedBytes: 0 };
   },
+  "end-process": async (item, _sources, deps) => {
+    if (!deps.processSources) return { status: "refused", reason: "This computer's Hook can't end processes." };
+    const result = await endProcess(item.id, deps.processSources);
+    // Memory, not disk: nothing on the volume was freed.
+    return result.status === "done" ? { status: "done", freedBytes: 0 } : { status: "refused", reason: result.reason };
+  },
   "shutdown-simulator": async (item, _sources, deps) => simulatorAction(item, deps, "shutdown"),
   "delete-simulator": async (item, _sources, deps) => simulatorAction(item, deps, "delete"),
   "prune-docker-builder": async (_item, _sources, deps) => {
@@ -458,7 +478,7 @@ const EXECUTORS: Partial<Record<ActionKind, Executor>> = {
 };
 
 /** The inventory as the view carries it: the scan, its state, and nothing internal. */
-function inventoryOf(scan: Inventory, scanning: boolean, stale: boolean): InventoryView {
+function inventoryOf(scan: Inventory, scanning: boolean, stale: boolean, processes?: InventoryProcess[]): InventoryView {
   return { collectedAt: scan.collectedAt, durationMs: scan.durationMs, ...(scanning ? { scanning: true } : {}), ...(stale ? { stale: true } : {}),
-    worktrees: scan.worktrees, space: scan.space, sessions: scan.sessions, ...(scan.errors?.length ? { errors: scan.errors } : {}) };
+    worktrees: scan.worktrees, space: scan.space, sessions: scan.sessions, ...(processes ? { processes } : {}), ...(scan.errors?.length ? { errors: scan.errors } : {}) };
 }

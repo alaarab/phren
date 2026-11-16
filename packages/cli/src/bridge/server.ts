@@ -56,7 +56,7 @@ import { SettingsSwitcher } from "./settings-switch.js";
 import { PermissionModeSwitcher } from "./permission-mode.js";
 import { SideQuestions } from "./side-questions.js";
 import { AccountUsageReader } from "./usage.js";
-import { ResourceMonitor } from "./resources.js";
+import { paneOwners, processTable, ResourceMonitor } from "./resources.js";
 import { ALERT_CHECK_MS, HealthAlerts } from "./machine-health-alerts.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { DREAM_TICK_MS, DreamScheduler, dreamProjectOf, effectiveDreamSessions, dreamStoreProjects, dreamTickerEnabled, readLastRun, runDreamChild } from "./dream-schedule.js";
@@ -237,7 +237,13 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       ...(process.platform === "darwin" ? { simulators: () => listSimulators(), xcodebuildRunning } : {}),
       docker: dockerUsage,
     },
-    closePane: (server, pane) => terminalProvider().closePane(server, pane) });
+    closePane: (server, pane) => terminalProvider().closePane(server, pane),
+    // The Processes list: the live process table, the panes that started each process, and the conductor, which is never ended there.
+    processSources: { rows: processTable, owners: paneOwners,
+      conductors: async () => new Set((await Promise.all((await recentServers()).map(async server => {
+        const name = String(server.session);
+        return sessionRowsFromOverview(await readWorkspaces(name, await sharedSnapshot(name, 4000), false));
+      }))).flat().filter(row => row.role === "conductor").map(row => `${row.pane.target.server}/${row.pane.target.pane}`)) } });
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions(undefined, codexServers);
   const scheduleStore = defaultPhrenPath();

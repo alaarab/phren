@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assess, collectResources, heavyKind, linuxChip, linuxModel, parseMacHardware, heavyProcesses, parseEtime, parseMeminfo, parsePmset, parsePs, parseSwap, type ProcessRow, ResourceMonitor, withStartTimes } from "./resources.js";
+import { assess, collectResources, heavyKind, linuxChip, linuxModel, parseMacHardware, heavyProcesses, parseEtime, parseMeminfo, parsePmset, parsePs, parseSwap, parseProcVmstatSwapins, parseVmStatSwapins, type ProcessRow, ResourceMonitor, withStartTimes } from "./resources.js";
 
 const GB = 1024 ** 3;
 const row = (pid: number, ppid: number, cpu: number, rssMB: number, command: string, args = command, pgid = pid): ProcessRow =>
@@ -133,7 +133,10 @@ describe("resources", () => {
     expect(parsePmset("Now drawing from 'AC Power'")).toBeUndefined();
     expect(parseSwap("total = 2048.00M  used = 798.50M  free = 1249.50M  (encrypted)")).toBe(Math.round(798.5 * 1024 ** 2));
     expect(parseMeminfo("MemTotal:  16000000 kB\nMemAvailable: 1600000 kB\nSwapTotal: 100 kB\nSwapFree: 40 kB\n"))
-      .toEqual({ totalBytes: 16000000 * 1024, availablePercent: 10, pressure: "warn", swapUsedBytes: 60 * 1024 });
+      .toEqual({ totalBytes: 16000000 * 1024, availablePercent: 10, pressure: "warn", swapUsedBytes: 60 * 1024, swapTotalBytes: 100 * 1024 });
+    expect(parseSwap("total = 2048.00M  used = 798.50M  free = 1249.50M  (encrypted)", "total")).toBe(2048 * 1024 ** 2);
+    expect(parseVmStatSwapins("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:  1000.\nSwapins:  250.\nSwapouts: 9.\n")).toBe(250 * 16384);
+    expect(parseProcVmstatSwapins("pgpgin 5\npswpin 1000\npswpout 2000\n")).toBe(1000 * 4096);
   });
 
   it("warns at under 10 GB free or load above twice the cores", () => {

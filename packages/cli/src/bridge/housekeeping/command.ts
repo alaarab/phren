@@ -32,6 +32,7 @@ export function formatInventory(inv: NonNullable<HousekeepingView["inventory"]>)
   const lines = [`  inventory ${inv.collectedAt}${inv.scanning ? " (measuring)" : ""}${inv.stale ? " (stale)" : ""}`];
   for (const w of inv.worktrees) lines.push(`    ${w.path}${w.branch ? ` [${w.branch}]` : ""}${w.sizeBytes !== undefined ? ` ${size(w.sizeBytes)}` : ""}${mark(w.action)}  ${w.action.id}`);
   for (const r of inv.space.slice(0, 20)) lines.push(`    ${size(r.sizeBytes).padStart(9)} ${r.title}${mark(r.action)}${r.action ? `  ${r.action.id}` : r.note ? `  (${r.note})` : ""}`);
+  for (const p of inv.processes ?? []) lines.push(`    ${size(p.memoryBytes + (p.swapBytes ?? 0)).padStart(9)} ${p.name} pid ${p.pid}${p.processes > 1 ? ` (${p.processes} processes)` : ""} cpu ${p.cpuPercent}%${mark(p.action)}  ${p.action.id}`);
   for (const p of inv.sessions) lines.push(`    pane ${p.pane.label ?? p.pane.target.pane} ${p.agent ?? ""} ${p.status ?? ""}${p.idleSeconds !== undefined ? ` idle ${Math.round(p.idleSeconds / 60)}m` : ""}${mark(p.action)}  ${p.action.id}`);
   return lines.join("\n");
 }
