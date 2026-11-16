@@ -432,6 +432,11 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     if (!ctx.turnQueue) throw new BridgeError(404, "This Hook has no after-turn queue.");
     return turnQueueRoute(ctx.turnQueue, url.pathname, data);
   }
+  // A linked computer reaches this Hook through its peer key, and no Hook-to-Hook
+  // flow changes Git or removes worktrees here. Refusing them keeps a peer from
+  // discarding or force-removing work directly, past the agents' permission modes.
+  if (headers["x-phren-origin"] === "peer" && (isGitWriteRoute(url.pathname) || url.pathname === "/v1/git/worktrees/remove"))
+    throw new BridgeError(403, "Another computer can't change Git or remove worktrees here.");
   if (isGitWriteRoute(url.pathname) && data.expectedRepository === undefined) {
     ctx.gitWrites?.record(url.pathname, headers);
     if (EXPECTED_REPOSITORY_REQUIRED) throw new BridgeError(400, "This app is too old to change Git safely. Update it.", { code: "expected-repository-required" });
