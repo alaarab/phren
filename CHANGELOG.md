@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.83] - 2026-11-16
+
 ### Security
 
 - Event schedules fence webhook text in the prompt: each `{{payload…}}` value arrives inside `<webhook-value>` tags under a line telling the agent it was written by whoever triggered the event and is data, not instructions. A branch name, commit message or pull request title could otherwise read as instructions to an agent running with your tools.
