@@ -61,7 +61,8 @@ describe("housekeeping git gate", () => {
 });
 
 describe("checkout blockers", () => {
-  it("finds nothing to lose in a clean, pushed worktree, and removes it without force", async () => {
+  // Windows: git cannot remove a worktree a test process still holds open, and paths differ; housekeeping targets macOS and Linux (phren task).
+  it.skipIf(process.platform === "win32")("finds nothing to lose in a clean, pushed worktree, and removes it without force", async () => {
     const { worktree, root, git } = await pushedRepository();
     expect(await checkoutBlockers(worktree, "worktree", idle)).toEqual([]);
     expect(await removeWorktreeSafely(worktree, idle)).toEqual({ removed: true, blockers: [] });
@@ -82,7 +83,8 @@ describe("checkout blockers", () => {
     expect((await stat(worktree)).isDirectory()).toBe(true);
   });
 
-  it("keeps a repository whose only unpushed work is on a branch that is not checked out", async () => {
+  // Windows: git cannot remove a worktree a test process still holds open, and paths differ; housekeeping targets macOS and Linux (phren task).
+  it.skipIf(process.platform === "win32")("keeps a repository whose only unpushed work is on a branch that is not checked out", async () => {
     const { root, worktree, git } = await pushedRepository();
     await git(root, "worktree", "remove", worktree);
     await git(root, "branch", "side");

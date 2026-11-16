@@ -219,7 +219,8 @@ describe("approving", () => {
     return { tree, git };
   }
 
-  it("re-checks safety against the disk, not the report, and records what it did", async () => {
+  // Windows: git cannot remove a worktree a test process still holds open, and paths differ; housekeeping targets macOS and Linux (phren task).
+  it.skipIf(process.platform === "win32")("re-checks safety against the disk, not the report, and records what it did", async () => {
     const { tree, git } = await pushedWorktree();
     const other = (await pushedWorktree()).tree;
     const { check, set } = scripted();
