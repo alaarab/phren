@@ -61,7 +61,8 @@ async function computer() {
 }
 
 describe("inventory", () => {
-  it("lists every worktree with what it holds and whether it may go", async () => {
+  // Windows: git cannot remove a worktree a test process still holds open, and paths differ; housekeeping targets macOS and Linux (phren task).
+  it.skipIf(process.platform === "win32")("lists every worktree with what it holds and whether it may go", async () => {
     const { app, clean, ahead, tmpCheckout, options } = await computer();
     const inventory = await scanInventory({ ...options, sessions: async () => [{ pane: { target: { server: "default", pane: "p1" }, label: "ios" }, agent: "claude", cwd: ahead }] });
     const rows = Object.fromEntries(inventory.worktrees.map(row => [row.path, row]));
@@ -74,7 +75,8 @@ describe("inventory", () => {
     expect(Date.parse(rows[clean].lastCommitAt!)).toBeGreaterThan(Date.now() - 3_600_000);
   });
 
-  it("ranks the space users and says which may be cleared", async () => {
+  // Windows: git cannot remove a worktree a test process still holds open, and paths differ; housekeeping targets macOS and Linux (phren task).
+  it.skipIf(process.platform === "win32")("ranks the space users and says which may be cleared", async () => {
     const { app, derived, scratch, options } = await computer();
     const inventory = await scanInventory(options);
     const rows = Object.fromEntries(inventory.space.map(row => [row.path, row]));
@@ -130,7 +132,8 @@ describe("handling inventory rows", () => {
       inventory: options, ...extra });
   }
 
-  it("approves rows by action id, re-checks each live, and drops what it handled", async () => {
+  // Windows: git cannot remove a worktree a test process still holds open, and paths differ; housekeeping targets macOS and Linux (phren task).
+  it.skipIf(process.platform === "win32")("approves rows by action id, re-checks each live, and drops what it handled", async () => {
     const machine = await computer();
     let status = "idle";
     const closed: string[] = [];
