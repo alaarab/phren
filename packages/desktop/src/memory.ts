@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { parseSchedule, readScheduleDocument, withScheduleLock, writeScheduleDocument, type Schedule } from "@phren/cli/client/schedule-format";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
@@ -56,8 +56,8 @@ const MEMORY_PATTERNS = [
 /** A git blob id: 40 (sha1) or 64 (sha256) lowercase hex characters. */
 const BLOB_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
-export function blobSha(content: Buffer): string {
-  return createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
+export function blobSha(content: Buffer, algorithm: "sha1" | "sha256" = "sha1"): string {
+  return createHash(algorithm).update(`blob ${content.length}\0`).update(content).digest("hex");
 }
 
 /** Normalize a store-relative path, refusing absolute paths and `..`. A
@@ -251,12 +251,16 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
     }
     // Fetch missing blobs eight at a time: each is one SSH channel, and the
     // per-computer pool carries far more than that.
-    await mkdir(blobsDir, { recursive: true });
+    // The store copy is the owner's memory: readable by this user only.
+    await mkdir(blobsDir, { recursive: true, mode: 0o700 });
+    await chmod(cacheDir, 0o700).catch(() => {});
+    await chmod(blobsDir, 0o700).catch(() => {});
     const missing = [...new Set(next.values())].filter((blobSha) => !existsSync(path.join(blobsDir, blobSha)));
     /** Keep a downloaded blob only when its content hashes to the id asked for. */
     const storeBlobFile = async (id: string, content: Buffer) => {
-      if (!BLOB_SHA.test(id) || (id.length === 40 && blobSha(content) !== id)) return;
-      await writeFile(path.join(blobsDir, id), content);
+      // Shared by every computer's mirror: a blob is kept only when its bytes hash to its id.
+      if (!BLOB_SHA.test(id) || blobSha(content, id.length === 64 ? "sha256" : "sha1") !== id) return;
+      await writeFile(path.join(blobsDir, id), content, { mode: 0o600 });
     };
     // A Hook with memoryStoreBatch answers up to 256 blobs per request; older
     // Hooks get one request per blob.
@@ -300,8 +304,9 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       const dest = mirrorFile(dir, rel);
       if (!dest) { next.delete(rel); continue; }
       if (state.blobShas.get(rel) !== blobSha || !existsSync(dest)) {
-        await mkdir(path.dirname(dest), { recursive: true });
+        await mkdir(path.dirname(dest), { recursive: true, mode: 0o700 });
         await copyFile(path.join(blobsDir, blobSha), dest);
+        await chmod(dest, 0o600).catch(() => {});
       }
     }
     await removeMissing(dir, next);

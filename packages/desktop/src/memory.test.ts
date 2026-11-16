@@ -1,5 +1,5 @@
 import { dump, load } from "js-yaml";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -164,6 +164,33 @@ describe("remote mirror", () => {
     expect(store.calls.blob).toBe(1); // only the real blob was requested
     expect(existsSync(path.join(dir, "cache", evil))).toBe(false);
     expect(existsSync(path.resolve(dir, "cache", "blobs", evil))).toBe(false);
+  });
+
+  it("keeps the store copy readable by this user only, and refuses a sha256 blob whose bytes do not match its id", async () => {
+    const good = Buffer.from("# kept\n"), goodId = blobSha(good, "sha256"), forged = "f".repeat(64);
+    const store = fakeStore({ "app/FINDINGS.md": "# app\n" }, { extraTree: [
+      { path: "app/notes/good.md", type: "blob", sha: goodId, size: good.length },
+      { path: "app/notes/forged.md", type: "blob", sha: forged, size: 8 },
+    ] });
+    const inner = store.request;
+    store.request = async (c, method, requestPath, body) => {
+      const sha = new URL(requestPath, "http://hook").searchParams.get("sha");
+      if (sha === goodId) return json({ sha, encoding: "base64", content: good.toString("base64") });
+      if (sha === forged) return json({ sha, encoding: "base64", content: Buffer.from("tampered").toString("base64") });
+      return inner(c, method, requestPath, body);
+    };
+    const cacheDir = path.join(dir, "cache");
+    await service(store, cacheDir).projects(B);
+    expect(existsSync(path.join(cacheDir, "blobs", goodId))).toBe(true);
+    expect(existsSync(path.join(cacheDir, "blobs", forged))).toBe(false);
+    expect(existsSync(path.join(cacheDir, "B", "app/notes/forged.md"))).toBe(false);
+    if (process.platform !== "win32") {
+      const mode = (p: string) => statSync(p).mode & 0o777;
+      expect(mode(cacheDir)).toBe(0o700);
+      expect(mode(path.join(cacheDir, "blobs"))).toBe(0o700);
+      expect(mode(path.join(cacheDir, "blobs", goodId))).toBe(0o600);
+      expect(mode(path.join(cacheDir, "B", "app/FINDINGS.md"))).toBe(0o600);
+    }
   });
 
   it("edits one schedule with the CLI's format, keeps list prompts intact, and refuses a stale edit", async () => {
