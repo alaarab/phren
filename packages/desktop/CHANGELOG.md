@@ -6,6 +6,10 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [Unreleased]
 
+### Security
+
+- **The Node extension host** is reached at `127.0.0.1:<port>` instead of `localhost:<port>`. Cookies ignore ports, so the editor was sending the app's sign-in cookie to the extension host, a process that runs extension code and is meant to hold no app credential.
+
 ## [0.1.16] - 2026-11-15
 
 ### Security
