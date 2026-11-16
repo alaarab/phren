@@ -64,7 +64,7 @@ describe.skipIf(process.platform === "win32")("trace redaction", () => {
     expect(redactString("curl -H 'Authorization: Bearer abc123' https://x")).toBe("curl -H 'Authorization: [redacted] https://x");
     expect(redactString(`push with ghp_${"a".repeat(36)} now`)).toBe("push with [redacted] now");
     expect(redactString("key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\nend")).toBe("key:\n[redacted]\nend");
-    expect(redactQuery("project=phren&token=abc&apiKey=k")).toBe("project=phren&token=%5Bredacted%5D&apiKey=%5Bredacted%5D");
+    expect(redactQuery("project=phren&token=abc&apiKey=k")).toBe("project=phren&token=[redacted]&apiKey=[redacted]");
   });
 
   it("never writes the body of a secret or sudo answer", async () => {
