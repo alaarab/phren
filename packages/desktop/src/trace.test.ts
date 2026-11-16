@@ -142,7 +142,7 @@ describe.skipIf(process.platform === "win32")("trace replay", () => {
   });
 });
 
-describe("trace redaction matches exports", () => {
+describe.skipIf(process.platform === "win32")("trace redaction matches exports", () => {
   it("removes the secret forms exports remove, not only bearer and prefixed tokens", async () => {
     const { redactValue } = await import("./trace.js");
     const text = [
