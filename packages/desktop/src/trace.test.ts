@@ -61,7 +61,7 @@ describe.skipIf(process.platform === "win32")("trace redaction", () => {
   });
 
   it("redacts secrets inside longer text, query strings and secret routes", () => {
-    expect(redactString("curl -H 'Authorization: Bearer abc123' https://x")).toBe("curl -H 'Authorization: Bearer [redacted]' https://x");
+    expect(redactString("curl -H 'Authorization: Bearer abc123' https://x")).toBe("curl -H 'Authorization: [redacted] https://x");
     expect(redactString(`push with ghp_${"a".repeat(36)} now`)).toBe("push with [redacted] now");
     expect(redactString("key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\nend")).toBe("key:\n[redacted]\nend");
     expect(redactQuery("project=phren&token=abc&apiKey=k")).toBe("project=phren&token=%5Bredacted%5D&apiKey=%5Bredacted%5D");
@@ -139,5 +139,25 @@ describe.skipIf(process.platform === "win32")("trace replay", () => {
       await replay.close();
       await rm(replayDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("trace redaction matches exports", () => {
+  it("removes the secret forms exports remove, not only bearer and prefixed tokens", async () => {
+    const { redactValue } = await import("./trace.js");
+    const text = [
+      "Authorization: Basic dXNlcjpwYXNzd29yZA==",
+      "postgres://admin:hunter2@db.internal/app",
+      "https://bucket.example/x?X-Amz-Signature=abcdef0123456789&other=1",
+      "DB_PASSWORD=correct-horse-battery",
+      "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+    ].join("\n");
+    const out = redactValue({ log: text }) as { log: string };
+    for (const secret of ["dXNlcjpwYXNzd29yZA", "hunter2", "abcdef0123456789", "correct-horse-battery", "npm_abcdefghijklmnopqrstuvwxyz0123456789"])
+      expect(out.log).not.toContain(secret);
+    // References people need survive: a git object id and a file path.
+    const kept = redactValue("commit 0123456789abcdef0123456789abcdef01234567 in packages/desktop/src/trace.ts") as string;
+    expect(kept).toContain("0123456789abcdef0123456789abcdef01234567");
+    expect(kept).toContain("packages/desktop/src/trace.ts");
   });
 });

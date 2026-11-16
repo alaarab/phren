@@ -8,8 +8,9 @@ import type { WebSocket } from "ws";
 import type { Computer, HookResponse } from "./contract.js";
 
 // @ts-expect-error shared plain ESM redaction module
-import { redactString } from "#redact";
-export { redactString };
+import { redactAll } from "#redact";
+/** Traces get the same redaction as exported chats: every token, header, URL and assignment form. */
+export const redactString = (value: string): string => redactAll(value);
 
 const MAX_BODY = 256 * 1024;
 const MAX_TRACE = 50 * 1024 * 1024;
