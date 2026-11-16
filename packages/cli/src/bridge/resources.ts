@@ -3,6 +3,8 @@ import { readdir, readFile, statfs } from "node:fs/promises";
 import { cpus, loadavg, totalmem, uptime } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { agentBudget, type AgentBudget } from "../heavy/budget-status.js";
+import type { Pressure } from "../heavy/budget.js";
 import { homeDir } from "../home-paths.js";
 import { recentServers, sharedSnapshot } from "./herdr.js";
 import { JobRegistry, jobPgids, paneKey, type CleanupReport, type JobSource, type ProcessLike, type TrackedJob } from "./job-registry.js";
@@ -66,6 +68,8 @@ export interface ComputerResources {
   warnings: Array<"load-high" | "memory-low" | "disk-low" | "battery-low">;
   /** Named health findings with severity and a fix (machine-health.ts), worst first. */
   health?: HealthFinding[];
+  /** The budget for agent work and its two pools (heavy/budget-status.ts). */
+  budget?: AgentBudget;
 }
 
 /** What the computer is, read once per Hook run: "MacBook Pro", "Apple M1 Max",
@@ -434,6 +438,8 @@ export interface ResourceDeps {
   jobs?: JobSource;
   /** Named findings for this read from the numbers and the process table. */
   health?: (value: ComputerResources, rows: ProcessRow[]) => HealthFinding[];
+  /** The agent budget for this read's memory and load. */
+  budget?: (pressure: Pressure) => AgentBudget;
 }
 
 export async function collectResources(deps: ResourceDeps): Promise<ComputerResources> {
@@ -463,7 +469,10 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
     memory, ...(disk ? { disk } : {}), ...(battery ? { battery } : {}), ...(hardware ? { hardware } : {}),
     heavy: owners.size || jobs.length ? heavyProcesses(rows, owners, jobs) : preliminary,
   };
-  const result: ComputerResources = { ...value, ...assess(value) };
+  const pressureNow: Pressure = { totalBytes: memory.totalBytes, load1: one, cores,
+    ...(memory.availablePercent !== undefined ? { availableBytes: Math.round(memory.totalBytes * memory.availablePercent / 100) } : {}) };
+  const budget = deps.budget ? (() => { try { return deps.budget!(pressureNow); } catch { return undefined; } })() : undefined;
+  const result: ComputerResources = { ...value, ...assess(value), ...(budget ? { budget } : {}) };
   const check = deps.health;
   if (!check) return result;
   const health = (() => { try { return check(result, rows); } catch { return undefined; } })();
@@ -480,7 +489,7 @@ export class ResourceMonitor {
     this.registry = deps.jobs ?? new JobRegistry();
     const health = new MachineHealth(process.env.PHREN_HEALTH_PROBES === "off" ? undefined : new PlatformProbes());
     this.deps = { platform: process.platform, now: Date.now, home: homeDir, processes: processTable, owners: paneOwners, panes: livePanes,
-      health: (value, rows) => health.assess(value, rows, this.deps.now()), ...deps, jobs: this.registry };
+      health: (value, rows) => health.assess(value, rows, this.deps.now()), budget: pressure => agentBudget(pressure, this.deps.now()), ...deps, jobs: this.registry };
   }
   async read(): Promise<ComputerResources> {
     if (this.cached && this.deps.now() - this.cached.at < this.maxAgeMs) return this.cached.value;

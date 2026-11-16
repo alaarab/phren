@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `phren heavy [--priority release|normal|low] -- <command>` runs a full test suite or native build once the computer has one of its heavy slots, N at once instead of one shared lock; `phren heavy status` shows who runs and waits. When memory or load holds a job back, it names an enrolled computer with room and the dispatch that would run it there.
 - `phren reap` lists dev servers, build daemons, test watchers, orphaned headless browsers, `pgrep -f` wait loops and test database clones agents left running, with age, idle time, memory, who started each and the command that stops it. It stops nothing.
 - Dispatch to `anywhere` passes over computers past their memory or load budget (`overBudget` on `/v1/dispatch/capacity`); with none left it fails with `over_budget`, as does an agent's dispatch that names such a computer.
+- The phone sees each computer's agent budget: `/v1/resources` (and the overview's resources frame) carries `budget`, with worker and heavy slots in use and waiting, the jobs holding them, and why the computer is over budget when it is.
 - The fanout and conductor skills say how to share a computer: `phren heavy` for heavy jobs, stop what you started, never wait with a `pgrep -f` loop, commit in small steps, and `git stash` and rerere are shared by every worktree.
 
 ## [0.3.79] - 2026-11-15
