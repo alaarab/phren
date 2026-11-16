@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.82] - 2026-11-16
+
 ### Added
 
 - Owner actions from the terminal work again once the phone signs owner actions: `phren conductor make`, `phren conductor stop`, `phren housekeeping --apply` and `--scan` wait for you to confirm in Phren on your phone, instead of failing with `owner-proof-required`. The phone shows what will happen and its answer carries its signature, so an agent cannot approve its own request. Needs a Phren app with owner confirmations.
