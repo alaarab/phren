@@ -52,6 +52,95 @@ fewer distinct inputs produce `looped.txt` and `blocked.json` and stop the worke
 Signals finalize cancellation; refusals override an otherwise successful exit.
 The existing external store scripts remain usable and are not removed.
 
+## Computer budget
+
+Every agent on a computer shares its memory and CPU. Measured on a 31 GB Linux
+box: a worker's full vitest run takes 2 to 8 GB and an app stack (API, vite,
+headless browser) 0.6 to 1 GB, and 5 to 10 agents at once ran it out of memory
+three times in a day. So each computer has its own budget, never synced with
+the store:
+
+```yaml
+# ~/.config/phren/budget.yaml ($XDG_CONFIG_HOME/phren/budget.yaml)
+workers: 4          # phren fanout run workers at once (default: one per 7 GB)
+heavySlots: 2       # phren heavy jobs at once (default: one per 12 GB)
+minFreeGB: 3        # available memory floor (default: 10% of memory, at least 2)
+maxLoadPerCore: 1.5 # one-minute load per core ceiling
+```
+
+`PHREN_FANOUT_WORKERS`, `PHREN_HEAVY_SLOTS`, `PHREN_MIN_FREE_GB` and
+`PHREN_MAX_LOAD_PER_CORE` override the file.
+
+`phren fanout run` takes a slot in the computer-wide `workers` pool before it
+starts a worker. With every slot busy, or while another worker runs and memory
+is under the floor or load over the ceiling, it waits and says so on stderr:
+
+```
+phren fanout: queued: all 4 slots busy: parser (pid 4120, 12m), … (worker budget 4 on this computer)
+phren fanout: started after waiting 6m (worker budget 4 on this computer)
+```
+
+The pool is ordered by priority (`--priority release|normal|low`, release
+first), then arrival. `--wait <minutes>` (default 120) bounds the wait; after
+it the launcher exits 75 without starting anything. The pressure gate only
+holds while another job in the pool runs, so the first worker always starts
+(with a warning when the computer is already pressed). The store's
+`scripts/run.sh` joins the same pool through `phren heavy --pool workers`.
+
+### Heavy jobs: `phren heavy`
+
+```sh
+phren heavy -- pnpm test
+phren heavy --priority release --label "0.3.80 RC" -- pnpm test
+phren heavy status
+```
+
+A computer-wide counting semaphore for full test runs and native builds, in
+place of a single shared `flock` (which made jobs wait over an hour). Up to
+`heavySlots` jobs run at once; waiting jobs start release work first, then in
+arrival order, and hold while memory or load is over budget and another job
+runs. The command's exit code is returned (75 when `--timeout <minutes>`
+passed before it started); messages go to stderr. A killed job's slot frees
+itself: tickets of processes that are gone are dropped by the next reader.
+State lives in `~/.local/state/phren/slots/<pool>/` (`PHREN_SLOTS_DIR`).
+
+### Heavy runs on another computer
+
+When `phren heavy` queues for memory or load, it asks the Hook for its
+enrolled computers and names the least pressed one that is not stressed, with
+the dispatch an agent can use: push the branch, then
+`phren dispatch <computer> <project> --worktree --prompt "Check out <branch>, run <command>, report the exit code and failures"`
+and `phren dispatch wait <id>`. The job itself still waits locally. Dispatch
+moves agents, not commands, so a direct route is missing:
+
+- a Hook route that runs an allowlisted command (the project's test script) in
+  a fresh worktree at a pushed commit, without an agent turn or its quota;
+- streaming that command's output and exit code back to the waiting shell, so
+  `phren heavy --elsewhere -- pnpm test` behaves like a local run;
+- taking a `heavy` slot on the receiving computer, so routed runs queue there
+  instead of piling on;
+- syncing an unpushed commit (today the branch must be on the remote first).
+
+### Leftovers: `phren reap`
+
+```sh
+phren reap [--all] [--json]
+```
+
+A read-only report of what agents started and nobody stopped: dev servers
+(vite, next/nuxt/astro/remix/storybook/wrangler dev, webpack, nodemon, tsx
+watch), build daemons (Gradle, Kotlin, turbo, `tsc --watch`), test watchers
+(vitest without `run`, `jest --watch`), headless browsers whose parent is
+gone, shell wait loops on `pgrep -f` (which match their own command line and
+never end) and Postgres databases cloned beside a test template
+(`hub_test_797` beside `hub_test`, through `psql` with its usual `PG*`
+settings). Each row has its age, memory (children included), idle time (how
+long its CPU time has not moved, from the second report on), who started it
+(the agent above it, or on Linux the agent session ids in its environment)
+and the exact stop command (`kill <pid>`, `dropdb '<name>'`). It stops
+nothing. Without `--all` it lists only work an agent started or whose parent
+is gone.
+
 ## Job directory
 
 Each job is a directory under the store's private runtime root:

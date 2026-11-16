@@ -29,7 +29,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ]),
     ],
     cliCommands: [
-      "init", "quickstart", "add", "agent", "projects", "search", "status", "doctor", "web-ui", "graph", "shell",
+      "init", "quickstart", "add", "agent", "projects", "search", "status", "doctor", "web-ui", "graph", "shell", "heavy", "reap",
       "add-finding", "pin", "review", "session-context", "sessions", "finding", "note", "notes",
       "search-fragments", "related-docs", "truths", "promote", "skills", "detect-skills", "hooks", "config",
       "maintain", "dream", "consolidation-status", "quality-feedback", "mcp-mode", "hooks-mode", "preset", "snippet",

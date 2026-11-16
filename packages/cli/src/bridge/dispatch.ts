@@ -838,7 +838,7 @@ async function readDispatchStatus(): Promise<Receipt[]> {
  * `outside` is a peer in another set, which a conductor does not dispatch to. */
 type Room = { source: string; account?: string; leftPercent?: number; exhausted?: boolean; until?: string; fiveHour?: WindowRoom; week?: WindowRoom };
 const windowRoom = z.object({ leftPercent: z.number().min(0).max(100).optional(), resetsAt: z.string().max(40).optional() }).passthrough().optional();
-async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; usage?: Room[]; outside?: true }> {
+async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; usage?: Room[]; outside?: true; overBudget?: string }> {
   const value = await host.request(caller && !host.local ? `/v1/dispatch/capacity?${caller}` : "/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
     servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough(),
@@ -848,12 +848,14 @@ async function capacity(host: DispatchHost, caller?: string): Promise<{ working:
     // Missing from an older Hook or a slow read: that computer's quota is unknown, so it is never ruled out by it.
     usage: z.array(z.object({ source: z.string(), account: z.string().optional(), leftPercent: z.number().min(0).max(100).optional(),
       exhausted: z.boolean().optional(), until: z.string().max(40).optional(), fiveHour: windowRoom, week: windowRoom }).passthrough()).max(64).optional(),
-    knowsCaller: z.boolean().optional() }).parse(value);
+    knowsCaller: z.boolean().optional(),
+    // Missing from an older Hook: its memory and load are unknown, never a reason to pass it over.
+    overBudget: z.string().max(500).optional() }).parse(value);
   // This computer places on whichever Herdr server its own Hook runs.
   if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
   if (!result.servers.includes(host.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
   return { working: result.working, computerId: result.computer.id, ...(result.harnesses ? { harnesses: result.harnesses as HarnessInventory["harnesses"] } : {}),
-    ...(result.usage ? { usage: result.usage } : {}),
+    ...(result.usage ? { usage: result.usage } : {}), ...(result.overBudget ? { overBudget: result.overBudget } : {}),
     ...(caller && result.knowsCaller === false ? { outside: true as const } : {}) };
 }
 
@@ -1212,7 +1214,7 @@ export class DispatchService {
       let remoteComputerID: string | undefined;
       const skipped: Skipped[] = [];
       let incapable = false, spentSeen = false;
-      const pooledOut: string[] = [];
+      const pooledOut: string[] = [], overBudget: string[] = [];
       // Pools and roles (account-policy.ts): which Claude account may run this on each computer.
       const projectPools = projectRule(phrenStoreRoot(), data.project);
       const limits = data.harness === "claude" ? await readAccountLimits() : [];
@@ -1242,6 +1244,8 @@ export class DispatchService {
           if (spent) { spentSeen = true; skipped.push({ computer: item.peer.name, reason: spent }); return false; }
           const refused = poolCheck(item.peer, item);
           if (refused) { pooledOut.push(item.peer.name); skipped.push({ computer: item.peer.name, reason: refused.slice(0, 200) }); }
+          // Out of memory or CPU by its own budget: a worker started there would stall it and every agent on it.
+          if (!refused && item.overBudget) { overBudget.push(item.peer.name); skipped.push({ computer: item.peer.name, reason: `over budget: ${item.overBudget}`.slice(0, 200) }); return false; }
           return !refused;
         });
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
@@ -1254,6 +1258,7 @@ export class DispatchService {
         remoteComputerID = selected?.computerId;
         // Pools ruled some computers out: say so whatever ruled out the rest, with each computer's reason in `skipped`.
         if (!peer && pooledOut.length) throw new BridgeError(409, `No connected computer has a Claude account that may do this work: pools and roles rule out ${pooledOut.join(", ")}${spentSeen || incapable ? ", and the others are out of quota or can't run it" : ""}.`.slice(0, 500), { code: "account_pool", skipped });
+        if (!peer && overBudget.length) throw new BridgeError(503, `Every connected computer that could run this is over its memory or load budget (${overBudget.join(", ")}); try again when one has room.`.slice(0, 500), { code: "over_budget", skipped });
         if (!peer && spentSeen) throw new BridgeError(503, `No connected computer has ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} quota left right now.`, { code: "out_of_quota", skipped });
         if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
@@ -1268,6 +1273,10 @@ export class DispatchService {
         if (reason) throw new BridgeError(409, `${peer.name} cannot run ${data.harness}${data.account ? ` account ${data.account}` : ""}: ${reason}`);
         const refused = poolCheck(peer, reported);
         if (refused) throw new BridgeError(409, `${peer.name}: ${refused}`, { code: "account_pool" });
+        // An agent naming a computer past its budget waits; the owner's own dispatch is never held back.
+        if (reported.overBudget && originPaneSchema.safeParse(originValue).success) {
+          throw new BridgeError(503, `${peer.name} is over its memory or load budget: ${reported.overBudget}. Try again when it has room, or dispatch to anywhere.`.slice(0, 500), { code: "over_budget" });
+        }
       }
       // Chosen here by pools and roles, the account goes in the launch; otherwise that computer picks, as before.
       // Keyed work is gitboy's runner: its clone and token never leave this Hook.

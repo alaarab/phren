@@ -270,6 +270,17 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/sudo.js")).runSudo(args),
   },
   {
+    name: "heavy", topic: "core", standalone: true,
+    usage: "phren heavy [--priority release|normal|low] [--slots N] [--pool NAME] [--label TEXT] [--timeout MINUTES] -- <command...> | phren heavy status [--json]",
+    summary: "Run a heavy job (full test run, native build) once this computer has a slot: N at once, release work first, waiting while memory or load is over budget",
+    run: async args => (await import("./heavy/command.js")).runHeavy(args),
+  },
+  {
+    name: "reap", topic: "core", standalone: true, usage: "phren reap [--all] [--json]",
+    summary: "List dev servers, build daemons, test watchers, wait loops and test database clones agents left running, with age, idle time, memory and the command that stops each; stops nothing itself",
+    run: async args => (await import("./heavy/reap.js")).runReap(args),
+  },
+  {
     name: "secret-exec", topic: "core", standalone: true, usage: "phren secret-exec [--prompt <text>] [--plist <key> [--field K=V]...] -- <command...>",
     summary: "Run a command with a secret typed on your phone on its stdin (a line, or a plist field); the phone shows the exact command and the secret never reaches the agent",
     run: async args => (await import("./bridge/secret.js")).runSecretExec(args),
@@ -665,7 +676,7 @@ export const REGISTRY: Command[] = [
   {
     name: "fanout",
     topic: "config",
-    usage: "phren fanout run|usage|resume|review|list|archive",
+    usage: "phren fanout run|usage|resume|review|list|archive [--priority release|normal|low] [--wait MINUTES]",
     summary: "Launch and manage usage-aware agent workers",
     run: async (args, ctx) => (await import("./fanout/command.js")).runFanout(args, ctx),
   },

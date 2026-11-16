@@ -79,6 +79,7 @@ import type { SettingsSwitcher } from "./settings-switch.js";
 import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
 import { type AccountUsageReader, capacityRoom, usageForCaller } from "./usage.js";
+import { pressureReason, readBudget, readPressure } from "../heavy/budget.js";
 import type { ResourceMonitor } from "./resources.js";
 import type { Housekeeper } from "./housekeeping/housekeeper.js";
 import { SCHEDULE_EVENT_BODY_CAP } from "./schedule-events.js";
@@ -649,10 +650,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             // Both bounded so a peer's capacity probe never waits on a cold `claude auth status` or usage read; missing means unknown.
             // PHREN_LAUNCH_CHECK=off turns this Hook's availability checks off, including what it advertises to dispatch.
             // `usage` is the room left per Codex and Claude account, so `anywhere` can break a tie by it.
-            const [inventory, limits] = await Promise.all([launchCheckOff() ? undefined : harnessInventoryWithin(2_500), within(2_500, accountUsage.limits(true))]);
+            const [inventory, limits, pressure] = await Promise.all([launchCheckOff() ? undefined : harnessInventoryWithin(2_500), within(2_500, accountUsage.limits(true)),
+              within(2_500, readPressure())]);
+            // Memory or load past this computer's budget (heavy/budget.ts): `anywhere` passes it over, and an agent may not name it.
+            const overBudget = pressure ? pressureReason(pressure, readBudget(pressure.totalBytes)) : undefined;
             result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session), ...linksBack,
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0),
-              ...(inventory ? { harnesses: inventory.harnesses } : {}), ...(limits ? { usage: capacityRoom(limits, Date.now()) } : {}) };
+              ...(inventory ? { harnesses: inventory.harnesses } : {}), ...(limits ? { usage: capacityRoom(limits, Date.now()) } : {}),
+              ...(overBudget ? { overBudget } : {}) };
             break;
           }
           case "/v1/speech/voices": {

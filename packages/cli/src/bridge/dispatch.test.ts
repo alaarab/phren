@@ -217,6 +217,25 @@ describe("dispatch receipts and selection", () => {
     await expect(new DispatchService().dispatch(brief)).rejects.toMatchObject({ status: 503, message: "No connected computer has codex quota left right now.", details: { code: "out_of_quota" } });
   });
 
+  it("passes over a computer past its memory or load budget, and holds an agent that names one", async () => {
+    const over = "1.2 GB of 31.0 GB memory available, under the 3.0 GB floor";
+    const probe = (budget: Record<string, string>) => vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1, ...(budget[peer.name] ? { overBudget: budget[peer.name] } : {}) }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    // Devbox is the least busy but out of memory: the worker goes to Desk, and the receipt says why.
+    probe({ Devbox: over });
+    expect(await new DispatchService().dispatch(brief)).toMatchObject({ computer: "Desk", skipped: [{ computer: "Devbox", reason: `over budget: ${over}` }] });
+    // An agent naming Devbox waits; the owner's own dispatch there still goes.
+    const agentPane = { server: "default", workspace: "w2", tab: "w2:t1", pane: "w2:p1" };
+    await expect(new DispatchService().dispatch({ ...brief, computer: "Devbox" }, agentPane)).rejects.toMatchObject({ status: 503, details: { code: "over_budget" } });
+    expect(await new DispatchService().dispatch({ ...brief, computer: "Devbox" })).toMatchObject({ computer: "Devbox" });
+    // Every computer over budget, this one included: refused with its own code, never placed.
+    probe({ Desk: over, Devbox: over });
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 9, overBudget: over } : { ok: true });
+    await expect(new DispatchService().dispatch(brief)).rejects.toMatchObject({ status: 503, details: { code: "over_budget" } });
+  });
+
   it("launches the worker with the dispatch's model and effort and keeps them on the receipt", async () => {
     const result = await new DispatchService().dispatch({ ...brief, model: "gpt-5.6-terra", effort: "high" });
     const launch = vi.mocked(peerRequest).mock.calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2];

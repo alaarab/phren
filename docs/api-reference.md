@@ -85,6 +85,16 @@ reason the dispatch fails with code `out_of_quota`. Low quota is not a reason
 to skip one: the least busy computer wins, then name. A named computer is never
 refused for quota.
 
+Capacity also carries `overBudget` (a sentence) when that computer's available
+memory is under its floor or its one-minute load per core is over its ceiling,
+by its own budget (`~/.config/phren/budget.yaml`, see
+[fan-out](fanout.md#computer-budget)). `anywhere` passes such a computer over
+and names it in `skipped` as `over budget: …`; when every candidate is over,
+the dispatch fails with code `over_budget` (503). An agent (a call from a pane)
+that names an over-budget computer is refused with `over_budget`; the owner's
+own dispatch from the phone or CLI is not. A missing `overBudget` (an older
+Hook, or a slow read) is never a reason to skip.
+
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
 

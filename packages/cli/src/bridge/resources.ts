@@ -337,6 +337,13 @@ async function darwinMemory(): Promise<ComputerResources["memory"]> {
     ...(swapUsedBytes !== undefined ? { swapUsedBytes } : {}) };
 }
 
+/** This computer's memory: the one reader behind the resources gauge and the agent budget (heavy/budget.ts). */
+export function readMemory(platform: NodeJS.Platform = process.platform): Promise<ComputerResources["memory"]> {
+  return platform === "darwin" ? darwinMemory()
+    : platform === "linux" ? readFile("/proc/meminfo", "utf8").then(parseMeminfo).catch(() => ({ totalBytes: totalmem() }))
+    : Promise.resolve({ totalBytes: totalmem() });
+}
+
 async function linuxBattery(): Promise<ComputerResources["battery"]> {
   const root = "/sys/class/power_supply";
   const names = await readdir(root).catch(() => [] as string[]);
@@ -435,9 +442,7 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
   const platform = deps.platform;
   const registry = deps.jobs ?? new JobRegistry();
   const [memory, disk, battery, rows, registered, hardware] = await Promise.all([
-    platform === "darwin" ? darwinMemory()
-      : platform === "linux" ? readFile("/proc/meminfo", "utf8").then(parseMeminfo).catch(() => ({ totalBytes: totalmem() }))
-      : Promise.resolve({ totalBytes: totalmem() }),
+    readMemory(platform),
     statfs(deps.home()).then(info => ({ path: "~", totalBytes: info.blocks * info.bsize, freeBytes: info.bavail * info.bsize })).catch(() => undefined),
     platform === "darwin" ? run("/usr/bin/pmset", ["-g", "batt"]).then(parsePmset).catch(() => undefined)
       : platform === "linux" ? linuxBattery() : Promise.resolve(undefined),

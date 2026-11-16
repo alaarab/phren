@@ -27,3 +27,33 @@ to send a bounded follow-up, and `phren fanout review JOB` for a review round.
 Codex resumes inherit their original sandbox; ask a resumed author to review
 without edits. Use a fresh review-tier worker for an enforced read-only sandbox.
 Archive completed jobs with `phren fanout archive`.
+
+## Sharing one computer
+
+Workers share the computer's memory, CPU, git state and processes with every
+other agent on it. On a 31 GB Linux box, 5 to 10 agents with full test runs
+ran it out of memory three times in a day.
+
+- `phren fanout run` waits for this computer's worker budget (about one worker
+  per 7 GB, set in `~/.config/phren/budget.yaml`) and says on stderr when it
+  queued and why. `--priority release` goes first; `--wait 0` fails at once.
+- Run every heavy job (a full test suite, a Gradle or Xcode build) as
+  `phren heavy -- <command>`, with `--priority release` for release work. It
+  allows N at once (about one per 12 GB) and replaces any lock of your own.
+  `phren heavy status` shows who runs and who waits.
+- Stop what you started before you finish: dev servers, watchers, browsers,
+  build daemons (`./gradlew --stop`) and test database clones (`dropdb`).
+  `phren reap` lists what agents left running with the command that stops
+  each; it stops nothing, and the owner says which to stop.
+- Never wait with `until ! pgrep -f <text>`: `pgrep -f` matches the waiting
+  shell's own command line, so the loop never ends (26 were found running
+  hours after their agents finished). Wait on a PID or a file, with a
+  deadline: `for i in $(seq 360); do kill -0 "$pid" 2>/dev/null || break; sleep 5; done`,
+  or poll the job's `exit.txt`.
+- Commit in small steps, each one building, so a usage-limit stop loses
+  nothing that is not in a commit.
+- `git stash` and the rerere cache belong to the repository, not the
+  worktree: every worktree sees the same stash list and replays the same
+  recorded resolutions. Never `git stash pop` (one agent's pop applied
+  another session's old stash); commit work in progress on your own branch
+  instead. After a merge that rerere resolved, read the diff before you commit.

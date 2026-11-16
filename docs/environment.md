@@ -238,6 +238,10 @@ same sidecar beside its own event log under `<store>/.sessions` while an
 interactive session streams a reply. Hook reads this temporary turn text for
 the live socket; it does not add it to transcript history.
 
+### Computer budget
+
+`PHREN_FANOUT_WORKERS`, `PHREN_HEAVY_SLOTS`, `PHREN_MIN_FREE_GB` and `PHREN_MAX_LOAD_PER_CORE` override this computer's budget in `$XDG_CONFIG_HOME/phren/budget.yaml` (default `~/.config/phren/budget.yaml`) for `phren fanout run`, `phren heavy` and dispatch placement. `PHREN_SLOTS_DIR` moves the slot pools (default `$XDG_STATE_HOME/phren/slots`, `~/.local/state/phren/slots`); `PHREN_HEAVY_PRIORITY` sets `phren heavy`'s default priority. See [fan-out](fanout.md#computer-budget).
+
 ### Code and worker files
 
 | Variable | Default | Use |

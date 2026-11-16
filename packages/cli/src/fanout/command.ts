@@ -7,6 +7,8 @@ import { archiveFinishedFanouts } from "../bridge/fanouts.js";
 import { defaultPolicy, policySchema, pick, type Candidate, type Tier } from "./picker.js";
 import { readUsage, recentProviderErrors } from "./usage.js";
 import { createJob, jobsRoot, launch, listJobs, readJob, swiftBuildCount } from "./launcher.js";
+import { readBudget, readPressure } from "../heavy/budget.js";
+import { acquire, PRIORITIES, QueueTimeout, type Held, type PriorityName } from "../heavy/slots.js";
 
 export async function runFanout(args: string[], ctx: CliContext): Promise<number | void> {
   const [action, ...rest] = args, store = ctx.phrenPath();
@@ -25,7 +27,7 @@ export async function runFanout(args: string[], ctx: CliContext): Promise<number
   const flags: Record<string, string> = {}, extra: string[] = [];
   while (rest.length) {
     const key = rest.shift()!, value = rest.shift();
-    if (!["--tier", "--provider", "--model", "--label", "--worktree", "--variant", "--extra"].includes(key) || !value) throw new Error(`Invalid fan-out option ${key}`);
+    if (!["--tier", "--provider", "--model", "--label", "--worktree", "--variant", "--extra", "--priority", "--wait"].includes(key) || !value) throw new Error(`Invalid fan-out option ${key}`);
     if (key === "--extra") extra.push(value); else flags[key.slice(2)] = value;
   }
   const tier = flags.tier ?? (action === "review" ? "review" : "narrow");
@@ -40,17 +42,33 @@ export async function runFanout(args: string[], ctx: CliContext): Promise<number
   if (!prompt.trim()) throw new Error("Provide a brief on stdin.");
   const file = path.join(store, ".config", "fanout.yaml");
   const policy = fs.existsSync(file) ? policySchema.parse(yaml.load(fs.readFileSync(file, "utf8"), { schema: yaml.CORE_SCHEMA })) : defaultPolicy;
-  const usage = await readUsage(), errors = recentProviderErrors(), needsSwift = /\b(swift|xcodebuild|ios)\b/i.test(prompt);
-  fs.mkdirSync(jobsRoot(store), { recursive: true, mode: 0o700 });
-  const reserved = withFileLock(path.join(jobsRoot(store), "launch"), () => {
-    const running = listJobs(store).filter(job => !fs.existsSync(path.join(jobsRoot(store), job.id, "exit.txt")));
-    const chosen = pick({ policy, tier: tier as Tier, usage, errors, running, swiftBuilds: needsSwift ? swiftBuildCount() : 0, needsSwift,
-      override: { provider: (flags.provider ?? previous?.provider) as Candidate["provider"] | undefined, model: flags.model ?? previous?.model } });
-    // An OpenCode worker is driven over HTTP; there is no command line to extend.
-    if (chosen.provider === "opencode" && extra.length) throw new Error("OpenCode workers take no --extra arguments.");
-    console.log(chosen.reason);
-    const options = { ...chosen, store, label, worktree, prompt, review: tier === "review", resume: previous?.session, variant: flags.variant, extra };
-    return { options, reservation: createJob(options) };
-  });
-  return launch(reserved.options, reserved.reservation);
+  // Wait for this computer's worker budget rather than start a worker it has
+  // no memory or CPU for (heavy/budget.ts; see `phren heavy status`).
+  if (flags.priority && !(flags.priority in PRIORITIES)) throw new Error("Choose priority release, normal or low.");
+  const waitMinutes = flags.wait === undefined ? 120 : Number(flags.wait);
+  if (!Number.isFinite(waitMinutes) || waitMinutes < 0) throw new Error("--wait takes minutes (0 to fail at once when the computer is full).");
+  const budget = readBudget((await readPressure()).totalBytes), slots = Math.min(budget.workers, policy.computerCap);
+  let held: Held;
+  try {
+    held = await acquire({ pool: "workers", slots, priority: PRIORITIES[(flags.priority ?? "normal") as PriorityName], label, budget,
+      pressure: () => readPressure(), timeoutMs: waitMinutes * 60_000, report: message => console.error(`phren fanout: ${message} (worker budget ${slots} on this computer)`) });
+  } catch (error) {
+    if (error instanceof QueueTimeout) { console.error(`phren fanout: not started, ${error.message}`); return 75; }
+    throw error;
+  }
+  try {
+    const usage = await readUsage(), errors = recentProviderErrors(), needsSwift = /\b(swift|xcodebuild|ios)\b/i.test(prompt);
+    fs.mkdirSync(jobsRoot(store), { recursive: true, mode: 0o700 });
+    const reserved = withFileLock(path.join(jobsRoot(store), "launch"), () => {
+      const running = listJobs(store).filter(job => !fs.existsSync(path.join(jobsRoot(store), job.id, "exit.txt")));
+      const chosen = pick({ policy, tier: tier as Tier, usage, errors, running, swiftBuilds: needsSwift ? swiftBuildCount() : 0, needsSwift,
+        override: { provider: (flags.provider ?? previous?.provider) as Candidate["provider"] | undefined, model: flags.model ?? previous?.model } });
+      // An OpenCode worker is driven over HTTP; there is no command line to extend.
+      if (chosen.provider === "opencode" && extra.length) throw new Error("OpenCode workers take no --extra arguments.");
+      console.log(chosen.reason);
+      const options = { ...chosen, store, label, worktree, prompt, review: tier === "review", resume: previous?.session, variant: flags.variant, extra };
+      return { options, reservation: createJob(options) };
+    });
+    return await launch(reserved.options, reserved.reservation);
+  } finally { held.release(); }
 }

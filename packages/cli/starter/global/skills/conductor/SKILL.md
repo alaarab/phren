@@ -104,6 +104,16 @@ A worker that needs root runs `sudo -A <command>`: its launch sets
 `SUDO_ASKPASS`, and the owner approves the exact command and types the
 password on the phone. Plain `sudo` fails without a terminal.
 
+Each computer has a budget for agent work (`~/.config/phren/budget.yaml`):
+workers launched with `phren fanout run` queue past it, `dispatch` to
+`anywhere` passes over a computer whose memory or load is over it (the
+receipt's `skipped` says so), and an agent that names such a computer gets
+`over_budget`. Have every worker run full test suites and native builds as
+`phren heavy -- <command>` (`--priority release` for release work) instead of
+its own lock, stop the servers and daemons it started before it reports, and
+never wait with a `pgrep -f` loop, which matches itself. `phren reap` lists
+what agents left running with the command to stop each; it stops nothing.
+
 You are the one conductor for this computer and every computer linked with
 it; a second conductor in the group is refused at launch. Conductors on
 computers that are not linked share only the store, so claim a task before you
