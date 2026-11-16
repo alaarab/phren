@@ -16,10 +16,10 @@ export const SCHEMA = 1;
 
 export const AREAS = ["memory", "disk", "sessions", "worktrees", "simulators", "docker"] as const;
 export type Area = typeof AREAS[number];
-export type ItemKind = "cache" | "worktree" | "tmp" | "pane" | "job" | "simulator" | "docker" | "health";
+export type ItemKind = "cache" | "worktree" | "tmp" | "pane" | "job" | "simulator" | "docker" | "health" | "process";
 export type Severity = "info" | "warn" | "high";
 export type Trigger = "tick" | "low-disk" | "high-load" | "manual" | "approve";
-export type ActionKind = "delete-path" | "remove-worktree" | "close-pane" | "end-job" | "shutdown-simulator" | "delete-simulator" | "prune-docker-builder";
+export type ActionKind = "delete-path" | "remove-worktree" | "close-pane" | "end-job" | "end-process" | "shutdown-simulator" | "delete-simulator" | "prune-docker-builder";
 /** warning: an observation; suggestion: needs the owner; kept: a safety rule holds it; auto: the Hook does it itself. */
 export type Section = "warning" | "suggestion" | "kept" | "auto";
 
@@ -70,6 +70,12 @@ export const inventorySchema = z.object({
     idleSeconds: z.number().optional(), cwd: z.string().optional(), dispatch: z.string().optional(), role: z.string().optional(),
     receipt: z.object({ id: z.string(), returnRead: z.boolean() }).optional(), action: actionSchema,
   })),
+  /** Live, read on each request: the programs holding the most memory, swap and CPU (processes.ts). */
+  processes: z.array(z.object({
+    id: z.string(), name: z.string(), pid: z.number(), processes: z.number(), cpuPercent: z.number(), memoryBytes: z.number(),
+    swapBytes: z.number().optional(), startedAt: iso.optional(), command: z.string(),
+    pane: z.object({ server: z.string(), pane: z.string(), label: z.string().optional(), agent: z.string().optional() }).optional(), action: actionSchema,
+  })).optional(),
   errors: z.array(z.object({ check: z.string(), message: z.string() })).optional(),
 });
 export const viewSchema = z.object({

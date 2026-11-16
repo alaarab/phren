@@ -57,7 +57,12 @@ export interface ComputerResources {
   platform: string;
   uptimeSeconds: number;
   cpu: { cores: number; load1: number; load5: number; load15: number; loadPerCore: number };
-  memory: { totalBytes: number; availablePercent?: number; pressure?: "normal" | "warn" | "critical"; swapUsedBytes?: number };
+  memory: {
+    totalBytes: number; availablePercent?: number; pressure?: "normal" | "warn" | "critical"; swapUsedBytes?: number;
+    swapTotalBytes?: number;
+    /** Bytes read back from swap since boot; the rate between two reads says whether the computer is paging now. */
+    swapInBytes?: number;
+  };
   disk?: { path: string; totalBytes: number; freeBytes: number };
   battery?: { percent: number; charging: boolean; onAC: boolean };
   hardware?: ComputerHardware;
@@ -288,10 +293,22 @@ export function parsePmset(output: string): ComputerResources["battery"] {
 }
 
 /** `sysctl vm.swapusage`: "total = 2048.00M  used = 798.50M  free = …". */
-export function parseSwap(output: string): number | undefined {
-  const match = /used\s*=\s*([\d.]+)([KMG])/.exec(output);
+export function parseSwap(output: string, field: "used" | "total" = "used"): number | undefined {
+  const match = new RegExp(`${field}\\s*=\\s*([\\d.]+)([KMG])`).exec(output);
   if (!match) return undefined;
   return Math.round(Number(match[1]) * { K: 1024, M: 1024 ** 2, G: GB }[match[2] as "K" | "M" | "G"]);
+}
+
+/** `vm_stat`: "Mach Virtual Memory Statistics: (page size of 16384 bytes)" … "Swapins: 12345." */
+export function parseVmStatSwapins(output: string): number | undefined {
+  const page = Number(/page size of (\d+) bytes/.exec(output)?.[1]), swapins = Number(/^Swapins:\s+(\d+)/m.exec(output)?.[1]);
+  return Number.isFinite(page) && page > 0 && Number.isFinite(swapins) ? swapins * page : undefined;
+}
+
+/** /proc/vmstat `pswpin`: pages read back from swap since boot. */
+export function parseProcVmstatSwapins(text: string, pageBytes = 4096): number | undefined {
+  const match = /^pswpin\s+(\d+)$/m.exec(text);
+  return match ? Number(match[1]) * pageBytes : undefined;
 }
 
 /** /proc/meminfo: MemTotal, MemAvailable and swap, in kB. */
@@ -301,7 +318,7 @@ export function parseMeminfo(text: string): ComputerResources["memory"] {
   const swapTotal = field("SwapTotal"), swapFree = field("SwapFree");
   const availablePercent = available !== undefined && total ? Math.round(available / total * 100) : undefined;
   return { totalBytes: total, ...(availablePercent !== undefined ? { availablePercent, pressure: availablePercent < 5 ? "critical" : availablePercent < 15 ? "warn" : "normal" } : {}),
-    ...(swapTotal !== undefined && swapFree !== undefined ? { swapUsedBytes: swapTotal - swapFree } : {}) };
+    ...(swapTotal !== undefined && swapFree !== undefined ? { swapUsedBytes: swapTotal - swapFree, swapTotalBytes: swapTotal } : {}) };
 }
 
 /** Gauge fill and warnings from the numbers. */
@@ -329,22 +346,31 @@ async function run(file: string, args: string[]): Promise<string> {
 }
 
 async function darwinMemory(): Promise<ComputerResources["memory"]> {
-  const [level, pressure, swap] = await Promise.all([
+  const [level, pressure, swap, vmStat] = await Promise.all([
     run("/usr/sbin/sysctl", ["-n", "kern.memorystatus_level"]).catch(() => ""),
     run("/usr/sbin/sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]).catch(() => ""),
     run("/usr/sbin/sysctl", ["-n", "vm.swapusage"]).catch(() => ""),
+    run("/usr/bin/vm_stat", []).catch(() => ""),
   ]);
   const available = Number(level.trim()), code = Number(pressure.trim()), swapUsedBytes = parseSwap(swap);
+  const swapTotalBytes = parseSwap(swap, "total"), swapInBytes = parseVmStatSwapins(vmStat);
   return { totalBytes: totalmem(),
     ...(level.trim() && Number.isFinite(available) ? { availablePercent: available } : {}),
     ...(pressure.trim() && Number.isFinite(code) ? { pressure: code >= 4 ? "critical" : code >= 2 ? "warn" : "normal" } : {}),
-    ...(swapUsedBytes !== undefined ? { swapUsedBytes } : {}) };
+    ...(swapUsedBytes !== undefined ? { swapUsedBytes } : {}), ...(swapTotalBytes !== undefined ? { swapTotalBytes } : {}),
+    ...(swapInBytes !== undefined ? { swapInBytes } : {}) };
+}
+
+async function linuxMemory(): Promise<ComputerResources["memory"]> {
+  const [meminfo, vmstat] = await Promise.all([readFile("/proc/meminfo", "utf8"), readFile("/proc/vmstat", "utf8").catch(() => "")]);
+  const swapInBytes = parseProcVmstatSwapins(vmstat);
+  return { ...parseMeminfo(meminfo), ...(swapInBytes !== undefined ? { swapInBytes } : {}) };
 }
 
 /** This computer's memory: the one reader behind the resources gauge and the agent budget (heavy/budget.ts). */
 export function readMemory(platform: NodeJS.Platform = process.platform): Promise<ComputerResources["memory"]> {
   return platform === "darwin" ? darwinMemory()
-    : platform === "linux" ? readFile("/proc/meminfo", "utf8").then(parseMeminfo).catch(() => ({ totalBytes: totalmem() }))
+    : platform === "linux" ? linuxMemory().catch(() => ({ totalBytes: totalmem() }))
     : Promise.resolve({ totalBytes: totalmem() });
 }
 
@@ -361,7 +387,7 @@ async function linuxBattery(): Promise<ComputerResources["battery"]> {
   return { percent, charging: status === "Charging" || status === "Full", onAC: online.includes("1") };
 }
 
-async function processTable(): Promise<ProcessRow[]> {
+export async function processTable(): Promise<ProcessRow[]> {
   const [stats, args, elapsed] = await Promise.all([run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,pcpu=,rss=,comm="]), run("/bin/ps", ["-axo", "pid=,args="]),
     run("/bin/ps", ["-axo", "pid=,etime="]).catch(() => "")]);
   return withStartTimes(parsePs(stats, args), elapsed, Date.now());

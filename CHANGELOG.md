@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Housekeeping lists the programs holding the most memory, swap and CPU (`processes` in `GET /v1/housekeeping?inventory=1`, read live), with an End action: TERM, then KILL after 5 seconds. A program's helpers are one row, so ending Chromium ends its renderers too. Refused for other users' processes, Phren Hook, the conductor, an agent pane's own process, and programs the computer or your session needs. `phren housekeeping` prints the list.
+
+### Changed
+
+- The swap warning fires on memory pressure, not on how much swap is used. Compressed swap (zram, macOS) holding idle pages is normal, so 19 GB of swap with half the memory free no longer warns. It warns when memory is nearly full, when the computer is reading pages back from swap while memory is short, or when swap is 75% full.
+
 ## [0.3.83] - 2026-11-16
 
 ### Security

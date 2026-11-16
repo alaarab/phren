@@ -91,11 +91,14 @@ interface Inventory {
     action?: Action }>;                                                                         // largest first, at most 500
   sessions: Array<{ id: string; pane: PaneLink; agent?: string; title?: string; project?: string; status?: string; idleSeconds?: number;
     cwd?: string; dispatch?: string; role?: string; receipt?: { id: string; returnRead: boolean }; action: Action }>;   // most idle first
+  processes?: Array<{ id: string; name: string; pid: number; processes: number; cpuPercent: number; memoryBytes: number;
+    swapBytes?: number; startedAt?: string; command: string;
+    pane?: { server: string; pane: string; label?: string; agent?: string }; action: Action }>;   // read live; largest memory + swap first
   errors?: Array<{ check: string; message: string }>;
 }
 interface Action {
   id: string;                // goes to POST /v1/housekeeping/approve
-  kind: "remove-worktree" | "delete-path" | "close-pane" | "shutdown-simulator" | "delete-simulator" | "prune-docker-builder";
+  kind: "remove-worktree" | "delete-path" | "close-pane" | "end-process" | "shutdown-simulator" | "delete-simulator" | "prune-docker-builder";
   label: string;             // "Remove worktree", "Clear cache", "Delete folder", "Delete node_modules", "Close pane", ...
   allowed: boolean;
   reason?: string;           // when not allowed: a plain sentence; show the button disabled with it
@@ -112,6 +115,7 @@ interface Action {
   - "Prune build cache" prunes docker build cache older than a week.
   - The npm and SwiftPM caches, docker images, containers and volumes have no action, and their `note` says why.
 - **Sessions** are this computer's agent panes. "Close pane" is refused for the conductor, a working or waiting agent, dispatched work that hasn't returned, and a return that hasn't been read (`receipt.returnRead: false`): the evidence stays (the 2026-11-08 lesson). If the receipts can't be read, every pane stays. `status` is an open set from the agent: `idle`, `working`, `blocked`, `done`, and so on.
+- **Processes** are read live on each `?inventory=1` request, not from the scan: the 20 programs holding the most memory plus swap (swap is per process on Linux only), then up to 5 more using half a core or more. A program's helpers count toward the process that started them, so Chromium and its renderers are one row (`processes` is the count) and ending the row ends the browser. CPU on Linux is measured over half a second, since `ps` reports a lifetime average there. "End" (`end-process`) sends SIGTERM to the row's root, waits 5 seconds, then SIGKILLs whatever of the row is left. It is refused for another user's process, Phren Hook and its parents, the conductor, an agent pane's own process (close the pane under Sessions instead), and programs the computer or the owner's session needs (launchd, WindowServer, systemd, sshd, the compositor, the terminal multiplexer, tailscaled and similar). The id hashes the pid, name and exact start time, so a restarted program has a new id. Ending a process frees memory, not disk, so `cleaned` records it with `freedBytes: 0`.
 - **Approving:** the action is found in the last scan and re-checked against the disk, the panes and the dispatch receipts at that moment. If something changed, it is `refused` with the reason. A handled row drops out of `inventory` at once and appears in `cleaned`. The id hashes the row's kind, target and state, so a row that changed in a later scan has a new id, and the old one is `gone`.
 
 ### Owner actions

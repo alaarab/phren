@@ -478,6 +478,64 @@
           "reason": "Its agent is working."
         }
       }
+    ],
+    "processes": [
+      {
+        "id": "e1e1e1e1e1e1e1e1",
+        "name": "chromium",
+        "pid": 1435228,
+        "processes": 84,
+        "cpuPercent": 12,
+        "memoryBytes": 6012954214,
+        "swapBytes": 6012954214,
+        "startedAt": "2026-11-12T08:00:00.000Z",
+        "command": "/usr/lib/chromium/chromium --ozone-platform=wayland",
+        "action": {
+          "id": "e1e1e1e1e1e1e1e1",
+          "kind": "end-process",
+          "label": "End chromium (84 processes)",
+          "allowed": true,
+          "confirm": "Asks chromium to quit, then forces it after 5 seconds. Unsaved work in it is lost."
+        }
+      },
+      {
+        "id": "e2e2e2e2e2e2e2e2",
+        "name": "swift-frontend",
+        "pid": 4242,
+        "processes": 1,
+        "cpuPercent": 380,
+        "memoryBytes": 125829120,
+        "command": "swift-frontend -frontend -c",
+        "pane": {
+          "server": "default",
+          "pane": "w2T:p3",
+          "label": "ios-rc",
+          "agent": "claude"
+        },
+        "action": {
+          "id": "e2e2e2e2e2e2e2e2",
+          "kind": "end-process",
+          "label": "End swift-frontend",
+          "allowed": true,
+          "confirm": "Asks swift-frontend to quit, then forces it after 5 seconds. Unsaved work in it is lost."
+        }
+      },
+      {
+        "id": "e3e3e3e3e3e3e3e3",
+        "name": "WindowServer",
+        "pid": 402,
+        "processes": 1,
+        "cpuPercent": 9,
+        "memoryBytes": 524288000,
+        "command": "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon",
+        "action": {
+          "id": "e3e3e3e3e3e3e3e3",
+          "kind": "end-process",
+          "label": "End WindowServer",
+          "allowed": false,
+          "reason": "Your computer or session needs WindowServer."
+        }
+      }
     ]
   }
 }

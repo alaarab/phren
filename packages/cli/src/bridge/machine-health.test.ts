@@ -18,7 +18,7 @@ describe("machine health", () => {
   });
 
   it("flags a daemon holding most of memory, swap and a nearly full disk, worst first", () => {
-    const value = resources({ memory: { totalBytes: 32 * GB, swapUsedBytes: 30 * GB }, disk: { path: "~", totalBytes: 500 * GB, freeBytes: 5 * GB }, uptimeSeconds: 38 * 86_400 });
+    const value = resources({ memory: { totalBytes: 32 * GB, swapUsedBytes: 30 * GB, availablePercent: 3 }, disk: { path: "~", totalBytes: 500 * GB, freeBytes: 5 * GB }, uptimeSeconds: 38 * 86_400 });
     const findings = assessHealth(value, [row(88, "/usr/sbin/fseventsd", 20)], [], NOW);
     expect(ids(findings)).toEqual(["swap/high", "disk/high", "memory-hog:fseventsd/high", "uptime/info"]);
     expect(findings.every(f => f.fix.length > 0)).toBe(true);
@@ -33,7 +33,7 @@ describe("machine health", () => {
   it("catches growth against the sample from half an hour ago", () => {
     const health = new MachineHealth();
     health.assess(resources(), [row(88, "fseventsd", 1)], NOW - HOUR);
-    const later = resources({ memory: { totalBytes: 32 * GB, swapUsedBytes: 5 * GB }, disk: { path: "~", totalBytes: 1000 * GB, freeBytes: 390 * GB } });
+    const later = resources({ memory: { totalBytes: 32 * GB, swapUsedBytes: 5 * GB, availablePercent: 10 }, disk: { path: "~", totalBytes: 1000 * GB, freeBytes: 390 * GB } });
     expect(ids(health.assess(later, [row(88, "fseventsd", 4)], NOW))).toEqual(["swap/warn", "disk/warn", "memory-leak:fseventsd/warn"]);
   });
 
@@ -54,6 +54,24 @@ describe("machine health", () => {
     health.assess(resources(), [], NOW);
     health.assess(resources({ memory: { totalBytes: 32 * GB, swapUsedBytes: 10 * GB } }), [], NOW + SAMPLE_EVERY_MS / 2);
     // The half-interval read was not sampled, so 40 minutes on there is still only the first sample to compare with.
-    expect(health.assess(resources({ memory: { totalBytes: 32 * GB, swapUsedBytes: 5 * GB } }), [], NOW + 40 * 60_000).map(f => f.id)).toEqual(["swap"]);
+    expect(health.assess(resources({ memory: { totalBytes: 32 * GB, swapUsedBytes: 5 * GB, availablePercent: 10 } }), [], NOW + 40 * 60_000).map(f => f.id)).toEqual(["swap"]);
+  });
+
+  it("leaves a big idle swap alone and warns on short memory, paging or a nearly full swap", () => {
+    // omarchy 2026-11-16: 18.7 GB in zram, 47% of memory available, nothing paging.
+    const idle = { totalBytes: 32 * GB, swapUsedBytes: 19 * GB, swapTotalBytes: 62 * GB, availablePercent: 47, pressure: "normal" as const };
+    const health = new MachineHealth();
+    expect(health.assess(resources({ memory: { ...idle, swapInBytes: 100 * GB } }), [], NOW)).toEqual([]);
+    // Five minutes later: 2 GB read back from swap (about 6.8 MB/s) while memory is short.
+    const paging = health.assess(resources({ memory: { ...idle, availablePercent: 9, pressure: "warn", swapInBytes: 102 * GB } }), [], NOW + SAMPLE_EVERY_MS);
+    expect(ids(paging)).toEqual(["swap/warn"]);
+    expect(paging[0].title).toMatch(/^Paging: 6\.8 MB\/s read back from swap$/);
+    expect(paging[0].fix).toContain("Processes");
+    // The same paging with memory to spare is not a warning.
+    const fresh = new MachineHealth();
+    fresh.assess(resources({ memory: { ...idle, swapInBytes: 100 * GB } }), [], NOW);
+    expect(fresh.assess(resources({ memory: { ...idle, swapInBytes: 102 * GB } }), [], NOW + SAMPLE_EVERY_MS)).toEqual([]);
+    expect(ids(assessHealth(resources({ memory: { ...idle, swapUsedBytes: 50 * GB } }), [], [], NOW))).toEqual(["swap/warn"]);
+    expect(ids(assessHealth(resources({ memory: { ...idle, swapUsedBytes: 58 * GB } }), [], [], NOW))).toEqual(["swap/high"]);
   });
 });

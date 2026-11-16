@@ -27,6 +27,8 @@ export interface HealthFinding {
 export interface HealthSample {
   at: number;
   swapUsedBytes?: number;
+  /** Cumulative bytes read back from swap, for the paging rate. */
+  swapInBytes?: number;
   diskFreeBytes?: number;
   /** Resident bytes of the largest processes, by program name. */
   rss: Record<string, number>;
@@ -68,6 +70,7 @@ export function healthSample(value: ComputerResources, rows: readonly ProcessRow
   }
   const rss = Object.fromEntries([...byName].sort((a, b) => b[1] - a[1]).slice(0, 8));
   return { at, ...(value.memory.swapUsedBytes !== undefined ? { swapUsedBytes: value.memory.swapUsedBytes } : {}),
+    ...(value.memory.swapInBytes !== undefined ? { swapInBytes: value.memory.swapInBytes } : {}),
     ...(value.disk ? { diskFreeBytes: value.disk.freeBytes } : {}), rss };
 }
 
@@ -79,13 +82,34 @@ export function assessHealth(value: ComputerResources, rows: readonly ProcessRow
   const oldest = history.find(s => now - s.at >= 30 * 60_000);
   const hours = oldest ? (now - oldest.at) / HOUR : 0;
 
-  const swap = value.memory.swapUsedBytes;
-  if (swap !== undefined) {
-    const grew = oldest?.swapUsedBytes !== undefined ? swap - oldest.swapUsedBytes : 0;
-    if (swap >= 20 * GB) add("swap", "", "high", `Swap at ${gb(swap)}`, "The system is paging heavily; everything slows and the disk fills.", "Find the process holding the most memory and restart it.");
-    else if (swap >= 8 * GB) add("swap", "", "warn", `Swap at ${gb(swap)}`, "Memory is overcommitted.", "Close or restart the largest memory users.");
-    else if (grew >= 4 * GB) add("swap", "", "warn", `Swap grew ${gb(grew)} in ${age(now - oldest!.at)}`, `Now ${gb(swap)}.`, "Look for a process whose memory keeps climbing.");
+  // Swap in use is not a problem by itself: compressed swap (zram, macOS) parks
+  // idle pages cheaply, and a big number with memory to spare is normal. Warn
+  // when memory is actually short, when the computer is paging now (reading
+  // swap back), or when swap itself is close to full.
+  const memory = value.memory, swap = memory.swapUsedBytes, available = memory.availablePercent;
+  const short = memory.pressure === "critical" || memory.pressure === "warn" || (available !== undefined && available < 15);
+  const full = swap !== undefined && memory.swapTotalBytes ? swap / memory.swapTotalBytes : undefined;
+  const last = history.at(-1);
+  const seconds = last ? (now - last.at) / 1000 : 0;
+  const pagingIn = memory.swapInBytes !== undefined && last?.swapInBytes !== undefined && seconds >= 60
+    ? Math.max(0, memory.swapInBytes - last.swapInBytes) / seconds : undefined;
+  const mb = (bytes: number) => `${(bytes / 1024 ** 2).toFixed(1)} MB/s`;
+  const fix = "Open Processes in Housekeeping and end the biggest memory users.";
+  const left = available !== undefined ? `${available}% of memory is available` : "Memory is short";
+  if (memory.pressure === "critical" || (available !== undefined && available < 5)) {
+    add("swap", "", "high", available !== undefined ? `Memory nearly full: ${available}% available` : "Memory pressure is critical",
+      `${swap ? `${gb(swap)} in swap. ` : ""}Programs slow down or get killed by the system.`, fix);
+  } else if (full !== undefined && full >= 0.9) {
+    add("swap", "", "high", `Swap ${Math.round(full * 100)}% full`, `${gb(swap!)} of ${gb(memory.swapTotalBytes!)}. When it fills, the system starts killing programs.`, fix);
+  } else if (pagingIn !== undefined && pagingIn >= 4 * 1024 ** 2 && short) {
+    add("swap", "", "warn", `Paging: ${mb(pagingIn)} read back from swap`, `${left}, so programs wait on swap and everything slows.`, fix);
+  } else if (full !== undefined && full >= 0.75) {
+    add("swap", "", "warn", `Swap ${Math.round(full * 100)}% full`, `${gb(swap!)} of ${gb(memory.swapTotalBytes!)}.`, fix);
+  } else if (swap !== undefined && oldest?.swapUsedBytes !== undefined && swap - oldest.swapUsedBytes >= 4 * GB && short) {
+    add("swap", "", "warn", `Swap grew ${gb(swap - oldest.swapUsedBytes)} in ${age(now - oldest.at)}`, `${left}; now ${gb(swap)} in swap.`,
+      "Look under Processes for a program whose memory keeps climbing.");
   }
+
 
   const free = value.disk?.freeBytes;
   if (free !== undefined) {

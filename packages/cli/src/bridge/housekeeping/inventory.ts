@@ -78,7 +78,7 @@ export interface InventoryOptions {
 }
 
 export const LABELS: Record<ActionKind, string> = {
-  "remove-worktree": "Remove worktree", "delete-path": "Delete", "close-pane": "Close pane", "end-job": "End job",
+  "remove-worktree": "Remove worktree", "delete-path": "Delete", "close-pane": "Close pane", "end-job": "End job", "end-process": "End",
   "shutdown-simulator": "Shut down simulator", "delete-simulator": "Delete simulator", "prune-docker-builder": "Prune build cache",
 };
 
