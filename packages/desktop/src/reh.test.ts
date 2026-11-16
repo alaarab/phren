@@ -86,7 +86,7 @@ describe.skipIf(process.platform === "win32")("rehStatus", () => {
 
     expect(status).toEqual({
       available: true,
-      authority: "localhost:54321",
+      authority: "127.0.0.1:54321",
       connectionToken: expect.stringMatching(/^[0-9a-f]{48}$/),
       version: "1.0.0",
       isolation: process.platform === "darwin" ? "sandbox" : "environment",
@@ -238,43 +238,5 @@ describe("node extensions opt-in", () => {
     expect(String((status as { reason?: string }).reason)).toContain("Node extensions are off");
     await setNodeExtensionsEnabled(true);
     expect(nodeExtensionsEnabled()).toBe(true);
-  });
-});
-
-
-describe("holdIpv6Loopback", () => {
-  const ipv6 = async () => {
-    const { createServer } = await import("node:net");
-    return new Promise<boolean>((resolve) => {
-      const s = createServer();
-      s.once("error", () => resolve(false));
-      s.listen(0, "::1", () => s.close(() => resolve(true)));
-    });
-  };
-
-  it("forwards ::1 to the host's 127.0.0.1 listener, and reports a ::1 port someone else holds", async () => {
-    if (!(await ipv6())) return;
-    const net = await import("node:net");
-    const { holdIpv6Loopback } = await import("./reh.js");
-    const host = net.createServer((socket) => socket.end("hello from v4"));
-    await new Promise<void>((done) => host.listen(0, "127.0.0.1", () => done()));
-    const port = (host.address() as { port: number }).port;
-    const held = await holdIpv6Loopback(port);
-    try {
-      expect(held.taken).toBe(false);
-      const reply = await new Promise<string>((resolve, reject) => {
-        let text = "";
-        const c = net.createConnection({ host: "::1", port }, () => {});
-        c.on("data", (d) => (text += d));
-        c.on("end", () => resolve(text));
-        c.on("error", reject);
-      });
-      expect(reply).toBe("hello from v4");
-      // A second hold finds ::1 taken (as an intruder's listener would be).
-      expect((await holdIpv6Loopback(port)).taken).toBe(true);
-    } finally {
-      held.server?.close();
-      host.close();
-    }
   });
 });

@@ -9,7 +9,6 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { createConnection, createServer, type Server } from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -19,7 +18,7 @@ const exec = promisify(execFile);
 
 export interface RehStatus {
   available: boolean;
-  /** "localhost:<port>" for the editor's remoteAuthority. */
+  /** "127.0.0.1:<port>" for the editor's remoteAuthority. */
   authority?: string;
   connectionToken?: string;
   version?: string;
@@ -195,26 +194,15 @@ async function start(): Promise<RehStatus> {
       current = status;
       resolve(status);
     }
-    let claiming = false;
     const onData = (chunk: Buffer) => {
       output = (output + chunk.toString()).slice(-8192);
       const match = /listening on (?:[\d.:]*?:)?(\d{2,5})\b/i.exec(output);
-      if (!match || current?.available || claiming) return;
-      claiming = true;
-      const port = Number(match[1]);
-      // The host listens on 127.0.0.1 but is addressed as localhost: hold the
-      // ::1 half too, so no other process can take it and receive the token.
-      void holdIpv6Loopback(port).then((held) => {
-        if (child !== thisProc) { held.server?.close(); return; }
-        if (held.taken) {
-          try { thisProc.kill("SIGTERM"); } catch { /* already gone */ }
-          finish({ available: false, reason: `Another process holds port ${port} on the IPv6 loopback (::1); the Node extension host was stopped so its token cannot reach it.` });
-          return;
-        }
-        releaseIpv6Guard();
-        ipv6Guard = held.server ?? null;
-        finish({ available: true, authority: `localhost:${port}`, connectionToken: token, version, isolation: how });
-      });
+      if (!match || current?.available) return;
+      // Addressed as 127.0.0.1, never localhost: the app's cookie is host-only on
+      // localhost and cookies ignore ports, so a localhost address would hand the
+      // daemon's credential to this process (security scan 2026-11-10). It also
+      // leaves nothing to squat on the IPv6 half of localhost.
+      finish({ available: true, authority: `127.0.0.1:${Number(match[1])}`, connectionToken: token, version, isolation: how });
     };
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData);
@@ -227,7 +215,6 @@ async function start(): Promise<RehStatus> {
     proc.on("exit", (code) => {
       dropToken();
       if (child !== thisProc) return; // a newer host owns the state
-      releaseIpv6Guard();
       child = null;
       if (current?.available) current = null; // restart lazily on the next request
       else finish({ available: false, reason: `The Node extension host exited (${code ?? "signal"}): ${output.split("\n").filter(Boolean).pop() ?? ""}` });
@@ -235,41 +222,8 @@ async function start(): Promise<RehStatus> {
   });
 }
 
-let ipv6Guard: Server | null = null;
-
-function releaseIpv6Guard(): void {
-  ipv6Guard?.close();
-  ipv6Guard = null;
-}
-
-/**
- * Holds ::1 at `port` with a plain forwarder to 127.0.0.1:`port`, so a
- * `localhost` address reaches the same listener on either loopback and no
- * other local process can take the IPv6 half (security scan 2026-11-10).
- * `taken` when something else already holds it; no server when the computer
- * has no IPv6 loopback, where nothing can.
- */
-export function holdIpv6Loopback(port: number): Promise<{ server?: Server; taken: boolean }> {
-  return new Promise((resolve) => {
-    const server = createServer((socket) => {
-      const upstream = createConnection({ host: "127.0.0.1", port });
-      socket.pipe(upstream).pipe(socket);
-      const end = () => { socket.destroy(); upstream.destroy(); };
-      socket.on("error", end);
-      upstream.on("error", end);
-      socket.on("close", end);
-      upstream.on("close", end);
-    });
-    server.once("error", (error: NodeJS.ErrnoException) => {
-      resolve(error.code === "EADDRINUSE" ? { taken: true } : { taken: false });
-    });
-    server.listen(port, "::1", () => resolve({ server, taken: false }));
-  });
-}
-
 export function stopReh(): void {
   generation++;
-  releaseIpv6Guard();
   child?.kill("SIGTERM");
   child = null;
   current = null;
