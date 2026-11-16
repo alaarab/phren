@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.81] - 2026-11-15
+
+### Fixed
+
+- The Hook advertises `housekeeping` and `housekeepingInventory` in `/v1/health`. 0.3.80 served the routes but left both out, so the phone hid its Housekeeping screen.
+
 ## [0.3.80] - 2026-11-15
 
 ### New

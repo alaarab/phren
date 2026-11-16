@@ -248,4 +248,11 @@ describe("phren modules enable", () => {
     expect(names()).toContain("git");
     expect(error).not.toHaveBeenCalled();
   });
+
+  it("declares every capability the Hook defines, so none is silently filtered out of /v1/health", async () => {
+    const { capabilities } = await import("../bridge/server-routes.js");
+    const declared = new Set(BUILTIN_MODULES.flatMap(module => module.capabilities));
+    // paneDeliveries has never been advertised; turning it on changes the phone's chat delivery path, so it waits for its own change (phren task).
+    expect(Object.keys(capabilities).filter(name => !declared.has(name))).toEqual(["paneDeliveries"]);
+  });
 });
