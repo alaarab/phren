@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- A linked computer can no longer change Git or remove worktrees on another computer through its Hook key (discard, checkout, commit, push, merge, checkpoint restore, worktree removal). No Hook-to-Hook flow uses those routes; before, a compromised linked computer could discard uncommitted work or force-remove a worktree directly, without going through an agent and its permission mode.
+
 ## [0.3.81] - 2026-11-15
 
 ### Fixed

@@ -56,6 +56,13 @@ describe("worktree removal routes", () => {
   const call = (route: string, body: Record<string, unknown>) => paneRoute({} as PaneRouteContext,
     new URL(`http://localhost${route}`), body, {} as ServerResponse);
 
+  it("refuses a linked computer's Git writes and worktree removals", async () => {
+    const asPeer = (route: string, body: Record<string, unknown>) => paneRoute({} as PaneRouteContext,
+      new URL(`http://localhost${route}`), body, {} as ServerResponse, { "x-phren-origin": "peer" });
+    for (const route of ["/v1/git/worktrees/remove", "/v1/git/discard", "/v1/git/checkout", "/v1/git/push", "/v1/git/pr/merge", "/v1/git/checkpoints/restore"])
+      await expect(asPeer(route, { server: "one", worktree: "x", token: "ab".repeat(32) })).rejects.toMatchObject({ status: 403 });
+  });
+
   it("blocks removal for a live pane on another terminal server", async () => {
     const { root, beside } = await repository();
     terminal.running = [{ session: "one" }, { session: "two" }];
