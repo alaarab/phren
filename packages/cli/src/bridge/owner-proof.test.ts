@@ -75,4 +75,22 @@ describe("owner proof", () => {
     expect([...deviceKeys(key("phren-android"))]).toEqual([owner.raw]);
     expect(deviceKeys([key("phren-computer"), key("phren-gitboy"), key("phren-iphone", "restrict"), key("me@laptop", "")].join("\n")).size).toBe(0);
   });
+
+  it("holds an unsigned terminal request for the phone once signing is on, but never the phone's own answer", async () => {
+    let asked = 0;
+    const confirm = async () => { asked++; };
+    const waiting = (pathname: string) => proof.check({ method: "POST", headers: { "x-phren-owner-confirm": "wait" } }, pathname, {}, "x", confirm);
+    // Before any phone signs, nothing is held.
+    await expect(waiting("/v1/conductor/make")).resolves.toBeUndefined();
+    expect(asked).toBe(0);
+    await check(signed(owner));
+    await expect(waiting("/v1/conductor/make")).resolves.toBeUndefined();
+    expect(asked).toBe(1);
+    await expect(waiting("/v1/owner-confirms/answer")).rejects.toMatchObject({ status: 403, details: { code: "owner-proof-required" } });
+    // Without the header the old refusal stands.
+    await expect(proof.check(request(undefined), "/v1/conductor/make", {}, "x", confirm)).rejects.toMatchObject({ status: 403 });
+    // An agent's origin is the route's to refuse, never held.
+    await expect(proof.check({ method: "POST", headers: { "x-phren-owner-confirm": "wait" } }, "/v1/conductor/make", { origin: "agent" }, "x", confirm)).resolves.toBeUndefined();
+    expect(asked).toBe(1);
+  });
 });

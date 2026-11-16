@@ -5,6 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { atomic, BridgeError, bridgeRoot, type Json } from "./protocol.js";
+import { OWNER_CONFIRM_HEADER } from "./owner-confirm.js";
 import { ownerRequest } from "./request-origin.js";
 
 /**
@@ -29,6 +30,7 @@ const ROUTES = new Set([
   "POST /v1/push/register",
   "POST /v1/sets/link",
   "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
+  "POST /v1/owner-confirms/answer",
 ]);
 
 const payloadSchema = z.object({
@@ -83,12 +85,16 @@ export class OwnerProof {
    * Throws 403 unless an owner-only request may go ahead. Requests that carry
    * an agent or peer origin are left to the route, which refuses them anyway.
    */
-  async check(request: Pick<IncomingMessage, "headers" | "method">, pathname: string, data: Json, digest: string | undefined): Promise<void> {
+  async check(request: Pick<IncomingMessage, "headers" | "method">, pathname: string, data: Json, digest: string | undefined,
+    confirm?: () => Promise<void>): Promise<void> {
     if (!ownerProofRoute(request.method, pathname) || !ownerRequest(request, data)) return;
     const header = request.headers?.[OWNER_PROOF_HEADER];
     if (typeof header !== "string") {
-      if (await this.isRequired()) throw new BridgeError(403, "Confirm this on your paired phone: this action needs its signature.", { code: "owner-proof-required" });
-      return;
+      if (!(await this.isRequired())) return;
+      // A terminal command asked to wait for the phone (owner-confirm.ts). The
+      // phone's answer is itself a signed owner action, so it never waits.
+      if (confirm && request.headers?.[OWNER_CONFIRM_HEADER] === "wait" && pathname !== "/v1/owner-confirms/answer") return confirm();
+      throw new BridgeError(403, "Confirm this on your paired phone: this action needs its signature.", { code: "owner-proof-required" });
     }
     const refused = () => new BridgeError(403, "The phone's signature for this action did not verify.", { code: "owner-proof-invalid" });
     let envelope: z.infer<typeof envelopeSchema>, payload: z.infer<typeof payloadSchema>;

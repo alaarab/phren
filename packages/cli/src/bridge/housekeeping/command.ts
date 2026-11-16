@@ -1,5 +1,5 @@
 import { hostname } from "node:os";
-import { hookRequest } from "../client.js";
+import { hookRequest, ownerHookRequest } from "../client.js";
 import type { Json } from "../protocol.js";
 import type { HousekeepingView } from "./report.js";
 
@@ -57,8 +57,8 @@ export async function runHousekeeping(args: string[]): Promise<number> {
   if (args.includes("--apply") || flag(args, "--scan")) {
     if (args.includes("--apply") && (!apply || apply.startsWith("-"))) { console.error("--apply takes comma-separated action ids."); return 1; }
     try {
-      const result = flag(args, "--scan") ? await hookRequest("/v1/housekeeping/scan", {}, undefined, 30_000)
-        : await hookRequest("/v1/housekeeping/approve", { ids: apply!.split(",").filter(Boolean), by: "cli" }, undefined, 90_000);
+      const result = flag(args, "--scan") ? await ownerHookRequest("/v1/housekeeping/scan", {})
+        : await ownerHookRequest("/v1/housekeeping/approve", { ids: apply!.split(",").filter(Boolean), by: "cli" });
       if (json || flag(args, "--scan")) { console.log(flag(args, "--scan") ? "Scan started; `phren housekeeping` shows it when it lands." : JSON.stringify(result, null, 2)); return 0; }
       for (const row of Array.isArray(result.results) ? result.results as Json[] : [])
         console.log(`${row.id}  ${row.status}${row.reason ? `: ${row.reason}` : ""}${typeof row.freedBytes === "number" && row.freedBytes ? ` (${size(row.freedBytes)} freed)` : ""}`);
