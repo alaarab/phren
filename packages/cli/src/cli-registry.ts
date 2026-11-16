@@ -299,6 +299,12 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./computers/command.js")).runUsage(args),
   },
   {
+    name: "housekeeping", topic: "core", standalone: true,
+    usage: "phren housekeeping [--dry-run] [--local] [--json] | --scan | --apply <action ids>",
+    summary: "The Hook's housekeeping report and inventory (worktrees, space, panes) for this and every linked computer; --apply removes or closes what you name, after a safety re-check",
+    run: async args => (await import("./bridge/housekeeping/command.js")).runHousekeeping(args),
+  },
+  {
     name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] | add <title> [--project <slug>] [--id <uuid>] | resolve <id> [--computer <name>] [--resolution <text>]]",
     summary: "List, add and resolve what waits on the owner",
     run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),

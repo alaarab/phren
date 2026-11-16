@@ -143,7 +143,7 @@ function stoppedServer(error: unknown): boolean {
  * one even when discovery left it out. A server that cannot be read, or any
  * discovery failure, fails the request: removal is never allowed on an
  * incomplete session check. */
-async function allPaneSessions(requested: string[] = []): Promise<WorktreeRemovalLiveSession[]> {
+export async function allPaneSessions(requested: string[] = []): Promise<WorktreeRemovalLiveSession[]> {
   const running = await serversStrict();
   const names = [...new Set([...requested, ...running.map(server => String(server.session)).filter(Boolean)])];
   const snapshots = await Promise.all(names.map(async (name): Promise<Json> => {

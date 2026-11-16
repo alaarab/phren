@@ -28,6 +28,7 @@ const ROUTES = new Set([
   "POST /v1/conductor/make", "POST /v1/conductor/stop",
   "POST /v1/push/register",
   "POST /v1/sets/link",
+  "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
 ]);
 
 const payloadSchema = z.object({

@@ -97,7 +97,9 @@ export function fanoutBlockedPushPayload(value: FanoutBlockedPush): Record<strin
 export function machineHealthPushPayload(value: MachineHealthPush, host?: string): Record<string, unknown> {
   return {
     aps: { alert: { title: `${value.computer}: ${value.title}`, body: `${value.detail} ${value.fix}`.trim() }, sound: "default", category: "PHREN_HEALTH" },
-    phren: { kind: "machineHealth", ...(host ? { host } : {}), computer: value.computer, id: value.id, title: value.title, detail: value.detail, fix: value.fix, route: "resources" },
+    // `housekeeping`: the same finding is a housekeeping warning with this id; a newer app opens it there, an older one routes to resources.
+    phren: { kind: "machineHealth", ...(host ? { host } : {}), computer: value.computer, id: value.id, title: value.title, detail: value.detail, fix: value.fix, route: "resources",
+      housekeeping: { computer: value.computer, id: value.id } },
   };
 }
 
