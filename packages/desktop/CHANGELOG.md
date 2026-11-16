@@ -8,6 +8,11 @@ GitHub release notes, and the app shows them when that version is available.
 
 ### Security
 
+- **The app's own pages** can be shown only inside the app. Web previews and extension frames share the app's site, so before, a previewed page could have loaded the signed-in app inside itself and tricked a click.
+- **Web previews** run in a sandboxed frame: the previewed page can no longer navigate the app away.
+
+### Security
+
 - **The Node extension host** is reached at `127.0.0.1:<port>` instead of `localhost:<port>`. Cookies ignore ports, so the editor was sending the app's sign-in cookie to the extension host, a process that runs extension code and is meant to hold no app credential.
 
 ## [0.1.16] - 2026-11-15

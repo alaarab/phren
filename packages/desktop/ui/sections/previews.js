@@ -79,7 +79,7 @@ export function mountPreviews(root) {
             <button class="pv-btn small" data-pv-close title="Close preview" disabled>Close</button>
           </div>
           <div class="pv-frame-wrap">
-            <iframe class="pv-frame" data-pv-frame hidden title="Web preview" referrerpolicy="no-referrer"></iframe>
+            <iframe class="pv-frame" data-pv-frame hidden title="Web preview" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads allow-pointer-lock"></iframe>
             <div class="pv-empty" data-pv-empty>Open a web server to preview it here.</div>
           </div>
         </div>
