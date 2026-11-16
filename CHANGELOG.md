@@ -5,8 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.80] - 2026-11-15
+
 ### New
 
+- Housekeeping on every computer (`docs/housekeeping.md`). The Hook checks every 15 minutes, when disk first drops under 20 GB, and when the computer first becomes stressed. It serves `GET /v1/housekeeping`: warnings (machine-health findings), suggested cleanups, what it keeps and why, and 14 days of what it cleaned. With `?inventory=1` it adds every worktree, the biggest space users and every agent pane, each with an action or the reason it is kept. Approve, dismiss, restore and scan are owner-only routes the phone signs. One safety module decides every cleanup and never deletes work: no uncommitted, unpushed or stashed changes, no live process or pane, no `reset`, `clean` or `--force`. `phren housekeeping` reads it from a shell.
 - Agent work respects each computer's memory and CPU. A per-computer budget (`~/.config/phren/budget.yaml`: workers, heavy slots, free-memory floor, load ceiling; defaults from the memory size, 4 workers and 2 heavy jobs on 31 GB) gates new work. `phren fanout run` (and the fanout skill's `run.sh`) queues a worker past it and says why, release priority first; `--wait` bounds the wait.
 - `phren heavy [--priority release|normal|low] -- <command>` runs a full test suite or native build once the computer has one of its heavy slots, N at once instead of one shared lock; `phren heavy status` shows who runs and waits. When memory or load holds a job back, it names an enrolled computer with room and the dispatch that would run it there.
 - `phren reap` lists dev servers, build daemons, test watchers, orphaned headless browsers, `pgrep -f` wait loops and test database clones agents left running, with age, idle time, memory, who started each and the command that stops it. It stops nothing.
