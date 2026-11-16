@@ -565,7 +565,8 @@ equals: "failure" }]` and `coalesceSeconds: 120`. Filters are ANDed exact,
 type-sensitive scalar equalities on dotted payload paths (max 16); the window
 is an integer from 0 to 86400 seconds (default 0). Prompts substitute
 `{{payload.a.b}}` once, missing/non-scalar paths become empty, each value is
-credential-redacted and capped at 1024 characters, and the prompt is capped at
+credential-redacted and capped at 1024 characters, then fenced as
+`<webhook-value>` data under a notice line, and the prompt is capped at
 8000. Version 1 timed files remain supported; older Hooks skip the whole
 version 2 file and older phones must not edit it.
 

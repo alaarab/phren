@@ -226,8 +226,11 @@ become plain text, credential detection runs before truncation, each value is
 capped at 1024 characters, disallowed control characters are removed, and the
 final prompt is capped at 8000 characters. Detected credentials become a
 redaction marker. Replacement text is never evaluated or recursively expanded.
-The worker still receives external text as part of its prompt; write prompts
-that treat event values as data.
+Each non-empty value is wrapped in `<webhook-value>…</webhook-value>` (with `<`
+and `>` inside it replaced by `‹` and `›`, so a value cannot close its own
+fence), and a prompt that received any value starts with a line telling the
+worker that text in those tags came from whoever triggered the event and is
+data, never instructions. Still write prompts that treat event values as data.
 
 `POST /v1/schedules/events` uses the same authenticated Hook connection and
 module route gate as other schedule writes. The exact JSON body is:
