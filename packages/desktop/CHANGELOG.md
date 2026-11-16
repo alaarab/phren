@@ -6,8 +6,13 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-11-15
+
 ### Security
 
+- **The app's local address** is held on both loopback addresses (127.0.0.1 and ::1), for the app and for the Node extension host. Before, another program on the computer could listen on the IPv6 half of `localhost` and receive the app's sign-in token or the extension host's connection token. If that address is already taken, the app picks another port, or says why it can't start.
+- **Your store's copy on this computer** (`~/.cache/phren/desktop-store`) is readable by you only. A downloaded file is kept only when its contents match its id, for SHA-256 stores too.
+- **Diagnostics recordings** (Settings › Diagnostics) remove the same secrets an exported chat does: tokens, Authorization headers, passwords in URLs and settings, and long random keys.
 - **Web previews** open at a secret address of their own, `http://<random>.localhost:<port>/`, and the preview answers nothing else. Before, it answered anyone who found its local port, so another account on the same computer could reach the previewed server through your tunnel.
 
 ## [0.1.15] - 2026-11-14
