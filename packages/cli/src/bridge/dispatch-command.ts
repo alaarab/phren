@@ -5,7 +5,7 @@ import { stat } from "node:fs/promises";
 import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { parseArgs } from "node:util";
-import { hookRequest } from "./client.js";
+import { ownerHookRequest, hookRequest } from "./client.js";
 import { DISPATCH_PROMPT_LIMIT, dispatchSchema, type DispatchInput } from "./dispatch.js";
 import { idempotencyKeySchema } from "./dispatch-idempotency.js";
 import { waitForDispatch } from "./dispatch-wait.js";
@@ -246,11 +246,11 @@ export async function runConductor(args: string[]): Promise<number> {
       const pane = values.pane ?? here?.pane;
       if (!pane) throw new Error("Run phren conductor make inside the agent's pane, or name it with --pane <id>.");
       const place = values.pane ? { paneId: values.pane } : { workspaceId: here!.workspace, tabId: here!.tab, paneId: here!.pane };
-      const result = await hookRequest(`/v1/conductor/make${muxQuery(values.mux, values.pane ? undefined : here)}`, place);
+      const result = await ownerHookRequest(`/v1/conductor/make${muxQuery(values.mux, values.pane ? undefined : here)}`, place);
       console.log(JSON.stringify(result, null, 2));
       return result.ok === true ? 0 : 1;
     }
-    const result = await hookRequest("/v1/conductor/stop", values.pane ? { paneId: values.pane } : {});
+    const result = await ownerHookRequest("/v1/conductor/stop", values.pane ? { paneId: values.pane } : {});
     console.log(result.stopped ? "This computer has no conductor now." : "This computer had no conductor.");
     return 0;
   }

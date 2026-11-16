@@ -309,6 +309,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     resources: async () => { const value = await resources.read(); const badge = await housekeeper?.badge().catch(() => undefined); return badge ? { ...value, housekeeping: badge } : value; },
     sudo: agentHooks.sudo,
     secrets: agentHooks.secrets,
+    ownerConfirms: agentHooks.ownerConfirms,
   });
   const gitWatch = new GitWatch();
   // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
@@ -334,7 +335,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
           ws.clients.delete(oldest);
         }
-        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1", url.searchParams.get("secrets") === "1"); return; }
+        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1", url.searchParams.get("secrets") === "1", url.searchParams.get("confirms") === "1"); return; }
         if (url.pathname === "/v1/git/watch") { void gitWatch.stream(client, url); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => failRelay(client)); return; }
         if (url.pathname === "/v1/browsers/stream") { streamBrowser(client, url.searchParams, browsers); return; }

@@ -29,3 +29,15 @@ export async function hookRequest(route: string, data?: Json, options: RequestOp
     req.on("close", () => clearTimeout(timer)); req.on("error", reject); req.end(payload);
   });
 }
+
+/**
+ * An owner-only action from the terminal. Once the phone signs owner actions,
+ * the Hook holds this request and asks the phone to confirm it (owner-confirm.ts);
+ * the command waits for that answer. Before then it goes straight through.
+ */
+export async function ownerHookRequest(route: string, data?: Json, method?: "POST" | "DELETE", notice: (line: string) => void = line => process.stderr.write(`${line}\n`)): Promise<Json> {
+  const note = setTimeout(() => notice("Waiting for you to confirm this in Phren on your phone (2 minutes)…"), 1_500);
+  try {
+    return await hookRequest(route, data, { socketPath: socketPath(), ...(method ? { method } : {}), headers: { "X-Phren-Owner-Confirm": "wait" } }, 200_000);
+  } finally { clearTimeout(note); }
+}

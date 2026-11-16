@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Owner actions from the terminal work again once the phone signs owner actions: `phren conductor make`, `phren conductor stop`, `phren housekeeping --apply` and `--scan` wait for you to confirm in Phren on your phone, instead of failing with `owner-proof-required`. The phone shows what will happen and its answer carries its signature, so an agent cannot approve its own request. Needs a Phren app with owner confirmations.
+
 ### Security
 
 - A linked computer can no longer change Git or remove worktrees on another computer through its Hook key (discard, checkout, commit, push, merge, checkpoint restore, worktree removal). No Hook-to-Hook flow uses those routes; before, a compromised linked computer could discard uncommitted work or force-remove a worktree directly, without going through an agent and its permission mode.

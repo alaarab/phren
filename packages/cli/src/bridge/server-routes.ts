@@ -14,7 +14,7 @@ import type { StorePulls } from "./store-pull.js";
 import type { GitboyWebhooks } from "./gitboy-webhooks.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { ownerRequest, requestPeer, type PeerIdentity } from "./request-origin.js";
-import { bodyDigest, OwnerProof } from "./owner-proof.js";
+import { bodyDigest, OWNER_PROOF_HEADER, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
@@ -199,7 +199,7 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
 export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -773,6 +773,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/push/status": result = agentHooks.push.status; break;
           case "/v1/sudo": result = { requests: agentHooks.sudo.list() }; break;
           case "/v1/secrets": result = { requests: agentHooks.secrets.list() }; break;
+          case "/v1/owner-confirms": result = { requests: agentHooks.ownerConfirms.list() }; break;
           case "/v1/projects/locate": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
             for (const candidate of candidates) {
@@ -884,7 +885,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request, url.pathname === "/v1/schedules/events" ? SCHEDULE_EVENT_BODY_CAP : undefined);
-        await ownerProof.check(request, url.pathname, data, bodyDigests.get(request));
+        await ownerProof.check(request, url.pathname, data, bodyDigests.get(request), () => agentHooks.ownerConfirms.confirm(request.method ?? "POST", url.pathname, data, new Promise<void>(done => response.once("close", () => done()))));
         if (url.pathname.startsWith("/v1/conductor/move/")) await ctx.succession!.authorize(z.string().uuid().parse(data.id), requestPeer(request), url.pathname.endsWith("/prepare") ? z.string().uuid().parse(data.originId) : undefined);
         const executeConductor: ConductorExecutor = async (action, payload, origin, remote = false) => {
           if (action === "dispatch") return dispatches!.dispatch(payload, { server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane });
@@ -1153,6 +1154,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Asked for: whether sudo took the password, so the phone knows to save or forget it.
           const outcome = parsed.outcome ? await answered.outcome : undefined;
           result = { ok: true, ...(outcome ? { outcome } : {}) };
+        } else if (url.pathname === "/v1/owner-confirms/answer") {
+          // Owner-proof route: the phone signs this answer, so an agent cannot approve its own held request.
+          if (!ownerRequest(request, data) || typeof request.headers?.[OWNER_PROOF_HEADER] !== "string")
+            throw new BridgeError(403, "Only the owner's phone answers, with its signature.", { code: "owner-proof-required" });
+          const input = z.object({ id: z.string().uuid(), approve: z.boolean() }).strict().parse(data);
+          if (!agentHooks.ownerConfirms.answer(input.id, input.approve)) throw new BridgeError(404, "This request is no longer waiting.");
+          result = { ok: true };
         } else if (url.pathname === "/v1/secrets/answer") {
           if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner answers a secret request, from the phone.");
           let parsed: ReturnType<typeof secretAnswer>;
@@ -1215,7 +1223,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "DELETE") {
         if (url.pathname !== "/v1/conductor/grants" && url.pathname !== "/v1/authority" && url.pathname !== "/v1/approval-rules") throw new BridgeError(404, "Unknown Phren Hook route.");
         const data = await body(request);
-        await ownerProof.check(request, url.pathname, data, bodyDigests.get(request));
+        await ownerProof.check(request, url.pathname, data, bodyDigests.get(request), () => agentHooks.ownerConfirms.confirm(request.method ?? "POST", url.pathname, data, new Promise<void>(done => response.once("close", () => done()))));
         if (url.pathname === "/v1/conductor/grants" && request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Peer conductor operations require the authenticated generation-scoped routes.");
         if (url.pathname === "/v1/approval-rules") {
           result = await changeApprovalRule(data, "DELETE");

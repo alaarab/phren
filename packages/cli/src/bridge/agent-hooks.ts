@@ -43,6 +43,7 @@ import { briefId, briefIdInPrompt, briefLabel, recordBriefArrival } from "./laun
 import { appServerApproval, appServerDecision, conductorCall, OPENCODE_APPROVAL_OPTIONS, opencodePermissionReply, type ConductorCall } from "./agent-hook-asks.js";
 import { SudoBroker } from "./sudo.js";
 import { SecretBroker } from "./secret.js";
+import { OwnerConfirmBroker } from "./owner-confirm.js";
 import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
 import { codexServers } from "./codex-servers.js";
 import { paneClient, paneKey, PaneServerWatcher, rootSession, servedPane, type PaneAsks } from "./opencode-panes.js";
@@ -280,6 +281,8 @@ export class AgentHooks {
   readonly sudo: SudoBroker;
   /** phren secret-exec requests, answered from the phone (secret.ts). */
   readonly secrets: SecretBroker;
+  /** Terminal owner actions held for the phone (owner-confirm.ts). */
+  readonly ownerConfirms: OwnerConfirmBroker;
   constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot, deliveriesFile?: string) {
     this.deliveries = new PromptDeliveries(deliveriesFile);
     // A push held while the owner was at the desktop is sent only if still unanswered.
@@ -296,6 +299,7 @@ export class AgentHooks {
       };
     this.sudo = new SudoBroker({ computer: () => this.computerName, push, label: briefLabel, describe });
     this.secrets = new SecretBroker({ computer: () => this.computerName, label: briefLabel, describe });
+    this.ownerConfirms = new OwnerConfirmBroker({ computer: () => this.computerName });
   }
   private approvalsDirectory(): string { return path.join(phrenStoreRoot(), ".runtime", "approvals"); }
   private scheduleOpencodeSweep() {

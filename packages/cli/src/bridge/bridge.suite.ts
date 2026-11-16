@@ -3257,6 +3257,13 @@ schedules:
       expect((await api("/v1/push/status")).data).toMatchObject({ configured: false, devices: 1 });
     });
 
+    it("lists held owner confirmations and takes an answer only with the phone's signature", async () => {
+      expect((await api("/v1/owner-confirms")).data).toEqual({ requests: [] });
+      const id = "0b4f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b";
+      expect(await api("/v1/owner-confirms/answer", { id, approve: true })).toMatchObject({ status: 403, data: { code: "owner-proof-required" } });
+      expect(await api("/v1/owner-confirms/answer", { id, approve: true }, "POST", { "x-phren-origin": "peer" })).toMatchObject({ status: 403 });
+    });
+
     it("forgets every push registration for the owner only, and they stay gone", async () => {
       await api("/v1/push/register", { deviceID: "8a3f2c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", hostID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9",
         token: "ab".repeat(32), environment: "development" });
