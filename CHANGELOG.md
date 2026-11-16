@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- Housekeeping lists the programs holding the most memory, swap and CPU (`processes` in `GET /v1/housekeeping?inventory=1`, read live), with an End action: TERM, then KILL after 5 seconds. A program's helpers are one row, so ending Chromium ends its renderers too. Refused for other users' processes, Phren Hook, the conductor, an agent pane's own process, and programs the computer or your session needs. `phren housekeeping` prints the list.
+- Housekeeping lists the programs holding the most memory, swap and CPU (`processes` in `GET /v1/housekeeping?inventory=1`, read live), with an End action: TERM, then KILL after 5 seconds. A program's helpers are one row, so ending Chromium ends its renderers too. Refused for other users' processes, Phren Hook, the conductor, an agent pane's own process, credential agents (ssh-agent, gpg-agent, keyrings) and programs the computer or your session needs. Command lines are shown with tokens and passwords redacted. `phren housekeeping` prints the list.
 
 ### Changed
 

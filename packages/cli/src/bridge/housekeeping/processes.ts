@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { redactSecretsForLog } from "../../content/secrets.js";
 import type { PaneRef, ProcessRow } from "../resources.js";
 import { actionId } from "./inventory.js";
 import type { InventoryAction } from "./inventory.js";
@@ -65,6 +66,8 @@ const PROTECTED = new Set([
   "systemd", "init", "sshd", "sshd-session", "dbus-daemon", "dbus-broker", "Xorg", "Xwayland", "Hyprland", "hyprland", "sway", "gnome-shell", "kwin_wayland",
   "kwin_x11", "plasmashell", "gdm", "sddm", "pipewire", "pipewire-pulse", "wireplumber", "pulseaudio", "NetworkManager", "wpa_supplicant", "tailscaled",
   "tailscale", "herdr", "tmux", "tmux: server", "zellij", "uwsm", "quickshell", "waybar", "mako", "hypridle", "hyprlock",
+  // Credential agents: ending one breaks git pushes, signing and SSH until the next login.
+  "ssh-agent", "gpg-agent", "gnome-keyring-daemon", "kwalletd5", "kwalletd6", "secretd",
 ]);
 
 const base = (row: ProcessRow) => path.basename(row.command) || row.command;
@@ -151,7 +154,8 @@ export async function listProcesses(sources: ProcessSources): Promise<InventoryP
     return {
       id, name, pid: root, processes: members.length, cpuPercent: Math.round(cpuPercent), memoryBytes,
       ...(swapBytes ? { swapBytes } : {}), ...(row.startedAt ? { startedAt: new Date(row.startedAt).toISOString() } : {}),
-      command: short(row.args || row.command),
+      // Command lines can carry tokens and passwords (--token=, URLs with credentials); the list goes to phones and linked computers.
+      command: short(redactSecretsForLog(row.args || row.command)),
       ...(pane ? { pane: { server: pane.server, pane: pane.pane, ...(pane.label ? { label: pane.label } : {}), ...(pane.agent ? { agent: pane.agent } : {}) } } : {}),
       action: { id, kind: "end-process", label: members.length > 1 ? `End ${name} (${members.length} processes)` : `End ${name}`, allowed: !block,
         ...(block ? { reason: block } : { confirm: `Asks ${name} to quit, then forces it after 5 seconds. Unsaved work in it is lost.` }) },

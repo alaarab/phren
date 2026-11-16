@@ -23,6 +23,7 @@ describe("processes", () => {
     row(9998, 1, "node", 300), row(9999, 9998, "node", 200),
     row(700, 1, "/usr/sbin/mds_stores", 600), row(800, 1, "Hyprland", 500),
     row(900, 1, "zsh", 10), row(901, 900, "claude", 800),
+    { ...row(40, 1, "/usr/bin/psql", 300), args: "psql postgres://admin:hunter2secret@db.internal/prod --set token=ghp_abcdefghijklmnopqrstuvwxyz0123456789" },
   ];
   const owners = new Map<number, PaneRef>([[900, { server: "default", pane: "w1:p1", label: "lead" }]]);
 
@@ -44,6 +45,8 @@ describe("processes", () => {
     // The agent's own child is fair game; the pane's shell is closed from Sessions.
     expect(by(901)).toMatchObject({ pane: { server: "default", pane: "w1:p1", label: "lead" } });
     expect(by(901).action.allowed).toBe(true);
+    // Secrets in a command line never leave the computer.
+    expect(by(40).command).not.toMatch(/hunter2secret|ghp_abcdefghijklmnopqrstuvwxyz0123456789/);
     // Tiny processes (launchd at 20 MB, the shell) are not listed.
     expect(list.some(r => r.pid === 1 || r.pid === 900)).toBe(false);
   });
