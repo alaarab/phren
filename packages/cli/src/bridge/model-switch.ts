@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { AgentHooks, visibleTerminalChoice, type TerminalChoice } from "./agent-hooks.js";
 import { validateTarget } from "./herdr.js";
+import { servedPane } from "./opencode-panes.js";
+import { switchOpencodeModel } from "./opencode-service.js";
 import { terminalProvider } from "./terminal.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
@@ -201,6 +203,18 @@ export class ModelSwitcher {
         }
         codexServers.setNextTurn(served, model.id, effort);
         return { ok: true, model: model.id, name: model.name, ...(effort ? { effort } : {}), applies: "next-turn" };
+      }
+      // An OpenCode 2 pane takes the model over its service, for the turns
+      // after this one: no picker is walked, and a working turn is left alone.
+      const service = target.source === "opencode" ? servedPane(target.server, target.pane) : undefined;
+      if (service?.api === 2) {
+        const model = (await this.catalog.list("opencode")).find(model => model.id === id);
+        if (!model) throw new BridgeError(422, "That model is not in the computer's catalogue. Refresh the model list.");
+        await validateTarget(target, false, true);
+        const held = await switchOpencodeModel({ ...service, session: target.session }, model.id, chosenEffort)
+          .catch(() => { throw new BridgeError(409, "OpenCode did not take that model. Open terminal to check the model."); });
+        if (held.id !== model.id) throw new BridgeError(409, `OpenCode kept ${held.id}. Open terminal to check the model.`);
+        return { ok: true, model: model.id, name: model.name, ...(held.variant && held.variant !== "default" ? { effort: held.variant } : {}), applies: "next-turn" };
       }
       terminal = (await validate(true)).terminal_id;
       if (target.source === "opencode") throw new BridgeError(422, "OpenCode uses an interactive /models picker. Open terminal to switch models; remote selection cannot yet be verified.");

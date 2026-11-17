@@ -336,6 +336,12 @@ nothing to that checkout.
   for the moment that command runs. This is accepted: the reader would have to
   be the same user, the server listens only on 127.0.0.1, and the password
   lives only as long as that OpenCode process;
+  `<bridge>/opencode-sessions/<session>.events.jsonl` (0600) is an OpenCode 2
+  conversation written out as the event log the 1.x plugin wrote, with its
+  `.preview.json` while an answer is streaming. The Hook reads it from
+  OpenCode 2's own background service, whose address and password it takes
+  from `~/.local/state/opencode/service.json` (OpenCode's file, read only);
+  nothing about the service is written to the registry above;
   `<bridge>/conductor.yaml` holds standing grants and `<bridge>/hooks.yaml`
   holds the verified peer directory.
 

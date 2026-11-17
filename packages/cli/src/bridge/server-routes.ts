@@ -269,7 +269,7 @@ async function paneTurnRecord(server: string, pane: Json, session: string): Prom
   if (pane.agent !== "opencode") return paneRecord(server, pane, session);
   if (typeof pane.terminal_id !== "string") return undefined;
   const pids = (await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids;
-  return ownRecord(await opencodeTurn(pids, pane.terminal_id), pane, "opencode", session);
+  return ownRecord(await opencodeTurn(pids, pane.terminal_id, session), pane, "opencode", session);
 }
 
 export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "agentHooks" | "journal" | "tabActivity" | "contextUsage" | "turnQueue">): WorkspacesReader {

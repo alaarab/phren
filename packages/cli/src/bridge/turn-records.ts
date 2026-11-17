@@ -19,6 +19,7 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { opencodeTurnStamps } from "./harness-status.js";
+import { opencodeServiceStamps } from "./opencode-service.js";
 import type { InputCategory } from "./input-classification.js";
 import { briefId } from "./launch-brief.js";
 import { atomicInPrivateDir, bridgeRoot, provider, serverName, sessionId, type Provider } from "./protocol.js";
@@ -271,8 +272,9 @@ export async function latestStopTasks(source: Provider, session: string): Promis
 /** OpenCode's turns for a pane running `pids`, from the stamps phren's OpenCode
  * plugin writes on session.status busy / session.idle; undefined for an older
  * plugin that writes none. `terminal` is the pane's, since the PIDs are. */
-export async function opencodeTurn(pids: number[], terminal: string): Promise<TurnRecord | undefined> {
-  const stamps = await opencodeTurnStamps(pids);
+export async function opencodeTurn(pids: number[], terminal: string, session?: string): Promise<TurnRecord | undefined> {
+  // 1.x: the plugin's stamps for the pane's process. 2.x: the service's own times for the conversation.
+  const stamps = await opencodeTurnStamps(pids) ?? (session ? await opencodeServiceStamps(session) : undefined);
   if (!stamps) return undefined;
   const busy = stamps.busyAt ? Date.parse(stamps.busyAt) : NaN, idle = stamps.idleAt ? Date.parse(stamps.idleAt) : NaN;
   const idleAt = stamps.idleAt;

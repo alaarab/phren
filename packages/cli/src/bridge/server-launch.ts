@@ -15,6 +15,7 @@ import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from 
 import { askpassEnv } from "./sudo.js";
 import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
+import { bindServicePane, createServiceSession, ensureOpencodeService, opencodeMajor, serviceLaunchArgs } from "./opencode-service.js";
 import { conductorBrief, ensureConductorBrief } from "./conductor-context.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
@@ -484,9 +485,14 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // Hook sends its prompts, answers its asks and interrupts it over HTTP, and
   // the pane stays the owner's view. A brief goes the same way once it
   // answers; its file still marks the dispatch so the arrival is recorded here.
-  const served = kind === "opencode" ? await prepareServedLaunch() : undefined;
+  // OpenCode 2 has one service for every pane instead (opencode-service.ts):
+  // the Hook creates the conversation there, with the launch's model and
+  // agent, and starts the pane on it.
+  const viaService = kind === "opencode" && (await opencodeMajor() ?? 0) >= 2 ? serviceLaunchArgs(args) : undefined;
+  if (viaService) args.splice(0, args.length, ...viaService.args);
+  const served = kind === "opencode" && !viaService ? await prepareServedLaunch() : undefined;
   if (served) args.push(...served.args);
-  const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
+  const briefFile = brief && (launchesWithBrief(kind) || structured || served || viaService) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
   const dispatchId = options.dispatchId ?? brief?.id;
@@ -608,6 +614,11 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
       await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
     } catch (error) { briefTurn = error instanceof AppServerRpcError ? undefined : "uncertain"; }
   }
+  // The conversation exists before the pane does, so the pane is bound to it
+  // from its first second. With no service to ask, the pane starts plain and
+  // is identified by its title once it has a conversation.
+  const serviceSession = viaService ? await ensureOpencodeService().then(live => live ? createServiceSession(live, cwd, viaService) : undefined).catch(() => undefined) : undefined;
+  if (serviceSession) args.push("--session", serviceSession);
   const agentArgs = [...(structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])]),
     ...(kind === "codex" ? ["-c", "check_for_update_on_startup=false"] : [])];
   if (keyedDispatchId) await markSubmitted(keyedDispatchId);
@@ -635,9 +646,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // Without a brief the pane's TUI started the thread; the Hook heard it.
   if (appServer && !appServer.threadId) await codexServers.awaitThread(appServer);
   let servedBrief: { session: string; delivered: boolean } | undefined;
-  if (served) {
+  if (served || serviceSession) {
     const variant = role === "conductor" || data.effort !== undefined ? effort : undefined;
-    const entry = await registerServedPane(server, created.paneId, cwd, served,
+    const entry = serviceSession ? bindServicePane(server, created.paneId, serviceSession, cwd) : await registerServedPane(server, created.paneId, cwd, served!,
       { defaults: { ...(role === "conductor" ? { agent: "conductor" } : {}), ...(model ? { model } : {}), ...(variant ? { variant } : {}) } }).catch(() => undefined);
     const sent = entry && brief ? await sendServedBrief(entry, brief.text) : undefined;
     if (brief && sent?.sent) {
@@ -670,7 +681,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   return { ok: true, ...created, cwd, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(choice ? { accountChoice: choice.reason } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
-      briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
+      briefState: appServer ? briefTurn ?? "unconfirmed" : served || viaService ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}), ...(agentTokenFile ? { agentTokenFile } : {}),
     ...(worktree?.cloneDir ? { cloneDir: worktree.cloneDir, gitConfigFile: worktree.gitConfigFile } : {}),
     ...(worktree?.workerFile ? { workerFile: worktree.workerFile } : {}) };

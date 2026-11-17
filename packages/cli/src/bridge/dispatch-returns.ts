@@ -23,6 +23,7 @@ import { isClaudeUsageLimit, ownerQuestion, readFinalTurn, type FinalTurn } from
 import { liveWork, runningTasks, takesPrompt } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
 import { childAgentTree, runningChildAgents } from "./transcripts.js";
+import { servicePane } from "./opencode-service.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
 import { listMoves, moveFrom, movedWorker, moveToSchema, type MovedWorker, type MoveRecord } from "./session-move.js";
 import { awaitedInReply, recentUncommitted, sharedCheckout, unfinishedTurn, type Uncommitted } from "./worker-unfinished.js";
@@ -151,7 +152,7 @@ async function limitCheckout(seen: WorkerObservation, directory: unknown, reader
 export async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
   if (source !== "opencode") return readTurn(server, String(pane.pane_id));
   if (typeof pane.terminal_id !== "string") return undefined;
-  return opencodeTurn((await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids, pane.terminal_id);
+  return opencodeTurn((await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids, pane.terminal_id, servicePane(server, String(pane.pane_id))?.session);
 }
 
 const defaultReaders: WorkerReaders = {
