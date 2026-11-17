@@ -123,6 +123,7 @@ import {
 } from "./setup.js";
 
 import { STARTER_DIR, VERSION, log, type McpMode } from "./shared.js";
+import { ensureStoreGitignore } from "./store-gitignore.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -592,6 +593,7 @@ export async function runInit(opts: InitOptions = {}) {
       // caps resolution see the intended value.
       setManagementPresetPreference(phrenPath, managementPreset);
       const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
+      ensureStoreGitignore(phrenPath);
       applyOnboardingPreferences(phrenPath, opts);
       const existingGitRepo = ensureLocalGitRepo(phrenPath);
       log(`\nphren already exists at ${phrenPath}`);
@@ -723,6 +725,8 @@ export async function runInit(opts: InitOptions = {}) {
 
   if (fs.existsSync(STARTER_DIR)) {
     copyDir(STARTER_DIR, phrenPath);
+    // The packaged starter has no .gitignore (npm drops them), so write it from code.
+    ensureStoreGitignore(phrenPath);
     writeRootManifest(phrenPath, {
       version: 1,
       installMode: "shared",
@@ -802,6 +806,7 @@ export async function runInit(opts: InitOptions = {}) {
   enableTaskMetadataForNewStore(phrenPath);
   setManagementPresetPreference(phrenPath, managementPreset);
   const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
+  ensureStoreGitignore(phrenPath);
   applyOnboardingPreferences(phrenPath, opts);
   const localGitRepo = ensureLocalGitRepo(phrenPath);
   log(`  Updated machines.yaml with machine "${effectiveMachine}"`);

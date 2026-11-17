@@ -12,7 +12,8 @@ import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { STORE_SECRET_GITIGNORE_LINES } from "../init/store-gitignore.js";
+import * as os from "os";
+import { ensureStoreGitignore, STORE_SECRET_GITIGNORE_LINES } from "../init/store-gitignore.js";
 
 /** Entries a .gitignore body lacks, by whole trimmed line (a commented-out entry does not count). */
 function missingSecretGitignoreLines(content: string): string[] {
@@ -50,4 +51,33 @@ describe("store .gitignore templates", () => {
   });
 
   // ── missingSecretGitignoreLines ───────────────────────────────────────────
+});
+
+describe("ensureStoreGitignore", () => {
+  // npm leaves .gitignore files out of the published package, so the starter's own
+  // file never reached stores made with `npx @phren/cli init` (found 2026-11-16).
+  it("writes the store's .gitignore when the starter brought none, and is idempotent", () => {
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), "phren-gi-"));
+    try {
+      expect(ensureStoreGitignore(store)).toContain(".env");
+      const written = fs.readFileSync(path.join(store, ".gitignore"), "utf8");
+      expect(missingSecretGitignoreLines(written)).toEqual([]);
+      expect(ensureStoreGitignore(store)).toEqual([]);
+      expect(fs.readFileSync(path.join(store, ".gitignore"), "utf8")).toBe(written);
+    } finally { fs.rmSync(store, { recursive: true, force: true }); }
+  });
+
+  it("adds only what an existing .gitignore lacks and keeps the owner's lines", () => {
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), "phren-gi-"));
+    try {
+      fs.writeFileSync(path.join(store, ".gitignore"), "node_modules/\n.runtime/\n# .env");
+      const added = ensureStoreGitignore(store);
+      expect(added).toContain(".env");
+      expect(added).not.toContain(".runtime/");
+      const body = fs.readFileSync(path.join(store, ".gitignore"), "utf8");
+      expect(body.startsWith("node_modules/\n.runtime/\n# .env\n")).toBe(true);
+      expect(missingSecretGitignoreLines(body)).toEqual([]);
+      expect(body.split("\n").filter(line => line === ".runtime/")).toHaveLength(1);
+    } finally { fs.rmSync(store, { recursive: true, force: true }); }
+  });
 });

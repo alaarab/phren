@@ -1,3 +1,6 @@
+import * as fs from "fs";
+import * as path from "path";
+
 /**
  * The gitignore entries every phren store must have, whichever install mode
  * created it.
@@ -40,3 +43,25 @@ export const STORE_SECRET_GITIGNORE_LINES = [
   // Legacy module migration backups were once written into the working tree.
   ".config/modules.yaml.migration-backup",
 ] as const;
+
+/** Editor and OS noise every store ignores too. */
+const STORE_NOISE_LINES = [".DS_Store", "*.swp", ".cache/"] as const;
+
+/**
+ * Writes the store's .gitignore from code, or appends whatever secret-bearing
+ * line it lacks, and returns the lines it added. The starter template's own
+ * .gitignore cannot be relied on: npm leaves `.gitignore` files out of a
+ * published package, so a store created with `npx @phren/cli init` had none,
+ * and `.env` (API keys) and `.runtime/` (credentials) went unignored.
+ */
+export function ensureStoreGitignore(storePath: string): string[] {
+  const file = path.join(storePath, ".gitignore");
+  const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  const present = new Set(current.split(/\r?\n/).map(line => line.trim()));
+  const missing = [...STORE_NOISE_LINES, ...STORE_SECRET_GITIGNORE_LINES].filter(line => !present.has(line));
+  if (!missing.length) return [];
+  const header = current ? "" : "# phren store: never sync secrets, credentials, transcripts or caches\n";
+  const separator = current && !current.endsWith("\n") ? "\n" : "";
+  fs.writeFileSync(file, `${current}${separator}${header}${missing.join("\n")}\n`);
+  return missing;
+}
