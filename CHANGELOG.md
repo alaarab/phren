@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Switching a Claude chat's model from the phone works again once the chat has history. Claude Code 2.1.326 asks "Switch model?" before a switch that makes it re-read the conversation; the Hook never answered, timed out after 4 seconds and pressed Escape, so Claude kept its model. The Hook now chooses "Yes, switch to <name>" when the name is the model that was picked, and reports "Claude kept <model>" when Claude does not switch.
+- A model switch reads only its own reply. An earlier "Set model to" line for the same model, still on screen, used to confirm a switch that had not happened yet.
+- A switch that fails before Claude takes the command no longer leaves `/model …` in the terminal's composer, where it refused every later switch with "There's unsent text in the terminal".
+
 ## [0.3.85] - 2026-11-16
 
 ### Security

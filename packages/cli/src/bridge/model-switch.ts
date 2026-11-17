@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentHooks, visibleTerminalChoice } from "./agent-hooks.js";
+import { AgentHooks, visibleTerminalChoice, type TerminalChoice } from "./agent-hooks.js";
 import { validateTarget } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
@@ -53,6 +53,46 @@ export function claudeEffortReply(text: string): EffortReply | undefined {
     }
   }
   return replies[0];
+}
+
+type ModelReply = { set: string } | { kept: string };
+
+/** The screen down to Claude Code's reply to the last `/model` in its
+ * transcript. A command still in the composer has a rule under it, no reply. */
+function lastModelReply(screen: string): { head: string[]; output: string } | undefined {
+  const lines = screen.split(/\r?\n/).map(line => stripTerminal(line).trim());
+  let echo = -1;
+  lines.forEach((line, index) => { if (/^[❯>]\s*\/model(?:\s|$)/.test(line)) echo = index; });
+  const reply = echo < 0 ? -1 : lines.findIndex((line, index) => index > echo && line !== "");
+  return reply < 0 ? undefined : { head: lines.slice(0, reply + 1), output: lines[reply].replace(/^[⏺●⎿]\s*/, "") };
+}
+const endsWith = (long: string[], short: string[]) => short.length <= long.length
+  && short.every((line, index) => line === long[long.length - short.length + index]);
+
+/** Claude Code's reply to the `/model` this transaction typed. `before` is the
+ * screen from before it typed: a reply already there, the same one after the
+ * screen scrolled, never answers this command, even one for the same model. */
+function claudeModelReply(text: string, before: string): ModelReply | undefined {
+  const now = lastModelReply(text), old = lastModelReply(before);
+  if (!now || old && (endsWith(old.head, now.head) || endsWith(now.head, old.head))) return undefined;
+  const set = now.output.match(/^Set model to (.+)$/i), kept = now.output.match(/^Kept model as (.+)$/i);
+  return set ? { set: set[1] } : kept ? { kept: kept[1] } : undefined;
+}
+
+/** The Hook's own slash command still in Claude's composer (the composer's
+ * rule under it), not its echo in the transcript (Claude's reply under it). */
+function unsentCommand(text: string, command: string): boolean {
+  const lines = text.split(/\r?\n/).map(line => stripTerminal(line).trim()).filter(Boolean);
+  let composer = -1;
+  lines.forEach((line, index) => { if (/^[›❯>]/.test(line)) composer = index; });
+  return composer >= 0 && lines[composer].replace(/^[›❯>]\s*/, "") === command && /^─/.test(lines[composer + 1] ?? "");
+}
+
+/** Claude Code 2.1.326 asks before a switch that drops the conversation's
+ * prompt cache: "Switch model?" with "Yes, switch to <name>" and "No, go back". */
+function claudeSwitchQuestion(text: string): TerminalChoice | undefined {
+  const choice = visibleTerminalChoice(stripTerminal(text));
+  return choice?.options.some(option => /^yes, switch to\s/i.test(option.label)) ? choice : undefined;
 }
 
 /** Empty prompts can draw a dim placeholder. Only ANSI evidence that every
@@ -122,6 +162,8 @@ export class ModelSwitcher {
     const { model: id, effort: chosenEffort } = request.parse(data);
     this.active.add(this.key(target));
     let opened = false;
+    // The slash command typed into a Claude pane, until Claude answers it.
+    let typed: string | undefined;
     let terminal: unknown;
     const validate = async (idle = false) => {
       const pane = await validateTarget(target, false, true);
@@ -182,6 +224,7 @@ export class ModelSwitcher {
       await validate(true);
       opened = true;
       this.hooks.menuOpened(target, "/model");
+      if (target.source === "claude") typed = `/model ${id}`;
       await terminalProvider().prompt(target.server, target.pane, target.source === "codex" ? "/model" : `/model ${id}`);
       if (target.source === "codex") {
         let menu = await waitFor(text => {
@@ -214,19 +257,33 @@ export class ModelSwitcher {
         await keys(["enter"]);
         await waitFor(text => codexModelStatus(text, model) ? true : undefined, "the new model in Codex's status line", true);
       } else {
-        await waitFor(text => text !== stripTerminal(before) && text.split(/\r?\n/).some(line => {
-          const output = line.trim().replace(/^[⏺●⎿]\s*/, "");
-          return output.toLowerCase().startsWith("set model to ") && [model.name, model.id, id].some(name => {
-            const result = output.slice("Set model to ".length).toLowerCase();
-            return result === name.toLowerCase() || result.startsWith(name.toLowerCase() + " ") || result.startsWith(name.toLowerCase() + " (");
-          });
-        }) ? true : undefined, "Claude's model confirmation");
+        const named = (value: string) => [model.name, model.id, id].some(name => {
+          const result = value.toLowerCase(), lower = name.toLowerCase();
+          return result === lower || result.startsWith(lower + " ") || result.startsWith(lower + " (");
+        });
+        let reply = await waitFor(text => claudeSwitchQuestion(text) ?? claudeModelReply(text, before), "Claude's model confirmation");
+        if ("options" in reply) {
+          // The picker already made this choice; Claude only warns that the
+          // next reply re-reads the conversation for the new model.
+          const yes = reply.options.find(option => /^yes, switch to\s/i.test(option.label))!;
+          if (!named(yes.label.replace(/^yes, switch to\s+/i, ""))) throw new BridgeError(409, "Claude asked about a different model than the one chosen. Open terminal to check the model.");
+          await this.hooks.moveDialogHighlight(target, reply, yes.key, async () => { await validate(); });
+          await keys(["enter"]);
+          reply = await waitFor(text => claudeSwitchQuestion(text) ? undefined : claudeModelReply(text, before), "Claude's model confirmation");
+        }
+        if ("options" in reply || "kept" in reply || !named(reply.set)) {
+          throw new BridgeError(409, "kept" in reply ? `Claude kept ${reply.kept.slice(0, 80)}. Open terminal to check the model.`
+            : "Could not verify Claude's model confirmation. Open terminal to check the model.");
+        }
+        typed = undefined;
         if (chosenEffort) {
           // `/effort` after the model, so the new model's own default never
           // replaces the chosen level.
           await validate(true);
-          await terminalProvider().prompt(target.server, target.pane, `/effort ${chosenEffort}`);
+          typed = `/effort ${chosenEffort}`;
+          await terminalProvider().prompt(target.server, target.pane, typed);
           const reply = await waitFor(text => claudeEffortReply(text), "Claude's effort confirmation");
+          typed = undefined;
           if ("error" in reply) throw new BridgeError(409, reply.error);
           claudeEffort = reply.effort;
         }
@@ -244,6 +301,10 @@ export class ModelSwitcher {
             const menu = visibleTerminalChoice(await this.hooks.paneLines(target));
             if (!menu || !/\b(?:(?:select|choose) model|reasoning (?:level|effort))\b/i.test(menu.title ?? "")) break;
           }
+          // One Escape keeps a command that never submitted ("esc again to
+          // clear"). The Hook typed it into an empty composer, so the Hook
+          // removes it: left there, it refuses every later switch as unsent text.
+          if (typed && unsentCommand(await this.hooks.paneLines(target), typed)) await keys(["ctrl+u"]);
         } catch { /* Identity or activity changed. Do not type further. */ }
       }
       throw error;

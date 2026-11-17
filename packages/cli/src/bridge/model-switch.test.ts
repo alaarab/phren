@@ -14,12 +14,14 @@ describe("model switch route transaction", () => {
   let switcher: ModelSwitcher, hooks: AgentHooks, stage: string, highlight: number;
   let missing: boolean, stuck: boolean, status: string, wrongFooter: boolean, draft: boolean, quick: boolean, missingEffort: boolean;
   let effortReply: string | undefined;
+  // A whole pane screen for a Claude case, in place of the staged ones below.
+  let screen: (() => string) | undefined;
   const sent = () => vi.mocked(rpc).mock.calls.filter(call => call[1] !== "agent.read").map(call => [call[1], call[2]]);
   beforeEach(() => {
     hooks = new AgentHooks();
     switcher = new ModelSwitcher(hooks, new ModelCatalog(async () => [astra], async () => [{ id: "claude-opus-5-5", name: "Opus 5.5" }]), 20);
     stage = "idle"; highlight = 0; missing = false; stuck = false; wrongFooter = false; draft = false; status = "idle"; quick = false; missingEffort = false;
-    effortReply = undefined;
+    effortReply = undefined; screen = undefined;
     vi.mocked(validateTarget).mockReset().mockImplementation(async () => ({ terminal_id: "t1", agent_status: status }));
     vi.mocked(rpc).mockReset().mockImplementation(async (_server, method, params) => {
       if (method === "agent.prompt") {
@@ -37,6 +39,7 @@ describe("model switch route transaction", () => {
         return {};
       }
       if (method === "agent.read") {
+        if (screen) return { read: { text: screen() } };
         const labels = stage === "quick" ? ["Auto", "All models"] : stage === "model" ? ["GPT-5.6-Sol", missing ? "GPT-Other" : "GPT-6-Astra (current)"] : ["Low", missingEffort ? "Minimal" : "Medium (default)", "High", "Extra high"];
         const text = ["quick", "model", "effort"].includes(stage)
           ? `${stage === "effort" ? "Select Reasoning Level for GPT-6-Astra" : "Select Model"}\n\n${labels.map((label, i) => `${i === highlight ? "›" : " "} ${i + 1}. ${label}  Description`).join("\n")}\nPress enter to confirm or esc to go back`
@@ -131,6 +134,33 @@ describe("model switch route transaction", () => {
   it("sends Claude's alias once and verifies its confirmation", async () => {
     expect(await switcher.switch({ ...target, source: "claude" }, { model: "opus" })).toEqual({ ok: true, model: "claude-opus-5-5", name: "Opus 5.5" });
     expect(sent()).toEqual([["agent.prompt", { target: target.pane, text: "/model opus" }]]);
+  });
+  // Claude Code 2.1.326's screens, as read from a live pane.
+  const rule = "──────────", composer = `${rule}\n❯\n${rule}\n  ⏵⏵ auto mode on (shift+tab to cycle)`;
+  const question = ["▔▔▔▔▔▔▔▔▔▔", "   Switch model?", "   Your next response will be slower and use more tokens",
+    "   This conversation is cached for the current model. Switching to Opus 5.5 means the full history gets", "   re-read.",
+    "   ❯ 1. Yes, switch to Opus 5.5", "     2. No, go back", "   Enter to confirm · Esc to cancel"].join("\n");
+  const claude = { ...target, source: "claude" as const };
+  it("answers Claude's question about the conversation cache, then verifies the switch", async () => {
+    // An earlier switch to the same model is still on screen while Claude asks.
+    const earlier = "● ok\n❯ /model opus\n  ⎿  Set model to Opus 5.5\n❯ /model fable\n  ⎿  Set model to Fable 5.2";
+    screen = () => stage === "idle" ? `${earlier}\n${composer}`
+      : stage === "claude" ? `${earlier.slice(5)}\n${question}`
+      : `${earlier.slice(5)}\n❯ /model opus\n  ⎿  Set model to Opus 5.5 and saved as your default for new sessions\n${composer}`;
+    expect(await switcher.switch(claude, { model: "opus" })).toEqual({ ok: true, model: "claude-opus-5-5", name: "Opus 5.5" });
+    expect(sent()).toEqual([["agent.prompt", { target: target.pane, text: "/model opus" }], ["agent.send_keys", { target: target.pane, keys: ["enter"] }]]);
+  });
+  it("says so when Claude keeps its model", async () => {
+    const kept = "❯ /model opus\n  ⎿  Kept model as Fable 5.2";
+    screen = () => stage === "claude" ? `${kept}\n${kept}\n${composer}` : `● ok\n${kept}\n${composer}`;
+    await expect(switcher.switch(claude, { model: "opus" })).rejects.toThrow("Claude kept Fable 5.2");
+  });
+  it("removes its own command when Claude never took it, and reads no earlier reply as the answer", async () => {
+    const kept = "❯ /model opus\n  ⎿  Kept model as Fable 5.2";
+    // The typed command stays in the composer; its completion menu scrolls the screen.
+    screen = () => sent().length ? `${kept}\n${rule}\n❯ /model opus\n${rule}\n  /model  Set the AI model` : `● ok\n${kept}\n${composer}`;
+    await expect(switcher.switch(claude, { model: "opus" })).rejects.toThrow("Could not verify Claude's model confirmation");
+    expect(sent().slice(1).map(call => (call[1] as { keys: string[] }).keys)).toEqual([["escape"], ["ctrl+u"]]);
   });
   it("sets Claude's effort with /effort after the model and ignores an older reply", async () => {
     effortReply = "Set effort level to high (saved as your default for new sessions): Comprehensive implementation";

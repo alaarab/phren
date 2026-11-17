@@ -666,7 +666,12 @@ the catalogue's display name, verifies the cursor before Enter, then chooses
 the requested or default reasoning effort and verifies the new model in its
 status line. An unreadable menu, missing row, or unconfirmed result returns an
 error; open menus are escaped without interrupting a working or replacement
-session. Claude receives `/model <id-or-alias>` and must show its confirmation.
+session. Claude receives `/model <id-or-alias>` and must show its confirmation
+under that command: a reply already on screen, even one for the same model,
+never counts. When Claude Code asks "Switch model?" first (2.1.326 does once the
+conversation is cached for the current model), the Hook chooses "Yes, switch to
+<name>" for the model the request named. "Kept model as" fails the switch. A
+command Claude never took is removed from its composer again.
 With `effort`, Claude then receives `/effort <level>` and must answer "Set
 effort level to" below that confirmation (a cap's lower level is returned as
 `effort`); the level must be one the catalogue lists for the model, or low,
