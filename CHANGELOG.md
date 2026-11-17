@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.86] - 2026-11-17
+
 ### Fixed
 
 - Switching a Claude chat's model from the phone works again once the chat has history. Claude Code 2.1.326 asks "Switch model?" before a switch that makes it re-read the conversation; the Hook never answered, timed out after 4 seconds and pressed Escape, so Claude kept its model. The Hook now chooses "Yes, switch to <name>" when the name is the model that was picked, and reports "Claude kept <model>" when Claude does not switch.
