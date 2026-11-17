@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.85] - 2026-11-16
+
 ### Security
 
 - `phren init` writes the store's `.gitignore` itself and adds any secret-bearing line an existing one lacks. The starter template's `.gitignore` never reached installs from npm (npm leaves `.gitignore` files out of published packages), so a store created with `npx @phren/cli init` ignored nothing: `.env` (where API keys go), `.runtime/` (credentials) and `.sessions/` could be committed and pushed. Run `phren init` again on such a store to repair it.
