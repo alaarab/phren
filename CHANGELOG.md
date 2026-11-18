@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.86] - 2026-11-17
+
 ### Added
 
 - OpenCode 2 (`@opencode/cli`) panes open in the phone's chat. OpenCode 2 runs one background service per user and the `opencode` in a pane is only its client, so the 1.x plugin never saw those panes: they sat on "Starting OpenCode…" and "Restore checkpoints could not be loaded". The Hook now asks the service which conversation a pane shows (by the pane's `OC | <title>` terminal title, or the `--session` it was started with), reads its transcript and live reply from the service, sends prompts over the service's API, shows its permission asks and questions on the phone and answers them there, stops a turn from the phone's Esc, renames the conversation, and reports when a turn starts and ends. Read on OpenCode 2.3.0; `PHREN_OPENCODE_SERVICE=off` keeps the Hook on the 1.x paths alone.
