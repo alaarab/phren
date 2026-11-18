@@ -18,6 +18,7 @@ import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { assignDaemonConversation, daemonRollouts, processTable, resumedConversation, sameDirectory, startedAt, type CodexPaneStart } from "./codex-daemon.js";
 import { codexServers } from "./codex-servers.js";
+import { opencodeServiceSession } from "./opencode-service.js";
 
 // terminal.ts and terminal-tmux.ts import this module, so it reaches them at
 // call time; a static import back would be an import cycle.
@@ -417,7 +418,9 @@ export async function opencodePidSession(pids: number[], root = phrenStoreRoot()
 }
 async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<PaneIdentity> {
   if (pane.agent === "opencode") {
-    const bound = await opencodePidSession(pids).catch(() => undefined);
+    // 1.x: the plugin in the pane's own process. 2.x: the shared service.
+    const bound = await opencodePidSession(pids).catch(() => undefined)
+      ?? await opencodeServiceSession(server, pane, async () => (await processTable()).filter(row => pids.includes(row.pid)).map(row => row.command)).catch(() => undefined);
     if (bound) return { sessionId: bound, noTranscriptLogs: false };
   }
   if (pane.agent === "copilot") {

@@ -6,6 +6,7 @@ import {
   freePort, listPaneServers, newPassword, type OpenCodePermission, type OpenCodeQuestion, openPaneClient, type PaneClient,
   type PaneServerEntry, PromptNotSent, type PromptOptions, readPaneServer, registerPaneServer, removePaneServer,
 } from "./opencode-pane-server.js";
+import { openServiceClient, servicePane, servicePanes } from "./opencode-service.js";
 import { bridgeRoot } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
 
@@ -37,16 +38,21 @@ const BRIEF_CONFIRM_MS = 10_000;
 
 export function paneServersDir(): string { return path.join(bridgeRoot(), "opencode-panes"); }
 
-/** The live server entry for a pane, if the Hook started its OpenCode. */
+/** The live server entry for a pane: the server of an OpenCode 1.x the Hook
+ * started, or OpenCode 2's shared service for a pane showing one of its
+ * conversations. */
 export function servedPane(server: string, pane: string): PaneServerEntry | undefined {
-  return readPaneServer(paneServersDir(), server, pane);
+  return readPaneServer(paneServersDir(), server, pane) ?? servicePane(server, pane);
 }
 
-export function servedPanes(): PaneServerEntry[] { return listPaneServers(paneServersDir()); }
+export function servedPanes(): PaneServerEntry[] {
+  const own = listPaneServers(paneServersDir());
+  return [...own, ...servicePanes().filter(entry => !own.some(other => paneKey(other) === paneKey(entry)))];
+}
 
 export function forgetServedPane(server: string, pane: string): void { removePaneServer(paneServersDir(), server, pane); }
 
-let clientFactory: (entry: PaneServerEntry) => PaneClient = entry => openPaneClient(entry);
+let clientFactory: (entry: PaneServerEntry) => PaneClient = entry => entry.api === 2 ? openServiceClient(entry) : openPaneClient(entry);
 export function paneClient(entry: PaneServerEntry): PaneClient { return clientFactory(entry); }
 /** For tests: build clients against a fake server; returns the restore. */
 export function setPaneClientFactory(factory: (entry: PaneServerEntry) => PaneClient): () => void {
@@ -164,6 +170,8 @@ export async function sendServedPrompt(entry: PaneServerEntry, session: string |
   // integration, no plugin record) keeps the session the Hook last showed
   // there, rather than starting a new one for every message.
   const shown = session ? undefined : shownSessions.get(shownKey);
+  // An OpenCode 2 pane shows one conversation of the service: the entry names it.
+  session ??= entry.session;
   let id = session ?? shown;
   try {
     if (id) {
@@ -220,7 +228,9 @@ export interface PaneAskSink {
   gone(key: string): void;
 }
 
-const ASK_EVENTS = new Set(["permission.asked", "permission.replied", "permission.updated", "question.asked", "question.replied", "question.rejected"]);
+const ASK_EVENTS = new Set(["permission.asked", "permission.replied", "permission.updated", "question.asked", "question.replied", "question.rejected",
+  // OpenCode 2 asks its questions as forms.
+  "form.created", "form.replied", "form.cancelled"]);
 const MAX_BACKOFF_MS = 30_000;
 export const paneKey = (entry: { server: string; pane: string }) => `${entry.server}\u0000${entry.pane}`;
 
@@ -242,7 +252,7 @@ export class PaneServerWatcher {
       const entry = current.get(key);
       // A live pane is listed again each tick, so an ask it still has keeps
       // its card however long it waits with no event.
-      if (entry && entry.pid === running.entry.pid && entry.port === running.entry.port) { void running.refresh?.().catch(() => {}); continue; }
+      if (entry && entry.pid === running.entry.pid && entry.port === running.entry.port && entry.session === running.entry.session) { void running.refresh?.().catch(() => {}); continue; }
       running.abort.abort(); this.live.delete(key); this.sink.gone(key);
     }
     for (const [key, entry] of current) {

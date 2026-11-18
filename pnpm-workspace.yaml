@@ -147,3 +147,15 @@ overrides:
   brace-expansion: ^5.0.12
   markdown-it: ^15.0.2
   linkify-it: ^6.1.0
+
+# Advisories the `advisories` CI job accepts, each with its reason. Remove an
+# entry as soon as a patched version exists.
+auditConfig:
+  ignoreGhsas:
+    # picomatch ReDoS on repeated extglobs. Every published version is
+    # affected (<= 4.0.7, no patched release as of 2026-11-17) and it is
+    # reached only through build and test tools (vite, vitest,
+    # electron-builder, @vscode/vsce); `pnpm audit --prod` is clean. The globs
+    # those tools match are ours, not untrusted input. Owner-approved
+    # 2026-11-17.
+    - GHSA-fc5q-39xc-vjpf

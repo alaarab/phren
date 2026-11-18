@@ -22,6 +22,7 @@ import { harnessStatus } from "./harness-status.js";
 import { dialogStatus, notePaneStatus, paneStatus, startupStatus } from "./pane-status.js";
 import { plainTitle } from "./session-activity.js";
 import type { TerminalPane, TerminalProvider } from "./terminal.js";
+import { servicePane } from "./opencode-service.js";
 import { herdrPanes } from "./terminal-herdr.js";
 
 /** The owner's own tmux server (the default socket). */
@@ -272,7 +273,7 @@ async function listRows(server: string): Promise<Row[]> {
 async function agentStatus(server: string, pane: string, terminal: string, agent: string, pids: number[]): Promise<{ status: string; seq: number } | undefined> {
   let status: { status: string; seq: number } | undefined;
   if (agent === "opencode" || agent === "copilot") {
-    const recorded = await harnessStatus(agent, pids).catch(() => undefined);
+    const recorded = await harnessStatus(agent, pids, agent === "opencode" ? servicePane(server, pane)?.session : undefined).catch(() => undefined);
     status = recorded ? notePaneStatus(server, pane, terminal, recorded) : undefined;
   } else status = await paneStatus(server, pane, terminal);
   const read = () => tmuxTerminal.readScreen(server, pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 });
