@@ -68,6 +68,25 @@ describe("live reply previews", () => {
       "The reply fills this row. ".repeat(4) + "Still! The next reply row.\n\nThe reply ends here.");
   });
 
+  // Owner's 2026-11-17 screen: a 108-column pane with no panel. Aligned, styled
+  // tool output was taken for one, and every row was cut at about 22 columns.
+  it("does not take aligned styled output in the reply region for a diff sidebar", () => {
+    const reply = "The duel runner now reports per-ability usage, with every ability working, though the ranger out-damages the brute on these placeholder numbers.";
+    const screen = [
+      "❯ Explain this",
+      "⏺ Bash(dotnet test)",
+      "  ⎿  Passed            \x1b[1mSimTests\x1b[22m",
+      "     Passed            \x1b[1mDuelTests\x1b[22m",
+      "     \x1b[32mranger\x1b[39m" + " ".repeat(40) + "\x1b[32m40 wins\x1b[39m",
+      "     \x1b[31mbrute\x1b[39m" + " ".repeat(41) + "\x1b[31m0 wins\x1b[39m",
+      "",
+      "⏺ The duel runner now reports per-ability usage, with every ability working, though the ranger out-damages",
+      "  the brute on these placeholder numbers.",
+      "✻ Working… (8s · esc to interrupt)", "❯",
+    ].join("\n");
+    expect(claudePanePreview(screen, "Explain this")).toBe(reply);
+  });
+
   it("withholds a read whose panel has no safe boundary", () => {
     const ambiguous = [
       "❯ Explain this", "⏺ The reply is still being written.",
