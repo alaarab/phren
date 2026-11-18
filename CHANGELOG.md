@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.87] - 2026-11-17
+
 ### Fixed
 
 - A Claude chat's live reply on the phone is no longer cut to about 20 characters a line, with a finished paragraph and the running command repeated under it. The Hook separates Claude's diff sidebar from the reply before previewing it, and took aligned, styled tool output (a test table, a diff) for that sidebar. A sidebar now has to be drawn in bold or dim/italic, at least 40 columns in.
