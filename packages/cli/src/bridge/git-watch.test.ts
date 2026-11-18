@@ -82,8 +82,13 @@ describe("live Git changes", () => {
     const service = new GitWatch({ platform, pollMs: 50 });
     try {
       await service.watch(client, root);
-      await writeFile(path.join(root, "root.txt"), "one\ntwo\n");
-      await waitFor(() => changed(client) >= 1);
+      // macOS starts delivering file events a moment after fs.watch returns,
+      // and drops what happened before. Edit again until one is seen.
+      for (let attempt = 0; changed(client) === 0; attempt++) {
+        if (attempt === 5) throw new Error("Timed out waiting for a watched frame.");
+        await writeFile(path.join(root, "root.txt"), `one\ntwo\n${attempt}\n`);
+        await waitFor(() => changed(client) >= 1, 2_000).catch(() => undefined);
+      }
       await sleep(1_500);
       expect(changed(client)).toBe(1);
       const frame = client.frames.find(entry => entry.type === "changed")!;
