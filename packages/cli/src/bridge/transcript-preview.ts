@@ -328,7 +328,12 @@ function claudeReplyRegion(screen: string[]): string[] | undefined {
       if (text.trim()) {
         const style = [...styles].sort(([a], [b]) => a - b).map(([key, value]) => `${key}:${value}`).join(";");
         const before = plain + text.slice(0, text.length - text.trimStart().length);
-        if (before.length >= 20 && / {4,}$/.test(before) && style && style !== inkStyle) {
+        // A panel is drawn in bold or dim/italic only, beside a reply at least
+        // MIN_WRAP_WIDTH wide. Coloured or padded tool output (a diff, a table,
+        // a command's aligned columns) nearer the left edge is the reply
+        // region's own text, never a panel: cropping there cut every row short.
+        const panelStyle = [...styles.keys()].every(key => key === 1 || key === 2 || key === 3);
+        if (before.length >= MIN_WRAP_WIDTH && / {4,}$/.test(before) && style && panelStyle && style !== inkStyle) {
           columns.set(before.length, (columns.get(before.length) ?? 0) + 1);
         }
         inkStyle = style;
