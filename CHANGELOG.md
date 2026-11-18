@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode 2 (`@opencode/cli`) panes open in the phone's chat. OpenCode 2 runs one background service per user and the `opencode` in a pane is only its client, so the 1.x plugin never saw those panes: they sat on "Starting OpenCode…" and "Restore checkpoints could not be loaded". The Hook now asks the service which conversation a pane shows (by the pane's `OC | <title>` terminal title, or the `--session` it was started with), reads its transcript and live reply from the service, sends prompts over the service's API, shows its permission asks and questions on the phone and answers them there, stops a turn from the phone's Esc, renames the conversation, and reports when a turn starts and ends. Read on OpenCode 2.3.0; `PHREN_OPENCODE_SERVICE=off` keeps the Hook on the 1.x paths alone.
+- An OpenCode 2 chat's model can be switched from the phone: the Hook sets it on the conversation over the service, for the turns after the current one, and confirms what the service holds. OpenCode 1.x still answers 422 with a direction to its `/models` picker.
+- Launching OpenCode on a computer with OpenCode 2 works: the Hook creates the conversation in the service with the launch's model, agent and effort, starts the pane on it (`opencode --session <id>`), and sends the brief over the API. The 1.x flags it used to pass (`--port`, `--model`, `--agent`, `--variant`) do not exist in OpenCode 2's TUI.
+
 ### Fixed
 
 - Switching a Claude chat's model from the phone works again once the chat has history. Claude Code 2.1.326 asks "Switch model?" before a switch that makes it re-read the conversation; the Hook never answered, timed out after 4 seconds and pressed Escape, so Claude kept its model. The Hook now chooses "Yes, switch to <name>" when the name is the model that was picked, and reports "Claude kept <model>" when Claude does not switch.

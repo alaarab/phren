@@ -676,7 +676,7 @@ With `effort`, Claude then receives `/effort <level>` and must answer "Set
 effort level to" below that confirmation (a cap's lower level is returned as
 `effort`); the level must be one the catalogue lists for the model, or low,
 medium, high, xhigh or max when it lists none.
-OpenCode returns 422 with a direction to use its terminal `/models` picker.
+An OpenCode 2 pane takes the model over its service (`POST /api/session/{id}/model`) for the turns after the current one, working or idle; the reply carries `applies: "next-turn"`, and `effort` is sent as the model's variant. OpenCode 1.x returns 422 with a direction to use its terminal `/models` picker.
 A Codex pane on the Hook's own app-server is not driven through its menu: the
 model and effort are checked against the catalogue and held for the pane's next
 Hook-sent turn (`turn/start` overrides, which Codex keeps for later turns). The
@@ -2479,7 +2479,7 @@ that restarted) replaces its preview with `text`. Health advertises
 | --- | --- | --- |
 | phren agent | provider text deltas in `<event log>.preview.json`, written at most every 100 ms | token-level, `streamed: true` |
 | Codex | the thread's in-progress `agentMessage` (Hook app-server or `thread_history_1.sqlite`), else rollout `agent_message_delta` rows | as often as Codex records deltas, `streamed: true` |
-| OpenCode | the plugin's `.preview.json`, flushed with its event log | token-level, `streamed: true` |
+| OpenCode | the plugin's `.preview.json`, flushed with its event log; for OpenCode 2 the unfinished answer the service holds, written to the same sidecar on each read | token-level (1.x) or per read (2.x), `streamed: true` |
 | Claude Code | the pane, read at most twice a second, anchored to the prompt, until the turn's first entry lands | screen text, no `delta`; later blocks arrive per block as entries |
 | Copilot | none (only its thinking state) | per block, as entries |
 

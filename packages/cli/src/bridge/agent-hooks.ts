@@ -465,7 +465,8 @@ export class AgentHooks {
     const client = this.servedClient(served.server, served.pane);
     // Everywhere writes the user's config before the pane is unblocked, so a
     // failed write leaves the ask answerable rather than half-answered.
-    if (decision === "allow-everywhere") await allowOpencodeToolEverywhere(held.request.type);
+    // OpenCode 2 keeps an "always" answer itself (its saved permissions); its config has no such block to write.
+    if (decision === "allow-everywhere" && servedPane(served.server, served.pane)?.api !== 2) await allowOpencodeToolEverywhere(held.request.type);
     try { await client.replyPermission(id, reply); }
     catch { throw new BridgeError(409, "This approval is no longer pending."); }
     this.opencode.delete(id); this.pushBindings.dropAction(id);

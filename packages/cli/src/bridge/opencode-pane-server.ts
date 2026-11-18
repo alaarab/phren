@@ -38,6 +38,11 @@ export interface PaneServerEntry {
   /** What the TUI was started with (`--agent`, `--model`, `--variant`), for
    * the first prompt of a session that has no earlier turn to follow. */
   defaults?: { agent?: string; model?: string; variant?: string };
+  /** 2 for a pane of OpenCode 2's shared service (opencode-service.ts): the
+   * port, password and pid are the service's, never written to the registry. */
+  api?: 2;
+  /** The conversation an OpenCode 2 pane shows. */
+  session?: string;
 }
 
 export interface OpenCodeSession {

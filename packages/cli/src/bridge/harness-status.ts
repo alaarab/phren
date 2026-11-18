@@ -13,6 +13,7 @@ import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { copilotForegroundSession } from "./herdr.js";
+import { opencodeServiceStatus } from "./opencode-service.js";
 import { object } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
@@ -126,9 +127,10 @@ export async function copilotProcessStatus(pids: number[], home = process.env.CO
 
 /** The status `agent`'s own records give for a pane running `pids`, for the
  * harnesses whose lifecycle hooks say nothing about turns. */
-export async function harnessStatus(agent: string, pids: number[]): Promise<string | undefined> {
+export async function harnessStatus(agent: string, pids: number[], session?: string): Promise<string | undefined> {
+  // An OpenCode 2 pane's own process records nothing: its service says whether the conversation is at work.
+  if (agent === "opencode") return await (pids.length ? opencodeProcessStatus(pids) : undefined) ?? (session ? opencodeServiceStatus(session) : undefined);
   if (!pids.length) return undefined;
-  if (agent === "opencode") return opencodeProcessStatus(pids);
   if (agent === "copilot") return copilotProcessStatus(pids);
   return undefined;
 }

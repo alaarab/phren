@@ -10,6 +10,7 @@ import path from "node:path";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider, type Target } from "./protocol.js";
 import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
+import { materializeOpencodeSession, opencodeSessionsRoot } from "./opencode-service.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 import { fanoutChildren } from "./fanouts.js";
 import { claudeChildAgents, claudePromptIdentity, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
@@ -261,7 +262,10 @@ export async function transcriptPath(source: Provider, session: string, account?
   if (!chosen) {
     // Codex 0.155 keeps new threads only in its sqlite store; the Hook
     // materializes those into a rollout-shaped file of its own.
-    const materialized = source === "codex" ? await materializeCodexThread(session) : undefined;
+    // OpenCode 2 keeps its sessions in its service; the Hook writes them
+    // out in the shape the 1.x plugin wrote.
+    const materialized = source === "codex" ? await materializeCodexThread(session)
+      : source === "opencode" ? await materializeOpencodeSession(session) : undefined;
     if (materialized) return materialized;
     throw new BridgeError(404, "The transcript is not available for this conversation.", { code: "transcript-unavailable" });
   }
@@ -270,10 +274,11 @@ export async function transcriptPath(source: Provider, session: string, account?
   return file;
 }
 
-/** Keeps a materialized Codex thread current before a read; a no-op for
- * transcripts the agent writes itself. */
+/** Keeps a materialized Codex thread or OpenCode 2 session current before a
+ * read; a no-op for transcripts the agent writes itself. */
 export async function refreshTranscript(file: string, source: Provider, session: string): Promise<void> {
   if (source === "codex" && file.startsWith(materializedRoot() + path.sep)) await materializeCodexThread(session);
+  if (source === "opencode" && file.startsWith(opencodeSessionsRoot() + path.sep)) await materializeOpencodeSession(session);
 }
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */

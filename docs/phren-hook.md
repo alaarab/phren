@@ -613,6 +613,26 @@ first), and stops a working turn from the phone's Esc with `session.abort`.
 The pane stays the owner's live view of the same conversation. An OpenCode
 started by hand keeps the typed path and the plugin's approval files.
 
+OpenCode 2 (`@opencode/cli`) is different: one background service per user
+(`opencode serve --service`) holds every conversation, and the `opencode` in a
+pane is only its client, so no plugin runs in the pane. The Hook reads the
+service's address and password from `~/.local/state/opencode/service.json` and
+treats every OpenCode 2 pane, started by hand or by the Hook, like a served
+one. It finds the pane's conversation by its terminal title (`OC | <title>`;
+one conversation with that title in the pane's folder) or by the `--session`
+the pane was started with, writes the conversation out as the plugin's event
+log under `<bridge>/opencode-sessions/`, sends prompts with
+`POST /api/session/{id}/prompt`, lists permission asks and question forms for
+the pane's folder and answers them on the conversation that asked (a
+subagent's asks reach its parent's pane), interrupts with
+`/api/session/{id}/interrupt`, renames with `PATCH /api/session/{id}` and
+switches the model with `/api/session/{id}/model`. "Allow everywhere" is
+OpenCode's own `always`, which the service saves; no config file is written.
+A launch creates the conversation first, with the model, agent and effort, and
+starts the pane with `opencode --session <id>`. A pane whose title names no
+conversation, or two, has no chat until it is started on one or its title
+becomes unique. `PHREN_OPENCODE_SERVICE=off` turns all of this off.
+
 On iOS, a request received in an open chat or discovered from the foreground
 session overview can create a Live Activity with Deny and Approve on the Lock
 Screen and Dynamic Island. Tapping either authenticates
