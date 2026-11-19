@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.88] - 2026-11-18
+
 ### Fixed
 
 - `GET /v1/dispatch` no longer sends the whole receipt ledger, which reached a megabyte at about 550 receipts. A phone reads it every 20 seconds for the conductor card's one line, and on iOS that dropped Tailscale while the app was open. It now answers `{dispatches,total,truncated}` with the 20 receipts that have the newest activity, `?limit=` for up to 1024, `?id=` for one receipt, and at most 256 KB of receipts in any answer. `phren dispatch status` lists the newest 100. `phren dispatch wait` asks for its receipt by id; it used to fail with "Hook response is too large" once the ledger passed 1 MB.
