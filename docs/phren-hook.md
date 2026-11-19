@@ -924,6 +924,13 @@ With the conductor module enabled, health capabilities `queuedHandOff`,
 `workerReports` and `ownerInbox` are true. Older Hooks omit them. The phone must
 check the relevant capability before offering the new surface.
 
+- `GET /v1/dispatch`: `{dispatches,total,truncated}`. `dispatches` holds the
+  receipts with the newest activity (a return, else the last update), newest
+  dispatch first: 20 by default, `?limit=1..1024` for more, and never more
+  than 262,144 bytes of receipts. `total` counts the whole ledger. A phone
+  that wants the latest dispatch or return for a card should send `limit=1`.
+  Hooks up to 0.3.33 ignore `limit` and send every receipt, a megabyte once
+  the ledger holds a few hundred.
 - `POST /v1/dispatch/report`: `{origin:{server,workspace,tab,pane},prs:[{url,repo,branch,tests,notes?}]}`.
   The Hook resolves the live conversation, requires its submitted turn record,
   and returns `{ok:true,target,prs}`. A missing or changed binding is a 409.

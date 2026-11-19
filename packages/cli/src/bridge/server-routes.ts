@@ -20,7 +20,7 @@ import type { AgentHooks } from "./agent-hooks.js";
 import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeRoutes } from "./code-routes.js";
 import type { WorkspaceContextUsage } from "./context.js";
-import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema } from "./dispatch.js";
+import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema, recentDispatches } from "./dispatch.js";
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId } from "./launch-brief.js";
@@ -369,7 +369,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }
           case "/v1/owner-inbox": result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" }, url.searchParams.get("local") === "1"); break;
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
-          case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
+          case "/v1/dispatch": {
+            // A bounded list: the phone reads this on a timer for one line.
+            const limit = z.coerce.number().int().min(1).max(1024).optional().parse(url.searchParams.get("limit") ?? undefined);
+            result = recentDispatches(await dispatchStatus(), limit); break;
+          }
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
           case "/v1/approval-rules": result = { rules: await listApprovalRules(undefined,

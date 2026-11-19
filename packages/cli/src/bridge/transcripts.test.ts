@@ -43,7 +43,8 @@ describe("transcript image payloads", () => {
   });
 
   it("strips structured data URLs while preserving string results, tool arguments, and unknown blocks", async () => {
-    const url = "data:image/png;base64," + Buffer.alloc(100_000, 37).toString("base64");
+    // Small enough that the three rows share one page.
+    const url = "data:image/png;base64," + Buffer.alloc(10_000, 37).toString("base64");
     const structuredImage = { type: "input_image", image_url: url };
     const events = [
       { type: "response_item", payload: { type: "function_call_output", call_id: "image", output: [text, structuredImage, { type: "unknown", data: url }] } },

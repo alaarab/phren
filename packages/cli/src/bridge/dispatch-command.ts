@@ -16,7 +16,7 @@ export async function runDispatch(args: string[]): Promise<number> {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch/report", { origin, prs: prsSchema.parse(JSON.parse(values.prs)) }), null, 2)); return 0;
   }
   if (args.length === 1 && args[0] === "status") {
-    console.log(JSON.stringify(await hookRequest("/v1/dispatch"), null, 2)); return 0;
+    console.log(JSON.stringify(await hookRequest("/v1/dispatch?limit=100"), null, 2)); return 0;
   }
   if (args.length === 1 && args[0] === "returns") {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch/returns", {}), null, 2)); return 0;

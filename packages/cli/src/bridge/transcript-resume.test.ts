@@ -113,6 +113,82 @@ describe("a phone resuming the conductor's chat", () => {
     expect(phone.lines()).toEqual(new Set(await visibleLines()));
   });
 
+  /** A Bash call and its output of `size` characters, as two transcript lines. */
+  function callWithOutput(at: number, size: number): string[] {
+    const id = `toolu_big_${at}`, timestamp = new Date(Date.UTC(2026, 8, 29, 23, 0) + at * 1_000).toISOString();
+    return [
+      JSON.stringify({ type: "assistant", uuid: `u${at}`, timestamp, message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: { command: "redacted" } }] } }),
+      JSON.stringify({ type: "user", uuid: `u${at + 1}`, timestamp, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `START${"x".repeat(size)}END` }] } }),
+    ];
+  }
+  /** The frame the Hook sends for a page, in bytes. */
+  const frameBytes = (page: object) => Buffer.byteLength(JSON.stringify({ ...page, type: "backlog", source: "claude", session: "00000000-0000-4000-8000-000000000000" }));
+  const FRAME_LIMIT = 262_144;
+
+  it("sends a reconnect delta larger than a page whole and in order, in frames under 256 KB", async () => {
+    const start = WINDOW.slice(0, 5);
+    await writeFile(file, start.map((kind, at) => row(kind, at)).join("\n") + "\n");
+    const phone = new Phone();
+    phone.receive(await new TranscriptReader(file, "claude").read());
+    // Six tool outputs of 100 KB land while the socket is down.
+    const outputs = Array.from({ length: 6 }, (_, turn) => start.length + turn * 2 + 1);
+    await appendFile(file, outputs.flatMap(line => callWithOutput(line - 1, 100_000)).join("\n") + "\n");
+    const total = start.length + outputs.length * 2;
+
+    let reader = new TranscriptReader(file, "claude");
+    const frames = [await reader.readAfter(phone.afterLine)];
+    phone.receive(frames[0]);
+    expect(frames[0].entries[0].line).toBe(start.length);
+    expect(phone.totalLines).toBeLessThan(total);
+    // The socket drops after the first page; the phone reconnects from its cursor.
+    reader = new TranscriptReader(file, "claude");
+    frames.push(await reader.readAfter(phone.afterLine));
+    phone.receive(frames[1]);
+    // Each later poll of the same stream sends the next page.
+    while (phone.totalLines < total) { frames.push(await reader.read()); phone.receive(frames.at(-1)!); }
+
+    for (const frame of frames) { expect(frameBytes(frame)).toBeLessThan(FRAME_LIMIT); expect(frame.reset).toBe(false); }
+    const received = frames.flatMap(frame => frame.entries.map(entry => entry.line));
+    expect(received).toEqual([...received].sort((a, b) => a - b));
+    for (const line of outputs) expect(phone.lines().has(line)).toBe(true);
+  });
+
+  it("replaces a delta too large to page with its newest page, and scrolling up reaches the rest", async () => {
+    const start = WINDOW.slice(0, 5);
+    await writeFile(file, start.map((kind, at) => row(kind, at)).join("\n") + "\n");
+    const phone = new Phone();
+    phone.receive(await new TranscriptReader(file, "claude").read());
+    // Thirty tool outputs of 100 KB, 3 MB in all, land while the socket is down.
+    const outputs = Array.from({ length: 30 }, (_, turn) => start.length + turn * 2 + 1);
+    await appendFile(file, outputs.flatMap(line => callWithOutput(line - 1, 100_000)).join("\n") + "\n");
+
+    const newest = await new TranscriptReader(file, "claude").readAfter(phone.afterLine);
+    expect(frameBytes(newest)).toBeLessThan(FRAME_LIMIT);
+    // It stops short of the phone's cursor, so it says it replaces the chat.
+    expect(newest.startLine).toBeGreaterThan(start.length);
+    expect(newest.reset).toBe(true);
+    phone.receive(newest);
+    expect(phone.lines().has(outputs.at(-1)!)).toBe(true);
+    for (let before = newest.startLine; before > 0;) {
+      const older = await new TranscriptReader(file, "claude").read(before);
+      expect(frameBytes(older)).toBeLessThan(FRAME_LIMIT);
+      expect(older.startLine).toBeLessThan(before);
+      phone.receive(older);
+      before = older.startLine;
+    }
+    for (const line of outputs) expect(phone.lines().has(line)).toBe(true);
+  });
+
+  it("shows the start and end of a tool output of several megabytes instead of leaving it out", async () => {
+    await writeFile(file, [row("voice", 0), ...callWithOutput(1, 3_000_000)].join("\n") + "\n");
+    const page = await new TranscriptReader(file, "claude").read();
+    expect(frameBytes(page)).toBeLessThan(FRAME_LIMIT);
+    const output = JSON.stringify(page.entries.find(entry => entry.line === 2)?.raw);
+    expect(output).toContain("STARTxxx");
+    expect(output).toContain("xxxEND");
+    expect(output).toContain("characters left out");
+  });
+
   it("keeps tool output visible when change capture fails and reports its error", async () => {
     await writeFile(file, ["call", "result", "reply"].map((kind, at) => row(kind, at)).join("\n") + "\n");
     const changes: ChangeLookup = { pending: () => false,

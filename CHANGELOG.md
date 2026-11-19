@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The Hook no longer sends a phone megabyte answers, which knocked Tailscale out on iOS while the app was open. `GET /v1/dispatch`, which the phone reads every 20 seconds for the conductor card's one line, sent the whole receipt ledger (1 MB at 550 receipts); it now lists the 20 receipts with the newest activity, `?limit=` for more, and at most 256 KB. `phren dispatch status` lists the newest 100.
+- Every transcript page (opening, reconnect, live append, older) carries at most 192 KB of rows. A reconnect or live delta larger than a page arrives in order, a page per poll, instead of in one frame of up to 4 MB. A single row of several megabytes is shown with its start and end; rows over 2 MB used to be left out.
+
 ## [0.3.33] - 2026-10-06
 
 ### Fixed

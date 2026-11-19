@@ -2937,6 +2937,30 @@ schedules:
       expect((await api("/v1/conductor")).data.conductor).toMatchObject({ server: "default", target: { workspace: conductor.data.workspaceId, source: "codex" } });
     });
 
+    it("lists the dispatch receipts with the newest activity in a bounded answer", async () => {
+      // The ledger keeps every worker's final reply: 120 receipts of 4 KB each.
+      const directory = path.join(root, "bridge/dispatches");
+      await mkdir(directory, { recursive: true });
+      const day = (n: number) => new Date(Date.UTC(2026, 0, 1 + n)).toISOString();
+      const id = (n: number) => `40000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+      for (let n = 0; n < 120; n++) {
+        await writeFile(path.join(directory, `${id(n)}.json`), JSON.stringify({ id: id(n), computer: "Devbox", project: "phren", harness: "codex", label: `Worker ${n}`,
+          state: "accepted", createdAt: day(n), updatedAt: day(n),
+          // The oldest dispatch is the one that returned last.
+          returned: { state: "done", at: n === 0 ? day(500) : day(n), reply: "r".repeat(4000), read: true } }));
+      }
+      const recent = (await api("/v1/dispatch")).data;
+      expect(Buffer.byteLength(JSON.stringify(recent))).toBeLessThan(262_144);
+      expect(recent).toMatchObject({ total: 120, truncated: true });
+      expect(recent.dispatches.map((receipt: any) => receipt.label)).toEqual([...Array.from({ length: 19 }, (_, at) => `Worker ${119 - at}`), "Worker 0"]);
+      expect((await api("/v1/dispatch?limit=1")).data.dispatches.map((receipt: any) => receipt.label)).toEqual(["Worker 0"]);
+      // Asking for everything still gets a bounded answer.
+      const all = (await api("/v1/dispatch?limit=1024")).data;
+      expect(Buffer.byteLength(JSON.stringify(all))).toBeLessThan(300_000);
+      expect(all).toMatchObject({ total: 120, truncated: true });
+      expect((await api("/v1/dispatch?limit=0")).status).toBe(400);
+    });
+
     it("dispatches through a fake SSH pipe to a second Hook and its registered project", async () => {
       await dispatchFixture();
       const sending = api("/v1/dispatch", { computer: "Devbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });

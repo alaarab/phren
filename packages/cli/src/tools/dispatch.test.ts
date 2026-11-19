@@ -56,7 +56,7 @@ describe("dispatch entry points", () => {
     expect(hookRequest).toHaveBeenCalledWith("/v1/dispatch", brief, undefined, 180_000);
     vi.mocked(hookRequest).mockResolvedValue({ dispatches: [] });
     expect(await command.run(["status"], context)).toBe(0);
-    expect(hookRequest).toHaveBeenLastCalledWith("/v1/dispatch");
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/dispatch?limit=100");
   });
 
   it.each(["core", "full"] as const)("hands off locally through the %s MCP profile", async profile => {

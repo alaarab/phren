@@ -1595,6 +1595,27 @@ transcript. An identified conversation whose transcript has not been written
 yet still opens an empty transcript WebSocket and waits for it; startup does
 not trigger terminal fallback merely because its file is absent.
 
+### Transcript page size
+
+Every transcript page carries at most 196,608 bytes of rows, so its frame
+stays under 256 KB: the opening `backlog` (60 entries at most), a reconnect
+with `afterLine`, a live `append`, an `older` page on the socket and
+`GET /v1/transcripts/history` (200 entries at most). Larger frames knocked a
+phone's Tailscale tunnel out.
+
+- A reconnect or live delta of up to four pages is sent whole and in order,
+  one page per 500 ms poll. Each page's `totalLines` is the line after its
+  last row, not the file's length, so a phone that reconnects after
+  `totalLines - 1` gets the rest.
+- A larger delta, or one of more than 200 entries, is answered with its
+  newest page as `type: "backlog"` with `reset: true`. Its `startLine` is the
+  cursor for the older pages.
+- A single line larger than a page has its long strings shortened to their
+  start and end around `… (N characters left out)`. JSON kept as text (tool
+  arguments) is shortened inside, so it still parses. The line is never left
+  out. `GET /v1/transcripts/blob` is not paged: it returns one image's bytes,
+  up to 8 MiB.
+
 ### Live transcript previews
 
 The transcript WebSocket includes `preview: {turnStartedAt, text}` or

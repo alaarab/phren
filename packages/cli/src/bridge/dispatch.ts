@@ -184,6 +184,31 @@ export async function dispatchStatus(): Promise<Receipt[]> {
   return receipts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/** Receipts `GET /v1/dispatch` lists when the caller names no `limit`. */
+export const DISPATCH_LIST_DEFAULT = 20;
+/** Bytes of receipts one `GET /v1/dispatch` answer carries, whatever its `limit`. */
+export const DISPATCH_LIST_BYTES = 262_144;
+
+/**
+ * The receipts with the newest activity (a return, else the last update), in
+ * the ledger's newest-first order. The ledger keeps up to 1024 receipts with
+ * each worker's final reply, and a phone reads this list on a timer for one
+ * line about the newest one: sending all of it was a megabyte per read.
+ */
+export function recentDispatches(receipts: Receipt[], limit = DISPATCH_LIST_DEFAULT, byteLimit = DISPATCH_LIST_BYTES): { dispatches: Receipt[]; total: number; truncated: boolean } {
+  const activity = (receipt: Receipt) => receipt.returned?.at ?? receipt.updatedAt;
+  const kept = new Set<Receipt>();
+  let bytes = 0;
+  for (const receipt of [...receipts].sort((a, b) => activity(b).localeCompare(activity(a)))) {
+    if (kept.size >= limit) break;
+    bytes += Buffer.byteLength(JSON.stringify(receipt));
+    // The newest receipt is always listed, whatever its size.
+    if (kept.size && bytes > byteLimit) break;
+    kept.add(receipt);
+  }
+  return { dispatches: receipts.filter(receipt => kept.has(receipt)), total: receipts.length, truncated: kept.size < receipts.length };
+}
+
 /** `caller` (a conductor's name and host key) asks a peer whether it links this computer back:
  * `outside` is a peer in another set, which a conductor does not dispatch to. */
 type Room = { source: string; account?: string; leftPercent?: number; exhausted?: boolean; until?: string };
