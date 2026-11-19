@@ -2452,6 +2452,29 @@ Transcript entries may include `promptEntryId`. Clients may offer “Restore fil
 
 The field appears on live WebSocket backlog and append pages, older pages and `GET /v1/transcripts/history` responses alike, and survives a Hook restart because it is read from the transcript. Codex and OpenCode omit it; their chat-turn restore stays unavailable.
 
+### Transcript page size
+
+Every transcript page carries at most 196,608 bytes of rows, so its frame
+stays under 256 KB: the opening `backlog` (60 entries at most), a reconnect
+with `afterLine`, a live `append`, an `older` page on the socket and
+`GET /v1/transcripts/history` (200 entries at most). Larger frames knocked a
+phone's Tailscale tunnel out.
+
+- A reconnect or live delta of up to four pages is sent whole and in order,
+  one page per 500 ms poll. Each page's `totalLines` is the line after its
+  last row, not the file's length, so a phone that reconnects after
+  `totalLines - 1` gets the rest.
+- A larger delta, or one of more than 200 entries, is answered with its
+  newest page as `type: "backlog"` with `reset: true`. Its `startLine` is the
+  cursor for the older pages.
+- A single line larger than a page has its long strings shortened to their
+  start and end around `… (N characters left out)`. JSON kept as text (tool
+  arguments) is shortened inside, so it still parses. A line of thousands of
+  short items keeps the start and end of each long list. Only a line that
+  still cannot fit (one object of thousands of short values) is left out;
+  lines over 2 MB used to be. `GET /v1/transcripts/blob` is not paged: it
+  returns one image's bytes, up to 8 MiB.
+
 ### Live transcript previews
 
 The transcript WebSocket includes `preview: {turnStartedAt, text}` or

@@ -8,6 +8,7 @@ import { claudeAccountRef, claudeHomeOfPath, claudeHomes, type AccountRef } from
 import { paneAccount, paneAccountKey } from "./pane-accounts.js";
 import path from "node:path";
 import { withTranscriptIndex } from "./transcript-index.js";
+import { clampRows, DELTA_BYTES, PAGE_BYTES } from "./transcript-budget.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider, type Target } from "./protocol.js";
 import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
 import { materializeOpencodeSession, opencodeSessionsRoot } from "./opencode-service.js";
@@ -361,7 +362,8 @@ export async function completionEntry(file: string, source: Provider, promptAt: 
           (before, after) => index.rows(handle, before, after));
         if (!raw || raw.isSidechain === true) continue;
         const projected = projectTranscriptRows(raw, source).rows.map(value => chatFrame(value, source));
-        if (!projected.length || Buffer.byteLength(JSON.stringify(projected)) >= 2_097_152) continue;
+        // A line the reader leaves out of every page cannot be the last row.
+        if (!projected.length || clampRows(projected).size > PAGE_BYTES) continue;
         // Progress can repeat the final reply verbatim. Require terminal
         // evidence even when the text matches the Stop's complete reply.
         if (source === "claude") {
@@ -452,8 +454,14 @@ export class TranscriptReader {
       // rest in fuller pages. A live tail (nextLine known) stays small too.
       const opening = before === undefined && (pastEnd || (!resuming && (reset || this.nextLine === 0)));
       const entryBudget = opening ? 60 : 200;
-      const byteBudget = opening ? 1_048_576 : 4_194_304;
+      // A delta continues what the phone holds (a reconnect from its cursor,
+      // the live tail). It is collected up to DELTA_BYTES so that one larger
+      // than a page can still be sent whole, a page per read.
+      const delta = before === undefined && !opening && this.imageLine === undefined;
+      const byteBudget = delta ? DELTA_BYTES : PAGE_BYTES;
       let bytes = 0, cursor = end, held: number | undefined;
+      // One per transcript line, newest first like `entries`.
+      const groups: { line: number; count: number; size: number }[] = [];
       // Claude's queue pairing: the row scan is newest-first, so a prompt turn
       // is seen before the content-free dequeue that delivered it. The bindings
       // name the phone message behind each queue occurrence when the Hook has
@@ -485,7 +493,7 @@ export class TranscriptReader {
               // that diff is still being computed on the live tail, the row
               // (and the newer rows already collected) waits for the next read.
               const ids = outputCallIds(raw, this.source);
-              if (before === undefined && ids.some(id => this.changes!.pending(id))) { held = row.line; entries.length = 0; bytes = 0; cursor = row.line; continue; }
+              if (before === undefined && ids.some(id => this.changes!.pending(id))) { held = row.line; entries.length = 0; groups.length = 0; bytes = 0; cursor = row.line; continue; }
               const attached: Json = {};
               const failures: Json = {};
               for (const id of ids) {
@@ -510,25 +518,49 @@ export class TranscriptReader {
           }
         } catch { /* A malformed old row cannot block the next readable page. */ }
         if (rows.length) {
-          const size = Buffer.byteLength(JSON.stringify(rows));
-          if (this.imageLine !== undefined || size < 2_097_152) {
-            // Leave an entry that doesn't fit for the following history page.
-            if (this.imageLine === undefined && bytes + size > byteBudget) break;
+          // An image read keeps its bytes; every other line is shortened to
+          // fit a page. One that still cannot fit (one object of thousands
+          // of short values) is left out rather than sent as a larger frame.
+          const fitted = this.imageLine === undefined ? clampRows(rows) : { rows, size: 0 };
+          if (fitted.size <= PAGE_BYTES) {
+            // Leave a line that doesn't fit for the following page.
+            if (this.imageLine === undefined && bytes + fitted.size > byteBudget) break;
             // Rows arrive newest first; reverse a row's blocks so the page
             // lists several calls from one source in the order they were written.
-            entries.push(...rows.slice().reverse().map(raw => ({ line: row.line, raw, ...(promptEntryId ? { promptEntryId } : {}) })));
-            bytes += size;
+            entries.push(...fitted.rows.slice().reverse().map(raw => ({ line: row.line, raw, ...(promptEntryId ? { promptEntryId } : {}) })));
+            groups.push({ line: row.line, count: fitted.rows.length, size: fitted.size });
+            bytes += fitted.size;
           }
         }
         cursor = row.line;
         if (entries.length >= entryBudget) break;
       }
+      if (delta && bytes > PAGE_BYTES) {
+        if (cursor > lower) {
+          // More than a delta's worth is new: keep the newest page of it.
+          // The page is marked a replacement below, as any that stops short.
+          while (groups.length > 1 && bytes > PAGE_BYTES) {
+            const oldest = groups.pop()!;
+            entries.length -= oldest.count; bytes -= oldest.size;
+          }
+          cursor = groups.at(-1)!.line;
+        } else {
+          // The whole delta is here. Send its oldest page now and hold the
+          // rest for the next reads, so the phone gets every row in order
+          // and a dropped socket resumes after the last page it received.
+          while (groups.length > 1 && bytes > PAGE_BYTES) {
+            const newest = groups.shift()!;
+            entries.splice(0, newest.count); bytes -= newest.size; held = newest.line;
+          }
+        }
+      }
       // Live reads run newest first. After a long disconnect or a burst of
       // output, a bounded page can stop before the phone's cursor. Mark that
       // page as a replacement so its start becomes a usable older-page cursor
-      // instead of silently merging two disjoint windows. A pending diff
-      // holds its row for a later poll and is not a completed page.
-      const skippedLiveLines = before === undefined && held === undefined && cursor > lower;
+      // instead of silently merging two disjoint windows. Rows held for a
+      // later read (a pending diff, the rest of a delta) are not skipped:
+      // the scan still reached the phone's cursor.
+      const skippedLiveLines = before === undefined && cursor > lower;
       // One prompt identity on several displayed prompts is ambiguous, so
       // none of them may claim it, whichever page or reader sees it.
       // A cursor resume must also invalidate identities retained by the phone,

@@ -579,7 +579,7 @@ test("Home's Saved today card says so when every read fails", async ({ page }) =
 test("Home reads and handles keys only while shown, including a hidden first mount", async ({ page }) => {
   let receipts = 0;
   let schedules = 0;
-  await page.route("**/v1/dispatch", async (route) => {
+  await page.route(/\/v1\/dispatch(\?|$)/, async (route) => {
     receipts++;
     await route.fulfill({ json: { dispatches: [] } });
   });

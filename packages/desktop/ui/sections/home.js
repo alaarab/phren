@@ -1,6 +1,6 @@
 import { createActiveTasks } from "./home/active-tasks.js";
 import { createSavedToday } from "./home/saved-today.js";
-import { hookGet, hookPost } from "../api.js";
+import { DISPATCH_LIST, hookGet, hookPost } from "../api.js";
 import { projectOf, sessions, store } from "../shell/store.js";
 import { approvals } from "../shell/approvals.js";
 import { followUsage } from "../shell/usage-rings.js";
@@ -145,7 +145,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     const online = (state.merged?.computers ?? []).filter((c) => c.state === "online");
     const answers = await Promise.all(online.map(async (c) => {
       try {
-        const body = await hookGet(c.computer, "/v1/dispatch");
+        const body = await hookGet(c.computer, "/v1/dispatch", DISPATCH_LIST);
         const list = Array.isArray(body.dispatches) ? body.dispatches : [];
         return [c.computer, list.map((receipt) => ({ receipt, computer: receipt.computer || c.computer }))];
       } catch (error) {

@@ -18,7 +18,7 @@ describe("dispatch wait", () => {
     const acked: Json[] = [];
     let reads = 0;
     const { code, lines } = await run(async (route, data) => {
-      if (route === "/v1/dispatch") return { dispatches: [{ id, target }] };
+      if (route === `/v1/dispatch?id=${id}`) return { dispatches: [{ id, target }] };
       if (route.startsWith("/v1/dispatch/returns?")) {
         reads++;
         if (reads === 1) return { returns: [{ id: other, state: "failed", error: "other worker", at }] };
@@ -38,13 +38,13 @@ describe("dispatch wait", () => {
   });
 
   it("ends failed and gone with exit 1", async () => {
-    const failed = await run(async route => route === "/v1/dispatch"
+    const failed = await run(async route => route === `/v1/dispatch?id=${id}`
       ? { dispatches: [{ id, target }] }
       : route.startsWith("/v1/dispatch/returns?") ? { returns: [{ id, state: "failed", error: "tests failed", at }] } : { ok: true });
     expect(failed.code).toBe(1);
     expect(failed.lines.at(-1)).toMatchObject({ state: "failed", final: true, error: "tests failed" });
 
-    const gone = await run(async route => route === "/v1/dispatch"
+    const gone = await run(async route => route === `/v1/dispatch?id=${id}`
       ? { dispatches: [{ id, target }] }
       : route.startsWith("/v1/dispatch/returns?") ? { returns: [] } : { workers: [{ state: "gone" }] });
     expect(gone.code).toBe(1);
@@ -54,7 +54,7 @@ describe("dispatch wait", () => {
   it("times out with exit 124 and says an unknown id failed after its grace period", async () => {
     const lines: Json[] = [];
     const code = await waitForDispatch(id, { intervalMs: 1, jitter: false, timeoutMs: 1, out: line => lines.push(line),
-      request: async route => route === "/v1/dispatch" ? { dispatches: [{ id, target }] } : { returns: [] } });
+      request: async route => route === `/v1/dispatch?id=${id}` ? { dispatches: [{ id, target }] } : { returns: [] } });
     expect(code).toBe(124);
     expect(lines.at(-1)).toMatchObject({ dispatch: id, state: "timeout", final: true });
 
@@ -72,7 +72,7 @@ describe("dispatch wait", () => {
     const code = await waitForDispatch(id, { intervalMs: 1, jitter: false, now: () => clock,
       sleep: async ms => { clock += ms; }, out: line => lines.push(line),
       request: async route => {
-        if (route === "/v1/dispatch") return { dispatches: [{ id, state: "launching", createdAt: "2026-11-08T10:00:00.000Z" }] };
+        if (route === `/v1/dispatch?id=${id}`) return { dispatches: [{ id, state: "launching", createdAt: "2026-11-08T10:00:00.000Z" }] };
         if (route.startsWith("/v1/dispatch/returns?")) {
           reads++;
           return { returns: reads < 3 ? [] : [{ id, state: "failed", error: "launch interrupted", at: new Date(clock).toISOString() }] };
@@ -92,16 +92,16 @@ describe("dispatch wait", () => {
       expect(lines.at(-1)).toMatchObject({ state: "failed", final: true, error: expect.stringContaining("unavailable") });
     };
     await failedWith(async route => {
-      if (route === "/v1/dispatch") throw new Error("list down");
+      if (route === `/v1/dispatch?id=${id}`) throw new Error("list down");
       return { returns: [] };
     });
     await failedWith(async route => {
-      if (route === "/v1/dispatch") return { dispatches: [{ id, target }] };
+      if (route === `/v1/dispatch?id=${id}`) return { dispatches: [{ id, target }] };
       if (route.startsWith("/v1/dispatch/returns?")) throw new Error("peek down");
       return { workers: [{ state: "working" }] };
     });
     await failedWith(async route => {
-      if (route === "/v1/dispatch") return { dispatches: [{ id, target }] };
+      if (route === `/v1/dispatch?id=${id}`) return { dispatches: [{ id, target }] };
       if (route.startsWith("/v1/dispatch/returns?")) return { returns: [] };
       throw new Error("workers down");
     });
@@ -114,7 +114,7 @@ describe("dispatch wait", () => {
     const code = await waitForDispatch(id, { intervalMs: 1, jitter: false, now: () => clock,
       sleep: async ms => { clock += ms; }, out: line => lines.push(line),
       request: async route => {
-        if (route === "/v1/dispatch") return { dispatches: [{ id, target }] };
+        if (route === `/v1/dispatch?id=${id}`) return { dispatches: [{ id, target }] };
         if (route.startsWith("/v1/dispatch/returns?")) {
           reads++;
           if (reads < 3) return { returns: [{ id, state: "needs-you", question: "Q?", at: new Date(0).toISOString() }] };

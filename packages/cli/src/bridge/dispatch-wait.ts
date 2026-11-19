@@ -87,7 +87,9 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
     let receipt: Json | undefined, returned: Json | undefined, worker: Json | undefined, peeked: Json | undefined;
     let listError: unknown, peekError: unknown, workerError: unknown;
     try {
-      const list = await request("/v1/dispatch");
+      // The list is bounded to the newest activity; ask for this receipt by
+      // id. A Hook that predates `id` answers with every receipt.
+      const list = await request(`/v1/dispatch?id=${encodeURIComponent(id)}`);
       receipt = objects(list.dispatches).find(row => row.id === id);
     } catch (error) { listError = error; }
     try {

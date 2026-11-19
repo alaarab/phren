@@ -1719,6 +1719,14 @@ With the conductor module enabled, health capabilities `queuedHandOff`,
 `workerReports` and `ownerInbox` are true. Older Hooks omit them. The phone must
 check the relevant capability before offering the new surface.
 
+- `GET /v1/dispatch`: `{dispatches,total,truncated}`. `dispatches` holds the
+  receipts with the newest activity (the later of a return and the last
+  update), newest dispatch first: 20 by default, `?limit=1..1024` for more,
+  and never more than 262,144 bytes of receipts. `total` counts the whole
+  ledger. `?id=<dispatch id>` answers with that one receipt, or none, wherever
+  it sits in the ledger. A phone that wants the latest dispatch or return for
+  a card should send `limit=1`. Hooks up to 0.3.87 ignore both parameters and
+  send every receipt, a megabyte once the ledger holds a few hundred.
 - `POST /v1/dispatch/close-self`: `{origin:{server,workspace,tab,pane}}`. An agent closing the pane it runs in (CLI: `phren dispatch close-self`, the form of `herdr pane close` that an agent's auto mode allows). The close is recorded as intentional (no gone return), runs after the reply, and only ever touches the named pane; a pane already gone answers `{ok:true,closed:false}`.
 - `POST /v1/dispatch/report`: `{origin:{server,workspace,tab,pane},prs:[{url,repo,branch,tests,notes?}],dispatch?}`.
   The Hook resolves the live conversation, requires its submitted turn record,

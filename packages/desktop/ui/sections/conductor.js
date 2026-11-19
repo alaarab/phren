@@ -4,7 +4,7 @@ import { HARNESS_LABELS } from "../harness.js";
 // standing grants, linked computer sets and the release authority policy.
 // This is the phone's Conductor screens, drawn with the desktop shell's CSS.
 // Everything reads through each computer's Hook (the daemon's /hosts proxy).
-import { hookGet, hookPost } from "../api.js";
+import { DISPATCH_LIST, hookGet, hookPost } from "../api.js";
 import { stateChip } from "../shell/returns.js";
 import { sessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
@@ -693,7 +693,7 @@ export function mountConductor(root) {
   async function loadDispatches() {
     const online = onlineComputers().map((c) => c.computer);
     const results = await Promise.all(online.map(async (computer) => {
-      const body = await hookGet(computer, "/v1/dispatch").catch(() => null);
+      const body = await hookGet(computer, "/v1/dispatch", DISPATCH_LIST).catch(() => null);
       return { computer, dispatches: Array.isArray(body?.dispatches) ? body.dispatches : [] };
     }));
     state.receipts.clear();

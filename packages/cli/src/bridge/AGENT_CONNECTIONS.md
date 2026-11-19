@@ -204,7 +204,7 @@ WebSockets on the same socket.
 | --- | --- |
 | `GET /v1/health` | Protocol, capabilities, computer identity. |
 | `POST /v1/dispatch` | Place a worker brief on an enrolled computer over pinned SSH. Returns a durable receipt and remote target; never automatically retries a mutation. |
-| `GET /v1/dispatch`, `/v1/dispatch/capacity` | Local placement receipts, with each worker's last observed state and latest return; running Herdr servers and working-agent count for scheduling. |
+| `GET /v1/dispatch`, `/v1/dispatch/capacity` | Local placement receipts, with each worker's last observed state and latest return: the 20 with the newest activity, `?limit=` for more, `?id=` for one, at most 256 KB; running Herdr servers and working-agent count for scheduling. |
 | `GET /v1/dispatch/arrival?id=<id>` | Receiving side of a brief that went with the launch: `{ arrival: { started?, accepted? } }` as the worker's SessionStart and UserPromptSubmit hooks reported it by `PHREN_DISPATCH_ID`, each with its time and target; `arrival: null` when this computer wrote no such brief. |
 | `POST /v1/dispatch/workers` | Receiving side of the returns loop: the state of up to 64 dispatched targets from the shared Herdr snapshot, plus a stopped worker's final reply (at most 4000 bytes). Keeps no dispatch state. |
 | `POST /v1/dispatch/returns` | Unread worker returns (done, needs-you, failed, blocked, gone), marked read as they are returned. With `?peek=1` the same rows are listed and left unread (answered by this Hook, never forwarded to a successor, refused from a peer); `phren dispatch returns --watch` reads them so. |

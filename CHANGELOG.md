@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `GET /v1/dispatch` no longer sends the whole receipt ledger, which reached a megabyte at about 550 receipts. A phone reads it every 20 seconds for the conductor card's one line, and on iOS that dropped Tailscale while the app was open. It now answers `{dispatches,total,truncated}` with the 20 receipts that have the newest activity, `?limit=` for up to 1024, `?id=` for one receipt, and at most 256 KB of receipts in any answer. `phren dispatch status` lists the newest 100. `phren dispatch wait` asks for its receipt by id; it used to fail with "Hook response is too large" once the ledger passed 1 MB.
+- Every transcript page (opening, reconnect, live append, older, `GET /v1/transcripts/history`) carries at most 192 KB of rows, so a frame stays under 256 KB. It was 1 MB for the opening page and 4 MB for the others. A reconnect or live delta larger than a page arrives in order, a page per poll. A single row of several megabytes is shown with its start and end; rows over 2 MB used to be left out.
+
 ## [0.3.87] - 2026-11-17
 
 ### Fixed
