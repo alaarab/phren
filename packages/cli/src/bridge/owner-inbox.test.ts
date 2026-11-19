@@ -8,6 +8,7 @@ import { OwnerInbox, type InboxItem, type InboxSource } from "./owner-inbox.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import { hookPeers, peerRequest } from "./peers.js";
 vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
+const linked = (name: string) => ({ name, address: `${name.toLowerCase()}.example`, username: "sam", port: 22 });
 let root: string, sources: InboxSource[];
 const inbox = () => new OwnerInbox(async () => sources, path.join(root, "owner-inbox.json"));
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-inbox-")); sources = []; vi.mocked(hookPeers).mockResolvedValue([]); });
@@ -124,7 +125,7 @@ describe("owner inbox", () => {
   it("filters legacy stale peer rows and merges a forwarded approval with its worker inbox", async () => {
     const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex" as const, session: "11111111-1111-4111-8111-111111111111" };
     sources = [{ source: "dispatch:1", kind: "blocked", title: "Approve test run", computer: "Desk", target, actionId: "q1" }];
-    vi.mocked(hookPeers).mockResolvedValue([{ name: "Desk" }] as never);
+    vi.mocked(hookPeers).mockResolvedValue([linked("Desk")] as never);
     vi.mocked(peerRequest).mockResolvedValue({ items: [
       { id: "stale", kind: "blocked", state: "open", live: false },
       { id: "manual", kind: "manual", state: "open", title: "Owner decision" },
@@ -136,7 +137,7 @@ describe("owner inbox", () => {
     expect((await ownerInboxView(inbox(), { includeResolved: true })).items).toHaveLength(4);
   });
   it("lists peer inboxes without recursion, reports unreachable peers and routes resolution to the owning Hook", async () => {
-    vi.mocked(hookPeers).mockResolvedValue([{ name: "Desk" }, { name: "Offline" }] as never);
+    vi.mocked(hookPeers).mockResolvedValue([linked("Desk"), linked("Offline")] as never);
     vi.mocked(peerRequest).mockImplementation(async (peer, route, body) => {
       if (peer.name === "Offline") throw Error("offline");
       return body ? { ok: true, item: { id: "remote-id", state: "resolved" } } : { items: [{ id: "remote-id", kind: "manual", title: "Remote question" }] };

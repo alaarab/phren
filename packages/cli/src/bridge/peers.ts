@@ -8,6 +8,8 @@ import { tryFileLock } from "../governance/locks.js";
 import { logger } from "../logger.js";
 import { hookRequest } from "./client.js";
 import { dispatchKeyPath, publicComputerKey } from "./computers.js";
+import { countPeer } from "./metrics.js";
+import { peerAnswered, peerDidNotAnswer, peerTimedOut } from "./peer-reach.js";
 // computerName comes from protocol.js, where it is defined: through computers.js it can still be
 // undefined when an import cycle (usage -> account-choice -> health -> peers) loads this file first.
 import { atomic, BridgeError, bridgeRoot, computerName, serverName, withErrorCode, type Json } from "./protocol.js";
@@ -123,8 +125,31 @@ export function peerOfflineMessage(diagnostic: string, exitCode: number | null |
   return `The remote Hook is offline or SSH did not confirm the request${details ? ` (${details})` : ""}.`;
 }
 
-/** A pin is supplied out of band; dispatch never learns or replaces host keys. */
+/**
+ * A pin is supplied out of band; dispatch never learns or replaces host keys. One SSH login per call, always
+ * dialed: what the owner asked for (a dispatch, a hand-off, a link) is never answered from memory. Reads that
+ * poll or fan out go through `peerRead` (peer-reads.ts). Each outcome is reported to peer-reach.ts.
+ */
 export async function peerRequest(peer: HookPeer, route: string, data?: Json, timeout?: number): Promise<Json> {
+  countPeer(routeName(route));
+  try {
+    const answer = await dialPeer(peer, route, data, timeout);
+    peerAnswered(peer);
+    return answer;
+  } catch (error) {
+    const code = error instanceof BridgeError ? error.details?.code : undefined;
+    if (code === "peer-offline") peerDidNotAnswer(peer, error as BridgeError);
+    else if (code === "peer-timeout") peerTimedOut(peer, () => new BridgeError(503, "The remote Hook is offline or SSH did not confirm the request (no answer from its SSH port).", { code: "peer-offline" }));
+    // Its Hook answered with an error of its own. A refused key or pin, or a missing local key or ssh, says nothing either way.
+    else if (error instanceof BridgeError && !["peer-key-not-enrolled", "peer-host-key-mismatch", "dispatch-key-missing", "ssh-unavailable"].includes(String(code))) peerAnswered(peer);
+    throw error;
+  }
+}
+
+/** A route as a metric name: its path, without the query a caller wrote. */
+const routeName = (route: string) => route.split("?")[0].replace(/^\/+/, "").replace(/\//g, ".").slice(0, 48) || "other";
+
+async function dialPeer(peer: HookPeer, route: string, data?: Json, timeout?: number): Promise<Json> {
   const root = bridgeRoot(), key = dispatchKeyPath(root);
   const info = await lstat(key).catch(() => undefined);
   if (!info?.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw new BridgeError(409, "Run phren bridge enroll-computer on this computer first (private key mode 0600).", { code: "dispatch-key-missing" });

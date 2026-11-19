@@ -8,7 +8,8 @@ import { getProjectDirs } from "../phren-paths.js";
 import { resolveAllStores } from "../store-registry.js";
 import { publicComputerKey } from "./computers.js";
 import { localHostKeyLine } from "./host-key.js";
-import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
+import { peerRead } from "./peer-reads.js";
+import { hookPeers, type HookPeer } from "./peers.js";
 import { BridgeError, bridgeRoot, errorCode, type Json } from "./protocol.js";
 import { canonicalComputer, latestScheduleBatch, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
 import { countGit } from "./metrics.js";
@@ -258,13 +259,14 @@ async function probePeer(peer: HookPeer, caller: { name: string; hostKey?: strin
     let listsBack: boolean | null = null;
     let version: string | undefined;
     try {
-      const answer = await peerRequest(peer, `/v1/health/peers?${query}`, undefined, PEER_TIMEOUT_MS);
+      // No kept answer: this is read straight after a link to see that it took.
+      const answer = await peerRead(peer, `/v1/health/peers?${query}`, { timeout: PEER_TIMEOUT_MS });
       listsBack = answer.knowsCaller === true;
       if (typeof answer.version === "string") version = answer.version;
     } catch (error) {
       // A Hook from before /v1/health/peers still proves it is reachable.
       if (!(error instanceof BridgeError && error.status === 404)) throw error;
-      const answer = await peerRequest(peer, "/v1/health", undefined, Math.max(1_000, PEER_TIMEOUT_MS - (Date.now() - started)));
+      const answer = await peerRead(peer, "/v1/health", { timeout: Math.max(1_000, PEER_TIMEOUT_MS - (Date.now() - started)) });
       if (typeof answer.version === "string") version = answer.version;
     }
     return { name: peer.name, reachable: true, ms: Date.now() - started, listsBack, ...(version ? { version } : {}) };

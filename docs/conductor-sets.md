@@ -154,7 +154,10 @@ phren conductor sets name "Home"    # or --clear
 - Loading: unresolved peer names may require a second parallel SSH round to
   `/v1/computers` (up to 12 seconds after the conductor replies, themselves
   bounded by 8 seconds). Known names skip this round. A missing or offline
-  identity directory retains the name-only view.
+  identity directory retains the name-only view. A directory is reused for a
+  minute, and one that did not come is not asked for again for a minute. A
+  peer already known to be off is not waited for (see "Peer reads" in
+  `phren-hook.md`).
 - Rename set: `POST /v1/sets/name` on any reachable member of that set.
 - Link: for an `indirect` or `one-way` member, when that computer's Hook has
   `capabilities.setLink`, offer Link and post `/v1/sets/link` with the

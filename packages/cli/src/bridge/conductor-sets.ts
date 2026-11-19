@@ -6,6 +6,7 @@ import { askPeers, buildSets, indirectMembers, localCaller } from "./conductor-g
 import { readSetName, saveSetName } from "./conductor-role.js";
 import { listsCaller } from "./health.js";
 import { type LinkResult, linkComputer } from "./link.js";
+import { PEER_READ_TTL_MS, peerRead, peerReader } from "./peer-reads.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import { BridgeError, type Json, object } from "./protocol.js";
 import { ownerRequest } from "./request-origin.js";
@@ -34,11 +35,15 @@ export async function conductorAnswer(info: LocalInfo, url: URL): Promise<Json> 
  * the slow ones and showed linked computers as unlinked. A peer past this
  * shows as unreachable in this reading only; conductor checks keep 8 s. */
 export const SETS_PEER_TIMEOUT_MS = 4_000;
+/** How long a peer's identity directory (names and ids, nothing live) is reused, and how long one that did not
+ * come is not asked for again. Asking makes that peer probe every peer of its own, so one sets view on each of
+ * six computers set off about 15 further SSH logins per computer. */
+const DIRECTORY_TTL_MS = 60_000;
 
 export async function readSets(info: LocalInfo): Promise<Json> {
   const [{ peers, peerError }, conductor, set, { computers }] = await Promise.all([optionalHookPeers(), localConductor(), readSetName(),
     readComputers({ local: { id: info.computer.id } })]);
-  const answers = await askPeers(peers, await localCaller(), undefined, SETS_PEER_TIMEOUT_MS);
+  const answers = await askPeers(peers, await localCaller(), peerReader(PEER_READ_TTL_MS), SETS_PEER_TIMEOUT_MS);
   // Old /v1/conductor replies list peer names without ids. Resolve unknown
   // names through the existing identity directory, also on older Hooks.
   // Skip this extra round when names already identify every member.
@@ -46,7 +51,7 @@ export async function readSets(info: LocalInfo): Promise<Json> {
   const reportedComputers = (await Promise.all(answers.map(async answer => {
     if (!answer.ok || answer.knowsCaller === false || !answer.peers?.some(name => indirect.has(computerLabel(name)))) return [];
     try {
-      const directory = await peerRequest(answer.peer, "/v1/computers", undefined, 2 * SETS_PEER_TIMEOUT_MS);
+      const directory = await peerRead(answer.peer, "/v1/computers", { timeout: 2 * SETS_PEER_TIMEOUT_MS, ttl: DIRECTORY_TTL_MS, failTtl: DIRECTORY_TTL_MS });
       return (Array.isArray(directory.computers) ? directory.computers.slice(0, 64) : []).flatMap(value => {
         const row = object(value);
         return typeof row.id === "string" && typeof row.name === "string" ? [{ id: row.id, name: row.name,

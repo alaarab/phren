@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readSetName, resetRoleState } from "./conductor-role.js";
 import { conductorAnswer, linkSetMember, nameSet, readSets } from "./conductor-sets.js";
 import { formatSets } from "./dispatch-command.js";
+import { refreshPeerReads } from "./peer-reads.js";
 import { BridgeError, type Json } from "./protocol.js";
 
 const mocks = vi.hoisted(() => ({ peers: [] as Json[], request: vi.fn() }));
@@ -20,7 +21,7 @@ const peer = (name: string) => ({ name, address: `${name.toLowerCase()}.example`
 const info = { computer: { id: "30000000-0000-4000-8000-000000000002", name: "Workstation" } };
 
 let root: string;
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-conductor-sets-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); resetRoleState(); mocks.request.mockReset(); });
+beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-conductor-sets-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); resetRoleState(); mocks.request.mockReset(); refreshPeerReads(); });
 afterEach(async () => { vi.unstubAllEnvs(); resetRoleState(); await rm(root, { recursive: true, force: true }); });
 
 describe("GET /v1/conductor", () => {
