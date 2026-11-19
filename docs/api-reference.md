@@ -496,6 +496,9 @@ friendly peer name for display and keeping its conductor. The `self` row has
 no link hint; clients should key computers by `id` when present. Unresolved
 names are checked through peers' `/v1/computers` directories in a second
 parallel round; unavailable directories retain the name-only view.
+These reads, like every read that goes to all peers, answer at once for a
+peer known to be off and take `refresh=1` to dial every peer again (see
+"Peer reads" in [phren-hook.md](phren-hook.md)).
 `/v1/health` lists `conductorSets` among its capabilities. See
 [Conductor sets](conductor-sets.md).
 

@@ -1,7 +1,8 @@
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
 import { localNames } from "./computer-names.js";
-import { optionalHookPeers, peerRequest } from "./peers.js";
+import { PEER_READ_TTL_MS, peerRead } from "./peer-reads.js";
+import { optionalHookPeers } from "./peers.js";
 import { bridgeRoot, object } from "./protocol.js";
 
 /** One real computer. `name` is what dispatch, hand_off and grants accept: the
@@ -160,7 +161,7 @@ export async function readComputers(options: ReadOptions = {}): Promise<{ comput
     if (options.probe) {
       let timer: NodeJS.Timeout | undefined;
       try {
-        const health = await Promise.race([peerRequest(peer, "/v1/health", undefined, PROBE_MS),
+        const health = await Promise.race([peerRead(peer, "/v1/health", { timeout: PROBE_MS, ttl: PEER_READ_TTL_MS }),
           new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), PROBE_MS); timer.unref(); })]);
         const computer = object(health.computer);
         const names = [computer.name, ...(Array.isArray(computer.aliases) ? computer.aliases : [])].filter((name): name is string => typeof name === "string");
