@@ -29,6 +29,9 @@ export async function hookPost(computer, route, body) {
   }));
 }
 
+/** `GET /v1/dispatch` lists a Hook's 20 newest receipts unless asked for more (the answer stays under 256 KB). */
+export const DISPATCH_LIST = { limit: "200" };
+
 /** GET a Hook route with query parameters (an object). */
 export async function hookGet(computer, route, query = {}, { signal } = {}) {
   const search = new URLSearchParams(query).toString();

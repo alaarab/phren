@@ -3,7 +3,7 @@ import { el } from "../dom.js";
 // along with the head commit's checks, the integrator for that computer and the
 // owner's release authority. Merge and Publish appear only where the policy is
 // ask-first; pressing one confirms the action through the Hook.
-import { hookGet, hookPost } from "../api.js";
+import { DISPATCH_LIST, hookGet, hookPost } from "../api.js";
 import { projectOf, sessions, store } from "../shell/store.js";
 
 const CSS_ID = "trains-css";
@@ -128,7 +128,7 @@ export function mountTrains(container) {
   // ---- data -----------------------------------------------------------
 
   async function loadReturns(computer) {
-    const body = await hookGet(computer, "/v1/dispatch").catch(() => null);
+    const body = await hookGet(computer, "/v1/dispatch", DISPATCH_LIST).catch(() => null);
     state.returns.set(computer, Array.isArray(body?.dispatches) ? body.dispatches : []);
   }
 

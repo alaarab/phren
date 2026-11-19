@@ -734,7 +734,9 @@ Each row names the dispatch ID, computer, project, label and the worker's
 takes more work and finishes again produces a new return. The receipt keeps
 the worker's last observed state in `worker` and the latest return in
 `returned`, so `phren dispatch status` shows them too, and a finished lead
-reads as completed in `/v1/subagents`.
+reads as completed in `/v1/subagents`. `phren dispatch status` lists the 100
+receipts with the newest activity, fewer when they exceed 256 KB; `total` and
+`truncated` say whether the ledger holds more.
 
 The dispatch `label` is also the worker's session name: the receiving Hook
 keeps it in `<bridge>/briefs/<id>/label` and shows it as the session's title

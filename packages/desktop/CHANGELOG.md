@@ -6,6 +6,10 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [Unreleased]
 
+### Improved
+
+- **Dispatch lists** (Home, Conductor, Review, Trains) ask each Hook for its 200 most recently active dispatches. Hooks newer than CLI 0.3.87 list 20 unless asked, in answers of at most 256 KB, so a computer with hundreds of old dispatches no longer sends a megabyte on every refresh. Desktop 0.1.16 and earlier show the 20 most recent per computer with such a Hook.
+
 ### Security
 
 - **The app's own pages** can be shown only inside the app. Web previews and extension frames share the app's site, so before, a previewed page could have loaded the signed-in app inside itself and tricked a click.

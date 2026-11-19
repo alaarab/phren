@@ -254,7 +254,7 @@ export const REGISTRY: Command[] = [
   {
     name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
-    subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
+    subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List the 100 local dispatch receipts with the newest activity" },
       { name: "wait", usage: "phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json] [--follow]", summary: "Follow one local dispatch to its end as NDJSON; exits 0 done, 1 failed or gone, 124 timeout" },
       { name: "close", usage: "phren dispatch close <dispatch-id> | phren dispatch close --idempotency-key <key>", summary: "Cancel a running local dispatch by id or idempotency key: stop its agent and close its pane" },
       { name: "returns", usage: "phren dispatch returns [--watch [--json] [--consume]]", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read; --watch prints them as they land until Ctrl-C, leaving them unread unless --consume" },

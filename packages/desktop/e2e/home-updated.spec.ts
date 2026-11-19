@@ -31,14 +31,14 @@ test("Home says how long ago it loaded, ticks, and Refresh reloads and resets th
   await page.clock.fastForward(35_000);
   await expect(label(page)).toHaveText(/Updated 3\ds ago/);
   await page.screenshot({ path: test.info().outputPath("home-aged.png") });
-  const before = h!.hook.calls.filter((c) => c.path === "/v1/dispatch").length;
+  const before = h!.hook.calls.filter((c) => c.path.split("?")[0] === "/v1/dispatch").length;
   await refresh(page).click();
   await expect(refresh(page)).toBeDisabled();
   await expect(label(page)).toHaveText(/Updated 3\ds ago/);
   release();
   await expect(refresh(page)).toBeEnabled();
   await expect(label(page)).toHaveText("Updated just now");
-  expect(h!.hook.calls.filter((c) => c.path === "/v1/dispatch").length).toBeGreaterThan(before);
+  expect(h!.hook.calls.filter((c) => c.path.split("?")[0] === "/v1/dispatch").length).toBeGreaterThan(before);
 });
 
 test("a failed Refresh keeps the old label and says Refresh failed", async ({ page }) => {

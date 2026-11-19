@@ -3,7 +3,7 @@ import { el } from "../dom.js";
 // computers becomes a queue item; each opens to its report and its diff, where
 // the owner leaves line comments that go back to that worker as one prompt, or
 // marks the work reviewed. Reads each computer's Hook through the daemon proxy.
-import { hookGet, hookPost, readRepoFile } from "../api.js";
+import { DISPATCH_LIST, hookGet, hookPost, readRepoFile } from "../api.js";
 import { stateChip } from "../shell/returns.js";
 import { sessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
@@ -300,7 +300,7 @@ export function mountReview(root) {
     if (state.mode !== "queue") return;
     const mine = ++pollGeneration;
     const results = await Promise.all(onlineComputers().map(async (c) => {
-      const body = await hookGet(c.computer, "/v1/dispatch").catch(() => null);
+      const body = await hookGet(c.computer, "/v1/dispatch", DISPATCH_LIST).catch(() => null);
       return [c.computer, Array.isArray(body?.dispatches) ? body.dispatches : []];
     }));
     if (mine !== pollGeneration) return;

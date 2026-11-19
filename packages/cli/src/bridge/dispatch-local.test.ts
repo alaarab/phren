@@ -402,7 +402,7 @@ describe("local dispatch", () => {
     const lines: Json[] = [];
     const code = await waitForDispatch(placed.id, { intervalMs: 1, jitter: false, out: line => lines.push(line),
       request: async (route, data) => {
-        if (route === "/v1/dispatch") return { dispatches: await dispatchStatus() };
+        if (route === `/v1/dispatch?id=${placed.id}`) return { dispatches: await dispatchStatus() };
         if (route.startsWith("/v1/dispatch/returns")) return { returns: [] };
         return { ok: true, ...(data ?? {}) };
       } });
