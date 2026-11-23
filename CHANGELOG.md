@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.90] - 2026-11-22
+
 ### Fixed
 
 - A linked computer that is off no longer slows every other Hook. With one of six computers asleep, `GET /v1/sets` took 12 s, `/v1/owner-inbox` 10 s, `/v1/computers` 8 s and `/v1/health/details` 5 s on each of the others, on every read, because each read waited out the SSH timeout again; the phone waits on these. A Hook now remembers a peer that did not answer and answers for it at once with the same error. It checks again after 5 seconds, doubling to 2 minutes, with one TCP connect to the peer's SSH port instead of a login. Measured against the same computers the reads take about 3 s, which is the slowest computer that is on. A dispatch, a hand-off and a link still dial every time.
