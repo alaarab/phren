@@ -903,7 +903,7 @@ socket.on('close', () => process.exit(0));
       // The counters saw the Herdr calls, identity probe and timers behind the reads above.
       const metrics = await api("/v1/metrics");
       expect(metrics.status).toBe(200);
-      expect(Object.keys(metrics.data).sort()).toEqual(["git", "herdr", "identity", "pid", "startedAt", "timers", "uptimeSeconds"]);
+      expect(Object.keys(metrics.data).sort()).toEqual(["git", "herdr", "identity", "peers", "pid", "startedAt", "timers", "uptimeSeconds"]);
       expect(metrics.data.herdr["session.snapshot"].total).toBeGreaterThan(0);
       expect(metrics.data.herdr["pane.process_info"].total).toBeGreaterThan(0);
       expect(Object.keys(metrics.data.identity).length).toBeGreaterThan(0);

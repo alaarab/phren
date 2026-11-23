@@ -957,6 +957,33 @@ through the peer that asked it. The same `code` appears on unreachable rows in
 | `peer-key-not-enrolled` | The peer refused this computer's dispatch key. |
 | `peer-host-key-mismatch` | The peer's SSH host key does not match its pin. |
 
+### Peer reads
+
+A Hook reaches a linked computer over one SSH login per request. The reads
+that go to every peer (`/v1/sets`, `/v1/computers`, `/v1/owner-inbox`,
+`/v1/health/details`, and `/v1/usage`, `/v1/resources` and `/v1/housekeeping`
+with `peers=1`) share that cost:
+
+- **A peer that is off is remembered.** After SSH fails to connect, or a wait
+  runs out and the peer's SSH port does not answer a TCP connect, these reads
+  answer for that peer at once with its last error (`code: "peer-offline"`)
+  instead of waiting out the SSH timeout again. The wait before the next check
+  starts at 5 seconds and doubles to 2 minutes. The check is one TCP connect to
+  the SSH port, no login; when the port answers, the next read dials. Any
+  answer from the peer's Hook forgets it.
+- **Reads arriving together share one login** per peer and route.
+- **Answers are reused for 5 seconds**, except the owner inbox and health
+  details, which are read fresh each time. The identity directory `/v1/sets`
+  asks peers for is reused for a minute.
+- **`refresh=1`** on any `GET` forgets all of this first, so every peer is
+  dialed. Send it for an explicit refresh; an older Hook ignores it.
+
+The memory is per Hook process and never written to disk. A dispatch, a
+hand-off, a link and every other request the owner makes still dial every
+time, and their outcome updates the same memory. Response shapes are
+unchanged. `GET /v1/metrics` counts logins by route under `peers`, and reads
+answered without one as `saved.offline`, `saved.shared` and `saved.cached`.
+
 ### Store sync
 
 The Hook reconciles every store this computer has with its remote every five

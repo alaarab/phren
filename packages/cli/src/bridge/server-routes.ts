@@ -48,6 +48,7 @@ import { listApprovalRules, changeApprovalRule } from "./approval-rules.js";
 import { addGrant, listGrants, listNamedGrants, removeGrant } from "./grants.js";
 import { clearProjectAuthority, confirmAuthority, listConfirmations, projectAuthority, readAuthority, setProjectAuthority } from "./authority.js";
 import { readComputers } from "./computer-identity.js";
+import { PEER_READ_TTL_MS, peerRead, refreshPeerReads } from "./peer-reads.js";
 import { hookPeers, optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
@@ -449,7 +450,7 @@ async function within<T>(ms: number, value: Promise<T>): Promise<T | undefined> 
 async function fromPeers(route: string): Promise<{ peers: Json[]; peerError?: string }> {
   const { peers, peerError } = await optionalHookPeers();
   const answers = await Promise.all(peers.map(async peer => {
-    try { return { name: peer.name, ...await peerRequest(peer, route, undefined, 15_000) }; }
+    try { return { name: peer.name, ...await peerRead(peer, route, { timeout: 15_000, ttl: PEER_READ_TTL_MS }) }; }
     catch (error) {
       const code = error instanceof BridgeError && typeof error.details?.code === "string" ? error.details.code : undefined;
       const older = error instanceof BridgeError && error.status === 404;
@@ -520,6 +521,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (url.pathname.startsWith("/v1/store/")) {
         result = await storeRoute(modules.store, request.method ?? "", url, request.method === "POST" ? await body(request) : undefined);
       } else if (request.method === "GET") {
+        // The owner asked for a fresh reading (pull to refresh, `phren computers`): peers are dialed again.
+        if (url.searchParams.get("refresh") === "1") refreshPeerReads();
         switch (url.pathname) {
           case "/v1/tasks": result = getTaskRoute(modules.store, url); break;
           case "/v1/tasks/stores": result = await getTaskDirectoryRoute(modules.store); break;

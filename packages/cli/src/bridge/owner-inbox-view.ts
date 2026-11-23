@@ -1,4 +1,5 @@
 import { BridgeError, type Json, objects } from "./protocol.js";
+import { peerRead } from "./peer-reads.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { ownerInboxSchema, type OwnerInbox } from "./owner-inbox.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
@@ -20,7 +21,8 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   const items: Json[] = objects(result.items).map(item => ({ ...item, inboxComputer: "local" })), unreachable: Json[] = [];
   await Promise.all(peers.map(async peer => {
     try {
-      const view = await peerRequest(peer, `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}`);
+      // No kept answer: the owner resolves a row and reads the list straight back.
+      const view = await peerRead(peer, `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}`);
       items.push(...objects(view.items).map(item => ({ ...item, inboxComputer: peer.name })));
     } catch (error) { unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." }); }
   }));
