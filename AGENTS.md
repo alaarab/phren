@@ -62,7 +62,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/files.ts` | Read-only `/v1/projects/files` browser for discovered checkouts: relative paths, no symlinks or `.git`, 2 MiB files and at most 500 directory entries. |
 | `packages/cli/src/bridge/project-memory.ts` | gitboy's Hook routes: `GET /v1/projects/:project/memory` (findings, truths, tasks, `remote:`), `/memory/files` (findings by cited file or code-index symbol), `/memory/search` (findings and truths ranked with the retrieval tokenizer and chunk matcher), `/tasks?branch=` and `POST /findings` (through `handleAddFinding`). Capped, credential-bearing text withheld. |
 | `packages/cli/src/bridge/scoped-gateway.ts` | The scoped SSH gateway (`dispatch-scoped`, `ssh-scoped`) for keys paired with `phren pair --scope gitboy-read|gitboy-write`: admits only the scope's routes, validates path, query and body against `gitboy-contract.ts`, rebuilds the Hook request itself, answers everything else with a refusal. |
-| `packages/cli/src/bridge/file-resolve.ts` | `GET /v1/files/resolve`: resolve chat references against the selected pane or worker cwd, then its Git root; return a safe repository-relative path and metadata using the file-range reader. |
+| `packages/cli/src/bridge/file-resolve.ts` | `GET /v1/files/resolve`: resolve chat references against the selected pane or worker cwd, then its Git root; return a safe repository-relative path and metadata using the file-range reader. Outside the repository (or with none) only media under home resolves, as `~/<path>` (`home-media.ts`, read back by `/v1/files/range`). |
 | `packages/cli/src/bridge/transcript-preview.ts` | Ephemeral live reply previews from Claude pane text and Codex/OpenCode deltas, capped at two updates per second and cleared by completed entries. |
 | `packages/cli/src/bridge/terminal.ts` | `TerminalProvider`: what the Hook needs from a terminal multiplexer (snapshot in the Hook's pane shape, list panes, processes, read screen, send keys, prompt, create, start an agent, focus, rename/close, ping). Identity and status stay out of it except as optional hints. `terminalProvider()` returns a router that sends each call to its server's provider (`terminalKind`: `tmux` / `tmux-<socket>` are tmux unless Herdr has that session, everything else Herdr); tests swap in a fake with `setTerminalProvider`. |
 | `packages/cli/src/bridge/terminal-herdr.ts` | The Herdr provider: one call on Herdr's socket per method, through `herdr.ts`'s exported `rpc` (the seam bridge tests fake). Herdr's `agent_session` / `agent_status` become pane hints. |
@@ -123,7 +123,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.3.88 (see `packages/cli/package.json`).
+`@phren/cli` 0.3.89 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 

@@ -10,6 +10,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - A linked computer that is off no longer slows every other Hook. With one of six computers asleep, `GET /v1/sets` took 12 s, `/v1/owner-inbox` 10 s, `/v1/computers` 8 s and `/v1/health/details` 5 s on each of the others, on every read, because each read waited out the SSH timeout again; the phone waits on these. A Hook now remembers a peer that did not answer and answers for it at once with the same error. It checks again after 5 seconds, doubling to 2 minutes, with one TCP connect to the peer's SSH port instead of a login. Measured against the same computers the reads take about 3 s, which is the slowest computer that is on. A dispatch, a hand-off and a link still dial every time.
 - A Hook makes fewer SSH logins to its peers. The phone reads `/v1/sets`, `/v1/computers` and `/v1/usage?peers=1` from every linked computer, and each Hook opened one login per peer per read: on one day a single computer took 4,786 logins from three other Hooks, up to 104 in a minute. Reads of the same peer that arrive together now share one login, an answer is reused for 5 seconds (the owner inbox and health details are still read fresh), and the identity directory `/v1/sets` asks peers for is reused for a minute, since asking made that peer log in to every peer of its own. `GET` routes take `refresh=1` to forget all of this and dial every peer. `GET /v1/metrics` counts peer logins by route under `peers`.
 
+## [0.3.89] - 2026-11-22
+
+### Added
+
+- A video, audio file or picture linked in a chat opens on the phone from anywhere in the computer's home folder, not only from the pane's repository: an absolute path such as `~/videos/out/promo.mp4` outside the repository, or any relative path when the pane's folder is in no repository. Such files resolve as `~/<path>` and stream in the usual bounded ranges, read-only. Only pictures, audio and video; no folder or file whose name starts with `.` (`~/.ssh`, `~/.config`), no symlinks, no `..`. Other files outside the repository are refused as before. Works with the phone as it is.
+
 ## [0.3.88] - 2026-11-18
 
 ### Fixed

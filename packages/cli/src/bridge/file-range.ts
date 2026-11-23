@@ -45,7 +45,7 @@ export async function readFileRange(root: string, requested: string, offset: num
     const relative = path.isAbsolute(requested) ? path.relative(base, requested) : requested;
     if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new BridgeError(403, "This file is outside the allowed folder.");
     let file = base;
-    for (const part of relative.split(path.sep).filter(part => part && part !== ".")) {
+    for (const part of relative.split(/[\\/]/).filter(part => part && part !== ".")) {
       file = path.join(file, part);
       if ((await lstat(file)).isSymbolicLink()) throw new BridgeError(403, "Symbolic links cannot be opened.");
     }

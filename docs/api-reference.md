@@ -1949,6 +1949,16 @@ is `{path, size, contentType, version}`, with a repository-relative path that
 can be passed to `/v1/files/range` with the same target/worktree. No file bytes
 or absolute server paths are returned. Hook advertises `fileResolution`.
 
+Pictures, audio and video (an `image/`, `audio/` or `video/` content type by
+extension) also resolve outside the repository: an absolute path beneath the
+Hook user's home folder, or, when the pane's folder is in no repository, a
+path relative to that folder if it is beneath home. These answer
+`path: "~/<path>"`, which `/v1/files/range` with the same session target reads
+from home in the usual bounded ranges (a repository's own `~` folder is tried
+first). No name part may start with `.` (`~/.ssh`, `~/.config`), and symlinks,
+`..` and other files are refused with the errors above (403 outside the
+repository, 409 with no repository).
+
 `POST /v1/files/write` saves one text file in the session's repository for the
 desktop editor. It takes the full session target, optional `child` or `worktree`
 (as the Git routes), a repository-relative `path`, the file's UTF-8 `content`
