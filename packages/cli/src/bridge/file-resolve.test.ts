@@ -1,7 +1,9 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { MAX_FILE_RANGE } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
+import { readHomeMedia } from "./home-media.js";
 
 let scratch: string, root: string, cwd: string;
 beforeEach(async () => {
@@ -14,7 +16,7 @@ beforeEach(async () => {
   await writeFile(path.join(cwd, "Main.swift"), "struct Screen {}\n");
   await writeFile(path.join(root, "Main.swift"), "struct OtherScreen {}\n");
 });
-afterEach(async () => { await rm(scratch, { recursive: true, force: true }); });
+afterEach(async () => { vi.unstubAllEnvs(); await rm(scratch, { recursive: true, force: true }); });
 
 it("prefers the live pane's cwd, then falls back to the repository root", async () => {
   expect(await resolveFilePath(root, cwd, "Main.swift")).toMatchObject({ path: "apps/ios/Main.swift", size: 17, contentType: "text/plain" });
@@ -51,4 +53,42 @@ it("refuses outside paths, control characters, metadata and symlinks before fall
   await expect(resolveFilePath(root, scratch, "Main.swift")).rejects.toMatchObject({ status: 403 });
   await expect(resolveFilePath(root, cwd, "missing.ts")).rejects.toMatchObject({ status: 404 });
   await expect(resolveFilePath(root, cwd, "apps")).rejects.toMatchObject({ status: 400 });
+});
+
+it("opens media anywhere under home, outside the repository or with none, read-only and in ranges", async () => {
+  const home = path.join(scratch, "home"), videos = path.join(home, "videos", "out");
+  vi.stubEnv("HOME", home); vi.stubEnv("USERPROFILE", home);
+  await mkdir(videos, { recursive: true }); await mkdir(path.join(home, ".config"));
+  await writeFile(path.join(videos, "promo.mp4"), "0123456789");
+  await writeFile(path.join(home, "notes.txt"), "private");
+  await writeFile(path.join(home, ".config", "clip.mp4"), "hidden");
+  await writeFile(path.join(scratch, "outside.mp4"), "outside");
+  await symlink(path.join(videos, "promo.mp4"), path.join(home, "linked.mp4"));
+  await symlink(path.join(home, "videos"), path.join(home, "shows"), "dir");
+  const promo = { path: "~/videos/out/promo.mp4", size: 10, contentType: "video/mp4" };
+
+  // Outside the pane's repository, by absolute path; and with no repository, also relative to the pane's folder.
+  expect(await resolveFilePath(root, cwd, path.join(videos, "promo.mp4"))).toMatchObject(promo);
+  expect(await resolveFilePath(undefined, home, path.join(videos, "promo.mp4"))).toMatchObject(promo);
+  expect(await resolveFilePath(undefined, home, "videos/out/promo.mp4")).toMatchObject(promo);
+  expect(await resolveFilePath(undefined, path.join(home, "videos"), "out/promo.mp4")).toMatchObject(promo);
+  const { version } = await resolveFilePath(undefined, home, "videos/out/promo.mp4");
+  expect(await readHomeMedia(promo.path, 4, 3, version)).toMatchObject({ path: promo.path, length: 3, total: 10, data: Buffer.from("456").toString("base64") });
+  await expect(readHomeMedia(promo.path, 0, MAX_FILE_RANGE + 1)).rejects.toMatchObject({ status: 400 });
+
+  // Not media, a hidden folder, a symlinked file or folder, a climb out, outside home: refused with the old errors.
+  for (const requested of [path.join(home, "notes.txt"), path.join(home, ".config", "clip.mp4"), path.join(scratch, "outside.mp4")]) {
+    await expect(resolveFilePath(root, cwd, requested)).rejects.toMatchObject({ status: 403 });
+    await expect(resolveFilePath(undefined, home, requested)).rejects.toMatchObject({ status: 409 });
+  }
+  for (const requested of ["linked.mp4", "shows/out/promo.mp4"]) {
+    await expect(resolveFilePath(undefined, home, requested)).rejects.toMatchObject({ status: 403 });
+    await expect(readHomeMedia("~/" + requested, 0, 10)).rejects.toMatchObject({ status: 403 });
+  }
+  await expect(resolveFilePath(undefined, path.join(home, "videos"), "../notes.txt")).rejects.toMatchObject({ status: 409 });
+  await expect(resolveFilePath(undefined, scratch, "home/videos/out/promo.mp4")).rejects.toMatchObject({ status: 409 });
+  for (const requested of ["~/notes.txt", "~/.config/clip.mp4", "~/videos/../.config/clip.mp4", "~/\u200c.config/clip.mp4", "~/CONFIG~1/clip.mp4"]) {
+    await expect(readHomeMedia(requested, 0, 10)).rejects.toMatchObject({ status: 403 });
+  }
+  await expect(resolveFilePath(undefined, home, "videos/missing.mp4")).rejects.toMatchObject({ status: 404 });
 });

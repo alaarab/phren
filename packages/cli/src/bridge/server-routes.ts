@@ -53,6 +53,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
+import { isHomeMediaPath, readHomeMedia } from "./home-media.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
@@ -700,19 +701,29 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/files/resolve": {
             const target = targetFromURL(url), pane = await validateTarget(target);
             const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);
-            const repository = await gitRoot(cwd);
-            if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
-            result = await resolveFilePath(repository, cwd, url.searchParams.get("path") ?? "");
+            // No repository: only media under home resolves (file-resolve.ts keeps the 409 otherwise).
+            result = await resolveFilePath(await gitRoot(cwd), cwd, url.searchParams.get("path") ?? "");
             break;
           }
           case "/v1/files/range": {
             let root: string;
+            const requested = url.searchParams.get("path") ?? "", version = url.searchParams.get("version") ?? undefined;
+            const range = () => [rangeInteger(url.searchParams.get("offset"), 0), rangeInteger(url.searchParams.get("length"), MAX_FILE_RANGE)] as const;
             if (url.searchParams.get("scope") === "uploads") {
               root = path.join(bridgeRoot(), "uploads");
             } else if (url.searchParams.has("session")) {
               const target = targetFromURL(url), pane = await validateTarget(target);
               const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);
               const repository = await gitRoot(cwd);
+              // `~/<path>` is home media from /v1/files/resolve; a repository's own `~` folder still wins.
+              if (isHomeMediaPath(requested)) {
+                const [offset, length] = range();
+                result = repository ? await readFileRange(repository, requested, offset, length, version).catch(error => {
+                  if (error instanceof BridgeError && error.status === 404) return readHomeMedia(requested, offset, length, version);
+                  throw error;
+                }) : await readHomeMedia(requested, offset, length, version);
+                break;
+              }
               if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
               root = repository;
             } else {
@@ -722,9 +733,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               if (!candidate) throw new BridgeError(404, "This project folder is not available on this computer.");
               root = candidate.directory;
             }
-            result = await readFileRange(root, url.searchParams.get("path") ?? "",
-              rangeInteger(url.searchParams.get("offset"), 0), rangeInteger(url.searchParams.get("length"), MAX_FILE_RANGE),
-              url.searchParams.get("version") ?? undefined);
+            result = await readFileRange(root, requested, ...range(), version);
             break;
           }
           case "/v1/models": result = { models: await modelCatalog.list(String(url.searchParams.get("source") ?? ""), url.searchParams.get("account") ?? undefined) }; break;
