@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.89] - 2026-11-22
+
 ### Added
 
 - A video, audio file or picture linked in a chat opens on the phone from anywhere in the computer's home folder, not only from the pane's repository: an absolute path such as `~/videos/out/promo.mp4` outside the repository, or any relative path when the pane's folder is in no repository. Such files resolve as `~/<path>` and stream in the usual bounded ranges, read-only. Only pictures, audio and video; no folder or file whose name starts with `.` (`~/.ssh`, `~/.config`), no symlinks, no `..`. Other files outside the repository are refused as before. Works with the phone as it is.
