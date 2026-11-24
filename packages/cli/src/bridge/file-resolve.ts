@@ -1,9 +1,12 @@
 import { lstat, realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { readFileRange } from "./file-range.js";
 import { isGitDirName } from "./git-dir-name.js";
-import { resolveHomeMedia } from "./home-media.js";
+import { resolveMedia, upperDrive } from "./home-media.js";
 import { BridgeError } from "./protocol.js";
+
+const slashed = (value: string) => value.split(path.sep).join("/");
 
 function beneath(root: string, file: string): boolean {
   const relative = path.relative(root, file);
@@ -14,19 +17,22 @@ function beneath(root: string, file: string): boolean {
  * names win over root-relative ones. Never turn an outside absolute path
  * into an unrelated in-repository suffix match. Metadata is checked by the
  * same no-symlink reader that will subsequently serve the file's bytes.
- * Outside the repository, or with none, only media under home resolves
- * (`home-media.ts`), as `~/<path>`. */
+ * Outside the repository, or with none, only media in a media root resolves
+ * (`home-media.ts`), as `~/<path>` or `~root/<root>/<path>`. A literal
+ * `~/...` names the Hook user's home. */
 export async function resolveFilePath(root: string | undefined, cwd: string, requested: string) {
   // Native Windows references use backslashes; walk the same components as
   // slash-form chat links. On POSIX a backslash remains an invalid reference.
-  if (process.platform === "win32") requested = requested.replaceAll("\\", "/");
+  // A lower-case drive (`c:/`) names the same file as `C:/`.
+  if (process.platform === "win32") requested = upperDrive(requested.replaceAll("\\", "/"));
   if (!requested || requested.length > 4096 || /[\x00-\x1f\x7f\\]/.test(requested)
       || /^[A-Za-z]:[^/]/.test(requested)
       || requested.split("/").some(isGitDirName) || path.win32.isAbsolute(requested) && !path.isAbsolute(requested)) {
     throw new BridgeError(400, "Invalid file path.");
   }
+  if (requested.startsWith("~/")) requested = upperDrive(slashed(path.resolve(homedir()))) + requested.slice(1);
   if (root === undefined) {
-    const media = await resolveHomeMedia(requested, cwd);
+    const media = await resolveMedia(requested, cwd);
     if (!media) throw new BridgeError(409, "This pane is not in a project repository.");
     return media;
   }
@@ -35,11 +41,11 @@ export async function resolveFilePath(root: string | undefined, cwd: string, req
   // macOS /tmp is an alias of /private/tmp. Preserve a trusted cwd's root
   // spelling without resolving any client-supplied symlink beneath it.
   const roots = [base, path.resolve(root), path.resolve(cwd, path.relative(folder, base))]
-    .map(value => value.split(path.sep).join("/"));
+    .map(value => upperDrive(slashed(value)));
   const absolute = path.isAbsolute(requested);
   const alias = roots.find(candidate => requested === candidate || requested.startsWith(candidate + "/"));
   if (absolute && !alias) {
-    const media = await resolveHomeMedia(requested, undefined);
+    const media = await resolveMedia(requested, undefined);
     if (!media) throw new BridgeError(403, "This file is outside the repository.");
     return media;
   }

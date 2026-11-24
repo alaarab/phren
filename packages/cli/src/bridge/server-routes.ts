@@ -54,7 +54,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
-import { isHomeMediaPath, readHomeMedia } from "./home-media.js";
+import { isMediaPath, readMedia } from "./home-media.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
@@ -704,7 +704,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/files/resolve": {
             const target = targetFromURL(url), pane = await validateTarget(target);
             const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);
-            // No repository: only media under home resolves (file-resolve.ts keeps the 409 otherwise).
+            // No repository: only media in a media root resolves (file-resolve.ts keeps the 409 otherwise).
             result = await resolveFilePath(await gitRoot(cwd), cwd, url.searchParams.get("path") ?? "");
             break;
           }
@@ -718,13 +718,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               const target = targetFromURL(url), pane = await validateTarget(target);
               const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);
               const repository = await gitRoot(cwd);
-              // `~/<path>` is home media from /v1/files/resolve; a repository's own `~` folder still wins.
-              if (isHomeMediaPath(requested)) {
+              // `~/<path>` and `~root/<root>/<path>` are media from /v1/files/resolve; a repository's own folder of that name still wins.
+              if (isMediaPath(requested)) {
                 const [offset, length] = range();
                 result = repository ? await readFileRange(repository, requested, offset, length, version).catch(error => {
-                  if (error instanceof BridgeError && error.status === 404) return readHomeMedia(requested, offset, length, version);
+                  if (error instanceof BridgeError && error.status === 404) return readMedia(requested, offset, length, version);
                   throw error;
-                }) : await readHomeMedia(requested, offset, length, version);
+                }) : await readMedia(requested, offset, length, version);
                 break;
               }
               if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");

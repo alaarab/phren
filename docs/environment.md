@@ -202,6 +202,12 @@ project's folder, or a worktree it created, trusted in Claude's and Codex's
 config before launching there, and from carrying the owner's Codex trust
 forward to Phren's own Codex hooks when an install rewrites them (see
 [footprint](footprint.md)).
+`~/.local/share/phren/bridge/media-roots` (one absolute folder per line, `#`
+comments) lists folders beyond home whose pictures, audio and video a chat link
+may open on the phone, read-only; on WSL the mounted Windows drives
+(`/mnt/<letter>`) are included without it. It is a file rather than an
+environment setting because the Hook service doesn't see shell env (see
+[API reference](api-reference.md), `GET /v1/files/resolve`).
 `PHREN_DREAMING=off` stops the Hook's dreaming ticker, whatever each project's
 `dreaming` config says; `PHREN_DREAM_COMMAND` names the `phren` binary the
 ticker runs `phren dream run --scheduled` with (default: `phren` on the Hook's
