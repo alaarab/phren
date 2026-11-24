@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A video, audio file or picture an agent links from a Windows drive under WSL now opens on the phone. A render at `/mnt/d/Projects/andz/builds/ad/showcase/andz-combos-r1.mp4`, linked by a session in the WSL home folder, showed "Video not found on pj", because media outside the pane's repository was served only from the home folder. On WSL the Hook now also serves media from the mounted Windows drives (`/mnt/c`, `/mnt/d`), and on any computer from the folders listed one per line in `~/.local/share/phren/bridge/media-roots`. These resolve as `~root/<absolute path>` (`~root/mnt/d/Projects/...`) and stream in the usual bounded ranges, read-only, with the same rules as home: pictures, audio and video only, no name starting with `.`, no symlinks, no `..`. Works with the phone as it is.
+- A chat link written `~/videos/out/clip.mp4` resolves to the Hook user's home folder even when the phone cannot tell where home is from the pane's folder.
+- A bare media name such as `clip.mp4`, linked by a session whose folder is in no repository (home, for one), is found beneath that folder: the newest file of that name at most four folders down, within 400 folders and half a second, skipping hidden and symlinked folders, `node_modules`, `Library` and `AppData`. Other files are still not served outside a repository.
+- On Windows, a path with a lower-case drive letter (`c:/Users/pj/...`) now matches the repository and home folder, which are spelled `C:/`.
+
 ## [0.3.90] - 2026-11-22
 
 ### Fixed

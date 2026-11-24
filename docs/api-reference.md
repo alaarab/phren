@@ -1950,14 +1950,33 @@ can be passed to `/v1/files/range` with the same target/worktree. No file bytes
 or absolute server paths are returned. Hook advertises `fileResolution`.
 
 Pictures, audio and video (an `image/`, `audio/` or `video/` content type by
-extension) also resolve outside the repository: an absolute path beneath the
-Hook user's home folder, or, when the pane's folder is in no repository, a
-path relative to that folder if it is beneath home. These answer
-`path: "~/<path>"`, which `/v1/files/range` with the same session target reads
-from home in the usual bounded ranges (a repository's own `~` folder is tried
-first). No name part may start with `.` (`~/.ssh`, `~/.config`), and symlinks,
-`..` and other files are refused with the errors above (403 outside the
-repository, 409 with no repository).
+extension) also resolve outside the repository when they are in a media root:
+the Hook user's home folder; on WSL (`/proc/version` says Microsoft, or
+`WSL_DISTRO_NAME` is set) the Windows drives it mounts, `/mnt/<letter>`; and
+each absolute folder listed one per line in
+`~/.local/share/phren/bridge/media-roots` (`#` starts a comment; a folder that
+does not exist is skipped; the file is read on each request). They resolve by
+an absolute path in a root, or, when the pane's folder is in no repository, by
+a path relative to that folder if it is in a root. A bare name (`clip.mp4`)
+missing from that folder is looked for beneath it: at most four folders down,
+400 folders and 500 ms, never inside a hidden or symlinked folder,
+`node_modules`, `Library`, `AppData`, `$RECYCLE.BIN` or
+`System Volume Information`, and the newest file of that name wins. A
+literal `~/...` names the Hook user's home, inside or outside the repository.
+On Windows a lower-case drive letter (`c:/`) matches as upper case.
+
+Home files answer `path: "~/<path>"`; files in another root answer
+`path: "~root/<root>/<path>"`, where `<root>` is the root's absolute path
+without its leading `/` and a Windows drive is written without its colon
+(`/mnt/d/Projects/clip.mp4` is `~root/mnt/d/Projects/clip.mp4`,
+`D:\Renders\clip.mp4` under a listed `D:\Renders` is
+`~root/D/Renders/clip.mp4`). `/v1/files/range` with the same session target
+reads either form from its root in the usual bounded ranges (a repository's own
+`~` or `~root` folder is tried first); a root taken off the list stops serving.
+No name part beneath the root may start with `.` (`~/.ssh`, `~/.config`), and
+symlinks, `..` and other files are refused with the errors above (403 outside
+the repository, 409 with no repository). Other files are never served from a
+media root, so a bare `Main.cs` from a pane in home stays 409.
 
 `POST /v1/files/write` saves one text file in the session's repository for the
 desktop editor. It takes the full session target, optional `child` or `worktree`
