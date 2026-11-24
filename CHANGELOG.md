@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.91] - 2026-11-23
+
 ### Fixed
 
 - A video, audio file or picture an agent links from a Windows drive under WSL now opens on the phone. A render at `/mnt/d/Projects/andz/builds/ad/showcase/andz-combos-r1.mp4`, linked by a session in the WSL home folder, showed "Video not found on pj", because media outside the pane's repository was served only from the home folder. On WSL the Hook now also serves media from the mounted Windows drives (`/mnt/c`, `/mnt/d`), and on any computer from the folders listed one per line in `~/.local/share/phren/bridge/media-roots`. These resolve as `~root/<absolute path>` (`~root/mnt/d/Projects/...`) and stream in the usual bounded ranges, read-only, with the same rules as home: pictures, audio and video only, no name starting with `.`, no symlinks, no `..`. Works with the phone as it is.
