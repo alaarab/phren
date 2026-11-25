@@ -6,6 +6,10 @@ GitHub release notes, and the app shows them when that version is available.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Linux AppImage** opens on distros that ship only fuse3, such as Arch and Omarchy. It now carries its own FUSE runtime instead of needing libfuse.so.2 installed on the computer.
+
 ### Improved
 
 - **Dispatch lists** (Home, Conductor, Review, Trains) ask each Hook for its 200 most recently active dispatches. Hooks newer than CLI 0.3.87 list 20 unless asked, in answers of at most 256 KB, so a computer with hundreds of old dispatches no longer sends a megabyte on every refresh. Desktop 0.1.16 and earlier show the 20 most recent per computer with such a Hook.
