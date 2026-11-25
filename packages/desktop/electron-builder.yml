@@ -45,6 +45,11 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     NSMicrophoneUsageDescription: Phren uses the microphone for dictation and talk mode.
+# The static AppImage runtime carries its own FUSE, so the AppImage opens on
+# distros that ship only fuse3 (Arch, Omarchy). The legacy default needs
+# libfuse.so.2 on the host.
+toolsets:
+  appimage: "1.0.3"
 linux:
   # The default comes from the scoped npm name, which is not a valid file name.
   executableName: phren-desktop
