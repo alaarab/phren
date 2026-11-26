@@ -2,12 +2,13 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { atomicInPrivateDir, BridgeError, bridgeRoot, objects, type Json, type Target, type StartingTarget, targetSchema, startingTargetSchema } from "./protocol.js";
-import { validateTarget, paneChatState, paneStartingToken, clearStartingToken, clearStartingTokenByToken } from "./herdr.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, objects, provider, type Json, type Target, type StartingTarget, targetSchema, startingTargetSchema } from "./protocol.js";
+import { validateTarget, paneIdentity, paneChatState, paneStartingToken, clearStartingToken, clearStartingTokenByToken } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
+import { briefId } from "./launch-brief.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
-import { originPaneSchema, reconcileIdempotencyKey, scanStartingToken, settleCancelledReservation, startingTargetFromPane, updateReceipt, type Receipt } from "./dispatch.js";
+import { dispatchReceipt, dispatchStatus, originPaneSchema, reconcileIdempotencyKey, scanStartingToken, settleCancelledReservation, startingTargetFromPane, updateReceipt, type Receipt } from "./dispatch.js";
 import { idempotencyKeySchema, withIdempotencyKeyLock, type IdempotencyRecord } from "./dispatch-idempotency.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets, type DispatchClonePaths } from "./dispatch-clone.js";
 import { launchInProgress, removeWorkerFile, terminateWorker, workerAlive, workerPid } from "./worker-identity.js";
@@ -285,6 +286,18 @@ async function releaseClosedFiles(dispatchId: string): Promise<void> {
   await removeDispatchClone(paths);
 }
 
+async function closeBoundPane(target: Target, pane: Json): Promise<void> {
+  await markWorkerClosed(target, String(pane.terminal_id));
+  try { await terminalProvider().closePane(target.server, target.pane); }
+  catch (error) {
+    // A refused close must not suppress a later genuine disappearance.
+    const { snapshot, findPane } = await import("./herdr.js");
+    const remaining = await snapshot(target.server).catch(() => undefined);
+    if (remaining && findPane(remaining, target)?.terminal_id === pane.terminal_id) await rm(file(target), { force: true });
+    throw error;
+  }
+}
+
 /** Called on the worker's computer only after the sender read the done return.
  * Recheck this exact ended turn and skip any new work, background work or inbox. */
 export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue): Promise<Json> {
@@ -305,15 +318,7 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
   const record = await paneTurn(data.target.server, current, data.target.source);
   if (record?.prompt && (!record.stop || record.stop.seq <= record.prompt.seq || record.terminal !== current.terminal_id
     || record.session !== data.target.session || workerTurnKey({ endedAt: record.stop.at, stopSeq: record.stop.seq }) !== data.turn)) return { ok: true, closed: false };
-  await markWorkerClosed(data.target, String(pane.terminal_id));
-  try { await terminalProvider().closePane(data.target.server, data.target.pane); }
-  catch (error) {
-    // A refused close must not suppress a later genuine disappearance. Keep
-    // the marker on an ambiguous transport failure if the pane is now gone.
-    const remaining = await snapshot(data.target.server).catch(() => undefined);
-    if (remaining && findPane(remaining, data.target)?.terminal_id === pane.terminal_id) await rm(file(data.target), { force: true });
-    throw error;
-  }
+  await closeBoundPane(data.target, pane);
   // Clean up files only for the dispatch durably bound to this exact pane and
   // session: a request naming another dispatch must never delete its clone.
   const owner = await updateReceipt(data.dispatch, () => false).catch(() => undefined);
@@ -331,12 +336,45 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
  * Only the caller's own pane (named by its terminal variables) is ever closed, and
  * after the reply, so the agent's `phren` call still returns. */
 export async function closeOwnPane(input: unknown, delayMs = 500): Promise<Json> {
-  const data = z.object({ origin: originPaneSchema }).strict().parse(input);
+  const data = z.object({ origin: originPaneSchema, dispatch: briefId.optional() }).strict().parse(input);
   const { snapshot, findPane } = await import("./herdr.js");
   const pane = findPane(await snapshot(data.origin.server), data.origin);
   if (!pane) return { ok: true, closed: false, reason: "The pane is already gone." };
+  const source = provider.safeParse(pane.agent);
+  const record = source.success ? await paneTurn(data.origin.server, pane, source.data) : undefined;
+  const session = await paneIdentity(data.origin.server, pane);
+  const own = record && record.terminal === pane.terminal_id && (!session || record.session === session) ? record : undefined;
+  const parsed = targetSchema.safeParse({ ...data.origin, source: pane.agent, session: session ?? own?.session });
+  if (parsed.success) {
+    const target = parsed.data;
+    const terminal = pane.terminal_id;
+    const dispatch = data.dispatch ?? own?.dispatch ?? (await dispatchStatus()).find(value => value.target && paneRunsTarget(value.target, pane, { sessionId: target.session })
+      && value.target.server === target.server && value.target.workspace === target.workspace && value.target.tab === target.tab && value.target.pane === target.pane)?.id;
+    if (dispatch && z.string().uuid().safeParse(dispatch).success) {
+      // Retry for ten minutes, but never close without this turn's recorded return.
+      const deadline = Date.now() + 600_000;
+      const timer = setTimeout(() => { void (async () => {
+        if (!findPane(await snapshot(target.server), target)) return;
+        const current = await validateTarget(target, false, true);
+        if (current.terminal_id !== terminal) return;
+        const turn = await paneTurn(target.server, current, target.source);
+        if (turn?.prompt?.seq !== own?.prompt?.seq || turn?.session !== own?.session) return;
+        const returned = (await dispatchReceipt(dispatch))?.returned;
+        const ended = turn?.stop && (!turn.prompt || turn.stop.seq > turn.prompt.seq)
+          ? workerTurnKey({ endedAt: turn.stop.at, stopSeq: turn.stop.seq }) : undefined;
+        if (!ended || returned?.state !== "done" || returned.turn !== ended) {
+          if (Date.now() < deadline) timer.refresh();
+          return;
+        }
+        await closeFinishedWorker({ target, dispatch, turn: ended });
+      })().catch(() => undefined); }, 15_000);
+      timer.unref();
+      return { ok: true, closed: false, pending: true, dispatch, pane: target.pane,
+        reason: "Close pending on this turn's recorded return; finish this turn. Rechecks every 15 seconds for up to 10 minutes, then leaves the pane open if no return is recorded." };
+    }
+  }
   await markPaneClosed(data.origin.server, pane);
   const timer = setTimeout(() => { void terminalProvider().closePane(data.origin.server, data.origin.pane).catch(() => undefined); }, delayMs);
   timer.unref();
-  return { ok: true, closed: true, pane: data.origin.pane };
+  return { ok: true, closed: true, pending: false, pane: data.origin.pane };
 }

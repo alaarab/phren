@@ -26,7 +26,8 @@ export async function runDispatch(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === "close-self") {
     const origin = await terminalPaneFromEnv();
     if (!origin) throw new Error("phren dispatch close-self runs inside the agent's own terminal pane.");
-    console.log(JSON.stringify(await hookRequest("/v1/dispatch/close-self", { origin }), null, 2)); return 0;
+    const dispatch = dispatchIdFromEnv();
+    console.log(JSON.stringify(await hookRequest("/v1/dispatch/close-self", { origin, ...(dispatch ? { dispatch } : {}) }), null, 2)); return 0;
   }
   if (args.length === 1 && args[0] === "status") {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch?limit=100"), null, 2)); return 0;
