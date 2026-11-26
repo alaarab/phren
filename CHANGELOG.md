@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Tasks show the work hanging off them. A task's new `Work:` record links its worker (dispatch id, computer, session, label, state), its branch or worktree, its pull request and its issue, on GitHub, GitLab or gitboy. The links fill themselves: a dispatch whose brief names a task (`bid:<id>`, its stable id, or its quoted title) records its worker there and the state follows the dispatch, a worker's `dispatch_report` records its pull request and branch, and every five minutes the Hook links pull requests whose body says `bid:<id>` or whose branch names the task. A merged linked pull request or a closed linked issue moves the task to Done once, with the reason in its history; nothing is ever reopened. `GET /v1/tasks` adds live state to open tasks with work (worker live, waiting or done; CI and mergeability; issue open or closed; a one-line `status`), and the new `GET /v1/tasks/detail` returns one task with fresh live state. A legacy `GitHub:` issue line moves into the record on the next write. Capability `taskWork`; `PHREN_TASK_WORK=off` turns the sweep and the recording off.
+
 ## [0.3.91] - 2026-11-23
 
 ### Fixed

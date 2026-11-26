@@ -1,4 +1,5 @@
 import { taskLinksSchema, type TaskLinks } from "../task/merge-links.js";
+import { cleanTaskWork, parseForgeUrl, parseTaskWork, type TaskWork } from "../task/work.js";
 import { parseTaskMetadata } from "./task-metadata.js";
 import { taskFormatStatus, taskFormatMigrationHint } from "./task-format.js";
 import { moduleEnabled } from "../modules/runtime.js";
@@ -44,6 +45,9 @@ export interface TaskItem {
   priority?: "high" | "medium" | "low";
   context?: string;
   links?: TaskLinks;
+  /** Worker, branch or worktree, pull request and issue (task/work.ts). A GitHub
+   * issue here also fills githubIssue/githubUrl, which stay authoritative for it. */
+  work?: TaskWork;
   pinned?: boolean;
   githubIssue?: number;
   githubUrl?: string;
@@ -163,9 +167,20 @@ function formatGitHubIssueReference(item: TaskItem): string | undefined {
   return item.githubUrl;
 }
 
+/** The Work record to write. githubIssue/githubUrl stay the GitHub issue's
+ * source of truth (every existing writer edits them), so a legacy `GitHub:`
+ * line with a URL migrates into `issue` here, and unlinking drops it. */
+function renderedWork(item: TaskItem): TaskWork | undefined {
+  let issue = item.work?.issue?.forge === "github" ? undefined : item.work?.issue;
+  const url = item.githubUrl ? parseForgeUrl(item.githubUrl) : undefined;
+  if (url?.kind === "issue" && url.domain === "github.com") issue = { forge: "github", number: url.number, url: url.url };
+  try { return cleanTaskWork(item.work || issue ? { version: 1, ...item.work, issue } : undefined); } catch { return item.work; }
+}
+
 function parseContinuation(lines: string[], idx: number): {
   context?: string;
   links?: TaskLinks;
+  work?: TaskWork;
   githubIssue?: number;
   githubUrl?: string;
   claim?: TaskClaim;
@@ -183,6 +198,7 @@ function parseContinuation(lines: string[], idx: number): {
   const opaqueContinuationLines: string[] = [];
   let context: string | undefined;
   let links: TaskLinks | undefined;
+  let work: TaskWork | undefined;
   let claim: TaskClaim | undefined;
   let githubIssue: number | undefined;
   let githubUrl: string | undefined;
@@ -207,6 +223,11 @@ function parseContinuation(lines: string[], idx: number): {
         const parsed = taskLinksSchema.safeParse(JSON.parse(trimmed.slice(6).trim()));
         if (parsed.success && !links) { links = parsed.data; linesToSkip++; continue; }
       } catch { /* Preserve unknown metadata verbatim. */ }
+    }
+    if (trimmed.startsWith("Work:") && !work) {
+      // A newer or broken record stays opaque below and blocks work-link writes.
+      work = parseTaskWork(trimmed.slice(5).trim());
+      if (work) { linesToSkip++; continue; }
     }
     if (trimmed.startsWith("Context:")) {
       context = trimmed.slice("Context:".length).trim();
@@ -234,7 +255,18 @@ function parseContinuation(lines: string[], idx: number): {
     contract = parseTaskMetadata(taskContractRecords[0]);
     if (!contract) taskContractRaw = taskContractRecords[0];
   } else if (taskContractRecords.length > 1) taskContractRaw = taskContractRecords[0];
-  return { context, links, githubIssue, githubUrl, claim, contract, taskContractRaw,
+  // The GitHub issue moved into the Work record; read it back into the old
+  // fields. A legacy GitHub: line with a URL reads as the Work issue and is
+  // written there on the next write.
+  if (work?.issue?.forge === "github" && githubIssue === undefined && githubUrl === undefined) {
+    githubIssue = work.issue.number;
+    githubUrl = work.issue.url;
+  }
+  const legacy = githubUrl ? parseForgeUrl(githubUrl) : undefined;
+  if (legacy?.kind === "issue" && legacy.domain === "github.com" && work?.issue?.url !== legacy.url) {
+    work = cleanTaskWork({ version: 1, ...work, issue: { forge: "github", number: legacy.number, url: legacy.url } });
+  }
+  return { context, links, work, githubIssue, githubUrl, claim, contract, taskContractRaw,
     ...(taskContractRaw !== undefined ? { taskContractLines } : {}),
     ...(taskContractRecords.length > 1 ? { taskContractRecords } : {}),
     ...(opaqueContinuationLines.length ? { opaqueContinuationLines } : {}), linesToSkip };
@@ -386,6 +418,7 @@ export function parseTaskContent(project: string, taskPath: string, content: str
       speculative,
       context: continuation.context,
       links: continuation.links,
+      work: continuation.work,
       pinned: pinned || undefined,
       githubIssue: continuation.githubIssue,
       githubUrl: continuation.githubUrl,
@@ -427,8 +460,11 @@ function renderTask(doc: TaskDoc): string {
       else if (item.taskContractRaw !== undefined) out.push(`  Task: ${item.taskContractRaw}`);
       else if (item.responsibility !== undefined || item.dependencies?.length || item.history?.length) out.push(`  Task: ${JSON.stringify({ version: 1, responsibility: item.responsibility ?? "agent", dependencies: item.dependencies ?? [], history: item.history ?? [] })}`);
       if (item.links) out.push(`  Links: ${JSON.stringify(item.links)}`);
+      const work = renderedWork(item);
+      if (work) out.push(`  Work: ${JSON.stringify(work)}`);
       if (item.context) out.push(`  Context: ${item.context}`);
-      const githubRef = formatGitHubIssueReference(item);
+      // A GitHub issue with its URL is written in the Work record instead.
+      const githubRef = work?.issue?.forge === "github" ? undefined : formatGitHubIssueReference(item);
       if (githubRef) out.push(`  GitHub: ${githubRef}`);
       if (item.claim) out.push(`  ${formatClaim(item.claim)}`);
       if (item.opaqueContinuationLines?.length) out.push(...item.opaqueContinuationLines);
@@ -1237,6 +1273,53 @@ export function tidyDoneTasks(phrenPath: string, project: string, keep: number =
 
 export function taskMarkdown(doc: TaskDoc): string {
   return renderTask(doc);
+}
+
+/**
+ * Change one task's work links under the task file lock. `change` gets the
+ * current record and returns the next one, or nothing to leave the task as it
+ * is. With `complete`, an open task also moves to Done, the reason recorded in
+ * its history (in its context when the store has no task metadata). A task
+ * already Done is never moved, and nothing here reopens one.
+ */
+export function updateTaskWork(phrenPath: string, project: string, match: string,
+  change: (work: TaskWork | undefined, item: TaskItem) => { work: TaskWork | undefined; complete?: string } | undefined,
+): PhrenResult<{ item: TaskItem; changed: boolean }> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
+  return withSafeLock(bPath, () => {
+    const parsed = readTasks(phrenPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
+    if (!found.match) return taskItemNotFound(project, match);
+    const item = parsed.data.items[found.match.section][found.match.index];
+    if (item.identityAmbiguous || item.opaqueContinuationLines?.some(line => line.trim().startsWith("Work:"))) {
+      return phrenErr("This task has an ambiguous identity or a Work record from a newer phren; update phren before linking work to it.", PhrenError.VALIDATION_ERROR);
+    }
+    const next = change(item.work, item);
+    if (!next) return phrenOk({ item, changed: false });
+    const work = cleanTaskWork(next.work);
+    const complete = next.complete && item.section !== "Done" ? next.complete : undefined;
+    if (!complete && JSON.stringify(work) === JSON.stringify(cleanTaskWork(item.work))) return phrenOk({ item, changed: false });
+    item.work = work;
+    if (complete) {
+      parsed.data.items[found.match.section].splice(found.match.index, 1);
+      item.section = "Done";
+      item.checked = true;
+      const entry = `completed: ${complete}${item.claim ? `; released claim by ${item.claim.computer}` : ""}`;
+      const storeRoot = path.dirname(path.dirname(parsed.data.path));
+      if (item.taskContractRaw === undefined && (item.history !== undefined || taskFormatStatus(storeRoot).enabled)) {
+        item.history = [...(item.history ?? []), { at: new Date().toISOString(), change: entry }];
+      } else item.context = item.context ? `${item.context}; ${entry}` : entry;
+      item.claim = undefined;
+      parsed.data.items.Done.unshift(item);
+    }
+    writeTaskDoc(parsed.data);
+    return phrenOk({ item, changed: true });
+  });
 }
 
 export function linkTaskIssue(

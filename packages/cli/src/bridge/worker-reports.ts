@@ -1,5 +1,6 @@
 import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { recordTaskPrs } from "../task/report-links.js";
+import { linkReportedWork } from "./task-work.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
@@ -45,7 +46,11 @@ export async function reportWorker(input: unknown): Promise<Json> {
   let taskLinks: { linked: boolean; error?: string };
   try { taskLinks = recordTaskPrs(phrenStoreRoot(), data.prs, task, dispatch); }
   catch { taskLinks = { linked: false, error: "PR report saved, but the private task link could not be saved. Retry the report." }; }
-  return { ok: true, target, prs: data.prs, taskLinks };
+  // The task's Work record (task/work.ts) takes the pull request on any forge.
+  let taskWork: { linked: boolean; error?: string };
+  try { taskWork = await linkReportedWork(data.prs, task, dispatch); }
+  catch { taskWork = { linked: false, error: "PR report saved, but the task's work link could not be saved. Retry the report." }; }
+  return { ok: true, target, prs: data.prs, taskLinks, taskWork };
 }
 /** Whether this Hook launched dispatch `id` and its brief arrived in exactly this pane and conversation. */
 async function arrivedHere(id: string | undefined, target: Target): Promise<boolean> {

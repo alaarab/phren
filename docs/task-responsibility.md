@@ -33,7 +33,7 @@ The TUI offers `:lane human|agent|all` as an independent lane filter and display
 
 ## Hook and phone contract
 
-Capabilities `taskDependencies`, `taskWriterSafety`, `taskAtomicCreate`, `taskAtomicSave` and `taskBoundLaunch` are advertised only when the tasks module is enabled. Existing authenticated Hook transport and registered store access apply.
+Capabilities `taskDependencies`, `taskWriterSafety`, `taskAtomicCreate`, `taskAtomicSave`, `taskBoundLaunch` and `taskWork` are advertised only when the tasks module is enabled. Existing authenticated Hook transport and registered store access apply.
 
 - `GET /v1/tasks/stores` returns `{ok:true,version:1,stores:[{id,name,role,primary,available,identityReady,ambiguous,metadataWritable,writerSafety,projects,repositoryIdentity?}]}`. `id` is the canonical eight-hex store ID or null; `projects` is the subscribed project-slug list. `repositoryIdentity`, when available, is the existing credential-stripped GitHub `{repository,branch}` identity. Only available, identity-ready, unambiguous stores may be selected. Native clients map the verified repository identity or the pinned computer’s exact primary store; they never hash or guess an ID. Readonly stores may supply prerequisites. No filesystem paths are returned.
 - `GET /v1/tasks?storeId=<immutable-id>&project=<slug>` also accepts optional `responsibility`/`readiness` query filters and returns `{ok, version:1, storeId, project, revision, metadataWritable, writerSafety, counts, items:{Active:[],Queue:[],Done:[]}}`. Entries have the same enriched shape as MCP.
@@ -132,3 +132,71 @@ failure stops further network reads and backs off for 15 minutes; cached errors
 never count as completion evidence. Tasks are re-read before each decision and
 updated under their normal locks with revision checks, so concurrent edits win.
 Repeated sweeps preserve existing decisions without appending duplicate evidence.
+
+## Task work links
+
+Every piece of work hangs off one task. A task's `Work:` record holds links only:
+the worker doing it, its branch or worktree, its pull request and its issue.
+
+```text
+- [ ] Fix the sync race <!-- bid:c2cc33d0 -->
+  Work: {"version":1,"worker":{"dispatchId":"5f0c3b8e-…","computer":"PJ","session":"…","label":"Sync race","harness":"claude","state":"working","at":"2026-11-25T18:45:00.000Z"},"branch":"feat/sync","worktree":"/home/me/app-sync","pr":{"forge":"github","number":877,"url":"https://github.com/me/app/pull/877"},"issue":{"forge":"gitboy","number":12,"url":"https://gitboy.example.com/me/app/issues/12"}}
+```
+
+`forge` is `github`, `gitlab` or `gitboy`. Worker `state` is the dispatch's last
+state: `launching`, `working`, `uncertain`, `needs-you`, `blocked`, `stalled`,
+`done`, `failed`, `gone` or `closed`. A record from a newer phren (another version
+or field) is kept verbatim and refuses work-link writes until phren is updated.
+A legacy `GitHub: #41 https://github.com/o/r/issues/41` line reads as the Work
+issue and moves into the record on the next write; `githubIssue`/`githubUrl` keep
+reporting it, and unlinking them drops it. A bare `GitHub: #41` stays as it is.
+
+Links fill themselves:
+
+- a dispatch records its worker on the task it carries or its brief names (see
+  [conductor](conductor.md#private-task-links-and-merge-reconciliation)), and the
+  worker's state follows the dispatch receipt. A newer dispatch takes the task
+  over; an older one never takes it back. A task-bound phone launch records its
+  worker once;
+- a worker's `dispatch_report` makes the reported pull request the task's pull
+  request, with its branch;
+- every five minutes the Hook lists the newest pull requests of each project
+  checked out on that computer (through `gh` or gitboy's API) and links one to an
+  open task when its body says `bid:<id>` (gitboy's reference rule), its branch
+  names the stable id as a whole segment (`feat/c2cc33d0-sync`), or its branch is
+  the task's recorded branch. The first pull request linked stays linked.
+
+The same sweep closes a task once: a merged linked pull request, or a closed
+linked issue, moves the open task to Done, with `completed: PR #877 merged (<url>)`
+or `completed: issue #12 closed (<url>)` in its history (in its context when the
+store has no task metadata) and `autoClosed` in its record. A pull request closed
+without merging closes nothing. A task the owner reopens keeps `autoClosed` and
+is not closed again by the same link; a new linked pull request clears it. Phren
+never reopens a task, pull request or issue, and never writes to a forge.
+`PHREN_TASK_WORK=off` stops the sweep and the dispatch recording.
+
+CI, mergeability and issue state are never stored. `GET /v1/tasks` adds `live` to
+each open task that has a `Work:` record, waiting at most two seconds for the
+forge (a slower answer is cached for the next read; readings are kept a minute);
+`live=0` leaves it out. `GET /v1/tasks/detail?storeId&project&stableId` returns
+one task from any section with `live` read fresh (up to eight seconds):
+
+```json
+{"ok":true,"version":1,"storeId":"365c6bb8","project":"phren","revision":"…","item":{
+  "id":"A1","stableId":"c2cc33d0","section":"Active","line":"Fix the sync race",
+  "work":{"version":1,"worker":{"dispatchId":"5f0c3b8e-…","computer":"PJ","label":"Sync race","state":"working","at":"…"},"branch":"feat/sync","pr":{"forge":"github","number":877,"url":"https://github.com/me/app/pull/877"}},
+  "live":{
+    "worker":{"phase":"live","state":"working","at":"…","source":"dispatch"},
+    "pr":{"state":"open","title":"Fix the sync race","draft":false,"checks":"passing","mergeable":"clean","head":"feat/sync","checkedAt":"…"},
+    "status":"PR #877 · checks passing · ready to merge"}}}
+```
+
+`live.worker.phase` is `live`, `waiting` (needs you, blocked on an approval, or
+stalled) or `done`; `source` is `dispatch` when this Hook holds the dispatch
+receipt, else `task` (the state the task recorded). `live.pr.checks` is
+`passing`, `failing`, `pending` or null (no checks); `mergeable` (open pull
+requests) is `clean`, `blocked`, `conflicts`, `behind`, `draft` or `unknown`;
+`state` is `open`, `merged` or `closed`. `live.issue.state` is `open` or `closed`.
+A forge that could not be read gives `{"error":"…","checkedAt":"…"}`, and one not
+read yet gives null. `live.status` is the one line a Tasks row shows: what needs
+the owner first, then the pull request, then a worker still going, then the issue.

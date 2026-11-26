@@ -208,6 +208,10 @@ may open on the phone, read-only; on WSL the mounted Windows drives
 (`/mnt/<letter>`) are included without it. It is a file rather than an
 environment setting because the Hook service doesn't see shell env (see
 [API reference](api-reference.md), `GET /v1/files/resolve`).
+`PHREN_TASK_WORK=off` stops the Hook's task work sweep (linking pull requests
+that name a task, closing a task whose linked pull request merged or linked issue
+closed) and the recording of dispatch workers on tasks; see
+[task work links](task-responsibility.md#task-work-links).
 `PHREN_DREAMING=off` stops the Hook's dreaming ticker, whatever each project's
 `dreaming` config says; `PHREN_DREAM_COMMAND` names the `phren` binary the
 ticker runs `phren dream run --scheduled` with (default: `phren` on the Hook's

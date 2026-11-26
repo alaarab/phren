@@ -11,6 +11,8 @@ import { launchSession } from "./server-launch.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { taskStoreProjects, taskStoreRepositoryIdentity } from "../data/task-store-directory.js";
 import { taskWriterSafety } from "../data/task-format.js";
+import { recordLaunchedWorker } from "./task-work.js";
+import { liveWork } from "./task-work-live.js";
 
 export const taskUpdatesSchema = z.object({
   responsibility: z.enum(["human", "agent"]).optional(),
@@ -57,6 +59,35 @@ export function getTaskRoute(base: string, url: URL) {
   const filtered = filterTaskDoc(base, result.data, filter);
   const writerSafety = taskWriterSafety(store.path);
   return { ok: true, version: 1, storeId, project, revision: result.data.revision, writerSafety, metadataWritable: store.role !== "readonly" && !permissionDeniedError(store.path, "update_task", project) && writerSafety.activation === "owner-acknowledged", counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
+}
+
+/** How long a task list waits for the forge before answering with what the
+ * cache has; the detail waits longer. A slower answer is cached for the next read. */
+const LIST_LIVE_WAIT_MS = 2_000, DETAIL_LIVE_WAIT_MS = 8_000;
+
+/** `GET /v1/tasks`: the task document, each open task with work links also
+ * carrying `live` (worker phase, pull request CI and mergeability, issue
+ * state, and the one-line `status` a Tasks row shows). `live=0` skips it. */
+export async function getTaskListRoute(base: string, url: URL) {
+  const result = getTaskRoute(base, url);
+  if (url.searchParams.get("live") === "0") return result;
+  const items = Object.fromEntries(await Promise.all(Object.entries(result.items).map(async ([section, rows]) => [section,
+    section === "Done" ? rows : await Promise.all(rows.map(async row => row.work ? { ...row, live: await liveWork(row.work, LIST_LIVE_WAIT_MS) ?? null } : row))])));
+  return { ...result, items };
+}
+
+/** `GET /v1/tasks/detail?storeId&project&stableId`: one task (any section)
+ * with its work links and fresh live state. */
+export async function getTaskDetailRoute(base: string, url: URL) {
+  const { storeId, project, stableId } = identitySchema.parse(Object.fromEntries(["storeId", "project", "stableId"].map(key => [key, url.searchParams.get(key) ?? undefined])));
+  const store = owner(base, storeId, false);
+  if (!taskStoreHasProject(store, project)) throw new BridgeError(404, "Project is not in that task store.");
+  const result = readTasks(store.path, project);
+  if (!result.ok || path.resolve(result.data.path) !== path.join(path.resolve(store.path), project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
+  const matches = [...result.data.items.Active, ...result.data.items.Queue, ...result.data.items.Done].filter(item => item.stableId === stableId);
+  if (matches.length !== 1) throw new BridgeError(404, matches.length ? "That task id is ambiguous." : "No task with that id.");
+  const item = taskView(base, result.data, matches[0]);
+  return { ok: true, version: 1, storeId, project, revision: result.data.revision, item: { ...item, live: item.work ? await liveWork(item.work, DETAIL_LIVE_WAIT_MS) ?? null : null } };
 }
 
 export function updateTaskRoute(base: string, input: unknown) {
@@ -140,6 +171,11 @@ export async function launchTaskRoute(base: string, server: string, input: unkno
     const launched = await launchSession(server, { kind: data.kind, model: data.model, effort: data.effort, account: data.account,
       permissionMode: data.permissionMode, role: "agent", cwd, label: task.text.slice(0, 200),
       launchId: task.launchId, brief: { id: task.launchId, text, task: task.identity } }, { trustFolder: true });
+    const target = launched.target && typeof launched.target === "object" ? launched.target as Json : undefined;
+    try {
+      recordLaunchedWorker(store.path, task.identity, { launchId: task.launchId, computer: getMachineName(), harness: data.kind, label: task.text.slice(0, 200),
+        started: launched.briefState === "sent", ...(typeof target?.session === "string" && target.session ? { session: target.session } : {}) });
+    } catch { /* The claim already binds the launch; the work link is a convenience. */ }
     return { ...launched, task: task.identity, taskRevision: task.revision, launchId: task.launchId, claimPreserved: true,
       state: launched.briefState === "sent" ? "started" : "uncertain" };
   } catch (error) {
