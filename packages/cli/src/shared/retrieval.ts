@@ -24,6 +24,7 @@ import {
 import { cachedCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
 import { parseCitationComment } from "../content/citation.js";
 import { getHighImpactFindings } from "../finding/impact.js";
+import { parseFindingLifecycle } from "../finding/lifecycle.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import * as fs from "fs";
@@ -803,6 +804,18 @@ export async function searchFederatedStores(
 // read as broader than it is.
 const TRUST_FILTERED_TYPES = new Set(["findings", "reference"]);
 
+/** Bullets marked superseded or retracted are history, never injected. The index
+ * drops them only from FINDINGS.md; topic archives keep them for the record. */
+const RETIRED_STATUSES = new Set(["superseded", "retracted"]);
+
+function dropRetiredBullets(content: string): string {
+  if (!content.includes("phren:status") && !content.includes("superseded_by")) return content;
+  return content
+    .split("\n")
+    .filter((line) => !(line.trimStart().startsWith("- ") && RETIRED_STATUSES.has(parseFindingLifecycle(line).status)))
+    .join("\n");
+}
+
 /**
  * Doc types that must never be pushed into an agent's prompt automatically.
  *
@@ -866,7 +879,7 @@ export function applyTrustFilter(
     .filter((doc) => isInjectableDocType(doc.type))
     .map((doc) => {
       if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
-      const trust = filterTrustedFindingsDetailed(doc.content, {
+      const trust = filterTrustedFindingsDetailed(dropRetiredBullets(doc.content), {
         ttlDays,
         minConfidence,
         decay,

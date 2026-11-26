@@ -7,7 +7,7 @@ import * as path from "path";
 const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-retrieval-test-"));
 process.env.PHREN_PATH = tmpPhren;
 
-import { rankResults, searchDocuments, applyRelevanceFloor, } from "../cli/hooks.js";
+import { rankResults, searchDocuments, applyRelevanceFloor, applyTrustFilter, selectSnippets } from "../cli/hooks.js";
 import type { DocRow } from "../shared/index.js";
 import { buildRobustFtsQuery } from "../utils.js";
 
@@ -214,5 +214,41 @@ describe("applyRelevanceFloor", () => {
     // A changed file is still a tie to the work.
     const changed = makeDocRow("zeta", "auth-config.md", "findings", "anything");
     expect(applyRelevanceFloor([changed], "yes", { changedFiles: new Set(["auth-config.md"]) }, "zeta")).toHaveLength(1);
+  });
+});
+
+describe("applyTrustFilter: retired bullets", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const topic = (bullets: string[]): DocRow => ({
+    project: "zeta", filename: "auth.md", type: "reference", path: "/tmp/zeta/reference/topics/auth.md",
+    content: `# auth\n\n## Archived ${today}\n\n${bullets.join("\n")}\n`,
+  });
+  const filter = (rows: DocRow[]) => applyTrustFilter(rows, 3650, 0, { enabled: false }).rows;
+
+  it("never injects a superseded or retracted bullet from a topic archive", () => {
+    const rows = filter([topic([
+      `- Rotate the session token on every privilege change <!-- created: ${today} -->`,
+      `- Rotate the session token weekly <!-- created: ${today} --> <!-- phren:status "superseded" -->`,
+      `- Session tokens never expire <!-- created: ${today} --> <!-- phren:status "retracted" -->`,
+      `- Rotate the session token hourly <!-- created: ${today} --> <!-- superseded_by: "Rotate the session token on every privilege change" -->`,
+      `- Session tokens live in the keychain <!-- created: ${today} --> <!-- phren:status "contradicted" -->`,
+    ])]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toContain("on every privilege change");
+    expect(rows[0].content).toContain("live in the keychain");
+    expect(rows[0].content).not.toContain("weekly");
+    expect(rows[0].content).not.toContain("never expire");
+    expect(rows[0].content).not.toContain("hourly");
+    const { selected } = selectSnippets(rows, "rotate session token", 2000, 10, 2000);
+    expect(selected.map((s) => s.snippet).join("\n")).not.toMatch(/weekly|hourly|never expire/);
+  });
+
+  it("injects nothing from an archive whose matching bullets are all retired", () => {
+    const rows = filter([topic([
+      `- Rotate the session token weekly <!-- created: ${today} --> <!-- phren:status "superseded" -->`,
+      `- Session tokens never expire <!-- created: ${today} --> <!-- phren:status "retracted" -->`,
+    ])]);
+    expect(rows.map((r) => r.content).join("\n")).not.toMatch(/weekly|never expire/);
+    expect(applyRelevanceFloor(rows, "rotate session token", null, "zeta")).toHaveLength(0);
   });
 });
