@@ -90,6 +90,13 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
   and `<project>/dreams/` (`last-run.json`, one `<runId>.json` per dream,
   `journal.md`). The Hook starts scheduled dreams as a low-priority
   `phren dream run --scheduled` child; `PHREN_DREAMING=off` stops its ticker.
+- Weekly task audits, on the same projects and window as dreams:
+  `<project>/task-audits/` (`last-run.json`, one `<runId>.json` per audit). The
+  Hook starts them as a low-priority `phren task audit --scheduled` child;
+  `PHREN_TASK_AUDIT=off` stops it.
+- `.runtime/session-tasks/<session>.json`: the tasks each agent session claimed
+  or moved to Active, read by the Stop hook and dispatch returns (at most 64 per
+  session).
 - Inside each store's Git repository, from sync: `refs/phren/backup/<ms>` (the
   pre-merge HEAD whenever local and remote history had both moved, deleted
   after 14 days), `.config/maintenance-writer.json` (which computer rewrites
