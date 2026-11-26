@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- A store opened as an Obsidian vault no longer syncs Obsidian's own workspace state: the store's `.gitignore` now lists `.obsidian/`, added to existing stores the next time `phren init` or a relink runs.
+
 ### Fixed
 
 - Contradiction checks now include archived findings and show where each one lives. Adding a finding also catches exact duplicates in active archive bullets and names the original; similar wording and retired archive bullets do not block new findings.
