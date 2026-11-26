@@ -189,6 +189,7 @@ export async function handleHookPrompt() {
   const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
   const watchHint = browserHint(getPhrenPath(), prompt, sessionId,
     resolvedConfig.proactivity.base ?? getProactivityLevel(getPhrenPath()));
+  // Printed whatever recall finds: browserHint uses up its once-per-session marker.
   if (watchHint) console.log(watchHint);
 
   // The pipeline extracts keywords too; the hook needs them first for session momentum,
@@ -259,9 +260,30 @@ export async function handleHookPrompt() {
         }
       }
     }
+    // Task capture runs even when recall abstains, and its budget pause belongs in the saved trace.
+    const taskLevel = resolvedConfig.proactivity.tasks
+      ?? resolvedConfig.proactivity.base
+      ?? getProactivityLevelForTask(getPhrenPath());
+    const taskLifecycle = moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
+      phrenPath: getPhrenPath(),
+      prompt,
+      project: detectedProject,
+      sessionId,
+      intent: result.intent,
+      taskLevel,
+      // The primary store's merged budgets, reused only for a project that lives there.
+      resolvedBudgets: { store: getPhrenPath(), budgets: resolvedConfig.retentionPolicy.budgets },
+    }) : { noticeLines: [] };
+    const paused = "budgetPaused" in taskLifecycle ? taskLifecycle.budgetPaused : undefined;
+
     if (result.abstained) {
       if (seen && sessionId) writeRecallSeen(getPhrenPath(), sessionId, seen);
-      recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result, [], { session: sessionId, indexMs }));
+      recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result, [],
+        { session: sessionId, indexMs, taskCapturePaused: paused }));
+      const parts = [...taskLifecycle.noticeLines];
+      const prePromptOutput = runPrePromptHooks(getPhrenPath(), raw);
+      if (prePromptOutput) parts.unshift(prePromptOutput);
+      if (parts.length > 0) console.log(parts.join("\n"));
       process.exit(0);
     }
 
@@ -314,21 +336,6 @@ export async function handleHookPrompt() {
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
     }
 
-    // Task capture runs before the trace line, which records a capture the open-task budget paused.
-    const taskLevel = resolvedConfig.proactivity.tasks
-      ?? resolvedConfig.proactivity.base
-      ?? getProactivityLevelForTask(getPhrenPath());
-    const taskLifecycle = moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
-      phrenPath: getPhrenPath(),
-      prompt,
-      project: detectedProject,
-      sessionId,
-      intent,
-      taskLevel,
-      // The primary store's merged budgets, reused only for a project that lives there.
-      resolvedBudgets: { store: getPhrenPath(), budgets: resolvedConfig.retentionPolicy.budgets },
-    }) : { noticeLines: [] };
-    const paused = "budgetPaused" in taskLifecycle ? taskLifecycle.budgetPaused : undefined;
     recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result,
       budgetSelected.map((s) => ({ project: s.doc.project, filename: s.doc.filename, type: s.doc.type, path: s.doc.path, key: s.key })),
       { session: sessionId, indexMs, taskCapturePaused: paused }));
