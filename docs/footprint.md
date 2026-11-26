@@ -288,6 +288,11 @@ nothing to that checkout.
   events, stderr, exit record and any `blocked.json` refusal record.
 - `<store>/.runtime/agent-fanouts-archive/` holds finished jobs after 24 hours,
   capped at 500 folders. These directories are local runtime state.
+- `<store>/.runtime/recall-trace.jsonl` holds one line per prompt the prompt hook
+  saw: the start of the prompt (160 characters), its keywords, which memories
+  passed or failed the relevance floor and why, what was injected, or why
+  nothing was. Kept to the newest 5,000 lines once it passes 4 MB; local
+  runtime state, never synced.
 - OpenCode's mirrored session event logs can have a `.preview.json` sidecar in
   `<store>/.runtime/sessions/`, holding temporary live reply text for Hook.
   An interactive phren agent writes the same sidecar beside its event log in

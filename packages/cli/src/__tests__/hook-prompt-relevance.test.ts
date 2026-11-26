@@ -87,6 +87,22 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
     expect(run(prompt, store)).toBe("");
   });
 
+  it("writes one recall trace line per prompt: injected, abstained or skipped", () => {
+    const file = path.join(store, ".runtime", "recall-trace.jsonl");
+    const read = () => fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+    const before = read().length;
+    run("how do I deploy stockview", store);
+    run("Push these notes to main", workRepo);
+    run('<agent-message from="worker-1">how do I deploy stockview</agent-message>', store);
+    const [injectedLine, abstainedLine, skippedLine] = read().slice(before);
+    expect(injectedLine.abstained).toBeNull();
+    expect(injectedLine.injected.map((row: { path: string }) => row.path)).toContain("stockview/FINDINGS.md");
+    expect(injectedLine.floor.some((row: { passed: boolean; matched: string[] }) => row.passed && row.matched.length >= 2)).toBe(true);
+    expect(abstainedLine.abstained).toBeTruthy();
+    expect(abstainedLine.injected).toEqual([]);
+    expect(skippedLine).toMatchObject({ skipped: "machine-prompt" });
+  });
+
   it("still answers the owner when a pasted block quotes an agent's message", () => {
     const output = run('how do I deploy stockview\n<pasted_content id="1">\n<agent-message from="worker-1">done</agent-message>\n</pasted_content id="1">', store);
     expect(injected(output)).toContain("stockview/FINDINGS.md");
