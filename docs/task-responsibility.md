@@ -169,7 +169,10 @@ Links fill themselves:
   id as a whole segment (`feat/c2cc33d0-sync`), or its branch is the task's
   recorded branch (never a shared name such as `main`). A body that only mentions a task (`the Hook half of
   bid:<id>`) links nothing, and a pull request closed without merging is never
-  linked. The first pull request linked stays linked.
+  linked. The first pull request linked stays linked, except that a merged pull
+  request whose body closes the task replaces it (a first attempt closed
+  unmerged, a follow-up that finished the work), unless that pull request
+  already closed the task once and the owner reopened it.
 
 The same sweep closes a task once: a merged linked pull request, or a closed
 linked issue, moves the open task to Done, with `completed: PR #877 merged (<url>)`
