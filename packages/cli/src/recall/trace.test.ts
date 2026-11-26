@@ -47,9 +47,9 @@ describe("recall trace", () => {
   });
 
   it("keeps the prompt short and survives a torn line", () => {
-    recordRecallTrace(tmp.path, skippedTraceEntry("x".repeat(500), "hooks-disabled", null));
+    recordRecallTrace(tmp.path, skippedTraceEntry("x".repeat(500), "no-keywords", null));
     fs.appendFileSync(recallTraceFile(tmp.path), "{\"at\":\n");
-    recordRecallTrace(tmp.path, skippedTraceEntry("second", "tool-disabled", null));
+    recordRecallTrace(tmp.path, skippedTraceEntry("second", "machine-prompt", null));
     const entries = readRecallTrace(tmp.path);
     expect(entries).toHaveLength(2);
     expect(entries[0].prompt).toHaveLength(160);

@@ -94,6 +94,7 @@ export {
 
 import type { SelectedSnippet } from "../shared/retrieval.js";
 import { runPromptPipeline } from "../recall/pipeline.js";
+import { recordRecallTrace, skippedTraceEntry, traceEntryFromResult } from "../recall/trace.js";
 import { buildHookOutput } from "./hooks-output.js";
 import {
   getGitContext,
@@ -166,7 +167,10 @@ export async function handleHookPrompt() {
 
   // Another agent's result, report or message is not the owner asking anything:
   // the context pass (about a second on a busy store) has nothing to answer.
-  if (isMachinePrompt(prompt)) process.exit(0);
+  if (isMachinePrompt(prompt)) {
+    recordRecallTrace(getPhrenPath(), skippedTraceEntry(prompt, "machine-prompt", null, sessionId));
+    process.exit(0);
+  }
 
   if (!getHooksEnabledPreference(getPhrenPath())) {
     appendAuditLog(getPhrenPath(), "hook_prompt", "status=disabled");
@@ -199,7 +203,10 @@ export async function handleHookPrompt() {
   // The pipeline extracts keywords too; the hook needs them first for session momentum,
   // and a prompt with none ends here before the index loads.
   const keywordEntries = extractKeywordEntries(prompt);
-  if (!keywordEntries.length) process.exit(0);
+  if (!keywordEntries.length) {
+    recordRecallTrace(getPhrenPath(), skippedTraceEntry(prompt, "no-keywords", detectedProject, sessionId));
+    process.exit(0);
+  }
   debugLog(`hook-prompt keywords: "${keywordEntries.join(" ")}"`);
 
   // Session momentum: track topic frequencies within the session
@@ -256,7 +263,10 @@ export async function handleHookPrompt() {
         }
       }
     }
-    if (result.abstained) process.exit(0);
+    if (result.abstained) {
+      recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result, [], { session: sessionId, indexMs }));
+      process.exit(0);
+    }
 
     const { intent } = result;
     const keywords = result.keywords.join(" ");
@@ -306,6 +316,10 @@ export async function handleHookPrompt() {
       budgetUsedTokens = runningTokens;
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
     }
+
+    recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result,
+      budgetSelected.map((s) => ({ project: s.doc.project, filename: s.doc.filename, type: s.doc.type, path: s.doc.path, key: s.key })),
+      { session: sessionId, indexMs }));
 
     // Live activity: what a prompt pulled in is a recall as much as a search
     // hit is, and it is by far the most common kind. Recording it here is what

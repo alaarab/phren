@@ -15,8 +15,8 @@ const ROTATE_BYTES = 4_000_000;
 const MAX_FLOOR_ROWS = 12;
 const MAX_PROMPT_CHARS = 160;
 
-/** Why the hook stopped before recall ran. */
-export type RecallSkipReason = "machine-prompt" | "hooks-disabled" | "tool-disabled" | "project-disabled";
+/** Why the hook stopped before recall ran: another agent's message, or a prompt with no keywords. */
+export type RecallSkipReason = "machine-prompt" | "no-keywords";
 
 export interface RecallTraceFloorRow {
   path: string;
