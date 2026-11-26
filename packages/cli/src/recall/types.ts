@@ -27,7 +27,8 @@ export type RecallFloorReason =
   | "too-few-matches" // dropped: best chunk matched fewer distinct keywords than required
   | "low-rarity" // dropped: matched keywords' summed rarity under the bar
   | "no-anchor" // dropped: matched only two keywords and neither is rare
-  | "low-overlap"; // dropped: overlap under the (cross-project) floor
+  | "low-overlap" // dropped: overlap under the (cross-project) floor
+  | "below-best"; // dropped: matched under 60% of the strongest row's keyword rarity
 
 export interface RecallDocRef {
   project: string;
