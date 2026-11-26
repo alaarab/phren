@@ -21,6 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - When two identical phone messages are queued in Claude Code, a delayed hook no longer marks the second delivered after the transcript has already confirmed the first. Claude can confirm a message before its transcript row arrives, and joined messages keep their confirmation across a Hook restart.
 - The prompt hook now uses an archived finding's creation date or, when it has none, the date of its archive section. Old bug notes expire after 30 days, and a recently written finding whose cited code changed can still reach the prompt. Untagged findings in topic archives last up to 365 days.
+- After Claude's reply, the phone keeps a session working while the background agents its Stop listed may still be running, instead of briefly showing idle before the Hook has found them. The overview, activity clock and dreaming use the same rule, and a child lookup that hangs or fails is retried rather than counted as zero.
 - Phren Hook stops background checks such as Claude sign-in discovery when it shuts down, so a slow check no longer delays a restart. Agents already running in panes keep working.
 - `phren shell` stays open when a skill folder contains a dangling symlink. Skill listing and linking skip symlinks whose targets are missing or are neither files nor folders.
 

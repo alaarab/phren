@@ -129,6 +129,8 @@ export interface EffectiveStatusInput {
   /** The transcript's final turn, when the caller already read it. */
   final?: FinalTurn;
   runningChildren?: number;
+  /** Child discovery has not answered (still running, timed out or failed). */
+  childrenPending?: boolean;
   /** A real held approval or question the Hook serves. */
   held?: boolean;
   /** A confirmed dialog in the pane. */
@@ -165,10 +167,17 @@ export function resolveEffectiveStatus(input: EffectiveStatusInput): string | un
   if (phase?.phase === "working") return "working";
   const background = liveWork(input.record, input.final, input.runningChildren ?? 0, input.now);
   if (background) return "working";
+  if (provisionalWork(input)) return "working";
   if (phase?.phase === "ended") {
     return terminal === "done" ? "done" : "idle";
   }
   return terminal;
+}
+
+/** The Stop's own running count, standing in for children until discovery answers. */
+export function provisionalWork(input: EffectiveStatusInput): number | undefined {
+  const phase = input.record ? turnPhase(input.record) : undefined;
+  return input.childrenPending && phase?.phase === "ended" ? runningTasks(input.record, input.final, input.now) || undefined : undefined;
 }
 
 /** Every background task the finished turn left running, awaited or not, less
