@@ -223,6 +223,15 @@ describe("applyRelevanceFloor", () => {
     expect(applyRelevanceFloor([side], "ledger webhook hmac rotating", null, "myapp", undefined, rarity)).toEqual([side]);
   });
 
+  it("matches prompt words inside a bullet's joined names: flags, file names, identifiers", () => {
+    const doc = makeDocRow("myapp", "FINDINGS.md", "findings",
+      "- Run `tool --install-hooks` once; CI then fails on rules missing from `.github/lint-allowlist.txt` and writes audit_log rows.");
+    const decisions: string[][] = [];
+    const kept = applyRelevanceFloor([doc], "install-hooks allowlist audit", null, "myapp", undefined, undefined, (_row, d) => decisions.push(d.matched));
+    expect(kept).toEqual([doc]);
+    expect(decisions).toEqual([["install-hook", "allowlist", "audit"]]);
+  });
+
   it("never matches the path: every store path contains .phren", () => {
     const doc = { ...makeDocRow("designstudio", "FINDINGS.md", "findings", "- Delegation notes for the studio."),
       path: "/home/sam/.phren/designstudio/FINDINGS.md" };
@@ -296,8 +305,16 @@ describe("selectSnippets: the bullet the floor accepted", () => {
     expect(selected[0].snippet).not.toContain("weekly");
   });
 
-  it("without rarity keeps the first of equally matching bullets", () => {
+  it("without rarity keeps the first of equally matching, equally long bullets", () => {
     const { selected } = selectSnippets([doc], "rotate keychain token", 2000, 10, 2000);
     expect(selected[0].snippet).toContain("weekly");
+  });
+
+  it("of bullets matching the same keywords, shows the shorter: a long one mentions them in passing", () => {
+    const archive: DocRow = { ...doc, content: "# auth\n\n"
+      + "- Sync notes: since the last merge the token refresh, keychain migration, staging rollout and laptop setup live in the shared runbook.\n"
+      + "- The keychain holds the refresh token.\n" };
+    const { selected } = selectSnippets([archive], "keychain token", 2000, 10, 2000);
+    expect(selected[0].snippet).toContain("keychain holds the refresh token");
   });
 });
