@@ -268,14 +268,24 @@ export function contentChunks(content: string, maxChunks = 600): string[] {
 
 export interface ChunkMatch { chunk: string; distinct: number; rarity: number; matched: string[] }
 
+// Ranking, the floor and selection read the same rows within one prompt: tokenise each row's chunks once.
+const chunkTokenCache = new WeakMap<object, { content: string; chunks: Array<{ chunk: string; tokens: Set<string> }> }>();
+
+function tokenizedChunks(doc: Pick<DocRow, "content">): Array<{ chunk: string; tokens: Set<string> }> {
+  const cached = chunkTokenCache.get(doc);
+  if (cached && cached.content === doc.content) return cached.chunks;
+  const chunks = contentChunks(doc.content).map((chunk) => ({ chunk, tokens: new Set(tokenizeForOverlap(chunk, Number.POSITIVE_INFINITY)) }));
+  chunkTokenCache.set(doc, { content: doc.content, chunks });
+  return chunks;
+}
+
 /** The doc's best chunk for this prompt: most summed keyword rarity among
  * chunks with the most distinct keyword matches. */
 export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content">, rarity?: Map<string, number>): ChunkMatch | null {
   if (!queryTokens.length) return null;
   const wanted = new Set(queryTokens);
   let best: ChunkMatch | null = null;
-  for (const chunk of contentChunks(doc.content)) {
-    const tokens = new Set(tokenizeForOverlap(chunk, Number.POSITIVE_INFINITY));
+  for (const { chunk, tokens } of tokenizedChunks(doc)) {
     const matched: string[] = [];
     let weight = 0;
     for (const token of wanted) {
