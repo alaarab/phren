@@ -36,6 +36,7 @@ import { vectorFallback, deterministicSeed } from "./search-fallback.js";
 import { getOllamaUrl, getCloudEmbeddingUrl } from "./ollama.js";
 import { keywordFallbackSearch } from "../core/search.js";
 import { debugLog } from "../shared.js";
+import type { RecallDocRef, RecallFloorDecision } from "../recall/types.js";
 
 // ── Scoring constants ─────────────────────────────────────────────────────────
 
@@ -260,7 +261,7 @@ export function contentChunks(content: string, maxChunks = 600): string[] {
   return chunks.slice(0, maxChunks);
 }
 
-export interface ChunkMatch { chunk: string; distinct: number; rarity: number }
+export interface ChunkMatch { chunk: string; distinct: number; rarity: number; matched: string[] }
 
 /** The doc's best chunk for this prompt: most summed keyword rarity among
  * chunks with the most distinct keyword matches. */
@@ -270,14 +271,16 @@ export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content
   let best: ChunkMatch | null = null;
   for (const chunk of contentChunks(doc.content)) {
     const tokens = new Set(tokenizeForOverlap(chunk, Number.POSITIVE_INFINITY));
-    let distinct = 0, weight = 0;
+    const matched: string[] = [];
+    let weight = 0;
     for (const token of wanted) {
       if (!tokens.has(token)) continue;
-      distinct += 1;
+      matched.push(token);
       weight += rarity?.get(token) ?? DEFAULT_TOKEN_RARITY;
     }
+    const distinct = matched.length;
     if (!distinct) continue;
-    if (!best || weight > best.rarity || (weight === best.rarity && distinct > best.distinct)) best = { chunk, distinct, rarity: weight };
+    if (!best || weight > best.rarity || (weight === best.rarity && distinct > best.distinct)) best = { chunk, distinct, rarity: weight, matched };
   }
   return best;
 }
@@ -946,7 +949,8 @@ export function rankResults(
   db: SqlJsDatabase,
   cwd?: string,
   query?: string,
-  opts?: { filterType?: string | null; skipTaskFilter?: boolean }
+  opts?: { filterType?: string | null; skipTaskFilter?: boolean },
+  explain?: (row: DocRow, score: number) => void
 ): DocRow[] {
   let ranked = [...rows];
   const queryTokens = query ? tokenizeForOverlap(query) : [];
@@ -1112,6 +1116,10 @@ export function rankResults(
     });
   }
 
+  if (explain) {
+    const scoreOf = new Map(scored.map((entry) => [entry.doc, entry.score]));
+    for (const doc of ranked) explain(doc, scoreOf.get(doc) ?? 0);
+  }
   return ranked;
 }
 
@@ -1173,6 +1181,9 @@ export function markStaleCitations(snippet: string, opts: CitationFreshnessOptio
 
 export { DEFAULT_MIN_QUERY_RELEVANCE };
 
+/** Why the floor kept or dropped one row, for the recall trace and eval. */
+export type RelevanceFloorVerdict = Omit<RecallFloorDecision, keyof RecallDocRef>;
+
 /**
  * Relevance floor: drop ranked docs that aren't actually relevant to *this*
  * prompt, so the hook injects signal or nothing — never noise to fill a quota.
@@ -1195,24 +1206,39 @@ export function applyRelevanceFloor(
   gitCtx: { branch?: string; changedFiles?: Set<string> } | null,
   detectedProject: string | null,
   floor: number = DEFAULT_MIN_QUERY_RELEVANCE,
-  rarity?: Map<string, number>
+  rarity?: Map<string, number>,
+  explain?: (row: DocRow, decision: RelevanceFloorVerdict) => void
 ): DocRow[] {
-  if (!(floor > 0)) return rows;
+  const unmatched = { distinct: 0, rarity: 0, overlap: 0, matched: [] as string[] };
+  if (!(floor > 0)) {
+    if (explain) for (const doc of rows) explain(doc, { ...unmatched, passed: true, reason: "floor-disabled" });
+    return rows;
+  }
   const queryTokens = tokenizeForOverlap(keywords);
   const changedFiles = gitCtx?.changedFiles ?? new Set<string>();
   const crossFloor = Math.max(floor, CROSS_PROJECT_MIN_QUERY_RELEVANCE);
   // Fewer meaningful keywords than a chunk must match: nothing can be about
   // this prompt ("Yes"), so only the structural signals remain.
   const minRarity = detectedProject ? MIN_CHUNK_RARITY : NO_PROJECT_MIN_CHUNK_RARITY;
-  return rows.filter((doc) => {
+  const decide = (doc: DocRow): RelevanceFloorVerdict => {
     // A changed file is a tie to this work; a branch name is not: its words
     // ("audio") run through a whole project's memory. It still orders results.
-    if (fileRelevanceBoost(doc.path, changedFiles) > 0) return true;
-    if (queryTokens.length < MIN_CHUNK_MATCHES) return false;
+    if (fileRelevanceBoost(doc.path, changedFiles) > 0) return { ...unmatched, passed: true, reason: "changed-file" };
+    if (queryTokens.length < MIN_CHUNK_MATCHES) return { ...unmatched, passed: false, reason: "too-few-keywords" };
     const match = bestChunkMatch(queryTokens, doc, rarity);
-    if (!match || match.distinct < MIN_CHUNK_MATCHES || match.rarity < minRarity) return false;
+    if (!match) return { ...unmatched, passed: false, reason: "no-chunk" };
+    const seen = { distinct: match.distinct, rarity: match.rarity, overlap: 0, matched: match.matched };
+    if (match.distinct < MIN_CHUNK_MATCHES) return { ...seen, passed: false, reason: "too-few-matches" };
+    if (match.rarity < minRarity) return { ...seen, passed: false, reason: "low-rarity" };
     const isCrossProject = Boolean(detectedProject) && doc.project !== detectedProject;
-    return overlapScore(queryTokens, match.chunk) >= (isCrossProject ? crossFloor : floor);
+    const overlap = overlapScore(queryTokens, match.chunk);
+    const passed = overlap >= (isCrossProject ? crossFloor : floor);
+    return { ...seen, overlap, passed, reason: passed ? "pass" : "low-overlap" };
+  };
+  return rows.filter((doc) => {
+    const decision = decide(doc);
+    explain?.(doc, decision);
+    return decision.passed;
   });
 }
 

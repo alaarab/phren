@@ -24,11 +24,9 @@ import {
   checkConsolidationNeeded,
 } from "../shared/content.js";
 import {
-  buildRobustFtsQuery,
   extractKeywordEntries,
   isFeatureEnabled,
   clampInt,
-  clampFloat,
   errorMessage,
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/preferences.js";
@@ -94,16 +92,8 @@ export {
 
 // ── Imports for the orchestrator ─────────────────────────────────────────────
 
-import {
-  searchDocumentsAsync,
-  applyTrustFilter,
-  rankResults,
-  applyRelevanceFloor,
-  promptRarity,
-  DEFAULT_MIN_QUERY_RELEVANCE,
-  selectSnippets,
-  detectTaskIntent,
-  type SelectedSnippet, wantsTasks } from "../shared/retrieval.js";
+import type { SelectedSnippet } from "../shared/retrieval.js";
+import { runPromptPipeline } from "../recall/pipeline.js";
 import { buildHookOutput } from "./hooks-output.js";
 import {
   getGitContext,
@@ -162,7 +152,6 @@ export function parseHookInput(raw: string): HookPromptInput | null {
 
 export async function handleHookPrompt() {
   const profile = resolveRuntimeProfile(getPhrenPath());
-  const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
 
   let raw = "";
   try { raw = await readStdin(); } catch (err: unknown) {
@@ -207,10 +196,11 @@ export async function handleHookPrompt() {
     resolvedConfig.proactivity.base ?? getProactivityLevel(getPhrenPath()));
   if (watchHint) console.log(watchHint);
 
+  // The pipeline extracts keywords too; the hook needs them first for session momentum,
+  // and a prompt with none ends here before the index loads.
   const keywordEntries = extractKeywordEntries(prompt);
-  const keywords = keywordEntries.join(" ");
-  if (!keywords) process.exit(0);
-  debugLog(`hook-prompt keywords: "${keywords}"`);
+  if (!keywordEntries.length) process.exit(0);
+  debugLog(`hook-prompt keywords: "${keywordEntries.join(" ")}"`);
 
   // Session momentum: track topic frequencies within the session
   let hotTopics: string[] = [];
@@ -240,90 +230,39 @@ export async function handleHookPrompt() {
   // Never block the prompt on a rebuild: serve the current/stale snapshot and
   // refresh in a detached process (see loadIndexForHook).
   const db = await loadIndexForHook(getPhrenPath(), profile);
-  stage.indexMs = Date.now() - tIndex0;
+  const indexMs = Date.now() - tIndex0;
 
-  const intent = detectTaskIntent(prompt);
   // Resolve git context AFTER the enabled check — it spawns 3 git processes and is
   // wasted work when the project has hooks disabled.
   const gitCtx = moduleEnabled(getPhrenPath(), "git") ? getGitContext(cwd) : null;
 
-  const safeQuery = buildRobustFtsQuery(keywords, detectedProject, getPhrenPath());
-  if (!safeQuery) process.exit(0);
-
   try {
-    const tSearch0 = Date.now();
-    let rows = await searchDocumentsAsync(db, safeQuery, prompt, keywords, detectedProject, false, getPhrenPath());
-    stage.searchMs = Date.now() - tSearch0;
-    if (!rows || !rows.length) process.exit(0);
+    const result = await runPromptPipeline({ prompt, phrenPath: getPhrenPath(), db, detectedProject, cwd, gitCtx, hotTopics });
 
-    const tTrust0 = Date.now();
-    const policy = resolvedConfig.retentionPolicy;
-    const memoryTtlDays = Number.parseInt(
-      process.env.PHREN_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
-    );
-    const trustResult = applyTrustFilter(
-      rows,
-      Number.isNaN(memoryTtlDays) ? policy.ttlDays : memoryTtlDays,
-      policy.minInjectConfidence, policy.decay,
-      getPhrenPath()
-    );
-    rows = trustResult.rows;
-    // Notes are intentionally available to explicit search, but are personal scratch
-    // context and should never be injected into an agent prompt automatically.
-    rows = rows.filter((row) => row.type !== "notes");
-    // Tasks are a backlog, not memory: only when the prompt is about the work.
-    if (!wantsTasks(prompt, intent)) rows = rows.filter((row) => row.type !== "task");
-    stage.trustMs = Date.now() - tTrust0;
-    if (!rows.length) process.exit(0);
-
-    const findingsProactivity = resolvedConfig.proactivity.findings
-      ?? resolvedConfig.proactivity.base
-      ?? getProactivityLevelForFindings(getPhrenPath());
-    if (moduleEnabled(getPhrenPath(), "git") && isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && findingsProactivity !== "low" && sessionId && detectedProject && cwd) {
-      const marker = sessionMarker(getPhrenPath(), `extracted-${sessionId}-${detectedProject}`);
-      if (!fs.existsSync(marker)) {
-        try {
-          await handleExtractMemories(detectedProject, cwd, true, sessionId, "hook");
-          fs.writeFileSync(marker, "");
-        } catch (err: unknown) {
-          debugLog(`auto-extract failed for ${detectedProject}: ${errorMessage(err)}`);
+    // Auto-extract once rows survive the trust filter, even if a later stage abstained.
+    if (result.trustSurvivors > 0) {
+      const findingsProactivity = resolvedConfig.proactivity.findings
+        ?? resolvedConfig.proactivity.base
+        ?? getProactivityLevelForFindings(getPhrenPath());
+      if (moduleEnabled(getPhrenPath(), "git") && isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && findingsProactivity !== "low" && sessionId && detectedProject && cwd) {
+        const marker = sessionMarker(getPhrenPath(), `extracted-${sessionId}-${detectedProject}`);
+        if (!fs.existsSync(marker)) {
+          try {
+            await handleExtractMemories(detectedProject, cwd, true, sessionId, "hook");
+            fs.writeFileSync(marker, "");
+          } catch (err: unknown) {
+            debugLog(`auto-extract failed for ${detectedProject}: ${errorMessage(err)}`);
+          }
         }
       }
     }
+    if (result.abstained) process.exit(0);
 
-    const tRank0 = Date.now();
-    rows = rankResults(rows, intent, gitCtx, detectedProject, getPhrenPath(), db, cwd, keywords);
-    stage.rankMs = Date.now() - tRank0;
-    if (!rows.length) process.exit(0);
-
-    // Relevance floor: inject signal or nothing. Ranking scores on priors too,
-    // so a doc can rank well with no real tie to this prompt — drop those rather
-    // than pad to a quota with noise (env PHREN_MIN_QUERY_RELEVANCE=0 disables).
-    const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
-    const preFloorCount = rows.length;
-    debugLog(`relevance-floor candidates: ${rows.slice(0, 12).map((row) => `${row.project}/${row.filename}`).join(", ")}`);
-    rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, promptRarity(db, keywords));
-    if (rows.length !== preFloorCount) {
-      debugLog(`relevance-floor: ${preFloorCount} -> ${rows.length} rows (floor=${relevanceFloor})`);
-    }
-    if (!rows.length) process.exit(0);
-
-    let safeTokenBudget = clampInt(process.env.PHREN_CONTEXT_TOKEN_BUDGET, 550, 180, 10000);
-    const safeLineBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_LINES, 6, 2, 100);
-    const safeCharBudget = clampInt(process.env.PHREN_CONTEXT_SNIPPET_CHARS, 520, 120, 10000);
-
-    // Session momentum: boost token budget for hot topics
-    if (hotTopics.length > 0) {
-      safeTokenBudget = Math.min(
-        Math.floor(safeTokenBudget * 1.3),
-        parseInt(process.env.PHREN_MAX_INJECT_TOKENS ?? '2000', 10)
-      );
-    }
-
-    const tSelect0 = Date.now();
-    let { selected, usedTokens } = selectSnippets(rows, keywords, safeTokenBudget, safeLineBudget, safeCharBudget);
-    stage.selectMs = Date.now() - tSelect0;
-    if (!selected.length) process.exit(0);
+    const { intent } = result;
+    const keywords = result.keywords.join(" ");
+    const stage = { indexMs, ...result.stageMs };
+    let selected: SelectedSnippet[] = result.selectedRows;
+    let usedTokens = result.usedTokens;
 
     // Once per session per project: the "What phren knows" paragraph from
     // summary.md, so the agent gets the shape of a project's archive before
@@ -397,7 +336,7 @@ export async function handleHookPrompt() {
       debugLog(`hook-prompt lookup-events: ${errorMessage(err)}`);
     }
 
-    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getPhrenPath(), sessionId, keywords);
+    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, result.tokenBudget, getPhrenPath(), sessionId, keywords);
     const taskLevel = resolvedConfig.proactivity.tasks
       ?? resolvedConfig.proactivity.base
       ?? getProactivityLevelForTask(getPhrenPath());
@@ -436,12 +375,6 @@ export async function handleHookPrompt() {
 
     if (sessionId) {
       trackSessionMetrics(getPhrenPath(), sessionId, budgetSelected);
-    }
-
-    // Reads stay side-effect free: trust filter output informs ranking/snippets now,
-    // while queue/audit mutation is deferred to explicit governance maintenance.
-    if (trustResult.queueItems.length > 0 || trustResult.auditEntries.length > 0) {
-      debugLog(`hook-prompt deferred trust governance items=${trustResult.queueItems.length} audit=${trustResult.auditEntries.length}`);
     }
 
     const noticeFile = sessionId ? sessionMarker(getPhrenPath(), `noticed-${sessionId}`) : null;
