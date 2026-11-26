@@ -94,7 +94,8 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
   const preFloorCount = rows.length;
   debugLog(`relevance-floor candidates: ${rows.slice(0, 12).map((row) => `${row.project}/${row.filename}`).join(", ")}`);
-  rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, promptRarity(db, keywords),
+  const rarity = promptRarity(db, keywords);
+  rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, rarity,
     (row, decision) => result.floor.push({ ...docRef(row), ...decision }));
   if (rows.length !== preFloorCount) {
     debugLog(`relevance-floor: ${preFloorCount} -> ${rows.length} rows (floor=${relevanceFloor})`);
@@ -114,7 +115,7 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   result.tokenBudget = tokenBudget;
 
   const tSelect0 = Date.now();
-  const { selected, usedTokens } = selectSnippets(rows, keywords, tokenBudget, lineBudget, charBudget);
+  const { selected, usedTokens } = selectSnippets(rows, keywords, tokenBudget, lineBudget, charBudget, rarity);
   result.stageMs.selectMs = Date.now() - tSelect0;
   result.usedTokens = usedTokens;
   result.selectedRows = selected;

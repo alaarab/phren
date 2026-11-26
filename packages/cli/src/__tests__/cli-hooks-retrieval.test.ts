@@ -252,3 +252,24 @@ describe("applyTrustFilter: retired bullets", () => {
     expect(applyRelevanceFloor(rows, "rotate session token", null, "zeta")).toHaveLength(0);
   });
 });
+
+describe("selectSnippets: the bullet the floor accepted", () => {
+  const doc: DocRow = {
+    project: "zeta", filename: "auth.md", type: "reference", path: "/tmp/zeta/reference/topics/auth.md",
+    content: "# auth\n\n- Rotate the token weekly in staging.\n- The keychain holds the token on every laptop.\n",
+  };
+
+  it("shows the bullet with the rarer matched keywords, as the floor weighs them", () => {
+    const rarity = new Map([["rotate", 0.1], ["keychain", 0.9], ["token", 0.1]]);
+    const floorMatch = applyRelevanceFloor([doc], "rotate keychain token", null, "zeta", undefined, rarity);
+    expect(floorMatch).toHaveLength(1);
+    const { selected } = selectSnippets([doc], "rotate keychain token", 2000, 10, 2000, rarity);
+    expect(selected[0].snippet).toContain("keychain holds the token");
+    expect(selected[0].snippet).not.toContain("weekly");
+  });
+
+  it("without rarity keeps the first of equally matching bullets", () => {
+    const { selected } = selectSnippets([doc], "rotate keychain token", 2000, 10, 2000);
+    expect(selected[0].snippet).toContain("weekly");
+  });
+});
