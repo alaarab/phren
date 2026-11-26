@@ -205,6 +205,15 @@ describe("applyRelevanceFloor", () => {
     expect(applyRelevanceFloor([pair], "api sso", null, "max", undefined, new Map([["api", 0.13], ["sso", 0.57]]))).toHaveLength(1);
   });
 
+  it("a word in most docs is no second match: a product name the store mentions in passing does not carry a bullet", () => {
+    const doc = makeDocRow("max", "notes.md", "findings", "- Quillmark export stays out of scope while the work queue drains.");
+    const reasons: string[] = [];
+    const rarity = new Map([["quillmark", 0.75], ["pricing", 0.36], ["work", 0.06]]);
+    expect(applyRelevanceFloor([doc], "quillmark pricing work", null, "max", undefined, rarity, (_row, d) => reasons.push(d.reason))).toHaveLength(0);
+    expect(reasons).toEqual(["too-few-matches"]);
+    expect(applyRelevanceFloor([doc], "quillmark pricing work", null, "max", undefined, new Map([...rarity, ["work", 0.2]]))).toHaveLength(1);
+  });
+
   it("three matched everyday keywords still pass: more evidence, no rare word needed", () => {
     const doc = makeDocRow("max", "notes.md", "findings", "- Compile the private client without touching the live tree.");
     const rarity = new Map([["compile", 0.25], ["private", 0.19], ["client", 0.2], ["live", 0.08]]);
