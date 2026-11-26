@@ -109,17 +109,18 @@ describe("recordFeedback", () => {
   });
 
   it.each([
-    ["helpful", "helpful"],
-    ["reprompt", "repromptPenalty"],
-    ["regression", "regressionPenalty"],
-  ] as const)("records %s feedback in journal", (kind, field) => {
+    ["helpful", "helpful", "explicitHelpful"],
+    ["reprompt", "repromptPenalty", "explicitReprompt"],
+    ["regression", "regressionPenalty", "explicitRegression"],
+  ] as const)("distinguishes heuristic and explicit %s feedback in journal", (kind, field, explicitField) => {
     const key = entryScoreKey("proj", "FINDINGS.md", `${kind} snippet`);
     recordFeedback(phrenPath, key, kind);
+    recordFeedback(phrenPath, key, kind, undefined, "explicit");
 
     const journalFile = path.join(phrenPath, ".runtime", "scores.jsonl");
     const lines = fs.readFileSync(journalFile, "utf8").trim().split("\n");
-    const entry = JSON.parse(lines[lines.length - 1]);
-    expect(entry.delta[field]).toBe(1);
+    expect(JSON.parse(lines[0]).delta).toEqual({ [field]: 1 });
+    expect(JSON.parse(lines[1]).delta).toEqual({ [field]: 1, [explicitField]: 1 });
   });
 
   it("writes audit log entry", () => {
@@ -164,18 +165,22 @@ describe("flushEntryScores", () => {
   it("aggregates multiple journal entries for the same key", () => {
     const key = entryScoreKey("proj", "FINDINGS.md", "agg test");
     recordFeedback(phrenPath, key, "helpful");
-    recordFeedback(phrenPath, key, "helpful");
-    recordFeedback(phrenPath, key, "reprompt");
-    recordFeedback(phrenPath, key, "regression");
+    recordFeedback(phrenPath, key, "helpful", undefined, "explicit");
+    recordFeedback(phrenPath, key, "helpful", undefined, "explicit");
+    recordFeedback(phrenPath, key, "reprompt", undefined, "explicit");
+    recordFeedback(phrenPath, key, "regression", undefined, "explicit");
 
     flushEntryScores(phrenPath);
 
     const scoresFile = path.join(phrenPath, ".runtime", "memory-scores.json");
     const data = JSON.parse(fs.readFileSync(scoresFile, "utf8"));
     const entry = data.entries[key];
-    expect(entry.helpful).toBe(2);
+    expect(entry.helpful).toBe(3);
     expect(entry.repromptPenalty).toBe(1);
     expect(entry.regressionPenalty).toBe(1);
+    expect(entry.explicitHelpful).toBe(2);
+    expect(entry.explicitReprompt).toBe(1);
+    expect(entry.explicitRegression).toBe(1);
   });
 
   it("clears journal after flush", () => {
@@ -197,70 +202,82 @@ describe("getQualityMultiplier", () => {
     expect(getQualityMultiplier(phrenPath, key)).toBe(1);
   });
 
-  it("boosts quality for helpful feedback", () => {
-    const key = entryScoreKey("proj", "FINDINGS.md", "boosted");
-    recordFeedback(phrenPath, key, "helpful");
-    recordFeedback(phrenPath, key, "helpful");
-    recordFeedback(phrenPath, key, "helpful");
+  it.each([
+    ["helpful", 1.15],
+    ["reprompt", 0.8],
+    ["regression", 0.6],
+  ] as const)("ranks explicit %s feedback before and after flushing", (feedback, expected) => {
+    const key = entryScoreKey("proj", "FINDINGS.md", feedback);
+    recordFeedback(phrenPath, key, feedback, undefined, "explicit");
 
-    const mult = getQualityMultiplier(phrenPath, key);
-    expect(mult).toBeGreaterThan(1);
-  });
-
-  it("reduces quality for reprompt and regression penalties", () => {
-    const key = entryScoreKey("proj", "FINDINGS.md", "penalized");
-    recordFeedback(phrenPath, key, "regression");
-    recordFeedback(phrenPath, key, "regression");
-    recordFeedback(phrenPath, key, "reprompt");
-
-    const mult = getQualityMultiplier(phrenPath, key);
-    expect(mult).toBeLessThan(1);
+    expect(getQualityMultiplier(phrenPath, key)).toBeCloseTo(expected);
+    flushEntryScores(phrenPath);
+    expect(getQualityMultiplier(phrenPath, key)).toBeCloseTo(expected);
   });
 
   it("clamps output between 0.2 and 1.5", () => {
     const goodKey = entryScoreKey("proj", "FINDINGS.md", "excellent");
     for (let i = 0; i < 50; i++) {
-      recordFeedback(phrenPath, goodKey, "helpful");
+      recordFeedback(phrenPath, goodKey, "helpful", undefined, "explicit");
     }
-    expect(getQualityMultiplier(phrenPath, goodKey)).toBeLessThanOrEqual(1.5);
+    expect(getQualityMultiplier(phrenPath, goodKey)).toBe(1.5);
 
     const badKey = entryScoreKey("proj", "FINDINGS.md", "terrible");
     for (let i = 0; i < 50; i++) {
-      recordFeedback(phrenPath, badKey, "regression");
+      recordFeedback(phrenPath, badKey, "regression", undefined, "explicit");
     }
-    expect(getQualityMultiplier(phrenPath, badKey)).toBeGreaterThanOrEqual(0.2);
+    expect(getQualityMultiplier(phrenPath, badKey)).toBe(0.2);
   });
 
-  it("includes frequency boost from impressions", () => {
+  it("keeps frequent recent injections and heuristic feedback neutral", () => {
     const key = entryScoreKey("proj", "FINDINGS.md", "frequent");
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 100; i++) {
       recordInjection(phrenPath, key);
+      recordFeedback(phrenPath, key, "reprompt");
+      recordFeedback(phrenPath, key, "helpful");
+      recordFeedback(phrenPath, key, "regression");
     }
 
-    const mult = getQualityMultiplier(phrenPath, key);
-    expect(mult).toBeGreaterThan(1);
+    expect(getQualityMultiplier(phrenPath, key)).toBe(1);
+    flushEntryScores(phrenPath);
+    expect(getQualityMultiplier(phrenPath, key)).toBe(1);
   });
 
-  it("includes recency boost for recently used entries", () => {
-    const key = entryScoreKey("proj", "FINDINGS.md", "recent");
-    // Record an injection (sets lastUsedAt to now)
-    recordInjection(phrenPath, key);
+  it.each([new Date().toISOString(), "2020-01-01T00:00:00.000Z"])("accepts legacy scores and journal lines dated %s without changing rank", (at) => {
+    const key = entryScoreKey("proj", "FINDINGS.md", "legacy");
+    const legacy = { impressions: 100, helpful: 20, repromptPenalty: 80, regressionPenalty: 10 };
+    fs.writeFileSync(path.join(phrenPath, ".runtime", "memory-scores.json"), JSON.stringify({
+      schemaVersion: 1,
+      entries: { [key]: { ...legacy, lastUsedAt: at } },
+    }));
+    fs.writeFileSync(path.join(phrenPath, ".runtime", "scores.jsonl"), JSON.stringify({ key, delta: legacy, at }) + "\n");
 
-    const mult = getQualityMultiplier(phrenPath, key);
-    // Should have a positive recency boost (within 7 days = +0.15)
-    expect(mult).toBeGreaterThan(1);
+    expect(getQualityMultiplier(phrenPath, key)).toBe(1);
+    flushEntryScores(phrenPath);
+    expect(getQualityMultiplier(phrenPath, key)).toBe(1);
+    const scores = JSON.parse(fs.readFileSync(path.join(phrenPath, ".runtime", "memory-scores.json"), "utf8"));
+    expect(scores.entries[key]).toMatchObject({
+      impressions: 200, helpful: 40, repromptPenalty: 160, regressionPenalty: 20,
+      explicitHelpful: 0, explicitReprompt: 0, explicitRegression: 0,
+    });
+
+    recordFeedback(phrenPath, key, "helpful", undefined, "explicit");
+    flushEntryScores(phrenPath);
+    expect(getQualityMultiplier(phrenPath, key)).toBeCloseTo(1.15);
   });
 
   it("reads from both flushed scores and pending journal", () => {
     const key = entryScoreKey("proj", "FINDINGS.md", "mixed");
-    recordFeedback(phrenPath, key, "helpful");
+    recordFeedback(phrenPath, key, "helpful", undefined, "explicit");
     flushEntryScores(phrenPath);
 
     // Add more to journal (not yet flushed)
-    recordFeedback(phrenPath, key, "helpful");
+    recordFeedback(phrenPath, key, "helpful", undefined, "explicit");
 
-    const mult = getQualityMultiplier(phrenPath, key);
-    // 2 helpful signals: should be > 1 from both flushed + journal
-    expect(mult).toBeGreaterThan(1);
+    expect(getQualityMultiplier(phrenPath, key)).toBeCloseTo(1.3);
+    recordFeedback(phrenPath, key, "regression", undefined, "explicit");
+    expect(getQualityMultiplier(phrenPath, key)).toBeCloseTo(0.9);
+    flushEntryScores(phrenPath);
+    expect(getQualityMultiplier(phrenPath, key)).toBeCloseTo(0.9);
   });
 });

@@ -299,7 +299,7 @@ export async function handleQualityFeedback(args: string[]) {
     console.error("Usage: phren quality-feedback --key=<entry-key> --type=helpful|reprompt|regression");
     process.exit(1);
   }
-  recordFeedback(getPhrenPath(), key, feedback);
+  recordFeedback(getPhrenPath(), key, feedback, undefined, "explicit");
   flushEntryScores(getPhrenPath());
   console.log(`Recorded feedback: ${feedback} for ${key}`);
 }

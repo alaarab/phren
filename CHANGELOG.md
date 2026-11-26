@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - The prompt hook no longer injects the same memory over and over in one conversation. Once a bullet has been shown, it stays out for the next 12 prompts of that session and the slot goes to the next relevant memory; it can come back after that, or straight away once Claude Code compacts or clears the conversation. In two days of one computer's history, 241 of 413 injected snippets were ones the same session had already been given, and one bullet was injected 62 times in a single session.
+- Memory ranking now uses only explicit feedback and CI failures tied to a finding. Being injected often or recently, or being repeated in a session, no longer raises or lowers a memory's ranking.
 
 ### Fixed
 

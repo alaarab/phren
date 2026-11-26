@@ -574,7 +574,7 @@ export async function handleExtractMemories(
     const line = `${c.text}${commitKey ? ` (source commit ${commitKey})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
       const key = entryScoreKey(project, FINDINGS_FILENAME, line);
-      recordFeedback(getPhrenPath(), key, "regression");
+      recordFeedback(getPhrenPath(), key, "regression", undefined, "explicit");
     }
     if (c.score >= threshold) {
       appendFindingJournal(getPhrenPath(), project, line, {

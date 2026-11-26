@@ -48,6 +48,12 @@ The threshold `minInjectConfidence=0.35` suppresses low-confidence findings from
 
 Configure via `phren config policy`.
 
+### Feedback and retrieval ranking
+
+Only explicit feedback changes the feedback multiplier used in retrieval ranking: `memory_feedback` (also `revise_finding action=feedback`), CLI `quality-feedback`, and a CI failure tied to a finding. Helpful feedback adds 0.15, reprompt feedback subtracts 0.2, and regression feedback subtracts 0.4, starting at 1 and clamped to 0.2–1.5. Without explicit feedback the multiplier is 1, including for older score records.
+
+Impressions, usage timestamps, and heuristic helpful or reprompt counts are still recorded for diagnostics and other features. They do not boost or penalize this multiplier. Trust decay and citation confidence checks still apply separately.
+
 ### Citation validation
 
 Findings can cite the source file and line number that motivated them:

@@ -82,7 +82,7 @@ describe("trackSessionMetrics", () => {
       JSON.stringify({
         schemaVersion: 1,
         entries: {
-          bad: { impressions: 0, helpful: 0, repromptPenalty: 0, regressionPenalty: 3, lastUsedAt: "" },
+          bad: { impressions: 0, helpful: 0, repromptPenalty: 0, regressionPenalty: 3, explicitRegression: 3, lastUsedAt: "" },
         },
       }),
     );
