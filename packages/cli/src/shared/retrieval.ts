@@ -24,6 +24,7 @@ import {
 import { cachedCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
 import { parseCitationComment, type CitationState, type FindingCitation } from "../content/citation.js";
 import { bulletKeyText, citationStateKey, readCitationStates, type CitationStates } from "../content/citation-states.js";
+import { parseCreatedDate } from "../content/metadata.js";
 import { getHighImpactFindings } from "../finding/impact.js";
 import { parseFindingLifecycle } from "../finding/lifecycle.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
@@ -878,25 +879,34 @@ export type TrustFilterQueueItem = { project: string; section: "Stale" | "Confli
 export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueItem[]; auditEntries: string[] };
 
 // A bullet's key in its source file and in the index alike: its fid, else the citation-state key text.
-const citationKey = (line: string) => /<!--\s*fid:([a-z0-9]{8})/i.exec(line)?.[1] ?? bulletKeyText(line);
+const bulletKey = (line: string) => /<!--\s*fid:([a-z0-9]{8})/i.exec(line)?.[1] ?? bulletKeyText(line);
 
-/** The citation line under each bullet of a document's source file; the FTS index omits comments. */
-function sourceCitationLines(sourceFile: string | undefined): Map<string, string> {
-  const citations = new Map<string, string>();
-  if (!sourceFile) return citations;
+type SourceBulletMetadata = { citationLine?: string; date?: string };
+
+// Read dates and citations together because the index strips their comments.
+function readSourceBulletMetadata(sourceFile: string | undefined, archived: boolean): Map<string, SourceBulletMetadata> {
+  const metadata = new Map<string, SourceBulletMetadata>();
+  if (!sourceFile) return metadata;
   try {
     const source = fs.readFileSync(sourceFile, "utf8").split("\n");
-    for (let i = 0; i < source.length - 1; i++) {
-      if (source[i].startsWith("- ") && parseCitationComment(source[i + 1])) citations.set(citationKey(source[i]), source[i + 1]);
+    let archivedDate: string | undefined;
+    for (let i = 0; i < source.length; i++) {
+      const line = source[i];
+      if (archived && line.startsWith("## Archived ")) archivedDate = /^## Archived (\d{4}-\d{2}-\d{2})\s*$/.exec(line)?.[1] ?? archivedDate;
+      if (!line.startsWith("- ")) continue;
+      const date = archived ? parseCreatedDate(line) ?? archivedDate : undefined;
+      const next = source[i + 1];
+      const citationLine = next && parseCitationComment(next) ? next : undefined;
+      if (date || citationLine) metadata.set(bulletKey(line), { citationLine, date });
     }
   } catch { /* unreadable source: nothing to restore or check */ }
-  return citations;
+  return metadata;
 }
 
 /** Restore only citation metadata for retained bullets. */
-function restoreCitationComments(content: string, citations: Map<string, string>): string {
+function restoreCitationComments(content: string, metadata: Map<string, SourceBulletMetadata>): string {
   return content.split("\n").map((line, index, lines) => {
-    const citation = line.startsWith("- ") ? citations.get(citationKey(line)) : undefined;
+    const citation = line.startsWith("- ") ? metadata.get(bulletKey(line))?.citationLine : undefined;
     return citation && !parseCitationComment(lines[index + 1] ?? "") ? `${line}\n${citation}` : line;
   }).join("\n");
 }
@@ -929,7 +939,8 @@ export function applyTrustFilter(
     .filter((doc) => isInjectableDocType(doc.type))
     .map((doc) => {
       if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
-      const citations = sourceCitationLines(doc.path);
+      const archived = doc.type === "reference" && /(?:^|[\\/])reference[\\/]topics[\\/][^\\/]+\.md$/.test(doc.path);
+      const metadata = readSourceBulletMetadata(doc.path, archived);
       const trust = filterTrustedFindingsDetailed(dropRetiredBullets(doc.content), {
         ttlDays,
         minConfidence,
@@ -937,8 +948,8 @@ export function applyTrustFilter(
         project: doc.project,
         highImpactFindingIds,
         citationState: citationState(doc.path),
-        // Indexed content has no citation comments, so each bullet's citation comes from the source file.
-        sourceCitation: (bullet) => parseCitationComment(citations.get(citationKey(bullet)) ?? "") ?? undefined,
+        sourceCitation: (bullet) => parseCitationComment(metadata.get(bulletKey(bullet))?.citationLine ?? "") ?? undefined,
+        sourceArchiveDate: archived ? (bullet) => metadata.get(bulletKey(bullet))?.date : undefined,
       });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
@@ -947,7 +958,7 @@ export function applyTrustFilter(
         if (conflicts.length) queueItems.push({ project: doc.project, section: "Conflicts", items: conflicts });
         auditEntries.push(`project=${doc.project} type=${doc.type} stale=${stale.length} invalid_citation=${conflicts.length}`);
       }
-      return { ...doc, content: restoreCitationComments(trust.content, citations) };
+      return { ...doc, content: restoreCitationComments(trust.content, metadata) };
     })
     .filter((doc) => {
       return !TRUST_FILTERED_TYPES.has(doc.type) || Boolean(doc.content.trim());

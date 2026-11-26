@@ -41,7 +41,7 @@ Each finding has a confidence score that falls with age, linearly between these 
 | 90 days | 0.65 |
 | 120 days and older | 0.45 |
 
-A finding with no date counts as 0.45. Past its age limit a finding is stale and is not injected. The limit is set by its tag, or by the retention policy's `ttlDays` (default 120) when it has none:
+When recalling findings from `reference/topics/`, including `.older.md` files, phren uses each bullet's `created` date or the nearest `## Archived <date>` heading above it. A finding with no date counts as 0.45. Past its age limit a finding is stale and is left out of the prompt.
 
 | Tag | Age limit | Extra multiplier |
 |-----|-----------|------------------|
@@ -50,7 +50,7 @@ A finding with no date counts as 0.45. Past its age limit a finding is stale and
 | `[workaround]` | 60 days | 0.85 |
 | `[bug]` | 30 days | 0.8 |
 | `[context]` | 30 days | 0.75 |
-| no tag | `ttlDays` | 1.0 |
+| no tag | `ttlDays` (120 days by default), 365 days in a topic archive | 1.0 |
 
 A finding whose citation names no repo, file or symbol gets a further 0.8×: one with no citation, or with only the `created_at` time every new finding gets. A cited line that drifted, or a cited file changed since the finding was written, gives 0.7×, and a citation that no longer resolves drops the finding.
 
@@ -157,7 +157,7 @@ Both verbs write to the audit log (`review_approve` / `review_reject`, with the 
 
 ### TTL and retention policy
 
-- `ttlDays=120`: untyped findings older than 120 days are flagged for review. A finding tagged with a type lives as long as its type allows instead (`[bug]` and `[context]` 30 days, `[workaround]` 60, `[pattern]` and `[pitfall]` 365, `[decision]` with no limit), whatever `ttlDays` is set to. Injection and the nightly TTL review use the same limit.
+- `ttlDays=120` flags untyped active findings older than 120 days for review and keeps them out of prompts. The prompt hook uses 365 days for untyped findings in topic archives. Tagged findings use their type's limit (`[bug]` and `[context]` 30 days, `[workaround]` 60, `[pattern]` and `[pitfall]` 365, `[decision]` with no limit).
 - `retentionDays=365`: findings are retained for 365 days before eligible for permanent deletion
 
 Configure via `phren config policy`.

@@ -61,6 +61,8 @@ If any index build or filesystem operation exceeds this threshold, a warning is 
 
 Archived content inside `<details>` and `<!-- phren:archive:start/end -->` blocks is **stripped before FTS5 indexing**. This keeps the index lean and prevents stale findings from polluting search results. The raw text is still in FINDINGS.md if you need it.
 
+Topic archives stay indexed. Before injecting a topic bullet, the prompt hook reads its date from the same source file it checks for citations and applies the finding's age limit.
+
 ## 3. Context Injection Tuning
 
 ### Recall eval
