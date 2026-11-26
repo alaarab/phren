@@ -21,5 +21,8 @@
   "abstainRate": 0.5152,
   "positiveAbstainRate": 0,
   "retiredInjected": 0,
-  "meanUsedTokens": 94.1563
+  "meanUsedTokens": 94.1563,
+  "judgedPairs": 35,
+  "unjudgedPairs": 0,
+  "judgedPrecision": 0.9143
 }
