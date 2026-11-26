@@ -66,6 +66,64 @@ jobs:
         if: env.PHREN_RC != 'true'
         run: echo 'Build passed. Tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"
 
+  # A PR that adds or changes test files runs just those files on Windows and
+  # macOS. Both 0.3.94 RCs that failed did so on Windows or macOS only, in test
+  # files a feature PR had just added or changed (#907, #915). Each red RC cost
+  # 19 minutes plus the wait for a fix, and Linux development builds can't show
+  # these failures. The full suite still runs only in the RC. A PR that changes
+  # no test file never asks for a Windows or macOS runner.
+  changed-tests-list:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      files: ${{ steps.list.outputs.files }}
+    steps:
+      - name: List the test files this PR adds or changes
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate \
+            --jq '.[] | select(.status != "removed") | .filename' \
+            | grep -E '^packages/((cli|code|desktop|desktop-kit|push-relay)/src|vscode/test)/[A-Za-z0-9._/-]+\.test\.ts$' \
+            | tr '\n' ' ' || true)
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "Changed test files: ${files:-none}" >> "$GITHUB_STEP_SUMMARY"
+
+  changed-tests:
+    needs: changed-tests-list
+    if: needs.changed-tests-list.outputs.files != ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Changed test files
+        shell: bash
+        env:
+          FILES: ${{ needs.changed-tests-list.outputs.files }}
+        # FILES holds only paths matching the pattern above, split on spaces.
+        run: |
+          read -ra files <<< "$FILES"
+          pnpm exec vitest run "${files[@]}" --maxWorkers=2
+
   # Known-vulnerable dependencies fail the build: every push, PR, nightly and
   # RC asks the registry about the lockfile, so a new high or critical advisory
   # shows up within a day without anyone pushing. Fix it with a bump or an
