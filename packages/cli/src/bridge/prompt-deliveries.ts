@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { z } from "zod";
 import { materializedPath } from "./codex-threads.js";
+import { normalizedPromptEntryId } from "./prompt-identity.js";
 import { atomicInPrivateDir, BridgeError, object, objects, provider, sessionId, type Json, type Provider, type Target } from "./protocol.js";
 import { claudePromptIdentity } from "./transcript-claude.js";
 import { transcriptPath, unwrapPastedContent } from "./transcripts.js";
@@ -151,18 +152,24 @@ export class PromptDeliveries {
     this.lineOf = lineOf ?? (landed === transcriptEntries ? transcriptLine : async () => undefined);
     if (!file) return;
     try {
-      for (const row of objects(object(JSON.parse(readFileSync(file, "utf8"))).records)) {
+      const saved = object(JSON.parse(readFileSync(file, "utf8"))), claims = object(saved.promptClaims);
+      const rows = Array.isArray(saved.records) ? saved.records : [];
+      for (const [index, row] of rows.entries()) {
         const parsed = recordSchema.safeParse(row);
+        if (!parsed.success) continue;
         // A message the Hook was typing when it stopped is in the pane or
         // nowhere: wait for the agent, and give up as for any other.
-        if (parsed.success) this.records.push({ ...parsed.data, state: parsed.data.state === "typed" ? "queued" : parsed.data.state });
+        const record: Record = { ...parsed.data, state: parsed.data.state === "typed" ? "queued" : parsed.data.state };
+        if (record.state === "delivered") record.promptEntryId = normalizedPromptEntryId(claims[index]);
+        if (record.id && record.promptEntryId && record.entry === undefined) record.awaitingRow = true;
+        this.records.push(record);
       }
     } catch { /* No file yet, or an unreadable one: start empty. */ }
     try {
       for (const [id, row] of Object.entries(object(JSON.parse(readFileSync(landedFile(file), "utf8"))))) {
         const parsed = landedSchema.safeParse(row), record = this.byId(id);
         if (!parsed.success || !record) continue;
-        if (parsed.data.promptEntryId && record.state === "delivered") {
+        if (parsed.data.promptEntryId && !record.promptEntryId && record.state === "delivered") {
           record.promptEntryId = parsed.data.promptEntryId;
           if (record.entry === undefined) record.awaitingRow = true;
         }
@@ -204,15 +211,19 @@ export class PromptDeliveries {
   private save() {
     if (!this.file) return;
     // A record without a phone id is kept once it claimed a transcript row, so after a restart that row is not offered to another message.
-    const kept = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn");
-    const rows = kept.map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, awaitingRow: _____, entryLate: _a, entryLine: _b, entryUuid: _c, entryShown: _d, promptEntryId: _l,
-      queueOffset: _e, queueAt: _f, queueRemoveOffset: _g, queueUserOffset: _h, queueDequeueOffset: _i, queueKey: _j, queueEnd: _k, ...row }) => row);
+    const kept = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn" || record.promptEntryId);
+    // Write the claims by record index in the same snapshot, including joined turns without a phone id.
+    const promptClaims: Json = {};
+    const rows = kept.map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, awaitingRow: _____, entryLate: _a, entryLine: _b, entryUuid: _c, entryShown: _d, promptEntryId,
+      queueOffset: _e, queueAt: _f, queueRemoveOffset: _g, queueUserOffset: _h, queueDequeueOffset: _i, queueKey: _j, queueEnd: _k, ...row }, index) => {
+      if (promptEntryId) promptClaims[index] = promptEntryId;
+      return row;
+    });
     // The rows phone messages landed as, apart from the records an older Hook reads strictly.
     const landed: Json = {};
-    for (const record of kept) if (record.id && (record.entryLine !== undefined || record.entryUuid || record.entryShown !== undefined || record.entryLate || record.promptEntryId)) {
+    for (const record of kept) if (record.id && (record.entryLine !== undefined || record.entryUuid || record.entryShown !== undefined || record.entryLate)) {
       landed[record.id] = { ...(record.entryLine !== undefined ? { line: record.entryLine } : {}), ...(record.entryUuid ? { uuid: record.entryUuid } : {}),
-        ...(record.entryShown !== undefined ? { shown: record.entryShown } : {}), ...(record.entryLate ? { late: true } : {}),
-        ...(record.promptEntryId ? { promptEntryId: record.promptEntryId } : {}) };
+        ...(record.entryShown !== undefined ? { shown: record.entryShown } : {}), ...(record.entryLate ? { late: true } : {}) };
     }
     // The Claude queue occurrence each phone message was typed as, beside the records for the same reason.
     const queue: Json = {};
@@ -225,7 +236,7 @@ export class PromptDeliveries {
     }
     const file = this.file;
     this.writing = this.writing.then(async () => {
-      await atomicInPrivateDir(file, { records: rows });
+      await atomicInPrivateDir(file, { records: rows, promptClaims });
       await atomicInPrivateDir(landedFile(file), landed);
       await atomicInPrivateDir(queueBindingsFile(file), queue);
     }).catch(() => undefined);
@@ -540,14 +551,19 @@ export class PromptDeliveries {
   async submitted(target: Target, prompt: string, promptEntryId?: string): Promise<void> {
     await this.refreshClaudeQueue(target);
     const hash = promptHash(prompt);
+    const scope = { ...target, hash };
     this.hookPanes.add(this.paneKey(target));
-    if (promptEntryId && this.claudeClaimed(target, { promptEntryId })) return;
+    if (promptEntryId && this.claudeClaimed(scope, { promptEntryId })) return;
     // A failed message stays matchable for a late take only until the pane's next Stop: a turn that ended
     // without it means a later identical prompt is a new one.
     const stop = this.lastStop.get(this.paneKey(target)) ?? -Infinity;
-    const pick = () => {
+    const pick = (offset?: number) => {
       const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered" && record.entry === undefined && record.queueEnd !== "returned"
         && (record.state !== "failed" || (record.settledAt ?? record.at) >= stop));
+      if (offset !== undefined) {
+        const owner = this.records.find(record => record.hash === hash && this.samePane(record, target) && record.session === target.session && record.queueUserOffset === offset);
+        if (owner) return open.includes(owner) ? owner : undefined;
+      }
       return open.find(entry => entry.session === target.session) ?? open[0];
     };
     let record = pick();
@@ -561,11 +577,11 @@ export class PromptDeliveries {
     if (target.source === "claude") {
       let rows: TranscriptEntry[] | undefined;
       try { rows = (await this.landed({ source: target.source, session: target.session, hash, at: record.at })).filter(row => row.hook); } catch { rows = undefined; }
-      record = pick();
-      if (!record || (promptEntryId && this.claudeClaimed(target, { promptEntryId }))) return;
       const named = promptEntryId ? rows?.find(row => row.promptEntryId === promptEntryId) : undefined;
-      if (named && this.claudeClaimed(target, named)) return;
-      const free = named ?? rows?.filter(row => (!promptEntryId || !row.promptEntryId) && !this.claudeClaimed(target, row)).sort((a, b) => a.offset - b.offset)[0];
+      record = pick(named?.offset);
+      if (!record || (promptEntryId && this.claudeClaimed(scope, { promptEntryId }))) return;
+      if (named && this.claudeClaimed(scope, named)) return;
+      const free = named ?? rows?.filter(row => (!promptEntryId || !row.promptEntryId) && !this.claudeClaimed(scope, row)).sort((a, b) => a.offset - b.offset)[0];
       // With no matching row yet, an earlier row whose hook could still arrive makes a legacy match ambiguous.
       if (!free && this.records.some(other => other.hash === hash && this.samePane(other, target) && other.session === target.session
         && other.entry !== undefined && other.entryHook !== false && !other.entryLate && (!promptEntryId || !other.promptEntryId))) {
@@ -623,9 +639,9 @@ export class PromptDeliveries {
     return true;
   }
   // A native prompt id survives a rewrite; an older row or claim can still match by byte offset.
-  private claudeClaimed(target: Pick<Target, "server" | "pane" | "source" | "session">, row: { offset?: number; promptEntryId?: string }, except?: Record): boolean {
+  private claudeClaimed(target: Pick<Target, "server" | "pane" | "source" | "session"> & { hash: string }, row: { offset?: number; promptEntryId?: string }, except?: Record): boolean {
     return this.records.some(other => other !== except && this.samePane(other, target) && other.session === target.session
-      && (row.promptEntryId && other.promptEntryId ? row.promptEntryId === other.promptEntryId : row.offset !== undefined && row.offset === other.entry));
+      && (row.promptEntryId && other.promptEntryId ? row.promptEntryId === other.promptEntryId : target.hash === other.hash && row.offset !== undefined && row.offset === other.entry));
   }
   private static claudeHookRow(record: Record, row: TranscriptEntry): boolean {
     if (!row.hook) return false;

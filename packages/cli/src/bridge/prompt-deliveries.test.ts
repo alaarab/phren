@@ -179,6 +179,24 @@ describe("held messages Claude submits as one turn", () => {
     expect(restarted.status("again-j005", claudeTarget).state).toBe("failed");
   });
 
+  it("keeps a replayed joined hook from settling another batch after restart", async () => {
+    const store = deliveries();
+    await send(store, "join-first-a", "A", claudeTarget);
+    await send(store, "join-first-b", "B", claudeTarget);
+    await store.submitted(claudeTarget, "A\nB", "claude:prompt:batch-first");
+    await send(store, "join-next-a", "A", claudeTarget);
+    await send(store, "join-next-b", "B", claudeTarget);
+    await store.flush();
+
+    const restarted = deliveries();
+    const states = () => restarted.forPane(claudeTarget).map(item => item.state);
+    expect(states()).toEqual(["delivered", "delivered", "queued", "queued"]);
+    await restarted.submitted(claudeTarget, "A\nB", "claude:prompt:batch-first");
+    expect(states()).toEqual(["delivered", "delivered", "queued", "queued"]);
+    await restarted.submitted(claudeTarget, "A\nB", "claude:prompt:batch-next");
+    expect(states()).toEqual(["delivered", "delivered", "delivered", "delivered"]);
+  });
+
   it("match only held messages, never a failed one", async () => {
     const store = deliveries();
     await send(store, "fail-0001", "A\nB", claudeTarget);
@@ -776,6 +794,39 @@ describe("identical Claude messages and their rows", () => {
     expect(states()).toEqual(["delivered", "delivered"]);
   });
 
+  it("keeps the committed prompt claim when the landed metadata write fails", async () => {
+    const store = deliveries();
+    await send(store, "crash-first", "yes", claudeTarget);
+    await send(store, "crash-next", "yes", claudeTarget);
+    await store.flush();
+    // Block the sidecar rename while leaving the delivery file writable.
+    await rm(`${file}.landed.json`);
+    await mkdir(`${file}.landed.json`);
+    await store.submitted(claudeTarget, "yes", "claude:prompt:crash-first");
+    await store.flush();
+
+    const restarted = deliveries();
+    const states = () => restarted.forPane(claudeTarget).map(item => item.state);
+    expect(states()).toEqual(["delivered", "queued"]);
+    await restarted.submitted(claudeTarget, "yes", "claude:prompt:crash-first");
+    expect(states()).toEqual(["delivered", "queued"]);
+  });
+
+  it("settles a rewritten removal at an offset previously claimed by different words", async () => {
+    const removed = (content: string) => Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content }) + "\n");
+    let contents = removed("go");
+    const store = new PromptDeliveries(file, () => clock, async record => matchingOffsets(contents, 0, record));
+    stores.push(store);
+    await send(store, "rewrite-go", "go", claudeTarget);
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("rewrite-go", claudeTarget).state).toBe("delivered");
+
+    await send(store, "rewrite-yes", "yes", claudeTarget);
+    contents = removed("yes");
+    await store.observe("default", [claudePane("working")]);
+    expect(store.status("rewrite-yes", claudeTarget).state).toBe("delivered");
+  });
+
   it("gives a message its hook settled the row written after it, not a later identical message that was dropped", async () => {
     // A "yes" settled by its hook at t, its row written after the hooks; a second "yes" typed 6 s later and dropped (Esc).
     let rows: { offset: number; hook: boolean; at?: number }[] = [];
@@ -1074,6 +1125,27 @@ describe("a Claude queue occurrence bound to a phone send", () => {
       () => store.claudeQueueBindings(claudeTarget, log));
     return { store: make(), make, append, reader };
   }
+
+  it("settles callbacks arriving in reverse order against their bound queue occurrences", async () => {
+    const { store, append } = await liveQueue(true);
+    const text = "Check the build";
+    await send(store, "reverse-first", text, claudeTarget);
+    await store.bindClaudeQueueRows(claudeTarget, []);
+    await append(enqueue(text));
+    await send(store, "reverse-second", text, claudeTarget);
+    await store.bindClaudeQueueRows(claudeTarget, []);
+    await append(enqueue(text));
+    const row = (id: string) => ({ type: "user", uuid: `row-${id}`, promptId: id, message: { role: "user", content: text } });
+    await append(row("first"), row("second"));
+    await store.submitted(claudeTarget, text, "claude:prompt:second");
+    await vi.waitFor(() => expect(store.forPane(claudeTarget).some(item => item.landed)).toBe(true));
+    expect(store.status("reverse-first", claudeTarget).state).toBe("queued");
+    await store.submitted(claudeTarget, text, "claude:prompt:first");
+    await vi.waitFor(() => {
+      expect(store.status("reverse-first", claudeTarget).landed).toEqual({ line: 2, uuid: "row-first" });
+      expect(store.status("reverse-second", claudeTarget).landed).toEqual({ line: 3, uuid: "row-second" });
+    });
+  });
 
   it.each(["dated", "undated"])("leaves an existing identical %s enqueue and removal unowned", async kind => {
     const { store, make, append, reader } = await liveQueue();

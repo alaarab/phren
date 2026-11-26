@@ -1590,8 +1590,11 @@ export class AgentHooks {
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (!automaticPrompt && !backgroundStop && ["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
-          // A notification callback never settles an unrelated phone delivery.
-          if (!automaticPrompt && typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536), normalizedPromptEntryId(body.promptEntryId));
+          const promptEntryId = normalizedPromptEntryId(body.promptEntryId);
+          // An identified callback can confirm delivery while turn classification waits for its row.
+          if ((!automaticPrompt || (unresolvedPrevious !== undefined && promptEntryId)) && typeof body.prompt === "string") {
+            await this.deliveries.submitted(target, body.prompt.slice(0, 65_536), promptEntryId);
+          }
           const recorded = await this.recordTurn(target, pane, body, dispatch, classifiedInput);
           if (unresolvedPrevious !== undefined && recorded) this.deferSubmission(target, pane, body, recorded, unresolvedPrevious, pids);
           if (automaticPrompt) { res.end("{}"); return; }

@@ -121,6 +121,20 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
     trace.push({ channel: "overview", ...row });
     return row;
   }
+  it.each(["full", "fast"])("%s confirms an identified delivery before its transcript row arrives", async mode => {
+    await forward(mode, { hook_event_name: "UserPromptSubmit", prompt });
+    const prior = (await readTurn(target.server, target.pane))!.prompt;
+    const text = "Check the next build", id = "early-phone-01", promptId = "fixture-next-build";
+    void hooks.deliveries.expect(target, text, 0, undefined, id, "term-1");
+    hooks.deliveries.queue(id, target);
+    await forward(mode, { hook_event_name: "UserPromptSubmit", prompt: text, prompt_id: promptId });
+    expect(hooks.deliveries.status(id, target)).toEqual({ state: "delivered", session });
+    expect((await readTurn(target.server, target.pane))!.prompt).toEqual(prior);
+
+    await append({ ...owner, uuid: "early-phone-row", timestamp: new Date().toISOString(), promptId, message: { role: "user", content: text } });
+    await hooks.deliveries.observe(target.server, [pane]);
+    await vi.waitFor(() => expect(hooks.deliveries.status(id, target).landed).toEqual({ line: 1, uuid: "early-phone-row" }));
+  });
   it.each(["full", "fast"])("%s reconciles a callback delivered before its owner row", async mode => {
     await forward(mode, { hook_event_name: "UserPromptSubmit", prompt });
     await append(assistant("Old reply.", true)); await forward(mode, { hook_event_name: "Stop" });

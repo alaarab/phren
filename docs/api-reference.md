@@ -873,10 +873,11 @@ hours in `deliveries.json` in the bridge folder (a hash of the words, never
 the text), so a Hook restart keeps them.
 
 For Claude Code, the transcript and UserPromptSubmit hook share a delivery
-claim using Claude's prompt ID when available. If the transcript confirms a
-message first, a delayed hook for that prompt leaves a second identical
-message queued until Claude takes it. Older rows use their byte position in
-the conversation's transcript.
+claim using Claude's prompt ID when available. An identified owner callback
+can confirm delivery before Claude writes the row. If the transcript confirms
+a message first, a delayed hook for that prompt leaves a second identical
+message queued until Claude takes it. For older rows, the Hook matches the
+byte position and the message's words within the conversation.
 
 A Codex pane on the Hook's own app-server takes the message over the
 app-server instead of typing: steered into a running turn (as the TUI's Enter
@@ -919,9 +920,9 @@ A phone matches its pending send to that row rather than to the row's text.
 - for messages delivered without a transcript row (app-server Codex, served
   OpenCode).
 
-The Hook keeps these rows and Claude's prompt claims in
-`deliveries.json.landed.json` beside the delivery records, so an older Hook
-still reads every delivery record.
+The Hook writes Claude's prompt claims atomically with delivery state in
+`deliveries.json`, including claims for joined turns. It keeps row details in
+`deliveries.json.landed.json` beside the delivery records.
 
 A Claude queue row also carries an optional `phrenDeliveryId` when the Hook has
 bound that queue occurrence to a phone send: the value is the `deliveryId` the
