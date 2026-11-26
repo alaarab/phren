@@ -122,24 +122,28 @@ describe("recall eval", () => {
 
   it("restores retrieval settings and removes the fixture after a runner fails", async () => {
     const root = tempDir();
-    const saved = { PHREN_MIN_QUERY_RELEVANCE: process.env.PHREN_MIN_QUERY_RELEVANCE, PHREN_FEATURE_RECALL_TEST: process.env.PHREN_FEATURE_RECALL_TEST, PHREN_EMBEDDING_API_URL: process.env.PHREN_EMBEDDING_API_URL };
+    const saved = { PHREN_MIN_QUERY_RELEVANCE: process.env.PHREN_MIN_QUERY_RELEVANCE, PHREN_FEATURE_RECALL_TEST: process.env.PHREN_FEATURE_RECALL_TEST, PHREN_EMBEDDING_API_URL: process.env.PHREN_EMBEDDING_API_URL, PHREN_OLLAMA_URL: process.env.PHREN_OLLAMA_URL };
     const home = process.env.HOME;
     const phrenPath = process.env.PHREN_PATH;
     try {
       process.env.PHREN_MIN_QUERY_RELEVANCE = "0.99";
       process.env.PHREN_FEATURE_RECALL_TEST = "on";
       process.env.PHREN_EMBEDDING_API_URL = "https://unused.invalid";
+      delete process.env.PHREN_OLLAMA_URL;
       await expect(runRecallEval({ root, cases: [negative], runner: async (_c, ctx) => {
         expect(process.env.PHREN_PATH).toBe(ctx.phrenPath);
         expect(process.env.PHREN_MIN_QUERY_RELEVANCE).toBeUndefined();
         expect(process.env.PHREN_FEATURE_RECALL_TEST).toBeUndefined();
-        expect(process.env.PHREN_EMBEDDING_API_URL).toBeUndefined();
+        // Embeddings are off for the run, whatever the computer has configured.
+        expect(process.env.PHREN_EMBEDDING_API_URL).toBe("off");
+        expect(process.env.PHREN_OLLAMA_URL).toBe("off");
         expect(ctx.db.exec("SELECT COUNT(*) FROM docs")[0].values[0][0]).toBeGreaterThan(0);
         throw new Error("runner interrupted");
       } })).rejects.toThrow("runner interrupted");
       expect(process.env.PHREN_MIN_QUERY_RELEVANCE).toBe("0.99");
       expect(process.env.PHREN_FEATURE_RECALL_TEST).toBe("on");
       expect(process.env.PHREN_EMBEDDING_API_URL).toBe("https://unused.invalid");
+      expect(process.env.PHREN_OLLAMA_URL).toBeUndefined();
       expect(process.env.HOME).toBe(home);
       expect(process.env.PHREN_PATH).toBe(phrenPath);
       expect(fs.existsSync(root)).toBe(false);
