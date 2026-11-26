@@ -8,7 +8,7 @@ import {
 } from "../data/access.js";
 import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./github.js";
 import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasExplicitTaskSignal, hasSuppressTaskIntent, hasCodeChangeContext, type ProactivityLevel } from "../proactivity.js";
-import { getWorkflowPolicy } from "../shared/governance.js";
+import { getWorkflowPolicy, projectBudgets, type StoreBudgets } from "../shared/governance.js";
 import { debugLog, sessionMarker } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { clankerEnabled, rowTitle } from "../clanker.js";
@@ -29,6 +29,8 @@ interface TaskSessionState {
 interface TaskPromptLifecycleResult {
   mode: TaskMode;
   noticeLines: string[];
+  /** Set when a new task was due but the project is over its open-task budget. */
+  budgetPaused?: { open: number; budget: number };
 }
 
 const ACTION_PREFIX_RE = /^(?:please\s+|can you\s+|could you\s+|would you\s+|i want you to\s+|i want to\s+|let(?:'|’)s\s+|lets\s+|help me\s+)/i;
@@ -355,6 +357,8 @@ export function handleTaskPromptLifecycle(args: {
   sessionId?: string;
   intent: string;
   taskLevel?: ProactivityLevel;
+  /** Budgets the caller already resolved for a store (the prompt hook's config), reused when the project lives there. */
+  resolvedBudgets?: { store: string; budgets: StoreBudgets };
 }): TaskPromptLifecycleResult {
   const mode = getTaskMode(args.phrenPath);
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
@@ -401,6 +405,18 @@ export function handleTaskPromptLifecycle(args: {
       mode,
       noticeLines: buildSuggestionNotice(args.project, line, issueMeta),
     };
+  }
+
+  // Over the open-task budget the hook files nothing new on its own. A prompt that asks for a
+  // task, add_task and `phren tasks add` still add one, and a matched task still moves. The budget
+  // is read only when a new task would be filed, from the config the hook already resolved.
+  if (!reusable && !hasExplicitTaskSignal(prompt)) {
+    const open = activeItems.length + parsed.data.items.Queue.length;
+    const budget = projectBudgets(args.phrenPath, args.project, args.resolvedBudgets).openTasks;
+    if (budget > 0 && open > budget) {
+      debugLog(`task lifecycle paused ${args.project}: ${open} open tasks, budget ${budget}`);
+      return { mode, noticeLines: [], budgetPaused: { open, budget } };
+    }
   }
 
   // Intent-aware auto mode: if the user is in discovery mode (brainstorming,

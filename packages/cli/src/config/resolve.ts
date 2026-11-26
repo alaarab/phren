@@ -228,6 +228,14 @@ export function buildConfigView(phrenPath: string, project?: string): ConfigView
     pushIfSet(levels, "global", dig(rawRetention, "decay", milestone), retentionPath);
     fields[fieldKey] = resolveConfigField(fieldKey, getConfigField(fieldKey)?.default, levels);
   }
+  // Budgets: tasks and review per project, the rest for this computer only.
+  for (const budget of ["openTasks", "reviewEntries", "runtimeMB", "fanoutArchiveMB", "runtimeAgeOut", "runtimeAgeOutDays"]) {
+    const fieldKey = `retention.budgets.${budget}`;
+    const levels: Level[] = [];
+    if (budget === "openTasks" || budget === "reviewEntries") pushIfSet(levels, "project", dig(overrides?.retentionPolicy, "budgets", budget), projectConfigPath);
+    pushIfSet(levels, "global", dig(rawRetention, "budgets", budget), retentionPath);
+    fields[fieldKey] = resolveConfigField(fieldKey, getConfigField(fieldKey)?.default, levels);
+  }
 
   // ── workflow ───────────────────────────────────────────────────────────────
   const lctLevels: Level[] = [];

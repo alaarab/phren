@@ -307,13 +307,26 @@ nothing to that checkout.
   `phren maintain gc` runs the same pruning by hand plus Git garbage collection,
   without rewriting commit history.
 - `<store>/.runtime/code/<project>.sqlite` holds the rebuildable code index,
-  references, declaration fingerprints and last-observed change times.
+  references, declaration fingerprints and last-observed change times. With
+  runtime age-out on (retention `budgets.runtimeAgeOut`, off by default), daily
+  maintenance removes an index whose recorded checkout no longer exists here or
+  is no longer a git checkout, once it has not been rebuilt for
+  `budgets.runtimeAgeOutDays` (30), and only after the week described below.
+  A removed index returns only when `phren code index` runs on a checkout.
 - `<store>/.runtime/packages/` holds optional installed packages, including
   `@phren/code` when it is not linked from the workspace.
 - `<store>/.runtime/agent-fanouts/<job id>/` holds each worker's manifest,
   events, stderr, exit record and any `blocked.json` refusal record.
 - `<store>/.runtime/agent-fanouts-archive/` holds finished jobs after 24 hours,
-  capped at 500 folders. These directories are local runtime state.
+  capped at 500 folders. Its size against retention `budgets.fanoutArchiveMB`
+  (512 MB) is reported; once runtime age-out is on and past its week, the
+  archive sweep also deletes the oldest finished folders past that size, and
+  daily maintenance removes folders that finished more than
+  `budgets.runtimeAgeOutDays` ago. These directories are local runtime state.
+- `<primary store>/.runtime/runtime-age-out.json` records when this computer
+  first saw runtime age-out on and whether its week (seven days and seven
+  daily store health lines) has passed. Written by daily maintenance while
+  age-out is on, removed when it is off; local runtime state, never synced.
 - `<store>/.runtime/recall-trace.jsonl` holds one line per prompt the prompt hook
   saw: the start of the prompt (160 characters), its keywords, which memories
   passed or failed the relevance floor and why, what was injected, or why
@@ -321,8 +334,11 @@ nothing to that checkout.
   runtime state, never synced.
 - `<primary store>/.runtime/store-health.jsonl` holds daily counts of findings,
   citations (with the share checkable on this computer), tasks and review entries for this computer's stores, primary runtime
-  file sizes and the last 24 hours of recall counts. Kept to the newest 400
-  lines; local runtime state, never synced.
+  file sizes by folder and by class (code indexes, fanout archive, live fanouts,
+  sessions, packages, logs, other), the components over their budgets and what
+  each budget stops, what runtime age-out removed or would remove, and the last
+  24 hours of recall counts. Kept to the newest 400 lines; local runtime state,
+  never synced.
 - `<store>/.sessions/recall-seen-<session>.json` holds, for one session, how
   many prompts the prompt hook has answered and a short hash of each memory
   bullet it injected in the last 12, so it does not inject them again. Removed

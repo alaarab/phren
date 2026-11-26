@@ -1,8 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initTestPhrenRoot, writeFile } from "../test-helpers.js";
-import { collectStoreHealth, recordStoreHealth } from "./store-health.js";
+import { budgetDoctorCheck, collectStoreHealth, recordStoreHealth } from "./store-health.js";
 import { qualityMarkers } from "../shared.js";
 
 let scratch: string;
@@ -166,19 +167,19 @@ describe("store health collection", () => {
       { at: "2026-11-24T12:00:00.000Z", abstained: "no-candidates" },
       { at: recent, skipped: "machine-prompt" },
       { at: recent, skipped: "no-keywords" },
-      { at: recent, injected: "wrong", abstained: 5, suppressedRepeats: -7 },
+      { at: recent, injected: "wrong", abstained: 5, suppressedRepeats: -7, taskCapturePaused: { open: 3, budget: 2 } },
       { at: "2026-11-24T11:59:59.999Z", injected: [{}], suppressedRepeats: 10 },
       { at: "2026-11-25T12:00:00.001Z", abstained: "future" },
       { at: "invalid" }, null, [], { other: "missing date" },
     ].map(row => JSON.stringify(row));
     put(primary, ".runtime/recall-trace.jsonl", trace.join("\n") + '\n{"at":');
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
-      prompts: 7, injected: 1, abstained: 3, skipped: 2, suppressedRepeats: 4,
+      prompts: 7, injected: 1, abstained: 3, skipped: 2, suppressedRepeats: 4, taskCapturePaused: 1,
       byAbstainReason: { "below-floor": 2, "no-candidates": 1 },
     });
     put(primary, ".runtime/recall-trace.jsonl", "");
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
-      prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, byAbstainReason: {},
+      prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, taskCapturePaused: 0, byAbstainReason: {},
     });
   });
 
@@ -192,9 +193,188 @@ describe("store health collection", () => {
         citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
         checkableCitations: { any: 0, withFile: 0 },
         openTasks: 0, doneTasks: 0, reviewEntries: 0,
-      }, citationCoverage: 0 }], runtimeBytes: {}, recall: null,
+      }, citationCoverage: 0 }], runtimeBytes: {},
+      runtimeClasses: { codeIndexes: 0, fanoutArchive: 0, fanouts: 0, sessions: 0, packages: 0, logs: 0, other: 0 },
+      budgets: { over: [] }, recall: null,
     });
     expect(fs.existsSync(path.join(primary, ".runtime"))).toBe(false);
+  });
+});
+
+describe("budgets in the health line", () => {
+  it("groups runtime bytes by class and marks each component over its budget with what that stops", () => {
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 2, reviewEntries: 2, runtimeMB: 1, fanoutArchiveMB: 0 } }));
+    put(primary, "proj/tasks.md", "# Tasks\n## Active\n- One\n## Queue\n- Two\n- Three\n## Done\n- Old\n");
+    put(primary, "proj/review.md", "# Review\n## Review\n- A\n- B\n## Stale\n- C\n");
+    // Past the 150 default, so only an explicit 0 keeps it off the list.
+    put(primary, "calm/tasks.md", `# Tasks\n## Queue\n${Array.from({ length: 160 }, (_, i) => `- Item ${i}`).join("\n")}\n`);
+    put(primary, "calm/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 0\n");
+    put(primary, "busy/tasks.md", "# Tasks\n## Queue\n- One\n- Two\n- Three\n");
+    put(primary, "busy/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 5\n");
+    put(primary, ".runtime/code/proj.sqlite", "x".repeat(1_100_000));
+    put(primary, ".runtime/agent-fanouts-archive/job-1/events.jsonl", "y".repeat(100));
+    put(primary, ".runtime/agent-fanouts/job-2/events.jsonl", "y".repeat(10));
+    put(primary, ".runtime/sessions/a.jsonl", "s");
+    put(primary, ".runtime/packages/p.json", "pp");
+    put(primary, ".runtime/debug.log", "z");
+    put(primary, ".runtime/lookup-events.jsonl", "zz");
+    put(primary, ".runtime/embeddings.json", "e");
+    const result = collectStoreHealth(primary, now, "test-computer");
+    expect(result.runtimeClasses).toEqual({ codeIndexes: 1_100_000, fanoutArchive: 100, fanouts: 10, sessions: 1, packages: 2, logs: 3, other: 1 });
+    expect(result.budgets.over).toEqual([
+      { component: "openTasks", store: "personal", project: "proj", value: 3, budget: 2, effect: "the prompt hook files no new tasks" },
+      { component: "reviewEntries", store: "personal", project: "proj", value: 3, budget: 2, effect: "machine-generated entries are not queued" },
+      { component: "runtimeBytes", value: 1_100_117, budget: 1_048_576, effect: "reported only" },
+    ]);
+  });
+
+  it("flags the fanout archive past its ceiling, pruned only once runtime age-out is on and past its week", () => {
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { fanoutArchiveMB: 0.0001 } }));
+    put(primary, ".runtime/agent-fanouts-archive/job-1/events.jsonl", "y".repeat(200));
+    const row = { component: "fanoutArchiveBytes", value: 200, budget: 105 };
+    expect(collectStoreHealth(primary, now, "test-computer").budgets.over).toEqual([
+      { ...row, effect: "reported only until runtime age-out is on" },
+    ]);
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { fanoutArchiveMB: 0.0001, runtimeAgeOut: true } }));
+    put(primary, ".runtime/runtime-age-out.json", JSON.stringify({ enabledSince: "2026-11-01T00:00:00.000Z", ready: true }));
+    expect(collectStoreHealth(primary, now, "test-computer").budgets.over).toEqual([
+      { ...row, effect: "the archive sweep deletes the oldest finished folders" },
+    ]);
+  });
+
+  it("gives doctor a warn-only line from the latest health record", () => {
+    expect(budgetDoctorCheck(primary)).toEqual({ name: "budgets", ok: true, detail: "no store health recorded yet" });
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 1 } }));
+    put(primary, "proj/tasks.md", "# Tasks\n## Queue\n- One\n- Two\n");
+    recordStoreHealth(primary, now, "test-computer");
+    expect(budgetDoctorCheck(primary)).toEqual({
+      name: "budgets", ok: true,
+      detail: "over budget on 2026-11-25: personal/proj open tasks 2 of 1 (the prompt hook files no new tasks)",
+    });
+    put(primary, "proj/tasks.md", "# Tasks\n## Queue\n- One\n");
+    recordStoreHealth(primary, new Date(now.getTime() + 86_400_000), "test-computer");
+    expect(budgetDoctorCheck(primary)).toEqual({ name: "budgets", ok: true, detail: "within budget on 2026-11-26" });
+  });
+});
+
+describe("runtime age-out", () => {
+  const day = 86_400_000;
+  const exists = (file: string) => fs.existsSync(path.join(primary, file));
+  const lastLine = () => JSON.parse(fs.readFileSync(path.join(primary, ".runtime/store-health.jsonl"), "utf8").trim().split("\n").at(-1)!) as Record<string, unknown>;
+  const old = new Date(now.getTime() - 40 * day);
+  const enable = () => put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { runtimeAgeOut: true } }));
+  // A week of earlier daily report lines and an opt-in this computer saw `since` days ago.
+  const pastWeek = (since: number, lines = 7) => {
+    put(primary, ".runtime/store-health.jsonl", Array.from({ length: lines }, (_, i) =>
+      JSON.stringify({ at: new Date(now.getTime() - (lines - i) * day).toISOString(), runtimeClasses: {} })).join("\n") + "\n");
+    put(primary, ".runtime/runtime-age-out.json", JSON.stringify({ enabledSince: new Date(now.getTime() - since * day).toISOString(), ready: false }));
+  };
+  // A code index as the indexer leaves it: a sqlite file whose meta table records the checkout it was built from.
+  const codeIndex = (name: string, repoRoot: string | null, at = old, file = path.join(primary, ".runtime/code", `${name}.sqlite`)) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const db = new DatabaseSync(file);
+    db.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    if (repoRoot) db.prepare("INSERT INTO meta (key, value) VALUES ('repo_root', ?)").run(repoRoot);
+    db.close();
+    fs.utimesSync(file, at, at);
+    return fs.statSync(file).size;
+  };
+  const checkout = (dir: string, gitFile = false) => {
+    fs.mkdirSync(dir, { recursive: true });
+    if (gitFile) fs.writeFileSync(path.join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/x\n");
+    else fs.mkdirSync(path.join(dir, ".git"));
+    return dir;
+  };
+  const archived = (name: string, manifest: Record<string, unknown>) => put(primary, `.runtime/agent-fanouts-archive/${name}/manifest.json`, JSON.stringify(manifest));
+
+  it("removes a code index only when the checkout it recorded is gone, and nothing it cannot read or does not own", () => {
+    put(primary, "forked/FINDINGS.md", "- Forked\n");
+    put(primary, "forked/phren.project.yaml", "remote: github.com/acme/upstream\n");
+    // A store project whose clone's origin is a fork, at a path no checkout search would find.
+    const forkBytes = codeIndex("forked", checkout(path.join(scratch, "odd", "place", "fork-clone")));
+    // A project no store has, indexed from its own folder (a git worktree has a .git file).
+    codeIndex("outside-store", checkout(path.join(scratch, "elsewhere", "worktree"), true));
+    const goneBytes = codeIndex("gone", path.join(scratch, "deleted-checkout"));
+    fs.mkdirSync(path.join(scratch, "not-git"));
+    const notGitBytes = codeIndex("not-git", path.join(scratch, "not-git"));
+    codeIndex("no-meta", null);
+    put(primary, ".runtime/code/corrupt.sqlite", "not a database");
+    fs.utimesSync(path.join(primary, ".runtime/code/corrupt.sqlite"), old, old);
+    codeIndex("locked", path.join(scratch, "deleted-checkout"));
+    put(primary, ".runtime/code/locked.sqlite.lock", "123");
+    codeIndex("fresh", path.join(scratch, "deleted-checkout"), new Date(now.getTime() - day));
+    const outsideIndex = path.join(scratch, "outside", "linked.sqlite");
+    codeIndex("linked", path.join(scratch, "deleted-checkout"), old, outsideIndex);
+    fs.symlinkSync(outsideIndex, path.join(primary, ".runtime/code/linked.sqlite"), "file");
+    archived("job-old", { status: "completed", finishedAt: old.toISOString() });
+    archived("job-new", { status: "failed", finishedAt: now.toISOString() });
+    archived("job-unfinished", { status: "running", finishedAt: old.toISOString() });
+    fs.mkdirSync(path.join(scratch, "outside", "job-link"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "outside", "job-link", "manifest.json"), JSON.stringify({ status: "completed", finishedAt: old.toISOString() }));
+    fs.symlinkSync(path.join(scratch, "outside", "job-link"), path.join(primary, ".runtime/agent-fanouts-archive/job-link"), "dir");
+    const jobBytes = fs.statSync(path.join(primary, ".runtime/agent-fanouts-archive/job-old/manifest.json")).size;
+    enable();
+    pastWeek(8);
+
+    expect(recordStoreHealth(primary, now, "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toEqual({
+      enabled: true, days: 30, enabledDays: 8, reportLines: 7, acted: true,
+      candidates: { codeIndexes: { count: 2, bytes: goneBytes + notGitBytes }, fanoutArchive: { count: 1, bytes: jobBytes } },
+    });
+    for (const removed of [".runtime/code/gone.sqlite", ".runtime/code/not-git.sqlite", ".runtime/agent-fanouts-archive/job-old"]) expect(exists(removed)).toBe(false);
+    for (const kept of ["forked", "outside-store", "no-meta", "corrupt", "locked", "fresh", "linked"]) expect(exists(`.runtime/code/${kept}.sqlite`)).toBe(true);
+    for (const kept of ["job-new", "job-unfinished", "job-link"]) expect(exists(`.runtime/agent-fanouts-archive/${kept}`)).toBe(true);
+    expect(fs.existsSync(outsideIndex)).toBe(true);
+    expect(fs.existsSync(path.join(scratch, "outside", "job-link", "manifest.json"))).toBe(true);
+    expect(exists("forked/FINDINGS.md")).toBe(true);
+    expect(forkBytes).toBeGreaterThan(0);
+  });
+
+  it("reports while off and counts the week from when this computer first saw it on", () => {
+    const bytes = codeIndex("gone", path.join(scratch, "deleted-checkout"));
+    const candidates = { codeIndexes: { count: 1, bytes }, fanoutArchive: { count: 0, bytes: 0 } };
+    pastWeek(0, 10);
+    fs.rmSync(path.join(primary, ".runtime/runtime-age-out.json"));
+    expect(recordStoreHealth(primary, now, "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toEqual({ enabled: false, days: 30, enabledDays: null, reportLines: 10, acted: false, candidates });
+    expect(exists(".runtime/runtime-age-out.json")).toBe(false);
+
+    // Ten earlier report lines do not skip the week: it starts when this computer first sees age-out on.
+    enable();
+    expect(recordStoreHealth(primary, new Date(now.getTime() + day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabled: true, enabledDays: 0, acted: false });
+    expect(recordStoreHealth(primary, new Date(now.getTime() + 7 * day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 6, acted: false });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(true);
+    expect(recordStoreHealth(primary, new Date(now.getTime() + 8 * day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 7, acted: true });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(false);
+
+    // Turning it off forgets the opt-in, so turning it on again waits another week.
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { runtimeAgeOut: false } }));
+    recordStoreHealth(primary, new Date(now.getTime() + 9 * day), "test-computer");
+    expect(exists(".runtime/runtime-age-out.json")).toBe(false);
+  });
+
+  it("needs seven readable daily lines, skipping torn lines and dates it cannot read", () => {
+    codeIndex("gone", path.join(scratch, "deleted-checkout"));
+    enable();
+    put(primary, ".runtime/runtime-age-out.json", JSON.stringify({ enabledSince: new Date(now.getTime() - 30 * day).toISOString(), ready: false }));
+    put(primary, ".runtime/store-health.jsonl", [
+      ...Array.from({ length: 3 }, (_, i) => JSON.stringify({ at: new Date(now.getTime() - (i + 1) * day).toISOString(), runtimeClasses: {} })),
+      ...Array.from({ length: 4 }, () => JSON.stringify({ at: "not a date", runtimeClasses: {} })),
+      JSON.stringify({ at: new Date(now.getTime() - 5 * day).toISOString() }),
+      '{"at":',
+    ].join("\n") + "\n");
+    expect(recordStoreHealth(primary, now, "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 30, reportLines: 3, acted: false });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(true);
+
+    fs.rmSync(path.join(primary, ".runtime/store-health.jsonl"));
+    fs.writeFileSync(path.join(primary, ".runtime/runtime-age-out.json"), "{torn");
+    expect(recordStoreHealth(primary, new Date(now.getTime() + day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 0, reportLines: 0, acted: false });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(true);
   });
 });
 

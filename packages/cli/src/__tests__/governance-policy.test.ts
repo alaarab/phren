@@ -428,7 +428,7 @@ describe("appendReviewQueue", () => {
   });
 
   it("creates review.md when it does not exist", () => {
-    const result = appendReviewQueue(phrenPath, PROJECT, "Review", ["Item one"]);
+    const result = appendReviewQueue(phrenPath, PROJECT, "Review", ["Item one"], { origin: "explicit" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toBe(1);
@@ -438,8 +438,8 @@ describe("appendReviewQueue", () => {
   });
 
   it("appends to existing review.md", () => {
-    appendReviewQueue(phrenPath, PROJECT, "Review", ["First"]);
-    const result = appendReviewQueue(phrenPath, PROJECT, "Review", ["Second"]);
+    appendReviewQueue(phrenPath, PROJECT, "Review", ["First"], { origin: "explicit" });
+    const result = appendReviewQueue(phrenPath, PROJECT, "Review", ["Second"], { origin: "explicit" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toBe(1);
@@ -450,15 +450,45 @@ describe("appendReviewQueue", () => {
   });
 
   it("deduplicates identical entries", () => {
-    appendReviewQueue(phrenPath, PROJECT, "Review", ["Unique item"]);
-    const result = appendReviewQueue(phrenPath, PROJECT, "Review", ["Unique item"]);
+    appendReviewQueue(phrenPath, PROJECT, "Review", ["Unique item"], { origin: "explicit" });
+    const result = appendReviewQueue(phrenPath, PROJECT, "Review", ["Unique item"], { origin: "explicit" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toBe(0); // no new items added
   });
 
+  const fullQueue = (entries: number) => fs.writeFileSync(path.join(phrenPath, PROJECT, "review.md"),
+    `# ${PROJECT} Review Queue\n\n## Review\n\n${Array.from({ length: entries }, (_, i) => `- [2026-11-01] Held item ${i}`).join("\n")}\n\n## Stale\n\n## Conflicts\n`);
+
+  it("holds back machine-generated appends over budget with their own result, while explicit appends still go in", () => {
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 2 } });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Review", ["Machine one", "Machine two"], { origin: "machine" })).toEqual({ ok: true, data: 2 });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Stale", ["Machine three"], { origin: "machine" })).toEqual({ ok: true, data: 1 });
+    const queuePath = path.join(phrenPath, PROJECT, "review.md");
+    const full = fs.readFileSync(queuePath, "utf8");
+    expect(appendReviewQueue(phrenPath, PROJECT, "Conflicts", ["Machine four"], { origin: "machine" })).toMatchObject({ ok: false, code: "OVER_BUDGET" });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Review", ["Machine one"], { origin: "explicit" })).toEqual({ ok: true, data: 0 });
+    expect(fs.readFileSync(queuePath, "utf8")).toBe(full);
+    expect(appendReviewQueue(phrenPath, PROJECT, "Review", ["Owner asked for this one"], { origin: "explicit" })).toEqual({ ok: true, data: 1 });
+    expect(fs.readFileSync(queuePath, "utf8")).toContain("Owner asked for this one");
+  });
+
+  it("takes an explicit 0 as off even past the default budget", () => {
+    fullQueue(160);
+    expect(appendReviewQueue(phrenPath, PROJECT, "Stale", ["Machine past the default"], { origin: "machine" })).toMatchObject({ ok: false, code: "OVER_BUDGET" });
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 0 } });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Stale", ["Machine past the default"], { origin: "machine" })).toEqual({ ok: true, data: 1 });
+  });
+
+  it("lets a project's own review budget override the store's", () => {
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 1 } });
+    fs.writeFileSync(path.join(phrenPath, PROJECT, "phren.project.yaml"), "config:\n  retentionPolicy:\n    budgets:\n      reviewEntries: 5\n");
+    appendReviewQueue(phrenPath, PROJECT, "Review", ["One", "Two"], { origin: "machine" });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Review", ["Three"], { origin: "machine" })).toEqual({ ok: true, data: 1 });
+  });
+
   it.each(["Stale", "Conflicts"] as const)("writes to correct section (%s)", (section) => {
-    const result = appendReviewQueue(phrenPath, PROJECT, section, [`${section} entry`]);
+    const result = appendReviewQueue(phrenPath, PROJECT, section, [`${section} entry`], { origin: "explicit" });
     expect(result.ok).toBe(true);
 
     const content = fs.readFileSync(path.join(phrenPath, PROJECT, "review.md"), "utf8");
@@ -467,18 +497,18 @@ describe("appendReviewQueue", () => {
   });
 
   it("rejects invalid project name", () => {
-    const result = appendReviewQueue(phrenPath, "../escape", "Review", ["test"]);
+    const result = appendReviewQueue(phrenPath, "../escape", "Review", ["test"], { origin: "explicit" });
     expect(result.ok).toBe(false);
   });
 
   it("rejects nonexistent project", () => {
-    const result = appendReviewQueue(phrenPath, "no-such-project", "Review", ["test"]);
+    const result = appendReviewQueue(phrenPath, "no-such-project", "Review", ["test"], { origin: "explicit" });
     expect(result.ok).toBe(false);
   });
 
   it("truncates oversized entries instead of rejecting", () => {
     const longEntry = "x".repeat(MAX_QUEUE_ENTRY_LENGTH + 50);
-    const result = appendReviewQueue(phrenPath, PROJECT, "Review", [longEntry]);
+    const result = appendReviewQueue(phrenPath, PROJECT, "Review", [longEntry], { origin: "explicit" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toBe(1);
@@ -598,6 +628,19 @@ describe("pruneDeadMemories TTL promotion", () => {
     expect(fs.existsSync(path.join(phrenPath, PROJECT, "review.md"))).toBe(false);
   });
 
+  it("says how many TTL-expired entries it held back when the review queue is over budget", () => {
+    seedExpiredFinding();
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 1 } });
+    fs.writeFileSync(path.join(phrenPath, PROJECT, "review.md"), "# Review\n\n## Review\n\n- One\n- Two\n\n## Stale\n\n## Conflicts\n");
+    const result = pruneDeadMemories(phrenPath, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toMatchObject({ ttlExpired: 1, heldBack: 1 });
+    expect(result.data.message).toContain("Held back 1 TTL-expired entry: the review queue is over its budget");
+    expect(result.data.message).not.toContain("Moved");
+    expect(fs.readFileSync(path.join(phrenPath, PROJECT, "review.md"), "utf8")).not.toContain("ttl-expired");
+  });
+
   it("leaves recently retrieved findings alone during the grace period", () => {
     seedExpiredFinding();
     const runtime = path.join(phrenPath, ".runtime");
@@ -615,6 +658,19 @@ describe("pruneDeadMemories TTL promotion", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.ttlExpired).toBe(0);
+  });
+});
+
+describe("retention budgets in the policy file", () => {
+  it("takes only a numeric 0 as off, falls back on junk, and reads age-out days under a week as the 30-day default", () => {
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { openTasks: "0", reviewEntries: 0, runtimeMB: -5, runtimeAgeOutDays: 1, runtimeAgeOut: "yes" } });
+    expect(getRetentionPolicy(phrenPath).budgets).toEqual({
+      openTasks: 150, reviewEntries: 0, runtimeMB: 1024, fanoutArchiveMB: 512, runtimeAgeOutDays: 30, runtimeAgeOut: false,
+    });
+    for (const days of [0, 6.5, 7, 45]) {
+      writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { runtimeAgeOutDays: days } });
+      expect(getRetentionPolicy(phrenPath).budgets.runtimeAgeOutDays).toBe(days >= 7 ? days : 30);
+    }
   });
 });
 

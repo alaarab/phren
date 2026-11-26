@@ -9,6 +9,7 @@ import {
   getRetentionPolicy,
   updateRetentionPolicy,
   type RetentionPolicyPatch,
+  budgetsPatchError,
   getWorkflowPolicy,
   updateWorkflowPolicy,
   getIndexPolicy,
@@ -426,8 +427,11 @@ async function handleSetConfig(
 
     // ── retention ─────────────────────────────────────────────────
     case "retention": {
-      const { ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay } =
+      const { ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay, budgets } =
         settings as RetentionPolicyPatch;
+      // A budget that is not a valid value is refused and nothing is written.
+      const refusedBudget = budgets !== undefined ? budgetsPatchError(budgets, project ? "project" : "global") : null;
+      if (refusedBudget) return mcpResponse({ ok: false, error: refusedBudget });
 
       if (project) {
         const err = validateProject(project);
@@ -442,6 +446,8 @@ async function handleSetConfig(
           if (autoAcceptThreshold !== undefined) retentionPatch.autoAcceptThreshold = autoAcceptThreshold;
           if (minInjectConfidence !== undefined) retentionPatch.minInjectConfidence = minInjectConfidence;
           if (decay !== undefined) retentionPatch.decay = { ...(existingRetention.decay ?? {}), ...decay };
+          // A project sets only its own task and review budgets (checked above).
+          if (budgets !== undefined) retentionPatch.budgets = { ...(existingRetention.budgets ?? {}), ...budgets };
           return { ...current, retentionPolicy: retentionPatch };
         });
         return mcpResponse({
@@ -459,6 +465,7 @@ async function handleSetConfig(
       if (autoAcceptThreshold !== undefined) globalPatch.autoAcceptThreshold = autoAcceptThreshold;
       if (minInjectConfidence !== undefined) globalPatch.minInjectConfidence = minInjectConfidence;
       if (decay !== undefined) globalPatch.decay = decay;
+      if (budgets !== undefined) globalPatch.budgets = budgets;
 
       const result = updateRetentionPolicy(phrenPath, globalPatch);
       if (!result.ok) {
@@ -762,7 +769,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         settings: z.record(z.string(), z.unknown()).describe(
           "Domain-specific settings. proactivity: { level, scope? } | taskMode: { mode } | " +
           "findingSensitivity: { level } | retention: { ttlDays?, retentionDays?, autoAcceptThreshold?, " +
-          "minInjectConfidence?, decay? } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
+          "minInjectConfidence?, decay?, budgets?: { openTasks?, reviewEntries?, runtimeMB?, fanoutArchiveMB?, runtimeAgeOut?, " +
+          "runtimeAgeOutDays? } } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
           "findingSensitivity? } | access: { admins?, contributors?, readers? } (each an array of actor names) | " +
           "index: { includeGlobs?, excludeGlobs?, includeHidden? } | " +
           "topic: { topics, domain? } | " +

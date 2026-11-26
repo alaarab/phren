@@ -314,9 +314,24 @@ export async function handleHookPrompt() {
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
     }
 
+    // Task capture runs before the trace line, which records a capture the open-task budget paused.
+    const taskLevel = resolvedConfig.proactivity.tasks
+      ?? resolvedConfig.proactivity.base
+      ?? getProactivityLevelForTask(getPhrenPath());
+    const taskLifecycle = moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
+      phrenPath: getPhrenPath(),
+      prompt,
+      project: detectedProject,
+      sessionId,
+      intent,
+      taskLevel,
+      // The primary store's merged budgets, reused only for a project that lives there.
+      resolvedBudgets: { store: getPhrenPath(), budgets: resolvedConfig.retentionPolicy.budgets },
+    }) : { noticeLines: [] };
+    const paused = "budgetPaused" in taskLifecycle ? taskLifecycle.budgetPaused : undefined;
     recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result,
       budgetSelected.map((s) => ({ project: s.doc.project, filename: s.doc.filename, type: s.doc.type, path: s.doc.path, key: s.key })),
-      { session: sessionId, indexMs }));
+      { session: sessionId, indexMs, taskCapturePaused: paused }));
 
     // Live activity: what a prompt pulled in is a recall as much as a search
     // hit is, and it is by far the most common kind. Recording it here is what
@@ -348,17 +363,6 @@ export async function handleHookPrompt() {
     }
 
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, result.tokenBudget, getPhrenPath(), sessionId, keywords);
-    const taskLevel = resolvedConfig.proactivity.tasks
-      ?? resolvedConfig.proactivity.base
-      ?? getProactivityLevelForTask(getPhrenPath());
-    const taskLifecycle = moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
-      phrenPath: getPhrenPath(),
-      prompt,
-      project: detectedProject,
-      sessionId,
-      intent,
-      taskLevel,
-    }) : { noticeLines: [] };
     if (taskLifecycle.noticeLines.length > 0) {
       parts.push("");
       parts.push(...taskLifecycle.noticeLines);
@@ -376,11 +380,12 @@ export async function handleHookPrompt() {
       // ignore — non-fatal
     }
 
-    // Add budget info to trace
+    // Add budget info to trace, and say when the open-task budget kept this prompt from filing a task
     if (parts.length > 0) {
       const traceIdx = parts.findIndex(p => p.includes("trace:"));
       if (traceIdx !== -1) {
         parts[traceIdx] = parts[traceIdx].replace(/tokens/, `budget=${budgetUsedTokens}/${maxInjectTokens};tokens`);
+        if (paused) parts[traceIdx] += `; tasks=paused open ${paused.open}/${paused.budget}`;
       }
     }
 

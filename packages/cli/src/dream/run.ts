@@ -357,7 +357,7 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
     const counts = countOutcomes(outcomes, dropped);
     writeLastRun(phrenPath, project, { runId, startedAt: changeset.startedAt, finishedAt, to: watermark, mode, status: "ok", counts, trigger: opts.trigger ?? "manual" });
     return { ...base, status: "ok", mode, runId, ...report, changeset, outcomes, dropped, counts, record, ...spend,
-      message: `${project}: ${counts.applied} applied, ${counts.proposed} proposed, ${counts.skipped} skipped, ${counts.failed} failed, ${counts.dropped} dropped.${collectionNotice}` };
+      message: `${project}: ${counts.applied} applied, ${counts.proposed} proposed, ${counts.skipped} skipped, ${counts.deferred ? `${counts.deferred} deferred (review queue over budget), ` : ""}${counts.failed} failed, ${counts.dropped} dropped.${collectionNotice}` };
   } finally {
     release();
   }

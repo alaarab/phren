@@ -17,6 +17,7 @@ import {
 import { detectProject } from "../shared/index.js";
 import { commandExists } from "../hooks.js";
 import { runGit, isFeatureEnabled, clampInt, errorMessage, isValidProjectName, resolveExecCommand } from "../utils.js";
+import { PhrenError } from "../phren-core.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
 import { findingQualityReason } from "../content/quality.js";
@@ -509,6 +510,8 @@ export async function handleExtractMemories(
   let queued = 0;
   let duplicates = 0;
   let rejected = 0;
+  // Held back by the review budget: not remembered as processed, so a later run queues them.
+  let heldBack = 0;
 
   /** True when this commit/subject pair has already been extracted in an earlier run. */
   const alreadyExtracted = (commitKey: string, subjectKey: string): boolean =>
@@ -535,9 +538,9 @@ export async function handleExtractMemories(
       duplicates++;
       continue;
     }
-    remember(commitKey, subjectKey);
     const line = `${candidate.text} (source commit ${commitKey})`;
     if (candidate.score >= threshold) {
+      remember(commitKey, subjectKey);
       appendFindingJournal(getPhrenPath(), project, line, {
         source,
         sessionId,
@@ -551,7 +554,9 @@ export async function handleExtractMemories(
       const qr1 = appendReviewQueue(getPhrenPath(), project, "Review", [{
         text: `[confidence ${candidate.score.toFixed(2)}] ${line}`,
         meta: buildQueueProvenanceMeta({ source, sessionId, repo: repoRoot, commit: rec.hash }),
-      }]);
+      }], { origin: "machine" });
+      if (!qr1.ok && qr1.code === PhrenError.OVER_BUDGET) { heldBack++; continue; }
+      remember(commitKey, subjectKey);
       if (qr1.ok) queued += qr1.data;
     }
   }
@@ -570,13 +575,13 @@ export async function handleExtractMemories(
       duplicates++;
       continue;
     }
-    remember(commitKey, subjectKey);
     const line = `${c.text}${commitKey ? ` (source commit ${commitKey})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
       const key = entryScoreKey(project, FINDINGS_FILENAME, line);
       recordFeedback(getPhrenPath(), key, "regression", undefined, "explicit");
     }
     if (c.score >= threshold) {
+      remember(commitKey, subjectKey);
       appendFindingJournal(getPhrenPath(), project, line, {
         source,
         sessionId,
@@ -589,7 +594,9 @@ export async function handleExtractMemories(
       const qr2 = appendReviewQueue(getPhrenPath(), project, "Review", [{
         text: `[confidence ${c.score.toFixed(2)}] ${line}`,
         meta: buildQueueProvenanceMeta({ source, sessionId, repo: repoRoot, commit: c.commit, file: c.file }),
-      }]);
+      }], { origin: "machine" });
+      if (!qr2.ok && qr2.code === PhrenError.OVER_BUDGET) { heldBack++; continue; }
+      remember(commitKey, subjectKey);
       if (qr2.ok) queued += qr2.data;
     }
   }
@@ -604,11 +611,11 @@ export async function handleExtractMemories(
   appendAuditLog(
     getPhrenPath(),
     "extract_memories",
-    `project=${project} accepted=${accepted} queued=${queued} duplicates=${duplicates} rejected=${rejected} window_days=${days}`
+    `project=${project} accepted=${accepted} queued=${queued} duplicates=${duplicates} rejected=${rejected} held_back=${heldBack} window_days=${days}`
   );
   if (!silent) {
     console.log(
-      `Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, duplicates=${duplicates}, rejected=${rejected}, window=${days}d`
+      `Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, duplicates=${duplicates}, rejected=${rejected}, held back for the review budget=${heldBack}, window=${days}d`
     );
   }
 }

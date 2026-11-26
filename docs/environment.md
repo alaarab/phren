@@ -93,6 +93,10 @@ These control how much context the UserPromptSubmit hook injects into each promp
 | `PHREN_MEMORY_EXTRACT_WINDOW_DAYS` | integer | `30` | How far back (in days) the `extract-memories` command looks in git and GitHub history. |
 | `PHREN_FINDINGS_CAP` | integer | `20` | Maximum findings in FINDINGS.md before auto-archival moves old entries to `reference/`. |
 
+Open-task, review-queue and `.runtime` budgets have no environment variables;
+they live in the retention policy (`phren config policy set --budgets.<name>=<value>`,
+see [Governance](governance.md#budgets)).
+
 ## Finding citations
 
 A finding can carry a source citation in a `<!-- phren:cite {json} -->` comment.
@@ -277,7 +281,9 @@ can live under `<store>/.runtime/packages/node_modules/@phren/code`.
 
 Workers write manifests, event logs, stderr and exit records under
 `<store>/.runtime/agent-fanouts`. Finished jobs move after 24 hours to
-`.runtime/agent-fanouts-archive`, capped at 500 folders. See
+`.runtime/agent-fanouts-archive`, capped at 500 folders. Its size is reported
+against 512 MB (retention `budgets.fanoutArchiveMB`) and enforced only once
+runtime age-out is on and past its week. See
 [Code index](code-index.md) and [Fan-out workers](fanout.md).
 
 Phone-local notification switches, the approval dedupe ledger and pending

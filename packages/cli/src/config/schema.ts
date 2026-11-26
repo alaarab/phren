@@ -369,6 +369,97 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         impact: "Lower values make stale memory fade faster.",
         risk: "safe",
       },
+      {
+        key: "retention.budgets.openTasks",
+        domain: "retention",
+        label: "Open-task budget",
+        summary: "Open tasks a project can hold before the prompt hook stops filing new ones.",
+        help:
+          "Past this many Active and Queue tasks, the prompt hook files no new task for the project "
+          + "and its trace line says so. Tasks you or an agent add still go in. 0 turns it off.",
+        control: "number",
+        range: { min: 0, max: 10000, step: 1 },
+        default: DEFAULT_POLICY.budgets.openTasks,
+        scope: "global+project",
+        impact: "Lower = auto-capture pauses sooner; nothing is ever removed.",
+        risk: "safe",
+      },
+      {
+        key: "retention.budgets.reviewEntries",
+        domain: "retention",
+        label: "Review queue budget",
+        summary: "Review entries a project can hold before phren stops queuing its own.",
+        help:
+          "Past this many entries, governance, TTL review, extraction, the tool hook and dreams queue nothing "
+          + "more for the project. Entries a person or agent queues still go in. 0 turns it off.",
+        control: "number",
+        range: { min: 0, max: 10000, step: 1 },
+        default: DEFAULT_POLICY.budgets.reviewEntries,
+        scope: "global+project",
+        impact: "Lower = machine-generated review entries stop sooner; nothing is ever removed.",
+        risk: "safe",
+      },
+      {
+        key: "retention.budgets.runtimeMB",
+        domain: "retention",
+        label: "Runtime budget (MB)",
+        summary: "Size of this computer's `.runtime` folder that daily store health flags.",
+        help: "Reported only: the daily store health line and `phren doctor` say when `.runtime` is past it. 0 turns it off.",
+        control: "number",
+        range: { min: 0, max: 1048576, step: 64 },
+        default: DEFAULT_POLICY.budgets.runtimeMB,
+        scope: "global-only",
+        impact: "Changes only what is reported.",
+        risk: "safe",
+      },
+      {
+        key: "retention.budgets.fanoutArchiveMB",
+        domain: "retention",
+        label: "Fanout archive ceiling (MB)",
+        summary: "Size of the finished fan-out archive that daily store health flags.",
+        help:
+          "Reported from day one. Once runtime age-out is on and this computer has waited its week, the archive "
+          + "sweep also deletes the oldest finished worker folders until the archive is under this size, beside "
+          + "the 500-folder cap. Unfinished folders are never touched. 0 turns the ceiling off.",
+        control: "number",
+        range: { min: 0, max: 1048576, step: 64 },
+        default: DEFAULT_POLICY.budgets.fanoutArchiveMB,
+        scope: "global-only",
+        impact: "Lower = old worker transcripts are deleted sooner.",
+        risk: "caution",
+      },
+      {
+        key: "retention.budgets.runtimeAgeOut",
+        domain: "retention",
+        label: "Age out runtime files",
+        summary: "Remove code indexes whose checkout is gone, and old finished fan-out folders.",
+        help:
+          "Removes a code index whose recorded checkout no longer exists on this computer (or is no longer a git "
+          + "checkout) once it has not been rebuilt for the age-out days, and fan-out folders that finished that long "
+          + "ago; it also turns on the fan-out archive's byte ceiling. It acts only after this computer has had it on "
+          + "for a week and seven daily store health lines exist; until then, and while off, the health line reports "
+          + "what it would remove.",
+        control: "boolean",
+        default: DEFAULT_POLICY.budgets.runtimeAgeOut,
+        scope: "global-only",
+        impact: "On deletes those files. A removed code index comes back only when `phren code index` runs on a checkout.",
+        risk: "caution",
+      },
+      {
+        key: "retention.budgets.runtimeAgeOutDays",
+        domain: "retention",
+        label: "Runtime age-out (days)",
+        summary: "How long a code index goes without a rebuild, or a fan-out folder sits finished, before age-out removes it.",
+        help:
+          "At least 7, with no off value: a smaller value in the policy file, 0 included, reads as 30. Turn age-out off "
+          + "with runtime age-out instead. Used only when it is on; the daily health line reports candidates either way.",
+        control: "number",
+        range: { min: 7, max: 3650, step: 1 },
+        default: DEFAULT_POLICY.budgets.runtimeAgeOutDays,
+        scope: "global-only",
+        impact: "Lower = regenerable files are removed sooner.",
+        risk: "safe",
+      },
     ],
   },
   {

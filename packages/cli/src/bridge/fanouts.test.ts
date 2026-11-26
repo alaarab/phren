@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -472,6 +472,51 @@ describe("fan-out archive sweep", () => {
     for (const kept of ["job-mine-running", "job-mine-locked", "job-mine-queued", "job-theirs", "job-orphan"]) {
       expect(await present(path.join(live, kept))).toBe(true);
     }
+  });
+
+  it("keeps the archive under its byte ceiling by deleting only finished folders, oldest first", async () => {
+    const { root, env, live, archive } = await store();
+    const put = async (name: string, ageDays: number, status: string) => {
+      const directory = path.join(archive, name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "events.jsonl"), "x".repeat(4000));
+      await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ status, finishedAt: new Date(Date.now() - ageDays * 24 * HOUR_MS).toISOString() }));
+    };
+    await put("old-running", 9, "running");
+    await put("old-done", 8, "completed");
+    await put("mid-done", 5, "failed");
+    await put("new-done", 1, "cancelled");
+    await archiveJob(root, "job-in", { manifest: { status: "completed", finishedAt: new Date(Date.now() - 25 * HOUR_MS).toISOString() } });
+    await writeFile(path.join(live, "job-in", "events.jsonl"), "x".repeat(4000));
+
+    expect(await archiveFinishedFanouts(env, { dryRun: true, maxBytes: 13_000 })).toEqual({ moved: ["job-in"], deleted: 2 });
+    expect((await readdir(archive)).sort()).toEqual(["mid-done", "new-done", "old-done", "old-running"]);
+    expect(await archiveFinishedFanouts(env, { maxBytes: 13_000 })).toEqual({ moved: ["job-in"], deleted: 2 });
+    expect((await readdir(archive)).sort()).toEqual(["job-in", "new-done", "old-running"]);
+  });
+
+  it("only reports the byte ceiling until runtime age-out is on and past its week, and takes 0 as off", async () => {
+    const { root, env, archive } = await store();
+    // 600 MB of logical size in a sparse file: past the 512 MB default without writing it.
+    await mkdir(path.join(archive, "old-done"), { recursive: true });
+    await writeFile(path.join(archive, "old-done", "exit.txt"), "0\n");
+    await writeFile(path.join(archive, "old-done", "events.jsonl"), "");
+    await truncate(path.join(archive, "old-done", "events.jsonl"), 600 * 1024 * 1024);
+    await mkdir(path.join(root, ".config"), { recursive: true });
+    const policy = (budgets: Record<string, unknown>) => writeFile(path.join(root, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets }));
+    const state = (ready: boolean) => writeFile(path.join(root, ".runtime", "runtime-age-out.json"), JSON.stringify({ enabledSince: "2026-01-01T00:00:00.000Z", ready }));
+
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 0 });
+    await policy({ runtimeAgeOut: true });
+    await state(false);
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 0 });
+    await state(true);
+    await policy({ runtimeAgeOut: true, fanoutArchiveMB: 0 });
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 0 });
+    expect(await present(path.join(archive, "old-done"))).toBe(true);
+    await policy({ runtimeAgeOut: true });
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 1 });
+    expect(await present(path.join(archive, "old-done"))).toBe(false);
   });
 
   it("takes a shorter age than 24 hours", async () => {

@@ -50,6 +50,7 @@ export const PhrenError = {
   VALIDATION_ERROR: "VALIDATION_ERROR",
   INDEX_ERROR: "INDEX_ERROR",
   NETWORK_ERROR: "NETWORK_ERROR",
+  OVER_BUDGET: "OVER_BUDGET",
 } as const;
 
 export type PhrenErrorCode = typeof PhrenError[keyof typeof PhrenError];

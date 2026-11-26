@@ -269,6 +269,21 @@ describe("routeKnowledgeItems", () => {
     expect(review).not.toContain("speculation");
   });
 
+  it("queues nothing over the project's review budget, as phren's own machine-generated entries", async () => {
+    const held = Array.from({ length: 160 }, (_, i) => `- [2026-11-01] Held item ${i}`).join("\n");
+    fs.writeFileSync(path.join(storeDir, project, "review.md"), `# ${project} Review Queue\n\n## Review\n\n${held}\n\n## Stale\n\n## Conflicts\n`);
+    const { promoted, queued } = await routeKnowledgeItems(
+      [
+        { text: "The build requires node 20 because of the sqljs wasm loader", confidence: 0.9, kind: "gotcha" },
+        { text: "The retry helper may be duplicating backoff logic", confidence: 0.6, kind: "finding" },
+      ],
+      { phrenCtx: { phrenPath: storeDir, profile: "", project }, sessionId: "sess-budget", config: DEFAULT_COMPACTION },
+    );
+    expect(promoted).toBe(1);
+    expect(queued).toBe(0);
+    expect(fs.readFileSync(path.join(storeDir, project, "review.md"), "utf-8")).not.toContain("duplicating backoff");
+  });
+
   it("does nothing without a project", async () => {
     const result = await routeKnowledgeItems(
       [{ text: "anything", confidence: 0.95, kind: "finding" }],

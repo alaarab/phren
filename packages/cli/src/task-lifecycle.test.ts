@@ -576,4 +576,58 @@ describe("progressive task model", () => {
     const item = tasks.data.items.Queue.find((t: any) => t.line.includes("Migrate to Postgres"));
     expect(item?.childFindings).toContain("fid:aabbccdd");
   });
+  describe("open-task budget", () => {
+    const auto = (budget: number) => {
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({ schemaVersion: 1, taskMode: "auto" }) + "\n");
+      writeFile(path.join(tmp.path, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { openTasks: budget } }) + "\n");
+    };
+    const open = () => { const tasks = readTasks(tmp.path, project); return tasks.ok ? tasks.data.items.Active.length + tasks.data.items.Queue.length : -1; };
+    const prompt = (text: string, session: string) => handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt: text, project, sessionId: session, intent: "build" });
+
+    it("files up to the budget, then pauses auto-capture while explicit adds still go in", () => {
+      auto(2);
+      addTask(tmp.path, project, "Existing work one");
+      addTask(tmp.path, project, "Existing work two");
+      expect(prompt("Implement the retry backoff in the sync worker", "budget-1").noticeLines.join("\n")).toContain("Queued task");
+      expect(open()).toBe(3);
+
+      const paused = prompt("Fix the flaky upload test in the parser", "budget-2");
+      expect(paused.noticeLines).toEqual([]);
+      expect(paused.budgetPaused).toEqual({ open: 3, budget: 2 });
+      expect(open()).toBe(3);
+
+      expect(addTask(tmp.path, project, "Owner adds this one by hand").ok).toBe(true);
+      expect(open()).toBe(4);
+      const asked = prompt("Add this to task: rename the sync worker queue", "budget-3");
+      expect(asked.budgetPaused).toBeUndefined();
+      expect(asked.noticeLines.join("\n")).toContain("Active task");
+      expect(open()).toBe(5);
+    });
+
+    it("still moves a matching task when over budget", () => {
+      auto(1);
+      writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n- [ ] Fix the retry backoff in the sync worker\n\n## Queue\n\n- [ ] Another queued item\n\n## Done\n`);
+      const matched = prompt("Fix the retry backoff in the sync worker again", "budget-match");
+      expect(matched.budgetPaused).toBeUndefined();
+      expect(open()).toBe(2);
+    });
+
+    it("takes an explicit 0 as off even past the default budget", () => {
+      const queue = Array.from({ length: 160 }, (_, i) => `- [ ] Queued item number ${i}`).join("\n");
+      writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n${queue}\n\n## Done\n`);
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({ schemaVersion: 1, taskMode: "auto" }) + "\n");
+      expect(prompt("Implement the parser cache invalidation", "budget-default").budgetPaused).toEqual({ open: 160, budget: 150 });
+      auto(0);
+      expect(prompt("Implement the parser cache invalidation", "budget-off").noticeLines.join("\n")).toContain("Queued task");
+      expect(open()).toBe(161);
+    });
+
+    it("uses the budget the hook already resolved instead of reading the policy again", () => {
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({ schemaVersion: 1, taskMode: "auto" }) + "\n");
+      for (const line of ["One", "Two", "Three"]) addTask(tmp.path, project, `Existing work ${line}`);
+      const resolvedBudgets = { store: tmp.path, budgets: { openTasks: 2, reviewEntries: 150, runtimeMB: 1024, fanoutArchiveMB: 512, runtimeAgeOutDays: 30, runtimeAgeOut: false } };
+      const paused = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt: "Fix the flaky upload test in the parser", project, sessionId: "budget-hook", intent: "build", resolvedBudgets });
+      expect(paused.budgetPaused).toEqual({ open: 3, budget: 2 });
+    });
+  });
 });

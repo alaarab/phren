@@ -15,6 +15,7 @@ import { editFinding, readFindings } from "../data/access.js";
 import { retractFinding, supersedeFinding } from "../finding/lifecycle.js";
 import { withFileLock } from "../governance/locks.js";
 import { appendReviewQueue } from "../governance/policy.js";
+import { PhrenError } from "../phren-core.js";
 import { renameOverSync, runtimeFile } from "../phren-paths.js";
 import { appendArchivedEntriesToTopicDoc, readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
@@ -24,7 +25,8 @@ import { writePage } from "./pages.js";
 import type { DreamChange, DreamChangeset, DreamEvidence, DreamOp } from "./types.js";
 
 export type DreamMode = "propose" | "apply";
-export type DreamOutcomeStatus = "applied" | "proposed" | "skipped" | "failed";
+/** `deferred`: a proposal held back because the project's review queue is over its budget. */
+export type DreamOutcomeStatus = "applied" | "proposed" | "skipped" | "deferred" | "failed";
 
 export interface DreamOutcome { index: number; op: DreamOp; status: DreamOutcomeStatus; detail: string }
 /** A change validation refused, with why; `index` is its position in the model's answer. */
@@ -233,7 +235,8 @@ function proposeOne(phrenPath: string, project: string, runId: string, index: nu
   if (change.op !== "add_finding") return { status: "proposed", detail: `pending dream apply ${runId} --only ${index}` };
   const refs = evidenceOf(change).map(e => clean(`${e.kind}:${e.ref}`, 80)).join("; ");
   const meta = `<!-- dream:${clean(runId, 64)}#${index} op:${change.op} -->${refs ? ` <!-- evidence: ${refs} -->` : ""}`;
-  const result = appendReviewQueue(phrenPath, project, "Review", [{ text: proposalText(change), meta }]);
+  const result = appendReviewQueue(phrenPath, project, "Review", [{ text: proposalText(change), meta }], { origin: "machine" });
+  if (!result.ok && result.code === PhrenError.OVER_BUDGET) return { status: "deferred", detail: "not queued: the review queue is over its review budget" };
   if (!result.ok) return { status: "failed", detail: result.error };
   return result.data > 0 ? { status: "proposed", detail: "queued for review" } : { status: "skipped", detail: "already in the review queue" };
 }
@@ -269,10 +272,10 @@ export interface DreamRecord {
   costUSD?: number;
 }
 
-export interface DreamCounts { applied: number; proposed: number; skipped: number; failed: number; dropped: number }
+export interface DreamCounts { applied: number; proposed: number; skipped: number; deferred: number; failed: number; dropped: number }
 
 export function countOutcomes(outcomes: DreamOutcome[], dropped: DreamDrop[]): DreamCounts {
-  const counts: DreamCounts = { applied: 0, proposed: 0, skipped: 0, failed: 0, dropped: dropped.length };
+  const counts: DreamCounts = { applied: 0, proposed: 0, skipped: 0, deferred: 0, failed: 0, dropped: dropped.length };
   for (const outcome of outcomes) counts[outcome.status]++;
   return counts;
 }
@@ -301,7 +304,7 @@ export function recordDream(phrenPath: string, project: string, record: DreamRec
   const counts = countOutcomes(record.outcomes, record.dropped);
   const notes = clean(record.changeset.notes, 160);
   const line = `- ${record.changeset.startedAt} ${record.changeset.runId} ${record.mode}: ${counts.applied} applied, ${counts.proposed} proposed, `
-    + `${counts.skipped} skipped, ${counts.failed} failed, ${counts.dropped} dropped (${record.changeset.inputs.transcripts} sessions)${notes ? ` — ${notes}` : ""}${record.warnings?.length ? ` — ${record.warnings.join("; ")}` : ""}\n`;
+    + `${counts.skipped} skipped, ${counts.deferred ? `${counts.deferred} deferred (review queue over budget), ` : ""}${counts.failed} failed, ${counts.dropped} dropped (${record.changeset.inputs.transcripts} sessions)${notes ? ` — ${notes}` : ""}${record.warnings?.length ? ` — ${record.warnings.join("; ")}` : ""}\n`;
   appendJournal(phrenPath, project, line);
   return file;
 }
@@ -329,7 +332,7 @@ export function readLastRun(phrenPath: string, project: string): DreamLastRun | 
   } catch { return undefined; }
 }
 
-/** Pending structured operations; add proposals are owned by the review queue. */
+/** Pending structured operations, plus additions the review budget deferred; queued additions are owned by the review queue. */
 export function pendingDreamProposals(phrenPath: string, project: string): number {
   let names: string[];
   try { names = fs.readdirSync(dreamsDir(phrenPath, project)); } catch { return 0; }
@@ -337,7 +340,7 @@ export function pendingDreamProposals(phrenPath: string, project: string): numbe
   for (const name of names.filter(n => n.endsWith(".json") && n !== "last-run.json")) {
     try {
       const record = JSON.parse(fs.readFileSync(path.join(dreamsDir(phrenPath, project), name), "utf8")) as DreamRecord;
-      count += record.outcomes.filter(o => o.status === "proposed" && o.op !== "add_finding").length;
+      count += record.outcomes.filter(o => (o.status === "proposed" && o.op !== "add_finding") || o.status === "deferred").length;
     } catch { /* Not a run record. */ }
   }
   return count;
@@ -356,6 +359,13 @@ export async function applyDreamProposals(phrenPath: string, project: string, ru
     const config = readDreamConfig(phrenPath, project);
     // Validate all targets before our own earlier operations can modify them.
     const current = findingVersions(phrenPath, project);
+    // An addition the review budget deferred is queued again, never written to memory directly.
+    for (const { index } of record.outcomes.filter(o => o.status === "deferred" && o.op === "add_finding" && (!only || only.includes(o.index)))) {
+      const outcome = sanitizeDream({ index, op: "add_finding" as const, ...proposeOne(phrenPath, project, runId, index, record.changeset.changes[index]) });
+      record.outcomes = record.outcomes.map(o => o.index === index ? outcome : o);
+      writeAtomic(file, `${JSON.stringify(sanitizeDream(record), null, 2)}\n`);
+      appendJournal(phrenPath, project, `- ${new Date().toISOString()} ${runId}#${index} ${outcome.status}: ${outcome.detail}\n`);
+    }
     const eligible = new Set(record.outcomes.filter(o => o.status === "proposed" && o.op !== "add_finding" && (!only || only.includes(o.index))).map(o => o.index));
     const stale = new Set([...eligible].filter(index => targetIds(record.changeset.changes[index]).some(id => {
       const fid = id.replace(/^fid:/, "");
