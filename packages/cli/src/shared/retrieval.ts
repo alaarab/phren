@@ -37,6 +37,7 @@ import { getOllamaUrl, getCloudEmbeddingUrl } from "./ollama.js";
 import { keywordFallbackSearch } from "../core/search.js";
 import { debugLog } from "../shared.js";
 import type { RecallDocRef, RecallFloorDecision } from "../recall/types.js";
+import { bulletHash } from "../recall/repeat.js";
 
 // ── Scoring constants ─────────────────────────────────────────────────────────
 
@@ -1133,6 +1134,8 @@ export interface SelectedSnippet {
   doc: DocRow;
   snippet: string;
   key: string;
+  /** `bulletHash` of the chosen chunk; absent on the hook's summary block. */
+  bulletHash?: string;
 }
 
 /** Mark snippet lines with stale citations (cited file missing or line content changed).
@@ -1258,9 +1261,12 @@ export function selectSnippets(
   charBudget: number,
   /** The prompt's keyword rarity, so the bullet shown is the one the relevance floor accepted. */
   rarity?: Map<string, number>,
-): { selected: SelectedSnippet[]; usedTokens: number } {
+  /** Bullet hashes injected recently in this session; those rows give their slot to the next. */
+  recentlyInjected?: ReadonlySet<string>,
+): { selected: SelectedSnippet[]; usedTokens: number; suppressedRepeats: number } {
   const selected: SelectedSnippet[] = [];
   let usedTokens = 36;
+  let suppressedRepeats = 0;
   const queryTokens = tokenizeForOverlap(keywords);
   const seenBullets = new Set<string>();
   const citationOptions = new Map<string, CitationFreshnessOptions>();
@@ -1284,6 +1290,9 @@ export function selectSnippets(
     // The bullet that matched, not the doc's opening lines.
     const match = bestChunkMatch(queryTokens, doc, rarity);
     const source = match && match.distinct >= MIN_CHUNK_MATCHES ? match.chunk : extractSnippet(doc.content, keywords, 8);
+    // Injected earlier this session and still in the agent's context: the next row takes the slot.
+    const hash = bulletHash(source);
+    if (recentlyInjected?.has(hash)) { suppressedRepeats++; continue; }
     // Read cached freshness before compaction can cut a citation comment. No refresh here.
     let annotated = source;
     if (TRUST_FILTERED_TYPES.has(doc.type)) {
@@ -1323,7 +1332,7 @@ export function selectSnippets(
       est = approximateTokens(snippet) + SNIPPET_OVERHEAD_TOKENS;
     }
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
-    selected.push({ doc, snippet, key });
+    selected.push({ doc, snippet, key, bulletHash: hash });
     usedTokens += est;
     if (selected.length >= 3) break;
   }
@@ -1333,7 +1342,7 @@ export function selectSnippets(
     const removed = selected.pop()!;
     usedTokens -= approximateTokens(removed.snippet) + SNIPPET_OVERHEAD_TOKENS;
   }
-  return { selected, usedTokens };
+  return { selected, usedTokens, suppressedRepeats };
 }
 
 // Re-export approximateTokens for use in output module

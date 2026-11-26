@@ -13,7 +13,8 @@ export type RecallAbstainReason =
   | "trust-filtered" // the trust, notes and tasks filters dropped every row
   | "ranked-empty" // ranking dropped every row
   | "below-floor" // the relevance floor dropped every row
-  | "nothing-selected"; // selection produced no snippet
+  | "nothing-selected" // selection produced no snippet
+  | "all-repeats"; // every row selection reached showed a bullet this session already injected
 
 /** Why the relevance floor kept or dropped one ranked row. */
 export type RecallFloorReason =
@@ -76,6 +77,8 @@ export interface RecallPipelineInput {
   gitCtx?: GitContext | null;
   /** Keywords mentioned 3+ times this session; raises the token budget. Read-only here. */
   hotTopics?: string[];
+  /** `bulletHash`es the hook injected this session within the repeat window; selection skips them. */
+  recentlyInjected?: ReadonlySet<string>;
 }
 
 export interface RecallResult {
@@ -91,7 +94,9 @@ export interface RecallResult {
   /** What selection chose, before the hook's once-per-session summary block and injection-budget trim. */
   selected: RecallSelected[];
   /** Internal: the selected rows with full documents, for the hook's output. Not part of the eval or trace. */
-  selectedRows: Array<{ doc: DocRow; snippet: string; key: string }>;
+  selectedRows: Array<{ doc: DocRow; snippet: string; key: string; bulletHash?: string }>;
+  /** Rows selection skipped because their bullet was in `recentlyInjected`. */
+  suppressedRepeats: number;
   usedTokens: number;
   tokenBudget: number;
   stageMs: RecallStageMs;

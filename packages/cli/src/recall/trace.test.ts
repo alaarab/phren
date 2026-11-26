@@ -19,7 +19,7 @@ describe("recall trace", () => {
       { ...doc("zeta/FINDINGS.md"), passed: false, reason: "low-rarity", distinct: 2, rarity: 0.31, overlap: 0.2, matched: ["give", "think"] },
     ],
     selected: [{ ...doc("zeta/reference/topics/deploy.md"), key: "zeta/deploy.md:abc", snippet: "- deploy with scripts/deploy.sh" }],
-    selectedRows: [], usedTokens: 120, tokenBudget: 550, stageMs: { searchMs: 5, trustMs: 1, rankMs: 2, selectMs: 1 },
+    selectedRows: [], suppressedRepeats: 0, usedTokens: 120, tokenBudget: 550, stageMs: { searchMs: 5, trustMs: 1, rankMs: 2, selectMs: 1 },
     ...over,
   });
 

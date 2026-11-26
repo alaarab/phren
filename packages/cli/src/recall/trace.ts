@@ -42,6 +42,8 @@ export interface RecallTraceEntry {
   floor?: RecallTraceFloorRow[];
   /** Store-relative paths and score keys of what was injected, after the summary block and budget trim. */
   injected?: Array<{ path: string; key: string; type: string }>;
+  /** Rows skipped because this session injected their bullet within the repeat window. */
+  suppressedRepeats?: number;
   tokens?: number;
   budget?: number;
   ms?: Record<string, number>;
@@ -92,6 +94,7 @@ export function traceEntryFromResult(
       matched: row.matched,
     })),
     injected: injected.map((row) => ({ path: storeRelative(phrenPath, row.path), key: row.key, type: row.type })),
+    suppressedRepeats: result.suppressedRepeats,
     tokens: result.usedTokens,
     budget: result.tokenBudget,
     ms: { ...(extra.indexMs !== undefined ? { index: extra.indexMs } : {}), search: result.stageMs.searchMs, trust: result.stageMs.trustMs, rank: result.stageMs.rankMs, select: result.stageMs.selectMs },

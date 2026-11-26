@@ -21,7 +21,7 @@ function result(snippets: string[], usedTokens: number, totalMs: number): Recall
   return {
     keywords: [], intent: "general", detectedProject: null,
     abstained: snippets.length ? null : "no-search-results",
-    trustSurvivors: snippets.length, candidates: [], floor: [], selectedRows: [],
+    trustSurvivors: snippets.length, candidates: [], floor: [], selectedRows: [], suppressedRepeats: 0,
     selected: snippets.map(snippet => ({ project: "velvetquay", filename: "FINDINGS.md", type: "findings", path: "velvetquay/FINDINGS.md", key: "fixture", snippet })),
     usedTokens, tokenBudget: 550,
     stageMs: { searchMs: totalMs / 4, trustMs: totalMs / 4, rankMs: totalMs / 4, selectMs: totalMs / 4 },

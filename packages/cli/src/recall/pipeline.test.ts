@@ -20,8 +20,8 @@ describe("runPromptPipeline", () => {
     fs.mkdirSync(path.dirname(path.join(tmp.path, file)), { recursive: true });
     fs.writeFileSync(path.join(tmp.path, file), text);
   };
-  const run = (prompt: string, detectedProject: string | null = null) =>
-    runPromptPipeline({ prompt, phrenPath: tmp.path, db, detectedProject });
+  const run = (prompt: string, detectedProject: string | null = null, recentlyInjected?: ReadonlySet<string>) =>
+    runPromptPipeline({ prompt, phrenPath: tmp.path, db, detectedProject, recentlyInjected });
 
   beforeAll(async () => {
     tmp = makeTempDir("recall-pipeline-");
@@ -30,6 +30,8 @@ describe("runPromptPipeline", () => {
     write("atlas/tasks.md", "# atlas Tasks\n\n## Queue\n\n- [ ] Polish the zorblat quintessa report\n");
     write("harbor/FINDINGS.md", "# harbor Findings\n\n- The saxophone tuner caches chart tiles for ten minutes.\n");
     for (let i = 0; i < 6; i++) write(`harbor/reference/notes-${i}.md`, `# notes ${i}\n\n- Widget ${i} settings live in the panel.\n`);
+    // Four docs that each answer a kiln question: more than selection's three slots.
+    for (let i = 0; i < 4; i++) write(`quarry/reference/kiln-${i}.md`, `# kiln ${i}\n\n- Kiln ${i} furnace scheduler fires batch ${i} after the glaze cures.\n`);
     db = await buildIndex(tmp.path);
   });
   afterAll(() => tmp?.cleanup());
@@ -73,8 +75,29 @@ describe("runPromptPipeline", () => {
   });
 
   it("abstains with nothing-selected when selection returns no snippet", async () => {
-    vi.mocked(selectSnippets).mockReturnValueOnce({ selected: [], usedTokens: 36 });
+    vi.mocked(selectSnippets).mockReturnValueOnce({ selected: [], usedTokens: 36, suppressedRepeats: 0 });
     expect((await run("ledger webhook retries", "atlas")).abstained).toBe("nothing-selected");
+  });
+
+  it("skips a bullet injected earlier this session and lets the next relevant row take its slot", async () => {
+    const first = await run("kiln furnace scheduler glaze", "quarry");
+    expect(first.selected).toHaveLength(3);
+    const repeat = first.selectedRows[0];
+    const shown = new Set(first.selected.map((s) => s.path));
+    const second = await run("kiln furnace scheduler glaze", "quarry", new Set([repeat.bulletHash!]));
+    expect(second.abstained).toBeNull();
+    expect(second.suppressedRepeats).toBe(1);
+    expect(second.selected).toHaveLength(3);
+    expect(second.selected.map((s) => s.path)).not.toContain(repeat.doc.path);
+    expect(second.selected.filter((s) => !shown.has(s.path))).toHaveLength(1);
+  });
+
+  it("abstains with all-repeats when every row's bullet was injected this session", async () => {
+    const first = await run("ledger webhook retries", "atlas");
+    const result = await run("ledger webhook retries", "atlas", new Set(first.selectedRows.map((s) => s.bulletHash!)));
+    expect(result.abstained).toBe("all-repeats");
+    expect(result.suppressedRepeats).toBe(first.selected.length);
+    expect(result.selected).toEqual([]);
   });
 
   it("selects the matching finding with its score, floor decision and feedback key", async () => {

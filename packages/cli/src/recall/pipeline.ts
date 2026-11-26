@@ -41,6 +41,7 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
     floor: [],
     selected: [],
     selectedRows: [],
+    suppressedRepeats: 0,
     usedTokens: 0,
     tokenBudget: 0,
     stageMs: { searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 },
@@ -115,12 +116,13 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   result.tokenBudget = tokenBudget;
 
   const tSelect0 = Date.now();
-  const { selected, usedTokens } = selectSnippets(rows, keywords, tokenBudget, lineBudget, charBudget, rarity);
+  const { selected, usedTokens, suppressedRepeats } = selectSnippets(rows, keywords, tokenBudget, lineBudget, charBudget, rarity, input.recentlyInjected);
   result.stageMs.selectMs = Date.now() - tSelect0;
   result.usedTokens = usedTokens;
+  result.suppressedRepeats = suppressedRepeats;
   result.selectedRows = selected;
   result.selected = selected.map((s) => ({ ...docRef(s.doc), key: s.key, snippet: s.snippet }));
-  if (!selected.length) return abstain("nothing-selected");
+  if (!selected.length) return abstain(suppressedRepeats > 0 ? "all-repeats" : "nothing-selected");
 
   // Reads stay side-effect free: trust filter output informs ranking/snippets now,
   // while queue/audit mutation is deferred to explicit governance maintenance.
