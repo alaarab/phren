@@ -411,8 +411,12 @@ function runtimeAgeOut(phrenPath: string, budgets: StoreBudgets, lines: string[]
   return { enabled: budgets.runtimeAgeOut, days: budgets.runtimeAgeOutDays, enabledDays, reportLines: reported, acted, candidates: ageOutCounts(candidates) };
 }
 
+function storeHealthFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "store-health.jsonl");
+}
+
 export function recordStoreHealth(phrenPath: string, now = new Date(), computer = getMachineName()): boolean {
-  const file = path.join(runtimeDir(phrenPath), "store-health.jsonl");
+  const file = storeHealthFile(phrenPath);
   return withFileLock(file, () => {
     const lines = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(line => line.trim()) : [];
     const today = now.toDateString();
@@ -436,9 +440,27 @@ const COMPONENT_LABELS: Record<OverBudget["component"], string> = {
   openTasks: "open tasks", reviewEntries: "review entries", runtimeBytes: ".runtime", fanoutArchiveBytes: "fanout archive",
 };
 
+export function budgetComponentName(row: OverBudget): string {
+  const scope = [row.store, row.project].filter(Boolean).join("/");
+  return scope ? `${scope} ${COMPONENT_LABELS[row.component]}` : COMPONENT_LABELS[row.component];
+}
+
+// The newest valid daily line; one short line a day keeps a whole-file read cheap.
+export function readLatestStoreHealth(phrenPath: string): StoreHealth | undefined {
+  const file = storeHealthFile(phrenPath);
+  const lines = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(line => line.trim()) : [];
+  for (const line of lines.reverse()) {
+    try {
+      const snapshot = JSON.parse(line) as StoreHealth | null;
+      if (typeof snapshot?.at === "string" && Number.isFinite(Date.parse(snapshot.at)) && Array.isArray(snapshot.stores)) return snapshot;
+    } catch { /* a torn or foreign line: try the one before */ }
+  }
+  return undefined;
+}
+
 /** Doctor's warn-only budgets line, from the latest daily health record: it never fails the check. */
 export function budgetDoctorCheck(phrenPath: string): { name: string; ok: true; detail: string } {
-  const file = path.join(runtimeDir(phrenPath), "store-health.jsonl");
+  const file = storeHealthFile(phrenPath);
   const lines = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(line => line.trim()) : [];
   let latest: Partial<StoreHealth> | undefined;
   for (const line of lines.reverse()) {
@@ -451,9 +473,8 @@ export function budgetDoctorCheck(phrenPath: string): { name: string; ok: true; 
   if (!latest.budgets.over.length) return { name: "budgets", ok: true, detail: `within budget on ${day}` };
   const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
   const rows = latest.budgets.over.map(row => {
-    const where = row.project ? `${row.store}/${row.project} ` : "";
     const amount = row.component.endsWith("Bytes") ? `${mb(row.value)} of ${mb(row.budget)}` : `${row.value} of ${row.budget}`;
-    return `${where}${COMPONENT_LABELS[row.component]} ${amount} (${row.effect})`;
+    return `${budgetComponentName(row)} ${amount} (${row.effect})`;
   });
   return { name: "budgets", ok: true, detail: `over budget on ${day}: ${rows.join("; ")}` };
 }

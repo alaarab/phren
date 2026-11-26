@@ -28,6 +28,7 @@ import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
 import { storeWeight } from "./store-weight.js";
 import { activeStoreAuthFailure, storeAuthDetail } from "./sync/auth.js";
 import { describeAutoSave } from "./sync/outcome.js";
+import { budgetComponentName, readLatestStoreHealth, type RuntimeClass, type StoreHealth } from "./governance/store-health.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,6 +64,46 @@ function hasCommandHook(value: unknown): boolean {
     if (!isRecord(entry) || !Array.isArray(entry.hooks)) return false;
     return entry.hooks.some((hook) => isRecord(hook) && typeof hook.command === "string" && (hook.command.includes("phren") || hook.command.includes("phren")));
   });
+}
+
+const RUNTIME_CLASS_LABELS: Record<RuntimeClass, string> = {
+  codeIndexes: "code indexes", fanoutArchive: "fanout archive", fanouts: "live fanouts",
+  sessions: "sessions", packages: "packages", logs: "logs", other: "other",
+};
+
+function formatRuntimeBytes(bytes: number): string {
+  let size = bytes;
+  for (const unit of ["B", "KB", "MB", "GB", "TB"]) {
+    if (size < 1024 || unit === "TB") return `${Number(size.toFixed(1))} ${unit}`;
+    size /= 1024;
+  }
+  return `${bytes} B`;
+}
+
+function formatStoreHealth(health: StoreHealth | undefined): string[] {
+  const heading = `  ${BOLD}Store health${RESET}`;
+  if (!health) return [`${heading}  ${DIM}first snapshot appears after the daily background maintenance${RESET}`];
+
+  const stale = Date.now() - Date.parse(health.at) > 3 * 86_400_000;
+  const age = stale ? ` · ${YELLOW}stale, older than 3 days${RESET}` : "";
+  const perStore = (value: (store: StoreHealth["stores"][number]) => string) =>
+    health.stores.map(store => health.stores.length > 1 ? `${store.name} ${value(store)}` : value(store)).join(" · ");
+  const over = health.budgets?.over;
+  const names = over?.length && over.length <= 3 ? ` (${over.map(budgetComponentName).join(", ")})` : "";
+  const budget = over ? `${over.length} ${over.length === 1 ? "item" : "items"} over budget${names}` : "Budget counts unavailable";
+  const totalBytes = Object.values(health.runtimeBytes ?? {}).reduce((sum, size) => sum + size, 0);
+  const largest = Object.entries(health.runtimeClasses ?? {}).sort((a, b) => b[1] - a[1])[0];
+  const largestLabel = largest?.[1] > 0 ? ` (largest: ${RUNTIME_CLASS_LABELS[largest[0] as RuntimeClass] ?? largest[0]}, ${formatRuntimeBytes(largest[1])})` : "";
+  const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 });
+
+  return [
+    `${heading}  ${DIM}${health.at.slice(0, 10)}${RESET}${age}`,
+    `    ${over?.length ? YELLOW : DIM}${budget}${RESET}`,
+    `    ${DIM}Citation coverage${RESET}  ${perStore(store => Number.isFinite(store.citationCoverage) ? percent.format(store.citationCoverage) : "unavailable")}`,
+    `    ${DIM}Retired bullets${RESET}  ${perStore(store => String(store.totals.retiredBullets))}`,
+    `    ${DIM}Duplicates${RESET}  ${perStore(({ totals }) => `${totals.duplicateTexts} ${totals.duplicateTexts === 1 ? "text" : "texts"}, ${totals.duplicateFids} ${totals.duplicateFids === 1 ? "ID" : "IDs"}`)}`,
+    `    ${DIM}.runtime${RESET}  ${formatRuntimeBytes(totalBytes)}${largestLabel}`,
+  ];
 }
 
 export async function runStatus() {
@@ -360,6 +401,8 @@ export async function runStatus() {
   }
 
   console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings${moduleEnabled(phrenPath, "tasks", profile) ? `, ${totalTask} tasks` : ""}, ${totalQueue} queued`);
+
+  console.log(`\n${formatStoreHealth(readLatestStoreHealth(phrenPath)).join("\n")}`);
 
   const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : phrenPath;
   const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"], EXEC_TIMEOUT_QUICK_MS, debugLog) === "true";

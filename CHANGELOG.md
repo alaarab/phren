@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - The recall eval reports judged precision: how many injected snippets were useful for their prompt, from cached relevance judgments (partial counts half), with the number of pairs not judged yet. It never calls a model. `--list-unjudged <file>` writes the pairs a judge still has to answer, `--judgments <file>` points a private run at its own cache, and `--check` fails when precision drops more than 2 points. The public fixture's judgments are committed beside its cases.
 - Daily store health counts the ids clanker mode injected and how many of them the same session opened with `get_memory_detail`. The prompt hook's trace now keeps each printed id, and `get_memory_detail` calls in a Claude Code session are logged to `.runtime/memory-detail-opens.jsonl`.
+- `phren status` shows the latest daily store health snapshot. It counts budget breaches, names them when there are at most three, and shows citation coverage, retired bullets, duplicate texts and IDs, and the size and largest class of `.runtime`. It flags snapshots older than three days.
 
 ### Changed
 
@@ -19,9 +20,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - When two identical phone messages are queued in Claude Code, a delayed hook no longer marks the second delivered after the transcript has already confirmed the first. Claude can confirm a message before its transcript row arrives, and joined messages keep their confirmation across a Hook restart.
 - The prompt hook now uses an archived finding's creation date or, when it has none, the date of its archive section. Old bug notes expire after 30 days, and a recently written finding whose cited code changed can still reach the prompt. Untagged findings in topic archives last up to 365 days.
-
-### Fixed
-
 - Phren Hook stops background checks such as Claude sign-in discovery when it shuts down, so a slow check no longer delays a restart. Agents already running in panes keep working.
 - `phren shell` stays open when a skill folder contains a dangling symlink. Skill listing and linking skip symlinks whose targets are missing or are neither files nor folders.
 

@@ -194,7 +194,7 @@ CLI Commands:
     phren maintain extract [project]      - mine git and GitHub signals
 
   Debugging and status:
-    phren status                          - health, active project, stats
+    phren status                          - daily store health, computer health, active project, stats
     phren doctor [--fix] [--check-data] [--agents] [--parity] - health check
     phren debug-injection --prompt "..."  - preview hook-prompt injection
     phren inspect-index [--project <n>]   - inspect FTS index contents
