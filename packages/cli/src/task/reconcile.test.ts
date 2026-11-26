@@ -104,21 +104,38 @@ describe("private task merge links", () => {
 `;
       fs.writeFileSync(file, original);
       const bin = path.join(temp.path, "bin"); fs.mkdirSync(bin);
-      const calls = path.join(temp.path, "calls.jsonl");
-      const fixture = path.join(temp.path, "responses.json");
-      fs.writeFileSync(fixture, JSON.stringify({ "7": merged, "8": { ...merged, number: 8, url: merged.url.replace("/7", "/8"), state: "CLOSED", mergedAt: null, mergeCommit: null }, "9": { ...merged, number: 9, url: merged.url.replace("/7", "/9"), headRefName: "feat/other", headRepository: { nameWithOwner: "example/library" } } }));
-      // Exercise actual argument transport and JSON decoding, not an injected query seam.
-      fs.writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env node
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-fs.appendFileSync(process.env.TEST_GH_CALLS, JSON.stringify(args) + '\\n');
-if (process.env.TEST_GH_OFFLINE === '1') process.exit(1);
-const rows = JSON.parse(fs.readFileSync(process.env.TEST_GH_FIXTURE, 'utf8'));
-if (args[0] !== 'pr' || !['view', 'list'].includes(args[1])) process.exit(2);
-console.log(JSON.stringify(args[1] === 'view' ? rows[args[2]] : args.includes('feat/reused') ? [rows['7'], rows['9']] : args.includes('feat/fork') ? [{ ...rows['7'], headRefName: 'feat/fork', headRepository: { nameWithOwner: 'someone/library' } }] : [rows['9']]));
+      const calls = path.join(temp.path, "calls.txt");
+      const fixture = path.join(temp.path, "responses"); fs.mkdirSync(fixture);
+      const response = (name: string, value: PrState | PrState[]) => fs.writeFileSync(path.join(fixture, `${name}.json`), JSON.stringify(value));
+      const other = { ...merged, number: 9, url: merged.url.replace("/7", "/9"), headRefName: "feat/other", headRepository: { nameWithOwner: "example/library" } };
+      response("pr-7", merged);
+      response("pr-8", { ...merged, number: 8, url: merged.url.replace("/7", "/8"), state: "CLOSED", mergedAt: null, mergeCommit: null });
+      response("pr-9", other);
+      response("branch-other", [other]);
+      response("branch-reused", [merged, other]);
+      response("branch-fork", [{ ...merged, headRefName: "feat/fork", headRepository: { nameWithOwner: "someone/library" } }]);
+      // Keep real argv transport, exit codes and JSON decoding, without
+      // booting 200 Node interpreters just to print fixture responses.
+      fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh
+printf '%s\\n' "$@" >> "$TEST_GH_CALLS"
+[ "$TEST_GH_OFFLINE" = '1' ] && exit 1
+case "$1:$2" in
+  pr:view) exec cat "$TEST_GH_FIXTURE/pr-$3.json" ;;
+  pr:list)
+    shift 2
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = '--head' ]; then head=$2; break; fi
+      shift
+    done
+    case "$head" in
+      feat/other|feat/reused|feat/fork) exec cat "$TEST_GH_FIXTURE/branch-\${head#feat/}.json" ;;
+    esac ;;
+esac
+exit 2
 `, { mode: 0o755 });
       vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH}`);
       vi.stubEnv("TEST_GH_CALLS", calls); vi.stubEnv("TEST_GH_FIXTURE", fixture);
+      vi.useFakeTimers({ toFake: ["Date"] });
       const preview = await reconcileTasks(temp.path);
       expect(preview).toMatchObject({ dryRun: true, done: 3, review: 2, errors: 0 });
       expect(fs.readFileSync(file, "utf8")).toBe(original);
@@ -141,7 +158,7 @@ console.log(JSON.stringify(args[1] === 'view' ? rows[args[2]] : args.includes('f
       expect(fs.readFileSync(calls, "utf8")).toBe(firstCalls);
       expect(firstCalls).not.toContain("1234abcd");
       // Expire the cache, then fail gh. No stale positive result may finish work.
-      vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.now() + 20 * 60 * 1000);
+      vi.setSystemTime(Date.now() + 20 * 60 * 1000);
       vi.stubEnv("TEST_GH_OFFLINE", "1");
       expect(await reconcileTasks(temp.path)).toMatchObject({ done: 0, review: 0, errors: 1, requests: 1 });
       expect(fs.readFileSync(file, "utf8")).toBe(after);
@@ -149,14 +166,12 @@ console.log(JSON.stringify(args[1] === 'view' ? rows[args[2]] : args.includes('f
       vi.stubEnv("TEST_GH_OFFLINE", "0"); vi.setSystemTime(Date.now() + 20 * 60 * 1000);
       expect(await reconcileTasks(temp.path)).toMatchObject({ done: 0, errors: 0 });
       // A nightly sweep must make progress beyond the same 100 open PRs.
-      const many: Record<string, PrState> = {};
       const lines = [];
       for (let n = 1000; n < 1102; n++) {
-        many[String(n)] = { ...merged, number: n, url: merged.url.replace("/7", `/${n}`), state: n === 1101 ? "MERGED" : "OPEN" };
+        response(`pr-${n}`, { ...merged, number: n, url: merged.url.replace("/7", `/${n}`), state: n === 1101 ? "MERGED" : "OPEN" });
         lines.push(`- [ ] Work ${n} <!-- bid:${n.toString(16).padStart(8, "0")} -->\n  Context: example/library#${n}`);
       }
       fs.writeFileSync(file, `# Tasks\n\n## Active\n\n${lines.join("\n")}\n\n## Done\n`);
-      fs.writeFileSync(fixture, JSON.stringify(many));
       expect(await reconcileTasks(temp.path)).toMatchObject({ requests: 100, done: 0 });
       vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
       expect(await reconcileTasks(temp.path)).toMatchObject({ requests: 100, done: 1 });
