@@ -964,6 +964,7 @@ export function updateTask(
     }
 
     if (changes.length && (item.responsibility !== undefined || item.dependencies !== undefined || item.history !== undefined)) item.history = [...(item.history ?? []), { at: new Date().toISOString(), change: changes.join(", ") }];
+    if (changes.length) item.lastActivity = new Date().toISOString();
     writeTaskDoc(parsed.data);
     return phrenOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
   }));
@@ -1138,6 +1139,7 @@ export function promoteTask(phrenPath: string, project: string, match: string, m
       item.checked = false;
       parsed.data.items.Active.unshift(item);
     }
+    item.lastActivity = new Date().toISOString();
 
     writeTaskDoc(parsed.data);
     return phrenOk(item);
@@ -1192,6 +1194,7 @@ export function claimTask(phrenPath: string, project: string, match: string, cla
         parsed.data.items.Active.unshift(item);
       }
     }
+    item.lastActivity = new Date().toISOString();
     writeTaskDoc(parsed.data);
     return phrenOk(item);
   }));
@@ -1223,6 +1226,7 @@ export function workNextTask(phrenPath: string, project: string, graphRoot = phr
     if (item.history !== undefined) item.history.push({ at: new Date().toISOString(), change: "moved Queue -> Active by next" });
     item.section = "Active";
     item.checked = false;
+    item.lastActivity = new Date().toISOString();
     parsed.data.items.Active.push(item);
     writeTaskDoc(parsed.data);
     return phrenOk(`Moved next queue item to Active in ${project}: ${item.line}`);
@@ -1314,6 +1318,7 @@ export function updateTaskWork(phrenPath: string, project: string, match: string
       item.claim = undefined;
       parsed.data.items.Done.unshift(item);
     }
+    item.lastActivity = new Date().toISOString();
     writeTaskDoc(parsed.data);
     return phrenOk({ item, changed: true });
   });
