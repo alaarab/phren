@@ -137,7 +137,7 @@ describe("auditRules and buildAuditPrompt", () => {
     expect(prompt).toContain("RULES.");
     expect(prompt).toContain("- bid:aaaa1111 (Active) Ship the login fix");
     expect(prompt).toContain(`— Context: ${long.slice(0, 600)}`);
-    expect(prompt).not.toContain(long.slice(600));
+    expect(prompt).not.toContain("x".repeat(601));
     expect(prompt).toContain('- bid:dddd4444 (Queue) Hire nobody');
     expect(prompt).toContain('Reply with JSON only: {"verdicts":[{"bid":"xxxxxxxx","verdict":"done|partial|valid|obsolete|unresolved"');
   });
@@ -268,5 +268,15 @@ describe("auditTasks", () => {
     expect(prompts[0]).not.toContain("bid:bbbb2222");
     expect(prompts[0]).not.toContain("bid:cccc3333");
     expect(cwds[0]).toBe(path.join(store, PROJECT));
+  });
+
+  it("rotates: the next run sends the tasks the last one did not, even ones it called valid", async () => {
+    const first = fakeRunner([{ bid: "aaaa1111", verdict: "valid" }, { bid: "dddd4444", verdict: "unresolved" }]);
+    await run({ runner: first.runner, limit: 2 });
+    const second = fakeRunner([]);
+    await run({ runner: second.runner, limit: 2 });
+    expect(second.prompts[0]).toContain("bid:bbbb2222");
+    expect(second.prompts[0]).toContain("bid:cccc3333");
+    expect(second.prompts[0]).not.toContain("bid:aaaa1111");
   });
 });

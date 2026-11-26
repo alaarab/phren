@@ -78,7 +78,8 @@ describe("TaskAuditScheduler", () => {
   it("does not retry a project within six hours, even when its run left no marker", async () => {
     const runs: string[] = [];
     let now = at(3);
-    const s = scheduler({ configs: { a: {} }, now: () => now, runs, sessions: async () => [] });
+    // A window wide enough that the retry guard, not the window, is what holds it back.
+    const s = scheduler({ configs: { a: { window: "00:00-23:30" } }, now: () => now, runs, sessions: async () => [] });
     expect(await s.tick()).toEqual(["a"]);
     now = new Date(at(3).getTime() + TASK_AUDIT_RETRY_MS / 2);
     expect(await s.tick()).toEqual([]);

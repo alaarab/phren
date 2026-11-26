@@ -160,12 +160,28 @@ export function readAuditLastRun(phrenPath: string, project: string): AuditLastR
 
 // ── Candidates, rules and prompt ──────────────────────────────────────────────
 
-/** Active+Queue tasks with a usable identity, oldest last-touch first (never-touched first). */
-export function auditCandidates(doc: TaskDoc, limit: number): TaskItem[] {
+/** When each task was last sent to an audit, by stable id: task-audits/audited.json. */
+export function auditedFile(phrenPath: string, project: string): string {
+  return path.join(taskAuditsDir(phrenPath, project), "audited.json");
+}
+
+export function readAudited(phrenPath: string, project: string): Record<string, string> {
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(auditedFile(phrenPath, project), "utf8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).filter(([bid, at]) => /^[a-f0-9]{8}$/.test(bid) && typeof at === "string" && Number.isFinite(Date.parse(at))));
+  } catch { return {}; }
+}
+
+/** Active+Queue tasks with a usable identity: never audited first, then the longest since their
+ * last audit, then the oldest last touch. Without the audit order a task the model calls valid
+ * (and so never touches) would come back every week and starve a long list. */
+export function auditCandidates(doc: TaskDoc, limit: number, audited: Record<string, string> = {}): TaskItem[] {
   const touched = (item: TaskItem) => taskLastTouched(item) ?? 0;
+  const lastAudit = (item: TaskItem) => (audited[item.stableId!] ? Date.parse(audited[item.stableId!]) : 0);
   return [...doc.items.Active, ...doc.items.Queue]
     .filter((item) => item.stableId && !item.identityAmbiguous)
-    .sort((a, b) => touched(a) - touched(b))
+    .sort((a, b) => lastAudit(a) - lastAudit(b) || touched(a) - touched(b))
     .slice(0, Math.max(0, Math.floor(limit)));
 }
 
@@ -281,7 +297,8 @@ export async function auditTasks(project: string, opts: AuditOptions = {}): Prom
 
     const doc = readTasks(phrenPath, project);
     if (!doc.ok) return fail(`Could not read ${project}'s tasks: ${doc.error}`);
-    const candidates = auditCandidates(doc.data, opts.limit ?? AUDIT_LIMIT_DEFAULT);
+    const audited = readAudited(phrenPath, project);
+    const candidates = auditCandidates(doc.data, opts.limit ?? AUDIT_LIMIT_DEFAULT, audited);
     if (!candidates.length) {
       if (!dryRun) writeAuditLastRun(phrenPath, project, { at: new Date().toISOString(), status: "empty", trigger, runId, counts: emptyCounts() });
       return { ...base, status: "empty", runId, message: `No open tasks with a stable ID in ${project}; nothing to audit.` };
@@ -361,6 +378,11 @@ export async function auditTasks(project: string, opts: AuditOptions = {}): Prom
     writeAtomic(recordPath, `${JSON.stringify({ project, runId, startedAt, finishedAt, trigger,
       candidates: candidates.map((item) => item.stableId!), verdicts, dropped, applied, counts, ...spend } satisfies TaskAuditRecord, null, 2)}\n`);
     writeAuditLastRun(phrenPath, project, { at: finishedAt, status: "ok", trigger, runId, counts });
+    // Every task sent this run moves to the back of the next run's order; ids no longer open drop out.
+    const open = new Set([...doc.data.items.Active, ...doc.data.items.Queue].map((item) => item.stableId).filter(Boolean));
+    writeAtomic(auditedFile(phrenPath, project), `${JSON.stringify(Object.fromEntries([
+      ...Object.entries(audited).filter(([bid]) => open.has(bid)), ...candidates.map((item) => [item.stableId!, finishedAt]),
+    ]))}\n`);
     const extra = [
       `${counts.closed} closed`, `${counts.noted} noted`,
       ...(counts.denied ? [`${counts.denied} denied`] : []),
