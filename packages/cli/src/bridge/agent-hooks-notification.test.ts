@@ -80,7 +80,8 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
   afterEach(async () => {
     for (const client of clients.splice(0)) client.close();
     hooks.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
-    await rm(root, { recursive: true, force: true });
+    // A git child can still be writing objects at teardown; retry instead of failing on ENOTEMPTY.
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   async function forward(mode: string, value: Json) {
     const payload = { session_id: session, cwd: pane.foreground_cwd, ...value };
