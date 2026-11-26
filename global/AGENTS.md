@@ -58,7 +58,8 @@ When spawning an Agent() or using team agents, phren context is auto-injected vi
 1. **Before starting work:** call `search_knowledge(query)` with the task description to check for existing findings, conventions, and decisions.
 2. **During work:** call `add_finding(project, finding)` for any non-obvious discovery (gotchas, patterns, architectural decisions, tradeoffs).
 3. **When completing a task:** call `manage_task(action: "complete", project, item)` if working on a tracked task.
-4. **At handoff:** summarize what was done and what was learned. Findings persist across sessions; chat does not.
+4. **Before you stop:** settle every task you claimed or moved to Active: complete it with its evidence, park it (context `Blocker: …; Next: …`) or return it to the Queue. The Stop hook lists the ones still open. Hold at most 3 Active tasks, and keep titles to one short line (under 80 characters) with the details in context.
+5. **At handoff:** summarize what was done and what was learned. Findings persist across sessions; chat does not.
 
 ## Project store
 

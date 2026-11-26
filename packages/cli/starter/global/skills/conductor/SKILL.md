@@ -224,6 +224,13 @@ permission prompt: say so and point the owner to the phone or the terminal. A
 owner before giving its work to another agent. A `done` reply is the worker's
 own account; check its evidence before saying tests passed or work merged.
 
+A return's `tasks` lists the tasks the worker's session claimed or moved to
+Active and how each stands: done, queue, parked (its context names a blocker
+and a next step) or open. A turn that ends with an open task returns needs-you
+naming it; send the worker back to settle it. Briefs ask for `Closes bid:<id>`
+in the pull request body: the Hook closes the task when that pull request
+merges, on GitHub and gitboy. After a merge, check the task moved to Done.
+
 A `stalled` return or `live_sessions` row with `stalled:true` means both the
 screen and transcript have stopped changing while working. Check it and report
 what is known; do not launch a duplicate or interrupt it just because of the flag.
