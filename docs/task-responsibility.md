@@ -211,3 +211,61 @@ When the latest refresh failed, the last reading keeps its `checkedAt` and gains
 `error`; a forge never read successfully gives `{"error":"…","checkedAt":"…"}`, and
 one not read yet gives null. `live.status` is the one line a Tasks row shows: what needs
 the owner first, then the pull request, then a worker still going, then the issue.
+
+## Settling tasks
+
+Tasks used to stay Active long after their work was done or dropped. Phren now
+asks whoever took a task to settle it, and returns the ones nobody touches.
+
+**The session ledger.** When an agent session claims a task (`claim_task`) or
+moves one to Active (`update_task` with `section: "Active"`, `promote` with
+`move_to_active`, `work_next`), the MCP server records it in
+`.runtime/session-tasks/<session>.json` in the primary store. The session is the
+claim's `session` parameter, else `CLAUDE_CODE_SESSION_ID`, else Codex's thread
+id. Each recorded task resolves to one of:
+
+| Resolution | Meaning |
+|------------|---------|
+| `done` | The task is in Done. |
+| `queue` | It went back to the Queue. |
+| `parked` | Still Active, and its context names a blocker and a next step: `Blocker: <what blocks it>; Next: <the next step>`. |
+| `open` | Still Active with neither: the session still owes it. |
+| `missing` | The task or its store is gone. |
+
+**The Stop hook.** When a Claude Code or Codex turn ends, `phren hook-stop`
+blocks the stop once if the session left any task `open`, listing them and asking
+the agent to complete each with its evidence, park it or return it to the Queue.
+It never blocks twice in a row (`stop_hook_active`), so an agent that will not
+settle cannot loop. Copilot and Cursor cannot block a stop and are left alone.
+`PHREN_TASK_STOP_CHECK=off` turns it off.
+
+**Dispatch returns.** A worker's return carries its session's `tasks` with their
+resolutions, and a finished turn that leaves one `open` returns `needs-you`
+naming the bids, so the conductor sends the worker back (see
+[`dispatch_returns`](api-reference.md#dispatch_returns)).
+
+**Closing on merge.** Briefs and pull requests say `Closes bid:<id>`; the task
+work sweep above closes the task when that pull request merges, on GitHub and on
+gitboy, even when another pull request was linked to the task first.
+
+**At most three Active tasks per session.** Taking a fourth still works, and the
+reply warns: finish, park or return one first.
+
+**Short titles.** `add_task` and `update_task` warn about a title over 80
+characters and suggest a short title plus context to move the rest into.
+
+**Staleness.** Every task write stamps `lastActivity`. An Active task untouched
+for 24 hours (its last activity, claim or worker update, else its creation) is
+stale:
+
+- the owner inbox lists it (`task-stale:<project>:<bid>`, kind `needs-you`), at
+  most 20, oldest first, from the computer that claimed it or, when unclaimed,
+  from every Hook sharing the store (the merged inbox shows it once). The row
+  resolves itself once the task is touched, done or back in the Queue;
+- the next scheduled dream for its project (see [Dreaming](dreaming.md)) moves
+  it back to the Queue, releases its claim and adds `Returned to Queue by the
+  nightly dream on <date>: Active and untouched since <date>.` to its context.
+  A manual or dry-run dream never moves tasks.
+
+`PHREN_TASK_STALE=off` turns off both. A task moved out of Active by
+`update_task` releases its claim, as `claim_task` with `release` does.

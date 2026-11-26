@@ -238,7 +238,12 @@ transcript when there are none; see [Returns](conductor.md#returns).
 | `gone` | The worker's pane closed or another conversation took it over. |
 
 Each row carries `id` (the dispatch ID), `computer`, `project`, `label`,
-`harness`, `state`, `at` and the worker's `target` for `hand_off`. A worker
+`harness`, `state`, `at` and the worker's `target` for `hand_off`. A `done`,
+`needs-you` or `failed` row can carry `tasks`: every task the worker's session
+claimed or moved to Active (`project`, `stableId`, `title`, `section` and
+`resolution`: `done`, `queue`, `parked`, `open` or `missing`). A finished turn
+that leaves a task `open` returns `needs-you` with `question` naming its bids;
+see [Settling tasks](task-responsibility.md#settling-tasks). A worker
 that takes more work after `done` and finishes again produces a new return.
 The dispatching Hook asks each enrolled computer about its open dispatches at
 most every 15 seconds, in one request per computer. Dispatches are followed
@@ -1135,6 +1140,10 @@ Append one or more tasks to a project's tasks.md file. Adds to the Queue section
 | `item` | string or string[] | yes | The task(s) to add. Pass a single string for one task, or an array of strings for batch add. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
+A title over 80 characters is still added, and the reply carries one line per
+such title (also in `data.warnings`) suggesting a short title and the context to
+move the rest into. `update_task` with new `text` warns the same way.
+
 Task mutations (`add_task` and every `manage_task` action, including their individual tools in the full profile) add `data.write` alongside the existing result fields:
 
 ```json
@@ -1226,6 +1235,13 @@ Claim a task for this computer, so conductors that are not linked through the Ho
 | `session` | string | no | The claiming conductor's session id, recorded with the claim. |
 | `release` | boolean | no | Release this computer's claim and return the task to the Queue. |
 | `force` | boolean | no | Take over another computer's claim once it is more than a day old. |
+
+A claim, `update_task` with `section: "Active"`, `promote` with
+`move_to_active` and `work_next` record the task in the calling session's
+ledger (the `session` parameter, else `CLAUDE_CODE_SESSION_ID` or Codex's
+thread id). When that session then holds more than three Active tasks, the
+reply adds a warning (`data.warning`); the move itself always goes through.
+See [Settling tasks](task-responsibility.md#settling-tasks).
 
 ---
 
