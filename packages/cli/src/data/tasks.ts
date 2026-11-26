@@ -960,6 +960,8 @@ export function updateTask(
         item.checked = section === "Done";
         parsed.data.items[section].unshift(item);
         changes.push(`moved ${found.match.section} -> ${section}`);
+        // A claim holds Active work; a task leaving Active is no longer anyone's.
+        if (section !== "Active" && item.claim) { changes.push(`released claim by ${item.claim.computer}`); item.claim = undefined; }
       }
     }
 
