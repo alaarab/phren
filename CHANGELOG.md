@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `phren dispatch close-self` in a dispatched worker no longer loses the worker's report. The pane now stays open until the Hook records the worker's final return, then closes the usual way after the conductor reads it. The reply says `pending: true`; if no return is recorded within ten minutes the pane is left open. A pane with no dispatch still closes right away.
+
 ## [0.3.94] - 2026-11-26
 
 ### Added
