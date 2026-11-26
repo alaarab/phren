@@ -1117,13 +1117,14 @@ describe("filterTrustedFindingsDetailed (extended)", () => {
 
   it("marks invalid citation entries", () => {
     const today = new Date().toISOString().slice(0, 10);
+    const repo = makePhren();
     const content = [
       "# proj FINDINGS",
       "",
       `## ${today}`,
       "",
       "- Entry with bad citation",
-      '  <!-- phren:cite {"created_at":"2025-01-01T00:00:00.000Z","repo":"/nonexistent/path"} -->',
+      `  <!-- phren:cite ${JSON.stringify({ created_at: "2025-01-01T00:00:00.000Z", repo, file: "deleted.ts" })} -->`,
     ].join("\n");
     const result = filterTrustedFindingsDetailed(content, { ttlDays: 365 });
     expect(result.issues.some(i => i.reason === "invalid_citation")).toBe(true);

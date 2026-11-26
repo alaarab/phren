@@ -31,6 +31,7 @@ import { summarizeProject } from "../content/summarize.js";
 import { claimMaintenanceWriter } from "../sync/maintenance-writer.js";
 import { tidyDoneTasks } from "../data/tasks.js";
 import { recordStoreHealth } from "../governance/store-health.js";
+import { citationStateKey, sweepCitationStates } from "../content/citation-states.js";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -153,6 +154,15 @@ async function governTargets(projects: MaintenanceTarget[], silent: boolean, dry
   const storeSummaries = new Map<string, GovernanceSummary>([
     [getPhrenPath(), { projects: 0, staleCount: 0, conflictCount: 0, reviewCount: 0 }],
   ]);
+  // Every computer records the citation states it can check; only a store's lease holder lets them
+  // reach its review queue, so one computer's missing repo or drifted checkout never files a conflict.
+  const citations = sweepCitationStates(getPhrenPath(), projects, { save: !dryRun });
+  const leaseHolder = new Map<string, boolean>();
+  const holdsLease = (storePath: string) => {
+    if (dryRun) return true;
+    if (!leaseHolder.has(storePath)) leaseHolder.set(storePath, claimMaintenanceWriter(storePath).writer);
+    return leaseHolder.get(storePath)!;
+  };
 
   for (const { storePath, project } of projects) {
     const summary = storeSummaries.get(storePath) ?? { projects: 0, staleCount: 0, conflictCount: 0, reviewCount: 0 };
@@ -163,10 +173,12 @@ async function governTargets(projects: MaintenanceTarget[], silent: boolean, dry
     const learningsPath = path.join(storePath, project, FINDINGS_FILENAME);
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
+    const holder = holdsLease(storePath);
     const trust = filterTrustedFindingsDetailed(content, {
       ttlDays: Number.isNaN(ttlDays) ? policy.ttlDays : ttlDays,
       minConfidence: policy.minInjectConfidence,
       decay: policy.decay,
+      citationState: (_citation, bullet) => holder ? citations.states[citationStateKey(learningsPath, bullet)]?.state : undefined,
     });
 
     const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);

@@ -64,6 +64,8 @@ export interface TrustFilterOptions {
   decay?: Partial<RetentionPolicy["decay"]>;
   project?: string;
   highImpactFindingIds?: Set<string>;
+  /** States already known (governance's bounded sweep); an undefined answer counts as unverifiable. Unset checks live. */
+  citationState?: (citation: FindingCitation, bullet: string) => CitationState | undefined;
 }
 
 export function getHeadCommit(cwd: string): string | undefined {
@@ -239,11 +241,28 @@ function resolveCitationFile(citation: FindingCitation): string | null {
   return path.resolve(citation.file);
 }
 
-// Session-scoped caches for git I/O during citation validation.
-// Keyed by "repo\0commit" and "repo\0file\0line" respectively.
+/**
+ * What this computer can tell about a citation:
+ * - valid: everything it names checks out.
+ * - drifted: the cited line changed since the cited commit, or is past the end of the file; the finding may still be right.
+ * - broken: the repo is here but the cited file is gone.
+ * - unverifiable: nothing to check, the repo is not on this computer, git could not run,
+ *   or the repo does not know the commit while the file is still there (squash-merged or unfetched).
+ */
+export type CitationState = "valid" | "drifted" | "broken" | "unverifiable";
+
+// Session-scoped caches for git I/O during citation checks.
+// Keyed by repo, "repo\0commit" and "repo\0file\0line" respectively.
 const MAX_CACHE_ENTRIES = 500;
+const checkoutCache = new Map<string, boolean>();
 const commitExistsCache = new Map<string, boolean>();
 const blameCache = new Map<string, string | false>();
+let gitCalls = 0;
+
+/** Git processes citation checks have started in this process; governance caps a run by it. */
+export function citationGitCallCount(): number {
+  return gitCalls;
+}
 
 function evictOldest<K, V>(cache: Map<K, V>): void {
   if (cache.size <= MAX_CACHE_ENTRIES) return;
@@ -251,68 +270,86 @@ function evictOldest<K, V>(cache: Map<K, V>): void {
   if (first !== undefined) cache.delete(first);
 }
 
-function commitExists(repoPath: string, commit: string): boolean {
-  const key = `${repoPath}\0${commit}`;
-  const cached = commitExistsCache.get(key);
-  if (cached !== undefined) return cached;
+// Output, false when git answered no, undefined when git could not run (missing binary, timeout).
+function citationGit(repoPath: string, args: string[], timeoutMs: number): string | false | undefined {
+  gitCalls++;
   try {
-    runGitOrThrow(repoPath, ["cat-file", "-e", `${commit}^{commit}`], EXEC_TIMEOUT_QUICK_MS);
-    commitExistsCache.set(key, true);
-    evictOldest(commitExistsCache);
-    return true;
+    return runGitOrThrow(repoPath, args, timeoutMs);
   } catch (err: unknown) {
-    debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${errorMessage(err)}`);
-    commitExistsCache.set(key, false);
-    evictOldest(commitExistsCache);
-    return false;
+    debugLog(`citation: git ${args[0]} in ${repoPath}: ${errorMessage(err)}`);
+    return (err as NodeJS.ErrnoException).code ? undefined : false;
   }
 }
 
-function cachedBlame(repoPath: string, relFile: string, line: number): string | false {
+function cachedGit(cache: Map<string, boolean>, key: string, repoPath: string, args: string[]): boolean | undefined {
+  const cached = cache.get(key);
+  if (cached !== undefined) return cached;
+  const out = citationGit(repoPath, args, EXEC_TIMEOUT_QUICK_MS);
+  if (out === undefined) return undefined;
+  cache.set(key, out !== false);
+  evictOldest(cache);
+  return out !== false;
+}
+
+function cachedBlame(repoPath: string, relFile: string, line: number): string | false | undefined {
   const key = `${repoPath}\0${relFile}\0${line}`;
   const cached = blameCache.get(key);
   if (cached !== undefined) return cached;
+  const out = citationGit(repoPath, ["blame", "-L", `${line},${line}`, "--porcelain", relFile], 10_000);
+  if (out === undefined) return undefined;
+  const first = out === false ? false : out.trim().split("\n")[0] || "";
+  blameCache.set(key, first);
+  evictOldest(blameCache);
+  return first;
+}
+
+function lineState(file: string, line: number | undefined): CitationState {
+  if (line === undefined) return "valid";
+  if (!Number.isInteger(line) || line < 1) return "drifted";
   try {
-    const out = runGitOrThrow(repoPath, ["blame", "-L", `${line},${line}`, "--porcelain", relFile], 10_000).trim();
-    const first = out.split("\n")[0] || "";
-    blameCache.set(key, first);
-    evictOldest(blameCache);
-    return first;
-  } catch (err: unknown) {
-    debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${errorMessage(err)}`);
-    blameCache.set(key, false);
-    evictOldest(blameCache);
-    return false;
+    return line > fs.readFileSync(file, "utf8").split("\n").length ? "drifted" : "valid";
+  } catch {
+    return "unverifiable";
   }
 }
 
-export function validateFindingCitation(citation: FindingCitation): boolean {
+export function checkFindingCitation(citation: FindingCitation): CitationState {
   // A symbol citation is resolved against the project's code index at write
   // time (the index lives outside the synced store, so it is not available
   // here). The write path records `symbol_unresolved` when it could not
   // resolve one; that is the symbol counterpart of a missing cited file.
-  if (citation.symbol && citation.symbol_unresolved) return false;
-  if (citation.repo && !fs.existsSync(citation.repo)) return false;
-  if (citation.commit && citation.repo && !commitExists(citation.repo, citation.commit)) return false;
-
-  const resolvedFile = resolveCitationFile(citation);
-  if (resolvedFile) {
-    if (!fs.existsSync(resolvedFile)) return false;
-    if (citation.line !== undefined) {
-      if (!Number.isInteger(citation.line) || citation.line < 1) return false;
-      const lineCount = fs.readFileSync(resolvedFile, "utf8").split("\n").length;
-      if (citation.line > lineCount) return false;
-      if (citation.commit && citation.repo) {
-        const relFile = path.isAbsolute(resolvedFile)
-          ? path.relative(citation.repo, resolvedFile)
-          : resolvedFile;
-        const first = cachedBlame(citation.repo, relFile, citation.line);
-        if (first === false || !first.startsWith(citation.commit)) return false;
-      }
-    }
+  if (citation.symbol && citation.symbol_unresolved) return "broken";
+  if (!citation.repo) {
+    // Without a repo only an absolute file this computer has can be checked.
+    if (!citation.file || !path.isAbsolute(citation.file) || !fs.existsSync(citation.file)) return "unverifiable";
+    return lineState(citation.file, citation.line);
   }
+  // Repo paths are per computer (/Users/... on a Mac, /home/... on Linux), so a missing one says nothing.
+  if (!fs.existsSync(citation.repo)) return "unverifiable";
+  let commitKnown = true;
+  if (citation.commit) {
+    if (cachedGit(checkoutCache, citation.repo, citation.repo, ["rev-parse", "--git-dir"]) !== true) return "unverifiable";
+    const known = cachedGit(commitExistsCache, `${citation.repo}\0${citation.commit}`, citation.repo, ["cat-file", "-e", `${citation.commit}^{commit}`]);
+    if (known === undefined) return "unverifiable";
+    commitKnown = known;
+  }
+  // An unknown commit may be squash-merged or not fetched yet; only a missing file proves the citation wrong.
+  if (!citation.file) return commitKnown ? "valid" : "unverifiable";
+  const resolvedFile = resolveCitationFile(citation);
+  if (!resolvedFile) return "unverifiable";
+  if (!fs.existsSync(resolvedFile)) return "broken";
+  if (!commitKnown) return "unverifiable";
+  const range = lineState(resolvedFile, citation.line);
+  if (range !== "valid" || citation.line === undefined || !citation.commit) return range;
+  const first = cachedBlame(citation.repo, path.relative(citation.repo, resolvedFile), citation.line);
+  if (first === undefined) return "unverifiable";
+  return first !== false && first.startsWith(citation.commit) ? "valid" : "drifted";
+}
 
-  return true;
+/** False only when this computer knows the citation is broken or its line drifted; one it cannot check passes. */
+export function validateFindingCitation(citation: FindingCitation): boolean {
+  const state = checkFindingCitation(citation);
+  return state === "valid" || state === "unverifiable";
 }
 
 function parseLearningDateHeading(line: string): string | null {
@@ -484,18 +521,18 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
       }
     }
 
-    if (citation && !validateFindingCitation(citation)) {
+    const citationState = citation
+      ? (options.citationState ? options.citationState(citation, line) ?? "unverifiable" : checkFindingCitation(citation))
+      : undefined;
+    if (citationState === "broken") {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "invalid_citation" });
       i++;
       continue;
     }
 
-    // If cited file was modified after finding was created, lower confidence
-    if (citation && effectiveDate && citation.file) {
-      const fileModifiedAfterFinding = wasFileModifiedAfter(citation.file, effectiveDate);
-      if (fileModifiedAfterFinding) {
-        confidence *= 0.7; // File changed since finding was written — may be stale
-      }
+    // The cited line drifted, or the cited file changed after the finding was written: it may be stale.
+    if (citationState === "drifted" || (citation && effectiveDate && citation.file && wasFileModifiedAfter(citation.file, effectiveDate))) {
+      confidence *= 0.7;
     }
 
     if (!citation) confidence *= 0.8;

@@ -95,17 +95,25 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
 // ── Stale citation detection ─────────────────────────────────────────────────
 
 describe("markStaleCitations", () => {
-  it("appends [stale citation] when cited file does not exist", () => {
+  it("appends [stale citation] when the cited file is gone from a repo this computer has", () => {
+    const repo = makeTempDir("stale-citation-repo-");
     const snippet = [
       "- Some finding about a deleted file",
-      `  <!-- phren:cite {"created_at":"2025-01-01","file":"/nonexistent/path/deleted.ts"} -->`,
+      `  <!-- phren:cite ${JSON.stringify({ created_at: "2025-01-01", repo: repo.path, file: "deleted.ts" })} -->`,
     ].join("\n");
 
     const result = markStaleCitations(snippet);
-    expect(result).toContain("[stale citation]");
+    repo.cleanup();
     expect(result).toContain("- Some finding about a deleted file [stale citation]");
     // The citation comment line should be skipped
     expect(result).not.toContain("phren:cite");
+  });
+
+  it("does not mark a citation whose repo or file is not on this computer", () => {
+    for (const cite of [{ repo: "/nonexistent/repo", file: "deleted.ts" }, { file: "/nonexistent/path/deleted.ts" }]) {
+      const snippet = ["- Some finding from another computer", `  <!-- phren:cite ${JSON.stringify({ created_at: "2025-01-01", ...cite })} -->`].join("\n");
+      expect(markStaleCitations(snippet)).toBe(snippet);
+    }
   });
 
   it("does not mark citation when cited file exists", () => {

@@ -97,6 +97,10 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
   signed in, `remote.<name>.url` switched to HTTPS with
   `credential.https://github.com.helper` set to `gh auth git-credential` in the
   store's own `.git/config`.
+- `.runtime/citation-states.json`: what daily governance last found for each
+  cited finding on this computer (valid, drifted, broken or unverifiable, with
+  the check time), keyed by fid. Never synced; entries unchecked for 30 days
+  are dropped, and it holds at most 5000.
 
 ### Agent settings (all presets: when MCP/hooks enabled)
 - `~/.claude/settings.json`, `~/.claude.json`, `mcpServers.phren` and the
