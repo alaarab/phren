@@ -293,6 +293,10 @@ nothing to that checkout.
   passed or failed the relevance floor and why, what was injected, or why
   nothing was. Kept to the newest 5,000 lines once it passes 4 MB; local
   runtime state, never synced.
+- `<primary store>/.runtime/store-health.jsonl` holds daily counts of findings,
+  citations, tasks and review entries for this computer's stores, primary runtime
+  file sizes and the last 24 hours of recall counts. Kept to the newest 400
+  lines; local runtime state, never synced.
 - `<store>/.sessions/recall-seen-<session>.json` holds, for one session, how
   many prompts the prompt hook has answered and a short hash of each memory
   bullet it injected in the last 12, so it does not inject them again. Removed

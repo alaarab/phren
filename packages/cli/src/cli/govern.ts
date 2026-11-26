@@ -30,6 +30,7 @@ import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { summarizeProject } from "../content/summarize.js";
 import { claimMaintenanceWriter } from "../sync/maintenance-writer.js";
 import { tidyDoneTasks } from "../data/tasks.js";
+import { recordStoreHealth } from "../governance/store-health.js";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -628,6 +629,8 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     });
     appendAuditLog(getPhrenPath(), "background_maintenance_failed", `error=${errMsg}`);
   } finally {
+    try { recordStoreHealth(getPhrenPath()); }
+    catch (err: unknown) { logger.debug("maintenance", `store health: ${errorMessage(err)}`); }
     try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
       if ((process.env.PHREN_DEBUG)) logger.debug("cli-govern", `backgroundMaintenance unlockFinal: ${errorMessage(err)}`);
     }
