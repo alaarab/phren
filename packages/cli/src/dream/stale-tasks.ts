@@ -5,8 +5,7 @@
  * is fresh again. `PHREN_TASK_STALE=off` turns it off. */
 import { readTasks, updateTask } from "../data/tasks.js";
 import { permissionDeniedError } from "../governance/rbac.js";
-import { isStale, taskLastTouched, taskTitle } from "../task/session-tasks.js";
-import { taskStaleEnabled } from "../bridge/task-stale.js";
+import { isStale, taskLastTouched, taskStaleEnabled, taskTitle } from "../task/session-tasks.js";
 
 /** A task this run returned to the Queue: its stable id and its line without metadata. */
 export interface RequeuedTask { stableId: string; title: string }

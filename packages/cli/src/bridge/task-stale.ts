@@ -8,12 +8,8 @@
 import { isLocalComputer } from "./dispatch-hosts.js";
 import type { InboxSource } from "./owner-inbox.js";
 import { openTasks } from "./task-work.js";
-import { isStale, taskLastTouched, taskTitle } from "../task/session-tasks.js";
+import { isStale, taskLastTouched, taskStaleEnabled, taskTitle } from "../task/session-tasks.js";
 import { phrenStoreRoot } from "./transcripts.js";
-
-export function taskStaleEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.PHREN_TASK_STALE?.trim().toLowerCase() !== "off";
-}
 
 /** The inbox calls its sources every five seconds; recompute at most this often. */
 const CACHE_MS = 5 * 60 * 1000;

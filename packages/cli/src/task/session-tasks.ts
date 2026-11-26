@@ -41,6 +41,11 @@ export interface SessionTaskState {
   resolution: SessionTaskResolution;
 }
 
+/** `PHREN_TASK_STALE=off` stops the stale-task inbox rows and the dream's requeue. */
+export function taskStaleEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.PHREN_TASK_STALE?.trim().toLowerCase() !== "off";
+}
+
 /** The calling agent's session id: Claude Code's, else Codex's. */
 export function currentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefined {
   for (const value of [env.CLAUDE_CODE_SESSION_ID, env.CODEX_THREAD_ID, env.CODEX_SESSION_ID]) {
