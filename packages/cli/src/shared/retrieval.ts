@@ -490,7 +490,8 @@ export function filterTaskByPriority(items: string[], allowedPriorities?: string
 
 // ── Search ───────────────────────────────────────────────────────────────────
 
-const SHARED_PROJECTS = ["shared", "org"];
+// Memory every project shares: team folders, and global (preferences and rules that hold in every project).
+const SHARED_PROJECTS = ["shared", "org", "global"];
 
 export function searchDocuments(
   db: SqlJsDatabase,
@@ -542,7 +543,10 @@ export function searchDocuments(
   };
 
   runScopedFtsQuery(safeQuery);
-  if (ftsDocs.length === 0 && relaxedQuery && relaxedQuery !== safeQuery) {
+  // Relax when the strict query found nothing in the prompt's own project: a shared or global file
+  // that happens to hold every keyword must not stop the search of the project itself.
+  const ownRows = detectedProject ? ftsDocs.filter((doc) => doc.project === detectedProject) : ftsDocs;
+  if (ownRows.length === 0 && relaxedQuery && relaxedQuery !== safeQuery) {
     runScopedFtsQuery(relaxedQuery);
   }
 
