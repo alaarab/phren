@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 
@@ -16,7 +16,8 @@ describe("hook-prompt abstain tail", () => {
     fs.writeFileSync(path.join(store, file), text);
   };
   const run = (prompt: string, session = "abstain-session") => {
-    const result = spawnSync(process.execPath, ["--import", clock, cli, "hook-prompt"], {
+    // --import takes a URL; a bare C:\ path fails on Windows (ERR_UNSUPPORTED_ESM_URL_SCHEME).
+    const result = spawnSync(process.execPath, ["--import", pathToFileURL(clock).href, cli, "hook-prompt"], {
       input: JSON.stringify({ prompt, cwd: workRepo, session_id: session }),
       env: { ...process.env, PHREN_PATH: store, PHREN_PROFILE: "personal", HOME: tmp.path,
         USERPROFILE: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0", PHREN_CLANKER: "off",
