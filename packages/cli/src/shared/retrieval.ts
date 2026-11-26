@@ -91,6 +91,8 @@ const NO_PROJECT_MIN_CHUNK_RARITY = 0.6;
  * words ("honest", "good") in one bullet are a coincidence, a rare word is a topic. Measured on a
  * 29-project store: everyday words sit at 0.2-0.45, the terms questions turn on mostly above 0.5. */
 const MIN_ANCHOR_RARITY = 0.5;
+/** A word in about half the store's docs or more ("work", the store's own folder name) is no evidence of a topic: it does not count toward MIN_CHUNK_MATCHES. */
+const MIN_MATCH_RARITY = 0.1;
 /** A row whose bullet carries under this share of the strongest row's matched rarity is a side match, mostly noise. */
 const MIN_SHARE_OF_BEST_RARITY = 0.6;
 /** Rarity for a token the index never saw, or when no index is at hand. */
@@ -1316,7 +1318,9 @@ export function applyRelevanceFloor(
     const match = bestChunkMatch(queryTokens, doc, rarity);
     if (!match) return { ...unmatched, passed: false, reason: "no-chunk" };
     const seen = { distinct: match.distinct, rarity: match.rarity, overlap: 0, matched: match.matched };
-    if (match.distinct < MIN_CHUNK_MATCHES) return { ...seen, passed: false, reason: "too-few-matches" };
+    // A product name plus "work" is one match, not two: the rare word alone would carry the bullet.
+    const telling = match.matched.filter((token) => (rarity?.get(token) ?? DEFAULT_TOKEN_RARITY) >= MIN_MATCH_RARITY).length;
+    if (telling < MIN_CHUNK_MATCHES) return { ...seen, passed: false, reason: "too-few-matches" };
     if (match.rarity < minRarity) return { ...seen, passed: false, reason: "low-rarity" };
     if (rarity?.size && match.distinct === MIN_CHUNK_MATCHES
       && !match.matched.some((token) => (rarity.get(token) ?? DEFAULT_TOKEN_RARITY) >= MIN_ANCHOR_RARITY)) {

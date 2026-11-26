@@ -42,8 +42,8 @@ describe("recall eval", () => {
     try {
       const cases = loadCases(casesFile);
       const fixture = buildRecallFixture(root);
-      expect(cases).toHaveLength(66);
-      expect(cases.filter(c => c.kind === "negative")).toHaveLength(34);
+      expect(cases).toHaveLength(67);
+      expect(cases.filter(c => c.kind === "negative")).toHaveLength(35);
       expect(fs.existsSync(path.join(root, "checkouts", "global"))).toBe(false);
       expect(fs.existsSync(path.join(fixture.phrenPath, "global", "phren.project.yaml"))).toBe(false);
       expect(cases.filter(c => c.kind === "positive" && c.project !== null && c.project !== "global" && c.relevant.some(r => r.project === "global")).length).toBeGreaterThanOrEqual(2);
