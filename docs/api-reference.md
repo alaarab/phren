@@ -1503,6 +1503,7 @@ List recent sessions, or drill into one session to return artifacts (findings + 
 ### `list_skills`
 
 List installed skills with resolved metadata (name, command, aliases, scope, enabled/visible state, command registration state).
+Discovery skips dangling symlinks and links to targets other than files or folders. The remaining skills are listed as usual.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

@@ -448,10 +448,10 @@ export function sessionMarker(phrenPath: string, name: string): string {
 // Debug logging is best-effort and only writes when a phren root already exists.
 export function debugLog(msg: string): void {
   if (!(process.env.PHREN_DEBUG)) return;
-  const phrenPath = findPhrenPath();
-  if (!phrenPath) return;
-  const logFile = runtimeFile(phrenPath, "debug.log");
   try {
+    const phrenPath = findPhrenPath();
+    if (!phrenPath) return;
+    const logFile = runtimeFile(phrenPath, "debug.log");
     fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
   } catch {
     // debug log is best-effort; logging errors about logging would recurse
@@ -714,8 +714,21 @@ function pushFileToken(parts: string[], filePath: string): void {
   }
 }
 
+export function statFileOrDirectory(filePath: string, followSymlinks = true): fs.Stats | undefined {
+  try {
+    const entry = fs.lstatSync(filePath, { throwIfNoEntry: false });
+    if (!entry?.isSymbolicLink()) return entry?.isFile() || entry?.isDirectory() ? entry : undefined;
+    const target = fs.statSync(filePath, { throwIfNoEntry: false });
+    if (target?.isFile() || target?.isDirectory()) return followSymlinks ? target : undefined;
+    debugLog(`Skipping symlink with no file or directory target: ${filePath}`);
+  } catch (err: unknown) {
+    debugLog(`Skipping unreadable scan path ${filePath}: ${errorMessage(err)}`);
+  }
+  return undefined;
+}
+
 function pushDirTokens(parts: string[], dirPath: string): void {
-  if (!fs.existsSync(dirPath)) {
+  if (!statFileOrDirectory(dirPath)?.isDirectory()) {
     parts.push(`${dirPath}:missing`);
     return;
   }
@@ -725,8 +738,8 @@ function pushDirTokens(parts: string[], dirPath: string): void {
       pushDirTokens(parts, fullPath);
       continue;
     }
-    const stat = fs.statSync(fullPath);
-    parts.push(`${fullPath}:${stat.mtimeMs}:${stat.size}`);
+    const stat = statFileOrDirectory(fullPath);
+    if (stat) parts.push(`${fullPath}:${stat.mtimeMs}:${stat.size}`);
   }
 }
 

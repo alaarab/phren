@@ -1,8 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "fs";
 import * as path from "path";
 import { startLiveStatePoller, resolveStartupIntroPlan } from "./shell/entry.js";
 import { shellStartupFrames, composeStartupFrame, fitFrame, stripAnsi } from "./shell/render.js";
-import { makeTempDir, writeFile } from "./test-helpers.js";
+import { initTestPhrenRoot, makeTempDir, runCliSpawn, setupIsolatedCliEnv, writeFile } from "./test-helpers.js";
+
+it("opens the Skills view when a skill folder contains a dangling symlink", () => {
+  const store = setupIsolatedCliEnv("phren-shell-skill-link-");
+  try {
+    initTestPhrenRoot(store.phrenDir);
+    writeFile(path.join(store.phrenDir, "demo", "AGENTS.md"), "# Demo\n");
+    const skills = path.join(store.phrenDir, "global", "skills");
+    writeFile(path.join(skills, "checklist", "SKILL.md"), "---\nname: checklist\ndescription: Review steps\n---\n");
+    writeFile(path.join(skills, "formatter.md"), "---\nname: formatter\ndescription: Format text\n---\n");
+    const brokenLink = path.join(skills, "checklist", "missing-asset");
+    fs.symlinkSync(path.join(store.rootDir, "absent"), brokenLink, "file");
+
+    const result = runCliSpawn(["shell", "--view", "skills", "--project", "demo"], store.env({ PHREN_DEBUG: "1" }));
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stdout).toContain("checklist");
+    expect(result.stdout).toContain("formatter");
+    expect(fs.lstatSync(brokenLink).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(store.phrenDir, ".runtime", "debug.log"), "utf8")).toMatch(/Skipping .*missing-asset/);
+  } finally {
+    store.cleanup();
+  }
+}, 30_000);
 
 describe("startLiveStatePoller", () => {
   beforeEach(() => {

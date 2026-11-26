@@ -225,6 +225,7 @@ Skill resolution is deterministic and policy-aware:
 - precedence: project scope overrides global scope for same skill name
 - alias collisions: aliases are deduplicated against their own primary command; commands/aliases shared by different skills are marked unregistered (case-insensitive)
 - visibility gating: disabled skills stay on disk but are hidden from active agent mirrors
+- discovery and linking skip symlinks with missing or unsupported targets and log the skipped path when `PHREN_DEBUG=1`
 - preferences: each discovery or linking pass reads shared and legacy settings once, preserving shared-setting precedence and refreshing on the next pass; malformed shared settings keep skills disabled
 - generated artifacts:
   - `.claude/skill-manifest.json`
