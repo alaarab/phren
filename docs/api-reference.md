@@ -1232,6 +1232,8 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
+Active findings in `FINDINGS.md` use fuzzy duplicate detection. Topic archives (including `.older.md`) block only exact matches after normalizing case and whitespace, removing comments and confidence markers, and ignoring a leading type tag. Only archive bullets with status `active` block an add. A skipped archive duplicate names the original `fid` or file in the message; batch responses also include `duplicates` entries with `text`, `file`, and `fid` when present.
+
 The finding is always saved as `active`. `add_finding` never auto-marks a finding as `contradicted`: instead it runs cheap lexical heuristics (no extra LLM/API call) and, when an existing finding looks like a possible duplicate or contradiction, returns it in the response as `potentialDuplicates` / `potentialConflicts` for the calling agent to judge. If a returned candidate is a genuine contradiction, resolve it explicitly with `resolve_contradiction` (or `supersede_finding`); if it is unrelated, ignore it. (Opt-in LLM-confirmed contradiction detection is still available via `PHREN_FEATURE_SEMANTIC_CONFLICT`.)
 
 `citation.name` names the function, type or variable the finding is about, as `Name`, `Type.member` or `name()`. When the project has a code index, the finding text is scanned for a name that resolves to exactly one declaration (four or more characters, and not a local variable unless exported) and that link is attached automatically; the finding text is never rewritten. An explicit `name` is validated against the index and stored either way: an unresolved one is kept and marked unresolved (the stored citation keeps its `symbol` and `symbol_unresolved` keys), the counterpart of an invalid file citation, and the trust filter treats it as `invalid_citation`.
@@ -1269,7 +1271,7 @@ Resolve a contradiction between two findings and update lifecycle statuses.
 
 ### `get_contradictions`
 
-List unresolved contradicted findings (status = `contradicted`) in one project or across all projects.
+List unresolved contradicted findings (status = `contradicted`) in one project or across all projects, including topic archives and their `.older.md` files. Each result keeps its existing fields and includes `tier` (`active`, `topic`, or `older`) and `file` (the absolute path to the containing file).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

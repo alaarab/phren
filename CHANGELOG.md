@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Contradiction checks now include archived findings and show where each one lives. Adding a finding also catches exact duplicates in active archive bullets and names the original; similar wording and retired archive bullets do not block new findings.
+
 ## [0.3.92] - 2026-11-25
 
 ### Added
