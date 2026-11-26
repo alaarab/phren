@@ -1,3 +1,6 @@
+import { execFileSync } from "child_process";
+import { getStoreProjectDirs, resolveAllStores } from "../store-registry.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import {
   appendAuditLog,
@@ -35,6 +38,46 @@ function targetProjects(projectArg?: string): string[] {
   return projectArg
     ? [projectArg]
     : getProjectDirs(getPhrenPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+}
+
+interface MaintenanceTarget {
+  storePath: string;
+  project: string;
+}
+
+function maintenanceTargets(projectArg?: string, dryRun = false): MaintenanceTarget[] {
+  const primary = getPhrenPath();
+  const primaryProject = projectArg ? storeAwareProjectPath(primary, projectArg) : null;
+  const primaryMatch = primaryProject && path.resolve(path.dirname(primaryProject)) === path.resolve(primary);
+  const targets: MaintenanceTarget[] = [];
+  for (const store of resolveAllStores(primary)) {
+    if (store.role === "primary") {
+      if (primaryProject && !primaryMatch) continue;
+      for (const project of targetProjects(projectArg)) targets.push({ storePath: primary, project });
+      continue;
+    }
+    if (primaryMatch && fs.existsSync(primaryProject)) continue;
+    try {
+      if (store.role === "readonly" || store.sync === "pull-only") throw new Error("read-only");
+      if (store.available === false) throw new Error("missing");
+      fs.accessSync(store.path, fs.constants.W_OK);
+      const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+        cwd: store.path, env: nonInteractiveGitEnv(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 5000,
+      }).trim();
+      if (fs.realpathSync(root) !== fs.realpathSync(store.path)) throw new Error("not a git checkout root");
+      const projects = getStoreProjectDirs(store).map((dir) => path.basename(dir))
+        .filter((project) => projectArg ? project === projectArg : project !== "global");
+      if (!projects.length) continue;
+      if (!dryRun) {
+        const lease = claimMaintenanceWriter(store.path);
+        if (!lease.writer) throw new Error(`${lease.holder} holds the maintenance lease`);
+      }
+      for (const project of projects) targets.push({ storePath: store.path, project });
+    } catch (err: unknown) {
+      logger.debug("maintenance", `skip store ${store.name}: ${errorMessage(err).replace(/\s+/g, " ")}`);
+    }
+  }
+  return targets;
 }
 
 function parseProjectDryRunArgs(
@@ -99,19 +142,24 @@ export interface GovernanceSummary {
 }
 
 export async function handleGovernMemories(projectArg?: string, silent: boolean = false, dryRun: boolean = false): Promise<GovernanceSummary> {
-  const profile = resolveRuntimeProfile(getPhrenPath());
-  const policy = getRetentionPolicy(getPhrenPath());
-  const ttlDays = Number.parseInt((process.env.PHREN_MEMORY_TTL_DAYS) || String(policy.ttlDays), 10);
-  const projects = projectArg
-    ? [projectArg]
-    : getProjectDirs(getPhrenPath(), profile).map((p) => path.basename(p)).filter((p) => p !== "global");
+  return governTargets(maintenanceTargets(projectArg, dryRun), silent, dryRun);
+}
 
+async function governTargets(projects: MaintenanceTarget[], silent: boolean, dryRun = false): Promise<GovernanceSummary> {
   let staleCount = 0;
   let conflictCount = 0;
   let reviewCount = 0;
+  const storeSummaries = new Map<string, GovernanceSummary>([
+    [getPhrenPath(), { projects: 0, staleCount: 0, conflictCount: 0, reviewCount: 0 }],
+  ]);
 
-  for (const project of projects) {
-    const learningsPath = path.join(getPhrenPath(), project, FINDINGS_FILENAME);
+  for (const { storePath, project } of projects) {
+    const summary = storeSummaries.get(storePath) ?? { projects: 0, staleCount: 0, conflictCount: 0, reviewCount: 0 };
+    summary.projects++;
+    storeSummaries.set(storePath, summary);
+    const policy = getRetentionPolicy(storePath, storePath === getPhrenPath() ? undefined : project);
+    const ttlDays = Number.parseInt(process.env.PHREN_MEMORY_TTL_DAYS || String(policy.ttlDays), 10);
+    const learningsPath = path.join(storePath, project, FINDINGS_FILENAME);
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
     const trust = filterTrustedFindingsDetailed(content, {
@@ -129,22 +177,27 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
       .filter((l) => l.startsWith("- "))
       .filter((l) => isLowValueFinding(l));
     reviewCount += lowValue.length;
+    summary.staleCount += stale.length;
+    summary.conflictCount += conflicts.length;
+    summary.reviewCount += lowValue.length;
 
     if (!dryRun) {
-      appendReviewQueue(getPhrenPath(), project, "Stale", stale);
-      appendReviewQueue(getPhrenPath(), project, "Conflicts", conflicts);
-      appendReviewQueue(getPhrenPath(), project, "Review", lowValue);
+      appendReviewQueue(storePath, project, "Stale", stale);
+      appendReviewQueue(storePath, project, "Conflicts", conflicts);
+      appendReviewQueue(storePath, project, "Review", lowValue);
     }
   }
 
   if (!dryRun) {
-    appendAuditLog(
-      getPhrenPath(),
-      "govern_memories",
-      `projects=${projects.length} stale=${staleCount} conflicts=${conflictCount} review=${reviewCount}`
-    );
-    for (const project of projects) {
-      consolidateProjectFindings(getPhrenPath(), project);
+    for (const [storePath, summary] of storeSummaries) {
+      appendAuditLog(
+        storePath,
+        "govern_memories",
+        `projects=${summary.projects} stale=${summary.staleCount} conflicts=${summary.conflictCount} review=${summary.reviewCount}`
+      );
+    }
+    for (const { storePath, project } of projects) {
+      consolidateProjectFindings(storePath, project);
     }
   }
   if (!silent) {
@@ -499,31 +552,48 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
   const markers = qualityMarkers(getPhrenPath());
   const startedAt = new Date().toISOString();
   try {
+    const projects = maintenanceTargets(projectArg);
     const compacted = compactFindingJournals(getPhrenPath(), projectArg);
-    const governance = await handleGovernMemories(projectArg, true);
+    for (const { storePath, project } of projects) {
+      if (storePath === getPhrenPath()) continue;
+      const result = compactFindingJournals(storePath, project);
+      compacted.added += result.added;
+      compacted.skipped += result.skipped;
+      compacted.failed += result.failed;
+    }
+    const governance = await governTargets(projects, true);
     // Done tasks past thirty move to .config/task-archive, and topic files get
     // their "## Now" block refreshed when they changed. Both structural and
     // cheap; a model is only consulted from `phren maintain summarize --llm`.
     let tidied = 0;
     let summarized = 0;
-    // Only the lease holder rewrites generated files; every computer still
-    // folds its own journal into the findings above (maintenance-writer.ts).
+    // Attached targets already hold their store lease; the primary keeps its existing journal and governance behavior.
     const lease = claimMaintenanceWriter(getPhrenPath());
-    for (const project of lease.writer ? targetProjects(projectArg) : []) {
+    for (const { storePath, project } of projects) {
+      if (storePath === getPhrenPath() && !lease.writer) continue;
       try {
-        const tidy = tidyDoneTasks(getPhrenPath(), project, 30);
+        const tidy = tidyDoneTasks(storePath, project, 30);
         if (tidy.ok && tidy.data.startsWith("Tidied")) tidied++;
       } catch (err: unknown) { logger.debug("maintenance", `tidy ${project}: ${errorMessage(err)}`); }
       try {
-        const summary = await summarizeProject(getPhrenPath(), project, {});
+        const summary = await summarizeProject(storePath, project, {});
         if (summary.topics.some((t) => t.updated) || summary.summaryUpdated) summarized++;
       } catch (err: unknown) { logger.debug("maintenance", `summarize ${project}: ${errorMessage(err)}`); }
     }
-    const pruneResult = lease.writer
+    const primarySelected = !projectArg || projects.some((p) => p.storePath === getPhrenPath());
+    const pruneResult = lease.writer && primarySelected
       ? pruneDeadMemories(getPhrenPath(), projectArg)
-      : { ok: true as const, data: { message: `prune skipped: ${lease.holder} maintains generated files` } };
-    const pruneMsg = pruneResult.ok ? pruneResult.data.message.replace(/\n+/g, " ") : pruneResult.error;
-    if (!pruneResult.ok) {
+      : { ok: true as const, data: { message: primarySelected ? `prune skipped: ${lease.holder} maintains generated files` : "prune skipped: no primary project selected" } };
+    const pruneMessages = [pruneResult.ok ? pruneResult.data.message : pruneResult.error];
+    let pruneFailed = !pruneResult.ok;
+    for (const { storePath, project } of projects) {
+      if (storePath === getPhrenPath()) continue;
+      const result = pruneDeadMemories(storePath, project);
+      pruneMessages.push(`${storePath}/${project}: ${result.ok ? result.data.message : result.error}`);
+      if (!result.ok) pruneFailed = true;
+    }
+    const pruneMsg = pruneMessages.join("; ").replace(/\n+/g, " ");
+    if (pruneFailed) {
       updateRuntimeHealth(getPhrenPath(), {
         lastGovernance: {
           at: startedAt,

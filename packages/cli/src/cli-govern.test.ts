@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { execFileSync } from "child_process";
 import { makeTempDir, writeFile, grantAdmin, resetTestPhrenPath } from "./test-helpers.js";
 
 let tmpDir: string;
@@ -34,6 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_MEMORY_TTL_DAYS;
@@ -156,3 +158,125 @@ describe("handleBackgroundMaintenance", () => {
 });
 
 // ── TTL enforcement ────────────────────────────────────────────────────
+
+function makeStorePair() {
+  const root = makePhren();
+  const primary = path.join(root, "primary");
+  const attached = path.join(root, "attached");
+  grantAdmin(primary);
+  grantAdmin(attached);
+  execFileSync("git", ["init", "--quiet", attached]);
+  const entry = { id: "22222222", name: "team", path: attached, role: "team", sync: "managed-git", projects: ["proj"] };
+  writeFile(path.join(primary, "stores.yaml"), JSON.stringify({ version: 1, stores: [
+    { id: "11111111", name: "personal", path: primary, role: "primary", sync: "managed-git" },
+  ] }));
+  const registry = path.join(primary, ".runtime", "attached-stores.yaml");
+  writeFile(registry, JSON.stringify({ version: 1, stores: [entry] }));
+  return { primary, attached, entry, registry };
+}
+
+function snapshotStore(root: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const entry of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    const relative = path.relative(root, file);
+    if (relative.split(path.sep).includes(".git")) continue;
+    files[relative] = fs.readFileSync(file, "utf8");
+  }
+  return files;
+}
+
+describe("maintenance of attached stores", () => {
+  it("governs both stores with their own retention policy and review queue", async () => {
+    const { primary, attached } = makeStorePair();
+    const date = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
+    const findings = `# Findings\n\n## ${date}\n\n- Deployment requires the migrations to finish before restarting workers\n`;
+    for (const store of [primary, attached]) makeProject(store, "proj", { "FINDINGS.md": findings });
+    writeFile(path.join(primary, ".config", "retention-policy.json"), JSON.stringify({ ttlDays: 120 }));
+    writeFile(path.join(attached, ".config", "retention-policy.json"), JSON.stringify({ ttlDays: 5 }));
+    writeFile(path.join(primary, "profiles", "local.yaml"), "projects: [proj]\n");
+    process.env.PHREN_PROFILE = "local";
+    const { handleGovernMemories } = await importGovern(primary);
+
+    const summary = await handleGovernMemories(undefined, true);
+
+    expect(summary.projects).toBe(2);
+    expect(summary.staleCount).toBe(1);
+    const queue = fs.readFileSync(path.join(attached, "proj", "review.md"), "utf8");
+    expect(queue.split("## Stale")[1]).toContain("Deployment requires the migrations");
+    expect(fs.existsSync(path.join(primary, "proj", "review.md"))).toBe(false);
+  });
+
+  it.each([undefined, "proj"])("does not rewrite an attached store leased to another computer (project=%s)", async (project) => {
+    const { primary, attached } = makeStorePair();
+    const today = new Date().toISOString().slice(0, 10);
+    makeProject(attached, "proj", {
+      "FINDINGS.md": `# Findings\n\n## 2020-01-01\n\n- Old deployment advice that retention would delete\n\n## ${today}\n\n- fixed stuff\n- fixed stuff\n`,
+      "tasks.md": "# Tasks\n\n## Active\n\n## Queue\n\n## Done\n\n" + Array.from({ length: 32 }, (_, i) => `- [x] Completed deployment ${i}\n`).join(""),
+      "reference/topics/deploy.md": "# Deploy\n\n## 2020-01-01\n\n- Archived deployment advice\n",
+    });
+    const leaseFile = path.join(attached, ".config", "maintenance-writer.json");
+    writeFile(leaseFile, JSON.stringify({ computer: "other-computer", renewedAt: new Date().toISOString() }));
+    const before = snapshotStore(attached);
+    const { handleGovernMemories, handleBackgroundMaintenance } = await importGovern(primary);
+
+    await handleGovernMemories(project, true);
+    await handleBackgroundMaintenance(project);
+
+    expect(snapshotStore(attached)).toEqual(before);
+    expect(JSON.parse(fs.readFileSync(path.join(primary, ".runtime", "runtime-health.json"), "utf8")).lastGovernance.status).toBe("ok");
+  });
+
+  it.each(["missing", "readonly", "pull-only", "not-git"])("quietly skips an attached store that is %s", async (reason) => {
+    const { primary, attached, entry, registry } = makeStorePair();
+    makeProject(primary, "proj", { "FINDINGS.md": "- fixed stuff\n" });
+    makeProject(attached, "proj", { "FINDINGS.md": "- fixed stuff\n" });
+    if (reason === "missing") fs.rmSync(attached, { recursive: true });
+    if (reason === "not-git") fs.rmSync(path.join(attached, ".git"), { recursive: true });
+    if (reason === "readonly") entry.role = "readonly";
+    if (reason === "pull-only") entry.sync = "pull-only";
+    writeFile(registry, JSON.stringify({ version: 1, stores: [entry] }));
+    const before = reason === "missing" ? undefined : snapshotStore(attached);
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { handleBackgroundMaintenance } = await importGovern(primary);
+
+    await handleBackgroundMaintenance();
+
+    expect(fs.readFileSync(path.join(primary, "proj", "review.md"), "utf8")).toContain("fixed stuff");
+    if (before) expect(snapshotStore(attached)).toEqual(before);
+    else expect(fs.existsSync(attached)).toBe(false);
+    expect(warnings).not.toHaveBeenCalled();
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("tidies, summarizes and prunes the attached store while the primary lease belongs to another computer", async () => {
+    const { primary, attached } = makeStorePair();
+    writeFile(path.join(primary, ".config", "maintenance-writer.json"), JSON.stringify({ computer: "other-computer", renewedAt: new Date().toISOString() }));
+    writeFile(path.join(primary, ".config", "retention-policy.json"), JSON.stringify({ retentionDays: 3650 }));
+    writeFile(path.join(attached, ".config", "retention-policy.json"), JSON.stringify({ retentionDays: 5 }));
+    const old = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    makeProject(attached, "proj", {
+      "FINDINGS.md": `# Findings\n\n## ${old}\n\n- Old deployment advice that retention should delete\n\n## ${today}\n\n- Keep database migrations ahead of the worker rollout\n- Keep database migrations ahead of the worker rollout\n`,
+      "tasks.md": "# Tasks\n\n## Active\n\n## Queue\n\n## Done\n\n" + Array.from({ length: 32 }, (_, i) => `- [x] Completed deployment ${i}\n`).join(""),
+      "reference/topics/deploy.md": `# Deploy\n\n## ${old}\n\n- Archived deployment advice\n`,
+    });
+    makeProject(attached, "unsubscribed", { "FINDINGS.md": "- fixed stuff\n" });
+    const unsubscribed = snapshotStore(path.join(attached, "unsubscribed"));
+    const { handleBackgroundMaintenance } = await importGovern(primary);
+
+    await handleBackgroundMaintenance();
+
+    const findings = fs.readFileSync(path.join(attached, "proj", "FINDINGS.md"), "utf8");
+    expect(findings).not.toContain("Old deployment advice");
+    expect(findings.match(/Keep database migrations/g)).toHaveLength(1);
+    expect(fs.readFileSync(path.join(attached, ".config", "task-archive", "proj.md"), "utf8")).toContain("Completed deployment");
+    expect(fs.readFileSync(path.join(attached, "proj", "reference", "topics", "deploy.md"), "utf8")).toContain("## Now");
+    expect(fs.readFileSync(path.join(attached, "proj", "summary.md"), "utf8")).toContain("What phren knows");
+    expect(snapshotStore(path.join(attached, "unsubscribed"))).toEqual(unsubscribed);
+    expect(fs.existsSync(path.join(primary, ".config", "task-archive"))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(primary, ".runtime", "runtime-health.json"), "utf8")).lastGovernance.status).toBe("ok");
+  });
+});

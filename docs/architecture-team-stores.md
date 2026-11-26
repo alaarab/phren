@@ -283,6 +283,7 @@ No copying: a team-store project's skills stay in the team store. `phren link` a
 ### Consolidation
 
 - **Per-store only** for mutations — each store consolidates independently
+- Daily background upkeep covers writable attached stores and their subscribed projects, using each store's own retention policy and review queue. Each attached store's `.config/maintenance-writer.json` lease must belong to this computer before any upkeep writes; the primary lease does not authorize team-store writes. Leases renew daily and expire after three days. Read-only, missing and non-Git attachments are skipped.
 - **Cross-store advisory** — `phren maintain consolidate --cross-store` produces promotion candidates but doesn't auto-mutate
 
 ### Cross-Store Finding Dedup
