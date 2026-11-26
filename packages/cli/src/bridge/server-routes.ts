@@ -104,6 +104,7 @@ import { DEFAULT_SPEECH_VOICE, listSpeechVoices, resolveSpeechVoice } from "./sp
 import { terminalKind, terminalMux } from "./terminal.js";
 import { resolveTerminalReference } from "./terminal-resolve.js";
 import { muxListForClient, muxReplyForClient, typedMuxRequest } from "./mux-wire.js";
+import { tabWaiting } from "./tab-waiting.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
  * the POST routes that are not bound to one pane, and grant deletion. */
@@ -319,12 +320,15 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
     const recordEnrichment: Array<() => Promise<void>> = [];
+    /** Each tab's turn record, for `waiting` once the background counts are in. */
+    const turnRecords = new Map<Json, TurnRecord>();
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const pane = agents.length === 1 ? agents[0] : undefined;
       const session = pane ? object(tab.target).session : undefined;
       const record = typeof session === "string" && pane ? await paneTurnRecord(server, pane, session).catch(() => undefined) : undefined;
       if (expired) return;
+      if (record) turnRecords.set(tab, record);
       if (pane && typeof session === "string") {
         const available = availablePaneEvidence(server, pane, session, record, agentHooks);
         if (available.held || ["blocked", "waiting"].includes(String(available.paneStatus)) || (record && turnPhase(record).phase === "working")) {
@@ -361,7 +365,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
           if (resolved) tab.agentStatus = resolved;
         }
         markBackground(tab, background);
-        if (tab.agentStatus === "working") delete tab.lastReply;
+        // Background work keeps an ended turn "working"; what it said stays.
+        if (tab.agentStatus === "working" && !tab.backgroundTasks) delete tab.lastReply;
         const target = targetSchema.safeParse(tab.target);
         const stall = target.success && agents.length === 1
           ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
@@ -408,7 +413,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (expired) return;
         Object.assign(tab, children);
         markBackground(tab, children.runningChildren);
-        if (tab.agentStatus === "working") delete tab.lastReply;
+        if (tab.agentStatus === "working" && !tab.backgroundTasks) delete tab.lastReply;
       }),
       eachTab(async ({ group, tab }) => {
         const identity = identified(group, tab);
@@ -425,6 +430,13 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     ]);
     await Promise.race([enrich, budget]);
     expired = true; clearTimeout(timer);
+    // What an ended turn still waits on (CI, its background work, a queue),
+    // from what it said and what still runs, so the phone can tell waiting
+    // from needing the owner.
+    for (const { tab } of tabs) {
+      const waiting = tabWaiting(turnRecords.get(tab), tab);
+      if (waiting) tab.waiting = waiting;
+    }
     // The row's status may have changed above (background work turns idle into
     // working): stamp what this reply sends, not the raw snapshot.
     const activity = await tabActivity.recordStatus(server, tabs.map(({ group, tab }) => ({ workspace: group.id, tab: tab.id, status: tab.agentStatus })), generation);
