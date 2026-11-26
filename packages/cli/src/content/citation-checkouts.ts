@@ -12,7 +12,7 @@ import { parseRemoteUrl } from "../bridge/git-hosts.js";
 import { homeDir } from "../home-paths.js";
 import { EXEC_TIMEOUT_QUICK_MS } from "../phren-core.js";
 import { debugLog } from "../phren-paths.js";
-import { getProjectSourcePath } from "../project-config.js";
+import { getProjectRemote, getProjectSourcePath } from "../project-config.js";
 import { getStoreProjectDirs, resolveAllStores } from "../store-registry.js";
 import { errorMessage, runGitOrThrow } from "../utils.js";
 
@@ -75,26 +75,55 @@ export function originRemote(dir: string): string | undefined {
   return remote;
 }
 
-// The checkout's git config file: `.git/config`, or the main repo's for a worktree (`.git` is a `gitdir:` file).
-function gitConfigFile(dir: string): string | undefined {
+// The checkout's git directory and the main repo's; they differ for a worktree, whose `.git` is a `gitdir:` file.
+function gitDirs(dir: string): { gitdir: string; common: string } | undefined {
   const dotGit = path.join(dir, ".git");
-  if (fs.statSync(dotGit).isDirectory()) return path.join(dotGit, "config");
-  const gitdir = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"))?.[1]?.trim();
-  if (!gitdir) return undefined;
-  const resolved = path.resolve(dir, gitdir);
-  const common = path.join(resolved, "commondir");
-  return path.join(fs.existsSync(common) ? path.resolve(resolved, fs.readFileSync(common, "utf8").trim()) : resolved, "config");
+  if (fs.statSync(dotGit).isDirectory()) return { gitdir: dotGit, common: dotGit };
+  const pointer = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"))?.[1]?.trim();
+  if (!pointer) return undefined;
+  const gitdir = path.resolve(dir, pointer);
+  const commondir = path.join(gitdir, "commondir");
+  return { gitdir, common: fs.existsSync(commondir) ? path.resolve(gitdir, fs.readFileSync(commondir, "utf8").trim()) : gitdir };
 }
 
-let rewrites: boolean | undefined;
+const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/** The commit a checkout has out, read from its git files without starting git; undefined when only git could say. */
+export function checkedOutCommit(dir: string): string | undefined {
+  try {
+    const dirs = gitDirs(dir);
+    if (!dirs) return undefined;
+    const head = fs.readFileSync(path.join(dirs.gitdir, "HEAD"), "utf8").trim();
+    if (SHA.test(head)) return head;
+    const ref = /^ref:\s*(refs\/\S+)$/.exec(head)?.[1];
+    if (!ref || ref.split("/").includes("..")) return undefined;
+    for (const base of new Set([dirs.gitdir, dirs.common])) {
+      try {
+        const sha = fs.readFileSync(path.join(base, ref), "utf8").trim();
+        if (SHA.test(sha)) return sha;
+      } catch { /* packed */ }
+    }
+    for (const line of fs.readFileSync(path.join(dirs.common, "packed-refs"), "utf8").split("\n")) {
+      const [sha, name] = line.trim().split(" ");
+      if (name === ref && SHA.test(sha)) return sha;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+let rewrites: { at: number; files: string; found: boolean } | undefined;
 // `url.<base>.insteadOf` in the user's git config changes what `git remote get-url` prints.
 function globalRewrites(env: NodeJS.ProcessEnv): boolean {
-  if (rewrites !== undefined) return rewrites;
   const xdg = env.XDG_CONFIG_HOME || path.join(homeDir(env), ".config");
-  rewrites = [path.join(homeDir(env), ".gitconfig"), path.join(xdg, "git", "config")].some(file => {
+  const files = [path.join(homeDir(env), ".gitconfig"), path.join(xdg, "git", "config")];
+  if (rewrites && rewrites.files === files.join("\0") && Date.now() - rewrites.at < CACHE_MS) return rewrites.found;
+  const found = files.some(file => {
     try { return /^\s*\[\s*(?:url|include|includeIf)\b/im.test(fs.readFileSync(file, "utf8")); } catch { return false; }
   });
-  return rewrites;
+  rewrites = { at: Date.now(), files: files.join("\0"), found };
+  return found;
 }
 
 /**
@@ -105,9 +134,9 @@ function globalRewrites(env: NodeJS.ProcessEnv): boolean {
 function configuredOrigin(dir: string, env: NodeJS.ProcessEnv): string | null | undefined {
   if (globalRewrites(env)) return undefined;
   try {
-    const file = gitConfigFile(dir);
-    if (!file) return undefined;
-    const config = fs.readFileSync(file, "utf8");
+    const dirs = gitDirs(dir);
+    if (!dirs) return undefined;
+    const config = fs.readFileSync(path.join(dirs.common, "config"), "utf8");
     if (/^\s*\[\s*(?:include|includeIf|url)\b/im.test(config)) return undefined;
     let inOrigin = false;
     for (const line of config.split("\n")) {
@@ -132,15 +161,40 @@ function namedFolders(name: string, env: NodeJS.ProcessEnv): string[] {
   return roots.map(root => path.resolve(root, name));
 }
 
+// The repository a folder is in: the folder itself or the nearest parent with `.git`, never the home folder or above it.
+function enclosingRepo(dir: string, env: NodeJS.ProcessEnv): string | undefined {
+  const home = path.resolve(homeDir(env));
+  for (let current = path.resolve(dir); ; current = path.dirname(current)) {
+    if (current === home || home.startsWith(current + path.sep) || current === path.dirname(current)) return undefined;
+    if (isRepoRoot(current)) return current;
+  }
+}
+
+// A registered folder counts through the repository it is in, so a monorepo package registered as a project finds the monorepo.
 function projectFolders(storePath: string, project: string, env: NodeJS.ProcessEnv): string[] {
   let registered: string | undefined;
   try { registered = getProjectSourcePath(storePath, project); } catch { /* unreadable config: the named folders still count */ }
-  return [...(registered ? [registered] : []), ...namedFolders(project, env)];
+  const repo = registered ? enclosingRepo(registered, env) : undefined;
+  return [...(repo ? [repo] : []), ...namedFolders(project, env)];
 }
 
-/** This computer's checkout of a project: the first of its candidate folders that is a git repository. */
+// A checkout's `origin`, from its git config when that is enough, else from git.
+function checkoutRemote(dir: string, env: NodeJS.ProcessEnv): string | undefined {
+  const configured = configuredOrigin(dir, env);
+  return configured === undefined ? originRemote(dir) : configured ?? undefined;
+}
+
+/**
+ * This computer's checkout of a project: the first of its candidate folders that is a git repository.
+ * When the project's config names its `remote:`, only a checkout of that remote counts, so a folder
+ * that merely has the project's name never puts another repo in its citations.
+ */
 export function projectCheckout(storePath: string, project: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return projectFolders(storePath, project, env).find(isRepoRoot);
+  let configured: string | null = null;
+  try { configured = getProjectRemote(storePath, project); } catch { /* unreadable config */ }
+  const wanted = configured ? citationRemote(configured)?.toLowerCase() : undefined;
+  return projectFolders(storePath, project, env)
+    .find(dir => isRepoRoot(dir) && (!wanted || checkoutRemote(dir, env)?.toLowerCase() === wanted));
 }
 
 // Every store project's candidate folders, in project order; listed once per cache period for a run of checks.
@@ -175,11 +229,7 @@ export function checkoutForRemote(phrenPath: string, remote: string, env: NodeJS
   if (!stored) return undefined;
   const wanted = stored.toLowerCase();
   const name = stored.split("/").pop() ?? "";
-  const matches = (candidate: string) => {
-    if (!isRepoRoot(candidate)) return false;
-    const configured = configuredOrigin(candidate, env);
-    return (configured === undefined ? originRemote(candidate) : configured)?.toLowerCase() === wanted;
-  };
+  const matches = (candidate: string) => isRepoRoot(candidate) && checkoutRemote(candidate, env)?.toLowerCase() === wanted;
   // The store's projects are listed only when no folder named after the repo is a clone of it.
   const dir = namedFolders(name, env).find(matches)
     ?? storeProjectFolders(phrenPath, env).find(matches);

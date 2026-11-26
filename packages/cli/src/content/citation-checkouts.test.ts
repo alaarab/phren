@@ -3,7 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { makeTempDir, writeFile } from "../test-helpers.js";
-import { buildCitationComment, checkFindingCitation, filterTrustedFindingsDetailed, type FindingCitation } from "./citation.js";
+import { buildCitationComment, checkFindingCitation, citationGitCallCount, type FindingCitation } from "./citation.js";
+import { applyTrustFilter } from "../shared/retrieval.js";
 import { checkoutForRemote, citationRemote, projectCheckout } from "./citation-checkouts.js";
 
 const REMOTE = "github.com/acme/widgets";
@@ -86,17 +87,41 @@ describe("a citation written on another computer", () => {
     expect(check(cite({ commit: first, file: "src/new.ts" }))).toBe("unverifiable");
   });
 
-  it("is unverifiable, never broken, when this clone is behind or on another line of history", () => {
+  it("is unverifiable, never broken, when this clone does not have the cited commit yet", () => {
+    writeFile(path.join(writer, "src", "b.ts"), "bee\n");
+    git(writer, "add", "-A");
+    git(writer, "commit", "-qm", "add b.ts");
+    expect(check(cite({ commit: git(writer, "rev-parse", "HEAD"), file: "src/b.ts", line: 1 }))).toBe("unverifiable");
+  });
+
+  it("is unverifiable, never broken, when the cited commit is fetched but another branch is checked out", () => {
     writeFile(path.join(writer, "src", "b.ts"), "bee\n");
     git(writer, "add", "-A");
     git(writer, "commit", "-qm", "add b.ts");
     const second = git(writer, "rev-parse", "HEAD");
-    // Not fetched here yet.
-    expect(check(cite({ commit: second, file: "src/b.ts", line: 1 }))).toBe("unverifiable");
-    // Fetched, but this clone has another branch checked out.
     git(here, "fetch", "-q", writer, "HEAD");
     git(here, "checkout", "-q", "-b", "old", first);
     expect(check(cite({ commit: second, file: "src/b.ts", line: 1 }))).toBe("unverifiable");
+  });
+
+  it("is unverifiable, not drifted, when the cited commit is fetched but not in this clone's history", () => {
+    fs.writeFileSync(path.join(writer, "src", "a.ts"), "one\nTWO\nthree\n");
+    git(writer, "commit", "-qam", "second");
+    const second = git(writer, "rev-parse", "HEAD");
+    git(here, "fetch", "-q", writer, "HEAD");
+    expect(check(cite({ commit: second, file: "src/a.ts", line: 2 }))).toBe("unverifiable");
+  });
+
+  it("checks history again after this clone moves to another commit", () => {
+    writeFile(path.join(here, "src", "new.ts"), "new\n");
+    git(here, "add", "-A");
+    git(here, "commit", "-qm", "add new.ts");
+    const added = git(here, "rev-parse", "HEAD");
+    git(here, "rm", "-q", "src/new.ts");
+    git(here, "commit", "-qm", "drop new.ts");
+    expect(check(cite({ commit: added, file: "src/new.ts" }))).toBe("broken");
+    git(here, "checkout", "-q", first);
+    expect(check(cite({ commit: added, file: "src/new.ts" }))).toBe("unverifiable");
   });
 
   it("is unverifiable when no clone here has that remote, or no store is given to look in", () => {
@@ -138,14 +163,41 @@ describe("a citation written on another computer", () => {
     expect(checkFindingCitation(noCommit, { phrenPath: store, relocate: true })).toBe("unverifiable");
   });
 
-  it("lets the trust filter drop a broken one when it knows the store", () => {
+  it("finds a monorepo clone through a project registered at a folder inside it", () => {
+    const mono = path.join(root.path, "elsewhere", "mono");
+    fs.mkdirSync(path.dirname(mono));
+    fs.renameSync(here, mono);
+    fs.mkdirSync(path.join(mono, "packages", "frontend"), { recursive: true });
+    writeFile(path.join(store, "widgets", "phren.project.yaml"), `sourcePath: ${path.join(mono, "packages", "frontend")}\n`);
+    expect(projectCheckout(store, "widgets")).toBe(mono);
+    expect(checkoutForRemote(store, REMOTE)).toBe(mono);
+  });
+
+  it("costs the prompt hook no git process or folder scan: a remote citation takes the state this computer's sweep recorded", () => {
+    // Store projects with clones, and a user git config whose include would make every candidate ask git.
+    writeFile(path.join(root.path, "home", ".gitconfig"), "[include]\n\tpath = extra.gitconfig\n");
+    for (let i = 0; i < 12; i++) {
+      clone(`p${i}`, `https://github.com/acme/p${i}.git`);
+      fs.mkdirSync(path.join(store, `p${i}`));
+    }
     git(here, "rm", "-q", "src/a.ts");
     git(here, "commit", "-qm", "drop a.ts");
     const today = new Date().toISOString().slice(0, 10);
-    const content = ["# Findings", "", `## ${today}`, "", "- The widget parser starts at line two", `  ${buildCitationComment(cite({ commit: first, file: "src/a.ts", line: 2 }))}`, ""].join("\n");
-    expect(filterTrustedFindingsDetailed(content, { ttlDays: 120 }).content).toContain("widget parser");
-    const filtered = filterTrustedFindingsDetailed(content, { ttlDays: 120, phrenPath: store });
-    expect(filtered.content).not.toContain("widget parser");
-    expect(filtered.issues.map(issue => issue.reason)).toEqual(["invalid_citation"]);
+    const findings = path.join(store, "widgets", "FINDINGS.md");
+    const content = ["# Findings", "", `## ${today}`, "",
+      "- No clone of this repo here <!-- fid:feed0001 -->", `  ${buildCitationComment(cite({ remote: "github.com/acme/missing", commit: first, file: "src/a.ts", line: 2 }))}`,
+      "- Recorded broken by the sweep <!-- fid:feed0002 -->", `  ${buildCitationComment(cite({ commit: first, file: "src/a.ts", line: 2 }))}`,
+      "- Not swept yet <!-- fid:feed0003 -->", `  ${buildCitationComment(cite({ commit: first, file: "src/a.ts", line: 1 }))}`,
+      ""].join("\n");
+    writeFile(findings, content);
+    writeFile(path.join(store, ".runtime", "citation-states.json"), JSON.stringify({ "fid:feed0002": { state: "broken", checkedAt: new Date().toISOString() } }));
+    const before = citationGitCallCount();
+    const result = applyTrustFilter([{ project: "widgets", filename: "FINDINGS.md", type: "findings", content, path: findings }], 120, 0, {}, store);
+    expect(citationGitCallCount() - before).toBe(0);
+    expect(result.rows[0].content).toContain("No clone of this repo here");
+    expect(result.rows[0].content).toContain("Not swept yet");
+    expect(result.rows[0].content).not.toContain("Recorded broken by the sweep");
+    // The daily sweep, which may run git, reaches the same verdict on its own.
+    expect(check(cite({ commit: first, file: "src/a.ts", line: 2 }))).toBe("broken");
   });
 });

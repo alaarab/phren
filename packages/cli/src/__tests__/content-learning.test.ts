@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -336,6 +336,34 @@ describe("portable citations", () => {
   it("makes a caller's absolute file repo-relative and keeps the caller's line and commit", () => {
     addFindingToFile(tmp.path, PROJECT, "The budget constant is read once", { file: path.join(checkout, "src", "net", "retry.ts"), line: 1, commit: "abc1234" });
     expect(lastCitation()).toEqual({ created_at: expect.any(String), remote: "github.com/Acme/Widgets", file: "src/net/retry.ts", line: 1, commit: "abc1234" });
+  });
+
+  it("cites a repo registered at a folder inside it by the repo's root", () => {
+    fs.mkdirSync(path.join(checkout, "packages", "net"), { recursive: true });
+    writeFile(path.join(tmp.path, PROJECT, "phren.project.yaml"), `sourcePath: ${path.join(checkout, "packages", "net")}\n`);
+    addFindingToFile(tmp.path, PROJECT, "The retry budget lives in src/net/retry.ts and nowhere else");
+    expect(lastCitation()).toMatchObject({ remote: "github.com/Acme/Widgets", file: "src/net/retry.ts", commit: head });
+  });
+
+  it("uses a checkout found by name only when its remote is the project's configured remote", () => {
+    const projects = path.join(tmp.path, "..", `${path.basename(tmp.path)}-projects`);
+    fs.mkdirSync(projects);
+    fs.renameSync(checkout, path.join(projects, PROJECT));
+    checkout = path.join(projects, PROJECT);
+    vi.stubEnv("PROJECTS_DIR", projects);
+    try {
+      writeFile(path.join(tmp.path, PROJECT, "phren.project.yaml"), "remote: https://github.com/acme/intended.git\n");
+      addFindingToFile(tmp.path, PROJECT, "Retries back off exponentially with jitter");
+      expect(lastCitation().remote).toBeUndefined();
+      expect(lastCitation().commit).toBeUndefined();
+      fs.rmSync(findingsPath());
+      git("remote", "set-url", "origin", "git@github.com:acme/intended.git");
+      addFindingToFile(tmp.path, PROJECT, "Retries back off exponentially with jitter");
+      expect(lastCitation()).toMatchObject({ remote: "github.com/acme/intended", commit: head });
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(projects, { recursive: true, force: true });
+    }
   });
 
   it("keeps a local-only repo's path and never guesses a file from the commit", () => {

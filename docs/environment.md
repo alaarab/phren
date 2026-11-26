@@ -113,8 +113,9 @@ The citation names the repo by its `origin` remote (`github.com/owner/repo`,
 with any user name or token in the URL left out), the commit, and a file
 relative to the repo root, so it can be checked on any computer with a clone.
 When the caller gives no repo or file, `add_finding` uses the project's checkout
-on this computer (its registered folder, else a folder named after the project
-under the usual roots), records its remote and `HEAD`, and cites a file only
+on this computer (the repository its registered folder is in, else a folder
+named after the project under the usual roots; when `phren.project.yaml` sets
+`remote:`, only a checkout of that remote), records its remote and `HEAD`, and cites a file only
 when the finding names exactly one file that checkout tracks; it never guesses
 a line. A project with no checkout here, or a repo with no clone URL, gets the
 older form. See [store-format.md](store-format.md#3-metadata-comments).

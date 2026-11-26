@@ -22,7 +22,8 @@ import {
   filterTrustedFindingsDetailed,
 } from "./content.js";
 import { cachedCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
-import { parseCitationComment } from "../content/citation.js";
+import { checkFindingCitation, parseCitationComment, type CitationState, type FindingCitation } from "../content/citation.js";
+import { citationStateKey, readCitationStates, type CitationStates } from "../content/citation-states.js";
 import { getHighImpactFindings } from "../finding/impact.js";
 import { parseFindingLifecycle } from "../finding/lifecycle.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
@@ -908,6 +909,15 @@ export function applyTrustFilter(
   const queueItems: TrustFilterQueueItem[] = [];
   const auditEntries: string[] = [];
   const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
+  // A citation that names its repo by remote takes the state this computer's daily sweep recorded: mapping a
+  // remote to a checkout scans folders and may start git, which the prompt path never does. Unrecorded is unverifiable.
+  let recorded: CitationStates | undefined;
+  const citationState = (file: string | undefined) => (citation: FindingCitation, bullet: string): CitationState | undefined => {
+    if (!citation.remote) return checkFindingCitation(citation);
+    if (!phrenPath || !file) return undefined;
+    recorded ??= readCitationStates(phrenPath);
+    return recorded[citationStateKey(file, bullet)]?.state;
+  };
 
   const filtered = rows
     .filter((doc) => isInjectableDocType(doc.type))
@@ -919,7 +929,7 @@ export function applyTrustFilter(
         decay,
         project: doc.project,
         highImpactFindingIds,
-        phrenPath,
+        citationState: citationState(doc.path),
       });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);

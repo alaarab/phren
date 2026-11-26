@@ -6,7 +6,7 @@ import type { RetentionPolicy } from "../shared/governance.js";
 import { findingIdFromLine } from "../finding/impact.js";
 import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./metadata.js";
 import { FINDING_TYPE_DECAY, extractFindingType } from "../finding/lifecycle.js";
-import { checkoutForRemote, checkoutGitCallCount, checkoutsNamedLike } from "./citation-checkouts.js";
+import { checkedOutCommit, checkoutForRemote, checkoutGitCallCount, checkoutsNamedLike } from "./citation-checkouts.js";
 
 export interface FindingCitation {
   created_at: string;
@@ -73,8 +73,6 @@ export interface TrustFilterOptions {
   highImpactFindingIds?: Set<string>;
   /** States already known (governance's bounded sweep); an undefined answer counts as unverifiable. Unset checks live. */
   citationState?: (citation: FindingCitation, bullet: string) => CitationState | undefined;
-  /** The primary store, so a live check can find this computer's checkout of a citation's `remote`. */
-  phrenPath?: string;
 }
 
 export function getHeadCommit(cwd: string): string | undefined {
@@ -283,8 +281,9 @@ function cachedGit(cache: Map<string, boolean>, key: string, repoPath: string, a
   return out !== false;
 }
 
-function cachedBlame(repoPath: string, relFile: string, line: number): string | false | undefined {
-  const key = `${repoPath}\0${relFile}\0${line}`;
+// `head` keys a checkout other than the writer's by the commit it has out, so a branch switch asks again.
+function cachedBlame(repoPath: string, relFile: string, line: number, head = ""): string | false | undefined {
+  const key = `${repoPath}\0${head}\0${relFile}\0${line}`;
   const cached = blameCache.get(key);
   if (cached !== undefined) return cached;
   const out = citationGit(repoPath, ["blame", "-L", `${line},${line}`, "--porcelain", relFile], 10_000);
@@ -306,7 +305,11 @@ function lineState(file: string, line: number | undefined): CitationState {
 }
 
 export interface CitationCheckOptions {
-  /** The primary store, so a citation's `remote` resolves to this computer's checkout of it. Without it a remote is unverifiable. */
+  /**
+   * The primary store, so a citation's `remote` resolves to this computer's checkout of it. Without it a remote is
+   * unverifiable. Mapping a remote scans folders and may start git, so only the daily sweep passes it; the prompt
+   * hook reads the states the sweep recorded.
+   */
   phrenPath?: string;
   /**
    * Also look for another computer's absolute repo path among this computer's checkouts with the same folder
@@ -354,27 +357,38 @@ function resolveTarget(citation: FindingCitation, opts: CitationCheckOptions): C
 }
 
 // The line check shared by both kinds of checkout: in range, and blamed on the cited commit when both are given.
-function fileState(root: string, file: string, citation: FindingCitation): CitationState {
+function fileState(root: string, file: string, citation: FindingCitation, head?: string): CitationState {
   const range = lineState(file, citation.line);
   if (range !== "valid" || citation.line === undefined || !citation.commit) return range;
-  const first = cachedBlame(root, path.relative(root, file), citation.line);
+  const first = cachedBlame(root, path.relative(root, file), citation.line, head);
   if (first === undefined) return "unverifiable";
   return first !== false && first.startsWith(citation.commit) ? "valid" : "drifted";
 }
 
-// Another checkout of the repo may be behind, ahead or on another branch than the writer's, so a missing
-// file proves the citation wrong only when the file was in the cited commit and that commit is in this
-// checkout's history. An unknown commit says nothing at all.
+// The commit a checkout has out: from its git files, else from git.
+function checkoutHead(root: string): string | undefined {
+  const head = checkedOutCommit(root);
+  if (head) return head;
+  const out = citationGit(root, ["rev-parse", "HEAD"], EXEC_TIMEOUT_QUICK_MS);
+  return out ? out.trim() || undefined : undefined;
+}
+
+// Another checkout of the repo may be behind, ahead or on another branch than the writer's, so it says
+// something about a cited file only when the cited commit is in the history it has out: then a changed
+// line is drifted and a file that was in the commit and is gone now is broken. Anything else is
+// unverifiable. The answer is cached per checked-out commit, so a branch switch asks git again.
 function portableState(target: CitationTarget, citation: FindingCitation): CitationState {
   const { root, file, relFile } = target;
   if (!citation.commit) return file && fs.existsSync(file) ? lineState(file, citation.line) : "unverifiable";
   if (commitKnownIn(root, citation.commit) !== true) return "unverifiable";
   if (!file || !relFile) return "valid";
-  if (fs.existsSync(file)) return fileState(root, file, citation);
+  const head = checkoutHead(root);
+  if (!head) return "unverifiable";
+  const inHistory = cachedGit(commitExistsCache, `${root}\0${head}\0ancestor\0${citation.commit}`, root, ["merge-base", "--is-ancestor", citation.commit, head]);
+  if (inHistory !== true) return "unverifiable";
+  if (fs.existsSync(file)) return fileState(root, file, citation, head);
   const inCommit = cachedGit(commitExistsCache, `${root}\0${citation.commit}:${relFile}`, root, ["cat-file", "-e", `${citation.commit}:${relFile}`]);
-  if (inCommit !== true) return "unverifiable";
-  const inHistory = cachedGit(commitExistsCache, `${root}\0ancestor\0${citation.commit}`, root, ["merge-base", "--is-ancestor", citation.commit, "HEAD"]);
-  return inHistory === true ? "broken" : "unverifiable";
+  return inCommit === true ? "broken" : "unverifiable";
 }
 
 export function checkFindingCitation(citation: FindingCitation, opts: CitationCheckOptions = {}): CitationState {
@@ -585,7 +599,7 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
 
     // Only a cited file or an unresolved symbol can be broken or drifted, so a commit-only citation costs no git here.
     const citationState = citation && (citation.file || citation.symbol_unresolved)
-      ? (options.citationState ? options.citationState(citation, line) ?? "unverifiable" : checkFindingCitation(citation, { phrenPath: options.phrenPath }))
+      ? (options.citationState ? options.citationState(citation, line) ?? "unverifiable" : checkFindingCitation(citation))
       : undefined;
     if (citationState === "broken") {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "invalid_citation" });
