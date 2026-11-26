@@ -193,6 +193,25 @@ describe("auditTasks", () => {
     expect(findTask("aaaa1111")?.context).toMatch(new RegExp(`^started last week; Weekly audit ${DAY.source}: remaining: still failing on Safari$`));
   });
 
+  it("applies nothing when access control denies the audit's task writes", async () => {
+    fs.mkdirSync(path.join(store, ".config"), { recursive: true });
+    fs.writeFileSync(path.join(store, ".config", "access-control.json"),
+      JSON.stringify({ admins: ["admin-user"], contributors: ["contrib-user"], readers: ["reader-user"] }));
+    process.env.PHREN_ACTOR = "reader-user";
+    try {
+      const { runner } = fakeRunner([
+        { bid: "bbbb2222", verdict: "done", evidence: "PR #12" },
+        { bid: "cccc3333", verdict: "partial", remainder: "docs still missing" },
+      ]);
+      const result = await run({ runner });
+      expect(result.status).toBe("ok");
+      expect(result.counts).toMatchObject({ denied: 2, closed: 0, noted: 0 });
+      expect(findTask("bbbb2222")?.section).toBe("Active");
+      expect(findTask("cccc3333")?.context).toBeUndefined();
+      expect(readAuditLastRun(store, PROJECT)?.counts).toMatchObject({ denied: 2, closed: 0 });
+    } finally { delete process.env.PHREN_ACTOR; }
+  });
+
   it("ignores unknown bids and records why", async () => {
     const { runner } = fakeRunner([{ bid: "ffff0000", verdict: "done", evidence: "made up" }]);
     const result = await run({ runner });
