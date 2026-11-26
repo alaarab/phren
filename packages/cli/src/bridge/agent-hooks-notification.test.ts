@@ -384,8 +384,22 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
     await writeFile(path.join(folder, "agent-child1.jsonl"), JSON.stringify({ type: "user", sessionId: session, agentId: "child1", isSidechain: true, timestamp: new Date().toISOString(), message: { role: "user", content: "Review" } }) + "\n");
     await append(assistant("Foreground done.", true));
     await forward("fast", { hook_event_name: "Stop", background_tasks: [{ id: "child1", status: "running" }] });
+    expect((await readTurn(target.server, target.pane))?.stop?.tasks?.running).toEqual(["child1"]);
     pane.agent_status = "idle";
-    expect((await open("/v1/status")).frames[0].agentStatus).toMatchObject({ status: "working" });
+    // Hold the real child lookup past the first status tick's budget.
+    const childAgentTree = transcripts.childAgentTree;
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transcripts, "childAgentTree").mockImplementationOnce(async (...args) => {
+      await pending;
+      return childAgentTree(...args);
+    });
+    let status!: Client;
+    try {
+      status = await open("/v1/status");
+      await vi.waitFor(() => expect(status.frames[0]).toBeDefined(), { timeout: 2500 });
+      expect(status.frames[0].agentStatus).toMatchObject({ status: "working" });
+    } finally { release(); }
     expect(await overview()).toMatchObject({ agentStatus: "working", runningChildren: 1 });
     expect((await open()).frames[0]).not.toHaveProperty("preview", expect.objectContaining({ text: expect.any(String) }));
   });

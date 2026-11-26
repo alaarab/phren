@@ -59,7 +59,7 @@ import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
 import { availablePaneEvidence, childActivity, effectivePaneEvidence } from "./session-evidence.js";
-import { liveWork, markBackground, ownRecord, paneRecord, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
+import { liveWork, markBackground, ownRecord, paneRecord, provisionalWork, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
 import { markSessionSeen, readSessionSeen } from "./session-seen.js";
 import { opencodeTurn, turnPhase, type TurnRecord } from "./turn-records.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
@@ -352,7 +352,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       });
       recordEnrichment.push(async () => {
         const evidence = pane && typeof session === "string" ? await effectivePaneEvidence(server, pane, session, agentHooks, undefined, record) : undefined;
-        const background = evidence ? liveWork(record, evidence.final, evidence.runningChildren) : undefined;
+        const background = evidence ? liveWork(record, evidence.final, evidence.runningChildren) ?? provisionalWork(evidence) : undefined;
         if (expired) return;
         if (evidence) {
           Object.assign(tab, evidence.children);
@@ -404,8 +404,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       eachTab(async ({ group, tab }) => {
         const identity = identified(group, tab);
         if (!identity) return;
-        const children = await childActivity(identity.source, identity.session);
-        if (expired) return;
+        const children = await childActivity(identity.source, identity.session).catch(() => undefined);
+        if (expired || !children) return;
         Object.assign(tab, children);
         markBackground(tab, children.runningChildren);
         if (tab.agentStatus === "working") delete tab.lastReply;
