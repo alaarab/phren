@@ -300,6 +300,13 @@ export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content
   return best;
 }
 
+/** Overlap of the doc's name and its best chunk: a topic archive of hundreds of
+ * bullets ranks by the bullet the floor and selection use, not by its first pages. */
+function bestChunkOverlapScore(queryTokens: string[], doc: DocRow, rarity?: Map<string, number>): number {
+  const match = bestChunkMatch(queryTokens, doc, rarity);
+  return overlapScore(queryTokens, `${doc.project} ${doc.filename} ${doc.type}\n${match?.chunk ?? ""}`);
+}
+
 /** How rare each prompt token is across the index: normalised IDF, 1 for a
  * token in one doc, near 0 for one in every doc. One FTS count per token. */
 /** `tokenRarity` for a prompt's keywords, tokenised as the floor tokenises them. */
@@ -968,7 +975,8 @@ export function rankResults(
   db: SqlJsDatabase,
   cwd?: string,
   query?: string,
-  opts?: { filterType?: string | null; skipTaskFilter?: boolean },
+  /** `rarity`: the prompt's keyword rarity, so a doc's best chunk is the one the floor will judge. */
+  opts?: { filterType?: string | null; skipTaskFilter?: boolean; rarity?: Map<string, number> },
   explain?: (row: DocRow, score: number) => void
 ): DocRow[] {
   let ranked = [...rows];
@@ -1048,7 +1056,7 @@ export function rankResults(
     const fileRel = fileRelevanceBoost(doc.path, changedFiles);
     const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
     const qualityMult = getQualityMultiplier(phrenPathLocal, key);
-    const queryOverlap = queryTokens.length > 0 ? docOverlapScore(queryTokens, doc) : 0;
+    const queryOverlap = queryTokens.length > 0 ? bestChunkOverlapScore(queryTokens, doc, opts?.rarity) : 0;
     const queryOverlapWeight = detectedProject && doc.project === detectedProject
       ? LOCAL_QUERY_OVERLAP_WEIGHT
       : CROSS_PROJECT_QUERY_OVERLAP_WEIGHT;

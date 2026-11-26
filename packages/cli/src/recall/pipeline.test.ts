@@ -32,6 +32,12 @@ describe("runPromptPipeline", () => {
     for (let i = 0; i < 6; i++) write(`harbor/reference/notes-${i}.md`, `# notes ${i}\n\n- Widget ${i} settings live in the panel.\n- Comparison projects honest detailed overview behavior design tradeoffs approach workflow maintenance usability context.\n`);
     // Four docs that each answer a kiln question: more than selection's three slots.
     for (let i = 0; i < 4; i++) write(`quarry/reference/kiln-${i}.md`, `# kiln ${i}\n\n- Kiln ${i} furnace scheduler fires batch ${i} after the glaze cures.\n`);
+    // A topic archive whose answer sits past its opening pages, and three short docs that each match two of its words.
+    const filler = Array.from({ length: 90 }, (_, i) => `- Dye vat ${i} drains into courtyard gutter ${i} after the evening rinse cycle.`);
+    write("loom/reference/topics/weaving.older.md", `# weaving\n\n${filler.join("\n")}\n- The shuttle jams when warp tension drops below the bobbin spindle threshold.\n`);
+    write("loom/reference/topics/a-shuttle.md", "# shuttle\n\n- The shuttle rides on the warp threads.\n");
+    write("loom/reference/topics/b-bobbin.md", "# bobbin\n\n- Bobbin and spindle parts ship together.\n");
+    write("loom/reference/topics/c-tension.md", "# tension\n\n- Tension springs sit beside the spindle.\n");
     db = await buildIndex(tmp.path);
   });
   afterAll(() => tmp?.cleanup());
@@ -116,6 +122,12 @@ describe("runPromptPipeline", () => {
     expect(result.abstained).toBe("all-repeats");
     expect(result.suppressedRepeats).toBe(first.selected.length);
     expect(result.selected).toEqual([]);
+  });
+
+  it("injects the bullet deep in a large archive ahead of short docs that match fewer words", async () => {
+    const result = await run("shuttle jams: warp tension or bobbin spindle?", "loom");
+    expect(result.selected[0]).toMatchObject({ project: "loom", filename: "weaving.older.md" });
+    expect(result.selected[0].snippet).toContain("shuttle jams when warp tension drops");
   });
 
   it("selects the matching finding with its score, floor decision and feedback key", async () => {
