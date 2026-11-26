@@ -1,5 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
@@ -9,7 +8,6 @@ import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { tryFileLock } from "../governance/locks.js";
 import { atomic, BridgeError, bridgeRoot, object } from "./protocol.js";
-const exec = promisify(execFile);
 // Each context needs at most two reads; slow Git falls back to ordinary approval.
 async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await exec("git", ["-C", cwd, "--no-pager", ...args], {

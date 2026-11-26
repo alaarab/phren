@@ -2,13 +2,11 @@ import { createHash } from "node:crypto";
 import { homeDir } from "../home-paths.js";
 import type { GitHost } from "./git-hosts.js";
 import { invalidatePullsForDomain } from "./git.js";
-import { execFile } from "node:child_process";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { atomic, bridgeRoot } from "./protocol.js";
 
-const exec = promisify(execFile);
 
 /** Tokens for the git hosts the Hook reads over HTTP (GitLab, gitboy). GitHub
  * goes through gh, which keeps its own sign-in.

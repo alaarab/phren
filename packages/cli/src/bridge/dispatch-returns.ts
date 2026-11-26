@@ -4,10 +4,9 @@ import { removeWorkerFile, workerAlive } from "./worker-identity.js";
 import { workerPrs, readIntegrator } from "./worker-reports.js";
 import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
+import { execProbe as run } from "./probe-processes.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { arrivalOf, boundWorkerGone, clearWorkerEnded, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
@@ -135,7 +134,6 @@ export interface WorkerReaders {
   moves?: () => Promise<MoveRecord[]>;
 }
 
-const run = promisify(execFile);
 async function checkedOutBranch(directory: string): Promise<string | undefined> {
   const { stdout } = await run("git", ["-C", directory, "rev-parse", "--abbrev-ref", "HEAD"], { timeout: 3_000 });
   const branch = stdout.trim();

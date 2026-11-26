@@ -24,11 +24,10 @@ import { redactSecretsForLog } from "../content/secrets.js";
 import { redactApproval } from "./approval-summary.js";
 import { stableComputerName } from "./computer-names.js";
 import type { DispatchHost } from "./dispatch-hosts.js";
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as run } from "./probe-processes.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { quoted, withOriginalBrief } from "./account-failover.js";
@@ -43,7 +42,6 @@ import { finalTurnFromLines, isClaudeUsageLimit, publicAssistant } from "./sched
 import type { TerminalProvider } from "./terminal.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 
-const run = promisify(execFile);
 
 export { moveToSchema };
 export type MoveTo = z.infer<typeof moveToSchema>;

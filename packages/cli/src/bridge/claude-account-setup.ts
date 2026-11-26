@@ -1,8 +1,7 @@
 // `phren bridge accounts add`: a new Claude home that shares the default home's setup.
-import { execFile } from "node:child_process";
 import { chmod, lstat, mkdir, readFile, symlink } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as run } from "./probe-processes.js";
 import { homeDir } from "../home-paths.js";
 import { claudeHome, claudeHomes, DEFAULT_ACCOUNT, forgetClaudeHomes, isAccountSlug, setAccountLabel } from "./claude-accounts.js";
 import { atomic } from "./protocol.js";
@@ -61,7 +60,6 @@ export function badAccountSlug(slug: string, email?: string): string {
   return `"${slug}" is not an account name: use 1 to 32 lowercase letters, digits and dashes, and not "default". Try "${suggestAccountSlug(slug, email)}".`;
 }
 
-const run = promisify(execFile);
 
 /** `locked`: an ssh session on a Mac whose login keychain it cannot use (Claude keeps a Mac's login there,
  * so a /login made in it is never saved). `unknown`: the check itself failed. A local session is never checked. */

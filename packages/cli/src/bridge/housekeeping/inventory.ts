@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "../probe-processes.js";
 import type { ActionKind, Area, PaneLink } from "./report.js";
 import {
   type BoundPane, cacheRules, deletionDecision, housekeepingGit, inspectCheckout, type InUseSources, type LiveProcess, paneCloseBlock,
@@ -19,7 +18,6 @@ import {
  * last scan; every action re-checks against the disk when approved.
  */
 
-const exec = promisify(execFile);
 
 export interface InventoryAction { id: string; kind: ActionKind; label: string; allowed: boolean; reason?: string; confirm?: string }
 

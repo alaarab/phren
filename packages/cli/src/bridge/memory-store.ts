@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { execProbe, startProbe } from "./probe-processes.js";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, realpath } from "node:fs/promises";
@@ -29,7 +30,8 @@ function serialized<T>(work: () => Promise<T>): Promise<T> {
 
 async function git(store: string, args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
   try {
-    const { stdout } = await exec("git", ["-C", store, ...args], {
+    const run = ["add", "read-tree", "write-tree"].includes(args[0]) ? exec : execProbe;
+    const { stdout } = await run("git", ["-C", store, ...args], {
       env: { ...process.env, ...env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 64 * 1024 * 1024, timeout: 60_000,
     });
     return stdout;
@@ -112,7 +114,7 @@ export async function storeBlob(store: string, sha: string): Promise<Json> {
   if (size > MAX_FILE) throw new BridgeError(413,
     "This store file exceeds the phone's 4 MiB limit. Archive or shorten it on the computer, then sync again.",
     { code: "store-file-too-large", size, limit: MAX_FILE });
-  const { stdout } = await exec("git", ["-C", store, "cat-file", "blob", sha], { encoding: "buffer", maxBuffer: MAX_FILE, timeout: 60_000 });
+  const { stdout } = await execProbe("git", ["-C", store, "cat-file", "blob", sha], { encoding: "buffer", maxBuffer: MAX_FILE, timeout: 60_000 });
   return { sha, encoding: "base64", content: stdout.toString("base64") };
 }
 
@@ -164,7 +166,7 @@ export async function storeBlobs(store: string, data: Json): Promise<Json> {
 /** Run one `git cat-file --batch[-check]` over these ids; output capped near the batch budget. */
 function catFile(store: string, mode: "--batch" | "--batch-check", shas: string[]): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn("git", ["-C", store, "cat-file", mode], { stdio: ["pipe", "pipe", "ignore"] });
+    const child = startProbe(() => spawn("git", ["-C", store, "cat-file", mode], { stdio: ["pipe", "pipe", "ignore"] }));
     const chunks: Buffer[] = [];
     let total = 0;
     child.stdout.on("data", (chunk: Buffer) => {

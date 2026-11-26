@@ -11,6 +11,7 @@ import { dump, load } from "js-yaml";
 import { withFileLock } from "../governance/locks.js";
 import { claudeConfigDir, homeDir } from "../home-paths.js";
 import { bridgeRoot } from "./protocol.js";
+import { killProbeGroup, startProbe } from "./probe-processes.js";
 
 import { claudePlan, monthlyAnniversary, subscriptionDate, type Subscription } from "./subscription.js";
 
@@ -315,15 +316,16 @@ let probeExit: Promise<void> | undefined;
 export function claudeAuthProbeExit(): Promise<void> | undefined { return probeExit; }
 
 const runAuthStatus: AuthRunner = home => new Promise(resolve => {
+  const { command, shell } = claudeAuthSpawn();
+  const kill = shell ? claudeAuthKill : killProbeGroup;
+  const child = startProbe(() => spawn(command, ["auth", "status", "--json"], {
+    cwd: homeDir(), stdio: ["ignore", "pipe", "ignore"], shell, detached: !shell, windowsHide: true,
+    env: { ...process.env, ...claudeLaunchEnv(home), NO_COLOR: "1" },
+  }), kill);
   let out = "", done = false, exit!: () => void;
   probeExit = new Promise<void>(settle => { exit = settle; });
-  const { command, shell } = claudeAuthSpawn();
-  const child = spawn(command, ["auth", "status", "--json"], {
-    cwd: homeDir(), stdio: ["ignore", "pipe", "ignore"], shell, windowsHide: true,
-    env: { ...process.env, ...claudeLaunchEnv(home), NO_COLOR: "1" },
-  });
   const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };
-  const timer = setTimeout(() => { claudeAuthKill(child); finish(); }, AUTH_TIMEOUT_MS);
+  const timer = setTimeout(() => { kill(child); finish(); }, AUTH_TIMEOUT_MS);
   child.stdout.on("data", (chunk: Buffer) => { if (out.length < 16_384) out += chunk.toString(); });
   child.on("error", () => { exit(); finish(); }); child.on("close", () => { exit(); finish(); });
 });

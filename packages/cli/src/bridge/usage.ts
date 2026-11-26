@@ -1,11 +1,11 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { lstat, open, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { claudeConfigDir, codexHome } from "../home-paths.js";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec, startProbe } from "./probe-processes.js";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
@@ -19,7 +19,6 @@ import { claudeCredits, creditSummary, creditWindows, homeSessionCosts, recordSe
 import { claudePlan, planName, subscriptionDate, type Subscription } from "./subscription.js";
 export type { Subscription } from "./subscription.js";
 
-const exec = promisify(execFile);
 
 export interface UsageWindow {
   id: string;
@@ -593,7 +592,7 @@ async function liveClaudeUsage(now: Date, home?: ClaudeHome): Promise<AccountUsa
 /** Only initialize and read limits. Never create a thread, prompt, or login. */
 export function readCodexLimits(executable = codexExecutable()): Promise<AccountUsage> {
   return new Promise(resolve => {
-    const child = spawn(executable, ["app-server"], { cwd: homedir(), stdio: ["pipe", "pipe", "ignore"] });
+    const child = startProbe(() => spawn(executable, ["app-server"], { cwd: homedir(), stdio: ["pipe", "pipe", "ignore"] }));
     let pending = "", bytes = 0, initialized = false, done = false;
     const finish = (result?: AccountUsage) => {
       if (done) return; done = true;

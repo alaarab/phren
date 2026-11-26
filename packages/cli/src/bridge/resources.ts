@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
 import { readdir, readFile, statfs } from "node:fs/promises";
 import { cpus, loadavg, totalmem, uptime } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { agentBudget, type AgentBudget } from "../heavy/budget-status.js";
 import type { Pressure } from "../heavy/budget.js";
 import { homeDir } from "../home-paths.js";
@@ -13,7 +12,6 @@ import { objects } from "./protocol.js";
 import { MachineHealth, type HealthFinding } from "./machine-health.js";
 import { PlatformProbes } from "./machine-probes.js";
 
-const exec = promisify(execFile);
 
 /**
  * This computer's live resources for `GET /v1/resources`, the overview

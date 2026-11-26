@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
 import { lstat, readdir, readlink, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "../probe-processes.js";
 import { git as runGit } from "../projects.js";
 
 /**
@@ -24,7 +23,6 @@ import { git as runGit } from "../projects.js";
  *    old enough and not in use, may be acted on without the owner.
  */
 
-const exec = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Rule 2: the git gate.

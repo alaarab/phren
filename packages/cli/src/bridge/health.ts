@@ -1,8 +1,8 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec, killProbeGroup, startProbe } from "./probe-processes.js";
 import { assessSyncOutage, FAILED_PUSH_STATUSES, getRuntimeHealth } from "../governance/policy.js";
 import { getProjectDirs } from "../phren-paths.js";
 import { resolveAllStores } from "../store-registry.js";
@@ -16,7 +16,6 @@ import { countGit } from "./metrics.js";
 import { tmuxHealth, type TmuxHealth } from "./terminal-tmux.js";
 import { lastSyncedAt, STORE_STALE_MS, storeWarning } from "../sync/store-sync.js";
 
-const exec = promisify(execFile);
 
 /** One tool's installed version, or why there is none. */
 export interface ToolVersion { tool: string; status: "ok" | "missing" | "error"; version?: string; detail?: string }
@@ -124,9 +123,11 @@ export function toolVersion(tool: string, executable = tool, args: string[] = []
   if (cached && Date.now() - cached.at < VERSION_CACHE_MS) return cached.value;
   const value = new Promise<ToolVersion>(resolve => {
     let out = "", done = false;
-    const child = spawn(executable, [...args, "--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
+    const child = startProbe(() => spawn(executable, [...args, "--version"], {
+      cwd: homedir(), stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32", env: { ...process.env, NO_COLOR: "1" },
+    }), killProbeGroup);
     const finish = (result: ToolVersion) => { if (!done) { done = true; clearTimeout(timer); resolve(result); } };
-    const timer = setTimeout(() => { child.kill("SIGKILL"); finish({ tool, status: "error", detail: `--version did not answer within ${VERSION_TIMEOUT_MS / 1000} seconds` }); }, VERSION_TIMEOUT_MS);
+    const timer = setTimeout(() => { killProbeGroup(child); finish({ tool, status: "error", detail: `--version did not answer within ${VERSION_TIMEOUT_MS / 1000} seconds` }); }, VERSION_TIMEOUT_MS);
     const collect = (chunk: Buffer) => { if (out.length < 4_096) out += chunk.toString(); };
     child.stdout.on("data", collect); child.stderr.on("data", collect);
     child.on("error", (error: NodeJS.ErrnoException) => finish(error.code === "ENOENT" ? { tool, status: "missing" }

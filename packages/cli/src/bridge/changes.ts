@@ -1,10 +1,9 @@
 import { checkoutGitEnv } from "./projects.js";
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFile, copyFile, mkdir, readdir, readFile, realpath, rm, stat, unlink, utimes } from "node:fs/promises";
 import { homeDir } from "../home-paths.js";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { BridgeError, bridgeRoot, object, type Json } from "./protocol.js";
 import { z } from "zod";
 import { ProcessPool } from "./limits.js";
@@ -12,7 +11,6 @@ import { phrenStoreRoot } from "./transcripts.js";
 import { countGit, countTick } from "./metrics.js";
 import { scanForSecrets } from "../content/secrets.js";
 
-const exec = promisify(execFile);
 
 /** One file a shell command changed, with the patch between the working
  * tree before the call and after it. `root` is the repository; `path` is

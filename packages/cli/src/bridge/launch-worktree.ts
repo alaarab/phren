@@ -6,6 +6,7 @@ import { z } from "zod";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { countGit } from "./metrics.js";
 import { gitRoot } from "./projects.js";
+import { execProbe } from "./probe-processes.js";
 import { BridgeError } from "./protocol.js";
 
 /** A launch in a worktree of its own: `git worktree add` from the project's
@@ -18,7 +19,8 @@ const exec = promisify(execFile);
 async function git(cwd: string, ...args: string[]): Promise<string> {
   countGit("launch-worktree");
   // A checkout of a large repository can take longer than a status read.
-  return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
+  const run = ["rev-parse", "check-ref-format", "show-ref"].includes(args[0]) ? execProbe : exec;
+  return (await run("git", ["-C", cwd, "--no-pager", ...args], {
     timeout: 120_000, maxBuffer: 1_048_576, env: nonInteractiveGitEnv({ ...process.env, GIT_CONFIG_NOSYSTEM: "1" }),
   })).stdout;
 }

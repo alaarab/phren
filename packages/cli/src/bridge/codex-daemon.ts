@@ -1,7 +1,6 @@
-import { execFile } from "node:child_process";
 import { open, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { codexHome } from "../home-paths.js";
 import { countIdentity } from "./metrics.js";
 import { object, sessionId, type Json } from "./protocol.js";
@@ -14,7 +13,6 @@ import { object, sessionId, type Json } from "./protocol.js";
  * Hook can still prove about such a conversation: which rollouts the daemon
  * holds, the folder and time each began, and when each pane's TUI started. */
 
-const exec = promisify(execFile);
 const DAEMON_COMMAND = /(?:^|\/)codex\s+app-server(?:\s|$)/;
 const ROLLOUT = /rollout-[^/]*-([a-f0-9-]{36})\.jsonl$/i;
 const CACHE_MS = 2_000, META_BYTES = 65_536, MAX_ROLLOUTS = 32, MAX_DAEMONS = 4;

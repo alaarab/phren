@@ -5,6 +5,7 @@ import { registeredStoreIdentity, resolveAllStores, storePathExists } from "../s
 import { ImmediatePulls } from "../sync/pull-now.js";
 import { runGitWithin } from "../sync/pull.js";
 import { parseRemoteUrl } from "./git-hosts.js";
+import { execProbe } from "./probe-processes.js";
 import { BridgeError } from "./protocol.js";
 import { ownerRequest } from "./request-origin.js";
 
@@ -43,12 +44,12 @@ export class StorePulls {
     const candidates = this.localStores().filter(entry => registeredStoreIdentity(entry.path) === identity.storeId);
     for (const store of candidates) {
       // Local Git metadata only, bounded; follow the same tracking branch pollStore will pull.
-      const refs = await runGitWithin(1000, store.path, ["for-each-ref", "--format=%(HEAD)%09%(upstream:remotename)%09%(upstream:remoteref)", "refs/heads/"]);
+      const refs = await runGitWithin(1000, store.path, ["for-each-ref", "--format=%(HEAD)%09%(upstream:remotename)%09%(upstream:remoteref)", "refs/heads/"], execProbe);
       if (!refs.ok) continue;
       const current = refs.output.split("\n").find(line => line.startsWith("*\t"));
       const [, remote, branch] = current?.split("\t") ?? [];
       if (!remote || remote === "." || branch !== `refs/heads/${identity.branch}`) continue;
-      const url = await runGitWithin(1000, store.path, ["remote", "get-url", "--", remote]);
+      const url = await runGitWithin(1000, store.path, ["remote", "get-url", "--", remote], execProbe);
       const repository = url.ok ? parseRemoteUrl(url.output)?.path.toLowerCase() : undefined;
       if (repository !== identity.repository) continue;
       this.pulls.request(store.path);

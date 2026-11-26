@@ -19,6 +19,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - The prompt hook now uses an archived finding's creation date or, when it has none, the date of its archive section. Old bug notes expire after 30 days, and a recently written finding whose cited code changed can still reach the prompt. Untagged findings in topic archives last up to 365 days.
 
+### Fixed
+
+- Phren Hook stops background checks such as Claude sign-in discovery when it shuts down, so a slow check no longer delays a restart. Agents already running in panes keep working.
+
 ## [0.3.94] - 2026-11-26
 
 ### Added

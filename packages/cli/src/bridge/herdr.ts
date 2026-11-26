@@ -2,12 +2,11 @@ import { paneBrowserWatch } from "./browser-watch.js";
 import { createHmac, randomBytes } from "node:crypto";
 import { paneAccount, paneAccountKey, notePaneTranscript } from "./pane-accounts.js";
 import type { AccountRef } from "./claude-accounts.js";
-import { execFile } from "node:child_process";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { open, readdir, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type OfflineCode, type Target, type StartingTarget } from "./protocol.js";
 import { logger } from "../logger.js";
 import { recordedSession } from "./agent-hook-stores.js";
@@ -24,7 +23,6 @@ import { opencodeServiceSession } from "./opencode-service.js";
 // call time; a static import back would be an import cycle.
 const terminal = () => import("./terminal.js");
 
-const exec = promisify(execFile);
 export function herdrRoot(): string { return process.env.PHREN_HERDR_HOME || path.join(homedir(), ".config/herdr"); }
 /** Where Herdr's socket for `server` lives. */
 export function herdrSocketPath(server: string): string { return herdrSocket(server); }

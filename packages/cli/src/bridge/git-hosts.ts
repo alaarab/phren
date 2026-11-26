@@ -1,5 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import type { Json } from "./protocol.js";
 import { git } from "./projects.js";
 import { runCombined } from "./git-publish.js";
@@ -7,7 +6,6 @@ import { gitboy } from "./git-host-gitboy.js";
 import { gitlab } from "./git-host-gitlab.js";
 import { mergeableWord, type ForgeItem } from "../task/work.js";
 
-const exec = promisify(execFile);
 
 /** Where a repository's pull or merge requests live. Phren supports three git
  * hosts: GitHub, GitLab and gitboy (self-hosted, any domain). The host is read

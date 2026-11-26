@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { startProbe } from "./probe-processes.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { findPhrenPath } from "../phren-paths.js";
@@ -277,8 +278,8 @@ function defaultDeps(): ProbeDeps {
   return {
     platform: process.platform, now: Date.now, home: homeDir(), uid: process.getuid?.() ?? 0,
     run: (file, args, timeoutMs = 10_000) => new Promise((resolve, reject) => {
-      execFile(file, args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: "C" } },
-        (err, stdout, stderr) => err ? reject(Object.assign(err, { stderr })) : resolve(stdout));
+      startProbe(() => execFile(file, args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: "C" } },
+        (err, stdout, stderr) => err ? reject(Object.assign(err, { stderr })) : resolve(stdout)));
     }),
     lockDirs: [bridgeRoot(), ...(store ? [store] : [])],
     alive: pid => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; } },

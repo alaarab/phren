@@ -1,11 +1,11 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { readdir, readlink } from "node:fs/promises";
 import { readlinkSync } from "node:fs";
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { bridgeRoot, object, type Json } from "./protocol.js";
 import { localSocket } from "./agent-hook-stores.js";
 import { terminalPaneFromEnv } from "./terminal.js";
@@ -93,7 +93,6 @@ export interface SecretRequestView {
   askedAt: string; expiresAt: string;
 }
 
-const exec = promisify(execFile);
 /** Every process's parent, from `ps`. */
 export async function processTable(): Promise<Map<number, number>> {
   const { stdout } = await exec("ps", ["-A", "-o", "pid=", "-o", "ppid="], { timeout: 5_000, maxBuffer: 16 * 1_048_576 });
