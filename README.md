@@ -41,7 +41,7 @@ Periodic remote checks are off by default. Enable them with `phren config pull-i
 
 **When you discover something:**
 - `phren add-finding <project> "finding text"` captures it with optional tags (`[decision]`, `[pattern]`, `[pitfall]`, `[bug]`)
-- Trust scores decay over time; decisions never do; observations expire in 14 days
+- Trust scores decay with age. Decisions never expire; patterns and pitfalls last a year, workarounds 60 days, bugs and context notes 30 days, untagged findings 120 days
 - Findings link to fragments (named concepts like "auth" or "build") that connect knowledge across projects
 
 **Sessions:**
