@@ -81,3 +81,16 @@ describe("ensureStoreGitignore", () => {
     } finally { fs.rmSync(store, { recursive: true, force: true }); }
   });
 });
+
+describe("ensureStoreGitignore: editor state", () => {
+  it("ignores Obsidian's workspace folder, so opening the store as a vault syncs nothing", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "phren-gitignore-obsidian-"));
+    try {
+      fs.writeFileSync(path.join(tmp, ".gitignore"), ".env\n");
+      expect(ensureStoreGitignore(tmp)).toContain(".obsidian/");
+      expect(fs.readFileSync(path.join(tmp, ".gitignore"), "utf8").split("\n")).toContain(".obsidian/");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});

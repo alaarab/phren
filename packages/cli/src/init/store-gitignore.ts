@@ -44,8 +44,9 @@ export const STORE_SECRET_GITIGNORE_LINES = [
   ".config/modules.yaml.migration-backup",
 ] as const;
 
-/** Editor and OS noise every store ignores too. */
-const STORE_NOISE_LINES = [".DS_Store", "*.swp", ".cache/"] as const;
+/** Editor and OS noise every store ignores too. `.obsidian/` is Obsidian's per-computer workspace
+ * state, written when the store is opened as a vault; syncing it churns every computer's history. */
+const STORE_NOISE_LINES = [".DS_Store", "*.swp", ".cache/", ".obsidian/"] as const;
 
 /**
  * Writes the store's .gitignore from code, or appends whatever secret-bearing
