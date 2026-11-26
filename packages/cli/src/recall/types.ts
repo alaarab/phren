@@ -6,6 +6,7 @@ import type { GitContext } from "../cli/session-git.js";
 
 /** Why the pipeline injected nothing. Null on the result when it selected something. */
 export type RecallAbstainReason =
+  | "machine-prompt" // another agent's message or a harness notice, not the owner asking
   | "no-keywords" // nothing left after stop words
   | "no-query" // no FTS query could be built from the keywords
   | "no-search-results" // search returned nothing

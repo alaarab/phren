@@ -30,7 +30,6 @@ import {
   errorMessage,
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/preferences.js";
-import { classifyClaudePromptText } from "../bridge/input-classification.js";
 import { logger } from "../logger.js";
 import { isToolHookEnabled, runPrePromptHooks } from "../hooks.js";
 import { handleExtractMemories } from "./extract.js";
@@ -94,6 +93,7 @@ export {
 
 import type { SelectedSnippet } from "../shared/retrieval.js";
 import { runPromptPipeline } from "../recall/pipeline.js";
+import { isMachinePrompt } from "../recall/prompt-source.js";
 import { recordRecallTrace, skippedTraceEntry, traceEntryFromResult } from "../recall/trace.js";
 import { buildHookOutput } from "./hooks-output.js";
 import {
@@ -125,16 +125,6 @@ export interface HookPromptInput {
   prompt: string;
   cwd?: string;
   sessionId?: string;
-}
-
-// Another agent's message relayed into this session: a sub-agent hand-back, a
-// message from another session, or the harness's idle or delivery notice.
-const AGENT_RELAY_PROMPT_RE = /^\s*(?:<(?:agent-message|cross-session-message)\b|\[Cross-session (?:delivery|idle) notice\])/i;
-
-/** A prompt nobody typed: a background agent's result, a teammate's message,
- *  another agent's report or a harness notice. The prompt hook answers none of them. */
-export function isMachinePrompt(prompt: string): boolean {
-  return classifyClaudePromptText(prompt).category === "notification" || AGENT_RELAY_PROMPT_RE.test(prompt);
 }
 
 export function parseHookInput(raw: string): HookPromptInput | null {
