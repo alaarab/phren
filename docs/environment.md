@@ -107,8 +107,17 @@ validated against the index and stored either way: one that does not resolve is
 kept and marked unresolved, the counterpart of an invalid file citation, and
 the trust filter treats it as `invalid_citation`. `code_definition` lists the
 findings linked to it, and `get_findings` / `search_knowledge` return the link
-so a client can show it. See
-[store-format.md](store-format.md#3-metadata-comments).
+so a client can show it.
+
+The citation names the repo by its `origin` remote (`github.com/owner/repo`,
+with any user name or token in the URL left out), the commit, and a file
+relative to the repo root, so it can be checked on any computer with a clone.
+When the caller gives no repo or file, `add_finding` uses the project's checkout
+on this computer (its registered folder, else a folder named after the project
+under the usual roots), records its remote and `HEAD`, and cites a file only
+when the finding names exactly one file that checkout tracks; it never guesses
+a line. A project with no checkout here, or a repo with no clone URL, gets the
+older form. See [store-format.md](store-format.md#3-metadata-comments).
 
 ## File Locking
 

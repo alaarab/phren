@@ -287,6 +287,64 @@ describe("finding provenance", () => {
   });
 });
 
+describe("portable citations", () => {
+  let checkout: string;
+  let head: string;
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: checkout, encoding: "utf8" }).trim();
+  const lastCitation = () => {
+    const line = fs.readFileSync(findingsPath(), "utf-8").split("\n").find(l => l.includes("phren:cite"))!;
+    return JSON.parse(line.replace(/^\s*<!-- phren:cite /, "").replace(/ -->\s*$/, ""));
+  };
+
+  beforeEach(() => {
+    checkout = path.join(tmp.path, "..", `${path.basename(tmp.path)}-checkout`);
+    fs.mkdirSync(checkout);
+    git("init", "-q");
+    writeFile(path.join(checkout, "src", "net", "retry.ts"), "export const budget = 3;\n");
+    writeFile(path.join(checkout, "src", "net", "index.ts"), "export {};\n");
+    writeFile(path.join(checkout, "src", "ui", "index.ts"), "export {};\n");
+    git("add", "-A");
+    git("commit", "-qm", "seed");
+    head = git("rev-parse", "HEAD");
+    git("remote", "add", "origin", "https://x-access-token:not-a-real-token@github.com/Acme/Widgets.git");
+    writeFile(path.join(tmp.path, PROJECT, "phren.project.yaml"), `sourcePath: ${checkout}\n`);
+  });
+
+  afterEach(() => fs.rmSync(checkout, { recursive: true, force: true }));
+
+  it("cites the project's checkout by its remote and HEAD when the caller gives no citation", () => {
+    expect(addFindingToFile(tmp.path, PROJECT, "Retries back off exponentially with jitter").ok).toBe(true);
+    expect(lastCitation()).toEqual({ created_at: expect.any(String), remote: "github.com/Acme/Widgets", commit: head });
+    expect(fs.readFileSync(findingsPath(), "utf-8")).not.toContain("not-a-real-token");
+  });
+
+  it("cites the one tracked file a finding names, and no line", () => {
+    addFindingToFile(tmp.path, PROJECT, "The retry budget lives in src/net/retry.ts and nowhere else");
+    expect(lastCitation()).toMatchObject({ remote: "github.com/Acme/Widgets", file: "src/net/retry.ts", commit: head });
+    expect(lastCitation().line).toBeUndefined();
+  });
+
+  it("cites no file when the named path is ambiguous or more than one file is named", () => {
+    addFindingToFile(tmp.path, PROJECT, "Every barrel file is called index.ts in this repo");
+    expect(lastCitation().file).toBeUndefined();
+    fs.rmSync(findingsPath());
+    addFindingsToFile(tmp.path, PROJECT, ["Both net/retry.ts and ui/index.ts read the retry budget at start-up"]);
+    expect(lastCitation()).toMatchObject({ remote: "github.com/Acme/Widgets", commit: head });
+    expect(lastCitation().file).toBeUndefined();
+  });
+
+  it("makes a caller's absolute file repo-relative and keeps the caller's line and commit", () => {
+    addFindingToFile(tmp.path, PROJECT, "The budget constant is read once", { file: path.join(checkout, "src", "net", "retry.ts"), line: 1, commit: "abc1234" });
+    expect(lastCitation()).toEqual({ created_at: expect.any(String), remote: "github.com/Acme/Widgets", file: "src/net/retry.ts", line: 1, commit: "abc1234" });
+  });
+
+  it("keeps a local-only repo's path and never guesses a file from the commit", () => {
+    git("remote", "remove", "origin");
+    addFindingToFile(tmp.path, PROJECT, "The seed commit set up the network module", { repo: checkout, commit: head });
+    expect(lastCitation()).toEqual({ created_at: expect.any(String), repo: checkout, commit: head });
+  });
+});
+
 describe("error path: invalid project name", () => {
   it("bulk add returns error for invalid project name", () => {
     const r = addFindingsToFile(tmp.path, "../escape", ["Should fail"]);

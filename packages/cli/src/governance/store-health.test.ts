@@ -86,21 +86,25 @@ describe("store health collection", () => {
       project: "proj", activeFindings: 8, archivedBullets: 2, olderBullets: 2,
       retiredBullets: 2, contradictedBullets: 2, bulletsWithoutFid: 3,
       duplicateFids: 2, duplicateTexts: 3,
-      citations: { none: 7, timestampOnly: 1, withFile: 2, withCommit: 2, withSymbol: 2 },
+      citations: { none: 7, timestampOnly: 1, withFile: 2, withCommit: 2, withSymbol: 2, withRemote: 0 },
+      checkableCitations: { any: 0, withFile: 0 },
       openTasks: 3, doneTasks: 2, reviewEntries: 3,
     });
+    expect(result.stores[0].citationCoverage).toBe(0);
     expect(result.stores[0].totals).toEqual({
       activeFindings: 9, archivedBullets: 2, olderBullets: 2,
       retiredBullets: 2, contradictedBullets: 2, bulletsWithoutFid: 3,
       duplicateFids: 2, duplicateTexts: 3,
-      citations: { none: 8, timestampOnly: 1, withFile: 2, withCommit: 2, withSymbol: 2 },
+      citations: { none: 8, timestampOnly: 1, withFile: 2, withCommit: 2, withSymbol: 2, withRemote: 0 },
+      checkableCitations: { any: 0, withFile: 0 },
       openTasks: 3, doneTasks: 2, reviewEntries: 3,
     });
     expect(result.stores[1].projects).toEqual([{
       project: "proj", activeFindings: 1, archivedBullets: 0, olderBullets: 0,
       retiredBullets: 0, contradictedBullets: 0, bulletsWithoutFid: 0,
       duplicateFids: 0, duplicateTexts: 0,
-      citations: { none: 1, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0 },
+      citations: { none: 1, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
+      checkableCitations: { any: 0, withFile: 0 },
       openTasks: 0, doneTasks: 0, reviewEntries: 0,
     }]);
     expect(fs.existsSync(path.join(team, ".runtime"))).toBe(false);
@@ -117,6 +121,30 @@ describe("store health collection", () => {
     expect(result.stores.map(store => [store.path, store.totals.activeFindings])).toEqual([[".", 1], ["../team", 1]]);
     expect(fs.existsSync(path.join(primary, ".runtime"))).toBe(false);
     expect(fs.existsSync(path.join(team, ".runtime"))).toBe(false);
+  });
+
+  it("reports the share of active findings whose citation this computer checked to a decided state", () => {
+    const remote = { remote: "github.com/acme/widgets", commit: "abc1234" };
+    put(primary, "proj/FINDINGS.md", [
+      "# Findings", "## 2026-11-25",
+      "- Checked valid <!-- fid:aaaa0001 -->", citation({ ...remote, file: "src/a.ts" }),
+      "- Checked broken <!-- fid:aaaa0002 -->", citation({ ...remote, file: "src/gone.ts" }),
+      "- Anchored to a commit <!-- fid:aaaa0003 -->", citation(remote),
+      "- No clone of the repo here <!-- fid:aaaa0004 -->", citation({ ...remote, file: "src/b.ts" }),
+      "- Bare timestamp <!-- fid:aaaa0005 -->", citation(),
+    ].join("\n"));
+    put(primary, "proj/reference/topics/old.md", "## Archived 2026-10-01\n- Archived and checked <!-- fid:aaaa0006 -->\n" + citation({ ...remote, file: "src/c.ts" }) + "\n");
+    put(primary, ".runtime/citation-states.json", JSON.stringify({
+      "fid:aaaa0001": { state: "valid", checkedAt: now.toISOString() },
+      "fid:aaaa0002": { state: "broken", checkedAt: now.toISOString() },
+      "fid:aaaa0003": { state: "valid", checkedAt: now.toISOString() },
+      "fid:aaaa0004": { state: "unverifiable", checkedAt: now.toISOString() },
+      "fid:aaaa0006": { state: "valid", checkedAt: now.toISOString() },
+    }));
+    const store = collectStoreHealth(primary, now, "test-computer").stores[0];
+    expect(store.totals.checkableCitations).toEqual({ any: 3, withFile: 2 });
+    expect(store.totals.citations.withRemote).toBe(5);
+    expect(store.citationCoverage).toBe(0.6);
   });
 
   it("measures primary logical file bytes recursively without following symlinks", () => {
@@ -161,9 +189,10 @@ describe("store health collection", () => {
       stores: [{ name: "personal", path: ".", projects: [], totals: {
         activeFindings: 0, archivedBullets: 0, olderBullets: 0, retiredBullets: 0,
         contradictedBullets: 0, bulletsWithoutFid: 0, duplicateFids: 0, duplicateTexts: 0,
-        citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0 },
+        citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
+        checkableCitations: { any: 0, withFile: 0 },
         openTasks: 0, doneTasks: 0, reviewEntries: 0,
-      } }], runtimeBytes: {}, recall: null,
+      }, citationCoverage: 0 }], runtimeBytes: {}, recall: null,
     });
     expect(fs.existsSync(path.join(primary, ".runtime"))).toBe(false);
   });

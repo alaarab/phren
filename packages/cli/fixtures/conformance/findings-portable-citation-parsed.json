@@ -1,0 +1,53 @@
+[
+  {
+    "id": "L1",
+    "stableId": "0000f001",
+    "date": "2026-11-26",
+    "text": "[pattern] Retries back off exponentially with jitter in the network client",
+    "citation": "<!-- phren:cite {\"created_at\":\"2026-11-26T09:00:00.000Z\",\"remote\":\"github.com/acme/widgets\",\"file\":\"src/net/retry.ts\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\",\"future_key\":\"kept verbatim\"} -->",
+    "citationData": {
+      "created_at": "2026-11-26T09:00:00.000Z",
+      "remote": "github.com/acme/widgets",
+      "file": "src/net/retry.ts",
+      "commit": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "status": "active",
+    "status_updated": "2026-11-26",
+    "archived": false,
+    "tier": "current"
+  },
+  {
+    "id": "L2",
+    "stableId": "0000f002",
+    "date": "2026-11-26",
+    "text": "The release script tags before it publishes",
+    "citation": "<!-- phren:cite {\"created_at\":\"2026-11-26T09:05:00.000Z\",\"remote\":\"github.com/acme/widgets\",\"commit\":\"0123456789abcdef0123456789abcdef01234567\"} -->",
+    "citationData": {
+      "created_at": "2026-11-26T09:05:00.000Z",
+      "remote": "github.com/acme/widgets",
+      "commit": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "status": "active",
+    "status_updated": "2026-11-26",
+    "archived": false,
+    "tier": "current"
+  },
+  {
+    "id": "L3",
+    "stableId": "0000f003",
+    "date": "2026-11-20",
+    "text": "Older citations name the repo by the writer's absolute path",
+    "citation": "<!-- phren:cite {\"created_at\":\"2026-11-20T09:00:00.000Z\",\"repo\":\"/Users/someone/Projects/widgets\",\"file\":\"src/net/retry.ts\",\"line\":12,\"commit\":\"89abcdef0123456789abcdef0123456789abcdef\"} -->",
+    "citationData": {
+      "created_at": "2026-11-20T09:00:00.000Z",
+      "repo": "/Users/someone/Projects/widgets",
+      "file": "src/net/retry.ts",
+      "line": 12,
+      "commit": "89abcdef0123456789abcdef0123456789abcdef"
+    },
+    "status": "active",
+    "status_updated": "2026-11-20",
+    "archived": false,
+    "tier": "current"
+  }
+]

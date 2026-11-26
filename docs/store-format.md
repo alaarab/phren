@@ -109,7 +109,7 @@ stays readable and hand-editable.
 | `<!-- phren:supersedes "..." -->` | This entry replaces another, referenced by text snippet ⚠️ |
 | `<!-- phren:superseded_by "..." [date] -->` | Inverse of the above |
 | `<!-- phren:contradicts "..." -->` | Conflicts with another entry, by text snippet ⚠️ |
-| `<!-- phren:cite {json} -->` | Provenance: commit, file, line, linked function or type, timestamps |
+| `<!-- phren:cite {json} -->` | Provenance: repo, commit, file, line, linked function or type, timestamps |
 | `<!-- phren:archive:start -->` / `:end` | Legacy archive block delimiters (§5.2) |
 | `<!-- source: ... -->` | Capture origin |
 
@@ -125,6 +125,22 @@ local variable unless exported). An explicit name is validated against the
 index and stored even when it does
 not resolve, in which case `"symbol_unresolved":true` is recorded and the trust
 filter treats the entry as `invalid_citation`.
+
+A citation names its repo in one of two ways. A new citation records
+`remote`, the repo's `origin` as `host/owner/repo`
+(`{"remote":"github.com/acme/widgets"}`): no scheme, user name, password, port,
+query or `.git`, the host in lower case and the path as git prints it. Its
+`file` is then relative to the repo root, with forward slashes. Every computer
+with a clone of that remote can check it, and readers compare remotes without
+case. Only a repo with no clone URL is still recorded as `repo`, the absolute
+path on the computer that wrote it, which is how every older citation names its
+repo. `commit` is the commit the citation was written against: the caller's, or
+the checkout's `HEAD`. `file` is the caller's, or the one tracked file the
+finding's text names; `line` is only ever the caller's.
+
+Readers must carry the citation line through any write unchanged, keys they do
+not know included (§2.1). The iOS app does: it ignores the keys it does not
+know and only writes a citation for a finding it creates.
 
 ⚠️ **`supersedes` and `contradicts` reference entries by a 60-character text
 snippet, not by `fid`.** Resolution is a normalised prefix match. Editing the
@@ -310,6 +326,12 @@ committed bytes:
 - a pinned/prioritised task edited by text only (§4.2)
 - text long enough and Unicode-rich enough to hit the 500- and 60-character
   boundaries (§2.2, §4.3)
+
+A citation that names its repo by `remote`, with a repo-relative `file` and a
+key no reader knows inside the JSON (§3), has
+`findings-portable-citation.md`, its parsed JSON and the bytes after an edit of
+that finding, asserted on the TypeScript side in
+`conformance-format-gaps.test.ts`.
 
 Lifecycle writes on archive bullets (§4.6) have their own cases:
 `archive-lifecycle-cases.json` names the store to set up, each operation

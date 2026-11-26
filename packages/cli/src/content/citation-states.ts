@@ -1,14 +1,16 @@
 /**
  * Citation states this computer has checked, kept in `.runtime/citation-states.json`.
- * A citation's repo path means something only on the computer that has it, so the
- * states stay local and are never written into the synced markdown. Governance
+ * Whether a citation checks out depends on the checkouts a computer has, so the
+ * states stay local and are never written into the synced markdown. A citation's
+ * `remote` resolves to this computer's clone of it, and another computer's repo
+ * path to a same-named checkout here that has the cited commit. Governance
  * checks the least recently checked citations first, a bounded number of git
  * calls per run, and picks up the rest on the next run.
  */
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { atomicWriteText, runtimeFile } from "../phren-paths.js";
+import { atomicWriteText, runtimeDir, runtimeFile } from "../phren-paths.js";
 import { debugLog } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { parseFindingId } from "./metadata.js";
@@ -48,9 +50,10 @@ export function citationStateKey(file: string, bullet: string): string {
   return `hash:${crypto.createHash("sha1").update(source).digest("hex").slice(0, 16)}`;
 }
 
+/** The recorded states; reading never creates `.runtime` (store health is read-only). */
 export function readCitationStates(phrenPath: string): CitationStates {
   try {
-    const raw = JSON.parse(fs.readFileSync(runtimeFile(phrenPath, CITATION_STATES_FILE), "utf8")) as Record<string, Partial<CitationStateEntry>>;
+    const raw = JSON.parse(fs.readFileSync(path.join(runtimeDir(phrenPath), CITATION_STATES_FILE), "utf8")) as Record<string, Partial<CitationStateEntry>>;
     const states: CitationStates = {};
     for (const [key, entry] of Object.entries(raw)) {
       if (entry && STATES.has(entry.state as CitationState) && typeof entry.checkedAt === "string" && Number.isFinite(Date.parse(entry.checkedAt))) {
@@ -80,7 +83,7 @@ function citedFindings(storePath: string, project: string): Array<{ key: string;
       if (!lines[i].startsWith("- ")) continue;
       const citation = parseCitationComment(lines[i + 1]);
       // A bare timestamp names nothing to check.
-      if (!citation || (!citation.repo && !citation.file && !citation.symbol_unresolved)) continue;
+      if (!citation || (!citation.repo && !citation.remote && !citation.file && !citation.symbol_unresolved)) continue;
       found.push({ key: citationStateKey(file, lines[i]), citation });
     }
   }
@@ -107,7 +110,7 @@ export function sweepCitationStates(
   let checked = 0;
   for (const key of order) {
     if (citationGitCallCount() - start >= maxGitCalls) break;
-    states[key] = { state: checkFindingCitation(cited.get(key)!), checkedAt };
+    states[key] = { state: checkFindingCitation(cited.get(key)!, { phrenPath, relocate: true }), checkedAt };
     checked++;
   }
   const kept = Object.entries(states)

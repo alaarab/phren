@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Daily store health reports citation coverage: how many active findings have a citation this computer could check, how many of those name a file, and the share of each store's active findings that is.
+
+### Changed
+
+- A finding's citation now names its repo by its clone URL, like `github.com/owner/repo` (a user name or token in the URL is left out), with the commit and a path inside the repo, instead of a folder on the computer that saved it. Any of your computers with a clone of that repo can check it, so a finding saved on the Mac checks on Linux. A finding saved without a citation, in a project with a checkout on this computer, now cites that checkout and its current commit, plus a file when the finding names exactly one file the repo tracks. Phren no longer guesses a file and line from the cited commit. Older citations with another computer's folder are checked against a same-named checkout here when it has the cited commit. In a clone other than the one a citation was written in, a cited file counts as gone only when it was in the cited commit and that commit is in the clone's history, since that clone may be behind or on another branch.
+
 ## [0.3.93] - 2026-11-25
 
 ### Added

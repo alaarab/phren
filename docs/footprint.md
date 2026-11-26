@@ -100,7 +100,8 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
 - `.runtime/citation-states.json`: what daily governance last found for each
   cited finding on this computer (valid, drifted, broken or unverifiable, with
   the check time), keyed by fid. Never synced; entries unchecked for 30 days
-  are dropped, and it holds at most 5000.
+  are dropped, and it holds at most 5000. Store health reads it for citation
+  coverage.
 
 ### Agent settings (all presets: when MCP/hooks enabled)
 - `~/.claude/settings.json`, `~/.claude.json`, `mcpServers.phren` and the
@@ -304,7 +305,7 @@ nothing to that checkout.
   nothing was. Kept to the newest 5,000 lines once it passes 4 MB; local
   runtime state, never synced.
 - `<primary store>/.runtime/store-health.jsonl` holds daily counts of findings,
-  citations, tasks and review entries for this computer's stores, primary runtime
+  citations (with the share checkable on this computer), tasks and review entries for this computer's stores, primary runtime
   file sizes and the last 24 hours of recall counts. Kept to the newest 400
   lines; local runtime state, never synced.
 - `<store>/.sessions/recall-seen-<session>.json` holds, for one session, how

@@ -17,8 +17,10 @@ import {
   buildSourceComment,
   getHeadCommit,
   getRepoRoot,
-  inferCitationLocation,
 } from "./citation.js";
+import { originRemote, projectCheckout } from "./citation-checkouts.js";
+import { EXEC_TIMEOUT_QUICK_MS } from "../phren-core.js";
+import { runGitOrThrow } from "../utils.js";
 import { iterateProjectFindings } from "../finding/locate.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref } from "./dedup.js";
 import { validateFindingsFormat, validateFinding } from "./validate.js";
@@ -53,6 +55,7 @@ interface PreparedFinding {
   original: string;
   normalized: string;
   bullet: string;
+  citation: FindingCitation;
   citationComment: string;
   tagWarning?: string;
 }
@@ -102,38 +105,115 @@ interface AddFindingsWriteResult {
   wrote: boolean;
 }
 
-function buildFindingCitation(
-  citationInput?: Partial<FindingCitation>,
-  nowIso?: string,
-  inferredRepo?: string,
-  headCommit?: string,
-): FindingCitation {
-  const citation: FindingCitation = {
-    created_at: nowIso ?? new Date().toISOString(),
-    repo: citationInput?.repo || inferredRepo,
-    file: citationInput?.file,
-    line: citationInput?.line,
-    commit: citationInput?.commit || (citationInput?.repo || inferredRepo ? headCommit ?? getHeadCommit(citationInput?.repo || inferredRepo || "") : undefined),
-    symbol: citationInput?.symbol,
-    symbol_unresolved: citationInput?.symbol_unresolved ? true : undefined,
-    supersedes: citationInput?.supersedes,
-    task_item: citationInput?.task_item,
-  };
-  if (citation.repo && citation.commit && (!citation.file || !citation.line)) {
-    const inferred = inferCitationLocation(citation.repo, citation.commit);
-    citation.file = citation.file || inferred.file;
-    citation.line = citation.line || inferred.line;
-  }
-  return citation;
+/** The repo a new finding's citation names, read once per write. */
+interface CitationRepo {
+  /** The checkout: the caller's repo, the repo of the caller's absolute file, else this computer's checkout of the project. */
+  root?: string;
+  /** The checkout's `origin` remote; when set the citation names the repo by it and its file relative to `root`. */
+  remote?: string;
+  head?: string;
+  /** The caller named a repo or a file, so the repo is cited even when it has no remote. */
+  given: boolean;
 }
 
-function resolveInferredCitationRepo(citationInput?: Partial<FindingCitation>): string | undefined {
-  if (citationInput?.repo) return citationInput.repo;
-  if (citationInput?.file) {
-    const fileDir = path.dirname(citationInput.file);
-    return getRepoRoot(fileDir);
+function resolveCitationRepo(phrenPath: string, project: string, input?: Partial<FindingCitation>): CitationRepo {
+  const given = Boolean(input?.repo || input?.file);
+  let root: string | undefined;
+  if (input?.repo) root = getRepoRoot(input.repo);
+  else if (input?.file && path.isAbsolute(input.file)) root = getRepoRoot(path.dirname(input.file));
+  else root = projectCheckout(phrenPath, project);
+  if (!root) return { root: input?.repo, head: input?.repo ? getHeadCommit(input.repo) : undefined, given };
+  return { root, remote: originRemote(root), head: getHeadCommit(root), given };
+}
+
+// A path inside `root` as a repo-relative path with forward slashes, or undefined when it is outside.
+function repoRelative(root: string, file: string): string | undefined {
+  const inside = (base: string, target: string) => {
+    const rel = path.relative(base, target);
+    return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel.split(path.sep).join("/") : undefined;
+  };
+  const direct = inside(root, file);
+  if (direct) return direct;
+  // git reports the real path (macOS /private/var for /var), so compare real paths too.
+  try { return inside(fs.realpathSync(root), fs.realpathSync(file)); } catch { return undefined; }
+}
+
+// File paths a finding names, like `content/citation.ts` or `README.md`.
+const NAMED_PATH = /(?:^|[\s`'"(\[])((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.[A-Za-z]\w{0,7})(?::\d+)?(?=$|[\s`'"),.;:\]])/g;
+
+/**
+ * The one file a finding names that the checkout tracks, as a repo-relative path. Each named
+ * path must match exactly one tracked file (whole path or a trailing part of one), and all of
+ * them the same file; anything less certain cites no file.
+ */
+function fileNamedInFinding(root: string, text: string): string | undefined {
+  const named = [...new Set([...text.replace(/<!--.*?-->/g, " ").matchAll(NAMED_PATH)].map(match => match[1]))]
+    .filter(name => !name.split("/").some(part => part === "." || part === ".."))
+    .slice(0, 20);
+  if (named.length === 0) return undefined;
+  let tracked: string[];
+  try {
+    const out = runGitOrThrow(root, ["ls-files", "-z", "--", ...named.map(name => `:(glob)**/${name}`)], EXEC_TIMEOUT_QUICK_MS);
+    tracked = out.split("\0").filter(Boolean);
+  } catch (err: unknown) {
+    debugLog(`fileNamedInFinding: git ls-files failed in ${root}: ${String(err)}`);
+    return undefined;
   }
-  return undefined;
+  const files = new Set<string>();
+  for (const name of named) {
+    const matches = tracked.filter(file => file === name || file.endsWith(`/${name}`));
+    if (matches.length > 1) return undefined;
+    if (matches.length === 1) files.add(matches[0]);
+  }
+  return files.size === 1 ? [...files][0] : undefined;
+}
+
+/**
+ * The citation for a new finding. With a remote it names the repo by that remote, the commit (the
+ * caller's, else the checkout's HEAD) and a repo-relative file: the caller's, else the one file the
+ * finding names. Without one it keeps the caller's repo path, as before. A file or line is never guessed.
+ */
+function buildFindingCitation(
+  input: Partial<FindingCitation> | undefined,
+  nowIso: string | undefined,
+  repo: CitationRepo,
+  findingText: string,
+): FindingCitation {
+  const created_at = nowIso ?? new Date().toISOString();
+  const rest = {
+    symbol: input?.symbol,
+    symbol_unresolved: input?.symbol_unresolved ? true : undefined,
+    supersedes: input?.supersedes,
+    task_item: input?.task_item,
+  };
+  if (repo.remote && repo.root) {
+    let file: string | undefined;
+    if (input?.file) {
+      const absolute = path.isAbsolute(input.file) ? input.file : input.repo ? path.resolve(input.repo, input.file) : undefined;
+      file = absolute ? repoRelative(repo.root, absolute) : path.posix.normalize(input.file.split(path.sep).join("/"));
+    }
+    const portableFile = file && !file.startsWith("../") && file !== ".." ? file : undefined;
+    if (!input?.file || portableFile) {
+      const named = portableFile ? undefined : fileNamedInFinding(repo.root, findingText);
+      return {
+        created_at,
+        remote: repo.remote,
+        file: portableFile ?? named,
+        line: portableFile ? input?.line : undefined,
+        commit: input?.commit || repo.head,
+        ...rest,
+      };
+    }
+  }
+  const repoPath = input?.repo || (repo.given ? repo.root : undefined);
+  return {
+    created_at,
+    repo: repoPath,
+    file: input?.file,
+    line: input?.line,
+    commit: input?.commit || (repoPath ? repo.head : undefined),
+    ...rest,
+  };
 }
 
 function buildFindingScope(scope?: string): string | undefined {
@@ -193,8 +273,7 @@ interface PrepareFindingOpts {
   scope?: string;
   provenance?: FindingProvenance;
   nowIso?: string;
-  inferredRepo?: string;
-  headCommit?: string;
+  citationRepo: CitationRepo;
   phrenPath?: string;
   idSource?: () => string;
 }
@@ -202,7 +281,7 @@ interface PrepareFindingOpts {
 function prepareFinding(
   opts: PrepareFindingOpts,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate"; duplicate?: ArchivedDuplicate } | { status: "rejected"; reason: string } {
-  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit, idSource } = opts;
+  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, citationRepo, idSource } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
     return { status: "rejected", reason: `Contains ${secretType}` };
@@ -280,13 +359,14 @@ function prepareFinding(
   }
   bullet += ` ${buildLifecycleComments(lifecycle, today)}`;
 
-  const citation = buildFindingCitation(citationInput, nowIso, inferredRepo, headCommit);
+  const citation = buildFindingCitation(citationInput, nowIso, citationRepo, normalizedLearning);
   return {
     status: "added",
     finding: {
       original: learning,
       normalized: normalizedLearning,
       bullet,
+      citation,
       citationComment: `  ${buildCitationComment(citation)}`,
       tagWarning,
     },
@@ -368,8 +448,7 @@ export function addFindingToFile(
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
   const scope = buildFindingScope(opts?.scope);
-  const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
-  const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
+  const citationRepo = resolveCitationRepo(phrenPath, project, resolvedCitationInput);
   const supersedesText = resolvedCitationInput?.supersedes;
   const normalizedForSupersedes = supersedesText
     ? resolveCoref(normalizeObservationTags(learning).text, {
@@ -391,7 +470,7 @@ export function addFindingToFile(
     if (!fs.existsSync(learningsPath)) {
       const preparedForNewFile = prepareFinding({
         finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
-        citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+        citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, citationRepo, phrenPath,
         idSource: opts?.idSource,
       });
       if (preparedForNewFile.status === "rejected") {
@@ -406,7 +485,7 @@ export function addFindingToFile(
       renameOverSync(tmpPath, learningsPath);
       return phrenOk({
         content: newContent,
-        citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
+        citation: preparedForNewFile.finding.citation,
         tagWarning: preparedForNewFile.finding.tagWarning,
         created: true,
         bullet: preparedForNewFile.finding.bullet,
@@ -425,7 +504,7 @@ export function addFindingToFile(
       : content;
     const prepared = prepareFinding({
       finding: learning, project, fullHistory: historyForDedup, extraAnnotations: opts?.extraAnnotations,
-      citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+      citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, citationRepo, phrenPath,
       idSource: opts?.idSource,
     });
     if (prepared.status === "rejected") {
@@ -481,7 +560,7 @@ export function addFindingToFile(
     renameOverSync(tmpPath, learningsPath);
     return phrenOk({
       content: updated,
-      citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
+      citation: prepared.finding.citation,
       tagWarning: prepared.finding.tagWarning,
       created: false,
       bullet: prepared.finding.bullet,
@@ -562,8 +641,7 @@ export function addFindingsToFile(
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
   const scope = buildFindingScope(opts?.scope);
-  const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
-  const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
+  const citationRepo = resolveCitationRepo(phrenPath, project, resolvedCitationInput);
 
   const added: string[] = [];
   const skipped: string[] = [];
@@ -585,7 +663,7 @@ export function addFindingsToFile(
         }
         const prepared = prepareFinding({
           finding: learning, project, fullHistory: content, extraAnnotations,
-          citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+          citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, citationRepo, phrenPath,
         });
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
@@ -621,7 +699,7 @@ export function addFindingsToFile(
       }
       const prepared = prepareFinding({
         finding: learning, project, fullHistory: content, extraAnnotations,
-        citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
+        citationInput: resolvedCitationInput, scope, nowIso, citationRepo, phrenPath,
       });
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });

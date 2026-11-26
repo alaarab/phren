@@ -919,6 +919,7 @@ export function applyTrustFilter(
         decay,
         project: doc.project,
         highImpactFindingIds,
+        phrenPath,
       });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);

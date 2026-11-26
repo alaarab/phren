@@ -44,6 +44,14 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); tmp.cleanup(); });
 
 describe("gitboy citation freshness", () => {
+  it("checks a citation that names its repo by remote with no checkout or project remote", async () => {
+    const urls: string[] = [];
+    const cite = citation("src/a.ts", { projectRemote: undefined, remote: "gitboy.example/alice/app" });
+    const result = await refreshCitationFreshness([cite], { ...options(), fetchImpl: async url => { urls.push(String(url)); return response(url, true); } });
+    expect(result.get(cite)?.state).toBe("changed");
+    expect(new URL(urls[0]).pathname).toBe("/api/v1/repos/alice/app/changed");
+  });
+
   it("never invokes git on a cold cache-only lookup, or when reading a persisted resolution", async () => {
     const repo = path.join(tmp.path, "checkout");
     mkdirSync(repo);
