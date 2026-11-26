@@ -234,9 +234,22 @@ export function tokenizeForOverlap(text: string, maxTokens = 24): string[] {
   return uniqueTokens.slice(0, maxTokens);
 }
 
-function overlapScore(queryTokens: string[], content: string): number {
+/** A bullet's tokens: whole words plus the parts of joined ones, so "allowlist" matches `lint-allowlist`. */
+function textTokens(text: string): Set<string> {
+  const tokens = new Set(tokenizeForOverlap(text, Number.POSITIVE_INFINITY));
+  for (const token of [...tokens]) {
+    if (!/[-_]/.test(token)) continue;
+    for (const part of [token.replace(/^[-_]+|[-_]+$/g, ""), ...token.split(/[-_]+/)]) {
+      const normalized = normalizeToken(part);
+      if (normalized.length > 1 && !STOP_WORDS.has(normalized)) tokens.add(normalized);
+    }
+  }
+  return tokens;
+}
+
+function overlapScore(queryTokens: string[], content: string, parts = true): number {
   if (!queryTokens.length) return 0;
-  const contentTokens = new Set(tokenizeForOverlap(content, Number.POSITIVE_INFINITY));
+  const contentTokens = parts ? textTokens(content) : new Set(tokenizeForOverlap(content, Number.POSITIVE_INFINITY));
   if (!contentTokens.size) return 0;
   let matched = 0;
   for (const token of queryTokens) {
@@ -249,7 +262,8 @@ function overlapScore(queryTokens: string[], content: string): number {
 function docOverlapScore(queryTokens: string[], doc: DocRow): number {
   // Never the path: every store path contains "/.phren/", so "phren" would match every doc.
   const corpus = `${doc.project} ${doc.filename} ${doc.type}\n${doc.content.slice(0, 5000)}`;
-  return overlapScore(queryTokens, corpus);
+  // Whole words only: this scores the first pages of up to 100 sampled docs per prompt.
+  return overlapScore(queryTokens, corpus, false);
 }
 
 /** A doc's bullets (with their continuation lines) or, with none, its
@@ -290,10 +304,11 @@ export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content
   if (!queryTokens.length) return null;
   const wanted = new Set(queryTokens);
   let best: ChunkMatch | null = null;
+  let bestSize = 0;
   for (const entry of cachedChunks(doc)) {
     // A chunk's tokens are substrings of its lowercase text, so one containing no keyword matches none.
     if (!queryTokens.some((token) => entry.lower.includes(token))) continue;
-    entry.tokens ??= new Set(tokenizeForOverlap(entry.chunk, Number.POSITIVE_INFINITY));
+    entry.tokens ??= textTokens(entry.chunk);
     const { chunk, tokens } = entry;
     const matched: string[] = [];
     let weight = 0;
@@ -304,7 +319,9 @@ export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content
     }
     const distinct = matched.length;
     if (!distinct) continue;
-    if (!best || weight > best.rarity || (weight === best.rarity && distinct > best.distinct)) best = { chunk, distinct, rarity: weight, matched };
+    // On a full tie the shorter chunk wins: the same keywords in fewer words are its subject, not a passing mention.
+    const tie = weight === best?.rarity && (distinct > best.distinct || (distinct === best.distinct && tokens.size < bestSize));
+    if (!best || weight > best.rarity || tie) { best = { chunk, distinct, rarity: weight, matched }; bestSize = tokens.size; }
   }
   return best;
 }
