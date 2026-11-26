@@ -1246,7 +1246,7 @@ Mark an existing finding as superseded by a newer finding.
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding_text` | string | yes | Finding selector (supports `fid:`, exact text, or partial match). |
-| `superseded_by` | string | yes | New finding text that supersedes the old one. |
+| `superseded_by` | string | yes | New finding text that supersedes the old one, or the `fid:` of a finding in any tier, whose text is used. The first 60 characters are stored. |
 
 ### `retract_finding`
 
@@ -1268,6 +1268,8 @@ Resolve a contradiction between two findings and update lifecycle statuses.
 | `finding_text` | string | yes | First finding selector (`fid:`, exact text, or partial match). |
 | `finding_text_other` | string | yes | Second finding selector (`fid:`, exact text, or partial match). |
 | `resolution` | enum | yes | One of: `keep_a`, `keep_b`, `keep_both`, `retract_both`. |
+
+These three tools (`revise_finding` actions `supersede`, `retract` and `resolve_contradiction`) also work on archived findings. A selector is matched in `FINDINGS.md` first, as before. When nothing there matches, it is looked up in the topic archives and their `.older.md` files by `fid:` or full text (case, whitespace, comments and a leading type tag aside; no partial matches), and that one bullet's line is rewritten with the same lifecycle comments; nothing else in the archive file changes. When the text matches more than one finding, nothing is changed and the error response carries `data.candidates`, each with `tier`, `file`, `line` and `fid` when it has one. Bullets inside a legacy `<details>` block in `FINDINGS.md` stay read-only. Responses include `tier` (`active`, `topic`, or `older`) and `file` for each changed finding.
 
 ### `get_contradictions`
 

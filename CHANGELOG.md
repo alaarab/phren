@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - A store opened as an Obsidian vault no longer syncs Obsidian's own workspace state: the store's `.gitignore` now lists `.obsidian/`, added to existing stores the next time `phren init` or a relink runs.
+- Superseding, retracting and resolving a contradiction now work on findings that have moved to the topic archives, including `.older.md`, found by fid or full text. Only that finding's line changes. If the text matches more than one archived finding, nothing changes and the matches are listed so you can pick one by fid. The finding a supersede points to can also be given as a fid from any tier.
 
 ### Changed
 
