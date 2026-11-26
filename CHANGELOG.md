@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Phren Hook stops background checks such as Claude sign-in discovery when it shuts down, so a slow check no longer delays a restart. Agents already running in panes keep working.
+- `phren shell` stays open when a skill folder contains a dangling symlink. Skill listing and linking skip symlinks whose targets are missing or are neither files nor folders.
 
 ## [0.3.94] - 2026-11-26
 

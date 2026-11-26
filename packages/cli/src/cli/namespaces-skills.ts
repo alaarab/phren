@@ -7,8 +7,9 @@ import {
   homePath,
   hookConfigPath,
 } from "../shared.js";
-import { isValidProjectName, errorMessage, getOptionValue } from "../utils.js";
+import { isValidProjectName, errorMessage, getOptionValue, safeProjectPath } from "../utils.js";
 import { logger } from "../logger.js";
+import { statFileOrDirectory } from "../phren-paths.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills, skillMirrorPath } from "../skill/registry.js";
 import { detectSkillCollisions } from "../link/skills.js";
@@ -185,18 +186,22 @@ export function handleSkillsNamespace(args: string[], profile: string) {
     }
 
     const source = path.resolve(expandHomePath(skillPath));
-    if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
+    if (!statFileOrDirectory(source)?.isFile()) {
       console.error(`Skill file not found: ${source}`);
       process.exit(1);
     }
 
     const baseName = path.basename(source);
     const fileName = baseName.toLowerCase().endsWith(".md") ? baseName : `${baseName}.md`;
-    const destDir = path.join(getPhrenPath(), project, "skills");
+    const destDir = safeProjectPath(getPhrenPath(), project, "skills");
+    if (!destDir) {
+      console.error("Skill directory escapes phren store.");
+      process.exit(1);
+    }
     const dest = path.join(destDir, fileName);
     fs.mkdirSync(destDir, { recursive: true });
 
-    if (fs.existsSync(dest)) {
+    if (fs.lstatSync(dest, { throwIfNoEntry: false })) {
       console.error(`Skill already exists: ${dest}`);
       process.exit(1);
     }
@@ -206,7 +211,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       console.log(`Linked skill ${fileName} into ${project}.`);
     } catch (err: unknown) {
       if ((process.env.PHREN_DEBUG)) logger.debug("cli-namespaces", `skill add symlinkFailed: ${errorMessage(err)}`);
-      fs.copyFileSync(source, dest);
+      fs.copyFileSync(source, dest, fs.constants.COPYFILE_EXCL);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
     return;
@@ -516,7 +521,7 @@ export function handleSkillList(profile: string, project?: string) {
 export function handleDetectSkills(args: string[], profile: string) {
   const importFlag = args.includes("--import");
   const nativeSkillsDir = homePath(".claude", "skills");
-  if (!fs.existsSync(nativeSkillsDir)) {
+  if (!statFileOrDirectory(nativeSkillsDir)?.isDirectory()) {
     console.log("No native skills directory found at ~/.claude/skills/");
     return;
   }
@@ -524,18 +529,21 @@ export function handleDetectSkills(args: string[], profile: string) {
   const trackedSkills = new Set<string>();
   const phrenPath = getPhrenPath();
   const globalSkillsDir = path.join(phrenPath, "global", "skills");
-  if (fs.existsSync(globalSkillsDir)) {
+  if (statFileOrDirectory(globalSkillsDir)?.isDirectory()) {
     for (const entry of fs.readdirSync(globalSkillsDir)) {
+      const stat = statFileOrDirectory(path.join(globalSkillsDir, entry));
+      if (!stat) continue;
       trackedSkills.add(entry.replace(/\.md$/, ""));
-      if (fs.statSync(path.join(globalSkillsDir, entry)).isDirectory()) {
+      if (stat.isDirectory()) {
         trackedSkills.add(entry);
       }
     }
   }
   for (const dir of getProjectDirs(phrenPath, profile)) {
     for (const projectSkillsDir of [path.join(dir, "skills"), path.join(dir, ".claude", "skills")]) {
-      if (!fs.existsSync(projectSkillsDir)) continue;
+      if (!statFileOrDirectory(projectSkillsDir)?.isDirectory()) continue;
       for (const entry of fs.readdirSync(projectSkillsDir)) {
+        if (!statFileOrDirectory(path.join(projectSkillsDir, entry))) continue;
         trackedSkills.add(entry.replace(/\.md$/, ""));
       }
     }
@@ -544,19 +552,15 @@ export function handleDetectSkills(args: string[], profile: string) {
   const untracked: Array<{ name: string; path: string; isDir: boolean }> = [];
   for (const entry of fs.readdirSync(nativeSkillsDir)) {
     const entryPath = path.join(nativeSkillsDir, entry);
-    const stat = fs.statSync(entryPath);
-    try {
-      if (fs.lstatSync(entryPath).isSymbolicLink()) continue;
-    } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) logger.debug("cli-namespaces", `skillList lstat: ${errorMessage(err)}`);
-    }
+    const stat = statFileOrDirectory(entryPath, false);
+    if (!stat) continue;
     const name = entry.replace(/\.md$/, "");
     if (trackedSkills.has(name)) continue;
     if (stat.isFile() && entry.endsWith(".md")) {
       untracked.push({ name, path: entryPath, isDir: false });
     } else if (stat.isDirectory()) {
       const skillFile = path.join(entryPath, "SKILL.md");
-      if (fs.existsSync(skillFile)) {
+      if (statFileOrDirectory(skillFile)?.isFile()) {
         untracked.push({ name, path: entryPath, isDir: true });
       }
     }
@@ -577,20 +581,24 @@ export function handleDetectSkills(args: string[], profile: string) {
     return;
   }
 
+  if (!safeProjectPath(phrenPath, "global", "skills")) {
+    console.error("Global skill directory escapes phren store.");
+    return;
+  }
   fs.mkdirSync(globalSkillsDir, { recursive: true });
   let imported = 0;
   for (const skill of untracked) {
     const dest = skill.isDir
       ? path.join(globalSkillsDir, skill.name)
       : path.join(globalSkillsDir, `${skill.name}.md`);
-    if (fs.existsSync(dest)) {
+    if (fs.lstatSync(dest, { throwIfNoEntry: false })) {
       console.log(`  skip ${skill.name} (already exists in global/skills/)`);
       continue;
     }
     if (skill.isDir) {
-      fs.cpSync(skill.path, dest, { recursive: true });
+      fs.cpSync(skill.path, dest, { recursive: true, filter: (source) => Boolean(statFileOrDirectory(source)) });
     } else {
-      fs.copyFileSync(skill.path, dest);
+      fs.copyFileSync(skill.path, dest, fs.constants.COPYFILE_EXCL);
     }
     const destDisplay = skill.isDir ? `global/skills/${skill.name}/` : `global/skills/${skill.name}.md`;
     console.log(`  imported ${skill.name} -> ${destDisplay}`);

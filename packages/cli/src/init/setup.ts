@@ -19,7 +19,7 @@ import {
   runtimeHealthFile,
   isRecord,
 } from "../shared.js";
-import { ensurePrivateDir, homePath } from "../phren-paths.js";
+import { ensurePrivateDir, homePath, statFileOrDirectory } from "../phren-paths.js";
 import { isLiveForeignPhrenRoot, phrenRootFromGlobalClaudeLink } from "./guard-globals.js";
 import { resolveWorktreeParent } from "../git-worktree.js";
 import { listProfiles, resolveActiveProfile, setMachineProfile } from "../profile-store.js";
@@ -28,7 +28,7 @@ import { execFileSync } from "child_process";
 import {
   GOVERNANCE_SCHEMA_VERSION,
 } from "../shared/governance.js";
-import { errorMessage } from "../utils.js";
+import { errorMessage, safeProjectPath } from "../utils.js";
 import { ROOT, STARTER_DIR, VERSION, resolveEntryScript, commandVersion, versionAtLeast, nearestWritableTarget } from "./shared.js";
 import { readInstallPreferences } from "./preferences.js";
 import {
@@ -248,19 +248,21 @@ function ensureGlobalStarterAssets(phrenPath: string): string[] {
   }
 
   const starterSkillsDir = path.join(starterGlobal, "skills");
-  const targetSkillsDir = path.join(targetGlobalDir, "skills");
+  const targetSkillsDir = safeProjectPath(phrenPath, "global", "skills");
+  if (!targetSkillsDir) return created;
   fs.mkdirSync(targetSkillsDir, { recursive: true });
   if (fs.existsSync(starterSkillsDir)) {
     for (const entry of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
       if (!skillEnabled(phrenPath, entry.name)) continue;
       const source = path.join(starterSkillsDir, entry.name);
       const target = path.join(targetSkillsDir, entry.name);
+      const targetStat = fs.lstatSync(target, { throwIfNoEntry: false });
+      if (targetStat?.isSymbolicLink()) statFileOrDirectory(target, false);
+      if (targetStat) continue;
       if (entry.isFile() && entry.name.endsWith(".md")) {
-        if (fs.existsSync(target)) continue;
         fs.copyFileSync(source, target);
         created.push(path.join("global", "skills", entry.name));
-      } else if (entry.isDirectory() && fs.existsSync(path.join(source, "SKILL.md"))) {
-        if (fs.existsSync(target)) continue;
+      } else if (entry.isDirectory() && statFileOrDirectory(path.join(source, "SKILL.md"), false)?.isFile()) {
         copyDirRecursive(source, target);
         created.push(path.join("global", "skills", entry.name) + path.sep);
       }
@@ -586,9 +588,14 @@ function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
 }
 
 function copyStarterFile(phrenPath: string, src: string, dest: string): string | null {
+  const existingStat = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if ((existingStat && !existingStat.isFile()) || !safeProjectPath(phrenPath, path.relative(phrenPath, dest))) {
+    debugLog(`Skipping unusable starter destination: ${dest}`);
+    return null;
+  }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (!fs.existsSync(dest)) {
-    fs.copyFileSync(src, dest);
+  if (!existingStat) {
+    fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
     return dest;
   }
 
@@ -621,7 +628,8 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
   }
 
   const starterSkillsDir = path.join(starterGlobal, "skills");
-  const targetSkillsDir = path.join(phrenPath, "global", "skills");
+  const targetSkillsDir = safeProjectPath(phrenPath, "global", "skills");
+  if (!targetSkillsDir) return updates;
   if (fs.existsSync(starterSkillsDir)) {
     fs.mkdirSync(targetSkillsDir, { recursive: true });
     for (const f of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
@@ -631,8 +639,8 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
       if (f.isFile() && f.name.endsWith(".md")) {
         const written = copyStarterFile(phrenPath, src, dest);
         if (written) updates.push(path.relative(phrenPath, written));
-      } else if (f.isDirectory() && fs.existsSync(path.join(src, "SKILL.md"))) {
-        for (const inner of walkSkillFolder(src)) {
+      } else if (f.isDirectory() && statFileOrDirectory(path.join(src, "SKILL.md"), false)?.isFile()) {
+        for (const inner of walkSkillFolder(src, dest)) {
           const written = copyStarterFile(phrenPath, path.join(src, inner), path.join(dest, inner));
           if (written) updates.push(path.relative(phrenPath, written));
         }
@@ -643,13 +651,20 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
   return updates;
 }
 
-function walkSkillFolder(root: string, prefix = ""): string[] {
+function walkSkillFolder(root: string, destination: string, prefix = ""): string[] {
+  const target = path.join(destination, prefix);
+  const targetStat = fs.lstatSync(target, { throwIfNoEntry: false });
+  if (targetStat && !targetStat.isDirectory()) {
+    debugLog(`Skipping unusable starter skill directory: ${target}`);
+    return [];
+  }
   const out: string[] = [];
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     const rel = path.join(prefix, entry.name);
     const abs = path.join(root, entry.name);
-    if (entry.isDirectory()) out.push(...walkSkillFolder(abs, rel));
+    if (entry.isDirectory()) out.push(...walkSkillFolder(abs, destination, rel));
     else if (entry.isFile()) out.push(rel);
+    else if (entry.isSymbolicLink()) statFileOrDirectory(abs, false);
   }
   return out;
 }

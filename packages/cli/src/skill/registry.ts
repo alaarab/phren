@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getProjectDirs } from "../shared.js";
 import { parseSkillFrontmatter } from "../link/skills.js";
+import { statFileOrDirectory } from "../phren-paths.js";
 import { readSkillEnabledState, type SkillEnabledResolver } from "./state.js";
 import { safeProjectPath } from "../utils.js";
 import { storeAwareProjectPath } from "../store-routing.js";
@@ -96,7 +97,7 @@ function collectSkills(
   sourceKind: "canonical",
   seen: Set<string>,
 ): SkillEntry[] {
-  if (!fs.existsSync(root)) return [];
+  if (!statFileOrDirectory(root)?.isDirectory()) return [];
   const results: SkillEntry[] = [];
   const realRoot = (() => {
     try {
@@ -107,15 +108,18 @@ function collectSkills(
   })();
 
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isSymbolicLink()) {
+      statFileOrDirectory(entryPath, false);
+      continue;
+    }
     const isFolder = entry.isDirectory();
-    const candidatePath = isFolder
-      ? path.join(root, entry.name, "SKILL.md")
-      : entry.name.endsWith(".md") ? path.join(root, entry.name) : null;
-    if (!candidatePath) continue;
+    if (!isFolder && (!entry.isFile() || !entry.name.endsWith(".md"))) continue;
+    const candidatePath = isFolder ? path.join(entryPath, "SKILL.md") : entryPath;
+    if (!statFileOrDirectory(candidatePath, false)?.isFile()) continue;
     const safeCandidate = safeProjectPath(root, path.relative(root, candidatePath));
-    if (!safeCandidate || seen.has(safeCandidate) || !fs.existsSync(safeCandidate)) continue;
+    if (!safeCandidate || seen.has(safeCandidate)) continue;
     try {
-      if (fs.lstatSync(safeCandidate).isSymbolicLink()) continue;
       const realCandidate = fs.realpathSync(safeCandidate);
       if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot + path.sep)) continue;
     } catch {

@@ -65,6 +65,7 @@ If you move from shell to the browser view (`phren web-ui`), the UI also stays r
 ### Skills (`s`)
 
 Shows installed global and project-local skills and lets you inspect what is available in the current context.
+Live refresh skips symlinks with missing or unsupported targets, so skills with a broken link to a bundled asset still appear.
 
 Skills now have first-class lifecycle state:
 - enabled skills are active and participate in linking/discovery

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { atomicWriteText } from "../phren-paths.js";
+import { atomicWriteText, statFileOrDirectory } from "../phren-paths.js";
 import { moduleSnapshot } from "../modules/runtime.js";
 import { getRegisteredTools } from "../tool-registry.js";
 import * as fs from "fs";
@@ -103,17 +103,17 @@ export function validateSkillFrontmatter(content: string, filePath?: string): Sk
 }
 
 export function validateSkillsDir(skillsDir: string): SkillValidationResult[] {
-  if (!fs.existsSync(skillsDir)) return [];
+  if (!statFileOrDirectory(skillsDir)?.isDirectory()) return [];
   const results: SkillValidationResult[] = [];
   for (const entry of fs.readdirSync(skillsDir)) {
     const entryPath = path.join(skillsDir, entry);
-    const stat = fs.statSync(entryPath);
-    if (stat.isDirectory()) {
+    const stat = statFileOrDirectory(entryPath);
+    if (stat?.isDirectory()) {
       const skillFile = path.join(entryPath, "SKILL.md");
-      if (fs.existsSync(skillFile)) {
+      if (statFileOrDirectory(skillFile)?.isFile()) {
         results.push(validateSkillFrontmatter(fs.readFileSync(skillFile, "utf8"), skillFile));
       }
-    } else if (stat.isFile() && entry.endsWith(".md")) {
+    } else if (stat?.isFile() && entry.endsWith(".md")) {
       results.push(validateSkillFrontmatter(fs.readFileSync(entryPath, "utf8"), entryPath));
     }
   }
@@ -189,12 +189,13 @@ function isUserOwnedFile(destPath: string, managedRoot: string): boolean {
  * can't because a user-owned file already occupies the destination slot.
  */
 export function detectSkillCollisions(srcDir: string, destDir: string, managedRoot: string): SkillCollision[] {
-  if (!fs.existsSync(srcDir) || !fs.existsSync(destDir)) return [];
+  if (!statFileOrDirectory(srcDir)?.isDirectory() || !statFileOrDirectory(destDir)?.isDirectory()) return [];
   const collisions: SkillCollision[] = [];
 
   for (const entry of fs.readdirSync(srcDir)) {
     const srcPath = path.join(srcDir, entry);
-    const stat = fs.statSync(srcPath);
+    const stat = statFileOrDirectory(srcPath);
+    if (!stat) continue;
 
     if (stat.isFile() && entry.endsWith(".md")) {
       const destPath = path.join(destDir, entry);
@@ -208,7 +209,7 @@ export function detectSkillCollisions(srcDir: string, destDir: string, managedRo
       }
     } else if (stat.isDirectory()) {
       const skillFile = path.join(srcPath, "SKILL.md");
-      if (fs.existsSync(skillFile)) {
+      if (statFileOrDirectory(skillFile)?.isFile()) {
         const destPath = path.join(destDir, entry);
         if (isUserOwnedFile(destPath, managedRoot)) {
           collisions.push({
@@ -245,7 +246,7 @@ export function linkSkillsDir(
   symlinkFile: (src: string, dest: string, managedRoot: string) => boolean,
   opts?: { phrenPath?: string; scope?: string },
 ): SkillCollision[] {
-  if (!fs.existsSync(srcDir)) return [];
+  if (!statFileOrDirectory(srcDir)?.isDirectory()) return [];
   fs.mkdirSync(destDir, { recursive: true });
   const expectedNames = new Set<string>();
   const collisions: SkillCollision[] = [];
@@ -253,7 +254,8 @@ export function linkSkillsDir(
 
   for (const entry of fs.readdirSync(srcDir)) {
     const srcPath = path.join(srcDir, entry);
-    const stat = fs.statSync(srcPath);
+    const stat = statFileOrDirectory(srcPath);
+    if (!stat) continue;
     const skillName = stat.isDirectory() ? entry : entry.replace(/\.md$/, "");
     if (isEnabled && opts?.scope && !isEnabled(opts.scope, skillName)) {
       continue;
@@ -275,7 +277,7 @@ export function linkSkillsDir(
       symlinkFile(srcPath, destPath, managedRoot);
     } else if (stat.isDirectory()) {
       const skillFile = path.join(srcPath, "SKILL.md");
-      if (fs.existsSync(skillFile)) {
+      if (statFileOrDirectory(skillFile)?.isFile()) {
         const destPath = path.join(destDir, entry);
         if (isUserOwnedFile(destPath, managedRoot)) {
           const collision: SkillCollision = {

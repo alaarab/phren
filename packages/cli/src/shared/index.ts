@@ -1,5 +1,6 @@
 import { moduleSnapshot } from "../modules/runtime.js";
 import { skillEnabled } from "../modules/provision.js";
+import { statFileOrDirectory } from "../phren-paths.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -602,6 +603,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
       const type = classifyFile(filename, relFile);
       if (type === "task" && !modules.has("tasks")) continue;
       if (relFile.startsWith("skills/") && !skillEnabled(storePath, relFile.split("/")[1], profile)) continue;
+      if (type === "skill" && !statFileOrDirectory(fullPath)?.isFile()) continue;
       entries.push({ fullPath, project: projectName, filename, type, relFile });
       allAbsolutePaths.push(fullPath);
     }
@@ -615,11 +617,12 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
 
   // Index global skills so search_knowledge can find them
   const globalSkillsDir = path.join(phrenPath, "global", "skills");
-  if (fs.existsSync(globalSkillsDir)) {
+  if (statFileOrDirectory(globalSkillsDir)?.isDirectory()) {
     const skillFiles = globSync("**/*.md", { cwd: globalSkillsDir, nodir: true });
     for (const relFile of skillFiles) {
       if (!skillEnabled(phrenPath, relFile.split("/")[0], profile)) continue;
       const fullPath = path.join(globalSkillsDir, relFile);
+      if (!statFileOrDirectory(fullPath)?.isFile()) continue;
       const filename = path.basename(relFile);
       entries.push({ fullPath, project: "global", filename, type: "skill", relFile: `skills/${relFile}` });
       allAbsolutePaths.push(fullPath);
