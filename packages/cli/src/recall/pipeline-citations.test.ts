@@ -106,3 +106,84 @@ describe("a finding without a fid keeps its recorded state through the index", (
     expect(conflicts).toEqual([expect.stringContaining("skips zebrafish archives"), expect.stringContaining("drops zebrafish manifests")]);
   });
 });
+
+// A legacy citation names the repo by its path on the writing computer. Here that repo is on this computer, so a live check would start git.
+describe("legacy repo citations on the indexed prompt path", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let db: SqlJsDatabase;
+  let store: string;
+  const today = new Date().toISOString().slice(0, 10);
+  const injected = async () => {
+    const result = await runPromptPipeline({ prompt: "quokka exporter zebrafish", phrenPath: store, db, detectedProject: "widgets" });
+    return result.selectedRows.map(row => row.doc.content).join("\n");
+  };
+
+  beforeAll(async () => {
+    tmp = makeTempDir("recall-citation-legacy-");
+    const repo = path.join(tmp.path, "checkout");
+    store = path.join(tmp.path, "store");
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo, "src", "quokka.ts"), "quokka\nexport\n");
+    fs.writeFileSync(path.join(repo, "src", "zebra.ts"), "zebra\n");
+    fs.writeFileSync(path.join(repo, "src", "heron.ts"), "heron\n");
+    git("add", "-A");
+    git("commit", "-qm", "first");
+    const commit = git("rev-parse", "HEAD");
+    git("rm", "-q", "src/zebra.ts");
+    fs.writeFileSync(path.join(repo, "src", "heron.ts"), "heron changed\n");
+    git("commit", "-qam", "drop zebra.ts, change heron.ts");
+    const cite = (fields: Record<string, unknown>) => `  <!-- phren:cite ${JSON.stringify({ created_at: new Date().toISOString(), ...fields })} -->`;
+    const legacy = (file: string, line: number) => cite({ repo, file, line, commit });
+    fs.mkdirSync(path.join(store, "widgets"), { recursive: true });
+    initTestPhrenRoot(store);
+    const findings = path.join(store, "widgets", "FINDINGS.md");
+    fs.writeFileSync(findings, [
+      "# widgets Findings", "", `## ${today}`, "",
+      "- The quokka exporter writes zebrafish manifests nightly <!-- fid:feed0101 -->", legacy("src/quokka.ts", 1),
+      "- The quokka exporter skips zebrafish archives on weekends <!-- fid:feed0102 -->", legacy("src/zebra.ts", 1),
+      "- The quokka exporter retries zebrafish uploads twice <!-- fid:feed0103 -->", legacy("src/heron.ts", 1),
+      "- The quokka exporter compresses zebrafish logs <!-- fid:feed0105 -->", cite({}),
+      "- The quokka exporter signs zebrafish bundles <!-- fid:feed0106 -->",
+      "",
+    ].join("\n"));
+    const sweep = sweepCitationStates(store, [{ storePath: store, project: "widgets" }]);
+    expect(Object.fromEntries(Object.entries(sweep.states).map(([key, entry]) => [key, entry.state]))).toEqual({
+      "fid:feed0101": "valid", "fid:feed0102": "broken", "fid:feed0103": "drifted",
+    });
+    // Written after the sweep, so no state is recorded for it.
+    fs.appendFileSync(findings, `- The quokka exporter batches zebrafish reports hourly <!-- fid:feed0104 -->\n${legacy("src/quokka.ts", 2)}\n`);
+    db = await buildIndex(store);
+  });
+  afterAll(() => tmp?.cleanup());
+
+  it("drops the finding the sweep recorded broken, reports it as a conflict and starts no git", async () => {
+    const gitBefore = citationGitCallCount();
+    const filtered = await injected();
+    expect(citationGitCallCount() - gitBefore).toBe(0);
+    expect(filtered).not.toContain("skips zebrafish archives");
+    for (const kept of ["writes zebrafish manifests", "retries zebrafish uploads", "batches zebrafish reports", "compresses zebrafish logs", "signs zebrafish bundles"]) {
+      expect(filtered).toContain(kept);
+    }
+    const rows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ?", ["widgets", "FINDINGS.md"]) ?? [];
+    const conflicts = applyTrustFilter(rows, 120, 0, {}, store).queueItems.filter(item => item.section === "Conflicts").flatMap(item => item.items);
+    expect(conflicts).toEqual([expect.stringContaining("skips zebrafish archives")]);
+  });
+
+  it("does not count a cited finding as uncited: at 0.9 confidence only valid and unrecorded citations pass", async () => {
+    // Fresh findings: cited 1.0, uncited or a bare created_at 0.8, drifted 0.7.
+    const policy = path.join(store, ".config", "retention-policy.json");
+    fs.writeFileSync(policy, JSON.stringify({ minInjectConfidence: 0.9 }));
+    try {
+      const filtered = await injected();
+      expect(filtered).toContain("writes zebrafish manifests");
+      expect(filtered).toContain("batches zebrafish reports");
+      for (const dropped of ["skips zebrafish archives", "retries zebrafish uploads", "compresses zebrafish logs", "signs zebrafish bundles"]) {
+        expect(filtered).not.toContain(dropped);
+      }
+    } finally {
+      fs.rmSync(policy, { force: true });
+    }
+  });
+});
