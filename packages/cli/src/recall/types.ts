@@ -24,7 +24,7 @@ export type RecallFloorReason =
   | "floor-disabled" // kept: PHREN_MIN_QUERY_RELEVANCE=0
   | "too-few-keywords" // dropped: the prompt has fewer keywords than a chunk must match
   | "no-chunk" // dropped: no chunk matched any keyword
-  | "too-few-matches" // dropped: best chunk matched fewer distinct keywords than required
+  | "too-few-matches" // dropped: best chunk matched fewer distinct keywords than required, not counting words in most docs
   | "low-rarity" // dropped: matched keywords' summed rarity under the bar
   | "no-anchor" // dropped: matched only two keywords and neither is rare
   | "low-overlap" // dropped: overlap under the (cross-project) floor

@@ -6,20 +6,23 @@ import { readFinalTurn } from "./schedule-watch.js";
 import { paneRecord, type EffectiveStatusInput } from "./session-activity.js";
 import { turnPhase, type TurnRecord } from "./turn-records.js";
 const CHILD_ACTIVITY_CACHE_MS = 5_000;
+const CHILD_ACTIVITY_PENDING_MS = 30_000;
 interface ChildActivity { runningChildren: number; childProviders: Provider[] }
-const childActivityCache = new Map<string, { at: number; pending: boolean; result: Promise<ChildActivity> }>();
+const childActivityCache = new Map<string, { at: number; startedAt: number; pending: boolean; result: Promise<ChildActivity> }>();
 
-export async function childActivity(source: Provider, session: string): Promise<ChildActivity> {
+export async function childActivity(source: Provider, session: string, since = 0): Promise<ChildActivity> {
   const key = `${source}\0${session}`, now = Date.now(), cached = childActivityCache.get(key);
-  // A slow tree still belongs to the next overview. Expiring an in-flight
-  // read every five seconds starts it over before any answer can be reused.
-  if (cached && (cached.pending || now - cached.at < CHILD_ACTIVITY_CACHE_MS)) return cached.result;
+  // A pending tree answers any caller for 30 s (a slower one is retried and its late answer dropped),
+  // a settled or failed one for 5 s; one begun before `since` cannot speak for the Stop that named it.
+  if (cached && cached.startedAt >= since && (cached.pending ? now - cached.startedAt < CHILD_ACTIVITY_PENDING_MS : now - cached.at < CHILD_ACTIVITY_CACHE_MS)) return cached.result;
   const result = childAgentTree(source, session).then(tree => {
     const running = runningChildAgents(tree);
     return { runningChildren: running.length, childProviders: [...new Set(running.map(child => child.provider))].sort() };
-  }).catch(() => ({ runningChildren: 0, childProviders: [] as Provider[] }));
-  const entry = { at: now, pending: true, result };
-  void result.then(() => { entry.at = Date.now(); entry.pending = false; });
+  });
+  const entry = { at: now, startedAt: now, pending: true, result };
+  // A failure is held for 5 s like an answer, as a backoff, so a missing transcript is not rescanned every tick.
+  const settle = () => { entry.at = Date.now(); entry.pending = false; };
+  void result.then(settle, settle);
   childActivityCache.set(key, entry);
   while (childActivityCache.size > 128) childActivityCache.delete(childActivityCache.keys().next().value!);
   return result;
@@ -54,18 +57,22 @@ function finalEvidence(record: TurnRecord): ReturnType<typeof readFinalTurn> {
 /** Every caller gets the same guarded foreground evidence, with whatever
  * enrichment is ready inside one bounded window. Late work never mutates it. */
 export async function effectivePaneEvidence(server: string, pane: Json, session: string,
-  hooks?: AgentHooks, questions?: CodexQuestions, knownRecord?: TurnRecord): Promise<EffectiveStatusInput & { children?: ChildActivity }> {
+  hooks?: AgentHooks, questions?: CodexQuestions, knownRecord?: TurnRecord): Promise<EffectiveStatusInput & { children?: ChildActivity; childrenPending: boolean }> {
   const record = knownRecord ?? await bounded(paneRecord(server, pane, session));
   const phase = record ? turnPhase(record) : undefined;
   const target: Target = { server, pane: String(pane.pane_id), workspace: String(pane.workspace_id), tab: String(pane.tab_id), source: pane.agent as Provider, session };
   let children: ChildActivity | undefined, final: Awaited<ReturnType<typeof readFinalTurn>>;
+  const source = provider.safeParse(pane.agent);
+  // Child evidence must describe the world after the record's latest Stop.
+  const since = record?.stop ? Date.parse(record.stop.at) : 0;
   let question = false;
   await bounded(Promise.all([
     record && phase?.phase === "ended" ? finalEvidence(record).then(value => { final = value; }) : undefined,
-    provider.safeParse(pane.agent).success ? childActivity(pane.agent as Provider, session).then(value => { children = value; }) : undefined,
+    // A failed lookup leaves children pending without cutting the other reads short.
+    source.success ? childActivity(source.data, session, since).then(value => { children = value; }, () => undefined) : undefined,
     hooks?.syncTerminalDialog?.(target, ["blocked", "waiting"].includes(String(pane.agent_status)) || phase?.phase === "working"),
     pane.agent === "codex" ? questions?.pending(target).then(value => { question = !!value?.length; }) : undefined,
   ]));
   const available = availablePaneEvidence(server, pane, session, record, hooks);
-  return { ...available, final, children, runningChildren: children?.runningChildren, held: available.held || question };
+  return { ...available, final, children, childrenPending: source.success && children === undefined, runningChildren: children?.runningChildren, held: available.held || question };
 }

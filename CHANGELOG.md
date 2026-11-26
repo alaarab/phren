@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.95] - 2026-11-26
+
 ### Added
 
 - The recall eval reports judged precision: how many injected snippets were useful for their prompt, from cached relevance judgments (partial counts half), with the number of pairs not judged yet. It never calls a model. `--list-unjudged <file>` writes the pairs a judge still has to answer, `--judgments <file>` points a private run at its own cache, and `--check` fails when precision drops more than 2 points. The public fixture's judgments are committed beside its cases.
@@ -21,12 +23,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - The prompt hook now shows which prompt words matched the memories it injected, up to eight words with a count of the rest. Clanker mode shows the same words in one short line after its index.
 - The prompt hook no longer injects a memory that matches the prompt much more weakly than the best one. A memory whose matched words carry less than 60% of the best memory's weight (rare words weigh more) is left out, and the recall trace records it as `below-best`. On a real store this raised judged precision from 57% to 64% and cut the tokens injected per prompt by 14%, with the same hits and false injections.
 - The prompt hook now finds a prompt's words inside a memory's joined names: "allowlist" matches `lint-allowlist.txt`, "audit" matches `audit_log` and `install-hooks` matches `--install-hooks`. When two bullets in one file match the same words, it shows the shorter one rather than a long note that mentions them in passing. On a real store this raised hit@3 from 80% to 90% and judged precision from 64% to 66%, with the same false injections.
+- The prompt hook no longer counts a word that appears in about half the store's memories or more ("work", or the store's own folder name) as one of the two prompt words a memory must match. A prompt about another product no longer pulls in a memory that only mentions the product's name next to such a word. On a real store this cut false injections from 5.0% to 3.3%, with the same hits and judged precision up from 66.5% to 67.2%.
 
 ### Fixed
 
 - A merged pull request whose body says `Closes bid:<id>` now closes the task even when another pull request was linked to it first, on GitHub and gitboy. Every task write records its last activity, and moving a task out of Active releases its claim.
 - When two identical phone messages are queued in Claude Code, a delayed hook no longer marks the second delivered after the transcript has already confirmed the first. Claude can confirm a message before its transcript row arrives, and joined messages keep their confirmation across a Hook restart.
 - The prompt hook now uses an archived finding's creation date or, when it has none, the date of its archive section. Old bug notes expire after 30 days, and a recently written finding whose cited code changed can still reach the prompt. Untagged findings in topic archives last up to 365 days.
+- After Claude's reply, the phone keeps a session working while the background agents its Stop listed may still be running, instead of briefly showing idle before the Hook has found them. The overview, activity clock and dreaming use the same rule, and a child lookup that hangs or fails is retried rather than counted as zero.
 - Phren Hook stops background checks such as Claude sign-in discovery when it shuts down, so a slow check no longer delays a restart. Agents already running in panes keep working.
 - `phren shell` stays open when a skill folder contains a dangling symlink. Skill listing and linking skip symlinks whose targets are missing or are neither files nor folders.
 

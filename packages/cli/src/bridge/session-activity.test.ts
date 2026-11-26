@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, resolveEffectiveStatus, sessionTitle, takesPrompt } from "./session-activity.js";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, provisionalWork, recordedBackground, replyExcerpt, resolveEffectiveStatus, sessionTitle, takesPrompt } from "./session-activity.js";
 import { nextTurn, noteTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
@@ -285,6 +285,14 @@ describe("the effective status resolver", () => {
     expect(resolveEffectiveStatus({ paneStatus: "done", record: record(0) })).toBe("done");
     // A replyless Stop remains authoritative despite a stale working snapshot.
     expect(resolveEffectiveStatus({ paneStatus: "working", record: record(0), final: { completed: false } })).toBe("idle");
+  });
+
+  it("keeps an ended turn working while child discovery is pending, on the Stop's own count", () => {
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: record(1), childrenPending: true })).toBe("working");
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: record(1), childrenPending: false })).toBe("idle");
+    expect(resolveEffectiveStatus({ paneStatus: "idle", record: record(), childrenPending: true })).toBe("idle");
+    expect(provisionalWork({ record: record(1), childrenPending: true })).toBe(1);
+    expect(provisionalWork({ record: record(1), childrenPending: false })).toBeUndefined();
   });
 
   it("falls back to the terminal snapshot without usable turn evidence", () => {

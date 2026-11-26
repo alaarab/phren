@@ -1,6 +1,6 @@
 {
-  "cases": 66,
-  "negatives": 34,
+  "cases": 67,
+  "negatives": 35,
   "positives": 32,
   "falseInjectionRate": 0,
   "falseInjectionByClass": {
@@ -18,7 +18,7 @@
     "topic": 1,
     "older": 1
   },
-  "abstainRate": 0.5152,
+  "abstainRate": 0.5224,
   "positiveAbstainRate": 0,
   "retiredInjected": 0,
   "meanUsedTokens": 89.5,
