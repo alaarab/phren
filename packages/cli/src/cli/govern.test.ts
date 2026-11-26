@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import * as childProcess from "child_process";
 import { makeTempDir, writeFile, grantAdmin, resetTestPhrenPath } from "../test-helpers.js";
+
+vi.mock("child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("child_process")>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
@@ -49,6 +55,7 @@ function dateDaysAgo(days: number): string {
 }
 
 beforeEach(() => {
+  vi.mocked(childProcess.execFileSync).mockReset();
   resetTestPhrenPath();
   delete process.env.PHREN_PROFILE;
   delete process.env.PHREN_MEMORY_TTL_DAYS;
@@ -171,40 +178,134 @@ describe("maintain gc", () => {
     const age = (file: string) => fs.utimesSync(file, old, old);
     fs.mkdirSync(path.join(phren, ".sessions"), { recursive: true });
     fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
-    for (const file of [".sessions/old-marker", ".sessions/recent-marker", ".runtime/old.log", ".runtime/old.jsonl", ".runtime/recent.log", ".runtime/notes.txt", ".runtime/telemetry.json"]) {
+    for (const file of [".sessions/old-marker", ".sessions/recent-marker", ".runtime/old.log", ".runtime/old.jsonl", ".runtime/sessions/old.json", ".runtime/recent.log", ".runtime/notes.txt", ".runtime/telemetry.json"]) {
       writeFile(path.join(phren, file), "x\n");
     }
     writeFile(path.join(phren, ".runtime", "audit.log"), "seed\n");
-    for (const file of [".sessions/old-marker", ".runtime/old.log", ".runtime/old.jsonl", ".runtime/notes.txt", ".runtime/telemetry.json", ".runtime/audit.log"]) {
+    for (const file of [".sessions/old-marker", ".runtime/old.log", ".runtime/old.jsonl", ".runtime/sessions/old.json", ".runtime/notes.txt", ".runtime/telemetry.json", ".runtime/audit.log"]) {
       age(path.join(phren, file));
     }
     const { logs } = captureConsole();
 
     const { handleMaintain } = await importGovern(phren);
+    const git = vi.mocked(childProcess.execFileSync).mockReturnValue(
+      "bbbbbbbb 2020-01-07 12:00:00 +0000 auto-save: second\naaaaaaaa 2020-01-06 12:00:00 +0000 auto-save: first\n",
+    );
     await handleMaintain(["gc", "--dry-run"]);
 
+    expect(git.mock.calls.map(([command, args]) => [command, args])).toEqual([]);
     const dryOutput = logs.join("\n");
     expect(dryOutput).toContain("[dry-run] Would remove: .sessions/old-marker");
     expect(dryOutput).toContain("[dry-run] Would remove: .runtime/old.log");
     expect(dryOutput).toContain("Would remove 1 stale session marker(s) from .sessions/");
     expect(dryOutput).toContain("Would remove 2 stale runtime log(s) from .runtime/");
     expect(fs.existsSync(path.join(phren, ".sessions", "old-marker"))).toBe(true);
+    expect(fs.existsSync(path.join(phren, ".runtime/sessions/old.json"))).toBe(true);
     expect(fs.readFileSync(path.join(phren, ".runtime", "audit.log"), "utf8")).toBe("seed\n");
 
     logs.length = 0;
     await handleMaintain(["gc"]);
 
+    expect(git.mock.calls.map(([command, args]) => [command, args])).toEqual([
+      ["git", ["gc", "--aggressive", "--quiet"]],
+    ]);
     expect(fs.existsSync(path.join(phren, ".sessions", "old-marker"))).toBe(false);
     expect(fs.existsSync(path.join(phren, ".sessions", "recent-marker"))).toBe(true);
     expect(fs.existsSync(path.join(phren, ".runtime", "old.log"))).toBe(false);
     expect(fs.existsSync(path.join(phren, ".runtime", "old.jsonl"))).toBe(false);
+    // Mirrored agent conversations the phone reads are never pruned.
+    expect(fs.existsSync(path.join(phren, ".runtime/sessions/old.json"))).toBe(true);
     expect(fs.existsSync(path.join(phren, ".runtime", "recent.log"))).toBe(true);
     expect(fs.existsSync(path.join(phren, ".runtime", "notes.txt"))).toBe(true);
     expect(fs.existsSync(path.join(phren, ".runtime", "telemetry.json"))).toBe(true);
     const audit = fs.readFileSync(path.join(phren, ".runtime", "audit.log"), "utf8");
     expect(audit).toContain("maintain_gc");
     expect(audit).toContain("sessions=1 logs=2");
-    expect(logs.join("\n")).toContain("GC complete: git_gc=false commits_squashed=0 sessions_pruned=1 logs_pruned=2");
+    expect(logs.join("\n")).toContain("GC complete: git_gc=true sessions_pruned=1 logs_pruned=2");
+  });
+});
+
+describe("background session and log pruning", () => {
+  it("prunes only files older than thirty days and waits twenty-four hours before another sweep", async () => {
+    const phren = makePhren();
+    const now = Math.floor(Date.now() / 1000) * 1000;
+    const day = 86_400_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const roots = [".sessions", ".runtime"];
+    for (const root of roots) {
+      for (const [name, days] of [["old.json", 31], ["cutoff.json", 30], ["recent.json", 29]] as const) {
+        const file = path.join(phren, root, name);
+        writeFile(file, "{}\n");
+        fs.utimesSync(file, new Date(now - days * day), new Date(now - days * day));
+      }
+    }
+    for (const root of [".runtime"]) {
+      for (const name of ["audit.log", "telemetry.json", "notes.txt"]) {
+        const file = path.join(phren, root, name);
+        writeFile(file, "seed\n");
+        fs.utimesSync(file, new Date(now - 31 * day), new Date(now - 31 * day));
+      }
+    }
+    const directory = path.join(phren, ".sessions/old-directory");
+    fs.mkdirSync(directory);
+    fs.utimesSync(directory, new Date(now - 31 * day), new Date(now - 31 * day));
+    const link = path.join(phren, ".sessions/old-link");
+    if (process.platform !== "win32") {
+      const target = path.join(phren, "old-target.json");
+      writeFile(target, "{}\n");
+      fs.utimesSync(target, new Date(now - 31 * day), new Date(now - 31 * day));
+      fs.symlinkSync(target, link);
+    }
+    const { handleBackgroundMaintenance } = await importGovern(phren);
+    const git = vi.mocked(childProcess.execFileSync);
+
+    await handleBackgroundMaintenance();
+
+    expect(git).not.toHaveBeenCalled();
+    for (const root of roots) {
+      expect(fs.existsSync(path.join(phren, root, "old.json"))).toBe(false);
+      expect(fs.existsSync(path.join(phren, root, "cutoff.json"))).toBe(true);
+      expect(fs.existsSync(path.join(phren, root, "recent.json"))).toBe(true);
+    }
+    for (const root of [".runtime"]) {
+      for (const name of ["audit.log", "telemetry.json", "notes.txt"]) {
+        expect(fs.readFileSync(path.join(phren, root, name), "utf8")).toContain("seed");
+      }
+    }
+    expect(fs.statSync(directory).isDirectory()).toBe(true);
+    if (process.platform !== "win32") expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    const mirrored = path.join(phren, ".runtime/sessions/old.jsonl");
+    writeFile(mirrored, "{}\n");
+    fs.utimesSync(mirrored, new Date(now - 31 * day), new Date(now - 31 * day));
+    const next = path.join(phren, ".runtime/next.jsonl");
+    writeFile(next, "{}\n");
+    fs.utimesSync(next, new Date(now - 31 * day), new Date(now - 31 * day));
+    clock.mockReturnValue(now + day - 1);
+    const reloaded = await importGovern(phren);
+    await reloaded.handleBackgroundMaintenance();
+    expect(fs.existsSync(next)).toBe(true);
+
+    clock.mockReturnValue(now + day);
+    await reloaded.handleBackgroundMaintenance();
+    expect(fs.existsSync(next)).toBe(false);
+    expect(fs.existsSync(mirrored)).toBe(true);
+  });
+
+  it("logs a pruning failure and finishes the rest of maintenance", async () => {
+    const phren = makePhren();
+    fs.mkdirSync(path.join(phren, ".runtime/session-log-prune.last-run"), { recursive: true });
+    const old = new Date(Date.now() - 31 * 86_400_000);
+    fs.utimesSync(path.join(phren, ".runtime/session-log-prune.last-run"), old, old);
+    const { handleBackgroundMaintenance } = await importGovern(phren);
+    const { logger } = await import("../logger.js");
+    const debug = vi.spyOn(logger, "debug").mockImplementation(() => {});
+
+    await handleBackgroundMaintenance();
+
+    expect(debug).toHaveBeenCalledWith("maintenance", expect.stringContaining("session/log pruning:"));
+    const health = JSON.parse(fs.readFileSync(path.join(phren, ".runtime/runtime-health.json"), "utf8"));
+    expect(health.lastGovernance.status).toBe("ok");
+    expect(fs.readFileSync(path.join(phren, ".runtime/audit.log"), "utf8")).toContain("background_maintenance");
   });
 });
 

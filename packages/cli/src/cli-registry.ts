@@ -190,6 +190,7 @@ const MAINTAIN_SUBCOMMANDS: Subcommand[] = [
   { name: "consolidate", usage: "phren maintain consolidate [project]", summary: "Deduplicate findings" },
   { name: "summarize", usage: "phren maintain summarize [project] [--llm] [--force]", summary: "Write what each topic archive amounts to, and what phren knows per project" },
   { name: "extract", usage: "phren maintain extract [project]", summary: "Mine git/GitHub signals" },
+  { name: "gc", usage: "phren maintain gc [--dry-run]", summary: "Run git gc and prune old session files and logs; pruning also runs daily" },
 ];
 
 const STORE_SUBCOMMANDS: Subcommand[] = [

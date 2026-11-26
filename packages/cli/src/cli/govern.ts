@@ -7,6 +7,7 @@ import {
   qualityMarkers,
   getProjectDirs,
   getPhrenPath,
+  runtimeFile,
 } from "../shared.js";
 import {
   appendReviewQueue,
@@ -262,166 +263,98 @@ export async function handleConsolidateMemories(args: string[] = []) {
 
 // ── GC (garbage collect) ─────────────────────────────────────────────────────
 
-interface GcReport {
-  gitGcRan: boolean;
-  commitsSquashed: number;
+interface LogPruneReport {
   sessionsRemoved: number;
   runtimeLogsRemoved: number;
 }
 
-async function handleGcMaintain(args: string[] = []): Promise<void> {
-  const dryRun = args.includes("--dry-run");
-  const phrenPath = getPhrenPath();
-  const { execFileSync } = await import("child_process");
-  const report: GcReport = {
-    gitGcRan: false,
-    commitsSquashed: 0,
-    sessionsRemoved: 0,
-    runtimeLogsRemoved: 0,
-  };
+function pruneSessionLogs(phrenPath: string, dryRun = false): LogPruneReport {
+  const cutoff = Date.now() - 30 * 86_400_000;
 
-  // 1. Run git gc --aggressive on the ~/.phren repo
-  if (dryRun) {
-    console.log("[dry-run] Would run: git gc --aggressive");
-  } else {
-    try {
-      execFileSync("git", ["gc", "--aggressive", "--quiet"], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "pipe" });
-      report.gitGcRan = true;
-      console.log("git gc --aggressive: done");
-    } catch (err: unknown) {
-      console.error(`git gc failed: ${errorMessage(err)}`);
-    }
-  }
-
-  // 2. Squash old auto-save commits (older than 7 days) into weekly summaries
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-  let oldCommits: string[] = [];
-  try {
-    const raw = execFileSync("git", ["log", `--before=${sevenDaysAgo}`, "--format=%H %ci %s"], {
-      env: nonInteractiveGitEnv(),
-      cwd: phrenPath,
-      encoding: "utf8",
-    }).trim();
-    if (raw) {
-      oldCommits = raw.split("\n").filter((l) => l.includes("auto-save:") || l.includes("[auto]"));
-    }
-  } catch {
-    // Not a git repo or no commits — skip silently
-  }
-
-  if (oldCommits.length === 0) {
-    console.log("Commit squash: no old auto-save commits to squash.");
-  } else if (dryRun) {
-    console.log(`[dry-run] Would squash ${oldCommits.length} auto-save commits older than 7 days into weekly summaries.`);
-    report.commitsSquashed = oldCommits.length;
-  } else {
-    // Group by ISO week based on commit timestamp (already in the log output)
-    const commitsByWeek = new Map<string, string[]>();
-    for (const line of oldCommits) {
-      const hash = line.split(" ")[0];
-      // Format: "HASH YYYY-MM-DD HH:MM:SS +ZZZZ subject..."
-      const dateMatch = line.match(/^[a-f0-9]+ (\d{4}-\d{2}-\d{2})/);
-      if (!dateMatch) continue;
-      const date = new Date(dateMatch[1]);
-      const weekStart = new Date(date);
-      weekStart.setDate(date.getDate() - date.getDay());
-      const weekKey = weekStart.toISOString().slice(0, 10);
-      if (!commitsByWeek.has(weekKey)) commitsByWeek.set(weekKey, []);
-      commitsByWeek.get(weekKey)!.push(hash);
-    }
-
-    // For each week with multiple commits, soft-reset to oldest and amend into a summary
-    for (const [weekKey, hashes] of commitsByWeek.entries()) {
-      if (hashes.length < 2) continue;
-      try {
-        const oldest = hashes[hashes.length - 1];
-        const newest = hashes[0];
-        // Use git rev-parse to get the parent of the oldest commit
-        const parentOfOldest = execFileSync("git", ["rev-parse", `${oldest}^`], {
-          env: nonInteractiveGitEnv(),
-          cwd: phrenPath,
-          encoding: "utf8",
-        }).trim();
-        // Build rebase script via env variable to squash all but first to "squash"
-        const rebaseScript = hashes
-          .map((h, i) => `${i === hashes.length - 1 ? "pick" : "squash"} ${h} auto-save`)
-          .reverse()
-          .join("\n");
-        const scriptPath = path.join(phrenPath, ".runtime", `gc-rebase-${weekKey}.sh`);
-        fs.writeFileSync(scriptPath, rebaseScript);
-        // Use GIT_SEQUENCE_EDITOR env var to feed our script to git rebase
-        execFileSync("git", ["rebase", "-i", parentOfOldest], {
-          cwd: phrenPath,
-          stdio: "pipe",
-          env: nonInteractiveGitEnv({ ...process.env, GIT_SEQUENCE_EDITOR: `cat ${scriptPath} >` }),
-        });
-        fs.unlinkSync(scriptPath);
-        report.commitsSquashed += hashes.length - 1;
-        console.log(`Squashed ${hashes.length} auto-save commits for week of ${weekKey} (${newest.slice(0, 7)}..${oldest.slice(0, 7)}).`);
-      } catch {
-        // Squashing is best-effort — log and continue
-        console.warn(`  Could not squash auto-save commits for week ${weekKey} (possibly non-linear history). Skipping.`);
-      }
-    }
-
-    if (report.commitsSquashed === 0) {
-      console.log("Commit squash: all old auto-save weeks have only one commit, nothing to squash.");
-    }
-  }
-
-  // 3–4. Prune stale files from .sessions/ and .runtime/
-  const thirtyDaysAgo = Date.now() - 30 * 86400000;
-
-  function pruneStaleFiles(
-    dir: string,
-    label: string,
-    filter?: (entry: string) => boolean,
-  ): number {
+  function pruneStaleFiles(dir: string, label: string, filter?: (entry: string) => boolean): number {
+    if (!fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory()) return 0;
     let removed = 0;
-    if (!fs.existsSync(dir)) return removed;
     for (const entry of fs.readdirSync(dir)) {
       if (filter && !filter(entry)) continue;
       const fullPath = path.join(dir, entry);
       try {
-        if (fs.statSync(fullPath).mtimeMs < thirtyDaysAgo) {
-          if (dryRun) {
-            console.log(`[dry-run] Would remove: ${label}/${entry}`);
-          } else {
-            fs.unlinkSync(fullPath);
-          }
-          removed++;
+        const stat = fs.lstatSync(fullPath);
+        if (!stat.isFile() || stat.mtimeMs >= cutoff) continue;
+        if (dryRun) {
+          console.log(`[dry-run] Would remove: ${label}/${entry}`);
+        } else {
+          fs.unlinkSync(fullPath);
         }
-      } catch { /* skip unreadable */ }
+        removed++;
+      } catch (err: unknown) {
+        logger.debug("maintenance", `session/log pruning ${label}/${entry}: ${errorMessage(err)}`);
+      }
     }
     return removed;
   }
 
   const logExtensions = new Set([".log", ".jsonl", ".json"]);
   const protectedFiles = new Set(["audit.log", "telemetry.json"]);
+  const isLog = (entry: string) => logExtensions.has(path.extname(entry)) && !protectedFiles.has(entry);
+  return {
+    sessionsRemoved: pruneStaleFiles(path.join(phrenPath, ".sessions"), ".sessions"),
+    // Not .runtime/sessions: those are mirrored agent conversations the phone still reads.
+    runtimeLogsRemoved: pruneStaleFiles(path.join(phrenPath, ".runtime"), ".runtime", isLog),
+  };
+}
 
-  report.sessionsRemoved = pruneStaleFiles(path.join(phrenPath, ".sessions"), ".sessions");
-  report.runtimeLogsRemoved = pruneStaleFiles(
-    path.join(phrenPath, ".runtime"),
-    ".runtime",
-    (entry) => logExtensions.has(path.extname(entry)) && !protectedFiles.has(entry),
-  );
+function pruneSessionLogsDaily(phrenPath: string): void {
+  try {
+    const marker = runtimeFile(phrenPath, "session-log-prune.last-run");
+    const now = Date.now();
+    let lastAttempt = 0;
+    try {
+      lastAttempt = Number(fs.readFileSync(marker, "utf8"));
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    if (now - lastAttempt < 86_400_000) return;
+    // The scheduler's quality lock serializes maintenance; record the attempt before pruning so failures wait a day too.
+    fs.writeFileSync(marker, `${now}\n`);
+    const report = pruneSessionLogs(phrenPath);
+    logger.debug("maintenance", `session/log pruning: sessions=${report.sessionsRemoved} logs=${report.runtimeLogsRemoved}`);
+  } catch (err: unknown) {
+    logger.debug("maintenance", `session/log pruning: ${errorMessage(err)}`);
+  }
+}
 
+async function handleGcMaintain(args: string[] = []): Promise<void> {
+  const dryRun = args.includes("--dry-run");
+  const phrenPath = getPhrenPath();
+  let gitGcRan = false;
+
+  if (dryRun) {
+    console.log("[dry-run] Would run: git gc --aggressive");
+  } else {
+    try {
+      execFileSync("git", ["gc", "--aggressive", "--quiet"], { env: nonInteractiveGitEnv(), cwd: phrenPath, stdio: "pipe" });
+      gitGcRan = true;
+      console.log("git gc --aggressive: done");
+    } catch (err: unknown) {
+      console.error(`git gc failed: ${errorMessage(err)}`);
+    }
+  }
+
+  const report = pruneSessionLogs(phrenPath, dryRun);
   const verb = dryRun ? "Would remove" : "Removed";
   console.log(`${verb} ${report.sessionsRemoved} stale session marker(s) from .sessions/`);
-  console.log(`${verb} ${report.runtimeLogsRemoved} stale runtime log(s) from .runtime/`);
+  console.log(`${verb} ${report.runtimeLogsRemoved} stale runtime log(s) from .runtime/ (including sessions/)`);
 
-  // 5. Summary
   if (!dryRun) {
     appendAuditLog(
       phrenPath,
       "maintain_gc",
-      `gitGc=${report.gitGcRan} squashed=${report.commitsSquashed} sessions=${report.sessionsRemoved} logs=${report.runtimeLogsRemoved}`
+      `gitGc=${gitGcRan} sessions=${report.sessionsRemoved} logs=${report.runtimeLogsRemoved}`
     );
   }
   console.log(
     `\nGC complete:${dryRun ? " (dry-run)" : ""}` +
-    ` git_gc=${report.gitGcRan}` +
-    ` commits_squashed=${report.commitsSquashed}` +
+    ` git_gc=${gitGcRan}` +
     ` sessions_pruned=${report.sessionsRemoved}` +
     ` logs_pruned=${report.runtimeLogsRemoved}`
   );
@@ -464,8 +397,8 @@ Subcommands:
                                          when findings feel repetitive, or monthly to keep things clean.
   phren maintain extract [project]      Mine git/GitHub signals into memory candidates
   phren maintain restore [project]      List and restore from .bak files
-  phren maintain gc [--dry-run]         Garbage-collect the ~/.phren repo: git gc, squash old
-                                         auto-save commits, prune stale session markers and runtime logs`);
+  phren maintain gc [--dry-run]         Run git gc and prune session files and runtime logs older
+                                         than 30 days. Pruning also runs daily in background maintenance`);
       if (sub) {
         console.error(`\nUnknown maintain subcommand: "${sub}"`);
         process.exit(1);
@@ -567,6 +500,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
   const markers = qualityMarkers(getPhrenPath());
   const startedAt = new Date().toISOString();
   try {
+    pruneSessionLogsDaily(getPhrenPath());
     const projects = maintenanceTargets(projectArg);
     const compacted = compactFindingJournals(getPhrenPath(), projectArg);
     for (const { storePath, project } of projects) {

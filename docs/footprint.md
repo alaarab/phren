@@ -284,6 +284,12 @@ nothing to that checkout.
 
 ### Optional code and worker state
 
+- `<primary store>/.runtime/session-log-prune.last-run` records the last local
+  pruning attempt. Daily background maintenance removes session files in
+  `.sessions/` and logs in `.runtime/` (not `.runtime/sessions/`) older than 30
+  days, preserving audit and telemetry files, directories and symlinks.
+  `phren maintain gc` runs the same pruning by hand plus Git garbage collection,
+  without rewriting commit history.
 - `<store>/.runtime/code/<project>.sqlite` holds the rebuildable code index,
   references, declaration fingerprints and last-observed change times.
 - `<store>/.runtime/packages/` holds optional installed packages, including
