@@ -55,6 +55,7 @@ import { storeAutoCommitBlocker } from "../sync/git-state.js";
 import { STAGED_DIFF } from "../sync/store-merge.js";
 import { storeCommitMessage } from "../machine-identity.js";
 import { finishUnmanagedClaude } from "./claude-unmanaged.js";
+import { taskStopDecision, writeTaskStopDecision } from "./session-stop-tasks.js";
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 
@@ -233,7 +234,7 @@ function getSessionCap(): number {
 
 export async function handleHookStop() {
   // Stop is the terminal event for a one-shot Claude print session.
-  const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
+  const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string; stop_hook_active?: boolean }>();
   try { finishUnmanagedClaude(stdinPayload ?? undefined, getPhrenPath()); }
   catch (err: unknown) { debugLog(`hook-stop worker finish failed: ${errorMessage(err)}`); }
   const ctx = buildHookContext();
@@ -258,6 +259,14 @@ export async function handleHookStop() {
       lastAutoSave: { at: now, status: "clean", detail: `hooks disabled for project ${activeProject}` },
     });
     return;
+  }
+
+  // Settle the tasks this session took on before it stops. The guard paths
+  // above stay silent and this block must emit only the JSON decision.
+  const taskStop = taskStopDecision({ phrenPath: ctx.phrenPath, payload: stdinPayload, tool: ctx.hookTool });
+  if (taskStop) {
+    writeTaskStopDecision(taskStop);
+    appendAuditLog(phrenPath, "hook_stop", `task_resolution open=${taskStop.open.length}`);
   }
 
   // Read stdin early — it's a stream and can only be consumed once.
