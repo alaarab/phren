@@ -20,7 +20,6 @@ import {
   linkTaskIssue,
   pinTask,
   unpinTask,
-  workNextTask,
   tidyDoneTasks,
   readTasks,
   readTasksAcrossProjects,
@@ -29,7 +28,8 @@ import {
   updateTask as updateTaskStore,
   promoteTask,
 } from "../data/access.js";
-import { applyGravity } from "../data/tasks.js";
+import { applyGravity, workNextTaskItem } from "../data/tasks.js";
+import { currentSessionId, recordSessionTask, sessionActiveCount, taskTitle, titleAdvice, TITLE_LIMIT, wipWarning } from "../task/session-tasks.js";
 import { captureTaskWrites } from "../data/task-receipts.js";
 import {
   buildTaskIssueBody,
@@ -56,6 +56,32 @@ const DEFAULT_DONE_LIMIT = 5;
 
 function refreshTaskIndex(updateFileInIndex: (filePath: string) => void, phrenPath: string, project: string): void {
   updateFileInIndex(path.join(phrenPath, project, TASKS_FILENAME));
+}
+
+/** Record a task the session took on, then warn past the WIP limit. Best effort: never changes a tool's result. */
+function sessionTaskNote(phrenPath: string, session: string | undefined, store: string, project: string,
+  item: Pick<TaskItem, "stableId">): string | undefined {
+  if (!session || !item.stableId) return undefined;
+  recordSessionTask(phrenPath, session, { store, project, stableId: item.stableId });
+  return wipWarning(sessionActiveCount(phrenPath, session));
+}
+
+function withWipWarning(message: string, data: Record<string, unknown>, warning: string | undefined): { message: string; data: Record<string, unknown> } {
+  return warning ? { message: `${message}\n${warning}`, data: { ...data, warning } } : { message, data };
+}
+
+/** One line per title over the limit, naming the short title and the context to move the rest into. */
+function titleNotes(titles: readonly string[]): string[] {
+  return titles.flatMap((text) => {
+    const advice = titleAdvice(text);
+    return advice
+      ? [`Title is ${taskTitle(text).length} characters; keep titles under ${TITLE_LIMIT} and move details to context: title "${advice.title}", context "${advice.context}".`]
+      : [];
+  });
+}
+
+function withTitleNotes(message: string, data: Record<string, unknown>, warnings: readonly string[]): { message: string; data: Record<string, unknown> } {
+  return warnings.length ? { message: [message, ...warnings].join("\n"), data: { ...data, warnings } } : { message, data };
 }
 
 function buildTaskView(doc: TaskDoc, status?: TaskStatus, limit?: number, doneLimit?: number, offset?: number): { doc: TaskDoc; includedSections: TaskSection[]; totalItems: number; totalUnpaged: number; truncated: boolean } {
@@ -332,7 +358,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "add_task",
     {
       title: "◆ phren · add task",
-      description: "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings.",
+      description: "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings. Keep titles under 80 characters; move details to the task's context.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your phren)."),
         item: z.preprocess(
@@ -366,7 +392,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           const { added, errors } = result.data;
           if (added.length > 0) refreshTaskIndex(updateFileInIndex, targetPhrenPath, project);
-          return mcpResponse({ ok: added.length > 0, ...(added.length === 0 ? { error: `No tasks added: ${errors.join("; ")}` } : {}), message: `Added ${added.length} of ${item.length} tasks to ${project}`, data: { project, added, errors } });
+          const noted = withTitleNotes(`Added ${added.length} of ${item.length} tasks to ${project}`, { project, added, errors }, titleNotes(added));
+          return mcpResponse({ ok: added.length > 0, ...(added.length === 0 ? { error: `No tasks added: ${errors.join("; ")}` } : {}), ...noted });
         });
       }
 
@@ -374,7 +401,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = addTaskStore(targetPhrenPath, project, item, { scope: normalizedScope });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, targetPhrenPath, project);
-        return mcpResponse({ ok: true, message: `Task added: ${result.data.line}`, data: { project, item, scope: normalizedScope } });
+        const noted = withTitleNotes(`Task added: ${result.data.line}`, { project, item, scope: normalizedScope }, titleNotes([result.data.line]));
+        return mcpResponse({ ok: true, ...noted });
       });
     }
   );
@@ -579,10 +607,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         // Handle work_next: pick highest-priority Queue item, move to Active
         if (updates.work_next) {
-          const result = workNextTask(targetPath, project, phrenPath);
+          const result = workNextTaskItem(targetPath, project, phrenPath);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           refreshTaskIndex(updateFileInIndex, targetPath, project);
-          return mcpResponse({ ok: true, message: result.data, data: { project } });
+          const warning = sessionTaskNote(phrenPath, currentSessionId(), targetPath, project, result.data);
+          const message = `Moved next queue item to Active in ${project}: ${result.data.line}`;
+          return mcpResponse({ ok: true, ...withWipWarning(message, { project }, warning) });
         }
 
         // Handle pin
@@ -598,11 +628,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           const result = promoteTask(targetPath, project, item!, updates.move_to_active ?? false);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           refreshTaskIndex(updateFileInIndex, targetPath, project);
-          return mcpResponse({
-            ok: true,
-            message: `Promoted task "${result.data.line}" in ${project}${updates.move_to_active ? " (moved to Active)" : ""}.`,
-            data: { project, item: result.data },
-          });
+          const warning = updates.move_to_active
+            ? sessionTaskNote(phrenPath, currentSessionId(), targetPath, project, result.data)
+            : undefined;
+          return mcpResponse({ ok: true, ...withWipWarning(
+            `Promoted task "${result.data.line}" in ${project}${updates.move_to_active ? " (moved to Active)" : ""}.`,
+            { project, item: result.data },
+            warning) });
         }
 
         if (updates.create_issue) {
@@ -673,7 +705,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = updateTaskStore(targetPath, project, item!, updates, phrenPath);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, targetPath, project);
-        return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
+        const noted = withTitleNotes(result.data, { project, item, updates }, updates.text ? titleNotes([updates.text]) : []);
+        // A task moved to Active is one this session took on; its stable ID comes from the written file.
+        const reread = updates.section?.toLowerCase() === "active" ? resolveTaskItem(targetPath, project, item!) : undefined;
+        const warning = reread?.ok ? sessionTaskNote(phrenPath, currentSessionId(), targetPath, project, reread.data) : undefined;
+        return mcpResponse({ ok: true, ...withWipWarning(noted.message, noted.data, warning) });
       });
     }
   );
@@ -735,10 +771,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         const outcome = await claimTaskSynced(targetPath, project, item, claim, { release, force, graphRoot: phrenPath });
         if (outcome.error) return mcpResponse({ ok: false, error: outcome.error });
         refreshTaskIndex(updateFileInIndex, targetPath, project);
+        const warning = !release && outcome.claimed
+          ? sessionTaskNote(phrenPath, session ?? currentSessionId(), targetPath, project, outcome.item ?? {})
+          : undefined;
         const message = release ? `Released in ${project}. ${outcome.detail}`
           : outcome.claimed ? `Claimed for ${claim.computer} in ${project}. ${outcome.detail}` : `Not claimed: ${outcome.detail}`;
-        return mcpResponse({ ok: release ? true : outcome.claimed, message,
-          data: { project, item: outcome.item?.stableId ? `bid:${outcome.item.stableId}` : item, claim: outcome.item?.claim, heldBy: outcome.heldBy, synced: outcome.synced } });
+        return mcpResponse({ ok: release ? true : outcome.claimed, ...withWipWarning(message,
+          { project, item: outcome.item?.stableId ? `bid:${outcome.item.stableId}` : item, claim: outcome.item?.claim, heldBy: outcome.heldBy, synced: outcome.synced },
+          warning) });
       });
     }
   );

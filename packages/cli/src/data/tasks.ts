@@ -1202,7 +1202,8 @@ export function claimTask(phrenPath: string, project: string, match: string, cla
   }));
 }
 
-export function workNextTask(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<string> {
+/** Pick the highest-priority ready Queue item and move it to Active; returns the moved item. */
+export function workNextTaskItem(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<TaskItem> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
   const preCheck = ensureProject(phrenPath, project);
@@ -1231,8 +1232,13 @@ export function workNextTask(phrenPath: string, project: string, graphRoot = phr
     item.lastActivity = new Date().toISOString();
     parsed.data.items.Active.push(item);
     writeTaskDoc(parsed.data);
-    return phrenOk(`Moved next queue item to Active in ${project}: ${item.line}`);
+    return phrenOk(item);
   }));
+}
+
+export function workNextTask(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<string> {
+  const result = workNextTaskItem(phrenPath, project, graphRoot);
+  return result.ok ? phrenOk(`Moved next queue item to Active in ${project}: ${result.data.line}`) : forwardErr(result);
 }
 
 export function tidyDoneTasks(phrenPath: string, project: string, keep: number = 30, dryRun?: boolean): PhrenResult<string> {
