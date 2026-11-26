@@ -73,6 +73,11 @@ export interface TrustFilterOptions {
   highImpactFindingIds?: Set<string>;
   /** States already known (governance's bounded sweep); an undefined answer counts as unverifiable. Unset checks live. */
   citationState?: (citation: FindingCitation, bullet: string) => CitationState | undefined;
+  /**
+   * The citation of a bullet whose comment is not in `content` (the search index strips citation comments),
+   * checked like one on the next line. Whether the bullet counts as cited for its confidence still follows `content`.
+   */
+  sourceCitation?: (bullet: string) => FindingCitation | undefined;
 }
 
 export function getHeadCommit(cwd: string): string | undefined {
@@ -598,12 +603,13 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
     }
 
     // Only a cited file or an unresolved symbol can be broken or drifted, so a commit-only citation costs no git here.
-    const citationState = citation && (citation.file || citation.symbol_unresolved)
-      ? (options.citationState ? options.citationState(citation, line) ?? "unverifiable" : checkFindingCitation(citation))
+    const checked = citation ?? options.sourceCitation?.(line);
+    const citationState = checked && (checked.file || checked.symbol_unresolved)
+      ? (options.citationState ? options.citationState(checked, line) ?? "unverifiable" : checkFindingCitation(checked))
       : undefined;
     if (citationState === "broken") {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "invalid_citation" });
-      i++;
+      if (citation) i++;
       continue;
     }
 

@@ -5,7 +5,7 @@ import { execFileSync } from "child_process";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 import { buildCitationComment, checkFindingCitation, citationGitCallCount, type FindingCitation } from "./citation.js";
 import { applyTrustFilter } from "../shared/retrieval.js";
-import { checkoutForRemote, citationRemote, projectCheckout } from "./citation-checkouts.js";
+import { checkedOutCommit, checkoutForRemote, citationRemote, projectCheckout } from "./citation-checkouts.js";
 
 const REMOTE = "github.com/acme/widgets";
 
@@ -171,6 +171,33 @@ describe("a citation written on another computer", () => {
     writeFile(path.join(store, "widgets", "phren.project.yaml"), `sourcePath: ${path.join(mono, "packages", "frontend")}\n`);
     expect(projectCheckout(store, "widgets")).toBe(mono);
     expect(checkoutForRemote(store, REMOTE)).toBe(mono);
+  });
+
+  it("follows a loose symbolic ref before packed refs, so a stale packed commit never stands in for HEAD", () => {
+    const base = git(here, "symbolic-ref", "--short", "HEAD");
+    git(here, "checkout", "-q", "-b", "alias");
+    writeFile(path.join(here, "src", "new.ts"), "new\n");
+    git(here, "add", "-A");
+    git(here, "commit", "-qm", "add new.ts");
+    const added = git(here, "rev-parse", "HEAD");
+    git(here, "rm", "-q", "src/new.ts");
+    git(here, "commit", "-qm", "drop new.ts");
+    git(here, "checkout", "-q", base);
+    git(here, "pack-refs", "--all");
+    fs.writeFileSync(path.join(here, ".git", "refs", "heads", "alias"), `ref: refs/heads/${base}\n`);
+    fs.writeFileSync(path.join(here, ".git", "HEAD"), "ref: refs/heads/alias\n");
+    expect(git(here, "rev-parse", "HEAD")).toBe(first);
+    expect(checkedOutCommit(here)).toBe(first);
+    expect(check(cite({ commit: added, file: "src/new.ts" }))).toBe("unverifiable");
+  });
+
+  it("never walks up from a registered folder that is gone to the repo around it", () => {
+    const outer = path.join(root.path, "outer");
+    fs.mkdirSync(outer);
+    git(outer, "init", "-q");
+    fs.rmSync(here, { recursive: true, force: true });
+    writeFile(path.join(store, "widgets", "phren.project.yaml"), `sourcePath: ${path.join(outer, "vendor", "old-project")}\n`);
+    expect(projectCheckout(store, "widgets")).toBeUndefined();
   });
 
   it("costs the prompt hook no git process or folder scan: a remote citation takes the state this computer's sweep recorded", () => {

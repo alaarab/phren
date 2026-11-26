@@ -877,21 +877,28 @@ export type TrustFilterQueueItem = { project: string; section: "Stale" | "Confli
 
 export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueItem[]; auditEntries: string[] };
 
-/** Restore only citation metadata for retained bullets; the FTS index omits comments. */
-function restoreCitationComments(content: string, sourceFile: string): string {
+// A bullet's key in its source file: its fid, else its text without comments.
+const citationKey = (line: string) => /<!--\s*fid:([a-z0-9]{8})/i.exec(line)?.[1] ?? line.replace(/<!--[\s\S]*?-->/g, "").trim();
+
+/** The citation line under each bullet of a document's source file; the FTS index omits comments. */
+function sourceCitationLines(sourceFile: string | undefined): Map<string, string> {
+  const citations = new Map<string, string>();
+  if (!sourceFile) return citations;
   try {
-    const key = (line: string) => /<!--\s*fid:([a-z0-9]{8})/i.exec(line)?.[1]
-      ?? line.replace(/<!--[\s\S]*?-->/g, "").trim();
     const source = fs.readFileSync(sourceFile, "utf8").split("\n");
-    const citations = new Map<string, string>();
     for (let i = 0; i < source.length - 1; i++) {
-      if (source[i].startsWith("- ") && parseCitationComment(source[i + 1])) citations.set(key(source[i]), source[i + 1]);
+      if (source[i].startsWith("- ") && parseCitationComment(source[i + 1])) citations.set(citationKey(source[i]), source[i + 1]);
     }
-    return content.split("\n").map((line, index, lines) => {
-      const citation = line.startsWith("- ") ? citations.get(key(line)) : undefined;
-      return citation && !parseCitationComment(lines[index + 1] ?? "") ? `${line}\n${citation}` : line;
-    }).join("\n");
-  } catch { return content; }
+  } catch { /* unreadable source: nothing to restore or check */ }
+  return citations;
+}
+
+/** Restore only citation metadata for retained bullets. */
+function restoreCitationComments(content: string, citations: Map<string, string>): string {
+  return content.split("\n").map((line, index, lines) => {
+    const citation = line.startsWith("- ") ? citations.get(citationKey(line)) : undefined;
+    return citation && !parseCitationComment(lines[index + 1] ?? "") ? `${line}\n${citation}` : line;
+  }).join("\n");
 }
 
 /** Apply trust filter to rows. Returns filtered rows plus any queue/audit items to be written
@@ -923,6 +930,7 @@ export function applyTrustFilter(
     .filter((doc) => isInjectableDocType(doc.type))
     .map((doc) => {
       if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
+      const citations = sourceCitationLines(doc.path);
       const trust = filterTrustedFindingsDetailed(dropRetiredBullets(doc.content), {
         ttlDays,
         minConfidence,
@@ -930,6 +938,12 @@ export function applyTrustFilter(
         project: doc.project,
         highImpactFindingIds,
         citationState: citationState(doc.path),
+        // Indexed content has no citation comments. A citation that names a remote is checked from the source file
+        // against the recorded state; a legacy one is left as before, unchecked on this path.
+        sourceCitation: (bullet) => {
+          const citation = parseCitationComment(citations.get(citationKey(bullet)) ?? "");
+          return citation?.remote ? citation : undefined;
+        },
       });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
@@ -938,7 +952,7 @@ export function applyTrustFilter(
         if (conflicts.length) queueItems.push({ project: doc.project, section: "Conflicts", items: conflicts });
         auditEntries.push(`project=${doc.project} type=${doc.type} stale=${stale.length} invalid_citation=${conflicts.length}`);
       }
-      return { ...doc, content: restoreCitationComments(trust.content, doc.path) };
+      return { ...doc, content: restoreCitationComments(trust.content, citations) };
     })
     .filter((doc) => {
       return !TRUST_FILTERED_TYPES.has(doc.type) || Boolean(doc.content.trim());

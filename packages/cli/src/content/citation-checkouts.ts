@@ -88,24 +88,36 @@ function gitDirs(dir: string): { gitdir: string; common: string } | undefined {
 
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
-/** The commit a checkout has out, read from its git files without starting git; undefined when only git could say. */
+// A loose ref's content: a commit, or `ref: <target>` for a symbolic one.
+function looseRef(dirs: { gitdir: string; common: string }, ref: string): string | undefined {
+  for (const base of new Set([dirs.gitdir, dirs.common])) {
+    try { return fs.readFileSync(path.join(base, ref), "utf8").trim(); } catch { /* not loose here */ }
+  }
+  return undefined;
+}
+
+/**
+ * The commit a checkout has out, read from its git files without starting git: HEAD, then loose refs
+ * (following symbolic ones a few levels, as git does), then packed refs. Undefined for anything it
+ * does not understand, and the caller asks git.
+ */
 export function checkedOutCommit(dir: string): string | undefined {
   try {
     const dirs = gitDirs(dir);
     if (!dirs) return undefined;
-    const head = fs.readFileSync(path.join(dirs.gitdir, "HEAD"), "utf8").trim();
-    if (SHA.test(head)) return head;
-    const ref = /^ref:\s*(refs\/\S+)$/.exec(head)?.[1];
-    if (!ref || ref.split("/").includes("..")) return undefined;
-    for (const base of new Set([dirs.gitdir, dirs.common])) {
-      try {
-        const sha = fs.readFileSync(path.join(base, ref), "utf8").trim();
-        if (SHA.test(sha)) return sha;
-      } catch { /* packed */ }
-    }
-    for (const line of fs.readFileSync(path.join(dirs.common, "packed-refs"), "utf8").split("\n")) {
-      const [sha, name] = line.trim().split(" ");
-      if (name === ref && SHA.test(sha)) return sha;
+    let value = fs.readFileSync(path.join(dirs.gitdir, "HEAD"), "utf8").trim();
+    for (let depth = 0; depth < 5; depth++) {
+      if (SHA.test(value)) return value;
+      const ref = /^ref:\s*(refs\/\S+)$/.exec(value)?.[1];
+      if (!ref || ref.split("/").includes("..")) return undefined;
+      const loose = looseRef(dirs, ref);
+      if (loose !== undefined) { value = loose; continue; }
+      // A ref with no loose file is packed, or does not exist yet (an unborn branch).
+      for (const line of fs.readFileSync(path.join(dirs.common, "packed-refs"), "utf8").split("\n")) {
+        const [sha, name] = line.trim().split(" ");
+        if (name === ref && SHA.test(sha)) return sha;
+      }
+      return undefined;
     }
     return undefined;
   } catch {
@@ -174,7 +186,8 @@ function enclosingRepo(dir: string, env: NodeJS.ProcessEnv): string | undefined 
 function projectFolders(storePath: string, project: string, env: NodeJS.ProcessEnv): string[] {
   let registered: string | undefined;
   try { registered = getProjectSourcePath(storePath, project); } catch { /* unreadable config: the named folders still count */ }
-  const repo = registered ? enclosingRepo(registered, env) : undefined;
+  // Only a folder that is here: a removed nested checkout must not resolve to the repo around it.
+  const repo = registered && fs.existsSync(registered) ? enclosingRepo(registered, env) : undefined;
   return [...(repo ? [repo] : []), ...namedFolders(project, env)];
 }
 
