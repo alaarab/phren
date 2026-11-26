@@ -280,3 +280,54 @@ describe("maintenance of attached stores", () => {
     expect(JSON.parse(fs.readFileSync(path.join(primary, ".runtime", "runtime-health.json"), "utf8")).lastGovernance.status).toBe("ok");
   });
 });
+
+describe("citation checks in governance", () => {
+  function citedFindings(phren: string, citation: Record<string, unknown>) {
+    const today = new Date().toISOString().slice(0, 10);
+    makeProject(phren, "proj", {
+      "FINDINGS.md": `# Findings\n\n## ${today}\n\n- Retry budget lives in the client wrapper module <!-- fid:abcd1234 -->\n  <!-- phren:cite ${JSON.stringify({ created_at: new Date().toISOString(), ...citation })} -->\n`,
+    });
+  }
+  const conflicts = (phren: string) => {
+    const queue = path.join(phren, "proj", "review.md");
+    return fs.existsSync(queue) ? fs.readFileSync(queue, "utf8").split("## Conflicts")[1] ?? "" : "";
+  };
+  const states = (phren: string) => JSON.parse(fs.readFileSync(path.join(phren, ".runtime", "citation-states.json"), "utf8"));
+
+  it("records a repo this computer lacks as unverifiable and queues nothing", async () => {
+    const phren = makePhren();
+    grantAdmin(phren);
+    citedFindings(phren, { repo: "/Users/someone-else/Projects/app", commit: "0123456789abcdef0123456789abcdef01234567", file: "src/client.ts", line: 4 });
+    const { handleGovernMemories } = await importGovern(phren);
+
+    const summary = await handleGovernMemories("proj", true);
+
+    expect(summary.conflictCount).toBe(0);
+    expect(conflicts(phren)).not.toContain("Retry budget");
+    expect(states(phren)["fid:abcd1234"].state).toBe("unverifiable");
+  });
+
+  it("queues a broken citation as a conflict only on the store's lease holder", async () => {
+    const phren = makePhren();
+    grantAdmin(phren);
+    const repo = path.join(phren, "repo");
+    fs.mkdirSync(repo);
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo, "a.ts"), "one\n");
+    git("add", "-A");
+    git("commit", "-qm", "first");
+    citedFindings(phren, { repo, commit: git("rev-parse", "HEAD"), file: "src/client.ts", line: 4 });
+    const lease = path.join(phren, ".config", "maintenance-writer.json");
+    writeFile(lease, JSON.stringify({ computer: "other-computer", renewedAt: new Date().toISOString() }));
+    const { handleGovernMemories } = await importGovern(phren);
+
+    expect((await handleGovernMemories("proj", true)).conflictCount).toBe(0);
+    expect(conflicts(phren)).not.toContain("Retry budget");
+    expect(states(phren)["fid:abcd1234"].state).toBe("broken");
+
+    fs.rmSync(lease);
+    expect((await handleGovernMemories("proj", true)).conflictCount).toBe(1);
+    expect(conflicts(phren)).toContain("Retry budget lives in the client wrapper module");
+  });
+});
