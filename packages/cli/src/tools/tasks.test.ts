@@ -266,3 +266,122 @@ describe("manage_task over the MCP wire", () => {
     expect(queueLines()).toEqual([expect.stringContaining("gamma three")]);
   });
 });
+
+const FOUR = `# demo
+
+## Active
+
+- [ ] alpha one <!-- bid:aaaaaaaa -->
+- [ ] beta two <!-- bid:bbbbbbbb -->
+- [ ] gamma three <!-- bid:cccccccc -->
+- [ ] delta four <!-- bid:dddddddd -->
+
+## Queue
+
+## Done
+`;
+
+const QUEUED = `# demo
+
+## Active
+
+## Queue
+
+- [ ] queued task <!-- bid:eeeeeeee -->
+
+## Done
+`;
+
+describe("session task ledger and title advice", () => {
+  const ENV_KEYS = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"] as const;
+  const ledgerPath = (session: string) => path.join(tmp.path, ".runtime", "session-tasks", `${session}.json`);
+  const ledgerRows = (session: string) => JSON.parse(fs.readFileSync(ledgerPath(session), "utf8")) as Array<Record<string, unknown>>;
+  const clearSessionEnv = () => { for (const key of ENV_KEYS) delete process.env[key]; };
+
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = Object.fromEntries(ENV_KEYS.map(key => [key, process.env[key]]));
+    clearSessionEnv();
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      const value = saved[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("records a claimed task in the session ledger under the env session id", async () => {
+    fs.writeFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME), THREE);
+    process.env.CLAUDE_CODE_SESSION_ID = "sess-claim";
+    const res = parse(await manage({ action: "claim", project: PROJECT, item: "bid:aaaaaaaa" }));
+    expect(res.ok).toBe(true);
+    expect(ledgerRows("sess-claim")).toEqual([
+      expect.objectContaining({ store: tmp.path, project: PROJECT, stableId: "aaaaaaaa" }),
+    ]);
+  });
+
+  it("warns on the fourth Active task in one session, not the third", async () => {
+    fs.writeFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME), FOUR);
+    process.env.CLAUDE_CODE_SESSION_ID = "sess-wip";
+    const results = [];
+    for (const id of ["aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd"]) {
+      results.push(parse(await manage({ action: "claim", project: PROJECT, item: `bid:${id}` })));
+    }
+    expect(results.every(res => res.ok)).toBe(true);
+    expect(results[2].data.warning).toBeUndefined();
+    expect(results[2].message).not.toContain("limit 3");
+    expect(results[3].data.warning).toContain("limit 3");
+    expect(results[3].message).toContain(results[3].data.warning);
+  });
+
+  it("records nothing and warns nothing without a session id", async () => {
+    fs.writeFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME), THREE);
+    const res = parse(await manage({ action: "claim", project: PROJECT, item: "bid:aaaaaaaa" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.warning).toBeUndefined();
+    expect(fs.existsSync(path.join(tmp.path, ".runtime", "session-tasks"))).toBe(false);
+  });
+
+  it("adds a 120-character title and carries the advice", async () => {
+    const long = "Implement the full session ledger and WIP warning flow for task tools:".padEnd(120, "x");
+    expect(long).toHaveLength(120);
+    const res = parse(await add({ project: PROJECT, item: long }));
+    expect(res.ok).toBe(true);
+    expect(res.data.warnings).toHaveLength(1);
+    expect(res.data.warnings[0]).toContain("Title is 120 characters");
+    expect(res.message).toContain("keep titles under 80");
+    expect(queueLines()).toContain(long);
+  });
+
+  it("does not warn for a short title", async () => {
+    const short = "Add the session ledger to the task tools";
+    const res = parse(await add({ project: PROJECT, item: short }));
+    expect(res.ok).toBe(true);
+    expect(res.data.warnings).toBeUndefined();
+    expect(res.message).not.toContain("keep titles under");
+  });
+
+  it("records the task work_next moves to Active", async () => {
+    fs.writeFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME), QUEUED);
+    process.env.CLAUDE_CODE_SESSION_ID = "sess-next";
+    const res = parse(await manage({ action: "update", project: PROJECT, updates: { work_next: true } }));
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("Moved next queue item to Active");
+    expect(ledgerRows("sess-next")).toEqual([
+      expect.objectContaining({ store: tmp.path, project: PROJECT, stableId: "eeeeeeee" }),
+    ]);
+  });
+
+  it("records a task update_task moves to Active", async () => {
+    fs.writeFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME), QUEUED);
+    process.env.CLAUDE_CODE_SESSION_ID = "sess-update";
+    const res = parse(await manage({ action: "update", project: PROJECT, item: "queued task", updates: { section: "Active" } }));
+    expect(res.ok).toBe(true);
+    expect(ledgerRows("sess-update")).toEqual([
+      expect.objectContaining({ store: tmp.path, project: PROJECT, stableId: "eeeeeeee" }),
+    ]);
+  });
+});
