@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 
@@ -16,7 +16,8 @@ describe("hook-prompt abstain tail", () => {
     fs.writeFileSync(path.join(store, file), text);
   };
   const run = (prompt: string, session = "abstain-session") => {
-    const result = spawnSync(process.execPath, ["--import", clock, cli, "hook-prompt"], {
+    // --import takes a URL: Windows reads a bare C:\ path as a "c:" scheme and the CLI exits 1.
+    const result = spawnSync(process.execPath, ["--import", pathToFileURL(clock).href, cli, "hook-prompt"], {
       input: JSON.stringify({ prompt, cwd: workRepo, session_id: session }),
       env: { ...process.env, PHREN_PATH: store, PHREN_PROFILE: "personal", HOME: tmp.path,
         USERPROFILE: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0", PHREN_CLANKER: "off",
@@ -60,6 +61,8 @@ console.log("custom context for " + input.session_id);
     write(".config/workflow-policy.json", JSON.stringify({ schemaVersion: 1, taskMode: "auto" }));
   });
   afterEach(() => tmp.cleanup());
+  // The custom hook runs through cmd /c on Windows, whose quoting this test's command doesn't model; the tail logic is OS-independent.
+  const withCustomHook = it.skipIf(process.platform === "win32");
 
   it("files a requested task and prints only its notice when recall abstains", () => {
     const output = run("Add a task to implement glimmerwick throttlebottom");
@@ -69,7 +72,7 @@ console.log("custom context for " + input.session_id);
     expect(lastTrace()).toMatchObject({ abstained: expect.any(String), injected: [] });
   });
 
-  it("prints custom pre-prompt output when recall abstains", () => {
+  withCustomHook("prints custom pre-prompt output when recall abstains", () => {
     installPrePromptHook();
     expect(run("glimmerwick throttlebottom")).toBe("custom context for abstain-session\n");
     expect(lastTrace()).toMatchObject({ abstained: expect.any(String), injected: [] });
@@ -92,7 +95,7 @@ console.log("custom context for " + input.session_id);
     expect(lastTrace()).toMatchObject({ abstained: expect.any(String), injected: [], taskCapturePaused: { open: 2, budget: 1 } });
   });
 
-  it("preserves every output byte for an injecting prompt", () => {
+  withCustomHook("preserves every output byte for an injecting prompt", () => {
     installPrePromptHook();
     expect(run("Fix the render callback so it reads the frame size from the main thread", "inject-session")).toMatchInlineSnapshot(`
       "custom context for inject-session
