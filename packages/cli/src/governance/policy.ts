@@ -278,13 +278,13 @@ export const MIN_RUNTIME_AGE_OUT_DAYS = 7;
 
 /**
  * Budgets with every field present. Only a number is read, so a numeric 0 is off and anything else
- * (a string, a negative number) keeps the default; age-out days are at least a week.
+ * (a string, a negative number) keeps the default. Age-out days have no off value: under a week reads as the default.
  */
 export function normalizeBudgets(raw: unknown): StoreBudgets {
   const data = isRecord(raw) ? raw : {};
   const budgets = { ...DEFAULT_POLICY.budgets };
   for (const key of BUDGET_NUMBERS) if (isFiniteNumber(data[key]) && data[key] >= 0) budgets[key] = data[key];
-  budgets.runtimeAgeOutDays = Math.max(MIN_RUNTIME_AGE_OUT_DAYS, budgets.runtimeAgeOutDays);
+  if (budgets.runtimeAgeOutDays < MIN_RUNTIME_AGE_OUT_DAYS) budgets.runtimeAgeOutDays = DEFAULT_POLICY.budgets.runtimeAgeOutDays;
   if (typeof data.runtimeAgeOut === "boolean") budgets.runtimeAgeOut = data.runtimeAgeOut;
   return budgets;
 }
@@ -328,10 +328,15 @@ export function runtimeAgeOutActive(phrenPath: string): boolean {
   return getRetentionPolicy(phrenPath).budgets.runtimeAgeOut && readRuntimeAgeOutState(phrenPath)?.ready === true;
 }
 
-/** A project's budgets: its own store's retention policy with the project's overrides. */
-export function projectBudgets(phrenPath: string, project: string): StoreBudgets {
+/**
+ * A project's budgets: its own store's retention policy with the project's overrides. `resolved` is budgets a
+ * caller already merged for `store` (the prompt hook's config); they are used only when that is the project's store.
+ */
+export function projectBudgets(phrenPath: string, project: string, resolved?: { store: string; budgets: StoreBudgets }): StoreBudgets {
   const dir = storeAwareProjectPath(phrenPath, project);
-  return getRetentionPolicy(dir ? path.dirname(dir) : phrenPath, project).budgets;
+  const store = dir ? path.dirname(dir) : phrenPath;
+  if (resolved && path.resolve(resolved.store) === path.resolve(store)) return resolved.budgets;
+  return getRetentionPolicy(store, project).budgets;
 }
 
 /** Default workflow policy. Exported so {@link config/schema} can render one source of truth. */

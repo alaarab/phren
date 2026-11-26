@@ -450,7 +450,9 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         domain: "retention",
         label: "Runtime age-out (days)",
         summary: "How long a code index goes without a rebuild, or a fan-out folder sits finished, before age-out removes it.",
-        help: "At least 7. Used only when runtime age-out is on; the daily health line reports candidates either way.",
+        help:
+          "At least 7, with no off value: a smaller value in the policy file, 0 included, reads as 30. Turn age-out off "
+          + "with runtime age-out instead. Used only when it is on; the daily health line reports candidates either way.",
         control: "number",
         range: { min: 7, max: 3650, step: 1 },
         default: DEFAULT_POLICY.budgets.runtimeAgeOutDays,

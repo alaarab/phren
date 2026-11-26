@@ -293,11 +293,21 @@ const requireModule = createRequire(import.meta.url);
 
 interface AgeOutCandidate { kind: keyof AgeOutCounts; target: string; bytes: number }
 
+// node:sqlite, loaded without the ExperimentalWarning Node 22 prints on first use (maintenance runs in the background).
+function loadSqlite(): typeof import("node:sqlite") {
+  const emit = process.emitWarning;
+  process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+    if (/SQLite is an experimental feature/i.test(typeof warning === "string" ? warning : warning.message)) return;
+    (emit as (...args: unknown[]) => void).call(process, warning, ...rest);
+  }) as typeof process.emitWarning;
+  try { return requireModule("node:sqlite") as typeof import("node:sqlite"); } finally { process.emitWarning = emit; }
+}
+
 // The checkout a code index was built from, as the indexer recorded it in its meta table; undefined when unreadable.
 function indexRepoRoot(file: string): string | undefined {
   let db: import("node:sqlite").DatabaseSync | undefined;
   try {
-    const { DatabaseSync } = requireModule("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } = loadSqlite();
     db = new DatabaseSync(file, { readOnly: true });
     const row = db.prepare("SELECT value FROM meta WHERE key = 'repo_root'").get() as { value?: unknown } | undefined;
     return typeof row?.value === "string" && row.value ? row.value : undefined;

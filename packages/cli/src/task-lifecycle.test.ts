@@ -625,7 +625,8 @@ describe("progressive task model", () => {
     it("uses the budget the hook already resolved instead of reading the policy again", () => {
       writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({ schemaVersion: 1, taskMode: "auto" }) + "\n");
       for (const line of ["One", "Two", "Three"]) addTask(tmp.path, project, `Existing work ${line}`);
-      const paused = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt: "Fix the flaky upload test in the parser", project, sessionId: "budget-hook", intent: "build", openTaskBudget: 2 });
+      const resolvedBudgets = { store: tmp.path, budgets: { openTasks: 2, reviewEntries: 150, runtimeMB: 1024, fanoutArchiveMB: 512, runtimeAgeOutDays: 30, runtimeAgeOut: false } };
+      const paused = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt: "Fix the flaky upload test in the parser", project, sessionId: "budget-hook", intent: "build", resolvedBudgets });
       expect(paused.budgetPaused).toEqual({ open: 3, budget: 2 });
     });
   });

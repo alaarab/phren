@@ -325,7 +325,8 @@ export async function handleHookPrompt() {
       sessionId,
       intent,
       taskLevel,
-      openTaskBudget: resolvedConfig.retentionPolicy.budgets.openTasks,
+      // The primary store's merged budgets, reused only for a project that lives there.
+      resolvedBudgets: { store: getPhrenPath(), budgets: resolvedConfig.retentionPolicy.budgets },
     }) : { noticeLines: [] };
     const paused = "budgetPaused" in taskLifecycle ? taskLifecycle.budgetPaused : undefined;
     recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result,

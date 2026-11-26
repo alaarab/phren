@@ -8,7 +8,7 @@ import {
 } from "../data/access.js";
 import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./github.js";
 import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasExplicitTaskSignal, hasSuppressTaskIntent, hasCodeChangeContext, type ProactivityLevel } from "../proactivity.js";
-import { getWorkflowPolicy, projectBudgets } from "../shared/governance.js";
+import { getWorkflowPolicy, projectBudgets, type StoreBudgets } from "../shared/governance.js";
 import { debugLog, sessionMarker } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { clankerEnabled, rowTitle } from "../clanker.js";
@@ -357,8 +357,8 @@ export function handleTaskPromptLifecycle(args: {
   sessionId?: string;
   intent: string;
   taskLevel?: ProactivityLevel;
-  /** The project's open-task budget when the caller already resolved its config (the prompt hook). */
-  openTaskBudget?: number;
+  /** Budgets the caller already resolved for a store (the prompt hook's config), reused when the project lives there. */
+  resolvedBudgets?: { store: string; budgets: StoreBudgets };
 }): TaskPromptLifecycleResult {
   const mode = getTaskMode(args.phrenPath);
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
@@ -412,7 +412,7 @@ export function handleTaskPromptLifecycle(args: {
   // is read only when a new task would be filed, from the config the hook already resolved.
   if (!reusable && !hasExplicitTaskSignal(prompt)) {
     const open = activeItems.length + parsed.data.items.Queue.length;
-    const budget = args.openTaskBudget ?? projectBudgets(args.phrenPath, args.project).openTasks;
+    const budget = projectBudgets(args.phrenPath, args.project, args.resolvedBudgets).openTasks;
     if (budget > 0 && open > budget) {
       debugLog(`task lifecycle paused ${args.project}: ${open} open tasks, budget ${budget}`);
       return { mode, noticeLines: [], budgetPaused: { open, budget } };

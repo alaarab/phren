@@ -662,11 +662,15 @@ describe("pruneDeadMemories TTL promotion", () => {
 });
 
 describe("retention budgets in the policy file", () => {
-  it("takes only a numeric 0 as off, falls back on junk, and keeps age-out at a week or more", () => {
+  it("takes only a numeric 0 as off, falls back on junk, and reads age-out days under a week as the 30-day default", () => {
     writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { openTasks: "0", reviewEntries: 0, runtimeMB: -5, runtimeAgeOutDays: 1, runtimeAgeOut: "yes" } });
     expect(getRetentionPolicy(phrenPath).budgets).toEqual({
-      openTasks: 150, reviewEntries: 0, runtimeMB: 1024, fanoutArchiveMB: 512, runtimeAgeOutDays: 7, runtimeAgeOut: false,
+      openTasks: 150, reviewEntries: 0, runtimeMB: 1024, fanoutArchiveMB: 512, runtimeAgeOutDays: 30, runtimeAgeOut: false,
     });
+    for (const days of [0, 6.5, 7, 45]) {
+      writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { runtimeAgeOutDays: days } });
+      expect(getRetentionPolicy(phrenPath).budgets.runtimeAgeOutDays).toBe(days >= 7 ? days : 30);
+    }
   });
 });
 

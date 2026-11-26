@@ -370,6 +370,25 @@ describe("review regressions", () => {
     { op: "edit", findingId: "dddd4444", newText: "Cache in ~/.cache", evidence: EVIDENCE },
   ] }) });
 
+  it("keeps an addition deferred by the review budget pending, and queues it on apply once the queue has room", async () => {
+    fs.mkdirSync(path.join(store, ".config"), { recursive: true });
+    fs.writeFileSync(path.join(store, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 1 } }));
+    const full = "# Review\n\n## Review\n\n- One\n- Two\n\n## Stale\n\n## Conflicts\n";
+    fs.writeFileSync(path.join(store, PROJECT, "review.md"), full);
+    const adds: DreamRunner = async () => ({ ok: true, output: JSON.stringify({ notes: "one addition", changes: [
+      { op: "add_finding", text: "Deploys need the VPN", evidence: EVIDENCE },
+    ] }) });
+    const result = await run({ runner: adds });
+    expect(result.counts).toMatchObject({ deferred: 1 });
+    expect(pendingDreamProposals(store, PROJECT)).toBe(1);
+
+    expect((await applyDreamProposals(store, PROJECT, result.runId!)).outcomes.map(o => o.status)).toEqual(["deferred"]);
+    fs.writeFileSync(path.join(store, PROJECT, "review.md"), "# Review\n\n## Review\n\n## Stale\n\n## Conflicts\n");
+    expect((await applyDreamProposals(store, PROJECT, result.runId!)).outcomes.map(o => o.status)).toEqual(["proposed"]);
+    expect(fs.readFileSync(path.join(store, PROJECT, "review.md"), "utf8")).toContain("Deploys need the VPN");
+    expect(pendingDreamProposals(store, PROJECT)).toBe(0);
+  });
+
   it("applies selected stored proposals once, journals outcomes and refuses an edited target", async () => {
     const result = await run({ runner: answer });
     expect(pendingDreamProposals(store, PROJECT)).toBe(2);

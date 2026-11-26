@@ -118,7 +118,7 @@ Pages are capped at 16 KB; a bigger subject should be split. Links to pages that
 
 ## Propose or apply
 
-In **propose** mode (the default) nothing in memory changes. Only `add_finding` changes become review items in `review.md`; approving them saves the finding. While the project's review queue is over its review budget ([Budgets](governance.md#budgets)) an addition is not queued and its outcome is `deferred`. Review additions like any other queue item:
+In **propose** mode (the default) nothing in memory changes. Only `add_finding` changes become review items in `review.md`; approving them saves the finding. While the project's review queue is over its review budget ([Budgets](governance.md#budgets)) an addition is not queued: its outcome is `deferred`, it stays in the run record, and `phren dream apply` (or `dream_apply`) on that run queues it once the queue has room. A later dream does not pick it up on its own. Review additions like any other queue item:
 
 ```bash
 phren review                           # show the queue
@@ -133,7 +133,7 @@ phren dream apply <runId> --project my-app
 phren dream apply <runId> --project my-app --only 0,2,4
 ```
 
-The MCP admin action `dream_apply` takes `project`, `runId`, and optional `only: [0, 2, 4]`. Adds stay in the review queue. Apply rechecks each target finding against the stored bullet and citation version under the findings write lock, refusing missing or changed targets. Completed operations are never replayed. Each outcome is saved back to the run record and appended to the journal; `status` and `log` report the remaining pending structured proposal count. Old run records without target versions cannot safely apply finding operations; create a fresh dream instead.
+The MCP admin action `dream_apply` takes `project`, `runId`, and optional `only: [0, 2, 4]`. Adds stay in the review queue. Apply rechecks each target finding against the stored bullet and citation version under the findings write lock, refusing missing or changed targets. Completed operations are never replayed. Each outcome is saved back to the run record and appended to the journal; `status` and `log` report the remaining pending structured proposal count, deferred additions included. Old run records without target versions cannot safely apply finding operations; create a fresh dream instead.
 
 In **apply** mode the changes are applied straight away and logged.
 

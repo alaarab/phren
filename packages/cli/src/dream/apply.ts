@@ -332,7 +332,7 @@ export function readLastRun(phrenPath: string, project: string): DreamLastRun | 
   } catch { return undefined; }
 }
 
-/** Pending structured operations; add proposals are owned by the review queue. */
+/** Pending structured operations, plus additions the review budget deferred; queued additions are owned by the review queue. */
 export function pendingDreamProposals(phrenPath: string, project: string): number {
   let names: string[];
   try { names = fs.readdirSync(dreamsDir(phrenPath, project)); } catch { return 0; }
@@ -340,7 +340,7 @@ export function pendingDreamProposals(phrenPath: string, project: string): numbe
   for (const name of names.filter(n => n.endsWith(".json") && n !== "last-run.json")) {
     try {
       const record = JSON.parse(fs.readFileSync(path.join(dreamsDir(phrenPath, project), name), "utf8")) as DreamRecord;
-      count += record.outcomes.filter(o => o.status === "proposed" && o.op !== "add_finding").length;
+      count += record.outcomes.filter(o => (o.status === "proposed" && o.op !== "add_finding") || o.status === "deferred").length;
     } catch { /* Not a run record. */ }
   }
   return count;
@@ -359,6 +359,13 @@ export async function applyDreamProposals(phrenPath: string, project: string, ru
     const config = readDreamConfig(phrenPath, project);
     // Validate all targets before our own earlier operations can modify them.
     const current = findingVersions(phrenPath, project);
+    // An addition the review budget deferred is queued again, never written to memory directly.
+    for (const { index } of record.outcomes.filter(o => o.status === "deferred" && o.op === "add_finding" && (!only || only.includes(o.index)))) {
+      const outcome = sanitizeDream({ index, op: "add_finding" as const, ...proposeOne(phrenPath, project, runId, index, record.changeset.changes[index]) });
+      record.outcomes = record.outcomes.map(o => o.index === index ? outcome : o);
+      writeAtomic(file, `${JSON.stringify(sanitizeDream(record), null, 2)}\n`);
+      appendJournal(phrenPath, project, `- ${new Date().toISOString()} ${runId}#${index} ${outcome.status}: ${outcome.detail}\n`);
+    }
     const eligible = new Set(record.outcomes.filter(o => o.status === "proposed" && o.op !== "add_finding" && (!only || only.includes(o.index))).map(o => o.index));
     const stale = new Set([...eligible].filter(index => targetIds(record.changeset.changes[index]).some(id => {
       const fid = id.replace(/^fid:/, "");
