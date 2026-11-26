@@ -59,6 +59,69 @@ describe("addFinding happy path", () => {
   });
 });
 
+describe("archived finding dedup", () => {
+  function archive(line: string, name = "rules.md") {
+    const file = path.join(tmp.path, PROJECT, "reference", "topics", name);
+    writeFile(file, `## 2026-01-01\n\n${line}\n`);
+    return file;
+  }
+
+  it.each(["rules.md", "rules.older.md"])("refuses exact normalized archive duplicates in %s and names their id", (name) => {
+    archive('- [pattern] Use Redis   for session storage [confidence 0.8] <!-- fid:deadbeef -->', name);
+    const result = addFindingToFile(tmp.path, PROJECT, "[decision] USE REDIS for session storage");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.status).toBe("skipped");
+    expect(result.data.message).toContain("fid:deadbeef");
+    expect(fs.existsSync(findingsPath())).toBe(false);
+  });
+
+  it("names the archive file when a duplicate has no id, including bulk adds", () => {
+    const file = archive("- Use Redis for session storage");
+    writeFile(findingsPath(), "# Findings\n");
+    const result = addFindingToFile(tmp.path, PROJECT, "Use Redis for session storage");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.status).toBe("skipped");
+    expect(result.data.message).toContain(file);
+    const bulk = addFindingsToFile(tmp.path, PROJECT, ["Use Redis for session storage"]);
+    expect(bulk.ok).toBe(true);
+    if (!bulk.ok) return;
+    expect(bulk.data.added).toEqual([]);
+    expect(bulk.data.skipped).toEqual(["Use Redis for session storage"]);
+    expect(bulk.data).toMatchObject({ duplicates: [{ text: "Use Redis for session storage", file }] });
+  });
+
+  it("allows near archive matches even when fuzzy dedup would reject them", () => {
+    archive("- Use Redis for session storage");
+    const result = addFindingToFile(tmp.path, PROJECT, "Use Redis for session storage with a five minute expiry");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.status).toBe("created");
+    expect(fs.readFileSync(findingsPath(), "utf8")).toContain("five minute expiry");
+  });
+
+  it.each(["superseded", "retracted"])("allows an exact duplicate of a %s archive bullet", (status) => {
+    archive(`- Use Redis for session storage <!-- fid:deadbeef --> <!-- phren:status "${status}" -->`);
+    const result = addFindingToFile(tmp.path, PROJECT, "Use Redis for session storage");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.status).toBe("created");
+    expect(fs.readFileSync(findingsPath(), "utf8")).toContain("Use Redis for session storage");
+  });
+
+  it("finds an exact duplicate among 2,000 archived bullets", () => {
+    writeFile(findingsPath(), "# Findings\n");
+    for (let topic = 0; topic < 20; topic++) {
+      archive(Array.from({ length: 100 }, (_, i) => `- Session cache rule ${topic * 100 + i} uses Redis with explicit expiry <!-- fid:${(topic * 100 + i).toString(16).padStart(8, "0")} -->`).join("\n"), `topic-${String(topic).padStart(2, "0")}.md`);
+    }
+    const result = addFindingToFile(tmp.path, PROJECT, "Session cache rule 1999 uses Redis with explicit expiry");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe("skipped");
+      expect(result.data.message).toContain("fid:000007cf");
+    }
+  });
+});
+
 describe("addFindings bulk", () => {
   it("adds 5 findings at once and all appear", () => {
     const findings = [

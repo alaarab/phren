@@ -34,7 +34,7 @@ import { runCustomHooks } from "../hooks.js";
 import { incrementSessionFindings } from "./session.js";
 import { extractFragmentNames } from "../shared/fragment-graph.js";
 import { extractFactFromFinding } from "./extract-facts.js";
-import { appendChildFinding, editFinding as editFindingCore, readFindings, FINDINGS_FILENAME } from "../data/access.js";
+import { appendChildFinding, editFinding as editFindingCore, parseFindingsContent, FINDINGS_FILENAME } from "../data/access.js";
 import { getActiveTaskForSession } from "../task/lifecycle.js";
 import {
   isInactiveFindingLine,
@@ -42,6 +42,7 @@ import {
   retractFinding as retractFindingLifecycle,
   resolveFindingContradiction,
 } from "../finding/lifecycle.js";
+import { iterateProjectFindings, type FindingTier } from "../finding/locate.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { TEAM_STORE_PATHSPECS } from "../cli/session-git.js";
 import { withFileLock } from "../governance/locks.js";
@@ -285,7 +286,7 @@ export async function handleAddFinding(
         provenance,
       });
       if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-      const { added, skipped, rejected } = result.data;
+      const { added, skipped, rejected, duplicates } = result.data;
       if (added.length > 0) {
         runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
         incrementSessionFindings(phrenPath, added.length, sessionId, project);
@@ -300,6 +301,7 @@ export async function handleAddFinding(
           added,
           skipped,
           rejected,
+          ...(duplicates ? { duplicates } : {}),
           ...(allPotentialDuplicates.length > 0 ? { potentialDuplicates: allPotentialDuplicates } : {}),
           ...(allPotentialConflicts.length > 0 ? { potentialConflicts: allPotentialConflicts } : {}),
         },
@@ -532,13 +534,25 @@ async function handleGetContradictions(
     status_updated?: string;
     status_reason?: string;
     status_ref?: string;
+    tier: FindingTier;
+    file: string;
   }> = [];
 
   for (const { project: p, storePath } of projectsWithPaths) {
-    const result = readFindings(storePath, p);
-    if (!result.ok) continue;
-    for (const finding of result.data) {
-      if (finding.status !== "contradicted") continue;
+    // Reuse the content parser for the existing positional ids, dates and lifecycle fields.
+    let currentFile = "";
+    let remaining: ReturnType<typeof parseFindingsContent> = [];
+    for (const located of iterateProjectFindings(storePath, p)) {
+      if (located.status !== "contradicted") continue;
+      if (located.file !== currentFile) {
+        currentFile = located.file;
+        try {
+          remaining = parseFindingsContent(fs.readFileSync(currentFile, "utf8"), { includeArchived: true });
+        } catch { remaining = []; continue; }
+      }
+      const index = remaining.findIndex((item) => item.stableId === located.fid && item.text === located.text && item.status === "contradicted");
+      if (index < 0) continue;
+      const [finding] = remaining.splice(index, 1);
       if (finding_text && !matchesFindingTextSelector(finding, finding_text)) continue;
       contradictions.push({
         project: p,
@@ -549,6 +563,8 @@ async function handleGetContradictions(
         status_updated: finding.status_updated,
         status_reason: finding.status_reason,
         status_ref: finding.status_ref,
+        tier: located.tier,
+        file: located.file,
       });
     }
   }
@@ -927,7 +943,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "get_contradictions",
     {
       title: "◆ phren · contradictions",
-      description: "List unresolved contradictions (findings currently marked with status contradicted).",
+      description: "List unresolved contradictions across FINDINGS.md and topic archives, including each finding's tier and file.",
       inputSchema: z.object({
         project: z.string().optional().describe("Optional project filter. When omitted, scans all projects."),
         finding_text: z.string().optional().describe("Optional finding selector (supports fid, exact text, or partial match)."),

@@ -19,6 +19,7 @@ import {
   getRepoRoot,
   inferCitationLocation,
 } from "./citation.js";
+import { iterateProjectFindings } from "../finding/locate.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref } from "./dedup.js";
 import { validateFindingsFormat, validateFinding } from "./validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./archive.js";
@@ -35,11 +36,18 @@ import {
 } from "../finding/lifecycle.js";
 import {
   METADATA_REGEX,
+  normalizeFindingText,
+  withoutTypeTag,
 } from "./metadata.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
+
+interface ArchivedDuplicate {
+  fid?: string;
+  file: string;
+}
 
 interface PreparedFinding {
   original: string;
@@ -193,7 +201,7 @@ interface PrepareFindingOpts {
 
 function prepareFinding(
   opts: PrepareFindingOpts,
-): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
+): { status: "added"; finding: PreparedFinding } | { status: "duplicate"; duplicate?: ArchivedDuplicate } | { status: "rejected"; reason: string } {
   const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit, idSource } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
@@ -225,6 +233,16 @@ function prepareFinding(
 
   if (isDuplicateFinding(fullHistory, bullet)) {
     return { status: "duplicate" };
+  }
+
+  if (opts.phrenPath) {
+    const needle = withoutTypeTag(normalizeFindingText(bullet));
+    for (const existing of iterateProjectFindings(opts.phrenPath, project)) {
+      if (existing.tier === "active" || existing.status !== "active") continue;
+      if (needle && withoutTypeTag(normalizeFindingText(existing.line)) === needle) {
+        return { status: "duplicate", duplicate: { fid: existing.fid, file: existing.file } };
+      }
+    }
   }
 
   // NOTE: heuristic contradiction detection is intentionally NOT done here. The lexical
@@ -370,17 +388,17 @@ export function addFindingToFile(
 
   const result: PhrenResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
     assertFindingVersions(learningsPath, opts?.expectedFindings);
-    const preparedForNewFile = prepareFinding({
-      finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
-      citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
-      idSource: opts?.idSource,
-    });
     if (!fs.existsSync(learningsPath)) {
+      const preparedForNewFile = prepareFinding({
+        finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
+        citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+        idSource: opts?.idSource,
+      });
       if (preparedForNewFile.status === "rejected") {
         return phrenErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
       }
       if (preparedForNewFile.status === "duplicate") {
-        return phrenOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
+        return phrenOk(duplicateMessage(project, preparedForNewFile.duplicate));
       }
       const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
       const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
@@ -415,7 +433,7 @@ export function addFindingToFile(
     }
     if (prepared.status === "duplicate") {
       debugLog(`add_finding: skipped duplicate for "${project}": ${learning.slice(0, 80)}`);
-      return phrenOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
+      return phrenOk(duplicateMessage(project, prepared.duplicate));
     }
 
     const issues = validateFindingsFormat(content);
@@ -521,12 +539,18 @@ export function addFindingToFile(
   return phrenOk({ message, status: "added" as const });
 }
 
+function duplicateMessage(project: string, duplicate?: ArchivedDuplicate): string {
+  return duplicate
+    ? `Skipped duplicate finding for "${project}": already exists as ${duplicate.fid ? `fid:${duplicate.fid}` : duplicate.file}.`
+    : `Skipped duplicate finding for "${project}": already exists with similar wording.`;
+}
+
 export function addFindingsToFile(
   phrenPath: string,
   project: string,
   learnings: string[],
   opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; scope?: string; provenance?: FindingProvenance }
-): PhrenResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
+): PhrenResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[]; duplicates?: (ArchivedDuplicate & { text: string })[] }> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
@@ -543,6 +567,7 @@ export function addFindingsToFile(
 
   const added: string[] = [];
   const skipped: string[] = [];
+  const duplicates: (ArchivedDuplicate & { text: string })[] = [];
   const rejected: { text: string; reason: string }[] = [];
 
   // Check project dir existence before withFileLock (which would create the dir via mkdirSync)
@@ -568,6 +593,7 @@ export function addFindingsToFile(
         }
         if (prepared.status === "duplicate") {
           skipped.push(learning);
+          if (prepared.duplicate) duplicates.push({ text: learning, ...prepared.duplicate });
           continue;
         }
         content = insertFindingIntoContent(content, today, prepared.finding.bullet, prepared.finding.citationComment);
@@ -603,6 +629,7 @@ export function addFindingsToFile(
       }
       if (prepared.status === "duplicate") {
         skipped.push(learning);
+        if (prepared.duplicate) duplicates.push({ text: learning, ...prepared.duplicate });
         continue;
       }
       content = insertFindingIntoContent(content, today, prepared.finding.bullet, prepared.finding.citationComment);
@@ -633,5 +660,5 @@ export function addFindingsToFile(
     }
   }
 
-  return phrenOk({ added, skipped, rejected });
+  return phrenOk({ added, skipped, rejected, ...(duplicates.length > 0 ? { duplicates } : {}) });
 }
