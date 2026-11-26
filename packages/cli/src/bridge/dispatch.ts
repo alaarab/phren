@@ -78,7 +78,7 @@ const remoteTarget = z.union([targetSchema, startingTargetSchema]);
 /** The local pane that asked for the dispatch, where return notices go. */
 export const originPaneSchema = z.object({ server: serverName, workspace: id, tab: id, pane: id }).strict();
 export type OriginPane = z.infer<typeof originPaneSchema>;
-export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "stalled", "gone"] as const;
+export const workerStates = ["working", "waiting", "done", "needs-you", "failed", "blocked", "stalled", "gone"] as const;
 export type WorkerState = typeof workerStates[number];
 const timestamp = z.string().datetime();
 const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
@@ -122,11 +122,16 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   submittedAt: timestamp.optional().describe("When the launch command was submitted; a missing worker file is only gone after its grace period."),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
     background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
-    waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
+    waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait."),
+    waitingOn: z.enum(["ci", "background", "queue", "other"]).optional()
+      .describe("What the worker waits on: background work while its finished turn still runs, or what its waiting return named.") }).strict().optional()
     .describe("The worker pane's last observed state."),
   returned: z.object({
-    state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone"]), at: timestamp,
+    state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone", "waiting"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
+    waitingOn: z.enum(["ci", "background", "queue", "other"]).optional()
+      .describe("A waiting return's one word: CI, this worker's own background work, a queue, or other work. Not an owner action."),
+    waitingFor: z.string().max(200).optional().describe("The sentence the worker's turn ended on, when it waits on something that is not the owner."),
     checkout: z.object({ path: z.string().max(4096), branch: z.string().max(256).optional() }).strict().optional()
       .describe("Where a worker that failed was working, for the dispatch that continues it."),
     prs: prsSchema.optional(),
@@ -135,7 +140,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
     waited: z.number().int().min(1).max(999).optional().describe("The most background tasks the worker waited on before it finished."),
-  }).strict().optional().describe("The latest return: the worker finished, needs the owner, failed, is blocked or is gone."),
+  }).strict().optional().describe("The latest return: the worker finished, is parked waiting on CI, background work or a queue, needs the owner, failed, is blocked or is gone."),
   approval: z.object({
     actionId: z.string().min(1).max(200), tool: z.string().max(200), title: z.string().max(200).optional(), request: z.string().max(500).optional(),
     requestKind: z.enum(["command", "tool", "edit", "question", "other"]).optional(), terminal: z.boolean().optional(),
@@ -694,7 +699,7 @@ export async function reconcileIdempotencyRecord(record: IdempotencyRecord): Pro
       return;
     }
     const worker = receipt.worker;
-    const workerLive = worker && ["working", "blocked", "needs-you"].includes(worker.state)
+    const workerLive = worker && ["working", "blocked", "needs-you", "waiting"].includes(worker.state)
       && Number.isFinite(Date.parse(worker.checkedAt)) && Date.now() - Date.parse(worker.checkedAt) < LAUNCH_INTERRUPTED_MS;
     if (workerLive) {
       if (receipt.state === "launching" || receipt.state === "sending") {
@@ -847,6 +852,26 @@ export function recentDispatches(receipts: Receipt[], limit = DISPATCH_LIST_DEFA
     kept.add(receipt);
   }
   return { dispatches: receipts.filter(receipt => kept.has(receipt)), total: receipts.length, truncated: kept.size < receipts.length };
+}
+
+/** One word for clients that do not fold the receipt's states themselves
+ * (the phone's dispatch rows, `dispatch_returns` rows). The latest return
+ * decides unless the worker is back at work after it — the same test as the
+ * task work link (task-work.ts `dispatchWorkerState`). A stalled return is
+ * still work in progress; a worker whose finished turn waits on background
+ * work is waiting, not working. */
+export function dispatchPhase(receipt: Receipt): "working" | "waiting" | "needs-owner" | "done" {
+  const fold = (state: string): "working" | "waiting" | "needs-owner" | "done" => state === "done" ? "done"
+    : state === "waiting" ? "waiting"
+    : state === "needs-you" || state === "blocked" || state === "failed" || state === "gone" ? "needs-owner"
+    : "working";
+  const returned = receipt.returned;
+  const workingAgain = receipt.worker?.state === "working" && returned !== undefined && Date.parse(receipt.worker.since) > Date.parse(returned.at);
+  if (returned && !workingAgain) return fold(returned.state);
+  if (receipt.worker) return receipt.worker.state === "working" && receipt.worker.waitingOn ? "waiting" : fold(receipt.worker.state);
+  if (receipt.state === "failed") return "needs-owner";
+  if (receipt.closedAt) return "done";
+  return "working";
 }
 
 /** Caller holds receiptUpdates, including for the entire routing snapshot. */

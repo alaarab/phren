@@ -94,7 +94,7 @@ describe("the receiving Hook's worker states", () => {
 
   it("keeps an idle pane with no turn record working while its finished turn still awaits shells", async () => {
     const answer = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Started.", awaited: 4 }));
-    expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 4, reply: "Started." });
+    expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 4, ended: true, reply: "Started." });
     const settled = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Done." }));
     expect(settled.workers[0]).toMatchObject({ state: "done", completed: true });
   });
@@ -115,7 +115,7 @@ describe("the receiving Hook's worker states", () => {
       ...readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Sub-agent started." }),
       children: async () => 1,
     });
-    expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 1, reply: "Sub-agent started." });
+    expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 1, ended: true, reply: "Sub-agent started." });
   });
 
   it("carries what the worker waits on from the approval reader, for a full target only", async () => {
@@ -301,6 +301,60 @@ describe("recording transitions", () => {
     expect(line).toMatch(/^Returns: 2 dispatches \(Devbox parser checks done, .*; Desk nav checks gone\)\. Call dispatch_returns\.$/);
     expect(line).not.toMatch(/[\x00-\x1f]/);
   });
+
+  it("records a turn whose reply waits on CI as waiting, and rereads it once across waiting and done", () => {
+    const value = receipt();
+    observe(value, { state: "working" }, 1000);
+    expect(observe(value, { state: "done", completed: true, reply: "PR #12 is open. Now waiting on CI.", waiting: "Now waiting on CI." }, 2000)).toBe(true);
+    expect(value.returned).toMatchObject({ state: "waiting", waitingOn: "ci", waitingFor: "Now waiting on CI.",
+      reply: "PR #12 is open. Now waiting on CI.", read: false });
+    expect(value.returned!.question).toBeUndefined();
+    expect(value.worker).toMatchObject({ state: "waiting", waitingOn: "ci" });
+    // The same turn read done on a later poll (CI answered, the wait was noticed late) is not a second return.
+    expect(observe(value, { state: "done", completed: true, reply: "PR #12 is open. Now waiting on CI." }, 3000)).toBe(false);
+    expect(value.returned!.state).toBe("waiting");
+  });
+
+  it("lets an owner question beat the wait the same reply names", () => {
+    const value = receipt();
+    observe(value, { state: "working" }, 1000);
+    expect(observe(value, { state: "done", completed: true, reply: "I'll push once the rerun passes.\nWhich changelog section should I use?",
+      waiting: "I'll push once the rerun passes." }, 2000)).toBe(true);
+    expect(value.returned).toMatchObject({ state: "needs-you", question: "I'll push once the rerun passes." });
+    expect(value.returned!.waitingFor).toBeUndefined();
+  });
+
+  it("reads an older peer's folded wait as waiting, never as an unfinished reason", () => {
+    const value = receipt();
+    observe(value, { state: "working" }, 1000);
+    expect(observe(value, { state: "done", completed: true, reply: "PR #12 is open. Now waiting on CI.",
+      unfinished: "Stopped waiting: Now waiting on CI." }, 2000)).toBe(true);
+    expect(value.returned).toMatchObject({ state: "waiting", waitingOn: "ci", waitingFor: "Now waiting on CI." });
+    expect(value.returned!.question).toBeUndefined();
+  });
+
+  it("says on the worker row what a turn whose end left background work is waiting on, with no return", () => {
+    const value = receipt();
+    expect(observe(value, { state: "working", completed: true, ended: true, background: 2 }, 1000)).toBe(true);
+    expect(value.worker).toMatchObject({ state: "working", waitingOn: "background" });
+    expect(value.returned).toBeUndefined();
+    // The same observation again writes nothing.
+    expect(observe(value, { state: "working", completed: true, ended: true, background: 2 }, 2000)).toBe(false);
+    // The wait ended, or the worker took new work: cleared.
+    expect(observe(value, { state: "working" }, 3000)).toBe(true);
+    expect(value.worker).not.toHaveProperty("waitingOn");
+  });
+
+  it("words a waiting return for the notice and carries the phase in the row", () => {
+    for (const [sentence, kind, word] of [["Now waiting on CI.", "ci", "CI"], ["Waiting on a background task.", "background", "background work"],
+      ["Waiting for my turn on the slot.", "queue", "the queue"], ["I'll wait for the results to arrive.", "other", "work"]] as const) {
+      const value = receipt();
+      observe(value, { state: "working" }, 1000);
+      expect(observe(value, { state: "done", completed: true, reply: sentence, waiting: sentence }, 2000)).toBe(true);
+      expect(noticeLine([value])).toBe(`Return: Devbox parser checks waiting on ${word}, ${sentence} (dispatch ${value.id}). Call dispatch_returns.`);
+      expect(returnRow(value)).toMatchObject({ state: "waiting", waitingOn: kind, waitingFor: sentence, phase: "waiting" });
+    }
+  });
 });
 
 describe("the dispatching Hook's returns loop", () => {
@@ -398,7 +452,7 @@ describe("the dispatching Hook's returns loop", () => {
 
     const rows = await returns.take();
     expect(rows).toEqual([{ id: placed.id, computer: "Devbox", project: "phren", label: "parser checks", harness: "claude",
-      state: "done", at: expect.any(String), reply: "Parser checks done, tests passed.", target: workerTarget }]);
+      state: "done", at: expect.any(String), reply: "Parser checks done, tests passed.", phase: "done", target: workerTarget }]);
     expect(await returns.take()).toEqual([]);
     const stored = await readFile(path.join(root, `dispatches/${placed.id}.json`), "utf8");
     expect(stored).not.toContain(brief.prompt);

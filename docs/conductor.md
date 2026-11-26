@@ -715,19 +715,29 @@ code 130). A return is one of:
 - `needs-you`: the worker finished by asking the owner something, or stopped
   mid-task. `question` is the question line, or why the turn is not done: its
   closing paragraph announced a step it never ran ("Let me install
-  dependencies.", "I'll resolve it on the follow-up branch."), it waits on
-  something with nothing left running ("Now waiting on CI.", "I'll push once
-  it passes."), or it left tracked uncommitted files and reported or named no
-  PR. A reply that hands over to the owner ("I'll wait for your review",
-  "I'll leave the merge to you") is done. Uncommitted files are counted only in a
-  checkout no other pane works in. A turn whose checkout git could not read
-  in time is returned `done` but its pane is not closed, and one turn is
-  returned once even when a later poll reads it differently.
+  dependencies.", "I'll resolve it on the follow-up branch."), or it left
+  tracked uncommitted files and reported or named no PR. A reply that hands
+  over to the owner ("I'll wait for your review", "I'll leave the merge to
+  you") is done. Uncommitted files are counted only in a checkout no other
+  pane works in. A turn whose checkout git could not read in time is returned
+  `done` but its pane is not closed, and one turn is returned once even when a
+  later poll reads it differently.
+- `waiting`: the worker's turn ended waiting on something with nothing left
+  running ("Now waiting on CI.", "I'll push once it passes."). `waitingOn` is
+  `ci`, `background`, `queue` or `other`, and `waitingFor` is the sentence. It
+  is not an owner action: it never becomes an owner inbox item or a "needs
+  you" notice, and its pane is not closed. A question for the owner in the
+  same reply makes the return `needs-you` instead.
 - `failed`: the harness ended the turn on an error instead of a reply, such
   as Codex's usage limit, or the owner interrupted the turn in the worker's
   terminal. `error` is the message.
 - `blocked`: the worker waits on terminal input, such as a permission prompt.
 - `gone`: its pane closed or another conversation took the pane over.
+
+Each row, and each receipt `GET /v1/dispatch` lists, also carries a `phase`
+for a badge: `working` (working or stalled, or an ended turn still waiting on
+its background tasks, shown as `worker.waitingOn: "background"`), `waiting`,
+`needs-owner` (needs-you, blocked, failed or gone) or `done`.
 
 Each row names the dispatch ID, computer, project, label and the worker's
 `target`, so an answer or follow-up goes back with `hand_off`. A worker that

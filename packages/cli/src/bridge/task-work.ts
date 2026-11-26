@@ -84,8 +84,8 @@ export interface DispatchReceiptView {
   id: string; createdAt: string; updatedAt: string; computer: string; label: string; harness?: string;
   task?: TaskDependency; state: string; branch?: string; cloneDir?: string; closedAt?: string;
   target?: { server?: string; session?: string };
-  worker?: { state: string; since: string };
-  returned?: { state: string; at: string; checkout?: { path: string; branch?: string } };
+  worker?: { state: string; since: string; waitingOn?: "ci" | "background" | "queue" | "other" };
+  returned?: { state: string; at: string; checkout?: { path: string; branch?: string }; waitingOn?: "ci" | "background" | "queue" | "other" };
 }
 
 /** The receipt's worker state as a task records it. A return wins unless the
@@ -110,10 +110,13 @@ export function recordDispatchWorker(receipt: DispatchReceiptView): void {
   if (!receipt.task || !taskWorkEnabled()) return;
   const base = phrenStoreRoot();
   const state = dispatchWorkerState(receipt);
+  // A waiting worker parks on what its return named; one back at work after
+  // waiting, on the background work its worker row still carries.
+  const waitingOn = state === "waiting" ? receipt.returned?.waitingOn ?? receipt.worker?.waitingOn : undefined;
   // Only the branch phren made for the dispatch: a worker's own checkout may be on main.
   const worktree = receipt.cloneDir ?? receipt.returned?.checkout?.path;
   const branch = receipt.branch;
-  const key = JSON.stringify([receipt.task, receipt.computer, receipt.target?.session, receipt.label, receipt.harness, state, branch, worktree]);
+  const key = JSON.stringify([receipt.task, receipt.computer, receipt.target?.session, receipt.label, receipt.harness, state, waitingOn, branch, worktree]);
   if (recorded.get(receipt.id) === key) return;
   const store = taskStores(base).filter(candidate => candidate.taskStoreId === receipt.task!.storeId && candidate.available !== false && candidate.role !== "readonly");
   if (store.length !== 1 || permissionDeniedError(store[0].path, "update_task", receipt.task.project)) return;
@@ -126,7 +129,7 @@ export function recordDispatchWorker(receipt: DispatchReceiptView): void {
     const worker = { dispatchId: receipt.id, computer: receipt.computer.slice(0, 200),
       ...(receipt.target?.session ? { session: receipt.target.session.slice(0, 200) } : {}),
       ...(receipt.label ? { label: receipt.label.slice(0, 200) } : {}), ...(receipt.harness ? { harness: receipt.harness } : {}),
-      state, at: same ? current.at : at };
+      state, ...(waitingOn ? { waitingOn } : {}), at: same ? current.at : at };
     return { work: { version: 1, ...work, worker, ...(branch ? { branch } : {}), ...(worktree ? { worktree } : {}) } };
   });
   if (result.ok) recorded.set(receipt.id, key);

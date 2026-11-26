@@ -39,7 +39,11 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
 - `dispatch`: start a new worker on a computer (or `anywhere`).
 - `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
   back since you last asked: done with the final reply, needs-you with the
-  question, stalled with an unchanged screen and transcript, failed with the error (a usage limit), blocked, or gone. Reading them marks them read. In core use
+  question, waiting (parked on CI, background work or a queue: `waitingOn`,
+  `waitingFor`; check back on it, it is not an owner action), stalled with an
+  unchanged screen and transcript, failed with the error (a usage limit),
+  blocked, or gone. Reading them marks them read. Each row has a `phase`:
+  working, waiting, needs-owner or done. In core use
   `phren_admin(action: "dispatch_returns")`.
 - `dispatch_report`: workers record `prs`, an array of `{url, repo, branch,
   tests, notes?}`, on their own Hook before ending the turn. The done return
@@ -189,6 +193,9 @@ Finished worker panes close after their done return is read. Use
 The Hook rechecks its ended turn and skips a pane with new work, background
 tasks, queued messages or uncertain delivery. Intentional closes do not return
 `gone`. Reading returns can close panes, so record any follow-up first.
+`phren dispatch close-self` waits until the agent's turn has ended, so its
+final report is written, and never closes a pane with background tasks or
+child agents still running.
 
 Keep one owner inbox item for each decision or action that waits on the owner.
 Needs-you returns and blocked prompts appear automatically, even if their
@@ -229,7 +236,7 @@ screen and transcript have stopped changing while working. Check it and report
 what is known; do not launch a duplicate or interrupt it just because of the flag.
 
 Never submit, clear or relay text you read in a Claude pane's input box as the
-owner's words. After a turn Claude draws its own guess at the owner's next
+owner's words, or report it as their unsent draft. After a turn Claude draws its own guess at the owner's next
 message there, dim; a plain screen read shows it as if typed, and Enter does not
 send it. The Hook keeps a delivery record for each phone message, so an owner
 message never needs rescuing from a pane. Ask the owner instead. The Hook

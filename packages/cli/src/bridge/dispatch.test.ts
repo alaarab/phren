@@ -2,11 +2,11 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DispatchService, dispatchProjectDirectory, dispatchStatus, repointDispatchOrigins } from "./dispatch.js";
+import { DispatchService, dispatchPhase, dispatchProjectDirectory, dispatchStatus, repointDispatchOrigins, type Receipt } from "./dispatch.js";
 import { getMachineName } from "../machine-identity.js";
 import { addGrant, removeGrant } from "./grants.js";
 import { confirmAuthority } from "./authority.js";
-import { BridgeError } from "./protocol.js";
+import { BridgeError, type Json } from "./protocol.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { hookRequest } from "./client.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
@@ -828,4 +828,33 @@ describe("a brief that went with the launch", () => {
     expect(result.error).toContain("has not confirmed it yet (last status idle)");
     expect(prompts()).toHaveLength(0);
   });
+});
+
+describe("dispatch phase", () => {
+  const at = (ms: number) => new Date(ms).toISOString();
+  const base = { id: "40000000-0000-4000-8000-00000000000f", computer: "Devbox", project: "phren", harness: "claude",
+    label: "checks", createdAt: at(0), updatedAt: at(0), state: "accepted" } as Receipt;
+  const withWorker = (state: string, extra: Json = {}, since = at(2)): Receipt =>
+    ({ ...base, worker: { state, since, checkedAt: since, sawWorking: true, ...extra } } as Receipt);
+  it.each([
+    ["a live placement", base, "working"],
+    ["a failed placement", { ...base, state: "failed" }, "needs-owner"],
+    ["a closed receipt", { ...base, closedAt: at(1) }, "done"],
+    ["a done return", { ...base, returned: { state: "done", at: at(1), read: false } }, "done"],
+    ["a waiting return", { ...base, returned: { state: "waiting", at: at(1), read: false, waitingOn: "ci" } }, "waiting"],
+    ["a needs-you return", { ...base, returned: { state: "needs-you", at: at(1), read: false } }, "needs-owner"],
+    ["a blocked return", { ...base, returned: { state: "blocked", at: at(1), read: false } }, "needs-owner"],
+    ["a failed return", { ...base, returned: { state: "failed", at: at(1), read: false } }, "needs-owner"],
+    ["a gone return", { ...base, returned: { state: "gone", at: at(1), read: false } }, "needs-owner"],
+    ["a stalled return is still work in progress", { ...base, returned: { state: "stalled", at: at(1), read: false } }, "working"],
+    ["a worker back at work after its return", { ...base, returned: { state: "done", at: at(1), read: false },
+      worker: { state: "working", since: at(2), checkedAt: at(2), sawWorking: true } }, "working"],
+    ["a resumed worker still running background work", { ...base, returned: { state: "done", at: at(1), read: false },
+      worker: { state: "working", since: at(2), checkedAt: at(2), sawWorking: true, waitingOn: "background" } }, "waiting"],
+    ["a worker whose finished turn still runs background work", withWorker("working", { waitingOn: "background" }), "waiting"],
+    ["a waiting worker row", withWorker("waiting", { waitingOn: "ci" }), "waiting"],
+    ["a worker that needs the owner", withWorker("needs-you"), "needs-owner"],
+    ["a stalled worker", withWorker("stalled"), "working"],
+    ["a done worker row", withWorker("done"), "done"],
+  ] as const)("%s", (_name, receipt, want) => expect(dispatchPhase(receipt as Receipt)).toBe(want));
 });

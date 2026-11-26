@@ -40,7 +40,7 @@ import type { AgentHooks } from "./agent-hooks.js";
 import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeRoutes } from "./code-routes.js";
 import type { WorkspaceContextUsage } from "./context.js";
-import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema, recentDispatches, reconcileInterruptedDispatches } from "./dispatch.js";
+import { type DispatchService, dispatchPhase, dispatchProjectDirectory, dispatchStatus, originPaneSchema, recentDispatches, reconcileInterruptedDispatches } from "./dispatch.js";
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId, briefRoot, launchesWithBrief, readLaunchBrief } from "./launch-brief.js";
@@ -550,7 +550,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const limit = z.coerce.number().int().min(1).max(1024).optional().parse(url.searchParams.get("limit") ?? undefined);
             const id = z.string().min(1).max(64).optional().parse(url.searchParams.get("id") ?? undefined);
             const receipts = await dispatchStatus();
-            result = id ? { dispatches: receipts.filter(receipt => receipt.id === id), total: receipts.length, truncated: false } : recentDispatches(receipts, limit);
+            const list = id
+              ? { dispatches: receipts.filter(receipt => receipt.id === id), total: receipts.length, truncated: false }
+              : recentDispatches(receipts, limit);
+            // `phase` folds each receipt's worker and return states into one word.
+            result = { ...list, dispatches: list.dispatches.map(receipt => ({ ...receipt, phase: dispatchPhase(receipt) })) };
             break;
           }
           // A session move (session-move.ts) by its id, or this computer's recent moves.

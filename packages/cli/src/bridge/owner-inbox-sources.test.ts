@@ -79,6 +79,26 @@ describe("current owner inbox sources", () => {
     expect(peerRequest).not.toHaveBeenCalled();
   });
 
+  it("never lists a worker parked waiting on CI as needing the owner", async () => {
+    panes = [];
+    const at = new Date().toISOString();
+    // A waiting return is never a candidate row.
+    vi.mocked(dispatchStatus).mockResolvedValue([{ id: "bbbbbbbb-1111-4111-8111-111111111112", computer: "local", target, project: "phren", label: "pr-finisher", createdAt: at,
+      returned: { state: "waiting", at, waitingOn: "ci", waitingFor: "Waiting on CI for #940." },
+      worker: { state: "waiting", since: at, checkedAt: at, sawWorking: true } }] as never);
+    expect((await box().run({})).items).toEqual([]);
+    expect(workerStates).not.toHaveBeenCalled();
+    // An older peer Hook folded the wait into its unfinished reason: still no row.
+    vi.mocked(dispatchStatus).mockResolvedValue([{ id: "bbbbbbbb-1111-4111-8111-111111111113", computer: "local", target, project: "phren", label: "pr-finisher", createdAt: at,
+      returned: { state: "needs-you", at, question: "Continue?" } }] as never);
+    let workers: Json[] = [{ state: "idle", completed: true, reply: "PR #12 is open. Now waiting on CI.", unfinished: "Stopped waiting: Now waiting on CI." }];
+    vi.mocked(workerStates).mockImplementation(async () => ({ workers }) as never);
+    expect((await box().run({})).items).toEqual([]);
+    // A real unfinished reason still is a row.
+    workers = [{ state: "idle", completed: true, unfinished: "Stopped with 9 uncommitted files and no PR." }];
+    expect((await box().run({})).items).toMatchObject([{ kind: "needs-you", title: "Stopped with 9 uncommitted files and no PR.", live: true }]);
+  });
+
   it("closes a local receipt whose worker is closed, or gone after the returns loop stopped watching it", async () => {
     panes = [];
     const at = new Date().toISOString(), old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
