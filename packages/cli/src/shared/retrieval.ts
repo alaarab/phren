@@ -91,6 +91,8 @@ const NO_PROJECT_MIN_CHUNK_RARITY = 0.6;
  * words ("honest", "good") in one bullet are a coincidence, a rare word is a topic. Measured on a
  * 29-project store: everyday words sit at 0.2-0.45, the terms questions turn on mostly above 0.5. */
 const MIN_ANCHOR_RARITY = 0.5;
+/** A row whose bullet carries under this share of the strongest row's matched rarity is a side match, mostly noise. */
+const MIN_SHARE_OF_BEST_RARITY = 0.6;
 /** Rarity for a token the index never saw, or when no index is at hand. */
 const DEFAULT_TOKEN_RARITY = 0.5;
 const TASK_RESCUE_MIN_OVERLAP = 0.3;
@@ -1262,7 +1264,8 @@ export type RelevanceFloorVerdict = Omit<RecallFloorDecision, keyof RecallDocRef
  * doc only when it has a real connection to the prompt:
  *   - a structural signal: it's a changed file, or matches the branch name, or
  *   - it's a canonical doc for the project you're actually in, or
- *   - its text clears a query-overlap floor (higher for cross-project docs).
+ *   - its text clears a query-overlap floor (higher for cross-project docs)
+ *     and keeps a share of the strongest row's matched rarity (no side matches).
  *
  * When there's no usable query signal (no tokens) it is a no-op. Setting the
  * floor to 0 (env PHREN_MIN_QUERY_RELEVANCE=0) disables it and restores the
@@ -1307,11 +1310,13 @@ export function applyRelevanceFloor(
     const passed = overlap >= (isCrossProject ? crossFloor : floor);
     return { ...seen, overlap, passed, reason: passed ? "pass" : "low-overlap" };
   };
-  return rows.filter((doc) => {
-    const decision = decide(doc);
+  const decided = rows.map((doc) => ({ doc, decision: decide(doc) }));
+  const best = Math.max(0, ...decided.filter(({ decision }) => decision.reason === "pass").map(({ decision }) => decision.rarity));
+  return decided.filter(({ doc, decision }) => {
+    if (decision.reason === "pass" && decision.rarity < best * MIN_SHARE_OF_BEST_RARITY) decision = { ...decision, passed: false, reason: "below-best" };
     explain?.(doc, decision);
     return decision.passed;
-  });
+  }).map(({ doc }) => doc);
 }
 
 export function selectSnippets(

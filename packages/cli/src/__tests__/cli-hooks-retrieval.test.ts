@@ -211,6 +211,18 @@ describe("applyRelevanceFloor", () => {
     expect(applyRelevanceFloor([doc], "compile private client live", null, "max", undefined, rarity)).toHaveLength(1);
   });
 
+  it("drops a side match carrying under 60% of the strongest row's keyword rarity, which alone would pass", () => {
+    const rarity = new Map([["ledger", 0.9], ["webhook", 0.6], ["hmac", 0.9], ["rotating", 0.5]]);
+    const answer = makeDocRow("myapp", "FINDINGS.md", "findings", "- The ledger webhook signs each payload with the rotating hmac key.");
+    const near = makeDocRow("myapp", "reference/topics/security.md", "reference", "- Rotating the hmac key breaks ledger replays.");
+    const side = makeDocRow("myapp", "reference/topics/ops.md", "reference", "- The ledger export calls a webhook nightly.");
+    const reasons: string[] = [];
+    const kept = applyRelevanceFloor([answer, near, side], "ledger webhook hmac rotating", null, "myapp", undefined, rarity, (_row, d) => reasons.push(d.reason));
+    expect(kept).toEqual([answer, near]);
+    expect(reasons).toEqual(["pass", "pass", "below-best"]);
+    expect(applyRelevanceFloor([side], "ledger webhook hmac rotating", null, "myapp", undefined, rarity)).toEqual([side]);
+  });
+
   it("never matches the path: every store path contains .phren", () => {
     const doc = { ...makeDocRow("designstudio", "FINDINGS.md", "findings", "- Delegation notes for the studio."),
       path: "/home/sam/.phren/designstudio/FINDINGS.md" };

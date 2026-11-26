@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - The prompt hook now shows which prompt words matched the memories it injected, up to eight words with a count of the rest. Clanker mode shows the same words in one short line after its index.
+- The prompt hook no longer injects a memory that matches the prompt much more weakly than the best one. A memory whose matched words carry less than 60% of the best memory's weight (rare words weigh more) is left out, and the recall trace records it as `below-best`. On a real store this raised judged precision from 57% to 64% and cut the tokens injected per prompt by 14%, with the same hits and false injections.
 
 ### Fixed
 
