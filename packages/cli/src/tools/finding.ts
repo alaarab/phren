@@ -29,7 +29,6 @@ import {
 } from "../shared/content.js";
 import { jaccardTokenize, jaccardSimilarity, stripMetadata, detectConflicts, extractDynamicEntities } from "../content/dedup.js";
 import { scanForSecrets } from "../content/secrets.js";
-import type { PhrenResult } from "../phren-core.js";
 import { runCustomHooks } from "../hooks.js";
 import { incrementSessionFindings } from "./session.js";
 import { extractFragmentNames } from "../shared/fragment-graph.js";
@@ -41,6 +40,8 @@ import {
   supersedeFinding,
   retractFinding as retractFindingLifecycle,
   resolveFindingContradiction,
+  archiveNote,
+  type LifecycleResult,
 } from "../finding/lifecycle.js";
 import { iterateProjectFindings, type FindingTier } from "../finding/locate.js";
 import { permissionDeniedError } from "../governance/rbac.js";
@@ -133,22 +134,20 @@ function matchesFindingTextSelector(
   return id === query || stableId === query || text === query || text.includes(query);
 }
 
-/** Shared boilerplate for lifecycle mutation tools: validate project → call core fn → update index → map response. */
+/** Shared boilerplate for lifecycle mutation tools: validate project → call core fn → re-index the files it wrote → map response. */
 function withLifecycleMutation<T>(
-  phrenPath: string,
   project: string,
   writeQueue: McpContext["withWriteQueue"],
   updateIndex: McpContext["updateFileInIndex"],
-  handler: () => PhrenResult<T>,
-  mapResponse: (data: T) => { message: string; data: Record<string, unknown> },
+  handler: () => LifecycleResult<T>,
+  mapResponse: (data: T) => { message: string; data: Record<string, unknown>; files: string[] },
 ) {
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
   return writeQueue(async () => {
     const result = handler();
-    if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-    const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
-    if (resolvedFindingsDir) updateIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
+    if (!result.ok) return mcpResponse({ ok: false, error: result.error, ...(result.candidates ? { data: { candidates: result.candidates } } : {}) });
     const mapped = mapResponse(result.data);
+    for (const file of new Set(mapped.files)) updateIndex(file);
     return mcpResponse({ ok: true, message: mapped.message, data: mapped.data });
   });
 }
@@ -429,11 +428,12 @@ async function handleSupersedeFinding(
   }
   const { withWriteQueue, updateFileInIndex } = ctx;
   return withLifecycleMutation(
-    phrenPath, project, withWriteQueue, updateFileInIndex,
+    project, withWriteQueue, updateFileInIndex,
     () => supersedeFinding(phrenPath, project, finding_text, superseded_by),
     (data) => ({
-      message: `Marked finding as superseded in ${project}.`,
-      data: { project, finding: data.finding, status: data.status, superseded_by: data.superseded_by },
+      message: `Marked finding as superseded in ${project}${archiveNote(data)}.`,
+      data: { project, finding: data.finding, status: data.status, superseded_by: data.superseded_by, tier: data.tier, file: data.file },
+      files: [data.file],
     }),
   );
 }
@@ -453,11 +453,12 @@ async function handleRetractFinding(
   }
   const { withWriteQueue, updateFileInIndex } = ctx;
   return withLifecycleMutation(
-    phrenPath, project, withWriteQueue, updateFileInIndex,
+    project, withWriteQueue, updateFileInIndex,
     () => retractFindingLifecycle(phrenPath, project, finding_text, reason),
     (data) => ({
-      message: `Retracted finding in ${project}.`,
-      data: { project, finding: data.finding, status: data.status, reason: data.reason },
+      message: `Retracted finding in ${project}${archiveNote(data)}.`,
+      data: { project, finding: data.finding, status: data.status, reason: data.reason, tier: data.tier, file: data.file },
+      files: [data.file],
     }),
   );
 }
@@ -492,7 +493,7 @@ async function handleResolveContradiction(
     });
   }
   return withLifecycleMutation(
-    phrenPath, project, withWriteQueue, updateFileInIndex,
+    project, withWriteQueue, updateFileInIndex,
     () => resolveFindingContradiction(phrenPath, project, findingText, findingTextOther, resolution),
     (data) => ({
       message: `Resolved contradiction in ${project} with "${resolution}".`,
@@ -504,6 +505,7 @@ async function handleResolveContradiction(
         finding_a: data.finding_a,
         finding_b: data.finding_b,
       },
+      files: [data.finding_a.file, data.finding_b.file],
     }),
   );
 }
@@ -886,8 +888,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "Mark an existing finding as superseded and link it to the newer finding text.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        finding_text: z.string().describe("Finding to supersede (supports fid, exact text, or partial match)."),
-        superseded_by: z.string().describe("Text of the new finding that supersedes this one."),
+        finding_text: z.string().describe("Finding to supersede (supports fid, exact text, or partial match; an archived finding by fid or exact text)."),
+        superseded_by: z.string().describe("Text of the new finding that supersedes this one, or its fid:xxxxxxxx in any tier."),
       }),
     },
     (params) => handleSupersedeFinding(ctx, params),
@@ -900,7 +902,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "Mark an existing finding as retracted and store the reason in lifecycle metadata.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        finding_text: z.string().describe("Finding to retract (supports fid, exact text, or partial match)."),
+        finding_text: z.string().describe("Finding to retract (supports fid, exact text, or partial match; an archived finding by fid or exact text)."),
         reason: z.string().describe("Reason for retraction."),
       }),
     },
@@ -914,8 +916,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "Resolve a contradiction between two findings and update lifecycle status based on the chosen resolution.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        finding_text: z.string().optional().describe("First finding (supports fid, exact text, or partial match)."),
-        finding_text_other: z.string().optional().describe("Second finding (supports fid, exact text, or partial match)."),
+        finding_text: z.string().optional().describe("First finding (supports fid, exact text, or partial match; an archived finding by fid or exact text)."),
+        finding_text_other: z.string().optional().describe("Second finding (supports fid, exact text, or partial match; an archived finding by fid or exact text)."),
         finding_a: z.string().optional().describe("Deprecated alias for finding_text."),
         finding_b: z.string().optional().describe("Deprecated alias for finding_text_other."),
         resolution: z.enum(["keep_a", "keep_b", "keep_both", "retract_both"]).describe("Resolution strategy."),

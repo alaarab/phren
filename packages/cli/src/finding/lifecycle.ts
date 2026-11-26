@@ -2,7 +2,7 @@ import * as fs from "fs";
 import { assertFindingVersions } from "./versions.js";
 import * as path from "path";
 import { renameOverSync } from "../phren-paths.js";
-import { PhrenError, phrenErr, phrenOk, type PhrenResult, type FindingTag } from "../phren-core.js";
+import { PhrenError, phrenErr, phrenOk, type PhrenErrorCode, type PhrenResult, type FindingTag } from "../phren-core.js";
 
 // Phren lifecycle comment prefix. No backward compat.
 const LIFECYCLE_PREFIX = "phren";
@@ -23,6 +23,7 @@ import {
   normalizeFindingText,
 } from "../content/metadata.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
+import { locateFinding, rewriteFindingLine, type FindingTier, type ProjectFinding } from "./locate.js";
 
 interface FindingDecayConfig {
   maxAgeDays: number;
@@ -293,36 +294,141 @@ function findingsPathForProject(phrenPath: string, project: string): PhrenResult
   return phrenOk(findingsPath);
 }
 
+/** One of several findings an archive lookup matched; the caller picks one by fid. */
+export interface LifecycleCandidate {
+  tier: FindingTier;
+  file: string;
+  /** 1-based line in the file. */
+  line: number;
+  fid?: string;
+  text: string;
+}
+
+/** A PhrenResult whose ambiguous archive lookups also list the candidates. */
+export type LifecycleResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; code?: PhrenErrorCode; candidates?: LifecycleCandidate[] };
+
+/** A finding a mutation changes: a line of the FINDINGS.md being edited, or a bullet in a topic or .older archive. */
+interface Target {
+  text: string;
+  tier: FindingTier;
+  file: string;
+  lineIndex: number;
+  archive?: ProjectFinding;
+}
+
+function ambiguousArchiveMatch(phrenPath: string, project: string, selector: string, matches: ProjectFinding[]): LifecycleResult<never> {
+  const projectDir = storeAwareProjectPath(phrenPath, project) ?? phrenPath;
+  const candidates = matches.map((f) => ({
+    tier: f.tier,
+    file: f.file,
+    line: f.lineIndex + 1,
+    ...(f.fid ? { fid: f.fid } : {}),
+    text: findingTextFromLine(f.line),
+  }));
+  const list = candidates.map((c) => `${c.tier} ${path.relative(projectDir, c.file)}:${c.line} ${c.fid ? `fid:${c.fid}` : "(no fid)"}`).join("; ");
+  return {
+    ok: false,
+    error: `"${selector}" matches ${candidates.length} findings, so none was changed: ${list}. Name one by fid.`,
+    code: PhrenError.AMBIGUOUS_MATCH,
+    candidates,
+  };
+}
+
+/**
+ * The finding a selector names: FINDINGS.md first, exactly as before; when
+ * nothing there matches (or only a read-only <details> bullet does), exactly
+ * one topic or .older bullet by fid or full text.
+ */
+function resolveTarget(phrenPath: string, project: string, findingsPath: string, lines: string[], selector: string): LifecycleResult<Target> {
+  const matched = matchFinding(lines, selector);
+  if (matched.ok) return phrenOk({ text: matched.data.text, tier: "active", file: findingsPath, lineIndex: matched.data.index });
+  // NOT_FOUND is "no match", VALIDATION_ERROR "only a <details> bullet matched"; ambiguity and empty input stand.
+  if (matched.code !== PhrenError.NOT_FOUND && matched.code !== PhrenError.VALIDATION_ERROR) return matched;
+  const located = locateFinding(phrenPath, project, selector.trim());
+  if (located.kind === "ambiguous") return ambiguousArchiveMatch(phrenPath, project, selector, located.candidates);
+  if (located.kind === "not_found" || located.finding.tier === "active") return matched;
+  const archive = located.finding;
+  if (archive.archived) {
+    return phrenErr(`Finding "${selector}" is archived and read-only. Restore or re-add it before mutating history.`, PhrenError.VALIDATION_ERROR);
+  }
+  return phrenOk({ text: findingTextFromLine(archive.line), tier: archive.tier, file: archive.file, lineIndex: archive.lineIndex, archive });
+}
+
+/** The superseded_by text: as given, or the text of the finding a `fid:` names in any tier. */
+function supersedingRef(phrenPath: string, project: string, supersededBy: string): LifecycleResult<string> {
+  const given = supersededBy.trim();
+  if (!/^fid:/i.test(given)) return phrenOk(given.slice(0, 60));
+  const located = locateFinding(phrenPath, project, given);
+  if (located.kind === "ambiguous") return ambiguousArchiveMatch(phrenPath, project, given, located.candidates);
+  if (located.kind === "not_found") return phrenErr(`No finding with ${given} to supersede with.`, PhrenError.NOT_FOUND);
+  return phrenOk(findingTextFromLine(located.finding.line).slice(0, 60));
+}
+
+/**
+ * Apply each edit: an archive bullet through rewriteFindingLine (that one line,
+ * under its file's lock), FINDINGS.md lines in place and the file written once,
+ * as before. Archive edits go first because only they can still fail.
+ */
+function writeTargets(
+  phrenPath: string,
+  project: string,
+  findingsPath: string,
+  lines: string[],
+  edits: Array<{ target: Target; transform: (line: string) => string }>,
+): PhrenResult<void> {
+  const written: string[] = [];
+  for (const { target, transform } of edits) {
+    if (!target.archive) continue;
+    const result = rewriteFindingLine(phrenPath, project, target.archive, transform);
+    if (!result.ok) {
+      if (!written.length) return result;
+      return phrenErr(`${result.error} (already updated: ${written.join(", ")})`, result.code);
+    }
+    written.push(`"${target.text.slice(0, 60)}"`);
+  }
+  const active = edits.filter(({ target }) => !target.archive);
+  if (!active.length) return phrenOk(undefined);
+  for (const { target, transform } of active) lines[target.lineIndex] = transform(lines[target.lineIndex]);
+  const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  const tmpPath = findingsPath + ".tmp." + process.pid;
+  fs.writeFileSync(tmpPath, normalized);
+  renameOverSync(tmpPath, findingsPath);
+  return phrenOk(undefined);
+}
+
 export function supersedeFinding(
   phrenPath: string,
   project: string,
   findingText: string,
   supersededBy: string,
   expectedFindings?: Record<string, string>
-): PhrenResult<{ finding: string; superseded_by: string; status: FindingLifecycleStatus }> {
+): LifecycleResult<{ finding: string; superseded_by: string; status: FindingLifecycleStatus; tier: FindingTier; file: string }> {
   const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
   const findingsPath = pathResult.data;
-  const ref = supersededBy.trim().slice(0, 60);
-  if (!ref) return phrenErr("superseded_by cannot be empty.", PhrenError.EMPTY_INPUT);
+  if (!supersededBy.trim()) return phrenErr("superseded_by cannot be empty.", PhrenError.EMPTY_INPUT);
 
   return withFileLock(findingsPath, () => {
     assertFindingVersions(findingsPath, expectedFindings);
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
-    const matched = matchFinding(lines, findingText);
-    if (!matched.ok) return matched;
+    const target = resolveTarget(phrenPath, project, findingsPath, lines, findingText);
+    if (!target.ok) return target;
+    const ref = supersedingRef(phrenPath, project, supersededBy);
+    if (!ref.ok) return ref;
     const today = new Date().toISOString().slice(0, 10);
-    lines[matched.data.index] = applyLifecycle(
-      lines[matched.data.index],
-      { status: "superseded", status_updated: today, status_reason: "superseded_by", status_ref: ref },
-      today,
-      { supersededBy: ref }
-    );
-    const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    const tmpPath = findingsPath + ".tmp." + process.pid;
-    fs.writeFileSync(tmpPath, normalized);
-    renameOverSync(tmpPath, findingsPath);
-    return phrenOk({ finding: matched.data.text, superseded_by: ref, status: "superseded" });
+    const written = writeTargets(phrenPath, project, findingsPath, lines, [{
+      target: target.data,
+      transform: (line) => applyLifecycle(
+        line,
+        { status: "superseded", status_updated: today, status_reason: "superseded_by", status_ref: ref.data },
+        today,
+        { supersededBy: ref.data }
+      ),
+    }]);
+    if (!written.ok) return written;
+    return phrenOk({ finding: target.data.text, superseded_by: ref.data, status: "superseded", tier: target.data.tier, file: target.data.file });
   });
 }
 
@@ -332,7 +438,7 @@ export function retractFinding(
   findingText: string,
   reason: string,
   expectedFindings?: Record<string, string>
-): PhrenResult<{ finding: string; reason: string; status: FindingLifecycleStatus }> {
+): LifecycleResult<{ finding: string; reason: string; status: FindingLifecycleStatus; tier: FindingTier; file: string }> {
   const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
   const findingsPath = pathResult.data;
@@ -342,21 +448,24 @@ export function retractFinding(
   return withFileLock(findingsPath, () => {
     assertFindingVersions(findingsPath, expectedFindings);
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
-    const matched = matchFinding(lines, findingText);
-    if (!matched.ok) return matched;
+    const target = resolveTarget(phrenPath, project, findingsPath, lines, findingText);
+    if (!target.ok) return target;
     const today = new Date().toISOString().slice(0, 10);
-    lines[matched.data.index] = applyLifecycle(
-      lines[matched.data.index],
-      { status: "retracted", status_updated: today, status_reason: reasonText },
-      today
-    );
-    const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    const tmpPath = findingsPath + ".tmp." + process.pid;
-    fs.writeFileSync(tmpPath, normalized);
-    renameOverSync(tmpPath, findingsPath);
-    return phrenOk({ finding: matched.data.text, reason: reasonText, status: "retracted" });
+    const written = writeTargets(phrenPath, project, findingsPath, lines, [{
+      target: target.data,
+      transform: (line) => applyLifecycle(line, { status: "retracted", status_updated: today, status_reason: reasonText }, today),
+    }]);
+    if (!written.ok) return written;
+    return phrenOk({ finding: target.data.text, reason: reasonText, status: "retracted", tier: target.data.tier, file: target.data.file });
   });
 }
+
+/** " (archived in reference/topics/<file>)" for a finding outside FINDINGS.md, for messages. */
+export function archiveNote({ tier, file }: { tier: FindingTier; file: string }): string {
+  return tier === "active" ? "" : ` (archived in reference/topics/${path.basename(file)})`;
+}
+
+type ResolvedFinding = { text: string; status: FindingLifecycleStatus; tier: FindingTier; file: string };
 
 export function resolveFindingContradiction(
   phrenPath: string,
@@ -364,10 +473,10 @@ export function resolveFindingContradiction(
   findingA: string,
   findingB: string,
   resolution: ContradictionResolution
-): PhrenResult<{
+): LifecycleResult<{
   resolution: ContradictionResolution;
-  finding_a: { text: string; status: FindingLifecycleStatus };
-  finding_b: { text: string; status: FindingLifecycleStatus };
+  finding_a: ResolvedFinding;
+  finding_b: ResolvedFinding;
 }> {
   const pathResult = findingsPathForProject(phrenPath, project);
   if (!pathResult.ok) return pathResult;
@@ -375,24 +484,28 @@ export function resolveFindingContradiction(
 
   return withFileLock(findingsPath, () => {
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
-    const matchedA = matchFinding(lines, findingA);
+    const matchedA = resolveTarget(phrenPath, project, findingsPath, lines, findingA);
     if (!matchedA.ok) return matchedA;
-    const matchedB = matchFinding(lines, findingB);
+    const matchedB = resolveTarget(phrenPath, project, findingsPath, lines, findingB);
     if (!matchedB.ok) return matchedB;
-    if (matchedA.data.index === matchedB.data.index) {
+    const a = matchedA.data;
+    const b = matchedB.data;
+    if (a.file === b.file && a.lineIndex === b.lineIndex) {
       return phrenErr("finding_a and finding_b refer to the same finding.", PhrenError.VALIDATION_ERROR);
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const refA = matchedA.data.text.slice(0, 60);
-    const refB = matchedB.data.text.slice(0, 60);
+    const refA = a.text.slice(0, 60);
+    const refB = b.text.slice(0, 60);
+    let transformA: (line: string) => string;
+    let transformB: (line: string) => string;
     let statusA: FindingLifecycleStatus = "active";
     let statusB: FindingLifecycleStatus = "active";
 
     if (resolution === "keep_a") {
-      lines[matchedA.data.index] = applyLifecycle(lines[matchedA.data.index], { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_a", status_ref: refB }, today);
-      lines[matchedB.data.index] = applyLifecycle(
-        lines[matchedB.data.index],
+      transformA = (line) => applyLifecycle(line, { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_a", status_ref: refB }, today);
+      transformB = (line) => applyLifecycle(
+        line,
         { status: "superseded", status_updated: today, status_reason: "contradiction_resolved_keep_a", status_ref: refA },
         today,
         { supersededBy: refA }
@@ -400,35 +513,36 @@ export function resolveFindingContradiction(
       statusA = "active";
       statusB = "superseded";
     } else if (resolution === "keep_b") {
-      lines[matchedA.data.index] = applyLifecycle(
-        lines[matchedA.data.index],
+      transformA = (line) => applyLifecycle(
+        line,
         { status: "superseded", status_updated: today, status_reason: "contradiction_resolved_keep_b", status_ref: refB },
         today,
         { supersededBy: refB }
       );
-      lines[matchedB.data.index] = applyLifecycle(lines[matchedB.data.index], { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_b", status_ref: refA }, today);
+      transformB = (line) => applyLifecycle(line, { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_b", status_ref: refA }, today);
       statusA = "superseded";
       statusB = "active";
     } else if (resolution === "keep_both") {
-      lines[matchedA.data.index] = applyLifecycle(lines[matchedA.data.index], { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_both", status_ref: refB }, today);
-      lines[matchedB.data.index] = applyLifecycle(lines[matchedB.data.index], { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_both", status_ref: refA }, today);
+      transformA = (line) => applyLifecycle(line, { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_both", status_ref: refB }, today);
+      transformB = (line) => applyLifecycle(line, { status: "active", status_updated: today, status_reason: "contradiction_resolved_keep_both", status_ref: refA }, today);
       statusA = "active";
       statusB = "active";
     } else {
-      lines[matchedA.data.index] = applyLifecycle(lines[matchedA.data.index], { status: "retracted", status_updated: today, status_reason: "contradiction_retracted_both", status_ref: refB }, today);
-      lines[matchedB.data.index] = applyLifecycle(lines[matchedB.data.index], { status: "retracted", status_updated: today, status_reason: "contradiction_retracted_both", status_ref: refA }, today);
+      transformA = (line) => applyLifecycle(line, { status: "retracted", status_updated: today, status_reason: "contradiction_retracted_both", status_ref: refB }, today);
+      transformB = (line) => applyLifecycle(line, { status: "retracted", status_updated: today, status_reason: "contradiction_retracted_both", status_ref: refA }, today);
       statusA = "retracted";
       statusB = "retracted";
     }
 
-    const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    const tmpPath = findingsPath + ".tmp." + process.pid;
-    fs.writeFileSync(tmpPath, normalized);
-    renameOverSync(tmpPath, findingsPath);
+    const written = writeTargets(phrenPath, project, findingsPath, lines, [
+      { target: a, transform: transformA },
+      { target: b, transform: transformB },
+    ]);
+    if (!written.ok) return written;
     return phrenOk({
       resolution,
-      finding_a: { text: matchedA.data.text, status: statusA },
-      finding_b: { text: matchedB.data.text, status: statusB },
+      finding_a: { text: a.text, status: statusA, tier: a.tier, file: a.file },
+      finding_b: { text: b.text, status: statusB, tier: b.tier, file: b.file },
     });
   });
 }

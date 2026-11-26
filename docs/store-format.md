@@ -235,6 +235,15 @@ the active window.
 The move stamps `<!-- consolidated: YYYY-MM-DD -->` into the source
 `FINDINGS.md`.
 
+The CLI now also writes lifecycle comments (§3) on archive bullets, in topic
+files and their `.older.md` halves, when a finding there is superseded,
+retracted or has a contradiction resolved. This is not a grammar change: an
+archive bullet is a finding bullet, so these comments were always legal on it,
+and bullets carry them into the archive when they move. The bullet's line is
+rewritten exactly as the same operation rewrites it in `FINDINGS.md`. Nothing
+else in the archive file changes, not even whitespace (§2.3): unlike a
+`FINDINGS.md` mutation, the file is not normalised.
+
 ---
 
 ## 5. Archive semantics
@@ -301,6 +310,13 @@ committed bytes:
 - a pinned/prioritised task edited by text only (§4.2)
 - text long enough and Unicode-rich enough to hit the 500- and 60-character
   boundaries (§2.2, §4.3)
+
+Lifecycle writes on archive bullets (§4.6) have their own cases:
+`archive-lifecycle-cases.json` names the store to set up, each operation
+(supersede or retract, on a topic file and on an `.older.md` file), the date
+and the expected file, and
+`packages/cli/src/__tests__/conformance-archive-lifecycle.test.ts` holds the
+CLI to those bytes.
 
 Conformance testing is **bidirectional**: the Swift port reads what TypeScript
 writes (the fixture suites above), and TypeScript reads what Swift writes —

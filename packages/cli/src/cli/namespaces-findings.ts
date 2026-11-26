@@ -2,7 +2,7 @@ import * as fs from "fs";
 import { getPhrenPath } from "../shared.js";
 import { isValidProjectName } from "../utils.js";
 import { addFinding, removeFinding } from "../core/finding.js";
-import { supersedeFinding, retractFinding, resolveFindingContradiction } from "../finding/lifecycle.js";
+import { supersedeFinding, retractFinding, resolveFindingContradiction, archiveNote } from "../finding/lifecycle.js";
 import { resolveProjectStorePath } from "./namespaces-utils.js";
 
 function printFindingUsage() {
@@ -109,7 +109,7 @@ export async function handleFindingNamespace(args: string[]) {
       console.error(result.error);
       process.exit(1);
     }
-    console.log(`Finding superseded: "${result.data.finding}" -> "${result.data.superseded_by}"`);
+    console.log(`Finding superseded: "${result.data.finding}" -> "${result.data.superseded_by}"${archiveNote(result.data)}`);
     return;
   }
 
@@ -143,7 +143,7 @@ export async function handleFindingNamespace(args: string[]) {
       console.error(result.error);
       process.exit(1);
     }
-    console.log(`Finding retracted: "${result.data.finding}" (reason: ${result.data.reason})`);
+    console.log(`Finding retracted: "${result.data.finding}" (reason: ${result.data.reason})${archiveNote(result.data)}`);
     return;
   }
 
@@ -203,8 +203,8 @@ export async function handleFindingNamespace(args: string[]) {
       process.exit(1);
     }
     console.log(`Resolved contradiction in "${project}" with "${resolution}".`);
-    console.log(`  finding_a: ${result.data.finding_a.text} → ${result.data.finding_a.status}`);
-    console.log(`  finding_b: ${result.data.finding_b.text} → ${result.data.finding_b.status}`);
+    console.log(`  finding_a: ${result.data.finding_a.text} → ${result.data.finding_a.status}${archiveNote(result.data.finding_a)}`);
+    console.log(`  finding_b: ${result.data.finding_b.text} → ${result.data.finding_b.status}${archiveNote(result.data.finding_b)}`);
     return;
   }
 
