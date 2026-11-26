@@ -16,7 +16,7 @@ import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { ownerRequest, requestPeer, type PeerIdentity } from "./request-origin.js";
 import { bodyDigest, OWNER_PROOF_HEADER, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
-import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
+import { getTaskListRoute, getTaskDetailRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { cancelDispatch, closeFinishedWorker, closeOwnPane } from "./worker-close.js";
@@ -209,7 +209,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; result.scheduleEvents = true; }
-  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
+  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; result.taskWork = true; }
   return result;
 }
 
@@ -524,7 +524,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         // The owner asked for a fresh reading (pull to refresh, `phren computers`): peers are dialed again.
         if (url.searchParams.get("refresh") === "1") refreshPeerReads();
         switch (url.pathname) {
-          case "/v1/tasks": result = getTaskRoute(modules.store, url); break;
+          case "/v1/tasks": result = await getTaskListRoute(modules.store, url); break;
+          case "/v1/tasks/detail": result = await getTaskDetailRoute(modules.store, url); break;
           case "/v1/tasks/stores": result = await getTaskDirectoryRoute(modules.store); break;
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
           case "/v1/metrics": result = hookMetrics.snapshot(); break;

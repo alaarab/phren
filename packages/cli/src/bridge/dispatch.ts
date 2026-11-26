@@ -1,4 +1,5 @@
 import { mergeTaskIdentitySchema } from "../task/merge-links.js";
+import { recordDispatchWorker, resolveBriefTask, taskWorkEnabled } from "./task-work.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { integratorSchema, prsSchema } from "./return-contract.js";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -213,6 +214,8 @@ async function saveReceipt(receipt: Receipt): Promise<void> {
   const root = path.join(bridgeRoot(), "dispatches");
   await mkdir(root, { recursive: true, mode: 0o700 });
   await atomic(path.join(root, `${receipt.id}.json`), receipt);
+  // The task the dispatch works on shows its worker and follows its state (task-work.ts).
+  if (receipt.task) try { recordDispatchWorker(receipt); } catch { /* The receipt is the record; the task link catches up on the next write. */ }
 }
 
 const IGNORED_MODE = "The receiving Hook is older and ignored permissionMode; the worker runs in that computer's default mode. Update its Hook.";
@@ -233,6 +236,11 @@ function serializeReceiptUpdate<T>(change: () => Promise<T>): Promise<T> {
   const run = receiptUpdates.then(change);
   receiptUpdates = run.catch(() => undefined);
   return run;
+}
+
+/** One dispatch receipt by id, for a task's live worker state. */
+export function dispatchReceipt(receiptID: string): Promise<Receipt | undefined> {
+  return readReceipt(receiptID);
 }
 
 async function readReceipt(receiptID: string): Promise<Receipt | undefined> {
@@ -1148,6 +1156,8 @@ export class DispatchService {
    * `continues` names the dispatch whose worker hit its usage limit (account-failover.ts). */
   async dispatch(input: unknown, originValue?: unknown, continues?: string): Promise<Json> {
     const data = dispatchSchema.parse(input);
+    // A brief that names a task (bid:, its stable id, or its quoted title) binds the dispatch to it.
+    if (!data.task && taskWorkEnabled()) try { data.task = resolveBriefTask(phrenStoreRoot(), data.prompt, data.project); } catch { /* Unbound, as before. */ }
     if (data.idempotencyKey && data.worktree !== true) {
       throw new BridgeError(400, "A dispatch with an idempotency key requires --worktree: keyed workers run only in a Phren-managed clone.");
     }

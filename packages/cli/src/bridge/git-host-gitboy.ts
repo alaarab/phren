@@ -4,6 +4,7 @@ import { fillFromCommits } from "./git-host-gitlab.js";
 import { apiRoot, HostApiError, hostJson, safeLink } from "./git-host-http.js";
 import type { Json } from "./protocol.js";
 import { git } from "./projects.js";
+import { mergeableWord } from "../task/work.js";
 
 /** gitboy, the self-hosted forge, over its REST API (/api/v1). gitboy names a
  * pull request by `index`, and an older gitboy has no draft state, no aggregate review decision
@@ -215,6 +216,12 @@ async function hasDraftState(ctx: Ctx, listed: unknown): Promise<boolean> {
   return sample.some(pull => typeof pull.draft === "boolean");
 }
 
+async function contextOrThrow(root: string, host: GitHost): Promise<Ctx> {
+  const ctx = await context(root, host);
+  if (!("api" in ctx)) throw new HostApiError(ctx.reason === "auth" ? "auth" : "failed", ctx.message ?? "gitboy is not reachable.");
+  return ctx;
+}
+
 export const gitboy: GitHostProvider = {
   kind: "gitboy",
   name: "gitboy",
@@ -278,6 +285,32 @@ export const gitboy: GitHostProvider = {
       const result = failed(error, ctx.domain);
       return { ok: false, reason: result.reason ?? "failed", message: result.message ?? "gitboy refused the merge." };
     }
+  },
+
+  async item(root, kind, number, host) {
+    const ctx = await contextOrThrow(root, host);
+    const { json } = await call<Json>(ctx, `/${kind === "pull" ? "pulls" : "issues"}/${number}`);
+    const value = obj(json);
+    const title = typeof value.title === "string" ? { title: value.title.slice(0, 300) } : {};
+    const closedAt = typeof value.closed_at === "string" && value.closed_at ? { closedAt: value.closed_at } : {};
+    if (kind === "issue") return { state: String(value.state ?? "").toLowerCase() === "open" ? "open" : "closed", ...title, ...closedAt };
+    const state = stateOf(value) === "MERGED" ? "merged" : stateOf(value) === "OPEN" ? "open" : "closed";
+    const { runs } = state === "open" ? await jobsFor(ctx, value) : { runs: [] };
+    const draft = value.draft === true || (value.draft === undefined && /^draft:/i.test(String(value.title ?? "")));
+    return { state, ...title, ...closedAt, draft, checks: rollup(runs.length ? runs : statusRuns(value)),
+      ...(state === "open" ? { mergeable: mergeableWord(gitboyMergeState(value).mergeState, draft) } : {}),
+      ...(typeof value.head_branch === "string" ? { head: value.head_branch } : {}),
+      ...(typeof value.merged_at === "string" && value.merged_at ? { mergedAt: value.merged_at } : {}) };
+  },
+
+  async recent(root, host) {
+    const ctx = await contextOrThrow(root, host);
+    const { json } = await call<unknown>(ctx, "/pulls?state=all&limit=50");
+    return rows(json).filter(pull => sameRepository(ctx, pull) && typeof (pull.index ?? pull.number) === "number").map(pull => {
+      const state = stateOf(pull);
+      return { number: (pull.index ?? pull.number) as number, url: pullUrl(ctx, pull), state: state === "MERGED" ? "merged" as const : state === "OPEN" ? "open" as const : "closed" as const,
+        head: String(pull.head_branch ?? ""), body: String(pull.body ?? "").slice(0, 65_536) };
+    });
   },
 
   async whoami(root, host, token, checkedApi) {

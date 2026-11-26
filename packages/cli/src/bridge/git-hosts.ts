@@ -5,6 +5,7 @@ import { git } from "./projects.js";
 import { runCombined } from "./git-publish.js";
 import { gitboy } from "./git-host-gitboy.js";
 import { gitlab } from "./git-host-gitlab.js";
+import { mergeableWord, type ForgeItem } from "../task/work.js";
 
 const exec = promisify(execFile);
 
@@ -64,10 +65,18 @@ export interface GitHostProvider {
    * tool picks it rather than the remote (gh prefers an `upstream` or its `repo set-default`). Without it,
    * the remote's `webUrl` is that repository. Null when it cannot be told. */
   repository?(root: string, host: GitHost): Promise<string | null>;
+  /** One pull request or issue by number, now: state, title, and for a pull
+   * request its checks and mergeability. Throws when the host can't say. */
+  item?(root: string, kind: "pull" | "issue", number: number, host: GitHost): Promise<ForgeItem>;
+  /** The newest pull requests (any state) with their head branch and body, for
+   * finding the ones that name a task. Throws when the host can't say. */
+  recent?(root: string, host: GitHost): Promise<RecentPull[]>;
   /** Who a token signs in as, for Connect; HTTP hosts only. A gitboy agent
    * token also reports the agent identity the host attached to it. */
   whoami?(root: string, host: GitHost, token: string, api?: string): Promise<{ user: string; agent?: { name?: string; repo_ids?: unknown[]; expires_at?: string }; agent_token?: { name?: string; repo_ids?: unknown[]; expires_at?: string } }>;
 }
+
+export interface RecentPull { number: number; url: string; state: "open" | "merged" | "closed"; head: string; body: string; repository?: string }
 
 export type MergeMethod = "merge" | "squash" | "rebase";
 export interface MergeRequest { number: number; method: MergeMethod; expectedHeadSha?: string; deleteBranch?: boolean;
@@ -210,6 +219,14 @@ function ghEnv(host: GitHost): NodeJS.ProcessEnv {
 
 const PULL_URL = /https:\/\/[^\s"'<>]+\/pull\/\d+/;
 
+/** `owner/repo` on github.com, `host/owner/repo` on GitHub Enterprise: what gh's --repo takes. */
+function ghRepo(host: GitHost): string {
+  const repo = host.webUrl?.replace(/^https?:\/\/[^/]+\//, "") ?? "";
+  if (!host.domain || repo.split("/").length !== 2) throw new Error("No GitHub repository of the form owner/repo.");
+  return host.domain === "github.com" ? repo : `${host.domain}/${repo}`;
+}
+const ghState = (value: unknown): ForgeItem["state"] => String(value).toUpperCase() === "MERGED" ? "merged" : String(value).toUpperCase() === "OPEN" ? "open" : "closed";
+
 const github: GitHostProvider = {
   kind: "github",
   name: "GitHub",
@@ -286,6 +303,30 @@ const github: GitHostProvider = {
     if (/not mergeable|required status|review|protected|blocked|head branch was modified|match-head-commit|conflict/i.test(output)) return { ok: false, reason: "blocked", message: output.slice(0, 1000) };
     if (/auth|login|401|403/i.test(output)) return { ok: false, reason: "auth", message: "The GitHub CLI is not signed in on this computer, or the account can't merge here. Run gh auth login there." };
     return { ok: false, reason: "failed", message: output.slice(0, 1000) || "gh pr merge failed." };
+  },
+
+  async item(root, kind, number, host) {
+    const fields = kind === "pull" ? "number,state,isDraft,title,headRefName,mergedAt,closedAt,statusCheckRollup,mergeStateStatus" : "number,state,title,closedAt";
+    const { stdout } = await exec("gh", [kind === "pull" ? "pr" : "issue", "view", String(number), "--repo", ghRepo(host), "--json", fields],
+      { cwd: root, timeout: 15_000, maxBuffer: 4_194_304, env: ghEnv(host) });
+    const value = JSON.parse(stdout || "null") as Json | null;
+    if (!value || value.number !== number) throw new Error(`gh did not return ${kind} ${number}.`);
+    const state = ghState(value.state), draft = value.isDraft === true;
+    return { state, ...(typeof value.title === "string" ? { title: value.title.slice(0, 300) } : {}),
+      ...(typeof value.closedAt === "string" && value.closedAt ? { closedAt: value.closedAt } : {}),
+      ...(kind === "pull" ? { draft, checks: checkRollup(value.statusCheckRollup),
+        ...(state === "open" ? { mergeable: mergeableWord(value.mergeStateStatus, draft) } : {}),
+        ...(typeof value.headRefName === "string" ? { head: value.headRefName } : {}),
+        ...(typeof value.mergedAt === "string" && value.mergedAt ? { mergedAt: value.mergedAt } : {}) } : {}) };
+  },
+
+  async recent(root, host) {
+    // In the checkout, as list() does: gh picks the repository (a fork's upstream), not origin.
+    const { stdout } = await exec("gh", ["pr", "list", "--state", "all", "--limit", "40", "--json", "number,url,state,headRefName,body"],
+      { cwd: root, timeout: 20_000, maxBuffer: 8_388_608, env: ghEnv(host) });
+    const parsed = JSON.parse(stdout || "[]");
+    return (Array.isArray(parsed) ? parsed : []).filter((pull: Json) => typeof pull.number === "number" && typeof pull.url === "string")
+      .map((pull: Json) => ({ number: pull.number as number, url: String(pull.url), state: ghState(pull.state), head: String(pull.headRefName ?? ""), body: String(pull.body ?? "").slice(0, 65_536) }));
   },
 
   async repository(root, host) {
