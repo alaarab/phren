@@ -143,6 +143,11 @@ const DREAM_SUBCOMMANDS: Subcommand[] = [
   { name: "eval", usage: "phren dream eval [--real] [--model <m>] [--json]", summary: "Score the dream engine on its fixture store" },
 ];
 
+// The task namespace's other subcommands document themselves through bare `phren task`.
+const TASK_SUBCOMMANDS: Subcommand[] = [
+  { name: "audit", usage: "phren task audit [--project <p>] [--scheduled] [--dry-run] [--limit <n>] [--json]", summary: "Audit open tasks against the code (weekly, bounded)" },
+];
+
 const SKILLS_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren skills list", summary: "List installed skills" },
   { name: "add", usage: "phren skills add <project> <path>", summary: "Link a skill into a project" },
@@ -562,7 +567,13 @@ export const REGISTRY: Command[] = [
     topic: "core",
     usage: "phren task <subcommand>",
     summary: "Manage tasks",
-    run: async (args) => {
+    subcommands: TASK_SUBCOMMANDS,
+    run: async (args, ctx) => {
+      if (args[0] === "audit") {
+        const { handleTaskAudit } = await import("./cli/task-audit.js");
+        await handleTaskAudit(args.slice(1), ctx.phrenPath(), ctx.profile());
+        return;
+      }
       const { handleTaskNamespace } = await import("./cli/namespaces.js");
       await handleTaskNamespace(args);
     },

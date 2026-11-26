@@ -166,7 +166,7 @@ export function auditCandidates(doc: TaskDoc, limit: number): TaskItem[] {
   return [...doc.items.Active, ...doc.items.Queue]
     .filter((item) => item.stableId && !item.identityAmbiguous)
     .sort((a, b) => touched(a) - touched(b))
-    .slice(0, Math.max(1, Math.floor(limit)));
+    .slice(0, Math.max(0, Math.floor(limit)));
 }
 
 const skillBody = (raw: string): string => {
