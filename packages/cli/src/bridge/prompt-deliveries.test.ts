@@ -21,6 +21,13 @@ async function send(store: PromptDeliveries, id: string, text: string, where = t
   store.queue(id, where);
 }
 
+async function compactDeliveries(store: PromptDeliveries, id: string) {
+  await store.flush();
+  const snapshot = JSON.parse(await readFile(file, "utf8")) as { records: { id?: string }[] };
+  snapshot.records = snapshot.records.filter(record => record.id !== id);
+  await writeFile(file, JSON.stringify(snapshot));
+}
+
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-deliveries-")); file = path.join(root, "deliveries.json"); clock = 1_000_000; landed = false; matches = 1; hookRows = false; });
 afterEach(async () => { await Promise.all(stores.map(store => store.flush())); stores = []; vi.unstubAllEnvs(); clearAccountCaches(); await rm(root, { recursive: true, force: true }); });
 
@@ -179,22 +186,27 @@ describe("held messages Claude submits as one turn", () => {
     expect(restarted.status("again-j005", claudeTarget).state).toBe("failed");
   });
 
-  it("keeps a replayed joined hook from settling another batch after restart", async () => {
+  it("keeps a replayed joined hook from settling another batch after compaction and restart", async () => {
     const store = deliveries();
-    await send(store, "join-first-a", "A", claudeTarget);
-    await send(store, "join-first-b", "B", claudeTarget);
-    await store.submitted(claudeTarget, "A\nB", "claude:prompt:batch-first");
+    await send(store, "discarded-join", "Earlier send", claudeTarget);
+    for (const batch of ["first", "second"]) {
+      await send(store, `join-${batch}-a`, "A", claudeTarget);
+      await send(store, `join-${batch}-b`, "B", claudeTarget);
+      await store.submitted(claudeTarget, "A\nB", `claude:prompt:batch-${batch}`);
+    }
     await send(store, "join-next-a", "A", claudeTarget);
     await send(store, "join-next-b", "B", claudeTarget);
-    await store.flush();
+    await compactDeliveries(store, "discarded-join");
 
     const restarted = deliveries();
-    const states = () => restarted.forPane(claudeTarget).map(item => item.state);
-    expect(states()).toEqual(["delivered", "delivered", "queued", "queued"]);
-    await restarted.submitted(claudeTarget, "A\nB", "claude:prompt:batch-first");
-    expect(states()).toEqual(["delivered", "delivered", "queued", "queued"]);
+    const pending = () => ["join-next-a", "join-next-b"].map(id => restarted.status(id, claudeTarget).state);
+    expect(pending()).toEqual(["queued", "queued"]);
+    for (const batch of ["first", "second"]) {
+      await restarted.submitted(claudeTarget, "A\nB", `claude:prompt:batch-${batch}`);
+      expect(pending()).toEqual(["queued", "queued"]);
+    }
     await restarted.submitted(claudeTarget, "A\nB", "claude:prompt:batch-next");
-    expect(states()).toEqual(["delivered", "delivered", "delivered", "delivered"]);
+    expect(pending()).toEqual(["delivered", "delivered"]);
   });
 
   it("match only held messages, never a failed one", async () => {
@@ -812,6 +824,19 @@ describe("identical Claude messages and their rows", () => {
     expect(states()).toEqual(["delivered", "queued"]);
   });
 
+  it("keeps a phone prompt claim with its delivery when compaction shifts the records", async () => {
+    const store = deliveries();
+    await send(store, "discarded-send", "Earlier send", claudeTarget);
+    await send(store, "compact-first", "yes", claudeTarget);
+    await store.submitted(claudeTarget, "yes", "claude:prompt:compact-first");
+    await send(store, "compact-next", "yes", claudeTarget);
+    await compactDeliveries(store, "discarded-send");
+
+    const restarted = deliveries();
+    await restarted.submitted(claudeTarget, "yes", "claude:prompt:compact-first");
+    expect(restarted.forPane(claudeTarget).map(item => item.state)).toEqual(["delivered", "queued"]);
+  });
+
   it("settles a rewritten removal at an offset previously claimed by different words", async () => {
     const removed = (content: string) => Buffer.from(JSON.stringify({ type: "queue-operation", operation: "remove", reason: "absorbed_mid_turn", content }) + "\n");
     let contents = removed("go");
@@ -1123,28 +1148,46 @@ describe("a Claude queue occurrence bound to a phone send", () => {
     const append = (...raw: Json[]) => appendFile(log, raw.map(row => JSON.stringify(row)).join("\n") + "\n");
     const reader = (store: PromptDeliveries) => new TranscriptReader(log, "claude", undefined, undefined, false, undefined,
       () => store.claudeQueueBindings(claudeTarget, log));
-    return { store: make(), make, append, reader };
+    return { store: make(), make, append, reader, log };
   }
 
-  it("settles callbacks arriving in reverse order against their bound queue occurrences", async () => {
+  it("settles a newer identical send when its row is bound to an expired failed send", async () => {
     const { store, append } = await liveQueue(true);
     const text = "Check the build";
-    await send(store, "reverse-first", text, claudeTarget);
+    await send(store, "expired-first", text, claudeTarget);
     await store.bindClaudeQueueRows(claudeTarget, []);
     await append(enqueue(text));
-    await send(store, "reverse-second", text, claudeTarget);
+    store.fail("expired-first", claudeTarget, "The message was dropped.");
+    clock += 1; store.stopped(claudeTarget);
+
+    await send(store, "expired-next", text, claudeTarget);
     await store.bindClaudeQueueRows(claudeTarget, []);
-    await append(enqueue(text));
-    const row = (id: string) => ({ type: "user", uuid: `row-${id}`, promptId: id, message: { role: "user", content: text } });
-    await append(row("first"), row("second"));
-    await store.submitted(claudeTarget, text, "claude:prompt:second");
-    await vi.waitFor(() => expect(store.forPane(claudeTarget).some(item => item.landed)).toBe(true));
-    expect(store.status("reverse-first", claudeTarget).state).toBe("queued");
-    await store.submitted(claudeTarget, text, "claude:prompt:first");
-    await vi.waitFor(() => {
-      expect(store.status("reverse-first", claudeTarget).landed).toEqual({ line: 2, uuid: "row-first" });
-      expect(store.status("reverse-second", claudeTarget).landed).toEqual({ line: 3, uuid: "row-second" });
-    });
+    await append(enqueue(text), { type: "user", promptId: "taken-next", message: { role: "user", content: text } });
+    await store.submitted(claudeTarget, text, "claude:prompt:taken-next");
+    expect(store.status("expired-first", claudeTarget).state).toBe("failed");
+    await vi.waitFor(() => expect(store.status("expired-next", claudeTarget)).toMatchObject({ state: "delivered", landed: { line: 2 } }));
+  });
+
+  it("observes a queued user row rewritten at the offset of a different message", async () => {
+    const { store, append, log } = await liveQueue(true);
+    const user = (text: string) => ({ type: "user", message: { role: "user", content: text } });
+    const queued = enqueue("yes");
+    const padding = { type: "system", content: "" };
+    padding.content = "x".repeat(Buffer.byteLength(JSON.stringify(queued)) - Buffer.byteLength(JSON.stringify(padding)));
+    await send(store, "old-offset-go", "go", claudeTarget);
+    await store.bindClaudeQueueRows(claudeTarget, []);
+    await append(padding, user("go"));
+    await store.observe("default", [claudePane("working")]);
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("old-offset-go", claudeTarget).landed).toEqual({ line: 1 }));
+
+    await writeFile(log, "");
+    await send(store, "new-offset-yes", "yes", claudeTarget);
+    await store.bindClaudeQueueRows(claudeTarget, []);
+    await append(queued, user("yes"));
+    await store.observe("default", [claudePane("working")]);
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    await vi.waitFor(() => expect(store.status("new-offset-yes", claudeTarget)).toMatchObject({ state: "delivered", landed: { line: 1 } }));
   });
 
   it.each(["dated", "undated"])("leaves an existing identical %s enqueue and removal unowned", async kind => {

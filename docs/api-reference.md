@@ -923,6 +923,7 @@ A phone matches its pending send to that row rather than to the row's text.
 The Hook writes Claude's prompt claims atomically with delivery state in
 `deliveries.json`, including claims for joined turns. It keeps row details in
 `deliveries.json.landed.json` beside the delivery records.
+Downgrading to an older Hook can lose claims made before the transcript row was written.
 
 A Claude queue row also carries an optional `phrenDeliveryId` when the Hook has
 bound that queue occurrence to a phone send: the value is the `deliveryId` the
