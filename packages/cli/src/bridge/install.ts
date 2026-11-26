@@ -23,6 +23,7 @@ import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-vo
 import { carryCodexHookTrust } from "./codex-hook-trust.js";
 import type { GatewayScope } from "./scoped-gateway.js";
 import { type CodexServerEntry, serversInService } from "./codex-servers.js";
+import { pruneHookVersions } from "./install-versions.js";
 
 const exec = promisify(execFile);
 const label = "com.phren.hook";
@@ -377,6 +378,7 @@ export async function install(version: string, noService = false, force = false)
     }
     throw error;
   }
+  await pruneHookVersions();
 }
 
 export async function uninstall() {

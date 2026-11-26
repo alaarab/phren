@@ -161,6 +161,20 @@ markers are left untouched.
 standalone helper in `~/.local/share/phren/bridge/versions/<version>`, with a
 `current` symlink, `dispatch` entry point, `askpass` helper for `sudo -A` (0700),
 and `installed.json` rollback record.
+After install or update finishes successfully (and, unless `--no-service` was
+passed, the new Hook answers its health check), old version directories are
+pruned. The current version and the two most recently staged others, ordered
+by directory modification time, stay for rollback. A version still running or
+referenced by an installer launch file stays too: the bridge root's `dispatch`,
+`dispatch-scoped`, `enroll`, `askpass` and legacy `start.sh`, the LaunchAgent
+plist, or the systemd user unit. References must name a complete
+`versions/<version>` path segment. Other bridge files and version payloads
+are never read for references. Missing or broken `current`, uncertain running
+versions, and inspection errors leave versions in place. Cleanup never follows symlinks
+inside `versions/`, never runs after a failed install or rollback, and reports
+the number removed and allocated bytes freed (measured by `du`) without making
+installation fail. The read-only prune plan lists kept versions with their
+reasons, directories to remove, and their total allocated bytes.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for
