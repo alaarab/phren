@@ -92,7 +92,7 @@ describe("the worker session's task ledger in dispatch returns", () => {
   it("keeps the reply's own unfinished reason; the tasks it owes only fill in", async () => {
     const withReply = (reply: string): WorkerReaders => ({ ...readers([task("open", "aaaa0001")]), turn: async () => endedTurn(reply) });
     const answer = await workerStates({ targets: [target] }, withReply("Let me run the tests."));
-    expect(answer.workers[0]).toMatchObject({ state: "done", unfinished: "Stopped mid-task: run the tests.",
+    expect(answer.workers[0]).toMatchObject({ state: "done", unfinished: "Stopped mid-task: Let me run the tests.",
       tasks: [{ stableId: "aaaa0001", resolution: "open" }] });
   });
 
