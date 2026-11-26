@@ -2,8 +2,12 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { execFileSync } from "child_process";
+import { makeTempDir } from "../test-helpers.js";
 import {
   buildCitationComment,
+  checkFindingCitation,
+  validateFindingCitation,
   parseCitationComment,
   buildSourceComment,
   parseSourceComment,
@@ -287,5 +291,113 @@ describe("filterTrustedFindingsDetailed", () => {
     const expired = filterTrustedFindingsDetailed(content(400), { ttlDays: 120, minConfidence: 0 });
     expect(expired.content).not.toContain("Batch the index writes");
     expect(expired.content).toContain("chose PostgreSQL");
+  });
+});
+
+// ── checkFindingCitation ───────────────────────────────────────────────────
+
+describe("checkFindingCitation", () => {
+  let repo: { path: string; cleanup: () => void };
+  let first: string;
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo.path, encoding: "utf8" }).trim();
+  const cite = (extra: Partial<FindingCitation>): FindingCitation => ({ created_at: new Date().toISOString(), repo: repo.path, ...extra });
+
+  beforeEach(() => {
+    repo = makeTempDir("phren-cite-states-");
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo.path, "a.ts"), "one\ntwo\nthree\n");
+    git("add", "-A");
+    git("commit", "-qm", "first");
+    first = git("rev-parse", "HEAD");
+  });
+
+  afterEach(() => repo.cleanup());
+
+  it("is valid when the cited line still comes from the cited commit", () => {
+    expect(checkFindingCitation(cite({ commit: first, file: "a.ts", line: 2 }))).toBe("valid");
+    expect(checkFindingCitation(cite({ commit: first }))).toBe("valid");
+  });
+
+  it("is drifted when the cited line changed since the commit or is past the end", () => {
+    fs.writeFileSync(path.join(repo.path, "a.ts"), "one\nTWO\nthree\n");
+    git("commit", "-qam", "second");
+    expect(checkFindingCitation(cite({ commit: first, file: "a.ts", line: 2 }))).toBe("drifted");
+    expect(checkFindingCitation(cite({ commit: first, file: "a.ts", line: 99 }))).toBe("drifted");
+    expect(validateFindingCitation(cite({ commit: first, file: "a.ts", line: 2 }))).toBe(false);
+  });
+
+  it("is broken when the repo does not know the commit or the file is gone", () => {
+    expect(checkFindingCitation(cite({ commit: "0123456789abcdef0123456789abcdef01234567", file: "a.ts", line: 1 }))).toBe("broken");
+    expect(checkFindingCitation(cite({ commit: first, file: "gone.ts", line: 1 }))).toBe("broken");
+    expect(validateFindingCitation(cite({ commit: first, file: "gone.ts" }))).toBe(false);
+  });
+
+  it("is unverifiable with nothing to check, a repo this computer lacks, or no git", () => {
+    expect(checkFindingCitation({ created_at: "2026-01-01" })).toBe("unverifiable");
+    const elsewhere = cite({ repo: "/Users/someone-else/Projects/app", commit: first, file: "a.ts", line: 2 });
+    expect(checkFindingCitation(elsewhere)).toBe("unverifiable");
+    expect(validateFindingCitation(elsewhere)).toBe(true);
+    expect(checkFindingCitation({ created_at: "2026-01-01", file: "/Users/someone-else/notes.ts", line: 1 })).toBe("unverifiable");
+
+    const savedPath = process.env.PATH;
+    process.env.PATH = path.join(repo.path, "no-bin");
+    try {
+      expect(checkFindingCitation(cite({ commit: first, file: "a.ts", line: 2 }))).toBe("unverifiable");
+    } finally {
+      process.env.PATH = savedPath;
+    }
+  });
+});
+
+describe("trust filter by citation state", () => {
+  let repo: { path: string; cleanup: () => void };
+  let first: string;
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo.path, encoding: "utf8" }).trim();
+  const findings = (citations: Record<string, Partial<FindingCitation>>) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = ["# Findings", "", `## ${today}`, ""];
+    for (const [text, citation] of Object.entries(citations)) {
+      lines.push(`- ${text}`, `  ${buildCitationComment({ created_at: new Date().toISOString(), ...citation })}`);
+    }
+    return lines.join("\n");
+  };
+
+  beforeEach(() => {
+    repo = makeTempDir("phren-cite-trust-");
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo.path, "a.ts"), "one\ntwo\nthree\n");
+    git("add", "-A");
+    git("commit", "-qm", "first");
+    first = git("rev-parse", "HEAD");
+    fs.writeFileSync(path.join(repo.path, "a.ts"), "one\nTWO\nthree\n");
+    git("commit", "-qam", "second");
+  });
+
+  afterEach(() => repo.cleanup());
+
+  it("keeps a finding whose repo is not on this computer, and drops only a broken one", () => {
+    const content = findings({
+      "Retry budget lives in the client wrapper": { repo: "/Users/someone-else/Projects/app", commit: first, file: "a.ts", line: 2 },
+      "The old helper file was the entry point": { repo: repo.path, commit: first, file: "gone.ts", line: 1 },
+    });
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 120, minConfidence: 0.9 });
+    expect(result.content).toContain("Retry budget lives in the client wrapper");
+    expect(result.content).not.toContain("The old helper file");
+    expect(result.issues).toEqual([expect.objectContaining({ reason: "invalid_citation", bullet: "- The old helper file was the entry point" })]);
+  });
+
+  it("lowers a drifted finding's confidence instead of dropping it as invalid", () => {
+    const content = findings({ "Line two is where the parser starts": { repo: repo.path, commit: first, file: "a.ts", line: 2 } });
+    expect(filterTrustedFindingsDetailed(content, { ttlDays: 120, minConfidence: 0.6 }).content).toContain("Line two is where the parser starts");
+    const strict = filterTrustedFindingsDetailed(content, { ttlDays: 120, minConfidence: 0.8 });
+    expect(strict.content).not.toContain("Line two is where the parser starts");
+    expect(strict.issues.map((issue) => issue.reason)).toEqual(["stale"]);
+  });
+
+  it("uses known states instead of checking when given them", () => {
+    const content = findings({ "The old helper file was the entry point": { repo: repo.path, commit: first, file: "gone.ts", line: 1 } });
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 120, citationState: () => undefined });
+    expect(result.content).toContain("The old helper file");
+    expect(result.issues).toEqual([]);
   });
 });

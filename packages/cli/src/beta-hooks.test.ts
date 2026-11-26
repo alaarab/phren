@@ -152,14 +152,22 @@ describe("validateCitation", () => {
     })).toBe(true);
   });
 
-  it("returns false for phren citations pointing to missing files", () => {
+  it("returns false for a missing file in a repo this computer has, true when the path is not here", () => {
+    expect(validateCitation({
+      citation: {
+        created_at: "2026-03-01T00:00:00.000Z",
+        repo: tmpPhren,
+        file: "nonexistent.ts",
+        line: 1,
+      },
+    })).toBe(false);
     expect(validateCitation({
       citation: {
         created_at: "2026-03-01T00:00:00.000Z",
         file: "/nonexistent/file.ts",
         line: 1,
       },
-    })).toBe(false);
+    })).toBe(true);
   });
 });
 
@@ -176,8 +184,11 @@ describe("annotateStale", () => {
   });
 
   it("marks phren citation comments stale when validation fails", () => {
-    const result = annotateStale('insight <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/no/such/file.ts","line":1} -->');
+    const result = annotateStale(`insight <!-- phren:cite ${JSON.stringify({ created_at: "2026-03-01T00:00:00.000Z", repo: tmpPhren, file: "no-such-file.ts", line: 1 })} -->`);
     expect(result).toContain("[citation stale]");
+    // A path this computer does not have is not marked.
+    const elsewhere = 'insight <!-- phren:cite {"created_at":"2026-03-01T00:00:00.000Z","file":"/no/such/file.ts","line":1} -->';
+    expect(annotateStale(elsewhere)).toBe(elsewhere);
     // A snippet without citations passes through unchanged.
     expect(annotateStale("plain text")).toBe("plain text");
   });

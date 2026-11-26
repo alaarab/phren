@@ -393,6 +393,7 @@ describe("filterTrustedFindings", () => {
   });
 
   it("drops stale and invalid-citation bullets", () => {
+    const tmp = makeTempDir("phren-cite-broken-");
     const content = [
       "# Project FINDINGS",
       "",
@@ -403,13 +404,14 @@ describe("filterTrustedFindings", () => {
       `## ${new Date().toISOString().slice(0, 10)}`,
       "",
       "- Bad citation",
-      `  <!-- phren:cite ${JSON.stringify({ created_at: new Date().toISOString(), file: "/missing/file.ts", line: 1 })} -->`,
+      `  <!-- phren:cite ${JSON.stringify({ created_at: new Date().toISOString(), repo: tmp.path, file: "missing.ts", line: 1 })} -->`,
       "",
     ].join("\n");
 
     const filtered = filterTrustedFindings(content, 90);
     expect(filtered).not.toContain("- Too old");
     expect(filtered).not.toContain("- Bad citation");
+    tmp.cleanup();
   });
 });
 

@@ -1181,7 +1181,8 @@ export function markStaleCitations(snippet: string, opts: CitationFreshnessOptio
         const resolvedFile = citation.repo
           ? path.resolve(citation.repo, citation.file)
           : (path.isAbsolute(citation.file) ? citation.file : null);
-        if (resolvedFile) {
+        // A repo (or repo-less file) this computer does not have says nothing about the finding.
+        if (resolvedFile && fs.existsSync(citation.repo ?? resolvedFile)) {
           let stale = false;
           if (!fs.existsSync(resolvedFile)) {
             stale = true;
