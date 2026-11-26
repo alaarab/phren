@@ -32,17 +32,27 @@ Managed API memory systems such as Mem0, Zep, and Supermemory expose different a
 
 ### Trust decay and confidence scoring
 
-Each finding has a confidence score that decays over time:
+Each finding has a confidence score that falls with age, linearly between these points (`content/citation.ts`):
 
-| Age | Confidence multiplier |
-|-----|----------------------|
-| 0–30 days | 1.0 (full confidence) |
-| 30–60 days | 0.9 |
-| 60–90 days | 0.75 |
-| 90–120 days | 0.5 |
-| 120+ days | below 0.35 → suppressed |
+| Age | Confidence |
+|-----|------------|
+| 0–30 days | 1.0 |
+| 60 days | 0.85 |
+| 90 days | 0.65 |
+| 120 days and older | 0.45 |
 
-A finding with no source file citation gets an additional 0.8× penalty. Findings whose cited `file:line` no longer exists in the codebase are penalized further.
+A finding with no date counts as 0.45. Past its age limit a finding is stale and is not injected. The limit is set by its tag, or by the retention policy's `ttlDays` (default 120) when it has none:
+
+| Tag | Age limit | Extra multiplier |
+|-----|-----------|------------------|
+| `[decision]` | never | 1.0, and never below 0.6 |
+| `[pattern]`, `[pitfall]` | 365 days | 1.0 |
+| `[workaround]` | 60 days | 0.85 |
+| `[bug]` | 30 days | 0.8 |
+| `[context]` | 30 days | 0.75 |
+| no tag | `ttlDays` | 1.0 |
+
+A finding with no source citation gets a further 0.8×. A cited file changed since the finding was written gives 0.7×, and a citation that no longer resolves drops the finding.
 
 The threshold `minInjectConfidence=0.35` suppresses low-confidence findings from being injected into context automatically. They remain in storage. They just stop contaminating your AI's working knowledge.
 
