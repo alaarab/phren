@@ -84,6 +84,10 @@ const MIN_CHUNK_MATCHES = 2;
  * nothing. With no detected project (the conductor) the bar is higher. */
 const MIN_CHUNK_RARITY = 0.55;
 const NO_PROJECT_MIN_CHUNK_RARITY = 0.6;
+/** A chunk that matches only MIN_CHUNK_MATCHES keywords must include one this rare: two everyday
+ * words ("honest", "good") in one bullet are a coincidence, a rare word is a topic. Measured on a
+ * 29-project store: everyday words sit at 0.2-0.45, the terms questions turn on mostly above 0.5. */
+const MIN_ANCHOR_RARITY = 0.5;
 /** Rarity for a token the index never saw, or when no index is at hand. */
 const DEFAULT_TOKEN_RARITY = 0.5;
 const TASK_RESCUE_MIN_OVERLAP = 0.3;
@@ -1230,6 +1234,10 @@ export function applyRelevanceFloor(
     const seen = { distinct: match.distinct, rarity: match.rarity, overlap: 0, matched: match.matched };
     if (match.distinct < MIN_CHUNK_MATCHES) return { ...seen, passed: false, reason: "too-few-matches" };
     if (match.rarity < minRarity) return { ...seen, passed: false, reason: "low-rarity" };
+    if (rarity?.size && match.distinct === MIN_CHUNK_MATCHES
+      && !match.matched.some((token) => (rarity.get(token) ?? DEFAULT_TOKEN_RARITY) >= MIN_ANCHOR_RARITY)) {
+      return { ...seen, passed: false, reason: "no-anchor" };
+    }
     const isCrossProject = Boolean(detectedProject) && doc.project !== detectedProject;
     const overlap = overlapScore(queryTokens, match.chunk);
     const passed = overlap >= (isCrossProject ? crossFloor : floor);

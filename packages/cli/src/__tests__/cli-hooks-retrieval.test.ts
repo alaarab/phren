@@ -191,8 +191,24 @@ describe("applyRelevanceFloor", () => {
     const doc = makeDocRow("max", "notes.md", "findings", "- Push the fix to main before the release.");
     const common = new Map([["push", 0.22], ["main", 0.18]]);
     expect(applyRelevanceFloor([doc], "push main", null, "max", undefined, common)).toHaveLength(0);
-    const rare = new Map([["push", 0.22], ["main", 0.45]]);
+    const rare = new Map([["push", 0.22], ["main", 0.6]]);
     expect(applyRelevanceFloor([doc], "push main", null, "max", undefined, rare)).toHaveLength(1);
+  });
+
+  it("two matched keywords need one rare one: everyday pairs are coincidences", () => {
+    const doc = makeDocRow("max", "notes.md", "findings", "- Be honest about what a good default is.");
+    const decisions: string[] = [];
+    const everyday = new Map([["honest", 0.44], ["good", 0.38]]);
+    expect(applyRelevanceFloor([doc], "honest good", null, "max", undefined, everyday, (_row, d) => decisions.push(d.reason))).toHaveLength(0);
+    expect(decisions).toEqual(["no-anchor"]);
+    const pair = makeDocRow("max", "notes.md", "findings", "- The sso login fails behind the api proxy.");
+    expect(applyRelevanceFloor([pair], "api sso", null, "max", undefined, new Map([["api", 0.13], ["sso", 0.57]]))).toHaveLength(1);
+  });
+
+  it("three matched everyday keywords still pass: more evidence, no rare word needed", () => {
+    const doc = makeDocRow("max", "notes.md", "findings", "- Compile the private client without touching the live tree.");
+    const rarity = new Map([["compile", 0.25], ["private", 0.19], ["client", 0.2], ["live", 0.08]]);
+    expect(applyRelevanceFloor([doc], "compile private client live", null, "max", undefined, rarity)).toHaveLength(1);
   });
 
   it("never matches the path: every store path contains .phren", () => {
