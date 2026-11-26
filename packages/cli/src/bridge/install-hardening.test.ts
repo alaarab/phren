@@ -1,18 +1,32 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
+import * as fsPromises from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
-const state = vi.hoisted(() => ({ home: "", exec: vi.fn(), health: vi.fn() }));
+const state = vi.hoisted(() => ({ home: "", exec: vi.fn(), health: vi.fn(), removeFailure: "" }));
 vi.mock("node:os", async importOriginal => ({ ...await importOriginal<typeof import("node:os")>(), homedir: () => state.home }));
-vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal<typeof import("node:child_process")>(),
-  execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }),
-}));
+vi.mock("node:child_process", async importOriginal => {
+  const original = await importOriginal<typeof import("node:child_process")>();
+  const { promisify } = await import("node:util");
+  return { ...original, execFile: Object.assign(() => {}, {
+    [Symbol.for("nodejs.util.promisify.custom")]: (file: string, ...args: unknown[]) => file === "du"
+      ? Reflect.apply(promisify(original.execFile), undefined, [file, ...args]) : state.exec(file, ...args),
+  }) };
+});
 vi.mock("node:fs/promises", async importOriginal => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...fs, copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst) };
+  return { ...fs,
+    copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst),
+    rm: async (...args: Parameters<typeof fs.rm>) => {
+      if (args[0] === state.removeFailure) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+      return fs.rm(...args);
+    },
+  };
 });
 vi.mock("./transport.js", () => ({ health: state.health }));
 import { install, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
+import { planHookVersionPrune, pruneHookVersions } from "./install-versions.js";
 
 beforeEach(async () => {
   state.home = await mkdtemp("/tmp/phren-install-");
@@ -23,6 +37,7 @@ beforeEach(async () => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   state.exec.mockReset().mockResolvedValue({ stdout: "", stderr: "" });
   state.health.mockReset().mockResolvedValue({ version: "0.2.14" });
+  state.removeFailure = "";
 });
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(state.home, { recursive: true, force: true }); });
 
@@ -185,6 +200,9 @@ it.skipIf(process.platform === "win32")("keeps the running version's own forward
   const live = { value: "0.2.13" };
   liveVersion(live);
   await install("0.2.13");
+  await oldVersions();
+  const versionsBefore = await versionNames();
+  vi.mocked(console.log).mockClear();
   await writeFile(path.join(root, "versions/0.2.13/claude-hook.mjs"), "// 0.2.13's forwarder\n");
   const before = await readFile(claudeSettings(), "utf8");
   expect(String(await install("0.2.14").catch((failure: Error) => failure))).toContain("did not become ready");
@@ -192,6 +210,8 @@ it.skipIf(process.platform === "win32")("keeps the running version's own forward
   expect(await readFile(path.join(root, "current/claude-hook.mjs"), "utf8")).toBe("// 0.2.13's forwarder\n");
   expect(await readFile(claudeSettings(), "utf8")).toBe(before);
   expect(JSON.parse(before).hooks.Stop).toEqual([{ hooks: [{ type: "command", command: forwarder(), timeout: 15 }] }]);
+  expect(await versionNames()).toEqual([...versionsBefore, "0.2.14"].sort());
+  expect(vi.mocked(console.log).mock.calls.flat().join("\n")).not.toContain("Hook versions:");
 });
 
 it.skipIf(process.platform === "win32")("points Claude back at the bundle when rolling back to a version without the forwarder, and forward again", async () => {
@@ -323,4 +343,172 @@ it.skipIf(process.platform === "win32")("keeps the owner's Codex trust when inst
   // Stop was never trusted, so it still waits for the owner's review.
   expect(text).not.toContain(":stop:");
   expect(text.startsWith('model = "x"\n\n')).toBe(true);
+});
+
+const oldNames = ["9.9.9", "0.2.11-security.1", "0.2.13-dev.9", "0.2.12-dev.1"];
+const versionNames = () => readdir(path.join(process.env.PHREN_BRIDGE_HOME!, "versions")).then(names => names.sort());
+async function oldVersions() {
+  for (const [index, name] of oldNames.entries()) {
+    const dir = path.join(process.env.PHREN_BRIDGE_HOME!, "versions", name);
+    await mkdir(path.join(dir, "nested"), { recursive: true });
+    await writeFile(path.join(dir, "nested/payload"), "old bundle");
+    // Future, distinct times prove that current is protected independently of recency or semver order.
+    const time = new Date(Date.UTC(2040, 0, index + 1));
+    await utimes(dir, time, time);
+  }
+}
+
+it.skipIf(process.platform === "win32").each([true, false])("prunes only after successful install (no service: %s), keeping current and the two most recently staged others", async noService => {
+  await oldVersions();
+  state.exec.mockImplementation(async (file: string, args: string[]) => {
+    if (file === "launchctl" && args[0] === "bootstrap") expect(await versionNames()).toContain("9.9.9");
+    return { stdout: "", stderr: "" };
+  });
+  await install("0.2.14", noService);
+  expect(await versionNames()).toEqual(["0.2.12-dev.1", "0.2.13-dev.9", "0.2.14"]);
+  expect(vi.mocked(console.log).mock.calls.flat().filter(line => String(line).startsWith("Hook versions:")))
+    .toEqual([expect.stringMatching(/^Hook versions: removed 2 version\(s\), freed [1-9]\d* bytes\.$/)]);
+});
+
+it.skipIf(process.platform === "win32").each(["start.sh", "Library/LaunchAgents/com.phren.hook.plist", ".config/systemd/user/phren-hook.service"])("keeps an older version referenced by the installed launcher %s", async launcher => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!, file = path.join(launcher === "start.sh" ? root : state.home, launcher);
+  await mkdir(path.dirname(file), { recursive: true });
+  const program = path.join(root, "versions/9.9.9/bridge-hook.mjs");
+  await writeFile(file, launcher.endsWith(".plist")
+    ? `<plist><dict><key>ProgramArguments</key><array><string>node</string><string>${program}</string></array></dict></plist>\n`
+    : launcher.endsWith(".service") ? `[Service]\nExecStart=node '${program}' serve\n` : `#!/bin/sh\nexec node '${program}' serve\n`);
+  await install("0.2.14", true);
+  expect(await versionNames()).toEqual(["0.2.12-dev.1", "0.2.13-dev.9", "0.2.14", "9.9.9"]);
+  expect((await planHookVersionPrune()).keep["9.9.9"]).toContain(`launch artifact: ${file}`);
+});
+
+it.skipIf(process.platform === "win32").each(["activation", "service start", "agent settings"])("does not prune when %s fails", async failure => {
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  await install("0.2.13", true);
+  await oldVersions();
+  const before = await versionNames();
+  vi.mocked(console.log).mockClear();
+  if (failure === "activation") {
+    await unlink(path.join(root, "current"));
+    await mkdir(path.join(root, "current"));
+  } else {
+    if (failure === "agent settings") await writeFile(claudeSettings(), '{"hooks":{}}');
+    let starts = 0;
+    state.exec.mockImplementation(async (file: string, args: string[]) => {
+      if (file === "launchctl" && args[0] === "bootstrap" && ++starts === 1) {
+        if (failure === "service start") throw new Error("service start fixture failure");
+        await writeFile(claudeSettings(), '{"changed":"during start"}');
+      }
+      return { stdout: "", stderr: "" };
+    });
+  }
+  await expect(install("0.2.14")).rejects.toThrow(failure === "service start" ? "service start fixture failure" : failure === "agent settings" ? "Agent settings changed" : /EISDIR|ENOTEMPTY|EEXIST/);
+  expect(await versionNames()).toEqual([...before, "0.2.14"].sort());
+  if (failure !== "activation") expect(await readlink(path.join(root, "current"))).toBe(path.join("versions", "0.2.13"));
+  expect(vi.mocked(console.log).mock.calls.flat().join("\n")).not.toContain("Hook versions:");
+});
+
+it.skipIf(process.platform === "win32")("ignores symlinks in versions and does not count or remove their outside contents", async () => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!, outside = path.join(state.home, "outside");
+  await mkdir(outside); await writeFile(path.join(outside, "precious"), "keep me");
+  await symlink(outside, path.join(root, "versions/outside-link"));
+  await install("0.2.14", true);
+  expect(await versionNames()).toEqual(["0.2.12-dev.1", "0.2.13-dev.9", "0.2.14", "outside-link"]);
+  expect(await readlink(path.join(root, "versions/outside-link"))).toBe(outside);
+  expect(await readFile(path.join(outside, "precious"), "utf8")).toBe("keep me");
+  expect(vi.mocked(console.log).mock.calls.flat().join("\n")).toMatch(/Hook versions: removed 2 version\(s\), freed [1-9]\d* bytes\./);
+});
+
+it.skipIf(process.platform === "win32")("keeps versions when a linked launcher cannot be inspected without following a symlink", async () => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!, outside = path.join(state.home, "outside.sh");
+  await writeFile(outside, "#!/bin/sh\nexec node ./versions/9.9.9/bridge-hook.mjs serve\n");
+  await symlink(outside, path.join(root, "start.sh"));
+  await install("0.2.14", true);
+  expect(await versionNames()).toEqual([...oldNames, "0.2.14"].sort());
+  expect(await readFile(outside, "utf8")).toContain("exec node");
+});
+
+it.skipIf(process.platform === "win32").each(["missing", "broken", "outside"])("deletes nothing when current is %s", async target => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  if (target !== "missing") await symlink(target === "outside" ? state.home : "versions/missing", path.join(root, "current"));
+  await pruneHookVersions();
+  expect(await versionNames()).toEqual([...oldNames].sort());
+});
+
+it.skipIf(process.platform === "win32").each([false, true])("protects the running Hook, keeping everything if its socket cannot identify the version (uncertain: %s)", async uncertain => {
+  await oldVersions();
+  const socket = path.join(process.env.PHREN_BRIDGE_HOME!, "hook.sock");
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socket, resolve); });
+  try {
+    if (uncertain) state.health.mockRejectedValue(new Error("unresponsive socket"));
+    else state.health.mockResolvedValue({ version: "9.9.9" });
+    await install("0.2.14", true);
+    expect(state.health).toHaveBeenCalled();
+    expect(await versionNames()).toEqual(uncertain ? [...oldNames, "0.2.14"].sort() : ["0.2.12-dev.1", "0.2.13-dev.9", "0.2.14", "9.9.9"]);
+    expect(JSON.parse(await readFile(path.join(process.env.PHREN_BRIDGE_HOME!, "installed.json"), "utf8")).version).toBe("0.2.14");
+  } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+});
+
+it.skipIf(process.platform === "win32")("finishes install and reports partial cleanup when a version cannot be removed", async () => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  state.removeFailure = path.join(root, "versions/9.9.9");
+  await install("0.2.14", true);
+  expect(await versionNames()).toEqual(["0.2.12-dev.1", "0.2.13-dev.9", "0.2.14", "9.9.9"]);
+  expect(JSON.parse(await readFile(path.join(root, "installed.json"), "utf8")).version).toBe("0.2.14");
+  expect(vi.mocked(console.log).mock.calls.flat().filter(line => String(line).startsWith("Hook versions:")))
+    .toEqual([expect.stringMatching(/^Hook versions: removed 1 version\(s\), freed [1-9]\d* bytes\. Some versions were kept because cleanup could not finish safely\.$/)]);
+});
+
+it.skipIf(process.platform === "win32")("ignores unrelated version mentions and never reads private files", async () => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  const unrelated = ["id_ed25519_dispatch", "AuthKey_fixture.p8", "unrelated.txt", "conversation-search.sqlite"];
+  for (const file of unrelated) await writeFile(path.join(root, file), "private fixture 9.9.9 versions/9.9.9/bridge-hook.mjs");
+  await mkdir(path.join(root, "versions/0.2.14"));
+  await symlink("versions/0.2.14", path.join(root, "current"));
+  const reads = vi.spyOn(fsPromises, "readFile");
+  await pruneHookVersions();
+  expect(await versionNames()).toEqual(["0.2.12-dev.1", "0.2.13-dev.9", "0.2.14"]);
+  for (const file of unrelated) expect(reads.mock.calls.some(([name]) => name === path.join(root, file))).toBe(false);
+  expect(reads.mock.calls.some(([name]) => typeof name === "string" && name.startsWith(path.join(root, "versions") + path.sep))).toBe(false);
+});
+
+it.skipIf(process.platform === "win32")("matches complete version path segments rather than bare names or version prefixes", async () => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  const dir = path.join(root, "versions/0.3.9");
+  await mkdir(dir); await writeFile(path.join(dir, "payload"), "old bundle");
+  await utimes(dir, new Date(0), new Date(0));
+  await writeFile(path.join(root, "start.sh"), "#!/bin/sh\n# 9.9.9\nexec node /some/versions/0.3.93/bridge-hook.mjs serve\n");
+  await install("0.2.14", true);
+  expect(await versionNames()).toEqual(["0.2.12-dev.1", "0.2.13-dev.9", "0.2.14"]);
+});
+
+it.skipIf(process.platform === "win32")("plans keep reasons, deletions and bytes without changing the layout or recursively listing payloads", async () => {
+  await oldVersions();
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  await mkdir(path.join(root, "versions/0.2.14"));
+  await symlink("versions/0.2.14", path.join(root, "current"));
+  const before = await versionNames();
+  const listings = vi.spyOn(fsPromises, "readdir");
+  const removals = vi.spyOn(fsPromises, "rm");
+  const plan = await planHookVersionPrune();
+  expect(await planHookVersionPrune()).toEqual(plan);
+  expect(plan.error).toBeUndefined();
+  expect(plan.keep).toEqual({
+    "0.2.14": ["current"],
+    "0.2.12-dev.1": ["one of the two newest other versions by directory mtime"],
+    "0.2.13-dev.9": ["one of the two newest other versions by directory mtime"],
+  });
+  expect(plan.delete.map(entry => entry.version)).toEqual(["0.2.11-security.1", "9.9.9"]);
+  expect(plan.bytes).toBeGreaterThan(0);
+  expect(removals).not.toHaveBeenCalled();
+  expect(listings.mock.calls.every(([file]) => file === path.join(root, "versions"))).toBe(true);
+  expect(await versionNames()).toEqual(before);
 });
