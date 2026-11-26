@@ -65,9 +65,9 @@ export function register(server: McpServer): void {
       const result = await hookRequest("/v1/dispatch/returns", { ...(origin ? { origin } : {}) });
       const returns = Array.isArray(result.returns) ? result.returns : [];
       // The worker session's task ledger (session-tasks.ts): one line per task under its return.
-      const blocks = returns.flatMap(row => {
-        const tasks = Array.isArray(object(row).tasks) ? object(row).tasks : [];
-        return tasks.length ? [`- ${String(object(row).computer)} ${String(object(row).label)} ${String(object(row).state)}`,
+      const blocks = returns.flatMap(raw => {
+        const row = object(raw), tasks: unknown[] = Array.isArray(row.tasks) ? row.tasks : [];
+        return tasks.length ? [`- ${String(row.computer)} ${String(row.label)} ${String(row.state)}`,
           ...tasks.map(task => {
             const entry = object(task);
             const title = String(entry.title ?? "");
