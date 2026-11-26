@@ -11,4 +11,16 @@ describe("wantsTasks", () => {
     expect(ask("why does the login throw a stack trace on refresh")).toBe(false);
     expect(ask("explain how the retry policy works")).toBe(false);
   });
+
+  it.each([
+    ["decide", false],
+    ["special", false],
+    ["latest", false],
+    ["attest", false],
+    ["build projects with a prefix and unit fixture", true],
+    ["releasing", true],
+    ["show the latest tasks", true],
+  ] as const)("admits tasks for %j: %s", (prompt, expected) => {
+    expect(wantsTasks(prompt, detectTaskIntent(prompt))).toBe(expected);
+  });
 });

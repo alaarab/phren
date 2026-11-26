@@ -1328,8 +1328,53 @@ describe("detectTaskIntent", () => {
     ["set up the CI pipeline for deploy", "build"],
     ["update the README with the new API", "docs"],
     ["hello", "general"],
+    ["projects", "general"],
+    ["prefix", "general"],
+    ["decide", "general"],
+    ["special", "general"],
+    ["latest", "general"],
+    ["unit", "general"],
+    ["attest", "general"],
+    ["fixture", "general"],
+    ["abuggy", "general"],
+    ["PR #42", "review"],
+    ["CI is red", "build"],
+    ["build projects with a prefix and unit fixture", "build"],
+    ["explain the latest fixture", "docs"],
+    ["use /swarm to fix the build and review docs", "skill"],
+    ["fix the build and review docs", "debug"],
+    ["review the build docs", "review"],
+    ["build the docs", "build"],
   ])("detects the intent of %j as %s", (prompt, intent) => {
     expect(detectTaskIntent(prompt)).toBe(intent);
+  });
+
+  it.each([
+    "bug", "bugs", "buggy", "debug", "debugs", "debugged", "debugging", "debugger", "debuggers",
+    "error", "errors", "fix", "fixes", "fixed", "fixing", "broken", "break", "breaks", "breaking",
+    "regression", "regressions", "fail", "fails", "failed", "failing", "failure", "failures",
+    "stack trace", "stack traces", "exits with 149", "it crashed", "the server hangs", "an exception", "traceback",
+    "go panics", "segfault", "flaky e2e", "timed out", "timeouts", "the hook is not working", "it doesn't work",
+  ])("detects the debug term %j", (prompt) => {
+    expect(detectTaskIntent(prompt)).toBe("debug");
+  });
+
+  it.each([
+    "review", "reviews", "reviewed", "reviewing", "reviewer", "reviewers",
+    "audit", "audits", "audited", "auditing", "pr", "prs", "pull request", "pull requests",
+    "nit", "nits", "nitpick", "nitpicks", "nitpicked", "nitpicking",
+    "refactor", "refactors", "refactored", "refactoring",
+  ])("detects the review term %j", (prompt) => {
+    expect(detectTaskIntent(prompt)).toBe("review");
+  });
+
+  it.each([
+    "build", "builds", "building", "rebuild", "rebuilds", "rebuilding",
+    "deploy", "deploys", "deployed", "deploying", "deployment", "deployments",
+    "release", "releases", "released", "releasing", "ci", "workflow", "workflows", "pipeline", "pipelines",
+    "test", "tests", "testing", "tested",
+  ])("detects the build term %j", (prompt) => {
+    expect(detectTaskIntent(prompt)).toBe("build");
   });
 
   it("detects explicit slash-command and skill phrasing as skill intent", () => {

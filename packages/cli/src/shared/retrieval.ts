@@ -101,9 +101,9 @@ const LOW_VALUE_BULLET_FRACTION = 0.5;
 
 const INTENT_SKILL_CMD_RE = /(?:^|\s)\/(?!(?:home|usr|var|tmp|etc|opt|api|mnt)\b)[a-z][\w-]*\b/;
 const INTENT_SKILL_KW_RE = /\bskill\b/;
-const INTENT_DEBUG_RE = /(bug|error|fix|broken|regression|fail|stack trace)/;
-const INTENT_REVIEW_RE = /(review|audit|pr|pull request|nit|refactor)/;
-const INTENT_BUILD_RE = /(build|deploy|release|ci|workflow|pipeline|test)/;
+const INTENT_DEBUG_RE = /\b(bug(?:s|gy)?|debug(?:s|ged|ging|gers?)?|errors?|fix(?:es|ed|ing)?|broken|break(?:s|ing)?|regressions?|fail(?:s|ed|ing|ures?)?|stack traces?|exit(?:s|ed)?|crash(?:es|ed|ing)?|hang(?:s|ing)?|exceptions?|traceback|panic(?:s|ked)?|segfault|flaky|time[ds] out|timeouts?|not working|does ?n[o']t work)\b/;
+const INTENT_REVIEW_RE = /\b(review(?:s|ed|ing|ers?)?|audit(?:s|ed|ing)?|prs?|pull requests?|nits?|nitpick(?:s|ed|ing)?|refactor(?:s|ed|ing)?)\b/;
+const INTENT_BUILD_RE = /\b((?:re)?build(?:s|ing)?|deploy(?:s|ed|ing|ments?)?|releas(?:e[sd]?|ing)|ci|workflows?|pipelines?|test(?:s|ing|ed)?)\b/;
 const INTENT_DOCS_RE = /\b(doc|docs|readme|explain|guide|instructions?)\b/;
 
 const WANTS_TASKS_RE = /\b(tasks?|todos?|backlog|queue|what'?s (left|next|remaining)|what is (left|next|remaining)|next up|remaining work|priorit(y|ies))\b/i;
