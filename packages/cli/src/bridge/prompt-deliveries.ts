@@ -4,6 +4,7 @@ import { open, stat } from "node:fs/promises";
 import { z } from "zod";
 import { materializedPath } from "./codex-threads.js";
 import { atomicInPrivateDir, BridgeError, object, objects, provider, sessionId, type Json, type Provider, type Target } from "./protocol.js";
+import { claudePromptIdentity } from "./transcript-claude.js";
 import { transcriptPath, unwrapPastedContent } from "./transcripts.js";
 
 /** A delivery the agent's turn ended without: the reason the phone shows. */
@@ -17,7 +18,7 @@ export type DeliveryState = "queued" | "delivered" | "failed";
 /** A transcript row carrying a message's words: its byte offset, and whether the agent fires UserPromptSubmit for it (a user row does; a mid-turn queue removal does not). */
 /** A transcript row with a message's words: its byte offset, whether it is a user row, when it was stamped, and
  * the row's own id where the harness writes one (Claude's `uuid`). */
-export interface TranscriptEntry { offset: number; hook: boolean; at?: number; uuid?: string;
+export interface TranscriptEntry { offset: number; hook: boolean; at?: number; uuid?: string; promptEntryId?: string;
   /** The row the conversation stream shows for this one, when that is another (a Codex rollout's user item). */
   shown?: number }
 export type TrackedState = DeliveryState | "unknown";
@@ -92,14 +93,14 @@ const recordSchema = z.object({
  * `entryUuid` (Claude's row id) and `entryShown`, the offset of the row the stream shows for it when that is not
  * the claimed entry (a Codex rollout's user item, written beside the event that is the turn). */
 type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number; hookClaim?: boolean; seenRow?: number; awaitingRow?: boolean;
-  entryLate?: boolean; entryLine?: number; entryUuid?: string; entryShown?: number;
+  entryLate?: boolean; entryLine?: number; entryUuid?: string; entryShown?: number; promptEntryId?: string;
   /** The Claude queue enqueue occurrence this phone message was typed as, and the queue rows that
    * took it: the byte offset of each. The transcript's own queue rows carry no phone id, so the
    * binding is what gives the enqueue, its removal and its submitted turn one identity. */
   queueOffset?: number; queueAt?: number; queueKey?: string; queueEnd?: "consumed" | "returned"; queueRemoveOffset?: number; queueUserOffset?: number; queueDequeueOffset?: number };
 const landedFile = (file: string) => `${file}.landed.json`;
 const landedSchema = z.object({ line: z.number().int().nonnegative().optional(), uuid: z.string().min(1).max(100).optional(),
-  shown: z.number().int().nonnegative().optional(), late: z.literal(true).optional() }).strict();
+  shown: z.number().int().nonnegative().optional(), late: z.literal(true).optional(), promptEntryId: z.string().max(256).optional() }).strict();
 const queueBindingsFile = (file: string) => `${file}.queue.json`;
 const queueBindingSchema = z.object({ offset: z.number().int().nonnegative().optional(), at: z.number().optional(),
   key: z.string().regex(/^[0-9a-f]{64}$/).optional(), end: z.enum(["consumed", "returned"]).optional(),
@@ -160,7 +161,12 @@ export class PromptDeliveries {
     try {
       for (const [id, row] of Object.entries(object(JSON.parse(readFileSync(landedFile(file), "utf8"))))) {
         const parsed = landedSchema.safeParse(row), record = this.byId(id);
-        if (!parsed.success || !record || record.entry === undefined) continue;
+        if (!parsed.success || !record) continue;
+        if (parsed.data.promptEntryId && record.state === "delivered") {
+          record.promptEntryId = parsed.data.promptEntryId;
+          if (record.entry === undefined) record.awaitingRow = true;
+        }
+        if (record.entry === undefined) continue;
         if (parsed.data.line !== undefined) record.entryLine = parsed.data.line;
         if (parsed.data.uuid) record.entryUuid = parsed.data.uuid;
         if (parsed.data.shown !== undefined) record.entryShown = parsed.data.shown;
@@ -199,13 +205,14 @@ export class PromptDeliveries {
     if (!this.file) return;
     // A record without a phone id is kept once it claimed a transcript row, so after a restart that row is not offered to another message.
     const kept = this.records.filter(record => record.id || record.entry !== undefined || record.joined === "turn");
-    const rows = kept.map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, awaitingRow: _____, entryLate: _a, entryLine: _b, entryUuid: _c, entryShown: _d,
+    const rows = kept.map(({ idleSince: _, checkedAt: __, hookClaim: ___, seenRow: ____, awaitingRow: _____, entryLate: _a, entryLine: _b, entryUuid: _c, entryShown: _d, promptEntryId: _l,
       queueOffset: _e, queueAt: _f, queueRemoveOffset: _g, queueUserOffset: _h, queueDequeueOffset: _i, queueKey: _j, queueEnd: _k, ...row }) => row);
     // The rows phone messages landed as, apart from the records an older Hook reads strictly.
     const landed: Json = {};
-    for (const record of kept) if (record.id && record.entry !== undefined && (record.entryLine !== undefined || record.entryUuid || record.entryShown !== undefined || record.entryLate)) {
+    for (const record of kept) if (record.id && (record.entryLine !== undefined || record.entryUuid || record.entryShown !== undefined || record.entryLate || record.promptEntryId)) {
       landed[record.id] = { ...(record.entryLine !== undefined ? { line: record.entryLine } : {}), ...(record.entryUuid ? { uuid: record.entryUuid } : {}),
-        ...(record.entryShown !== undefined ? { shown: record.entryShown } : {}), ...(record.entryLate ? { late: true } : {}) };
+        ...(record.entryShown !== undefined ? { shown: record.entryShown } : {}), ...(record.entryLate ? { late: true } : {}),
+        ...(record.promptEntryId ? { promptEntryId: record.promptEntryId } : {}) };
     }
     // The Claude queue occurrence each phone message was typed as, beside the records for the same reason.
     const queue: Json = {};
@@ -529,21 +536,17 @@ export class PromptDeliveries {
   /** Conversation `target` just submitted `prompt`. Its own record wins, then
    * the oldest open one in the same pane: the agent kept the text across a
    * conversation change, and the conversation now in the pane is where it
-   * went. A prompt nothing matches was typed locally. Never refused.
-   * For Claude the transcript is consulted first and the submission claims
-   * the earliest unclaimed user row with these words, through the same
-   * `settle` and the same table of claimed entries the idle check uses: a
-   * callback for a row already claimed (the idle check settled it, the hook
-   * came late) settles nothing more. */
-  async submitted(target: Target, prompt: string): Promise<void> {
+   * went. A Claude callback shares the claim with the transcript read. */
+  async submitted(target: Target, prompt: string, promptEntryId?: string): Promise<void> {
     await this.refreshClaudeQueue(target);
     const hash = promptHash(prompt);
     this.hookPanes.add(this.paneKey(target));
+    if (promptEntryId && this.claudeClaimed(target, { promptEntryId })) return;
     // A failed message stays matchable for a late take only until the pane's next Stop: a turn that ended
     // without it means a later identical prompt is a new one.
     const stop = this.lastStop.get(this.paneKey(target)) ?? -Infinity;
     const pick = () => {
-      const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered" && record.queueEnd !== "returned"
+      const open = this.records.filter(record => record.hash === hash && this.samePane(record, target) && record.state !== "delivered" && record.entry === undefined && record.queueEnd !== "returned"
         && (record.state !== "failed" || (record.settledAt ?? record.at) >= stop));
       return open.find(entry => entry.session === target.session) ?? open[0];
     };
@@ -551,39 +554,27 @@ export class PromptDeliveries {
     if (!record) {
       // A prompt that is one known message's own words (a late hook for a message already settled) is not a join.
       // Records from an earlier join never get a hook of their own, so they do not count.
-      if (!this.records.some(other => other.hash === hash && this.samePane(other, target) && other.joined === undefined) && this.settleJoined(target, prompt)) this.save();
+      if (!this.records.some(other => other.hash === hash && this.samePane(other, target) && other.joined === undefined) && this.settleJoined(target, prompt, promptEntryId)) this.save();
       return;
     }
     let entry: TranscriptEntry | undefined;
     if (target.source === "claude") {
-      // A hook settles a message only by claiming a row for it: rows all claimed by earlier messages is a
-      // callback for a turn already accounted for. No row yet (not written or not readable, or a transcript
-      // that cannot be read) settles nothing now: the claim waits on the record for its row to appear.
       let rows: TranscriptEntry[] | undefined;
       try { rows = (await this.landed({ source: target.source, session: target.session, hash, at: record.at })).filter(row => row.hook); } catch { rows = undefined; }
       record = pick();
-      if (!record) return;
-      // Claims are per conversation: another conversation's rows can sit at the same byte offset.
-      // Only user rows count: a mid-turn queue removal never had a hook, so it says nothing about this callback.
-      const claimers = this.records.filter(other => other.hash === hash && this.samePane(other, target) && other.session === target.session && other.entry !== undefined && other.entryHook !== false);
-      const claimed = new Set(claimers.map(other => other.entry));
-      // A row an earlier message took only to name it in its receipt (`entryLate`) is never offered again, but it
-      // says nothing about this callback: that message's hook already came, so this one is not it, late.
-      const waitedOn = claimers.filter(other => !other.entryLate).length;
-      const free = rows?.filter(row => !claimed.has(row.offset)).sort((a, b) => a.offset - b.offset)[0];
-      // Claude writes the submitted row only after its UserPromptSubmit hooks return, and this callback is one
-      // of them: the row for this submission is never readable yet. So no free row (or a transcript that cannot
-      // be read) settles on the hook's word at once, as the agent took it and started its turn. The row it
-      // writes next stays this message's (`taken` counts hook-settled messages first). Only when a message
-      // with these words already claimed a row in this conversation may the callback be that message's, late:
-      // then it waits for a row of its own, looked for in the conversation that made the claim.
-      if (!free && !waitedOn) {
-        this.settle(record, target.session);
-        // A phone message claims the row Claude writes next, so its receipt can name it (`claimClaudeRow`).
-        if (record.id) record.awaitingRow = true;
-        this.save(); return;
+      if (!record || (promptEntryId && this.claudeClaimed(target, { promptEntryId }))) return;
+      const named = promptEntryId ? rows?.find(row => row.promptEntryId === promptEntryId) : undefined;
+      if (named && this.claudeClaimed(target, named)) return;
+      const free = named ?? rows?.filter(row => (!promptEntryId || !row.promptEntryId) && !this.claudeClaimed(target, row)).sort((a, b) => a.offset - b.offset)[0];
+      // With no matching row yet, an earlier row whose hook could still arrive makes a legacy match ambiguous.
+      if (!free && this.records.some(other => other.hash === hash && this.samePane(other, target) && other.session === target.session
+        && other.entry !== undefined && other.entryHook !== false && !other.entryLate && (!promptEntryId || !other.promptEntryId))) {
+        if (!rows?.length) { record.hookClaim = true; record.session = target.session; }
+        return;
       }
-      if (!free) { if (!rows?.length) { record.hookClaim = true; record.session = target.session; } return; }
+      // Claude can write the row after the callback returns; keep its identity for the later transcript read.
+      record.promptEntryId = promptEntryId;
+      if (!free && record.id) record.awaitingRow = true;
       entry = free;
     }
     this.settle(record, target.session);
@@ -603,7 +594,7 @@ export class PromptDeliveries {
    * inside "yes, but later". Only hashes of the line runs are compared, never stored. Only messages still held
    * (typed or queued) are matched: a failed one could take the lines of messages that are held, and a late
    * take of a failed message stays its own hook's to report. */
-  private settleJoined(target: Target, prompt: string): boolean {
+  private settleJoined(target: Target, prompt: string, promptEntryId?: string): boolean {
     const candidates = this.records.filter(record => this.samePane(record, target) && record.queueEnd !== "returned" && PromptDeliveries.open(record))
       .sort((a, b) => a.at - b.at).slice(0, JOINED_MAX_OPEN);
     if (!candidates.length) return false;
@@ -628,13 +619,24 @@ export class PromptDeliveries {
     // The turn's row carries the joined words: a hook-settled record of them (no phone id) claims it as
     // `taken` lets any hook-settled message, so a later message with the same words cannot take it.
     this.records.push({ hash: promptHash(prompt), server: target.server, pane: target.pane, source: target.source, session: target.session,
-      state: "delivered", at: this.now(), settledAt: this.now(), joined: "turn" });
+      state: "delivered", at: this.now(), settledAt: this.now(), joined: "turn", promptEntryId });
     return true;
+  }
+  // A native prompt id survives a rewrite; an older row or claim can still match by byte offset.
+  private claudeClaimed(target: Pick<Target, "server" | "pane" | "source" | "session">, row: { offset?: number; promptEntryId?: string }, except?: Record): boolean {
+    return this.records.some(other => other !== except && this.samePane(other, target) && other.session === target.session
+      && (row.promptEntryId && other.promptEntryId ? row.promptEntryId === other.promptEntryId : row.offset !== undefined && row.offset === other.entry));
+  }
+  private static claudeHookRow(record: Record, row: TranscriptEntry): boolean {
+    if (!row.hook) return false;
+    if (record.promptEntryId && row.promptEntryId) return record.promptEntryId === row.promptEntryId;
+    return row.at === undefined || (row.at >= record.at - ENTRY_SLACK_MS && row.at <= (record.settledAt ?? record.at) + HOOK_ROW_MS);
   }
   /** `record` takes transcript row `row` as its own: the entry no other message with these words may take, and,
    * for a phone message, the row its receipt names (`landed`), whose line is counted in the background. */
   private claim(record: Record, row: TranscriptEntry, hook = row.hook, late = false) {
     record.entry = row.offset; record.entryHook = hook; delete record.entryLine;
+    if (row.promptEntryId) record.promptEntryId = row.promptEntryId;
     if (late) record.entryLate = true; else delete record.entryLate;
     if (row.uuid) record.entryUuid = row.uuid; else delete record.entryUuid;
     if (row.shown !== undefined) record.entryShown = row.shown; else delete record.entryShown;
@@ -694,17 +696,15 @@ export class PromptDeliveries {
         .sort((a, b) => (a.settledAt ?? a.at) - (b.settledAt ?? b.at));
       const from = Math.min(record.at, ...hooked.map(other => other.at));
       const found = (await this.landed({ ...record, at: from }).catch(() => [] as TranscriptEntry[])).sort((a, b) => a.offset - b.offset);
-      const used = new Set(this.records.filter(other => same(other) && other.entry !== undefined).map(other => other.entry));
       let claimedRows = false;
       for (const other of hooked) {
         if (other.entry !== undefined) continue;
-        const row = found.find(entry => entry.hook && !used.has(entry.offset)
-          && (entry.at === undefined || (entry.at >= other.at - ENTRY_SLACK_MS && entry.at <= (other.settledAt ?? other.at) + HOOK_ROW_MS)));
+        const row = found.find(entry => PromptDeliveries.claudeHookRow(other, entry) && !this.claudeClaimed(record, entry, other));
         if (!row) continue;
-        this.claim(other, row, true); used.add(row.offset); claimedRows = true;
+        this.claim(other, row, true); claimedRows = true;
       }
       if (claimedRows) this.save();
-      const unclaimed = found.filter(entry => !used.has(entry.offset) && (entry.at === undefined || entry.at >= record.at - ENTRY_SLACK_MS));
+      const unclaimed = found.filter(entry => !this.claudeClaimed(record, entry) && (entry.at === undefined || entry.at >= record.at - ENTRY_SLACK_MS));
       if (working) {
         // A user row is its hook's to settle, unless that hook already came (before the row could be read), or
         // the pane sends no callbacks at all: then a row two checks in a row saw unclaimed settles it.
@@ -718,6 +718,7 @@ export class PromptDeliveries {
     // The record may have settled (its hook claimed a row) while the transcript was read.
     if (!PromptDeliveries.claimable(record)) return false;
     const index = free.findIndex(row => {
+      if (this.claudeClaimed(record, row)) return false;
       const owner = this.records.find(other => this.samePane(other, record) && other.session === record.session
         && (row.hook ? other.queueUserOffset === row.offset : other.queueRemoveOffset === row.offset));
       if (owner && owner !== record) return false;
@@ -763,10 +764,7 @@ export class PromptDeliveries {
     // Another path (`taken` for an identical message) may have given it its row meanwhile.
     if (record.entry !== undefined) { delete record.awaitingRow; return; }
     if (!record.awaitingRow || record.session !== session) return;
-    const used = new Set(this.records.filter(other => other !== record && other.hash === record.hash && this.samePane(other, record)
-      && other.session === record.session && other.entry !== undefined).map(other => other.entry!));
-    const row = rows.find(row => !used.has(row.offset)
-      && (row.at === undefined || (row.at >= record.at - ENTRY_SLACK_MS && row.at <= (record.settledAt ?? record.at) + HOOK_ROW_MS)));
+    const row = rows.find(row => PromptDeliveries.claudeHookRow(record, row) && !this.claudeClaimed(record, row, record));
     if (!row) return;
     this.claim(record, row, true, true); delete record.awaitingRow;
     this.save();
@@ -915,8 +913,10 @@ export function matchingOffsets(buffer: Buffer, start: number, record: { hash: s
     const stamp = Date.parse(String(row.timestamp ?? ""));
     if (Number.isFinite(stamp) && stamp < record.at - 5_000) continue;
     // One entry per row, even when its content repeats the words.
-    if (userTexts(row).some(text => promptHash(text) === record.hash)) (item ? items : entries).push({ offset, hook: row.type === "user", ...(Number.isFinite(stamp) ? { at: stamp } : {}),
-      ...(typeof row.uuid === "string" && row.uuid && row.uuid.length <= 100 ? { uuid: row.uuid } : {}) });
+    if (!userTexts(row).some(text => promptHash(text) === record.hash)) continue;
+    const promptEntryId = claudePromptIdentity(row, row);
+    (item ? items : entries).push({ offset, hook: row.type === "user", ...(Number.isFinite(stamp) ? { at: stamp } : {}),
+      ...(typeof row.uuid === "string" && row.uuid && row.uuid.length <= 100 ? { uuid: row.uuid } : {}), ...(promptEntryId ? { promptEntryId } : {}) });
   }
   if (!events) return [...entries, ...items].sort((a, b) => b.offset - a.offset);
   // The event is the turn, but the conversation stream shows the user item Codex wrote just before it (the event is

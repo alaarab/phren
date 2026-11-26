@@ -737,6 +737,45 @@ describe("a message that will never settle", () => {
 });
 
 describe("identical Claude messages and their rows", () => {
+  it("keeps a second send queued when a delayed hook names the row already settled by observation", async () => {
+    const first = { type: "user", uuid: "row-first", promptId: "submit-first", message: { content: "yes" } };
+    const transcript = (rows: Json[]) => Buffer.from(rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+    let contents = transcript([]);
+    const store = new PromptDeliveries(file, () => clock, async record => matchingOffsets(contents, 0, record));
+    stores.push(store);
+    await send(store, "observed-01", "yes", claudeTarget);
+    await send(store, "observed-02", "yes", claudeTarget);
+    contents = transcript([first]);
+    await store.observe("default", [claudePane("working")]);
+    clock += 3_000; await store.observe("default", [claudePane("working")]);
+    const states = () => store.forPane(claudeTarget).map(item => item.state);
+    expect(states()).toEqual(["delivered", "queued"]);
+
+    // A transcript rewrite moves the same user row without changing its native prompt id.
+    contents = transcript([{ type: "system", content: "Resumed" }, first]);
+    await store.submitted(claudeTarget, "yes", "claude:prompt:submit-first");
+    expect(states()).toEqual(["delivered", "queued"]);
+
+    await store.submitted(claudeTarget, "yes", "claude:prompt:submit-second");
+    expect(states()).toEqual(["delivered", "delivered"]);
+  });
+
+  it("settles two identical sends on distinct hooks and ignores a replay before either row is written", async () => {
+    let store = deliveries();
+    await send(store, "submitted-01", "yes", claudeTarget);
+    await send(store, "submitted-02", "yes", claudeTarget);
+    const states = () => store.forPane(claudeTarget).map(item => item.state);
+    const submit = (id: string) => store.submitted(claudeTarget, "yes", `claude:prompt:${id}`);
+    await submit("first");
+    expect(states()).toEqual(["delivered", "queued"]);
+    await store.flush();
+    store = deliveries();
+    await submit("first");
+    expect(states()).toEqual(["delivered", "queued"]);
+    await submit("second");
+    expect(states()).toEqual(["delivered", "delivered"]);
+  });
+
   it("gives a message its hook settled the row written after it, not a later identical message that was dropped", async () => {
     // A "yes" settled by its hook at t, its row written after the hooks; a second "yes" typed 6 s later and dropped (Esc).
     let rows: { offset: number; hook: boolean; at?: number }[] = [];

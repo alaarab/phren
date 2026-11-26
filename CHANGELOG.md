@@ -17,6 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- When two identical phone messages are queued in Claude Code, a delayed hook no longer marks the second delivered after the transcript has already confirmed the first.
 - The prompt hook now uses an archived finding's creation date or, when it has none, the date of its archive section. Old bug notes expire after 30 days, and a recently written finding whose cited code changed can still reach the prompt. Untagged findings in topic archives last up to 365 days.
 
 ### Fixed

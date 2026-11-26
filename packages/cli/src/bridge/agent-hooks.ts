@@ -190,7 +190,7 @@ export class AgentHooks {
         await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ ...binding, status, event: status === "working" ? "UserPromptSubmit" : "Stop" }));
       }
       notePaneStatus(target.server, target.pane, String(pane.terminal_id), status);
-      if (typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
+      if (typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536), normalizedPromptEntryId(body.promptEntryId));
       if (status === "working") { this.settleTerminalAnswered(target, body); this.stopCompacting(target); }
       if (dispatch) await recordBriefArrival(dispatch, "UserPromptSubmit", target).catch(() => undefined);
     } catch { /* Retry transient discovery and I/O failures within the bounded window. */ }
@@ -1591,7 +1591,7 @@ export class AgentHooks {
         if (!automaticPrompt && !backgroundStop && ["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
           // A notification callback never settles an unrelated phone delivery.
-          if (!automaticPrompt && typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
+          if (!automaticPrompt && typeof body.prompt === "string") await this.deliveries.submitted(target, body.prompt.slice(0, 65_536), normalizedPromptEntryId(body.promptEntryId));
           const recorded = await this.recordTurn(target, pane, body, dispatch, classifiedInput);
           if (unresolvedPrevious !== undefined && recorded) this.deferSubmission(target, pane, body, recorded, unresolvedPrevious, pids);
           if (automaticPrompt) { res.end("{}"); return; }
