@@ -101,6 +101,7 @@ describe("task work sweep", () => {
       "- [ ] Merge me <!-- bid:a1a1a1a1 -->",
       "- [ ] Named by branch <!-- bid:b2b2b2b2 -->",
       "- [ ] Named only by a PR closed unmerged <!-- bid:a7a7a7a7 -->",
+      "- [ ] Only mentioned by a merged PR <!-- bid:9a9a9a9a -->",
       "- [ ] Closed unmerged <!-- bid:c3c3c3c3 -->", work({ pr: pr(103) }),
       "- [ ] Issue fixed <!-- bid:d4d4d4d4 -->", "  GitHub: #104 https://github.com/me/app/issues/104",
       "- [ ] Reopened by the owner <!-- bid:e5e5e5e5 -->", work({ pr: pr(105), autoClosed: { at: "2026-11-24T10:00:00.000Z", reason: "PR #105 merged" } }),
@@ -111,6 +112,7 @@ describe("task work sweep", () => {
       { number: 102, url: pr(102).url, state: "open", head: "feat/b2b2b2b2-branch", body: "" },
       { number: 107, url: pr(107).url, state: "open", head: "misc", body: "Mentions bid:99999999 and f6f6f6f6." },
       { number: 108, url: pr(108).url, state: "closed", head: "try/a7a7a7a7", body: "Fixes bid:a7a7a7a7" },
+      { number: 109, url: pr(109).url, state: "merged", head: "fix/half", body: "Hook half of Phren task bid:9a9a9a9a." },
     ];
     items.set("pull:101", { state: "merged", mergedAt: "2026-11-25T10:00:00Z" });
     items.set("pull:102", { state: "open", checks: "failing", mergeable: "clean" });
@@ -124,6 +126,7 @@ describe("task work sweep", () => {
     expect(item("a1a1a1a1").history?.at(-1)?.change).toBe(`completed: PR #101 merged (${pr(101).url})`);
     expect(item("b2b2b2b2")).toMatchObject({ section: "Active", work: { pr: pr(102), branch: "feat/b2b2b2b2-branch" } });
     expect(item("a7a7a7a7").work).toBeUndefined();
+    expect(item("9a9a9a9a")).toMatchObject({ section: "Active", work: undefined });
     expect(item("c3c3c3c3").section).toBe("Active");
     expect(item("d4d4d4d4")).toMatchObject({ section: "Done", githubIssue: 104 });
     expect(item("d4d4d4d4").history?.at(-1)?.change).toBe("completed: issue #104 closed (https://github.com/me/app/issues/104)");

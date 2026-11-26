@@ -121,7 +121,8 @@ export class TaskWorkSweeper {
       try { pulls = await provider.recent(root, host); } catch { result.errors++; continue; }
       // One closed without merging is no task's work; linking it would hold the slot.
       for (const pull of pulls.filter(row => row.state !== "closed")) {
-        const ids = bidReferences(pull.body), branchIds = branchTaskIds(pull.head);
+        // A body links only the tasks it closes: a mention ("the Hook half of bid:…") is not the task's work.
+        const ids = bidReferences(pull.body).closes, branchIds = branchTaskIds(pull.head);
         const matches = open.filter(task => ids.includes(task.identity.stableId)
           || (task.project === project && (branchIds.includes(task.identity.stableId) || (!!pull.head && task.item.work?.branch === pull.head && !task.item.work?.pr))));
         for (const task of matches) if (this.linkPull(task, host.kind, pull)) result.linked++;

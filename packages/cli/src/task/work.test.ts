@@ -97,7 +97,8 @@ describe("work references", () => {
   ("refuses %s", url => expect(parseForgeUrl(url)).toBeUndefined());
 
   it("reads bid references as gitboy does, branch ids as whole segments, and brief titles exactly", () => {
-    expect(bidReferences("Closes bid:c2cc33d0. See bid:aaaaaaaa, not xbid:bbbbbbbb, bid:cccccccc9, bid:dddddddd-x or /bid:eeeeeeee")).toEqual(["c2cc33d0", "aaaaaaaa"]);
+    expect(bidReferences("Closes bid:c2cc33d0. See bid:aaaaaaaa, not xbid:bbbbbbbb, bid:cccccccc9, bid:dddddddd-x or /bid:eeeeeeee")).toEqual({ closes: ["c2cc33d0"], mentions: ["aaaaaaaa"] });
+    expect(bidReferences("Fixes bid:aaaaaaaa, bid:bbbbbbbb and bid:cccccccc. Hook half of Phren task bid:dddddddd.")).toEqual({ closes: ["aaaaaaaa", "bbbbbbbb", "cccccccc"], mentions: ["dddddddd"] });
     expect(branchTaskIds("feat/c2cc33d0-work-links")).toEqual(["c2cc33d0"]);
     expect(branchTaskIds("agent/links-c2cc33d0")).toEqual(["c2cc33d0"]);
     expect(branchTaskIds("feat/c2cc33d0ff")).toEqual([]);

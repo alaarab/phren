@@ -67,12 +67,24 @@ export function parseForgeUrl(value: string): ForgeUrl | undefined {
 
 // ---------------------------------------------------------------- task references
 
-/** gitboy's own rule (packages/shared phren-task-refs): `bid:` and eight
+/** gitboy's own rule (packages/shared phren-task-refs.ts): `bid:` and eight
  * lowercase hex digits standing alone, so gitboy and Phren read a pull
- * request or brief the same way. */
+ * request or brief the same way. A closing keyword right before it (closes,
+ * fixes, resolves; or a list after one: "fixes bid:a, bid:b and bid:c")
+ * closes the task; anything else only mentions it ("the Hook half of bid:a"). */
 const BID_REFERENCE = /(?<![\w:/.@=?&#-])bid:([0-9a-f]{8})(?![\w-]|[.:/@]\w)/g;
-export function bidReferences(text: string): string[] {
-  return [...new Set([...(text ?? "").matchAll(BID_REFERENCE)].map(match => match[1]))];
+const CLOSING = /(?<![\w-])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?[ \t]{1,4}$/i;
+const LIST = /^[ \t]*(?:,|&|and|,[ \t]*and)[ \t]*$/i;
+export function bidReferences(text: string): { closes: string[]; mentions: string[] } {
+  const closes = new Set<string>(), mentions = new Set<string>();
+  let previousEnd = -1, previousClosing = false;
+  for (const match of (text ?? "").matchAll(BID_REFERENCE)) {
+    const closing: boolean = CLOSING.test(text.slice(Math.max(0, match.index - 20), match.index)) || (previousClosing && LIST.test(text.slice(previousEnd, match.index)));
+    (closing ? closes : mentions).add(match[1]);
+    previousEnd = match.index + match[0].length;
+    previousClosing = closing;
+  }
+  return { closes: [...closes], mentions: [...mentions].filter(id => !closes.has(id)) };
 }
 /** Stable ids a branch names as a whole segment: `task/c2cc33d0`,
  * `feat/c2cc33d0-work-links`, `agent/work-links-c2cc33d0`. */
@@ -84,7 +96,8 @@ export interface BriefReferences { ids: string[]; bareIds: string[]; texts: stri
 /** What a worker brief says about its task: `bid:` ids, bare stable ids and
  * quoted text (`Phren task (project phren): "Fix the sync race"`). */
 export function briefReferences(prompt: string): BriefReferences {
-  const ids = bidReferences(prompt);
+  const { closes, mentions } = bidReferences(prompt);
+  const ids = [...closes, ...mentions];
   const bareIds = [...new Set([...prompt.matchAll(/(?<![\w:/.@=?&#-])([0-9a-f]{8})(?![\w-])/g)].map(match => match[1]))].filter(id => !ids.includes(id));
   const texts = [...new Set([...prompt.matchAll(/["“]([^"\n“”]{6,400})["”]/g)].map(match => match[1].trim()))];
   return { ids, bareIds, texts };

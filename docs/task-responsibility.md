@@ -162,9 +162,12 @@ Links fill themselves:
   request, with its branch;
 - every five minutes the Hook lists the newest pull requests of each project
   checked out on that computer (through `gh` or gitboy's API) and links one to an
-  open task when its body says `bid:<id>` (gitboy's reference rule), its branch
-  names the stable id as a whole segment (`feat/c2cc33d0-sync`), or its branch is
-  the task's recorded branch. The first pull request linked stays linked.
+  open task when its body closes it (`Closes bid:<id>`, `Fixes …`, `Resolves …`,
+  or a list after one, as gitboy reads references), its branch names the stable
+  id as a whole segment (`feat/c2cc33d0-sync`), or its branch is the task's
+  recorded branch. A body that only mentions a task (`the Hook half of
+  bid:<id>`) links nothing, and a pull request closed without merging is never
+  linked. The first pull request linked stays linked.
 
 The same sweep closes a task once: a merged linked pull request, or a closed
 linked issue, moves the open task to Done, with `completed: PR #877 merged (<url>)`
