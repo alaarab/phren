@@ -498,7 +498,7 @@ describe("approve and reject are no longer the same operation", () => {
 describe("appendReviewQueue metadata", () => {
   it("appends comment metadata to the queue line and keeps it out of the display text", () => {
     const meta = buildQueueProvenanceMeta({ source: "extract", repo: "/repos/api", commit: "abc1234" });
-    const added = appendReviewQueue(tmpDir, PROJECT, "Review", [{ text: "Some candidate insight", meta }]);
+    const added = appendReviewQueue(tmpDir, PROJECT, "Review", [{ text: "Some candidate insight", meta }], { origin: "explicit" });
     expect(added.ok && added.data).toBe(1);
 
     expect(readQueueFile()).toContain(`"commit":"abc1234"`);
@@ -510,16 +510,16 @@ describe("appendReviewQueue metadata", () => {
   it("drops metadata that is not comments-only", () => {
     const added = appendReviewQueue(tmpDir, PROJECT, "Review", [
       { text: "Some candidate insight", meta: `<script>alert(1)</script>` },
-    ]);
+    ], { origin: "explicit" });
     expect(added.ok && added.data).toBe(1);
     expect(readQueueFile()).not.toContain("<script>");
   });
 
   it("dedups against the same text queued without metadata", () => {
-    expect(appendReviewQueue(tmpDir, PROJECT, "Review", ["Some candidate insight"]).ok).toBe(true);
+    expect(appendReviewQueue(tmpDir, PROJECT, "Review", ["Some candidate insight"], { origin: "explicit" }).ok).toBe(true);
     const again = appendReviewQueue(tmpDir, PROJECT, "Review", [
       { text: "Some candidate insight", meta: buildQueueProvenanceMeta({ source: "extract", commit: "abc1234" }) },
-    ]);
+    ], { origin: "explicit" });
     expect(again.ok && again.data).toBe(0);
 
     const queue = readReviewQueue(tmpDir, PROJECT);
@@ -528,7 +528,7 @@ describe("appendReviewQueue metadata", () => {
   });
 
   it("still accepts plain string entries", () => {
-    const added = appendReviewQueue(tmpDir, PROJECT, "Stale", ["- An older finding", "Another one"]);
+    const added = appendReviewQueue(tmpDir, PROJECT, "Stale", ["- An older finding", "Another one"], { origin: "explicit" });
     expect(added.ok && added.data).toBe(2);
     const queue = readReviewQueue(tmpDir, PROJECT);
     if (!queue.ok) return;

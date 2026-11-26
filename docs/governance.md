@@ -113,7 +113,7 @@ teammates, not a security boundary against a local user.
 - **Extraction.** Candidates mined from git history that score below `autoAcceptThreshold` (default 0.75, `PHREN_MEMORY_AUTO_ACCEPT`) are queued **instead of** being written to `FINDINGS.md`. The queue line is the only copy.
 - **Governance.** `phren maintain govern` and TTL enforcement queue findings that already live in `FINDINGS.md` under `## Stale` and `## Conflicts`, asking you to confirm they are still true.
 
-The tool hook's finding candidates and a dream's proposals land there too. All of these are machine-generated, and none is queued while the project's queue is over its review budget (see [Budgets](#budgets)).
+The tool hook's finding candidates, the coding agent's compaction and a dream's proposals land there too. All of these are machine-generated, and none is queued while the project's queue is over its review budget (see [Budgets](#budgets)).
 
 So a queue line can point at three different realities, and the verbs behave accordingly.
 
@@ -164,18 +164,18 @@ Configure via `phren config policy`.
 
 ### Budgets
 
-Budgets bound what phren adds on its own. Nothing a person or agent wrote is ever removed for one, and every budget can be set to 0 to turn it off. They live in the retention policy (`budgets` in `.config/retention-policy.json`), and the two per-project ones can be overridden per project:
+Budgets bound what phren adds on its own. Nothing a person or agent wrote is ever removed for one, and an explicit 0 turns a budget off. They live in the retention policy (`budgets` in `.config/retention-policy.json`), and the two per-project ones can be overridden per project. `phren config policy set` and `set_config` refuse a value that is not a number of 0 or more (whole for tasks, entries and days, at least 7 days for age-out, true or false for `runtimeAgeOut`) and change nothing; a value in the file that is not a number keeps the default.
 
 | Budget | Default | Past it |
 |---|---|---|
 | `openTasks` (per project) | 150 | The prompt hook files no new task for the project, and its trace line ends `tasks=paused open <n>/<budget>`. A prompt that asks for a task ("add this to the task list"), `add_task`, `phren tasks add` and the apps still add tasks, and a prompt that matches an Active task still moves it. |
-| `reviewEntries` (per project) | 150 | Governance (stale, broken-citation and low-value findings), TTL review, extraction, the tool hook and dreams queue nothing more in the project's `review.md`. An entry a person or agent queues still goes in. |
+| `reviewEntries` (per project) | 150 | Governance (stale, broken-citation and low-value findings), TTL review, extraction, the tool hook, the coding agent's compaction and dreams queue nothing more in the project's `review.md`. An entry a person or agent queues still goes in. Nothing is lost: extraction leaves a held-back candidate unprocessed so a later run queues it, a dream records the addition as `deferred`, and TTL review says how many it held back. |
 | `runtimeMB` | 1024 | Reported only: this computer's `.runtime` folder is flagged. |
-| `fanoutArchiveMB` | 512 | The fan-out archive sweep deletes the oldest finished folders until the archive fits, beside its 500-folder cap. |
+| `fanoutArchiveMB` | 512 | Reported only until runtime age-out is on and past its week; then the fan-out archive sweep deletes the oldest finished folders until the archive fits, beside its 500-folder cap. |
 
 Daily store health (`.runtime/store-health.jsonl`) lists each component over its budget with its count, budget and what that stops, groups `.runtime` bytes by class (code indexes, fanout archive, live fanouts, sessions, packages, logs, other), and counts the prompts in the last 24 hours that filed no task for budget. `phren doctor` shows the latest line's over-budget components as a warning that never fails the check.
 
-**Runtime age-out** (`runtimeAgeOut`, off by default) removes regenerable `.runtime` files: a code index whose project has no checkout on this computer, or no project of that name in any store, once it has not been rebuilt for `runtimeAgeOutDays` (30), and a fan-out archive folder that finished that long ago. Running workers, sessions, logs, caches, the store's markdown and `.git` are never touched. Turned on, it still waits until the health log is a week old, and the health line says each day what it removed or, until then, would remove.
+**Runtime age-out** (`runtimeAgeOut`, off by default) removes a code index whose recorded checkout (the `repo_root` the indexer wrote) no longer exists on this computer or is no longer a git checkout, once it has not been rebuilt for `runtimeAgeOutDays` (30, at least 7), and a fan-out archive folder that finished that long ago; it also turns on the archive's byte ceiling. An index it cannot read, a locked one and symlinks are kept, and running workers, sessions, logs, caches, the store's markdown and `.git` are never touched. A removed index comes back only when `phren code index` runs on a checkout. Turned on, it waits a week from the day this computer first sees it on (kept in the machine-local `.runtime/runtime-age-out.json`; turning it off forgets that) and for seven daily store health lines, and the health line says each day what it removed or would remove.
 
 ### The phren shell: human review before agent consumption
 

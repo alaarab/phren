@@ -19,7 +19,8 @@ const MAX_JOBS = 128;
 const ARCHIVE_AGE_MS = 24 * 60 * 60 * 1000;
 /** How many folders the archive keeps; the oldest beyond that are deleted. */
 export const ARCHIVE_MAX_FOLDERS = 500;
-/** How many bytes the archive keeps by default (retention policy `budgets.fanoutArchiveMB`); past it the oldest finished folders are deleted. */
+/** The archive's byte ceiling unless the retention policy sets `budgets.fanoutArchiveMB`. It is only reported until runtime
+ * age-out is on and past its week; then the oldest finished folders past it are deleted. */
 export const ARCHIVE_MAX_BYTES = 512 * 1024 * 1024;
 const ARCHIVED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const WORKTREE_CACHE_MS = 15_000;
@@ -409,12 +410,13 @@ async function folderBytes(target: string): Promise<number> {
   return total;
 }
 
-/** The byte ceiling from the store's retention policy, read only when the caller gave none. */
+/** The byte ceiling the sweep enforces when the caller gave none: 0 (none) unless runtime age-out is on and past its week. */
 async function archiveMaxBytes(env: NodeJS.ProcessEnv): Promise<number> {
   try {
-    const { getRetentionPolicy } = await import("../governance/policy.js");
-    return Math.round(getRetentionPolicy(storeRoot(env)).budgets.fanoutArchiveMB * 1024 * 1024);
-  } catch { return ARCHIVE_MAX_BYTES; }
+    const { getRetentionPolicy, runtimeAgeOutActive } = await import("../governance/policy.js");
+    const store = storeRoot(env);
+    return runtimeAgeOutActive(store) ? Math.round(getRetentionPolicy(store).budgets.fanoutArchiveMB * 1024 * 1024) : 0;
+  } catch { return 0; }
 }
 
 /** Move finished fan-out job folders into the archive.
@@ -425,9 +427,10 @@ async function archiveMaxBytes(env: NodeJS.ProcessEnv): Promise<number> {
  * ARCHIVE_AGE_MS old. A folder with no manifest goes too once its exit.txt is
  * that old, gaining a synthesized {status: failed, reason: "no manifest"}
  * manifest in the archive. The archive keeps ARCHIVE_MAX_FOLDERS folders,
- * deleting the oldest beyond that, and then deletes the oldest finished
- * folders until it is under `maxBytes` (the store's `budgets.fanoutArchiveMB`,
- * 512 MB unless set; 0 is no ceiling). `dryRun` reports the same work without
+ * deleting the oldest beyond that. Once runtime age-out is on and past its
+ * week (or when the caller passes `maxBytes`), it then deletes the oldest
+ * finished folders until the archive is under the store's
+ * `budgets.fanoutArchiveMB` (512 MB unless set; 0 is no ceiling). `dryRun` reports the same work without
  * touching anything. `olderThanMs` replaces the 24 hour age (0 archives every
  * finished job), and `parent` limits the sweep to one parent session's jobs;
  * a folder without a manifest has no parent and is left alone then. */

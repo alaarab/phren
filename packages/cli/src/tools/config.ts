@@ -9,6 +9,7 @@ import {
   getRetentionPolicy,
   updateRetentionPolicy,
   type RetentionPolicyPatch,
+  budgetsPatchError,
   getWorkflowPolicy,
   updateWorkflowPolicy,
   getIndexPolicy,
@@ -428,6 +429,9 @@ async function handleSetConfig(
     case "retention": {
       const { ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay, budgets } =
         settings as RetentionPolicyPatch;
+      // A budget that is not a valid value is refused and nothing is written.
+      const refusedBudget = budgets !== undefined ? budgetsPatchError(budgets, project ? "project" : "global") : null;
+      if (refusedBudget) return mcpResponse({ ok: false, error: refusedBudget });
 
       if (project) {
         const err = validateProject(project);
@@ -442,14 +446,8 @@ async function handleSetConfig(
           if (autoAcceptThreshold !== undefined) retentionPatch.autoAcceptThreshold = autoAcceptThreshold;
           if (minInjectConfidence !== undefined) retentionPatch.minInjectConfidence = minInjectConfidence;
           if (decay !== undefined) retentionPatch.decay = { ...(existingRetention.decay ?? {}), ...decay };
-          // A project sets its own task and review budgets; the runtime ones are this computer's.
-          if (budgets !== undefined) {
-            retentionPatch.budgets = {
-              ...(existingRetention.budgets ?? {}),
-              ...(budgets.openTasks !== undefined ? { openTasks: budgets.openTasks } : {}),
-              ...(budgets.reviewEntries !== undefined ? { reviewEntries: budgets.reviewEntries } : {}),
-            };
-          }
+          // A project sets only its own task and review budgets (checked above).
+          if (budgets !== undefined) retentionPatch.budgets = { ...(existingRetention.budgets ?? {}), ...budgets };
           return { ...current, retentionPolicy: retentionPatch };
         });
         return mcpResponse({

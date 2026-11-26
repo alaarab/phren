@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initTestPhrenRoot, writeFile } from "../test-helpers.js";
 import { budgetDoctorCheck, collectStoreHealth, recordStoreHealth } from "./store-health.js";
@@ -205,7 +206,8 @@ describe("budgets in the health line", () => {
     put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 2, reviewEntries: 2, runtimeMB: 1, fanoutArchiveMB: 0 } }));
     put(primary, "proj/tasks.md", "# Tasks\n## Active\n- One\n## Queue\n- Two\n- Three\n## Done\n- Old\n");
     put(primary, "proj/review.md", "# Review\n## Review\n- A\n- B\n## Stale\n- C\n");
-    put(primary, "calm/tasks.md", "# Tasks\n## Queue\n- Only one\n");
+    // Past the 150 default, so only an explicit 0 keeps it off the list.
+    put(primary, "calm/tasks.md", `# Tasks\n## Queue\n${Array.from({ length: 160 }, (_, i) => `- Item ${i}`).join("\n")}\n`);
     put(primary, "calm/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 0\n");
     put(primary, "busy/tasks.md", "# Tasks\n## Queue\n- One\n- Two\n- Three\n");
     put(primary, "busy/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 5\n");
@@ -226,11 +228,17 @@ describe("budgets in the health line", () => {
     ]);
   });
 
-  it("flags the fanout archive past its ceiling", () => {
+  it("flags the fanout archive past its ceiling, pruned only once runtime age-out is on and past its week", () => {
     put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { fanoutArchiveMB: 0.0001 } }));
     put(primary, ".runtime/agent-fanouts-archive/job-1/events.jsonl", "y".repeat(200));
+    const row = { component: "fanoutArchiveBytes", value: 200, budget: 105 };
     expect(collectStoreHealth(primary, now, "test-computer").budgets.over).toEqual([
-      { component: "fanoutArchiveBytes", value: 200, budget: 105, effect: "the next archive sweep deletes the oldest finished folders" },
+      { ...row, effect: "reported only until runtime age-out is on" },
+    ]);
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { fanoutArchiveMB: 0.0001, runtimeAgeOut: true } }));
+    put(primary, ".runtime/runtime-age-out.json", JSON.stringify({ enabledSince: "2026-11-01T00:00:00.000Z", ready: true }));
+    expect(collectStoreHealth(primary, now, "test-computer").budgets.over).toEqual([
+      { ...row, effect: "the archive sweep deletes the oldest finished folders" },
     ]);
   });
 
@@ -251,42 +259,122 @@ describe("budgets in the health line", () => {
 
 describe("runtime age-out", () => {
   const day = 86_400_000;
-  const stamp = (file: string, at: Date) => fs.utimesSync(path.join(primary, file), at, at);
   const exists = (file: string) => fs.existsSync(path.join(primary, file));
-  const lastLine = () => recordedLines().at(-1) as Record<string, unknown>;
+  const lastLine = () => JSON.parse(fs.readFileSync(path.join(primary, ".runtime/store-health.jsonl"), "utf8").trim().split("\n").at(-1)!) as Record<string, unknown>;
+  const old = new Date(now.getTime() - 40 * day);
+  const enable = () => put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { runtimeAgeOut: true } }));
+  // A week of earlier daily report lines and an opt-in this computer saw `since` days ago.
+  const pastWeek = (since: number, lines = 7) => {
+    put(primary, ".runtime/store-health.jsonl", Array.from({ length: lines }, (_, i) =>
+      JSON.stringify({ at: new Date(now.getTime() - (lines - i) * day).toISOString(), runtimeClasses: {} })).join("\n") + "\n");
+    put(primary, ".runtime/runtime-age-out.json", JSON.stringify({ enabledSince: new Date(now.getTime() - since * day).toISOString(), ready: false }));
+  };
+  // A code index as the indexer leaves it: a sqlite file whose meta table records the checkout it was built from.
+  const codeIndex = (name: string, repoRoot: string | null, at = old, file = path.join(primary, ".runtime/code", `${name}.sqlite`)) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const db = new DatabaseSync(file);
+    db.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    if (repoRoot) db.prepare("INSERT INTO meta (key, value) VALUES ('repo_root', ?)").run(repoRoot);
+    db.close();
+    fs.utimesSync(file, at, at);
+    return fs.statSync(file).size;
+  };
+  const checkout = (dir: string, gitFile = false) => {
+    fs.mkdirSync(dir, { recursive: true });
+    if (gitFile) fs.writeFileSync(path.join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/x\n");
+    else fs.mkdirSync(path.join(dir, ".git"));
+    return dir;
+  };
+  const archived = (name: string, manifest: Record<string, unknown>) => put(primary, `.runtime/agent-fanouts-archive/${name}/manifest.json`, JSON.stringify(manifest));
 
-  it("reports what it would remove while off, waits a week of health lines once on, then removes only regenerable files", () => {
-    vi.stubEnv("PROJECTS_DIR", path.join(scratch, "Projects"));
-    fs.mkdirSync(path.join(scratch, "Projects", "fixture-here", ".git"), { recursive: true });
-    put(primary, "fixture-here/FINDINGS.md", "- Here\n");
-    put(primary, "fixture-gone/FINDINGS.md", "- Gone\n");
-    const old = new Date(now.getTime() - 40 * day);
-    for (const name of ["fixture-here", "fixture-gone", "fixture-unknown", "fixture-fresh"]) put(primary, `.runtime/code/${name}.sqlite`, "x".repeat(100));
-    for (const name of ["fixture-here", "fixture-gone", "fixture-unknown"]) stamp(`.runtime/code/${name}.sqlite`, old);
-    stamp(".runtime/code/fixture-fresh.sqlite", new Date(now.getTime() - day));
-    const archived = (name: string, manifest: Record<string, unknown>) => put(primary, `.runtime/agent-fanouts-archive/${name}/manifest.json`, JSON.stringify(manifest));
+  it("removes a code index only when the checkout it recorded is gone, and nothing it cannot read or does not own", () => {
+    put(primary, "forked/FINDINGS.md", "- Forked\n");
+    put(primary, "forked/phren.project.yaml", "remote: github.com/acme/upstream\n");
+    // A store project whose clone's origin is a fork, at a path no checkout search would find.
+    const forkBytes = codeIndex("forked", checkout(path.join(scratch, "odd", "place", "fork-clone")));
+    // A project no store has, indexed from its own folder (a git worktree has a .git file).
+    codeIndex("outside-store", checkout(path.join(scratch, "elsewhere", "worktree"), true));
+    const goneBytes = codeIndex("gone", path.join(scratch, "deleted-checkout"));
+    fs.mkdirSync(path.join(scratch, "not-git"));
+    const notGitBytes = codeIndex("not-git", path.join(scratch, "not-git"));
+    codeIndex("no-meta", null);
+    put(primary, ".runtime/code/corrupt.sqlite", "not a database");
+    fs.utimesSync(path.join(primary, ".runtime/code/corrupt.sqlite"), old, old);
+    codeIndex("locked", path.join(scratch, "deleted-checkout"));
+    put(primary, ".runtime/code/locked.sqlite.lock", "123");
+    codeIndex("fresh", path.join(scratch, "deleted-checkout"), new Date(now.getTime() - day));
+    const outsideIndex = path.join(scratch, "outside", "linked.sqlite");
+    codeIndex("linked", path.join(scratch, "deleted-checkout"), old, outsideIndex);
+    fs.symlinkSync(outsideIndex, path.join(primary, ".runtime/code/linked.sqlite"), "file");
     archived("job-old", { status: "completed", finishedAt: old.toISOString() });
     archived("job-new", { status: "failed", finishedAt: now.toISOString() });
     archived("job-unfinished", { status: "running", finishedAt: old.toISOString() });
-    const oldManifestBytes = fs.statSync(path.join(primary, ".runtime/agent-fanouts-archive/job-old/manifest.json")).size;
-    const candidates = { codeIndexes: { count: 2, bytes: 200 }, fanoutArchive: { count: 1, bytes: oldManifestBytes } };
+    fs.mkdirSync(path.join(scratch, "outside", "job-link"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "outside", "job-link", "manifest.json"), JSON.stringify({ status: "completed", finishedAt: old.toISOString() }));
+    fs.symlinkSync(path.join(scratch, "outside", "job-link"), path.join(primary, ".runtime/agent-fanouts-archive/job-link"), "dir");
+    const jobBytes = fs.statSync(path.join(primary, ".runtime/agent-fanouts-archive/job-old/manifest.json")).size;
+    enable();
+    pastWeek(8);
 
     expect(recordStoreHealth(primary, now, "test-computer")).toBe(true);
-    expect(lastLine().runtimeAgeOut).toEqual({ enabled: false, days: 30, reportDays: 0, acted: false, candidates });
+    expect(lastLine().runtimeAgeOut).toEqual({
+      enabled: true, days: 30, enabledDays: 8, reportLines: 7, acted: true,
+      candidates: { codeIndexes: { count: 2, bytes: goneBytes + notGitBytes }, fanoutArchive: { count: 1, bytes: jobBytes } },
+    });
+    for (const removed of [".runtime/code/gone.sqlite", ".runtime/code/not-git.sqlite", ".runtime/agent-fanouts-archive/job-old"]) expect(exists(removed)).toBe(false);
+    for (const kept of ["forked", "outside-store", "no-meta", "corrupt", "locked", "fresh", "linked"]) expect(exists(`.runtime/code/${kept}.sqlite`)).toBe(true);
+    for (const kept of ["job-new", "job-unfinished", "job-link"]) expect(exists(`.runtime/agent-fanouts-archive/${kept}`)).toBe(true);
+    expect(fs.existsSync(outsideIndex)).toBe(true);
+    expect(fs.existsSync(path.join(scratch, "outside", "job-link", "manifest.json"))).toBe(true);
+    expect(exists("forked/FINDINGS.md")).toBe(true);
+    expect(forkBytes).toBeGreaterThan(0);
+  });
 
-    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { runtimeAgeOut: true } }));
-    expect(recordStoreHealth(primary, new Date(now.getTime() + 2 * day), "test-computer")).toBe(true);
-    expect(lastLine().runtimeAgeOut).toEqual({ enabled: true, days: 30, reportDays: 2, acted: false, candidates });
-    expect(exists(".runtime/code/fixture-gone.sqlite")).toBe(true);
+  it("reports while off and counts the week from when this computer first saw it on", () => {
+    const bytes = codeIndex("gone", path.join(scratch, "deleted-checkout"));
+    const candidates = { codeIndexes: { count: 1, bytes }, fanoutArchive: { count: 0, bytes: 0 } };
+    pastWeek(0, 10);
+    fs.rmSync(path.join(primary, ".runtime/runtime-age-out.json"));
+    expect(recordStoreHealth(primary, now, "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toEqual({ enabled: false, days: 30, enabledDays: null, reportLines: 10, acted: false, candidates });
+    expect(exists(".runtime/runtime-age-out.json")).toBe(false);
 
+    // Ten earlier report lines do not skip the week: it starts when this computer first sees age-out on.
+    enable();
+    expect(recordStoreHealth(primary, new Date(now.getTime() + day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabled: true, enabledDays: 0, acted: false });
     expect(recordStoreHealth(primary, new Date(now.getTime() + 7 * day), "test-computer")).toBe(true);
-    expect(lastLine().runtimeAgeOut).toEqual({ enabled: true, days: 30, reportDays: 7, acted: true, candidates });
-    expect((lastLine().runtimeClasses as Record<string, number>).codeIndexes).toBe(200);
-    expect(exists(".runtime/code/fixture-gone.sqlite")).toBe(false);
-    expect(exists(".runtime/code/fixture-unknown.sqlite")).toBe(false);
-    expect(exists(".runtime/agent-fanouts-archive/job-old")).toBe(false);
-    for (const kept of [".runtime/code/fixture-here.sqlite", ".runtime/code/fixture-fresh.sqlite", ".runtime/agent-fanouts-archive/job-new",
-      ".runtime/agent-fanouts-archive/job-unfinished", "fixture-gone/FINDINGS.md", "fixture-here/FINDINGS.md"]) expect(exists(kept)).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 6, acted: false });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(true);
+    expect(recordStoreHealth(primary, new Date(now.getTime() + 8 * day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 7, acted: true });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(false);
+
+    // Turning it off forgets the opt-in, so turning it on again waits another week.
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { runtimeAgeOut: false } }));
+    recordStoreHealth(primary, new Date(now.getTime() + 9 * day), "test-computer");
+    expect(exists(".runtime/runtime-age-out.json")).toBe(false);
+  });
+
+  it("needs seven readable daily lines, skipping torn lines and dates it cannot read", () => {
+    codeIndex("gone", path.join(scratch, "deleted-checkout"));
+    enable();
+    put(primary, ".runtime/runtime-age-out.json", JSON.stringify({ enabledSince: new Date(now.getTime() - 30 * day).toISOString(), ready: false }));
+    put(primary, ".runtime/store-health.jsonl", [
+      ...Array.from({ length: 3 }, (_, i) => JSON.stringify({ at: new Date(now.getTime() - (i + 1) * day).toISOString(), runtimeClasses: {} })),
+      ...Array.from({ length: 4 }, () => JSON.stringify({ at: "not a date", runtimeClasses: {} })),
+      JSON.stringify({ at: new Date(now.getTime() - 5 * day).toISOString() }),
+      '{"at":',
+    ].join("\n") + "\n");
+    expect(recordStoreHealth(primary, now, "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 30, reportLines: 3, acted: false });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(true);
+
+    fs.rmSync(path.join(primary, ".runtime/store-health.jsonl"));
+    fs.writeFileSync(path.join(primary, ".runtime/runtime-age-out.json"), "{torn");
+    expect(recordStoreHealth(primary, new Date(now.getTime() + day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toMatchObject({ enabledDays: 0, reportLines: 0, acted: false });
+    expect(exists(".runtime/code/gone.sqlite")).toBe(true);
   });
 });
 

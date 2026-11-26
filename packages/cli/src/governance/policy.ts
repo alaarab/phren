@@ -271,16 +271,61 @@ export const DEFAULT_POLICY: RetentionPolicy = {
 };
 
 const BUDGET_NUMBERS = ["openTasks", "reviewEntries", "runtimeMB", "fanoutArchiveMB", "runtimeAgeOutDays"] as const;
+const PROJECT_BUDGETS = new Set(["openTasks", "reviewEntries"]);
+const WHOLE_BUDGETS = new Set(["openTasks", "reviewEntries", "runtimeAgeOutDays"]);
+/** Age-out never removes a file unused for less than a week. */
+export const MIN_RUNTIME_AGE_OUT_DAYS = 7;
 
-/** Budgets with every field present: a negative or non-number value (or an age-out under a day) takes the default. */
+/**
+ * Budgets with every field present. Only a number is read, so a numeric 0 is off and anything else
+ * (a string, a negative number) keeps the default; age-out days are at least a week.
+ */
 export function normalizeBudgets(raw: unknown): StoreBudgets {
   const data = isRecord(raw) ? raw : {};
   const budgets = { ...DEFAULT_POLICY.budgets };
-  for (const key of BUDGET_NUMBERS) {
-    if (isFiniteNumber(data[key]) && data[key] >= (key === "runtimeAgeOutDays" ? 1 : 0)) budgets[key] = data[key];
-  }
+  for (const key of BUDGET_NUMBERS) if (isFiniteNumber(data[key]) && data[key] >= 0) budgets[key] = data[key];
+  budgets.runtimeAgeOutDays = Math.max(MIN_RUNTIME_AGE_OUT_DAYS, budgets.runtimeAgeOutDays);
   if (typeof data.runtimeAgeOut === "boolean") budgets.runtimeAgeOut = data.runtimeAgeOut;
   return budgets;
+}
+
+/** Why a budgets patch from the CLI or set_config is refused, or null. A project sets only its task and review budgets. */
+export function budgetsPatchError(patch: unknown, scope: "global" | "project"): string | null {
+  if (!isRecord(patch)) return "budgets must be an object of budget names and values";
+  for (const [key, value] of Object.entries(patch)) {
+    const name = `budgets.${key}`;
+    if (key !== "runtimeAgeOut" && !(BUDGET_NUMBERS as readonly string[]).includes(key)) {
+      return `Unknown budget ${name}: use ${[...BUDGET_NUMBERS, "runtimeAgeOut"].join(", ")}`;
+    }
+    if (scope === "project" && !PROJECT_BUDGETS.has(key)) return `${name} is set for the whole computer, not per project`;
+    if (key === "runtimeAgeOut") {
+      if (typeof value !== "boolean") return `${name} must be true or false`;
+      continue;
+    }
+    if (!isFiniteNumber(value) || value < 0) return `${name} must be a number, 0 or more (0 turns it off)`;
+    if (WHOLE_BUDGETS.has(key) && !Number.isInteger(value)) return `${name} must be a whole number`;
+    if (key === "runtimeAgeOutDays" && value < MIN_RUNTIME_AGE_OUT_DAYS) return `${name} must be at least ${MIN_RUNTIME_AGE_OUT_DAYS}`;
+  }
+  return null;
+}
+
+/** This computer's runtime age-out opt-in, in `.runtime` (never synced): when it first saw age-out on, and whether its week has passed. */
+export interface RuntimeAgeOutState { enabledSince: string; ready: boolean }
+
+export const RUNTIME_AGE_OUT_STATE = "runtime-age-out.json";
+
+export function readRuntimeAgeOutState(phrenPath: string): RuntimeAgeOutState | null {
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(runtimeDir(phrenPath), RUNTIME_AGE_OUT_STATE), "utf8"));
+    return isRecord(state) && typeof state.enabledSince === "string" && Number.isFinite(Date.parse(state.enabledSince))
+      ? { enabledSince: state.enabledSince, ready: state.ready === true }
+      : null;
+  } catch { return null; }
+}
+
+/** Age-out (and the fanout archive's byte ceiling) acts only while it is on and this computer has waited its week. */
+export function runtimeAgeOutActive(phrenPath: string): boolean {
+  return getRetentionPolicy(phrenPath).budgets.runtimeAgeOut && readRuntimeAgeOutState(phrenPath)?.ready === true;
 }
 
 /** A project's budgets: its own store's retention policy with the project's overrides. */
@@ -1020,18 +1065,20 @@ function queueDedupKey(line: string): string {
  */
 export type ReviewQueueOrigin = "machine" | "explicit";
 
+/** Over budget a machine-generated batch fails with `OVER_BUDGET`, so callers can tell it from a duplicate (ok, 0). */
 export function appendReviewQueue(
   phrenPath: string,
   project: string,
   section: "Review" | "Stale" | "Conflicts",
   entries: ReviewQueueEntryInput[],
-  opts: { origin?: ReviewQueueOrigin } = {},
+  opts: { origin: ReviewQueueOrigin },
 ): PhrenResult<number> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const queuePath = path.join(resolvedDir, "review.md");
-  const budget = opts.origin === "machine" ? projectBudgets(phrenPath, project).reviewEntries : 0;
+  // A caller compiled without an origin (plain JS) counts as machine-generated, so the budget never fails open.
+  const budget = (opts?.origin ?? "machine") === "machine" ? projectBudgets(phrenPath, project).reviewEntries : 0;
   const today = new Date().toISOString().slice(0, 10);
 
   const normalized: Array<{ text: string; meta: string }> = [];
@@ -1066,8 +1113,9 @@ export function appendReviewQueue(
     // Over budget, a machine-generated batch waits; the daily store health line names the project.
     const queued = lines.filter((line) => line.startsWith("- ")).length;
     if (budget > 0 && queued > budget) {
-      debugLog(`appendReviewQueue: ${project} review queue over budget (${queued}/${budget}), held back ${normalized.length} machine entr${normalized.length === 1 ? "y" : "ies"}`);
-      return phrenOk(0);
+      const held = `held back ${normalized.length} machine-generated entr${normalized.length === 1 ? "y" : "ies"}`;
+      debugLog(`appendReviewQueue: ${project} review queue over budget (${queued}/${budget}), ${held}`);
+      return phrenErr(`${project}'s review queue is over its budget (${queued} of ${budget}); ${held}.`, PhrenError.OVER_BUDGET);
     }
     const secHeader = `## ${section}`;
     let secIdx = lines.findIndex((line) => line.trim() === secHeader);
@@ -1104,6 +1152,8 @@ export interface PruneMemoriesResult {
   pruned: number;
   /** TTL-expired entries promoted into review.md's `## Stale` section. */
   ttlExpired: number;
+  /** Of those, entries not queued because the project's review queue was over its budget. */
+  heldBack: number;
 }
 
 /**
@@ -1259,6 +1309,7 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
   // TTL enforcement: promote entries older than ttlDays that haven't been retrieved recently.
   const lastRetrieval = lastRetrievalByDocument(phrenPath);
   let ttlExpired = 0;
+  let heldBack = 0;
   for (const dir of dirs) {
     const file = resolveFindingsPath(dir);
     if (!file) continue;
@@ -1272,24 +1323,27 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
       }
       continue;
     }
-    appendReviewQueue(phrenPath, projectName, "Stale", expiredEntries, { origin: "machine" });
+    const queued = appendReviewQueue(phrenPath, projectName, "Stale", expiredEntries, { origin: "machine" });
+    if (!queued.ok && queued.code === PhrenError.OVER_BUDGET) heldBack += expiredEntries.length;
   }
 
-  const ttlLine = ttlExpired > 0
-    ? `\n${dryRun ? "Would move" : "Moved"} ${ttlExpired} TTL-expired entr${ttlExpired === 1 ? "y" : "ies"} to review.md`
-    : "";
+  const entries = (n: number) => `${n} TTL-expired entr${n === 1 ? "y" : "ies"}`;
+  const moved = ttlExpired - heldBack;
+  const ttlLine = (moved > 0 ? `\n${dryRun ? "Would move" : "Moved"} ${entries(moved)} to review.md` : "")
+    + (heldBack > 0 ? `\nHeld back ${entries(heldBack)}: the review queue is over its budget` : "");
 
   if (dryRun) {
     const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
     const detail = dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary;
-    return phrenOk({ message: `${detail}${ttlLine}`, pruned, ttlExpired });
+    return phrenOk({ message: `${detail}${ttlLine}`, pruned, ttlExpired, heldBack });
   }
 
-  appendAuditLog(phrenPath, "prune_memories", `project=${project || "all"} pruned=${pruned} ttl_expired=${ttlExpired}`);
+  appendAuditLog(phrenPath, "prune_memories", `project=${project || "all"} pruned=${pruned} ttl_expired=${ttlExpired} held_back=${heldBack}`);
   return phrenOk({
     message: `Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.${ttlLine}`,
     pruned,
     ttlExpired,
+    heldBack,
   });
 }
 

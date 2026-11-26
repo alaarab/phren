@@ -118,7 +118,7 @@ Pages are capped at 16 KB; a bigger subject should be split. Links to pages that
 
 ## Propose or apply
 
-In **propose** mode (the default) nothing in memory changes. Only `add_finding` changes become review items in `review.md`; approving them saves the finding. Review additions like any other queue item:
+In **propose** mode (the default) nothing in memory changes. Only `add_finding` changes become review items in `review.md`; approving them saves the finding. While the project's review queue is over its review budget ([Budgets](governance.md#budgets)) an addition is not queued and its outcome is `deferred`. Review additions like any other queue item:
 
 ```bash
 phren review                           # show the queue

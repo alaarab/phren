@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -495,15 +495,26 @@ describe("fan-out archive sweep", () => {
     expect((await readdir(archive)).sort()).toEqual(["job-in", "new-done", "old-running"]);
   });
 
-  it("reads the ceiling from the store's retention policy, and 0 turns it off", async () => {
+  it("only reports the byte ceiling until runtime age-out is on and past its week, and takes 0 as off", async () => {
     const { root, env, archive } = await store();
+    // 600 MB of logical size in a sparse file: past the 512 MB default without writing it.
     await mkdir(path.join(archive, "old-done"), { recursive: true });
-    await writeFile(path.join(archive, "old-done", "exit.txt"), "x".repeat(3000));
+    await writeFile(path.join(archive, "old-done", "exit.txt"), "0\n");
+    await writeFile(path.join(archive, "old-done", "events.jsonl"), "");
+    await truncate(path.join(archive, "old-done", "events.jsonl"), 600 * 1024 * 1024);
     await mkdir(path.join(root, ".config"), { recursive: true });
-    const policy = (fanoutArchiveMB: number) => writeFile(path.join(root, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { fanoutArchiveMB } }));
-    await policy(0);
+    const policy = (budgets: Record<string, unknown>) => writeFile(path.join(root, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets }));
+    const state = (ready: boolean) => writeFile(path.join(root, ".runtime", "runtime-age-out.json"), JSON.stringify({ enabledSince: "2026-01-01T00:00:00.000Z", ready }));
+
     expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 0 });
-    await policy(0.001);
+    await policy({ runtimeAgeOut: true });
+    await state(false);
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 0 });
+    await state(true);
+    await policy({ runtimeAgeOut: true, fanoutArchiveMB: 0 });
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 0 });
+    expect(await present(path.join(archive, "old-done"))).toBe(true);
+    await policy({ runtimeAgeOut: true });
     expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 1 });
     expect(await present(path.join(archive, "old-done"))).toBe(false);
   });

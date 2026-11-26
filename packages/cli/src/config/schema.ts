@@ -416,10 +416,11 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         key: "retention.budgets.fanoutArchiveMB",
         domain: "retention",
         label: "Fanout archive ceiling (MB)",
-        summary: "Size of the finished fan-out archive before its oldest folders are deleted.",
+        summary: "Size of the finished fan-out archive that daily store health flags.",
         help:
-          "Beside the 500-folder cap, the archive sweep deletes the oldest finished worker folders until the "
-          + "archive is under this size. Running workers are never touched. 0 turns the ceiling off.",
+          "Reported from day one. Once runtime age-out is on and this computer has waited its week, the archive "
+          + "sweep also deletes the oldest finished worker folders until the archive is under this size, beside "
+          + "the 500-folder cap. Unfinished folders are never touched. 0 turns the ceiling off.",
         control: "number",
         range: { min: 0, max: 1048576, step: 64 },
         default: DEFAULT_POLICY.budgets.fanoutArchiveMB,
@@ -431,23 +432,25 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         key: "retention.budgets.runtimeAgeOut",
         domain: "retention",
         label: "Age out runtime files",
-        summary: "Remove regenerable `.runtime` files nobody has used for a while.",
+        summary: "Remove code indexes whose checkout is gone, and old finished fan-out folders.",
         help:
-          "Removes code indexes for projects with no checkout on this computer and finished fan-out folders, "
-          + "once unused for the age-out days. It acts only after a week of daily store health lines; until "
-          + "then, and while off, the health line reports what it would remove.",
+          "Removes a code index whose recorded checkout no longer exists on this computer (or is no longer a git "
+          + "checkout) once it has not been rebuilt for the age-out days, and fan-out folders that finished that long "
+          + "ago; it also turns on the fan-out archive's byte ceiling. It acts only after this computer has had it on "
+          + "for a week and seven daily store health lines exist; until then, and while off, the health line reports "
+          + "what it would remove.",
         control: "boolean",
         default: DEFAULT_POLICY.budgets.runtimeAgeOut,
         scope: "global-only",
-        impact: "On deletes regenerable files; a removed code index is rebuilt on the next index.",
+        impact: "On deletes those files. A removed code index comes back only when `phren code index` runs on a checkout.",
         risk: "caution",
       },
       {
         key: "retention.budgets.runtimeAgeOutDays",
         domain: "retention",
         label: "Runtime age-out (days)",
-        summary: "How long a regenerable `.runtime` file goes unused before age-out removes it.",
-        help: "Used only when runtime age-out is on; the daily health line reports candidates either way.",
+        summary: "How long a code index goes without a rebuild, or a fan-out folder sits finished, before age-out removes it.",
+        help: "At least 7. Used only when runtime age-out is on; the daily health line reports candidates either way.",
         control: "number",
         range: { min: 7, max: 3650, step: 1 },
         default: DEFAULT_POLICY.budgets.runtimeAgeOutDays,

@@ -922,7 +922,7 @@ describe("appendReviewQueue", () => {
     const phren = makePhren();
     grantAdmin(phren);
     makeProject(phren, "emptyq", { "summary.md": "# emptyq\n" });
-    const emptyResult = appendReviewQueue(phren, "emptyq", "Stale", []);
+    const emptyResult = appendReviewQueue(phren, "emptyq", "Stale", [], { origin: "explicit" });
     expect(emptyResult.ok).toBe(true);
     if (emptyResult.ok) expect(emptyResult.data).toBe(0);
   });
@@ -934,7 +934,7 @@ describe("appendReviewQueue", () => {
 
     const result = appendReviewQueue(phren, "sanitizequeue", "Review", [
       "Line one\\nLine two <!-- source: injected --> \"quoted\" \0 text",
-    ]);
+    ], { origin: "explicit" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 

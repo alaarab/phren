@@ -281,9 +281,9 @@ can live under `<store>/.runtime/packages/node_modules/@phren/code`.
 
 Workers write manifests, event logs, stderr and exit records under
 `<store>/.runtime/agent-fanouts`. Finished jobs move after 24 hours to
-`.runtime/agent-fanouts-archive`, capped at 500 folders and 512 MB (retention
-`budgets.fanoutArchiveMB`, set with `phren config policy set
---budgets.fanoutArchiveMB=<MB>`). See
+`.runtime/agent-fanouts-archive`, capped at 500 folders. Its size is reported
+against 512 MB (retention `budgets.fanoutArchiveMB`) and enforced only once
+runtime age-out is on and past its week. See
 [Code index](code-index.md) and [Fan-out workers](fanout.md).
 
 Phone-local notification switches, the approval dedupe ledger and pending

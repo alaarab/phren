@@ -113,7 +113,7 @@ export async function runBridge(args: string[], version: string): Promise<number
       const { moved, deleted } = await archiveFinishedFanouts(process.env, options);
       const doing = dryRun ? "Would archive" : "Archived";
       const removal = dryRun ? "would delete" : "deleted";
-      console.log(`${doing} ${moved.length} fan-out job(s); ${removal} ${deleted} past the archive caps (${ARCHIVE_MAX_FOLDERS} folders and the byte ceiling).`);
+      console.log(`${doing} ${moved.length} fan-out job(s); ${removal} ${deleted} past the archive caps (${ARCHIVE_MAX_FOLDERS} folders, and the byte ceiling once runtime age-out is on).`);
       break;
     }
     case "speech-key": {

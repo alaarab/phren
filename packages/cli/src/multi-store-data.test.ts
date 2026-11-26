@@ -229,7 +229,7 @@ describe("multi-store data layer", () => {
 
   describe("review queue", () => {
     it("appends queue entries into the secondary store", () => {
-      const result = appendReviewQueue(phrenDir, "team-proj", "Review", ["Candidate from capture"]);
+      const result = appendReviewQueue(phrenDir, "team-proj", "Review", ["Candidate from capture"], { origin: "explicit" });
       expect(result.ok).toBe(true);
 
       const queueFile = path.join(teamDir, "team-proj", "review.md");

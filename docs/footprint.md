@@ -295,19 +295,24 @@ nothing to that checkout.
 - `<store>/.runtime/code/<project>.sqlite` holds the rebuildable code index,
   references, declaration fingerprints and last-observed change times. With
   runtime age-out on (retention `budgets.runtimeAgeOut`, off by default), daily
-  maintenance removes the index of a project with no checkout on this computer
-  (or no project of that name in any store) once it has not been rebuilt for
-  `budgets.runtimeAgeOutDays` (30), and only after a week of daily store health
-  lines.
+  maintenance removes an index whose recorded checkout no longer exists here or
+  is no longer a git checkout, once it has not been rebuilt for
+  `budgets.runtimeAgeOutDays` (30), and only after the week described below.
+  A removed index returns only when `phren code index` runs on a checkout.
 - `<store>/.runtime/packages/` holds optional installed packages, including
   `@phren/code` when it is not linked from the workspace.
 - `<store>/.runtime/agent-fanouts/<job id>/` holds each worker's manifest,
   events, stderr, exit record and any `blocked.json` refusal record.
 - `<store>/.runtime/agent-fanouts-archive/` holds finished jobs after 24 hours,
-  capped at 500 folders and at retention `budgets.fanoutArchiveMB` (512 MB):
-  past either, the archive sweep deletes the oldest finished folders. Runtime
-  age-out, when on, also removes folders that finished more than
+  capped at 500 folders. Its size against retention `budgets.fanoutArchiveMB`
+  (512 MB) is reported; once runtime age-out is on and past its week, the
+  archive sweep also deletes the oldest finished folders past that size, and
+  daily maintenance removes folders that finished more than
   `budgets.runtimeAgeOutDays` ago. These directories are local runtime state.
+- `<primary store>/.runtime/runtime-age-out.json` records when this computer
+  first saw runtime age-out on and whether its week (seven days and seven
+  daily store health lines) has passed. Written by daily maintenance while
+  age-out is on, removed when it is off; local runtime state, never synced.
 - `<store>/.runtime/recall-trace.jsonl` holds one line per prompt the prompt hook
   saw: the start of the prompt (160 characters), its keywords, which memories
   passed or failed the relevance floor and why, what was injected, or why

@@ -96,6 +96,21 @@ describe("extract idempotency", () => {
     expect(audit.trim().split("\n").pop()).toContain("queued=0 duplicates=2");
   });
 
+  it("leaves a candidate held back by the review budget unprocessed, so a later run queues it", async () => {
+    writeFile(path.join(tmp.path, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 1 } }));
+    writeFile(path.join(tmp.path, PROJECT, "review.md"), "# demo Review Queue\n\n## Review\n\n- [2026-11-01] Held one\n- [2026-11-01] Held two\n\n## Stale\n\n## Conflicts\n");
+    const { handleExtractMemories } = await loadExtract([RECONNECT]);
+    await handleExtractMemories(PROJECT, "/repo", true);
+    expect(reviewQueueEntries()).toHaveLength(2);
+    const audit = () => fs.readFileSync(path.join(tmp.path, ".runtime", "audit.log"), "utf8").trim().split("\n").pop();
+    expect(audit()).toMatch(/queued=0 .*held_back=1/);
+
+    writeFile(path.join(tmp.path, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 0 } }));
+    await handleExtractMemories(PROJECT, "/repo", true);
+    expect(reviewQueueEntries().some((line) => line.includes("Socket reconnect"))).toBe(true);
+    expect(audit()).toMatch(/queued=1 .*held_back=0/);
+  });
+
   it("re-queues nothing when the queued line drifted from what extraction renders", async () => {
     const { handleExtractMemories } = await loadExtract([RECONNECT]);
     await handleExtractMemories(PROJECT, "/repo", true);

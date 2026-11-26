@@ -357,6 +357,8 @@ export function handleTaskPromptLifecycle(args: {
   sessionId?: string;
   intent: string;
   taskLevel?: ProactivityLevel;
+  /** The project's open-task budget when the caller already resolved its config (the prompt hook). */
+  openTaskBudget?: number;
 }): TaskPromptLifecycleResult {
   const mode = getTaskMode(args.phrenPath);
   if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
@@ -406,12 +408,15 @@ export function handleTaskPromptLifecycle(args: {
   }
 
   // Over the open-task budget the hook files nothing new on its own. A prompt that asks for a
-  // task, add_task and `phren tasks add` still add one, and a matched task still moves.
-  const open = activeItems.length + parsed.data.items.Queue.length;
-  const budget = projectBudgets(args.phrenPath, args.project).openTasks;
-  if (!reusable && budget > 0 && open > budget && !hasExplicitTaskSignal(prompt)) {
-    debugLog(`task lifecycle paused ${args.project}: ${open} open tasks, budget ${budget}`);
-    return { mode, noticeLines: [], budgetPaused: { open, budget } };
+  // task, add_task and `phren tasks add` still add one, and a matched task still moves. The budget
+  // is read only when a new task would be filed, from the config the hook already resolved.
+  if (!reusable && !hasExplicitTaskSignal(prompt)) {
+    const open = activeItems.length + parsed.data.items.Queue.length;
+    const budget = args.openTaskBudget ?? projectBudgets(args.phrenPath, args.project).openTasks;
+    if (budget > 0 && open > budget) {
+      debugLog(`task lifecycle paused ${args.project}: ${open} open tasks, budget ${budget}`);
+      return { mode, noticeLines: [], budgetPaused: { open, budget } };
+    }
   }
 
   // Intent-aware auto mode: if the user is in discovery mode (brainstorming,

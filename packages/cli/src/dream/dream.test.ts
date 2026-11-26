@@ -281,6 +281,17 @@ describe("applyChangeset (propose mode)", () => {
   });
 });
 
+describe("applyChangeset (propose mode) over the review budget", () => {
+  it("records an addition it could not queue as deferred, not skipped", async () => {
+    fs.mkdirSync(path.join(store, ".config"), { recursive: true });
+    fs.writeFileSync(path.join(store, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 1 } }));
+    fs.writeFileSync(path.join(store, PROJECT, "review.md"), "# Review\n\n## Review\n\n- One\n- Two\n\n## Stale\n\n## Conflicts\n");
+    const [outcome] = await applyChangeset(store, changeset([{ op: "add_finding", text: "Deploys need the VPN", evidence: EVIDENCE }]), { mode: "propose", injectBudgetKB: 8 });
+    expect(outcome).toMatchObject({ status: "deferred", detail: expect.stringContaining("over its review budget") });
+    expect(fs.readFileSync(path.join(store, PROJECT, "review.md"), "utf8")).not.toContain("Deploys need the VPN");
+  });
+});
+
 describe("dream", () => {
   const reply = JSON.stringify({ notes: "Captured the pnpm switch.", changes: [
     { op: "supersede", findingId: "aaaa1111", newText: "Builds use pnpm", evidence: [{ kind: "transcript", ref: "s1#t1", quote: "switch to pnpm" }] },

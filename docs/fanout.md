@@ -244,7 +244,7 @@ A folder with no manifest at all is moved once its `exit.txt` is more than 24
 hours old. The sweep writes `{ "status": "failed", "reason": "no manifest" }`
 as its manifest in the archive.
 
-The archive holds at most 500 folders and 512 MB (retention `budgets.fanoutArchiveMB`, 0 for no byte ceiling); the oldest beyond the folder cap are deleted, and then the oldest finished folders until the archive fits the byte ceiling.
+The archive holds at most 500 folders; the oldest beyond that are deleted. Its size is reported against 512 MB (retention `budgets.fanoutArchiveMB`, 0 for no byte ceiling) in daily store health; only once runtime age-out is on and past its week does the sweep also delete the oldest finished folders until the archive fits ([Budgets](governance.md#budgets)).
 Each sweep that moved or deleted anything writes one line to the Hook's log.
 
 Run the sweep by hand with:

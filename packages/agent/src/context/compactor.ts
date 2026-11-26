@@ -222,6 +222,8 @@ export async function routeKnowledgeItems(
         phrenCtx.project,
         "Review",
         toQueue.map((item) => ({ text: item.text, meta })),
+        // Model-extracted, so held back while the project's review queue is over its budget.
+        { origin: "machine" },
       );
       if (result.ok) queued = result.data ?? toQueue.length;
     } catch { /* best effort */ }

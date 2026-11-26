@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { createRequire } from "module";
 import * as path from "path";
 import { parseFindingsContent, readReviewQueue, type FindingItem } from "../data/access.js";
 import { readTasks } from "../data/tasks.js";
@@ -10,10 +11,9 @@ import { getMachineName } from "../machine-identity.js";
 import { atomicWriteText, debugLog, runtimeDir } from "../phren-paths.js";
 import { readRecallTrace, recallTraceFile } from "../recall/trace.js";
 import { getStoreProjectDirs, resolveAllStores } from "../store-registry.js";
-import { projectCheckout } from "../content/citation-checkouts.js";
 import { errorMessage, isValidProjectName } from "../utils.js";
 import { withFileLock } from "./locks.js";
-import { getRetentionPolicy, type StoreBudgets } from "./policy.js";
+import { getRetentionPolicy, readRuntimeAgeOutState, RUNTIME_AGE_OUT_STATE, runtimeAgeOutActive, type StoreBudgets } from "./policy.js";
 
 export interface StoreHealthCounts {
   activeFindings: number;
@@ -64,8 +64,10 @@ type AgeOutCounts = Record<"codeIndexes" | "fanoutArchive", { count: number; byt
 export interface RuntimeAgeOut {
   enabled: boolean;
   days: number;
-  /** Days since the first health line that reported runtime classes; age-out acts from 7. */
-  reportDays: number;
+  /** Days since this computer first saw age-out on (null while off); it acts from 7. */
+  enabledDays: number | null;
+  /** Earlier daily lines that reported runtime classes; it acts from 7. */
+  reportLines: number;
   acted: boolean;
   /** What age-out removes, or would remove, today. */
   candidates: AgeOutCounts;
@@ -246,10 +248,9 @@ export function collectStoreHealth(
     ];
   }));
   const global = getRetentionPolicy(phrenPath).budgets;
-  over.push(
-    overBudget("runtimeBytes", Object.values(runtimeBytes).reduce((sum, size) => sum + size, 0), megabytes(global.runtimeMB)),
-    overBudget("fanoutArchiveBytes", runtimeClasses.fanoutArchive, megabytes(global.fanoutArchiveMB)),
-  );
+  const fanoutRow = overBudget("fanoutArchiveBytes", runtimeClasses.fanoutArchive, megabytes(global.fanoutArchiveMB));
+  if (fanoutRow && !runtimeAgeOutActive(phrenPath)) fanoutRow.effect = "reported only until runtime age-out is on";
+  over.push(overBudget("runtimeBytes", Object.values(runtimeBytes).reduce((sum, size) => sum + size, 0), megabytes(global.runtimeMB)), fanoutRow);
   return {
     at: now.toISOString(), computer, stores, runtimeBytes, runtimeClasses,
     budgets: { over: over.filter((row): row is OverBudget => row !== null) },
@@ -263,7 +264,7 @@ const BUDGET_EFFECTS: Record<OverBudget["component"], string> = {
   openTasks: "the prompt hook files no new tasks",
   reviewEntries: "machine-generated entries are not queued",
   runtimeBytes: "reported only",
-  fanoutArchiveBytes: "the next archive sweep deletes the oldest finished folders",
+  fanoutArchiveBytes: "the archive sweep deletes the oldest finished folders",
 };
 
 function overBudget(component: OverBudget["component"], value: number, budget: number, where: { store?: string; project?: string } = {}): OverBudget | null {
@@ -283,22 +284,29 @@ function runtimeClass(name: string): RuntimeClass {
   return /\.(?:log|jsonl)$/.test(name) ? "logs" : "other";
 }
 
-// ── Runtime age-out: regenerable files only, off by default, and never before a week of health lines ──
+// ── Runtime age-out: regenerable files only, off by default, and never before this computer's week ──
 
 const DAY_MS = 86_400_000;
-const AGE_OUT_REPORT_DAYS = 7;
+const AGE_OUT_WAIT_DAYS = 7;
 const FINISHED_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const requireModule = createRequire(import.meta.url);
 
 interface AgeOutCandidate { kind: keyof AgeOutCounts; target: string; bytes: number }
 
-// Every project name in every store this computer reads, with the store it lives in.
-function storeProjects(phrenPath: string): Map<string, string> {
-  const projects = new Map<string, string>();
-  for (const entry of resolveAllStores(phrenPath, { migrateAttachments: false }).filter(store => store.available !== false)) {
-    const store = entry.role === "primary" ? { ...entry, path: phrenPath } : entry;
-    for (const dir of getStoreProjectDirs(store)) if (!projects.has(path.basename(dir))) projects.set(path.basename(dir), store.path);
-  }
-  return projects;
+// The checkout a code index was built from, as the indexer recorded it in its meta table; undefined when unreadable.
+function indexRepoRoot(file: string): string | undefined {
+  let db: import("node:sqlite").DatabaseSync | undefined;
+  try {
+    const { DatabaseSync } = requireModule("node:sqlite") as typeof import("node:sqlite");
+    db = new DatabaseSync(file, { readOnly: true });
+    const row = db.prepare("SELECT value FROM meta WHERE key = 'repo_root'").get() as { value?: unknown } | undefined;
+    return typeof row?.value === "string" && row.value ? row.value : undefined;
+  } catch { return undefined; } finally { try { db?.close(); } catch { /* already closed */ } }
+}
+
+// A folder that is a git checkout here: a repository or a worktree (`.git` file).
+function isCheckout(dir: string): boolean {
+  return fs.existsSync(path.join(dir, ".git"));
 }
 
 // When an archived fanout folder finished, mirroring the archive sweep: its manifest's finishedAt, else exit.txt's mtime.
@@ -312,21 +320,21 @@ function archivedFinish(folder: string): number | undefined {
 }
 
 /**
- * Code indexes of projects with no checkout on this computer (or no project at all) not rebuilt for `days`,
- * and finished fanout folders finished `days` ago. Nothing else in `.runtime`, and nothing outside it.
+ * Code indexes whose recorded checkout is gone from this computer (missing, or no longer a git checkout) and
+ * not rebuilt for `days`, and archived fanout folders finished `days` ago. An index without a readable record,
+ * a locked one, a symlink, and everything else in `.runtime` or outside it are never candidates.
  */
 function ageOutCandidates(phrenPath: string, days: number, now: Date): AgeOutCandidate[] {
   const cutoff = now.getTime() - days * DAY_MS;
   const candidates: AgeOutCandidate[] = [];
   const code = path.join(runtimeDir(phrenPath), "code");
-  const projects = storeProjects(phrenPath);
   for (const name of fs.existsSync(code) ? fs.readdirSync(code).sort() : []) {
     const project = name.endsWith(".sqlite") ? name.slice(0, -".sqlite".length) : "";
     const file = path.join(code, name);
     const stat = fs.lstatSync(file, { throwIfNoEntry: false });
     if (!isValidProjectName(project) || !stat?.isFile() || stat.mtimeMs > cutoff || fs.existsSync(`${file}.lock`)) continue;
-    const store = projects.get(project);
-    if (store && projectCheckout(store, project)) continue;
+    const repoRoot = indexRepoRoot(file);
+    if (!repoRoot || isCheckout(repoRoot)) continue;
     candidates.push({ kind: "codeIndexes", target: file, bytes: stat.size });
   }
   const archive = path.join(runtimeDir(phrenPath), "agent-fanouts-archive");
@@ -345,23 +353,38 @@ function ageOutCounts(candidates: AgeOutCandidate[]): AgeOutCounts {
   return counts;
 }
 
-// Days since the first line that reported runtime classes: the report age-out waits a week for.
-function reportDays(lines: string[], now: Date): number {
+// Earlier daily lines that reported runtime classes; a torn line or one whose date cannot be read does not count.
+function reportLines(lines: string[]): number {
+  let count = 0;
   for (const line of lines) {
     try {
       const entry = JSON.parse(line);
-      if (entry?.runtimeClasses && typeof entry.at === "string") return Math.max(0, Math.floor((now.getTime() - Date.parse(entry.at)) / DAY_MS));
+      if (entry?.runtimeClasses && typeof entry.at === "string" && Number.isFinite(Date.parse(entry.at))) count++;
     } catch { /* a torn line */ }
   }
-  return 0;
+  return count;
 }
 
+/**
+ * The opt-in this computer saw, kept in `.runtime` (never synced): its week starts the first day age-out is on here,
+ * and turning it off forgets it. Ready once that week has passed and seven daily lines have reported runtime classes.
+ */
 function runtimeAgeOut(phrenPath: string, budgets: StoreBudgets, lines: string[], now: Date): RuntimeAgeOut {
+  const stateFile = path.join(runtimeDir(phrenPath), RUNTIME_AGE_OUT_STATE);
   const candidates = ageOutCandidates(phrenPath, budgets.runtimeAgeOutDays, now);
-  const days = reportDays(lines, now);
-  const acted = budgets.runtimeAgeOut && days >= AGE_OUT_REPORT_DAYS;
-  if (acted) for (const { target } of candidates) fs.rmSync(target, { recursive: true, force: true });
-  return { enabled: budgets.runtimeAgeOut, days: budgets.runtimeAgeOutDays, reportDays: days, acted, candidates: ageOutCounts(candidates) };
+  const reported = reportLines(lines);
+  let enabledDays: number | null = null;
+  let acted = false;
+  if (!budgets.runtimeAgeOut) {
+    fs.rmSync(stateFile, { force: true });
+  } else {
+    const enabledSince = readRuntimeAgeOutState(phrenPath)?.enabledSince ?? now.toISOString();
+    enabledDays = Math.max(0, Math.floor((now.getTime() - Date.parse(enabledSince)) / DAY_MS));
+    acted = enabledDays >= AGE_OUT_WAIT_DAYS && reported >= AGE_OUT_WAIT_DAYS;
+    atomicWriteText(stateFile, `${JSON.stringify({ enabledSince, ready: acted })}\n`);
+    if (acted) for (const { target } of candidates) fs.rmSync(target, { recursive: true, force: true });
+  }
+  return { enabled: budgets.runtimeAgeOut, days: budgets.runtimeAgeOutDays, enabledDays, reportLines: reported, acted, candidates: ageOutCounts(candidates) };
 }
 
 export function recordStoreHealth(phrenPath: string, now = new Date(), computer = getMachineName()): boolean {

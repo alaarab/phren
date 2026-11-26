@@ -604,16 +604,29 @@ describe("progressive task model", () => {
       expect(open()).toBe(5);
     });
 
-    it("still moves a matching task when over budget, and 0 turns the budget off", () => {
+    it("still moves a matching task when over budget", () => {
       auto(1);
       writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n- [ ] Fix the retry backoff in the sync worker\n\n## Queue\n\n- [ ] Another queued item\n\n## Done\n`);
       const matched = prompt("Fix the retry backoff in the sync worker again", "budget-match");
       expect(matched.budgetPaused).toBeUndefined();
       expect(open()).toBe(2);
+    });
 
+    it("takes an explicit 0 as off even past the default budget", () => {
+      const queue = Array.from({ length: 160 }, (_, i) => `- [ ] Queued item number ${i}`).join("\n");
+      writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n${queue}\n\n## Done\n`);
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({ schemaVersion: 1, taskMode: "auto" }) + "\n");
+      expect(prompt("Implement the parser cache invalidation", "budget-default").budgetPaused).toEqual({ open: 160, budget: 150 });
       auto(0);
       expect(prompt("Implement the parser cache invalidation", "budget-off").noticeLines.join("\n")).toContain("Queued task");
-      expect(open()).toBe(3);
+      expect(open()).toBe(161);
+    });
+
+    it("uses the budget the hook already resolved instead of reading the policy again", () => {
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({ schemaVersion: 1, taskMode: "auto" }) + "\n");
+      for (const line of ["One", "Two", "Three"]) addTask(tmp.path, project, `Existing work ${line}`);
+      const paused = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt: "Fix the flaky upload test in the parser", project, sessionId: "budget-hook", intent: "build", openTaskBudget: 2 });
+      expect(paused.budgetPaused).toEqual({ open: 3, budget: 2 });
     });
   });
 });

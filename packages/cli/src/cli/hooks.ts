@@ -325,6 +325,7 @@ export async function handleHookPrompt() {
       sessionId,
       intent,
       taskLevel,
+      openTaskBudget: resolvedConfig.retentionPolicy.budgets.openTasks,
     }) : { noticeLines: [] };
     const paused = "budgetPaused" in taskLifecycle ? taskLifecycle.budgetPaused : undefined;
     recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result,

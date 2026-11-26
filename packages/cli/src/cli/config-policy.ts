@@ -11,6 +11,7 @@ import {
   VALID_FINDING_SENSITIVITY,
   type FindingSensitivityLevel,
   type RetentionPolicyPatch,
+  budgetsPatchError,
 } from "../shared/governance.js";
 import { updateProjectConfigOverrides } from "../project-config.js";
 import { isValidProjectName } from "../utils.js";
@@ -211,20 +212,43 @@ export async function handleIndexPolicy(args: string[]) {
 
 // ── Memory policy ────────────────────────────────────────────────────────────
 
-/** `--ttlDays=90 --decay.d30=1 --budgets.runtimeAgeOut=true` as a patch, over `base`'s decay and budgets. */
-function policyPatch(args: string[], base: RetentionPolicyPatch = {}): RetentionPolicyPatch {
+// A budget value as typed: true/false, or a number; anything else stays a string so validation refuses it.
+function budgetValue(raw: string): unknown {
+  if (raw === "true" || raw === "false") return raw === "true";
+  return raw.trim() !== "" && Number.isFinite(Number(raw)) ? Number(raw) : raw;
+}
+
+/**
+ * `--ttlDays=90 --decay.d30=1 --budgets.runtimeAgeOut=true` as a patch, over `base`'s decay and budgets.
+ * Exits 1 with nothing written when a budget is not a valid value.
+ */
+function policyPatch(args: string[], scope: "global" | "project", base: RetentionPolicyPatch = {}): RetentionPolicyPatch {
   const patch: Record<string, unknown> = {};
+  const budgets: Record<string, unknown> = {};
   for (const arg of args) {
     if (!arg.startsWith("--")) continue;
     const [k, v] = arg.slice(2).split("=");
     if (!k || v === undefined) continue;
-    const value = v === "true" ? true : v === "false" ? false : Number.isNaN(Number(v)) ? v : Number(v);
     const [group, field] = k.split(".");
-    if ((group === "decay" || group === "budgets") && field) {
-      patch[group] = { ...(base[group] ?? {}), ...(patch[group] as Record<string, unknown> | undefined), [field]: value };
+    if (group === "budgets" && field) {
+      budgets[field] = budgetValue(v);
+      continue;
+    }
+    const num = Number(v);
+    const value = Number.isNaN(num) ? v : num;
+    if (group === "decay" && field) {
+      patch.decay = { ...(base.decay ?? {}), ...(patch.decay as Record<string, unknown> | undefined), [field]: value };
     } else {
       patch[k] = value;
     }
+  }
+  if (Object.keys(budgets).length) {
+    const refused = budgetsPatchError(budgets, scope);
+    if (refused) {
+      console.error(`No settings changed: ${refused}.`);
+      process.exit(1);
+    }
+    patch.budgets = { ...(base.budgets ?? {}), ...budgets };
   }
   return patch as RetentionPolicyPatch;
 }
@@ -263,11 +287,12 @@ export async function handleRetentionPolicy(args: string[]) {
         process.exit(1);
       }
       requireFlagPairs(filteredArgs.slice(1), "phren config policy set --project <name> --ttlDays=90 --retentionDays=365");
+      policyPatch(filteredArgs.slice(1), "project");
       warnIfUnregistered(phrenPath, projectArg);
       updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
         const existingRetention = current.retentionPolicy ?? {};
         const retentionPatch: NonNullable<typeof existingRetention> = { ...existingRetention };
-        Object.assign(retentionPatch, policyPatch(filteredArgs.slice(1), retentionPatch));
+        Object.assign(retentionPatch, policyPatch(filteredArgs.slice(1), "project", retentionPatch));
         return { ...current, retentionPolicy: retentionPatch };
       });
       const resolved = mergeConfig(phrenPath, projectArg);
@@ -275,7 +300,7 @@ export async function handleRetentionPolicy(args: string[]) {
       return;
     }
     requireFlagPairs(filteredArgs.slice(1), "phren config policy set --ttlDays=90 --retentionDays=365");
-    const result = updateRetentionPolicy(phrenPath, policyPatch(filteredArgs.slice(1)));
+    const result = updateRetentionPolicy(phrenPath, policyPatch(filteredArgs.slice(1), "global"));
     if (!result.ok) {
       console.error(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
