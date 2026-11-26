@@ -13,6 +13,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - A finding's citation now names its repo by its clone URL, like `github.com/owner/repo` (a user name or token in the URL is left out), with the commit and a path inside the repo, instead of a folder on the computer that saved it. Any of your computers with a clone of that repo can check it, so a finding saved on the Mac checks on Linux. A finding saved without a citation, in a project with a checkout on this computer, now cites that checkout and its current commit, plus a file when the finding names exactly one file the repo tracks. Phren no longer guesses a file and line from the cited commit. A project whose `phren.project.yaml` names its `remote:` only cites a checkout of that remote, and a project registered at a folder inside a repo cites that repo. Older citations with another computer's folder are checked against a same-named checkout here when it has the cited commit. A clone other than the one a citation was written in may be behind or on another branch, so a cited file there counts as changed or gone only when the cited commit is in the history that clone has checked out. The prompt hook starts no git process for these citations: it uses what the daily check last recorded on this computer.
 
+### Fixed
+
+- A finding with an older citation, one that names a folder on the computer that saved it, is now checked by the prompt hook and `search_knowledge` the way a new citation is: from what the daily check last recorded on this computer, with no git process. Before, they never looked at these citations. A cited file that's gone now keeps the finding out of your agent's context, and a cited line that changed lowers its confidence. A finding that cites code also no longer loses confidence as if it cited nothing; one saved with only its date still counts as uncited.
+
 ## [0.3.93] - 2026-11-25
 
 ### Added

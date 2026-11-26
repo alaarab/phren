@@ -60,7 +60,7 @@ Every finding has a confidence score. The score degrades over time in four steps
 | 91–120 days | 0.65 | 0.52 |
 | 120+ days | 0.45 | 0.36 |
 
-Entries below 0.35 are suppressed entirely and move to the review queue instead of being injected. Entries with file/line/commit citations hold their score longer than uncited ones.
+Entries below 0.35 are suppressed entirely and move to the review queue instead of being injected. Entries with file/line/commit citations hold their score longer than uncited ones. A cited entry is one whose citation names a repo, file or symbol; a finding saved with only its `created_at` time counts as uncited.
 
 You can save a truth with `pin_memory` to make it never decay. Truths live in `truths.md` and are always prepended to context injection for the detected project, with priority second only to findings. Use `get_truths` to read all truths for a project, or `phren truths <project>` from the CLI.
 

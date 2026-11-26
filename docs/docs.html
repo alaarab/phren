@@ -1140,7 +1140,7 @@ stateDiagram-v2
             <tr><td>Past 120 days</td><td colspan="2">Stale: past the default TTL (<code>ttlDays</code>)</td></tr>
           </tbody>
         </table></div>
-        <p>A finding below 0.35 confidence (<code>minInjectConfidence</code>) is left out of injected context.</p>
+        <p>A finding below 0.35 confidence (<code>minInjectConfidence</code>) is left out of injected context. A cited finding is one whose citation names a repo, file or symbol; one saved with only its <code>created_at</code> time counts as uncited.</p>
 
         <div class="decay-curve">
                     <svg viewBox="0 0 500 180" preserveAspectRatio="none">

@@ -52,7 +52,7 @@ A finding with no date counts as 0.45. Past its age limit a finding is stale and
 | `[context]` | 30 days | 0.75 |
 | no tag | `ttlDays` | 1.0 |
 
-A finding with no source citation gets a further 0.8×. A cited file changed since the finding was written gives 0.7×, and a citation that no longer resolves drops the finding.
+A finding whose citation names no repo, file or symbol gets a further 0.8×: one with no citation, or with only the `created_at` time every new finding gets. A cited line that drifted, or a cited file changed since the finding was written, gives 0.7×, and a citation that no longer resolves drops the finding.
 
 The threshold `minInjectConfidence=0.35` suppresses low-confidence findings from being injected into context automatically. They remain in storage. They just stop contaminating your AI's working knowledge.
 
@@ -79,7 +79,7 @@ Each computer checks a citation against its own disk and gets one of four states
 
 New citations name their repo by its `origin` remote (`github.com/owner/repo`) with a repo-relative file, so a finding written on one computer checks on any other with a clone of that repo ([store-format.md](store-format.md#3-metadata-comments)). Phren finds the clone the way the code index finds a project's checkout: the project's registered folder for this computer (or the repository it is inside, for a monorepo package), then a folder named after the repo or the project under `$PROJECTS_DIR`, `~`, `~/Projects` and the other usual roots, and uses it only when its `origin` is the same remote. A clone other than the one the citation was written in may be behind, ahead or on another branch, so it says something about a cited file only when the cited commit is in the history it has checked out: then a changed line is drifted and a file that was in the commit and is gone is broken. Anything else is unverifiable, and the answer is asked again after the clone moves to another commit. The daily check also tries an older citation's absolute repo path from another computer (a `/Users/...` path on Linux) against a same-named checkout here, and uses that checkout only when it has the cited commit. A remote this computer has no clone of stays unverifiable.
 
-Finding a clone scans folders and may start git, so only the daily check does it. The prompt hook and `search_knowledge` use the state the daily check last recorded on this computer for a citation that names a remote, and one not checked yet changes nothing; they start no git process for it.
+Finding a clone scans folders and may start git, and so does checking a repo path, so only the daily check does either. The prompt hook and `search_knowledge` check no citation themselves: every citation, whether it names a remote or a repo path, takes the state the daily check last recorded on this computer, and one not checked yet changes nothing. They start no git process.
 
 Daily store health (`.runtime/store-health.jsonl`) reports citation coverage: per project the active findings whose citation this computer last checked to valid, drifted or broken, how many of those name a file, and per store the share of active findings that is.
 

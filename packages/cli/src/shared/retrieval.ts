@@ -22,7 +22,7 @@ import {
   filterTrustedFindingsDetailed,
 } from "./content.js";
 import { cachedCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
-import { checkFindingCitation, parseCitationComment, type CitationState, type FindingCitation } from "../content/citation.js";
+import { parseCitationComment, type CitationState, type FindingCitation } from "../content/citation.js";
 import { bulletKeyText, citationStateKey, readCitationStates, type CitationStates } from "../content/citation-states.js";
 import { getHighImpactFindings } from "../finding/impact.js";
 import { parseFindingLifecycle } from "../finding/lifecycle.js";
@@ -916,11 +916,10 @@ export function applyTrustFilter(
   const queueItems: TrustFilterQueueItem[] = [];
   const auditEntries: string[] = [];
   const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
-  // A citation that names its repo by remote takes the state this computer's daily sweep recorded: mapping a
-  // remote to a checkout scans folders and may start git, which the prompt path never does. Unrecorded is unverifiable.
+  // Every citation takes the state this computer's daily sweep recorded: checking a repo path or mapping a remote
+  // to a checkout starts git, which the prompt path never does. Unrecorded is unverifiable.
   let recorded: CitationStates | undefined;
-  const citationState = (file: string | undefined) => (citation: FindingCitation, bullet: string): CitationState | undefined => {
-    if (!citation.remote) return checkFindingCitation(citation);
+  const citationState = (file: string | undefined) => (_citation: FindingCitation, bullet: string): CitationState | undefined => {
     if (!phrenPath || !file) return undefined;
     recorded ??= readCitationStates(phrenPath);
     return recorded[citationStateKey(file, bullet)]?.state;
@@ -938,12 +937,8 @@ export function applyTrustFilter(
         project: doc.project,
         highImpactFindingIds,
         citationState: citationState(doc.path),
-        // Indexed content has no citation comments. A citation that names a remote is checked from the source file
-        // against the recorded state; a legacy one is left as before, unchecked on this path.
-        sourceCitation: (bullet) => {
-          const citation = parseCitationComment(citations.get(citationKey(bullet)) ?? "");
-          return citation?.remote ? citation : undefined;
-        },
+        // Indexed content has no citation comments, so each bullet's citation comes from the source file.
+        sourceCitation: (bullet) => parseCitationComment(citations.get(citationKey(bullet)) ?? "") ?? undefined,
       });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);

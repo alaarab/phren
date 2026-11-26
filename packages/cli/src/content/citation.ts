@@ -75,7 +75,7 @@ export interface TrustFilterOptions {
   citationState?: (citation: FindingCitation, bullet: string) => CitationState | undefined;
   /**
    * The citation of a bullet whose comment is not in `content` (the search index strips citation comments),
-   * checked like one on the next line. Whether the bullet counts as cited for its confidence still follows `content`.
+   * checked and counted as cited like one on the next line.
    */
   sourceCitation?: (bullet: string) => FindingCitation | undefined;
 }
@@ -427,6 +427,11 @@ export function checkFindingCitation(citation: FindingCitation, opts: CitationCh
   return fileState(citation.repo, resolvedFile, citation);
 }
 
+/** True when a citation names code: a repo, a file or a symbol. A bare `created_at`, which every new finding has, is no evidence. */
+function citationNamesCode(citation: FindingCitation): boolean {
+  return Boolean(citation.repo || citation.remote || citation.file || citation.symbol);
+}
+
 /** False only when this computer knows the citation is broken or its line drifted; one it cannot check passes. */
 export function validateFindingCitation(citation: FindingCitation, opts: CitationCheckOptions = {}): boolean {
   const state = checkFindingCitation(citation, opts);
@@ -618,7 +623,8 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
       confidence *= 0.7;
     }
 
-    if (!citation) confidence *= 0.8;
+    // Uncited: no citation, or one that names no code.
+    if (!checked || !citationNamesCode(checked)) confidence *= 0.8;
     if (project && highImpactFindingIds?.size) {
       const findingId = findingIdFromLine(line);
       if (highImpactFindingIds.has(findingId)) confidence *= 1.15;
