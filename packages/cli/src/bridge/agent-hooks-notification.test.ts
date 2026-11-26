@@ -45,6 +45,7 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
   let root: string, file: string, hooks: AgentHooks, pane: Json, screen: string, snapshotValue: Json;
   const clients: Client[] = [];
   let modules: ReturnType<typeof activateModules>;
+  const listCheckpoints = () => checkpointRoute(String(pane.foreground_cwd), target, "list", {}, async () => pane);
   beforeEach(async () => {
     trace.length = 0;
     session = randomUUID(); target.session = session;
@@ -79,9 +80,14 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
   });
   afterEach(async () => {
     for (const client of clients.splice(0)) client.close();
-    hooks.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();
-    // A git child can still be writing objects at teardown; retry instead of failing on ENOTEMPTY.
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      hooks.close();
+      // Listing joins the worktree's queue and waits for background checkpoint writes.
+      await listCheckpoints();
+    } finally {
+      vi.restoreAllMocks(); vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
   });
   async function forward(mode: string, value: Json) {
     const payload = { session_id: session, cwd: pane.foreground_cwd, ...value };
@@ -240,8 +246,7 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
   it.each(["full", "fast"])("%s forwarder preserves generation, deliveries, checkpoints and replyless final Stop", async mode => {
     await forward(mode, { hook_event_name: "UserPromptSubmit", prompt });
     const initial = (await readTurn("default", "w1:p1"))!;
-    const checkpoints = () => checkpointRoute(String(pane.foreground_cwd), target, "list", {}, async () => pane);
-    const before = await checkpoints();
+    const before = await listCheckpoints();
     expect((before as Json).checkpoints).toHaveLength(1);
     await writeFile(path.join(String(pane.foreground_cwd), "changed.txt"), "Do not checkpoint a notification");
     const pending = hooks.deliveries.expect(target, notice.message.content, 0, undefined, "unrelated-delivery", "term-1");
@@ -260,7 +265,7 @@ describe.skipIf(process.platform === "win32")("Claude notification production re
       await forward(mode, { hook_event_name: "UserPromptSubmit", prompt: row.type === "attachment" ? row.attachment!.prompt : row.message!.content });
       expect((await readTurn("default", "w1:p1"))!.prompt).toEqual(initial.prompt);
     }
-    expect(await checkpoints()).toEqual(before);
+    expect(await listCheckpoints()).toEqual(before);
     await forward(mode, { hook_event_name: "UserPromptSubmit", prompt: "unresolved ordinary text" });
     expect((await readTurn("default", "w1:p1"))!.prompt).toEqual(initial.prompt);
     // Available origin must also survive either forwarder with no matching row.
