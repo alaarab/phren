@@ -76,6 +76,23 @@ print aggregates, and per-case `--out <file>` is allowed only outside the
 repository. Use `--write-baseline` to record the public fixture's score and
 `--check` to detect changes; baselines omit machine-dependent timings.
 
+Judged precision asks whether each injected snippet was useful for its prompt.
+Each (case prompt, snippet) pair is looked up in a JSONL cache of judgments
+(`relevant`, `partial` or `irrelevant`, plus a one-line reason), keyed by a hash
+of the prompt and the snippet text without comments or dates. Precision is
+relevant pairs, plus half the partial ones, over judged pairs; the summary also
+counts unjudged pairs. The eval never calls a model. The public cache is
+`packages/cli/fixtures/recall-eval/judgments.jsonl`; a private run reads its own
+with `--judgments <file>`, kept outside the repository. `--list-unjudged <file>`
+(outside the repository) writes the rubric and each unjudged pair with its key;
+a judge appends `{"key", "judgment", "reason"}` rows to the cache, and a later
+row for a key replaces an earlier one. The rubric, also the cache's first row:
+judge the snippet against the prompt alone, not the case's known item.
+`relevant` answers the prompt or states something the agent would act on;
+`partial` is on the prompt's subject without answering it; `irrelevant` shares
+words or the project but not the subject. `--check` fails on any change except
+judged precision, which fails only when it drops more than 2 points.
+
 These variables control how much memory context the `hook-prompt` injects into each prompt:
 
 | Variable | Default | Range | Effect |

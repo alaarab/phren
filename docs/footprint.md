@@ -329,15 +329,21 @@ nothing to that checkout.
   age-out is on, removed when it is off; local runtime state, never synced.
 - `<store>/.runtime/recall-trace.jsonl` holds one line per prompt the prompt hook
   saw: the start of the prompt (160 characters), its keywords, which memories
-  passed or failed the relevance floor and why, what was injected, or why
-  nothing was. Kept to the newest 5,000 lines once it passes 4 MB; local
-  runtime state, never synced.
+  passed or failed the relevance floor and why, what was injected (with the id
+  clanker mode printed for it), or why nothing was. Kept to the newest 5,000
+  lines once it passes 4 MB; local runtime state, never synced.
+- `<store>/.runtime/memory-detail-opens.jsonl` holds one line per
+  `get_memory_detail` call made in a Claude Code session: the time, the session
+  id Claude Code gives the MCP server and the id fetched. Daily store health
+  pairs it with the trace to count the clanker ids a session opened. Kept to the
+  newest 5,000 lines once it passes 1 MB; local runtime state, never synced.
 - `<primary store>/.runtime/store-health.jsonl` holds daily counts of findings,
   citations (with the share checkable on this computer), tasks and review entries for this computer's stores, primary runtime
   file sizes by folder and by class (code indexes, fanout archive, live fanouts,
   sessions, packages, logs, other), the components over their budgets and what
   each budget stops, what runtime age-out removed or would remove, and the last
-  24 hours of recall counts. Kept to the newest 400 lines; local runtime state,
+  24 hours of recall counts, including how many clanker ids were injected and
+  how many of those the same session opened. Kept to the newest 400 lines; local runtime state,
   never synced.
 - `<store>/.sessions/recall-seen-<session>.json` holds, for one session, how
   many prompts the prompt hook has answered and a short hash of each memory

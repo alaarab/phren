@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- The recall eval reports judged precision: how many injected snippets were useful for their prompt, from cached relevance judgments (partial counts half), with the number of pairs not judged yet. It never calls a model. `--list-unjudged <file>` writes the pairs a judge still has to answer, `--judgments <file>` points a private run at its own cache, and `--check` fails when precision drops more than 2 points. The public fixture's judgments are committed beside its cases.
+- Daily store health counts the ids clanker mode injected and how many of them the same session opened with `get_memory_detail`. The prompt hook's trace now keeps each printed id, and `get_memory_detail` calls in a Claude Code session are logged to `.runtime/memory-detail-opens.jsonl`.
+
 ### Changed
 
 - The prompt hook now shows which prompt words matched the memories it injected, up to eight words with a count of the rest. Clanker mode shows the same words in one short line after its index.

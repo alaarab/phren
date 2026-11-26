@@ -96,7 +96,8 @@ import { runPromptPipeline } from "../recall/pipeline.js";
 import { isMachinePrompt } from "../recall/prompt-source.js";
 import { recordRecallTrace, skippedTraceEntry, traceEntryFromResult } from "../recall/trace.js";
 import { readRecallSeen, recentlyInjected, writeRecallSeen } from "../recall/repeat.js";
-import { buildHookOutput } from "./hooks-output.js";
+import { buildHookOutput, compactRowId, COMPACT_INDEX_ROWS } from "./hooks-output.js";
+import { clankerEnabled } from "../clanker.js";
 import {
   getGitContext,
   trackSessionMetrics,
@@ -336,8 +337,11 @@ export async function handleHookPrompt() {
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
     }
 
+    // Clanker mode prints an id per index row; the trace keeps it so opens can be matched to injections.
+    const clanker = clankerEnabled(getPhrenPath());
     recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result,
-      budgetSelected.map((s) => ({ project: s.doc.project, filename: s.doc.filename, type: s.doc.type, path: s.doc.path, key: s.key })),
+      budgetSelected.map((s, i) => ({ project: s.doc.project, filename: s.doc.filename, type: s.doc.type, path: s.doc.path, key: s.key,
+        ...(clanker && i < COMPACT_INDEX_ROWS ? { id: compactRowId(s, getPhrenPath()) } : {}) })),
       { session: sessionId, indexMs, taskCapturePaused: paused }));
 
     // Live activity: what a prompt pulled in is a recall as much as a search

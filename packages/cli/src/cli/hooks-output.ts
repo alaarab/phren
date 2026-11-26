@@ -14,7 +14,7 @@ import {
   extractFindingIdsFromSnippet,
 } from "../finding/impact.js";
 import { errorMessage } from "../utils.js";
-import { HOOK_TITLE_CHARS, clankerEnabled, docEntries, queryTerms, rowKeywords, rowTitle, termScore } from "../clanker.js";
+import { HOOK_TITLE_CHARS, clankerEnabled, docEntries, queryTerms, rowKeywords, rowTitle, termScore, type DocEntry } from "../clanker.js";
 import { annotateStale } from "./hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "../shared/retrieval.js";
 import { approximateTokens, fileRelevanceBoost, branchMatchBoost, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
@@ -22,22 +22,32 @@ import { logger } from "../logger.js";
 
 // ── Clanker mode: compact index ──────────────────────────────────────────────
 
+// The finding or task a one-bullet snippet is, matched by its start since the budget often cuts the id comment.
+function compactEntry({ doc, snippet }: SelectedSnippet): DocEntry | undefined {
+  const bullets = snippet.split("\n").filter((l) => /^-\s/.test(l));
+  const prefix = bullets.length === 1 ? bullets[0].replace(/ \[may be out of date:[\s\S]*$/, "").replace(/…$/, "").slice(0, 120) : "";
+  return prefix ? docEntries(doc.content).find((e) => e.line.startsWith(prefix)) : undefined;
+}
+
+/** Rows the clanker index prints at most. */
+export const COMPACT_INDEX_ROWS = 8;
+
+/** The id a compact index row prints: the entry's `fid:`/`bid:`, else the doc's `mem:` key. */
+export function compactRowId(selected: SelectedSnippet, phrenPathLocal: string, entry = compactEntry(selected)): string {
+  return entry ? entry.id : `mem:${getDocSourceKey(selected.doc, phrenPathLocal)}`;
+}
+
 function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string, terms: string[]): string[] {
   const lines: string[] = [];
   const options = new Map<string, CitationFreshnessOptions>();
-  for (const { doc, snippet, key } of selected) {
-    // A snippet that is one finding or task gets that entry's own id, so
-    // expanding it returns the entry rather than the whole file.
-    // Snippets are cut at a character budget, which often drops the id
-    // comment at the end of a long bullet, so match the bullet in the doc.
+  for (const row of selected) {
+    const { doc, snippet, key } = row;
     const textLines = snippet.split("\n").filter((l) => l.trim() && !l.trim().startsWith("<!--"));
     // The line that matched most of the prompt, skipping headings and table rules.
     const candidates = textLines.filter((l) => !/^\s*(#|\|?[\s:|-]+\|?\s*$)/.test(l));
     const firstLine = candidates.reduce<string | undefined>((best, l) => (best === undefined || termScore(l, terms) > termScore(best, terms) ? l : best), undefined) ?? textLines[0] ?? "";
-    const bullets = snippet.split("\n").filter((l) => /^-\s/.test(l));
-    const prefix = bullets.length === 1 ? bullets[0].replace(/ \[may be out of date:[\s\S]*$/, "").replace(/…$/, "").slice(0, 120) : "";
-    const entry = prefix ? docEntries(doc.content).find((e) => e.line.startsWith(prefix)) : undefined;
-    const id = entry ? entry.id : `mem:${getDocSourceKey(doc, phrenPathLocal)}`;
+    const entry = compactEntry(row);
+    const id = compactRowId(row, phrenPathLocal, entry);
     const text = (entry ? entry.line : firstLine).replace(/ \[may be out of date:[\s\S]*$/, "");
     const citation = entry ? entry.text.split("\n").map(parseCitationComment).find(cite => cite !== null)
       : parseCitationComment(snippet.split("\n")[snippet.split("\n").indexOf(firstLine) + 1] ?? "");
@@ -86,7 +96,7 @@ export function buildHookOutput(
 
   const clanker = clankerEnabled(phrenPathLocal);
   if (clanker) {
-    const indexEntries = selected.slice(0, 8);
+    const indexEntries = selected.slice(0, COMPACT_INDEX_ROWS);
     const indexLines = buildCompactIndex(indexEntries, phrenPathLocal, queryTerms(keywords ?? ""));
     parts.push("Index (get_memory_detail id=<id> for full text):");
     for (const line of indexLines) {

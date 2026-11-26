@@ -40,8 +40,8 @@ export interface RecallTraceEntry {
   abstained?: string | null;
   candidates?: number;
   floor?: RecallTraceFloorRow[];
-  /** Store-relative paths and score keys of what was injected, after the summary block and budget trim. */
-  injected?: Array<{ path: string; key: string; type: string }>;
+  /** Store-relative paths and score keys of what was injected, after the summary block and budget trim; `id` is what clanker mode printed. */
+  injected?: Array<{ path: string; key: string; type: string; id?: string }>;
   /** Rows skipped because this session injected their bullet within the repeat window. */
   suppressedRepeats?: number;
   tokens?: number;
@@ -74,7 +74,7 @@ export function traceEntryFromResult(
   phrenPath: string,
   prompt: string,
   result: RecallResult,
-  injected: Array<RecallDocRef & { key: string }>,
+  injected: Array<RecallDocRef & { key: string; id?: string }>,
   extra: { session?: string; indexMs?: number; taskCapturePaused?: { open: number; budget: number } } = {},
 ): RecallTraceEntry {
   return {
@@ -95,7 +95,7 @@ export function traceEntryFromResult(
       overlap: round(row.overlap),
       matched: row.matched,
     })),
-    injected: injected.map((row) => ({ path: storeRelative(phrenPath, row.path), key: row.key, type: row.type })),
+    injected: injected.map((row) => ({ path: storeRelative(phrenPath, row.path), key: row.key, type: row.type, ...(row.id ? { id: row.id } : {}) })),
     suppressedRepeats: result.suppressedRepeats,
     tokens: result.usedTokens,
     budget: result.tokenBudget,
@@ -109,40 +109,70 @@ export function skippedTraceEntry(prompt: string, skipped: RecallSkipReason, pro
   return { at: new Date().toISOString(), ...(session ? { session } : {}), project, prompt: clampPrompt(prompt), skipped };
 }
 
-/** Append one entry. Best-effort: a trace failure never breaks the hook. */
-export function recordRecallTrace(phrenPath: string, entry: RecallTraceEntry): void {
-  const file = recallTraceFile(phrenPath);
+// Best-effort append, trimmed to the newest lines past the byte cap: a log failure never breaks the hook or a tool.
+function appendCapped(file: string, entry: unknown, rotateBytes: number, maxLines: number): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
   } catch (err: unknown) {
-    debugLog(`recordRecallTrace write failed: ${errorMessage(err)}`);
+    debugLog(`${path.basename(file)} write failed: ${errorMessage(err)}`);
     return;
   }
   try {
-    if (fs.statSync(file).size <= ROTATE_BYTES) return;
-    const kept = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).slice(-MAX_TRACE_LINES);
+    if (fs.statSync(file).size <= rotateBytes) return;
+    const kept = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).slice(-maxLines);
     const tmp = `${file}.tmp-${process.pid}`;
     fs.writeFileSync(tmp, `${kept.join("\n")}\n`);
     fs.renameSync(tmp, file);
   } catch (err: unknown) {
-    debugLog(`recordRecallTrace rotation failed: ${errorMessage(err)}`);
+    debugLog(`${path.basename(file)} rotation failed: ${errorMessage(err)}`);
   }
+}
+
+// Every parsed line with a string `at`, oldest first; a torn line from a concurrent append is skipped.
+function readLines<T extends { at: string }>(file: string): T[] {
+  if (!fs.existsSync(file)) return [];
+  const out: T[] = [];
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line) continue;
+    try {
+      const parsed = JSON.parse(line) as T;
+      if (parsed && typeof parsed.at === "string") out.push(parsed);
+    } catch { /* torn line */ }
+  }
+  return out;
+}
+
+/** Append one entry. Best-effort: a trace failure never breaks the hook. */
+export function recordRecallTrace(phrenPath: string, entry: RecallTraceEntry): void {
+  appendCapped(recallTraceFile(phrenPath), entry, ROTATE_BYTES, MAX_TRACE_LINES);
 }
 
 /** Every parsed entry, oldest first; malformed lines are skipped. */
 export function readRecallTrace(phrenPath: string): RecallTraceEntry[] {
-  const file = recallTraceFile(phrenPath);
-  if (!fs.existsSync(file)) return [];
-  const out: RecallTraceEntry[] = [];
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    if (!line) continue;
-    try {
-      const parsed = JSON.parse(line) as RecallTraceEntry;
-      if (parsed && typeof parsed.at === "string") out.push(parsed);
-    } catch {
-      // A torn line from a concurrent append: skip it.
-    }
-  }
-  return out;
+  return readLines<RecallTraceEntry>(recallTraceFile(phrenPath));
+}
+
+// ── Opens: which ids an agent fetched with get_memory_detail, per session, to pair with clanker injections ──
+
+const OPENS_FILE = "memory-detail-opens.jsonl";
+const OPENS_ROTATE_BYTES = 1_000_000;
+
+export interface MemoryOpenEntry {
+  at: string;
+  session: string;
+  id: string;
+}
+
+export function memoryOpensFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), OPENS_FILE);
+}
+
+/** One get_memory_detail call; Claude Code passes its session id to the MCP server, and without one there is nothing to pair. */
+export function recordMemoryOpen(phrenPath: string, id: string, session = process.env.CLAUDE_CODE_SESSION_ID): void {
+  if (session) appendCapped(memoryOpensFile(phrenPath), { at: new Date().toISOString(), session, id }, OPENS_ROTATE_BYTES, MAX_TRACE_LINES);
+}
+
+export function readMemoryOpens(phrenPath: string): MemoryOpenEntry[] {
+  return readLines<MemoryOpenEntry>(memoryOpensFile(phrenPath));
 }

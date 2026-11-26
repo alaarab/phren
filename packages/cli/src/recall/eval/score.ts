@@ -1,5 +1,6 @@
 import type { RecallResult } from "../types.js";
 import { RECALL_NEGATIVE_CLASSES, RECALL_TIERS, type RecallEvalCase } from "./cases.js";
+import { judgmentPairs, type RecallJudgments } from "./judgments.js";
 
 export interface RecallEvalRow {
   case: RecallEvalCase;
@@ -18,6 +19,10 @@ export interface RecallScore {
   positiveAbstainRate: number;
   retiredInjected: number;
   meanUsedTokens: number;
+  judgedPairs: number;
+  unjudgedPairs: number;
+  /** Relevant plus half of partial, over judged (case, injected snippet) pairs. */
+  judgedPrecision: number;
   p50StageMs: number;
   p95StageMs: number;
 }
@@ -32,7 +37,7 @@ function hit(row: RecallEvalRow): boolean {
   });
 }
 
-export function scoreRecall(rows: RecallEvalRow[], fixture: { retiredTexts: string[] }): RecallScore {
+export function scoreRecall(rows: RecallEvalRow[], fixture: { retiredTexts: string[]; judgments?: RecallJudgments }): RecallScore {
   const negatives = rows.filter(row => row.case.kind === "negative");
   const positives = rows.filter(row => row.case.kind === "positive");
   const injected = rows.filter(row => row.result.selected.length > 0);
@@ -43,6 +48,9 @@ export function scoreRecall(rows: RecallEvalRow[], fixture: { retiredTexts: stri
   // Nearest-rank percentiles keep measured timings rather than interpolating them.
   const percentile = (p: number) => timings.length ? timings[Math.ceil(p * timings.length) - 1] : 0;
   const retired = fixture.retiredTexts.map(normalize).filter(Boolean);
+  const pairs = judgmentPairs(rows);
+  const judged = pairs.flatMap(pair => fixture.judgments?.get(pair.key)?.judgment ?? []);
+  const relevance = judged.reduce((sum, judgment) => sum + (judgment === "relevant" ? 1 : judgment === "partial" ? 0.5 : 0), 0);
   return {
     cases: rows.length,
     negatives: negatives.length,
@@ -55,6 +63,9 @@ export function scoreRecall(rows: RecallEvalRow[], fixture: { retiredTexts: stri
     positiveAbstainRate: abstainRate(positives),
     retiredInjected: rows.reduce((count, row) => count + row.result.selected.filter(selected => retired.some(text => normalize(selected.snippet).includes(text))).length, 0),
     meanUsedTokens: rate(injected.reduce((sum, row) => sum + row.result.usedTokens, 0), injected.length),
+    judgedPairs: judged.length,
+    unjudgedPairs: pairs.length - judged.length,
+    judgedPrecision: rate(relevance, judged.length),
     p50StageMs: percentile(0.5),
     p95StageMs: percentile(0.95),
   };
@@ -73,6 +84,7 @@ export function formatRecallScore(score: RecallScore): string {
     line("Abstain / positive abstain", `${percent(score.abstainRate)} / ${percent(score.positiveAbstainRate)}`),
     line("Retired snippets injected", String(score.retiredInjected)),
     line("Mean tokens when injecting", score.meanUsedTokens.toFixed(2)),
+    line("Judged precision / unjudged", `${percent(score.judgedPrecision)} of ${score.judgedPairs} / ${score.unjudgedPairs}`),
     line("Total stage ms p50 / p95", `${score.p50StageMs.toFixed(2)} / ${score.p95StageMs.toFixed(2)}`),
   ].join("\n");
 }
@@ -89,6 +101,14 @@ export interface RecallMetricDelta {
   baseline: number | null;
   current: number | null;
   delta: number | null;
+}
+
+/** Judged precision moves when judgments are added or revised, so only a drop of more than two points fails a check. */
+export const PRECISION_DROP_TOLERANCE = 0.02;
+
+export function failsCheck(row: RecallMetricDelta): boolean {
+  if (row.metric === "judgedPrecision" && row.delta !== null) return row.delta < -PRECISION_DROP_TOLERANCE;
+  return row.delta !== 0;
 }
 
 export function compareToBaseline(score: RecallScore, baseline: RecallBaseline): RecallMetricDelta[] {
