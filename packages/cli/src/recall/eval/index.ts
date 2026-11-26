@@ -39,13 +39,16 @@ const ENV_KEYS = [
 let running = false;
 const FIXTURE_PROFILE = "recall";
 
-function swapEnv(phrenPath: string, root: string, profile: string): () => void {
+function swapEnv(phrenPath: string, root: string, profile: string, embeddings: boolean): () => void {
   const keys = new Set([...ENV_KEYS, ...Object.keys(process.env).filter(key => /^PHREN_(FEATURE_|.*EMBED|OLLAMA)/.test(key))]);
   const saved = new Map([...keys].map(key => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
   process.env.PHREN_PATH = phrenPath;
   // The hook indexes with this computer's profile; without one the reserved `global` folder is never searched.
   if (profile) process.env.PHREN_PROFILE = profile;
+  // The vector tier uses whatever embedding backend answers (Ollama on localhost by default), which
+  // varies by computer; off unless asked, so a baseline means the same thing everywhere.
+  if (!embeddings) process.env.PHREN_OLLAMA_URL = process.env.PHREN_EMBEDDING_API_URL = "off";
   // Keep implicit home-store reads and the indexer's temporary cache inside this run.
   process.env.HOME = process.env.USERPROFILE = path.join(root, "home");
   process.env.TMPDIR = process.env.TMP = process.env.TEMP = path.join(root, "tmp");
@@ -64,8 +67,8 @@ export interface RecallEvalReport {
   rows: RecallEvalRow[];
 }
 
-async function runCases(runner: RecallRunner, cases: RecallEvalCase[], phrenPath: string, retiredTexts: string[], root: string, profile: string): Promise<RecallEvalReport> {
-  const restore = swapEnv(phrenPath, root, profile);
+async function runCases(runner: RecallRunner, cases: RecallEvalCase[], phrenPath: string, retiredTexts: string[], root: string, profile: string, embeddings = false): Promise<RecallEvalReport> {
+  const restore = swapEnv(phrenPath, root, profile, embeddings);
   let db: SqlJsDatabase | undefined;
   try {
     db = await buildIndex(phrenPath, profile || undefined, { force: true });
@@ -93,7 +96,7 @@ export async function runRecallEval(options: { runner: RecallRunner; cases?: Rec
   }
 }
 
-export async function runRecallStoreEval(options: { runner: RecallRunner; cases: RecallEvalCase[]; phrenPath: string; profile?: string }): Promise<RecallEvalReport> {
+export async function runRecallStoreEval(options: { runner: RecallRunner; cases: RecallEvalCase[]; phrenPath: string; profile?: string; embeddings?: boolean }): Promise<RecallEvalReport> {
   if (running) throw new Error("Recall eval changes process environment; run evaluations sequentially");
   const phrenPath = fs.realpathSync(options.phrenPath);
   if (!fs.statSync(phrenPath).isDirectory()) throw new Error("Store must be a directory");
@@ -103,7 +106,7 @@ export async function runRecallStoreEval(options: { runner: RecallRunner; cases:
   const root = fs.mkdtempSync(path.join(SCRATCH, "recall-private-"));
   running = true;
   try {
-    return await runCases(options.runner, options.cases, phrenPath, [], root, profile);
+    return await runCases(options.runner, options.cases, phrenPath, [], root, profile, options.embeddings);
   } finally {
     running = false;
     fs.rmSync(root, { recursive: true, force: true });
