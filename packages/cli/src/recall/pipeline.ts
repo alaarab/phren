@@ -99,8 +99,10 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   result.trustSurvivors = rows.length;
   if (!rows.length) return abstain("trust-filtered");
 
+  // Long prompts already scored their words when choosing keywords; ranking, the floor and selection share it.
+  rarity ??= promptRarity(db, keywords);
   const tRank0 = Date.now();
-  rows = rankResults(rows, intent, gitCtx, detectedProject, phrenPath, db, cwd, keywords, undefined,
+  rows = rankResults(rows, intent, gitCtx, detectedProject, phrenPath, db, cwd, keywords, { rarity },
     (row, score) => result.candidates.push({ ...docRef(row), score }));
   result.stageMs.rankMs = Date.now() - tRank0;
   if (!rows.length) return abstain("ranked-empty");
@@ -111,7 +113,6 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
   const preFloorCount = rows.length;
   debugLog(`relevance-floor candidates: ${rows.slice(0, 12).map((row) => `${row.project}/${row.filename}`).join(", ")}`);
-  rarity ??= promptRarity(db, keywords);
   rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, rarity,
     (row, decision) => result.floor.push({ ...docRef(row), ...decision }));
   if (rows.length !== preFloorCount) {

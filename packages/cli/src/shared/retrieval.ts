@@ -268,14 +268,29 @@ export function contentChunks(content: string, maxChunks = 600): string[] {
 
 export interface ChunkMatch { chunk: string; distinct: number; rarity: number; matched: string[] }
 
+// Ranking, the floor and selection read the same rows within one prompt: split each row once, tokenise a chunk once.
+type CachedChunk = { chunk: string; lower: string; tokens?: Set<string> };
+const chunkCache = new WeakMap<object, { content: string; chunks: CachedChunk[] }>();
+
+function cachedChunks(doc: Pick<DocRow, "content">): CachedChunk[] {
+  const cached = chunkCache.get(doc);
+  if (cached && cached.content === doc.content) return cached.chunks;
+  const chunks = contentChunks(doc.content).map((chunk) => ({ chunk, lower: chunk.toLowerCase() }));
+  chunkCache.set(doc, { content: doc.content, chunks });
+  return chunks;
+}
+
 /** The doc's best chunk for this prompt: most summed keyword rarity among
  * chunks with the most distinct keyword matches. */
 export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content">, rarity?: Map<string, number>): ChunkMatch | null {
   if (!queryTokens.length) return null;
   const wanted = new Set(queryTokens);
   let best: ChunkMatch | null = null;
-  for (const chunk of contentChunks(doc.content)) {
-    const tokens = new Set(tokenizeForOverlap(chunk, Number.POSITIVE_INFINITY));
+  for (const entry of cachedChunks(doc)) {
+    // A chunk's tokens are substrings of its lowercase text, so one containing no keyword matches none.
+    if (!queryTokens.some((token) => entry.lower.includes(token))) continue;
+    entry.tokens ??= new Set(tokenizeForOverlap(entry.chunk, Number.POSITIVE_INFINITY));
+    const { chunk, tokens } = entry;
     const matched: string[] = [];
     let weight = 0;
     for (const token of wanted) {
@@ -288,6 +303,13 @@ export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content
     if (!best || weight > best.rarity || (weight === best.rarity && distinct > best.distinct)) best = { chunk, distinct, rarity: weight, matched };
   }
   return best;
+}
+
+/** Overlap of the doc's name and its best chunk: a topic archive of hundreds of
+ * bullets ranks by the bullet the floor and selection use, not by its first pages. */
+function bestChunkOverlapScore(queryTokens: string[], doc: DocRow, rarity?: Map<string, number>): number {
+  const match = bestChunkMatch(queryTokens, doc, rarity);
+  return overlapScore(queryTokens, `${doc.project} ${doc.filename} ${doc.type}\n${match?.chunk ?? ""}`);
 }
 
 /** How rare each prompt token is across the index: normalised IDF, 1 for a
@@ -958,7 +980,8 @@ export function rankResults(
   db: SqlJsDatabase,
   cwd?: string,
   query?: string,
-  opts?: { filterType?: string | null; skipTaskFilter?: boolean },
+  /** `rarity`: the prompt's keyword rarity, so a doc's best chunk is the one the floor will judge. */
+  opts?: { filterType?: string | null; skipTaskFilter?: boolean; rarity?: Map<string, number> },
   explain?: (row: DocRow, score: number) => void
 ): DocRow[] {
   let ranked = [...rows];
@@ -1038,7 +1061,7 @@ export function rankResults(
     const fileRel = fileRelevanceBoost(doc.path, changedFiles);
     const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
     const qualityMult = getQualityMultiplier(phrenPathLocal, key);
-    const queryOverlap = queryTokens.length > 0 ? docOverlapScore(queryTokens, doc) : 0;
+    const queryOverlap = queryTokens.length > 0 ? bestChunkOverlapScore(queryTokens, doc, opts?.rarity) : 0;
     const queryOverlapWeight = detectedProject && doc.project === detectedProject
       ? LOCAL_QUERY_OVERLAP_WEIGHT
       : CROSS_PROJECT_QUERY_OVERLAP_WEIGHT;
