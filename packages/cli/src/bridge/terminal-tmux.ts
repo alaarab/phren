@@ -13,6 +13,7 @@ import { browserEnv } from "./browser-env.js";
 // argument array: text from the phone reaches tmux as an argument or on
 // stdin, never through a shell.
 import { execFile } from "node:child_process";
+import { startProbe } from "./probe-processes.js";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { hostname, tmpdir, userInfo } from "node:os";
@@ -149,18 +150,18 @@ const defaultDeps: TmuxDeps = {
     if (!binary) { reject(new BridgeError(503, "tmux is not installed on this computer.")); return; }
     // -u: without a UTF-8 locale (launchd and systemd services often have
     // none) tmux 3.7 prints a format's tabs as "_" and no pane parses.
-    const child = execFile(binary, ["-u", ...socketFlags(socket), ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
-      (error, stdout, stderr) => { if (error) reject(tmuxError(String(stderr), error)); else resolve(String(stdout)); });
+    const child = startProbe(() => execFile(binary, ["-u", ...socketFlags(socket), ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
+      (error, stdout, stderr) => { if (error) reject(tmuxError(String(stderr), error)); else resolve(String(stdout)); }));
     if (options.input !== undefined) child.stdin?.end(options.input); else child.stdin?.end();
   }),
   processes: () => new Promise(resolve => {
-    execFile("ps", ["-A", "-o", "pid=,pgid=,tpgid=,tty=,args="], { timeout: 3_000, maxBuffer: 8_388_608, env: { ...process.env, LC_ALL: "C" } },
-      (error, stdout) => resolve(error ? "" : String(stdout)));
+    startProbe(() => execFile("ps", ["-A", "-o", "pid=,pgid=,tpgid=,tty=,args="], { timeout: 3_000, maxBuffer: 8_388_608, env: { ...process.env, LC_ALL: "C" } },
+      (error, stdout) => resolve(error ? "" : String(stdout))));
   }),
   version: () => new Promise(resolve => {
     const binary = tmuxBinary();
     if (!binary) { resolve(""); return; }
-    execFile(binary, ["-V"], { timeout: 3_000 }, (error, stdout) => resolve(error ? "" : String(stdout)));
+    startProbe(() => execFile(binary, ["-V"], { timeout: 3_000 }, (error, stdout) => resolve(error ? "" : String(stdout))));
   }),
   sockets: async (strict = false) => (await Promise.all(tmuxSocketFolders().map(folder => tmuxSocketsIn(folder, strict)))).flat(),
   sleep: (ms, signal) => new Promise((resolve, reject) => {

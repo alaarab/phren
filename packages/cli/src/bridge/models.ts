@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { startProbe } from "./probe-processes.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { claudeConfigDir } from "../home-paths.js";
@@ -16,7 +17,7 @@ export interface AgentModel {
 /** Only initialize and list. Never a thread, a prompt, or a login. */
 export function readCodexModels(executable = codexExecutable()): Promise<AgentModel[]> {
   return new Promise(resolve => {
-    const child = spawn(executable, ["app-server"], { cwd: homedir(), stdio: ["pipe", "pipe", "ignore"] });
+    const child = startProbe(() => spawn(executable, ["app-server"], { cwd: homedir(), stdio: ["pipe", "pipe", "ignore"] }));
     let pending = "", bytes = 0, initialized = false, done = false;
     const finish = (result: AgentModel[] = []) => {
       if (done) return; done = true;
@@ -147,7 +148,7 @@ function olderVersion(installed: string, required: string): boolean {
 /** The installed client's version, so a model it cannot run is not offered. */
 function claudeVersion(executable = "claude"): Promise<string | undefined> {
   return new Promise(resolve => {
-    const child = spawn(executable, ["--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] });
+    const child = startProbe(() => spawn(executable, ["--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] }));
     let out = "";
     // A version probe has no work to save. Terminate it even if a wrapper
     // ignores SIGTERM, so timed-out catalogue refreshes cannot leak children.
@@ -172,7 +173,7 @@ export async function readClaudeModels(configDir?: string, installed?: string | 
  * else under the gateway it came from; the configured default is marked. */
 export async function readOpenCodeModels(executable = "opencode", configDir = path.join(homedir(), ".config/opencode")): Promise<AgentModel[]> {
   const listed = await new Promise<string>(resolve => {
-    const child = spawn(executable, ["models"], { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] });
+    const child = startProbe(() => spawn(executable, ["models"], { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] }));
     let out = "", done = false;
     const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };
     const timer = setTimeout(() => { child.kill("SIGTERM"); finish(); }, 12_000);
@@ -208,7 +209,7 @@ export async function readPhrenModels(command?: { file: string; args: string[] }
   const found = command ? undefined : (await import("../modules/agent-package.js")).findAgentPackage({ global: false });
   const run = command ?? (found ? { file: process.execPath, args: [found.bin, "models", "--json"] } : { file: "phren-agent", args: ["models", "--json"] });
   const listed = await new Promise<string>(resolve => {
-    const child = spawn(run.file, run.args, { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] });
+    const child = startProbe(() => spawn(run.file, run.args, { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] }));
     let out = "", done = false;
     const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };
     const timer = setTimeout(() => { child.kill("SIGTERM"); finish(); }, 12_000);

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { execProbe } from "./probe-processes.js";
 import { chmod, lstat, mkdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -60,7 +61,8 @@ export interface DispatchClone extends DispatchClonePaths {
 const exec = promisify(execFile);
 async function git(args: string[], env: NodeJS.ProcessEnv = nonInteractiveGitEnv(process.env)): Promise<string> {
   countGit("dispatch-clone");
-  return (await exec("git", args, { timeout: 120_000, maxBuffer: 1_048_576, env })).stdout;
+  const run = args[2] === "config" && args[3] === "--get" ? execProbe : exec;
+  return (await run("git", args, { timeout: 120_000, maxBuffer: 1_048_576, env })).stdout;
 }
 
 function configValue(value: string): string {

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { execProbe } from "./probe-processes.js";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -163,7 +164,7 @@ export async function opencodeMajor(): Promise<number | undefined> {
   const live = await opencodeService();
   if (live) return Number.parseInt(live.version, 10);
   if (installed && Date.now() - installed.at < 300_000) return installed.major;
-  const major = exec("opencode", ["--version"], { timeout: 8_000, env: { ...process.env, NO_COLOR: "1" } })
+  const major = execProbe("opencode", ["--version"], { timeout: 8_000, env: { ...process.env, NO_COLOR: "1" } })
     .then(({ stdout }) => { const found = /(\d+)\.\d+/.exec(String(stdout))?.[1]; return found ? Number(found) : undefined; }, () => undefined);
   installed = { at: Date.now(), major };
   return major;

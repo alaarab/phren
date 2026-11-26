@@ -12,8 +12,11 @@ import { locateProject } from "./locate.js";
 import { BridgeError, type Json } from "./protocol.js";
 import { LookupCache } from "./lookup-cache.js";
 import { countGit } from "./metrics.js";
+import { execProbe } from "./probe-processes.js";
 
 const exec = promisify(execFile);
+const GIT_READS = new Set(["cat-file", "check-ignore", "check-ref-format", "diff", "diff-tree", "for-each-ref",
+  "log", "ls-files", "ls-tree", "rev-list", "rev-parse", "show", "show-ref", "status"]);
 interface GitReadBudget { deadline: number; controller: AbortController; pending: Set<Promise<unknown>> }
 const gitReadBudget = new AsyncLocalStorage<GitReadBudget>();
 const GIT_READ_MS = 10_000;
@@ -70,7 +73,14 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
   countGit("projects");
   let pending: Promise<{ stdout: string; stderr: string }> | undefined;
   try {
-    pending = exec("git", ["-C", cwd, "--no-pager", ...args], {
+    const [command, verb] = args;
+    const reading = GIT_READS.has(command) || (command === "branch" && verb === "--show-current")
+      || (command === "config" && args.includes("--get")) || (command === "remote" && args.length === 1)
+      || (command === "hash-object" && !args.includes("-w"))
+      || (command === "symbolic-ref" && !args.includes("--delete") && args.filter(arg => !arg.startsWith("-")).length === 2)
+      || (command === "worktree" && verb === "list") || (command === "submodule" && verb === "status")
+      || (command === "stash" && verb === "list");
+    pending = (reading ? execProbe : exec)("git", ["-C", cwd, "--no-pager", ...args], {
       timeout, maxBuffer: 4_194_304, env: checkoutGitEnv(),
       ...(budget ? { signal: budget.controller.signal, killSignal: "SIGKILL" as const } : {}),
     });
@@ -273,7 +283,7 @@ export async function repositoryBranch(cwd: string): Promise<string | undefined>
   let value: string | undefined;
   try {
     countGit("branch");
-    const { stdout } = await exec("git", ["-C", cwd, "--no-pager", "branch", "--show-current"], {
+    const { stdout } = await execProbe("git", ["-C", cwd, "--no-pager", "branch", "--show-current"], {
       timeout: 5_000, maxBuffer: 65_536, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" }),
     });
     value = stdout.trim().slice(0, 200) || undefined;
@@ -324,7 +334,7 @@ function addListener(ports: Map<string, LocalServer>, address: string, port: num
 
 /** Listening TCP sockets owned by this user, via lsof (always present on macOS). */
 async function listenersFromLsof(ports: Map<string, LocalServer>): Promise<void> {
-  const result = await exec(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
+  const result = await execProbe(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
     ["-nP", "-a", "-u", userInfo().username, "-iTCP", "-sTCP:LISTEN", "-Fpcn"], { timeout: 4000, maxBuffer: 1_048_576 });
   let pid: number | undefined, processName: string | undefined;
   for (const line of result.stdout.split("\n")) {
@@ -341,7 +351,7 @@ async function listenersFromLsof(ports: Map<string, LocalServer>): Promise<void>
  * lsof is absent (Arch/Omarchy, minimal containers). Lines look like
  * `LISTEN 0 512 *:3000 *:* users:(("bun",pid=123,fd=24))`. */
 async function listenersFromSs(ports: Map<string, LocalServer>): Promise<void> {
-  const result = await exec("ss", ["-ltnpH"], { timeout: 4000, maxBuffer: 1_048_576 });
+  const result = await execProbe("ss", ["-ltnpH"], { timeout: 4000, maxBuffer: 1_048_576 });
   for (const line of result.stdout.split("\n")) {
     const columns = line.trim().split(/\s+/);
     if (columns.length < 4) continue;

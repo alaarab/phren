@@ -8,6 +8,7 @@ import { z } from "zod";
 import { detectHost, providerFor, unknownHost, type MergeRequest } from "./git-hosts.js";
 import { writeHostToken } from "./git-host-auth.js";
 import { HostApiError, tokenDestination } from "./git-host-http.js";
+import { killProbeGroup, startProbe } from "./probe-processes.js";
 
 /** Finishing a session from the phone: commit what is staged, push the
  * current branch, open a pull request. Each acts on the repository the
@@ -39,10 +40,12 @@ export function runCombined(command: string, args: string[], cwd: string, timeou
     };
     // Its own process group, so a timeout reaches what a Git hook started too.
     const group = process.platform !== "win32";
-    const child = spawn(command, args, {
+    const launch = () => spawn(command, args, {
       cwd, stdio: ["ignore", "pipe", "pipe"], detached: group,
       env: nonInteractiveGitEnv({ ...process.env, ...extraEnv, GIT_CONFIG_NOSYSTEM: "1", GIT_EDITOR: "true", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1" }),
     });
+    const child = command === "gh" && (args[0] === "--version" || (args[0] === "auth" && args[1] === "status"))
+      ? startProbe(launch, killProbeGroup) : launch();
     const append = (chunk: Buffer) => {
       if (truncated) return;
       output += chunk.toString("utf8");

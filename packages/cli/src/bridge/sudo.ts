@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, readlinkSync } from "node:fs";
@@ -6,7 +5,7 @@ import { open, readdir, readFile, readlink, unlink } from "node:fs/promises";
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
 import { createConnection, createServer, type Socket } from "node:net";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { userInfo } from "node:os";
 import { atomic, bridgeRoot, object, type Json } from "./protocol.js";
 import { localSocket } from "./agent-hook-stores.js";
@@ -131,7 +130,6 @@ export interface ProcessRecord {
   /** When it started (procfs start ticks on Linux, `ps -o lstart` elsewhere), to distinguish a recycled pid. */
   started?: string;
 }
-const exec = promisify(execFile);
 /** One process's parent, effective uid, name and arguments. */
 export async function readProcess(pid: number): Promise<ProcessRecord | undefined> {
   if (!Number.isInteger(pid) || pid <= 1) return undefined;

@@ -1,7 +1,6 @@
-import { execFile } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { countGit } from "./metrics.js";
 
@@ -14,7 +13,6 @@ import { countGit } from "./metrics.js";
  * is not closed and the dispatcher nudges it on.
  */
 
-const exec = promisify(execFile);
 
 /** A sentence that announces work the turn never did: "Let me…", "I'll…",
  * "I need to…", or "Now" with a working verb. Whatever follows the subject in

@@ -85,6 +85,7 @@ import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.j
 import { localNames } from "./computer-names.js";
 import { startStoreSyncLoop } from "../sync/store-sync.js";
 import { SocketBudget, socketIdentity, socketKind } from "./socket-budget.js";
+import { stopProbes } from "./probe-processes.js";
 import { logger } from "../logger.js";
 
 export { capabilities, capabilitiesForModules, requireRoute } from "./server-routes.js";
@@ -447,7 +448,14 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(dreamTimer); clearInterval(taskWorkTimer); clearInterval(canaryTimer); clearInterval(healthTimer); clearInterval(housekeepingTimer); clearInterval(inventoryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => {
+      process.off("SIGTERM", stop); process.off("SIGINT", stop);
+      browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention();
+      for (const timer of [scheduleTimer, dreamTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
+      scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close();
+      ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections();
+      stopProbes();
+    };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

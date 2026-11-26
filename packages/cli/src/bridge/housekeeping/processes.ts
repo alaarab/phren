@@ -1,7 +1,6 @@
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "../probe-processes.js";
 import { redactSecretsForLog } from "../../content/secrets.js";
 import type { PaneRef, ProcessRow } from "../resources.js";
 import { actionId } from "./inventory.js";
@@ -18,7 +17,6 @@ import type { InventoryAction } from "./inventory.js";
  * conductor.
  */
 
-const exec = promisify(execFile);
 
 export interface InventoryProcess {
   id: string;

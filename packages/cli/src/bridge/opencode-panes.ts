@@ -1,6 +1,5 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe } from "./probe-processes.js";
 import { intervalFromEnv } from "./limits.js";
 import {
   freePort, listPaneServers, newPassword, type OpenCodePermission, type OpenCodeQuestion, openPaneClient, type PaneClient,
@@ -19,8 +18,6 @@ import { terminalProvider } from "./terminal.js";
  * password, process id and directory; a pane with no entry (one the owner
  * started by hand) keeps the typed path.
  */
-
-const exec = promisify(execFile);
 
 /** Set in a served pane's environment: the port its TUI listens on. The
  * OpenCode plugin leaves permission asks to the Hook's HTTP client when its
@@ -75,7 +72,7 @@ export function listensOn(command: string, port: number): boolean {
 }
 
 async function processTable(): Promise<Array<{ pid: number; command: string }>> {
-  const { stdout } = await exec("ps", ["-Aww", "-o", "pid=,command="], { timeout: 3_000, maxBuffer: 8_388_608 });
+  const { stdout } = await execProbe("ps", ["-Aww", "-o", "pid=,command="], { timeout: 3_000, maxBuffer: 8_388_608 });
   return String(stdout).split("\n").flatMap(line => {
     const match = /^\s*(\d+)\s+(.*)$/.exec(line);
     return match ? [{ pid: Number(match[1]), command: match[2] }] : [];

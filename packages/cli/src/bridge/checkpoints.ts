@@ -1,5 +1,6 @@
 /** Files-only turn checkpoints. Private, parentless commits never move the user's refs/index. */
 import { execFile } from "node:child_process";
+import { execProbe } from "./probe-processes.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, rmdirSync, unlinkSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { lstat, mkdtemp, open, readlink, realpath, rm } from "node:fs/promises";
@@ -59,7 +60,8 @@ async function context(cwd: string, target: Target, budget = 15_000): Promise<Co
   const runEnv = async (root: string, extra: NodeJS.ProcessEnv, ...args: string[]) => {
     const left = Math.floor(deadline - performance.now());
     if (left <= 0) throw new Error("Checkpoint time budget exceeded");
-    return (await exec("git", [...GIT_PATH_OPTIONS, "-C", root, "--no-pager", ...args], { env: { ...checkoutGitEnv(), ...extra }, timeout: left, killSignal: "SIGKILL", maxBuffer: 8_388_608 })).stdout;
+    const run = ["rev-parse", "for-each-ref", "ls-files", "diff-tree", "ls-tree", "check-ignore"].includes(args[0]) ? execProbe : exec;
+    return (await run("git", [...GIT_PATH_OPTIONS, "-C", root, "--no-pager", ...args], { env: { ...checkoutGitEnv(), ...extra }, timeout: left, killSignal: "SIGKILL", maxBuffer: 8_388_608 })).stdout;
   };
   const runAt = (root: string, ...args: string[]) => runEnv(root, {}, ...args);
   let root: string, dir: string, common: string;
@@ -83,7 +85,7 @@ async function context(cwd: string, target: Target, budget = 15_000): Promise<Co
         (error, stdout) => error ? reject(error) : resolve(stdout));
       child.stdin!.on("error", () => {}); child.stdin!.end(input);
     }),
-    bytes: async oid => { check(); return (await exec("git", [...GIT_PATH_OPTIONS, "-C", root, "cat-file", "blob", oid], { env: checkoutGitEnv(), encoding: "buffer", timeout: Math.max(1, Math.floor(deadline - performance.now())), maxBuffer: 8_388_608 })).stdout; },
+    bytes: async oid => { check(); return (await execProbe("git", [...GIT_PATH_OPTIONS, "-C", root, "cat-file", "blob", oid], { env: checkoutGitEnv(), encoding: "buffer", timeout: Math.max(1, Math.floor(deadline - performance.now())), maxBuffer: 8_388_608 })).stdout; },
     private: (index, ...args) => runEnv(root, { GIT_INDEX_FILE: index }, "-c", "core.fsmonitor=false", ...args) };
 }
 

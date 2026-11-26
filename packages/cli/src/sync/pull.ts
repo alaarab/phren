@@ -1,5 +1,5 @@
 /** Periodic, non-interactive remote checks for running MCP servers. */
-import { execFile } from "child_process";
+import { execFile, type ExecFileOptionsWithStringEncoding } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { promisify } from "util";
@@ -50,9 +50,10 @@ const execAsync = promisify(execFile);
 export const runPollGit: RunGit = (cwd, args) => runGitWithin(10_000, cwd, args);
 
 /** One Git command with its output, or its error once it fails or `timeout` passes. */
-export async function runGitWithin(timeout: number, cwd: string, args: string[]): Promise<GitResult> {
+export async function runGitWithin(timeout: number, cwd: string, args: string[],
+  run: (file: string, args: string[], options: ExecFileOptionsWithStringEncoding) => Promise<{ stdout: string }> = execAsync): Promise<GitResult> {
   try {
-    const { stdout } = await execAsync("git", args, {
+    const { stdout } = await run("git", args, {
       cwd, encoding: "utf8", timeout, maxBuffer: 64 * 1024 * 1024,
       env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0" }),
     });

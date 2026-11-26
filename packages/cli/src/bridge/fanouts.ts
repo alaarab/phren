@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { z } from "zod";
 import type { ChangedFile } from "./changes.js";
 import { type Json, object, type Provider, sessionId } from "./protocol.js";
@@ -24,7 +23,6 @@ export const ARCHIVE_MAX_FOLDERS = 500;
 export const ARCHIVE_MAX_BYTES = 512 * 1024 * 1024;
 const ARCHIVED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const WORKTREE_CACHE_MS = 15_000;
-const exec = promisify(execFile);
 const jobID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 const timestamp = z.string().datetime({ offset: true });
 

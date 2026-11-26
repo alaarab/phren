@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { z } from "zod";
 import { BridgeError, bridgeRoot } from "./protocol.js";
 
@@ -13,7 +12,6 @@ import { BridgeError, bridgeRoot } from "./protocol.js";
  * and a replacement session in the same pane has a different PID or start time.
  */
 
-const exec = promisify(execFile);
 const dispatchId = z.string().uuid();
 
 export interface LaunchLock { file: string; nonce: string; pid: number; start?: string }

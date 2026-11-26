@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { startProbe } from "./probe-processes.js";
 import { BridgeError } from "./protocol.js";
 
 /**
@@ -37,6 +38,6 @@ export function hostKeyLine(stdout: string): string | undefined {
 /** This computer's ed25519 host public key line, or undefined when it has none. */
 export function localHostKeyLine(dirs?: string[], sshd?: string): Promise<string | undefined> {
   return new Promise(resolve => {
-    execFile("sh", ["-c", hostKeyScript(dirs, sshd)], { timeout: 10_000 }, (error, stdout) => resolve(hostKeyLine(stdout ?? "")));
+    startProbe(() => execFile("sh", ["-c", hostKeyScript(dirs, sshd)], { timeout: 10_000 }, (error, stdout) => resolve(hostKeyLine(stdout ?? ""))));
   });
 }

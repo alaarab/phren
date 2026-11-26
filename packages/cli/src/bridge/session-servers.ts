@@ -1,6 +1,5 @@
-import { execFile } from "node:child_process";
 import { open, stat } from "node:fs/promises";
-import { promisify } from "node:util";
+import { execProbe as exec } from "./probe-processes.js";
 import { objects, type Json, type Provider } from "./protocol.js";
 import { snapshot } from "./herdr.js";
 import { terminalProvider, type PaneProcesses } from "./terminal.js";
@@ -23,7 +22,6 @@ import { targetTranscriptPath } from "./transcripts.js";
  * Everything else is left out, including a port another pane owns.
  */
 
-const exec = promisify(execFile);
 
 export interface SessionServer extends LocalServer { source: "started" | "mentioned" }
 

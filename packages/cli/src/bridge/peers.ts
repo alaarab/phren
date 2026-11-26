@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { startProbe } from "./probe-processes.js";
 import { lstat, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Duplex } from "node:stream";
@@ -159,7 +160,7 @@ async function dialPeer(peer: HookPeer, route: string, data?: Json, timeout?: nu
   try {
     const knownHosts = path.join(temporary, "known_hosts");
     await writeFile(knownHosts, `phren-peer ${peer.hostKey}\n`, { mode: 0o600 });
-    const ssh = spawn("ssh", peerSSHArgs(peer, knownHosts, key), { stdio: ["pipe", "pipe", "pipe"] });
+    const ssh = startProbe(() => spawn("ssh", peerSSHArgs(peer, knownHosts, key), { stdio: ["pipe", "pipe", "pipe"] }));
     child = ssh;
     stream = new Duplex({
       read() { ssh.stdout.resume(); },

@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - The prompt hook now shows which prompt words matched the memories it injected, up to eight words with a count of the rest. Clanker mode shows the same words in one short line after its index.
 
+### Fixed
+
+- Phren Hook stops background checks such as Claude sign-in discovery when it shuts down, so a slow check no longer delays a restart. Agents already running in panes keep working.
+
 ## [0.3.94] - 2026-11-26
 
 ### Added

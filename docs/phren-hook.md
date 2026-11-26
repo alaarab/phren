@@ -914,6 +914,12 @@ version when upgrading. On Linux, Codex workers started by an earlier Hook
 finish (`--force` restarts at once). The systemd unit uses `Restart=always`,
 so a Hook that exits on its own comes back; `systemctl --user stop` still
 stops it. The standalone bundle survives npm cache cleanup.
+
+On SIGTERM or SIGINT, the Hook closes its listeners and stops its in-flight
+subprocess probes before exiting. These include sign-in, version, model and
+usage checks, terminal and machine inspection, Git reads and peer SSH calls.
+Agents running in panes and their app servers keep their own lifetimes.
+
 `rollback` activates the prior installed version; it leaves migrated key
 restrictions in place. Rolling back to a helper without `ssh-exec` previews
 therefore keeps previews unavailable until the helper is updated again.
