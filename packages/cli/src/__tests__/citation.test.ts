@@ -326,10 +326,17 @@ describe("checkFindingCitation", () => {
     expect(validateFindingCitation(cite({ commit: first, file: "a.ts", line: 2 }))).toBe(false);
   });
 
-  it("is broken when the repo does not know the commit or the file is gone", () => {
-    expect(checkFindingCitation(cite({ commit: "0123456789abcdef0123456789abcdef01234567", file: "a.ts", line: 1 }))).toBe("broken");
+  it("is broken when the cited file is gone, whether or not the repo knows the commit", () => {
     expect(checkFindingCitation(cite({ commit: first, file: "gone.ts", line: 1 }))).toBe("broken");
+    expect(checkFindingCitation(cite({ commit: "0123456789abcdef0123456789abcdef01234567", file: "gone.ts", line: 1 }))).toBe("broken");
     expect(validateFindingCitation(cite({ commit: first, file: "gone.ts" }))).toBe(false);
+  });
+
+  it("is unverifiable when the repo does not know the commit but the file is still there", () => {
+    const unknown = cite({ commit: "0123456789abcdef0123456789abcdef01234567", file: "a.ts", line: 1 });
+    expect(checkFindingCitation(unknown)).toBe("unverifiable");
+    expect(validateFindingCitation(unknown)).toBe(true);
+    expect(checkFindingCitation(cite({ commit: "0123456789abcdef0123456789abcdef01234567" }))).toBe("unverifiable");
   });
 
   it("is unverifiable with nothing to check, a repo this computer lacks, or no git", () => {

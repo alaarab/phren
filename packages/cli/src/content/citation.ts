@@ -245,8 +245,9 @@ function resolveCitationFile(citation: FindingCitation): string | null {
  * What this computer can tell about a citation:
  * - valid: everything it names checks out.
  * - drifted: the cited line changed since the cited commit, or is past the end of the file; the finding may still be right.
- * - broken: the repo is here but does not know the commit, or the file is gone.
- * - unverifiable: nothing to check, the repo is not on this computer, or git could not run.
+ * - broken: the repo is here but the cited file is gone.
+ * - unverifiable: nothing to check, the repo is not on this computer, git could not run,
+ *   or the repo does not know the commit while the file is still there (squash-merged or unfetched).
  */
 export type CitationState = "valid" | "drifted" | "broken" | "unverifiable";
 
@@ -325,16 +326,19 @@ export function checkFindingCitation(citation: FindingCitation): CitationState {
   }
   // Repo paths are per computer (/Users/... on a Mac, /home/... on Linux), so a missing one says nothing.
   if (!fs.existsSync(citation.repo)) return "unverifiable";
+  let commitKnown = true;
   if (citation.commit) {
     if (cachedGit(checkoutCache, citation.repo, citation.repo, ["rev-parse", "--git-dir"]) !== true) return "unverifiable";
     const known = cachedGit(commitExistsCache, `${citation.repo}\0${citation.commit}`, citation.repo, ["cat-file", "-e", `${citation.commit}^{commit}`]);
     if (known === undefined) return "unverifiable";
-    if (!known) return "broken";
+    commitKnown = known;
   }
-  if (!citation.file) return "valid";
+  // An unknown commit may be squash-merged or not fetched yet; only a missing file proves the citation wrong.
+  if (!citation.file) return commitKnown ? "valid" : "unverifiable";
   const resolvedFile = resolveCitationFile(citation);
   if (!resolvedFile) return "unverifiable";
   if (!fs.existsSync(resolvedFile)) return "broken";
+  if (!commitKnown) return "unverifiable";
   const range = lineState(resolvedFile, citation.line);
   if (range !== "valid" || citation.line === undefined || !citation.commit) return range;
   const first = cachedBlame(citation.repo, path.relative(citation.repo, resolvedFile), citation.line);
