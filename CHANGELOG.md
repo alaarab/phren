@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- The prompt hook now shows which prompt words matched the memories it injected, up to eight words with a count of the rest. Clanker mode shows the same words in one short line after its index.
+
 ## [0.3.94] - 2026-11-26
 
 ### Added

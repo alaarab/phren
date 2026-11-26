@@ -391,7 +391,7 @@ export async function handleHookPrompt() {
     if (parts.length > 0) {
       const traceIdx = parts.findIndex(p => p.includes("trace:"));
       if (traceIdx !== -1) {
-        parts[traceIdx] = parts[traceIdx].replace(/tokens/, `budget=${budgetUsedTokens}/${maxInjectTokens};tokens`);
+        parts[traceIdx] = parts[traceIdx].replace(/tokens≈/, `budget=${budgetUsedTokens}/${maxInjectTokens};tokens≈`);
         if (paused) parts[traceIdx] += `; tasks=paused open ${paused.open}/${paused.budget}`;
       }
     }

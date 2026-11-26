@@ -82,6 +82,7 @@ export function buildHookOutput(
   const parts: string[] = [statusLine, "<phren-context>"];
   const impactEntries: Array<{ findingId: string; project: string; sessionId: string }> = [];
   const impactSessionId = sessionId ?? "none";
+  const matchedWords = new Set<string>();
 
   const clanker = clankerEnabled(phrenPathLocal);
   if (clanker) {
@@ -93,6 +94,7 @@ export function buildHookOutput(
     }
     parts.push("");
     for (const injected of indexEntries) {
+      for (const word of injected.matched ?? []) matchedWords.add(word);
       recordInjection(phrenPathLocal, injected.key, sessionId);
       if (injected.doc.type === "findings") {
         for (const findingId of extractFindingIdsFromSnippet(injected.snippet)) {
@@ -143,6 +145,7 @@ export function buildHookOutput(
     }
 
     for (const injected of ordered) {
+      for (const word of injected.matched ?? []) matchedWords.add(word);
       const { doc, snippet, key } = injected;
       recordInjection(phrenPathLocal, key, sessionId);
       if (doc.type === "findings") {
@@ -173,18 +176,23 @@ export function buildHookOutput(
   logImpact(phrenPathLocal, impactEntries);
 
   parts.push("</phren-context>");
-  // The trace is for people reading the hook log; clanker mode spends no tokens on it.
-  if (clanker) return parts;
+  // Up to eight matched prompt words, then a count; nothing at all when no snippet matched any.
+  const matched = matchedWords.size ? [...matchedWords].slice(0, 8).join(",") + (matchedWords.size > 8 ? `,+${matchedWords.size - 8}` : "") : "";
+  const matchedField = matched ? ` matched=${matched};` : "";
+  if (clanker) {
+    if (matched) parts.push(`\u25c6 phren \u00b7 matched=${matched}`);
+    return parts;
+  }
 
   const changedCount = gitCtx?.changedFiles.size ?? 0;
   if (gitCtx) {
     const fileHits = selected.filter((r) => fileRelevanceBoost(r.doc.path, gitCtx.changedFiles) > 0).length;
     const branchHits = selected.filter((r) => branchMatchBoost(r.doc.content, gitCtx.branch) > 0).length;
     parts.push(
-      `\u25c6 phren \u00b7 trace: intent=${intent}; reasons=file:${fileHits},branch:${branchHits}; branch=${gitCtx.branch}; changed_files=${changedCount}; tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`
+      `\u25c6 phren \u00b7 trace: intent=${intent};${matchedField} reasons=file:${fileHits},branch:${branchHits}; branch=${gitCtx.branch}; changed_files=${changedCount}; tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`
     );
   } else {
-    parts.push(`\u25c6 phren \u00b7 trace: intent=${intent}; reasons=intent-only; tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`);
+    parts.push(`\u25c6 phren \u00b7 trace: intent=${intent};${matchedField} tokens\u2248${usedTokens}/${tokenBudget}; stages=index:${stage.indexMs}ms,search:${stage.searchMs}ms,trust:${stage.trustMs}ms,rank:${stage.rankMs}ms,select:${stage.selectMs}ms`);
   }
 
   return parts;

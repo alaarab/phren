@@ -105,7 +105,7 @@ console.log("custom context for " + input.session_id);
       - The render callback reads the frame size the main thread pushed before it.
 
       </phren-context>
-      ◆ phren · trace: intent=debug; reasons=intent-only; budget=84/2000;tokens≈84/550; stages=index:0ms,search:0ms,trust:0ms,rank:0ms,select:0ms
+      ◆ phren · trace: intent=debug; matched=render,callback,read,frame,size,main,thread; budget=84/2000;tokens≈84/550; stages=index:0ms,search:0ms,trust:0ms,rank:0ms,select:0ms
 
       <phren-notice>
       Queued task (myproject): Fix the render callback so it reads the frame size from the main thread

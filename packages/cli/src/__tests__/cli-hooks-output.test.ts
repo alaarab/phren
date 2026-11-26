@@ -66,6 +66,21 @@ describe("cli-hooks-output", () => {
   });
 
   describe("buildHookOutput", () => {
+    it.each([
+      ["eight", ["render", "callback", "frame", "size", "main", "thread", "cache", "retry"], "render,callback,frame,size,main,thread,cache,retry"],
+      ["ten", ["render", "callback", "frame", "size", "main", "thread", "cache", "retry", "backoff", "jitter"], "render,callback,frame,size,main,thread,cache,retry,+2"],
+    ])("shows %s distinct matched words in first appearance order", (_label, words, expected) => {
+      const selected = [
+        makeSnippet({ key: "a", matched: words.slice(0, 4) }),
+        makeSnippet({ key: "b", matched: [words[1], ...words.slice(4)] }),
+        // The once-per-session summary carries no matched words.
+        makeSnippet({ key: "knows:test-project" }),
+      ];
+      const parts = buildHookOutput(selected, 80, "debug", null, null,
+        { indexMs: 1, searchMs: 2, trustMs: 3, rankMs: 4, selectMs: 5 }, 5000, TEST_PHREN_PATH);
+      expect(parts.at(-1)).toBe(`◆ phren · trace: intent=debug; matched=${expected}; tokens≈80/5000; stages=index:1ms,search:2ms,trust:3ms,rank:4ms,select:5ms`);
+    });
+
     it("omits project label when detectedProject is null", () => {
       const parts = buildHookOutput(
         [makeSnippet()],
@@ -78,11 +93,12 @@ describe("cli-hooks-output", () => {
         TEST_PHREN_PATH
       );
       expect(parts[0]).not.toContain(" \u00b7 test-project");
+      expect(parts.at(-1)).toBe("◆ phren · trace: intent=query; tokens≈50/500; stages=index:0ms,search:0ms,trust:0ms,rank:0ms,select:0ms");
     });
 
     it("trims middle items when over token budget with 3+ snippets", () => {
       const bigSnippet = (key: string) =>
-        makeSnippet({ snippet: "x".repeat(2000), key });
+        makeSnippet({ snippet: "x".repeat(2000), key, matched: [key] });
       const selected = [
         bigSnippet("a"),
         bigSnippet("b"),
@@ -102,6 +118,7 @@ describe("cli-hooks-output", () => {
       // Should have fewer snippet blocks than input
       const snippetBlocks = parts.filter(p => p.startsWith("["));
       expect(snippetBlocks.length).toBeLessThan(4);
+      expect(parts.at(-1)).toContain("; matched=a,b; tokens≈");
     });
   });
 });
