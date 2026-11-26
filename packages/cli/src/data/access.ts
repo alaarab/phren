@@ -45,8 +45,11 @@ import {
   parseAllContradictions,
   stripComments,
   normalizeFindingText,
+  withoutTypeTag,
 } from "../content/metadata.js";
 import { withSafeLock, ensureProject, walkDirectory } from "../shared/data-utils.js";
+import { iterateProjectFindings, rewriteFindingLine } from "../finding/locate.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 export type { TaskSection, TaskItem, TaskDoc } from "./tasks.js";
 export {
@@ -221,8 +224,6 @@ function resolveDuplicateMatches(matches: FindingBulletLine[]): FindingBulletLin
   const first = bulletContentKey(matches[0].line);
   return matches.every(({ line }) => bulletContentKey(line) === first) ? matches[0] : null;
 }
-
-const withoutTypeTag = (text: string): string => text.replace(/^\[[a-z-]+\]\s*/i, "");
 
 function findMatchingFindingBullet(
   bulletLines: FindingBulletLine[],
@@ -790,9 +791,9 @@ function existsAsLiveFinding(phrenPath: string, project: string, text: string): 
 
 interface ArchivedReferenceMatch {
   file: string;
-  /** True when the file lives under reference/topics/ — the tier auto-archive writes. */
+  /** True for reference/topics/ (topic archives and their .older.md halves), the tier auto-archive writes. */
   autoArchived: boolean;
-  idx: number;
+  lineIndex: number;
   line: string;
 }
 
@@ -805,30 +806,32 @@ interface ArchivedReferenceMatch {
  * approve and reject used to be no-ops, so both verbs have to look here.
  */
 function findArchivedReferenceMatches(phrenPath: string, project: string, text: string, exactOnly = false): ArchivedReferenceMatch[] {
-  const referenceDir = safeProjectPath(phrenPath, project, "reference");
-  if (!referenceDir || !fs.existsSync(referenceDir)) return [];
-
   const needle = normalizeFindingText(text);
   if (!needle) return [];
-  const topicsDir = path.join(referenceDir, "topics") + path.sep;
+
+  const candidates: ArchivedReferenceMatch[] = [];
+  for (const finding of iterateProjectFindings(phrenPath, project)) {
+    if (finding.tier !== "active") candidates.push({ file: finding.file, autoArchived: true, lineIndex: finding.lineIndex, line: finding.line });
+  }
+  // Hand-written docs elsewhere under reference/ are matched only so reject can refuse them.
+  const referenceDir = storeAwareProjectPath(phrenPath, project, "reference");
+  if (referenceDir) {
+    const topicsDir = path.join(referenceDir, "topics") + path.sep;
+    for (const filePath of walkDirectory(referenceDir)) {
+      if (filePath.startsWith(topicsDir)) continue;
+      fs.readFileSync(filePath, "utf8").split("\n").forEach((line, lineIndex) => {
+        if (line.startsWith("- ")) candidates.push({ file: filePath, autoArchived: false, lineIndex, line });
+      });
+    }
+  }
 
   const exact: ArchivedReferenceMatch[] = [];
   const partial: ArchivedReferenceMatch[] = [];
-  for (const filePath of walkDirectory(referenceDir)) {
-    const lines = fs.readFileSync(filePath, "utf8").split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      if (!lines[i].startsWith("- ")) continue;
-      const normalized = normalizeFindingText(lines[i]);
-      if (!normalized) continue;
-      const hit: ArchivedReferenceMatch = {
-        file: filePath,
-        autoArchived: filePath.startsWith(topicsDir),
-        idx: i,
-        line: lines[i],
-      };
-      if (normalized === needle || (exactOnly && withoutTypeTag(normalized) === withoutTypeTag(needle))) exact.push(hit);
-      else if (normalized.includes(needle)) partial.push(hit);
-    }
+  for (const candidate of candidates) {
+    const normalized = normalizeFindingText(candidate.line);
+    if (!normalized) continue;
+    if (normalized === needle || (exactOnly && withoutTypeTag(normalized) === withoutTypeTag(needle))) exact.push(candidate);
+    else if (normalized.includes(needle)) partial.push(candidate);
   }
   return exact.length > 0 || exactOnly ? exact : partial;
 }
@@ -1028,19 +1031,7 @@ export function rejectQueueItemDetailed(
   }
 
   const target = matches[0];
-  const purge = withSafeLock(target.file, () => {
-    const lines = fs.readFileSync(target.file, "utf8").split("\n");
-    // Re-resolve under the lock — the file may have moved since the scan.
-    const idx = lines[target.idx] === target.line ? target.idx : lines.indexOf(target.line);
-    if (idx === -1) return phrenErr(`Archived entry vanished from ${path.basename(target.file)} before it could be removed.`, PhrenError.NOT_FOUND);
-    const removeCount = isCitationLine(lines[idx + 1] || "") ? 2 : 1;
-    lines.splice(idx, removeCount);
-    const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    const tmp = `${target.file}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, normalized);
-    renameOverSync(tmp, target.file);
-    return phrenOk(undefined);
-  });
+  const purge = rewriteFindingLine(phrenPath, project, target, () => null);
   if (!purge.ok) return forwardErr(purge);
 
   return finish(

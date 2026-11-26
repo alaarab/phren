@@ -345,8 +345,8 @@ describe("dequeueQueueItem: drops the question, keeps the knowledge", () => {
 });
 
 describe("rejectQueueItem: archived content", () => {
-  it("removes the finding from reference/topics where auto-archive moved it", () => {
-    const topicFile = writeTopicDoc("database", [
+  it.each(["database", "database.older"])("removes the finding from reference/topics/%s.md where auto-archive moved it", (slug) => {
+    const topicFile = writeTopicDoc(slug, [
       `- Postgres advisory locks are per-session, not per-transaction <!-- fid:ccccdddd -->`,
       `- Vacuum does not reclaim space held by an open transaction`,
     ]);

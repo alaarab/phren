@@ -243,6 +243,11 @@ export function normalizeFindingText(raw: string): string {
     .toLowerCase();
 }
 
+/** Normalized finding text without a leading type tag ("[pattern] "). */
+export function withoutTypeTag(text: string): string {
+  return text.replace(/^\[[a-z-]+\]\s*/i, "");
+}
+
 // ---------------------------------------------------------------------------
 // Add helpers — append metadata comments to a line
 // ---------------------------------------------------------------------------
