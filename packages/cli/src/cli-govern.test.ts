@@ -142,6 +142,21 @@ describe("handleBackgroundMaintenance", () => {
     expect(staleSection).toContain("Deploy ordering rule nobody reads anymore");
   });
 
+  it("queues no stale or low-value findings for a project whose review queue is over budget", async () => {
+    const phren = makePhren();
+    grantAdmin(phren);
+    writeFile(path.join(phren, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 1 } }));
+    const today = new Date().toISOString().slice(0, 10);
+    makeProject(phren, "proj", {
+      "FINDINGS.md": `# proj Findings\n\n## ${today}\n\n- wip\n- Deploy ordering rule nobody reads anymore <!-- created: 2020-01-01 -->\n`,
+      "review.md": "# proj Review Queue\n\n## Review\n\n- [2026-11-01] First held item\n- [2026-11-02] Second held item\n\n## Stale\n\n## Conflicts\n",
+    });
+    const before = fs.readFileSync(path.join(phren, "proj", "review.md"), "utf8");
+    const { handleBackgroundMaintenance } = await importGovern(phren);
+    await handleBackgroundMaintenance("proj");
+    expect(fs.readFileSync(path.join(phren, "proj", "review.md"), "utf8")).toBe(before);
+  });
+
   it("cleans up lock file even on success", async () => {
     const phren = makePhren();
     grantAdmin(phren);

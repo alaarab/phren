@@ -693,6 +693,14 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     logger.debug("doctor", `context-cost: ${errorMessage(err)}`);
   }
 
+  // Warn-only: what the latest daily store health line found over budget.
+  try {
+    const { budgetDoctorCheck } = await import("../governance/store-health.js");
+    checks.push(budgetDoctorCheck(phrenPath));
+  } catch (err: unknown) {
+    logger.debug("doctor", `budgets: ${errorMessage(err)}`);
+  }
+
   checks.push({
     name: "runtime-health-file",
     ok: Boolean(runtime),

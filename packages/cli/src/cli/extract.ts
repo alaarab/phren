@@ -551,7 +551,7 @@ export async function handleExtractMemories(
       const qr1 = appendReviewQueue(getPhrenPath(), project, "Review", [{
         text: `[confidence ${candidate.score.toFixed(2)}] ${line}`,
         meta: buildQueueProvenanceMeta({ source, sessionId, repo: repoRoot, commit: rec.hash }),
-      }]);
+      }], { origin: "machine" });
       if (qr1.ok) queued += qr1.data;
     }
   }
@@ -589,7 +589,7 @@ export async function handleExtractMemories(
       const qr2 = appendReviewQueue(getPhrenPath(), project, "Review", [{
         text: `[confidence ${c.score.toFixed(2)}] ${line}`,
         meta: buildQueueProvenanceMeta({ source, sessionId, repo: repoRoot, commit: c.commit, file: c.file }),
-      }]);
+      }], { origin: "machine" });
       if (qr2.ok) queued += qr2.data;
     }
   }

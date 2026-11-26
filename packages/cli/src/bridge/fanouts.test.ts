@@ -474,6 +474,40 @@ describe("fan-out archive sweep", () => {
     }
   });
 
+  it("keeps the archive under its byte ceiling by deleting only finished folders, oldest first", async () => {
+    const { root, env, live, archive } = await store();
+    const put = async (name: string, ageDays: number, status: string) => {
+      const directory = path.join(archive, name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "events.jsonl"), "x".repeat(4000));
+      await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ status, finishedAt: new Date(Date.now() - ageDays * 24 * HOUR_MS).toISOString() }));
+    };
+    await put("old-running", 9, "running");
+    await put("old-done", 8, "completed");
+    await put("mid-done", 5, "failed");
+    await put("new-done", 1, "cancelled");
+    await archiveJob(root, "job-in", { manifest: { status: "completed", finishedAt: new Date(Date.now() - 25 * HOUR_MS).toISOString() } });
+    await writeFile(path.join(live, "job-in", "events.jsonl"), "x".repeat(4000));
+
+    expect(await archiveFinishedFanouts(env, { dryRun: true, maxBytes: 13_000 })).toEqual({ moved: ["job-in"], deleted: 2 });
+    expect((await readdir(archive)).sort()).toEqual(["mid-done", "new-done", "old-done", "old-running"]);
+    expect(await archiveFinishedFanouts(env, { maxBytes: 13_000 })).toEqual({ moved: ["job-in"], deleted: 2 });
+    expect((await readdir(archive)).sort()).toEqual(["job-in", "new-done", "old-running"]);
+  });
+
+  it("reads the ceiling from the store's retention policy, and 0 turns it off", async () => {
+    const { root, env, archive } = await store();
+    await mkdir(path.join(archive, "old-done"), { recursive: true });
+    await writeFile(path.join(archive, "old-done", "exit.txt"), "x".repeat(3000));
+    await mkdir(path.join(root, ".config"), { recursive: true });
+    const policy = (fanoutArchiveMB: number) => writeFile(path.join(root, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { fanoutArchiveMB } }));
+    await policy(0);
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 0 });
+    await policy(0.001);
+    expect(await archiveFinishedFanouts(env)).toEqual({ moved: [], deleted: 1 });
+    expect(await present(path.join(archive, "old-done"))).toBe(false);
+  });
+
   it("takes a shorter age than 24 hours", async () => {
     const { root, env, live, archive } = await store();
     await archiveJob(root, "job-hour", { manifest: { status: "failed", finishedAt: new Date(Date.now() - HOUR_MS).toISOString() } });

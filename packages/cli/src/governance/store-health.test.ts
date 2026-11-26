@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initTestPhrenRoot, writeFile } from "../test-helpers.js";
-import { collectStoreHealth, recordStoreHealth } from "./store-health.js";
+import { budgetDoctorCheck, collectStoreHealth, recordStoreHealth } from "./store-health.js";
 import { qualityMarkers } from "../shared.js";
 
 let scratch: string;
@@ -166,19 +166,19 @@ describe("store health collection", () => {
       { at: "2026-11-24T12:00:00.000Z", abstained: "no-candidates" },
       { at: recent, skipped: "machine-prompt" },
       { at: recent, skipped: "no-keywords" },
-      { at: recent, injected: "wrong", abstained: 5, suppressedRepeats: -7 },
+      { at: recent, injected: "wrong", abstained: 5, suppressedRepeats: -7, taskCapturePaused: { open: 3, budget: 2 } },
       { at: "2026-11-24T11:59:59.999Z", injected: [{}], suppressedRepeats: 10 },
       { at: "2026-11-25T12:00:00.001Z", abstained: "future" },
       { at: "invalid" }, null, [], { other: "missing date" },
     ].map(row => JSON.stringify(row));
     put(primary, ".runtime/recall-trace.jsonl", trace.join("\n") + '\n{"at":');
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
-      prompts: 7, injected: 1, abstained: 3, skipped: 2, suppressedRepeats: 4,
+      prompts: 7, injected: 1, abstained: 3, skipped: 2, suppressedRepeats: 4, taskCapturePaused: 1,
       byAbstainReason: { "below-floor": 2, "no-candidates": 1 },
     });
     put(primary, ".runtime/recall-trace.jsonl", "");
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
-      prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, byAbstainReason: {},
+      prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, taskCapturePaused: 0, byAbstainReason: {},
     });
   });
 
@@ -192,9 +192,101 @@ describe("store health collection", () => {
         citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
         checkableCitations: { any: 0, withFile: 0 },
         openTasks: 0, doneTasks: 0, reviewEntries: 0,
-      }, citationCoverage: 0 }], runtimeBytes: {}, recall: null,
+      }, citationCoverage: 0 }], runtimeBytes: {},
+      runtimeClasses: { codeIndexes: 0, fanoutArchive: 0, fanouts: 0, sessions: 0, packages: 0, logs: 0, other: 0 },
+      budgets: { over: [] }, recall: null,
     });
     expect(fs.existsSync(path.join(primary, ".runtime"))).toBe(false);
+  });
+});
+
+describe("budgets in the health line", () => {
+  it("groups runtime bytes by class and marks each component over its budget with what that stops", () => {
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 2, reviewEntries: 2, runtimeMB: 1, fanoutArchiveMB: 0 } }));
+    put(primary, "proj/tasks.md", "# Tasks\n## Active\n- One\n## Queue\n- Two\n- Three\n## Done\n- Old\n");
+    put(primary, "proj/review.md", "# Review\n## Review\n- A\n- B\n## Stale\n- C\n");
+    put(primary, "calm/tasks.md", "# Tasks\n## Queue\n- Only one\n");
+    put(primary, "calm/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 0\n");
+    put(primary, "busy/tasks.md", "# Tasks\n## Queue\n- One\n- Two\n- Three\n");
+    put(primary, "busy/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 5\n");
+    put(primary, ".runtime/code/proj.sqlite", "x".repeat(1_100_000));
+    put(primary, ".runtime/agent-fanouts-archive/job-1/events.jsonl", "y".repeat(100));
+    put(primary, ".runtime/agent-fanouts/job-2/events.jsonl", "y".repeat(10));
+    put(primary, ".runtime/sessions/a.jsonl", "s");
+    put(primary, ".runtime/packages/p.json", "pp");
+    put(primary, ".runtime/debug.log", "z");
+    put(primary, ".runtime/lookup-events.jsonl", "zz");
+    put(primary, ".runtime/embeddings.json", "e");
+    const result = collectStoreHealth(primary, now, "test-computer");
+    expect(result.runtimeClasses).toEqual({ codeIndexes: 1_100_000, fanoutArchive: 100, fanouts: 10, sessions: 1, packages: 2, logs: 3, other: 1 });
+    expect(result.budgets.over).toEqual([
+      { component: "openTasks", store: "personal", project: "proj", value: 3, budget: 2, effect: "the prompt hook files no new tasks" },
+      { component: "reviewEntries", store: "personal", project: "proj", value: 3, budget: 2, effect: "machine-generated entries are not queued" },
+      { component: "runtimeBytes", value: 1_100_117, budget: 1_048_576, effect: "reported only" },
+    ]);
+  });
+
+  it("flags the fanout archive past its ceiling", () => {
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { fanoutArchiveMB: 0.0001 } }));
+    put(primary, ".runtime/agent-fanouts-archive/job-1/events.jsonl", "y".repeat(200));
+    expect(collectStoreHealth(primary, now, "test-computer").budgets.over).toEqual([
+      { component: "fanoutArchiveBytes", value: 200, budget: 105, effect: "the next archive sweep deletes the oldest finished folders" },
+    ]);
+  });
+
+  it("gives doctor a warn-only line from the latest health record", () => {
+    expect(budgetDoctorCheck(primary)).toEqual({ name: "budgets", ok: true, detail: "no store health recorded yet" });
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 1 } }));
+    put(primary, "proj/tasks.md", "# Tasks\n## Queue\n- One\n- Two\n");
+    recordStoreHealth(primary, now, "test-computer");
+    expect(budgetDoctorCheck(primary)).toEqual({
+      name: "budgets", ok: true,
+      detail: "over budget on 2026-11-25: personal/proj open tasks 2 of 1 (the prompt hook files no new tasks)",
+    });
+    put(primary, "proj/tasks.md", "# Tasks\n## Queue\n- One\n");
+    recordStoreHealth(primary, new Date(now.getTime() + 86_400_000), "test-computer");
+    expect(budgetDoctorCheck(primary)).toEqual({ name: "budgets", ok: true, detail: "within budget on 2026-11-26" });
+  });
+});
+
+describe("runtime age-out", () => {
+  const day = 86_400_000;
+  const stamp = (file: string, at: Date) => fs.utimesSync(path.join(primary, file), at, at);
+  const exists = (file: string) => fs.existsSync(path.join(primary, file));
+  const lastLine = () => recordedLines().at(-1) as Record<string, unknown>;
+
+  it("reports what it would remove while off, waits a week of health lines once on, then removes only regenerable files", () => {
+    vi.stubEnv("PROJECTS_DIR", path.join(scratch, "Projects"));
+    fs.mkdirSync(path.join(scratch, "Projects", "fixture-here", ".git"), { recursive: true });
+    put(primary, "fixture-here/FINDINGS.md", "- Here\n");
+    put(primary, "fixture-gone/FINDINGS.md", "- Gone\n");
+    const old = new Date(now.getTime() - 40 * day);
+    for (const name of ["fixture-here", "fixture-gone", "fixture-unknown", "fixture-fresh"]) put(primary, `.runtime/code/${name}.sqlite`, "x".repeat(100));
+    for (const name of ["fixture-here", "fixture-gone", "fixture-unknown"]) stamp(`.runtime/code/${name}.sqlite`, old);
+    stamp(".runtime/code/fixture-fresh.sqlite", new Date(now.getTime() - day));
+    const archived = (name: string, manifest: Record<string, unknown>) => put(primary, `.runtime/agent-fanouts-archive/${name}/manifest.json`, JSON.stringify(manifest));
+    archived("job-old", { status: "completed", finishedAt: old.toISOString() });
+    archived("job-new", { status: "failed", finishedAt: now.toISOString() });
+    archived("job-unfinished", { status: "running", finishedAt: old.toISOString() });
+    const oldManifestBytes = fs.statSync(path.join(primary, ".runtime/agent-fanouts-archive/job-old/manifest.json")).size;
+    const candidates = { codeIndexes: { count: 2, bytes: 200 }, fanoutArchive: { count: 1, bytes: oldManifestBytes } };
+
+    expect(recordStoreHealth(primary, now, "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toEqual({ enabled: false, days: 30, reportDays: 0, acted: false, candidates });
+
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { runtimeAgeOut: true } }));
+    expect(recordStoreHealth(primary, new Date(now.getTime() + 2 * day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toEqual({ enabled: true, days: 30, reportDays: 2, acted: false, candidates });
+    expect(exists(".runtime/code/fixture-gone.sqlite")).toBe(true);
+
+    expect(recordStoreHealth(primary, new Date(now.getTime() + 7 * day), "test-computer")).toBe(true);
+    expect(lastLine().runtimeAgeOut).toEqual({ enabled: true, days: 30, reportDays: 7, acted: true, candidates });
+    expect((lastLine().runtimeClasses as Record<string, number>).codeIndexes).toBe(200);
+    expect(exists(".runtime/code/fixture-gone.sqlite")).toBe(false);
+    expect(exists(".runtime/code/fixture-unknown.sqlite")).toBe(false);
+    expect(exists(".runtime/agent-fanouts-archive/job-old")).toBe(false);
+    for (const kept of [".runtime/code/fixture-here.sqlite", ".runtime/code/fixture-fresh.sqlite", ".runtime/agent-fanouts-archive/job-new",
+      ".runtime/agent-fanouts-archive/job-unfinished", "fixture-gone/FINDINGS.md", "fixture-here/FINDINGS.md"]) expect(exists(kept)).toBe(true);
   });
 });
 

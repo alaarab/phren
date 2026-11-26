@@ -198,9 +198,9 @@ async function governTargets(projects: MaintenanceTarget[], silent: boolean, dry
     summary.reviewCount += lowValue.length;
 
     if (!dryRun) {
-      appendReviewQueue(storePath, project, "Stale", stale);
-      appendReviewQueue(storePath, project, "Conflicts", conflicts);
-      appendReviewQueue(storePath, project, "Review", lowValue);
+      appendReviewQueue(storePath, project, "Stale", stale, { origin: "machine" });
+      appendReviewQueue(storePath, project, "Conflicts", conflicts, { origin: "machine" });
+      appendReviewQueue(storePath, project, "Review", lowValue, { origin: "machine" });
     }
   }
 

@@ -585,7 +585,7 @@ export class AgentHooks {
     try {
       const { moved, deleted } = await archiveFinishedFanouts();
       if (!moved.length && !deleted) return;
-      logger.info("fanouts", `Archived ${moved.length} finished fan-out job(s); deleted ${deleted} past the archive cap.`);
+      logger.info("fanouts", `Archived ${moved.length} finished fan-out job(s); deleted ${deleted} past the archive caps.`);
     } catch { /* The archive sweep must never break the Hook. */ }
   }
   watch(target: Target): () => void {

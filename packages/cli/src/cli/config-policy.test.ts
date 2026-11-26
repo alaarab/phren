@@ -186,6 +186,19 @@ describe("config retention policy", () => {
     expect(projectConfig?.retentionPolicy?.ttlDays).toBe(60);
     expect(projectConfig?.retentionPolicy?.decay?.d30).toBe(0.5);
   });
+
+  it("sets budgets globally, including the age-out switch, and a project's open-task budget on its own", async () => {
+    const { handleRetentionPolicy } = await importPolicy();
+    const output = captureConsole();
+    fs.mkdirSync(path.join(phrenDir, "demo"));
+
+    await handleRetentionPolicy(["set", "--budgets.openTasks=200", "--budgets.runtimeAgeOut=true"]);
+    expect(getRetentionPolicy(phrenDir).budgets).toMatchObject({ openTasks: 200, reviewEntries: 150, runtimeAgeOut: true });
+
+    await handleRetentionPolicy(["--project", "demo", "set", "--budgets.openTasks=400"]);
+    expect(JSON.parse(output.logs.at(-1) ?? "{}").budgets).toMatchObject({ openTasks: 400, reviewEntries: 150, runtimeAgeOut: true });
+    expect(getRetentionPolicy(phrenDir).budgets.openTasks).toBe(200);
+  });
 });
 
 describe("config index policy", () => {

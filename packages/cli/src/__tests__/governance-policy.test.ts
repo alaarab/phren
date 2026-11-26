@@ -457,6 +457,28 @@ describe("appendReviewQueue", () => {
     expect(result.data).toBe(0); // no new items added
   });
 
+  it("stops machine-generated appends while the queue is over its budget, and owner appends still go in", () => {
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 2 } });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Review", ["Machine one", "Machine two"], { origin: "machine" })).toEqual({ ok: true, data: 2 });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Stale", ["Machine three"], { origin: "machine" })).toEqual({ ok: true, data: 1 });
+    const queuePath = path.join(phrenPath, PROJECT, "review.md");
+    const full = fs.readFileSync(queuePath, "utf8");
+    expect(appendReviewQueue(phrenPath, PROJECT, "Conflicts", ["Machine four"], { origin: "machine" })).toEqual({ ok: true, data: 0 });
+    expect(fs.readFileSync(queuePath, "utf8")).toBe(full);
+    expect(appendReviewQueue(phrenPath, PROJECT, "Review", ["Owner asked for this one"])).toEqual({ ok: true, data: 1 });
+    expect(fs.readFileSync(queuePath, "utf8")).toContain("Owner asked for this one");
+
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 0 } });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Conflicts", ["Machine four"], { origin: "machine" })).toEqual({ ok: true, data: 1 });
+  });
+
+  it("lets a project's own review budget override the store's", () => {
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 1 } });
+    fs.writeFileSync(path.join(phrenPath, PROJECT, "phren.project.yaml"), "config:\n  retentionPolicy:\n    budgets:\n      reviewEntries: 5\n");
+    appendReviewQueue(phrenPath, PROJECT, "Review", ["One", "Two"], { origin: "machine" });
+    expect(appendReviewQueue(phrenPath, PROJECT, "Review", ["Three"], { origin: "machine" })).toEqual({ ok: true, data: 1 });
+  });
+
   it.each(["Stale", "Conflicts"] as const)("writes to correct section (%s)", (section) => {
     const result = appendReviewQueue(phrenPath, PROJECT, section, [`${section} entry`]);
     expect(result.ok).toBe(true);

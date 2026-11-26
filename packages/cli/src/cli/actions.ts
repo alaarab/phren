@@ -173,7 +173,7 @@ export async function handleDoctor(args: string[]) {
   if (result.machine) console.log(`machine: ${result.machine}`);
   if (result.profile) console.log(`profile: ${result.profile}`);
   console.log(`tasks: ${getWorkflowPolicy(getPhrenPath()).taskMode} mode`);
-  const renderCheckState = (check: { name: string; ok: boolean; detail: string }): "ok" | "fail" | "info" => {
+  const renderCheckState = (check: { name: string; ok: boolean; detail: string }): "ok" | "fail" | "info" | "warn" => {
     if (
       check.name === "git-remote" &&
       check.ok &&
@@ -181,6 +181,7 @@ export async function handleDoctor(args: string[]) {
     ) {
       return "info";
     }
+    if (check.name === "budgets" && check.ok && check.detail.startsWith("over budget")) return "warn";
     return check.ok ? "ok" : "fail";
   };
   for (const check of result.checks) {

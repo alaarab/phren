@@ -47,6 +47,8 @@ export interface RecallTraceEntry {
   tokens?: number;
   budget?: number;
   ms?: Record<string, number>;
+  /** Set when the hook filed no task because the project is over its open-task budget. */
+  taskCapturePaused?: { open: number; budget: number };
 }
 
 export function recallTraceFile(phrenPath: string): string {
@@ -73,7 +75,7 @@ export function traceEntryFromResult(
   prompt: string,
   result: RecallResult,
   injected: Array<RecallDocRef & { key: string }>,
-  extra: { session?: string; indexMs?: number } = {},
+  extra: { session?: string; indexMs?: number; taskCapturePaused?: { open: number; budget: number } } = {},
 ): RecallTraceEntry {
   return {
     at: new Date().toISOString(),
@@ -98,6 +100,7 @@ export function traceEntryFromResult(
     tokens: result.usedTokens,
     budget: result.tokenBudget,
     ms: { ...(extra.indexMs !== undefined ? { index: extra.indexMs } : {}), search: result.stageMs.searchMs, trust: result.stageMs.trustMs, rank: result.stageMs.rankMs, select: result.stageMs.selectMs },
+    ...(extra.taskCapturePaused ? { taskCapturePaused: extra.taskCapturePaused } : {}),
   };
 }
 

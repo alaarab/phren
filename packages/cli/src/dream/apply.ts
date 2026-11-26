@@ -233,9 +233,9 @@ function proposeOne(phrenPath: string, project: string, runId: string, index: nu
   if (change.op !== "add_finding") return { status: "proposed", detail: `pending dream apply ${runId} --only ${index}` };
   const refs = evidenceOf(change).map(e => clean(`${e.kind}:${e.ref}`, 80)).join("; ");
   const meta = `<!-- dream:${clean(runId, 64)}#${index} op:${change.op} -->${refs ? ` <!-- evidence: ${refs} -->` : ""}`;
-  const result = appendReviewQueue(phrenPath, project, "Review", [{ text: proposalText(change), meta }]);
+  const result = appendReviewQueue(phrenPath, project, "Review", [{ text: proposalText(change), meta }], { origin: "machine" });
   if (!result.ok) return { status: "failed", detail: result.error };
-  return result.data > 0 ? { status: "proposed", detail: "queued for review" } : { status: "skipped", detail: "already in the review queue" };
+  return result.data > 0 ? { status: "proposed", detail: "queued for review" } : { status: "skipped", detail: "already in the review queue, or the queue is over its review budget" };
 }
 
 /** Apply or propose every change in order. One change failing never stops the rest. */

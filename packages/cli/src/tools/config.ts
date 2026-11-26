@@ -426,7 +426,7 @@ async function handleSetConfig(
 
     // ── retention ─────────────────────────────────────────────────
     case "retention": {
-      const { ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay } =
+      const { ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay, budgets } =
         settings as RetentionPolicyPatch;
 
       if (project) {
@@ -442,6 +442,14 @@ async function handleSetConfig(
           if (autoAcceptThreshold !== undefined) retentionPatch.autoAcceptThreshold = autoAcceptThreshold;
           if (minInjectConfidence !== undefined) retentionPatch.minInjectConfidence = minInjectConfidence;
           if (decay !== undefined) retentionPatch.decay = { ...(existingRetention.decay ?? {}), ...decay };
+          // A project sets its own task and review budgets; the runtime ones are this computer's.
+          if (budgets !== undefined) {
+            retentionPatch.budgets = {
+              ...(existingRetention.budgets ?? {}),
+              ...(budgets.openTasks !== undefined ? { openTasks: budgets.openTasks } : {}),
+              ...(budgets.reviewEntries !== undefined ? { reviewEntries: budgets.reviewEntries } : {}),
+            };
+          }
           return { ...current, retentionPolicy: retentionPatch };
         });
         return mcpResponse({
@@ -459,6 +467,7 @@ async function handleSetConfig(
       if (autoAcceptThreshold !== undefined) globalPatch.autoAcceptThreshold = autoAcceptThreshold;
       if (minInjectConfidence !== undefined) globalPatch.minInjectConfidence = minInjectConfidence;
       if (decay !== undefined) globalPatch.decay = decay;
+      if (budgets !== undefined) globalPatch.budgets = budgets;
 
       const result = updateRetentionPolicy(phrenPath, globalPatch);
       if (!result.ok) {
@@ -762,7 +771,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         settings: z.record(z.string(), z.unknown()).describe(
           "Domain-specific settings. proactivity: { level, scope? } | taskMode: { mode } | " +
           "findingSensitivity: { level } | retention: { ttlDays?, retentionDays?, autoAcceptThreshold?, " +
-          "minInjectConfidence?, decay? } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
+          "minInjectConfidence?, decay?, budgets?: { openTasks?, reviewEntries?, runtimeMB?, fanoutArchiveMB?, runtimeAgeOut?, " +
+          "runtimeAgeOutDays? } } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
           "findingSensitivity? } | access: { admins?, contributors?, readers? } (each an array of actor names) | " +
           "index: { includeGlobs?, excludeGlobs?, includeHidden? } | " +
           "topic: { topics, domain? } | " +

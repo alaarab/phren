@@ -198,7 +198,7 @@ export async function handleHookTool() {
           findingsLevelForTool
         );
         for (const { text, confidence } of candidates) {
-          appendReviewQueue(ctx.phrenPath, activeProject, "Review", [text]);
+          appendReviewQueue(ctx.phrenPath, activeProject, "Review", [text], { origin: "machine" });
           debugLog(`hook-tool: queued candidate for review (conf=${confidence}): ${text.slice(0, 60)}`);
         }
 

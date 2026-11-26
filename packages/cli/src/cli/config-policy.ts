@@ -10,6 +10,7 @@ import {
   VALID_TASK_MODES,
   VALID_FINDING_SENSITIVITY,
   type FindingSensitivityLevel,
+  type RetentionPolicyPatch,
 } from "../shared/governance.js";
 import { updateProjectConfigOverrides } from "../project-config.js";
 import { isValidProjectName } from "../utils.js";
@@ -210,6 +211,24 @@ export async function handleIndexPolicy(args: string[]) {
 
 // ── Memory policy ────────────────────────────────────────────────────────────
 
+/** `--ttlDays=90 --decay.d30=1 --budgets.runtimeAgeOut=true` as a patch, over `base`'s decay and budgets. */
+function policyPatch(args: string[], base: RetentionPolicyPatch = {}): RetentionPolicyPatch {
+  const patch: Record<string, unknown> = {};
+  for (const arg of args) {
+    if (!arg.startsWith("--")) continue;
+    const [k, v] = arg.slice(2).split("=");
+    if (!k || v === undefined) continue;
+    const value = v === "true" ? true : v === "false" ? false : Number.isNaN(Number(v)) ? v : Number(v);
+    const [group, field] = k.split(".");
+    if ((group === "decay" || group === "budgets") && field) {
+      patch[group] = { ...(base[group] ?? {}), ...(patch[group] as Record<string, unknown> | undefined), [field]: value };
+    } else {
+      patch[k] = value;
+    }
+  }
+  return patch as RetentionPolicyPatch;
+}
+
 export async function handleRetentionPolicy(args: string[]) {
   const phrenPath = getPhrenPath();
   const { project: projectArg, rest: filteredArgs } = parseProjectArg(args);
@@ -248,19 +267,7 @@ export async function handleRetentionPolicy(args: string[]) {
       updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
         const existingRetention = current.retentionPolicy ?? {};
         const retentionPatch: NonNullable<typeof existingRetention> = { ...existingRetention };
-        for (const arg of filteredArgs.slice(1)) {
-          if (!arg.startsWith("--")) continue;
-          const [k, v] = arg.slice(2).split("=");
-          if (!k || v === undefined) continue;
-          const num = Number(v);
-          const value = Number.isNaN(num) ? v : num;
-          if (k.startsWith("decay.")) {
-            retentionPatch.decay = { ...(retentionPatch.decay ?? {}) };
-            (retentionPatch.decay as Record<string, unknown>)[k.slice("decay.".length)] = value;
-          } else {
-            (retentionPatch as Record<string, unknown>)[k] = value;
-          }
-        }
+        Object.assign(retentionPatch, policyPatch(filteredArgs.slice(1), retentionPatch));
         return { ...current, retentionPolicy: retentionPatch };
       });
       const resolved = mergeConfig(phrenPath, projectArg);
@@ -268,21 +275,7 @@ export async function handleRetentionPolicy(args: string[]) {
       return;
     }
     requireFlagPairs(filteredArgs.slice(1), "phren config policy set --ttlDays=90 --retentionDays=365");
-    const patch: Record<string, unknown> = {};
-    for (const arg of filteredArgs.slice(1)) {
-      if (!arg.startsWith("--")) continue;
-      const [k, v] = arg.slice(2).split("=");
-      if (!k || v === undefined) continue;
-      const num = Number(v);
-      const value = Number.isNaN(num) ? v : num;
-      if (k.startsWith("decay.")) {
-        patch.decay = patch.decay || {};
-        (patch.decay as Record<string, unknown>)[k.slice("decay.".length)] = value;
-      } else {
-        patch[k] = value;
-      }
-    }
-    const result = updateRetentionPolicy(phrenPath, patch);
+    const result = updateRetentionPolicy(phrenPath, policyPatch(filteredArgs.slice(1)));
     if (!result.ok) {
       console.error(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -291,7 +284,7 @@ export async function handleRetentionPolicy(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: phren config policy [--project <name>] [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
+  console.error("Usage: phren config policy [--project <name>] [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45 --budgets.openTasks=150 --budgets.reviewEntries=150 --budgets.runtimeMB=1024 --budgets.fanoutArchiveMB=512 --budgets.runtimeAgeOut=false --budgets.runtimeAgeOutDays=30]");
   process.exit(1);
 }
 

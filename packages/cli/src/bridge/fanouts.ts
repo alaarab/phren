@@ -19,6 +19,8 @@ const MAX_JOBS = 128;
 const ARCHIVE_AGE_MS = 24 * 60 * 60 * 1000;
 /** How many folders the archive keeps; the oldest beyond that are deleted. */
 export const ARCHIVE_MAX_FOLDERS = 500;
+/** How many bytes the archive keeps by default (retention policy `budgets.fanoutArchiveMB`); past it the oldest finished folders are deleted. */
+export const ARCHIVE_MAX_BYTES = 512 * 1024 * 1024;
 const ARCHIVED_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const WORKTREE_CACHE_MS = 15_000;
 const exec = promisify(execFile);
@@ -376,20 +378,43 @@ async function exitStamp(directory: string): Promise<number | undefined> {
   return exit?.isFile() && !exit.isSymbolicLink() ? exit.mtimeMs : undefined;
 }
 
-/** When an archived folder counts as finished for the cap: its manifest's
- * finishedAt, else exit.txt's mtime, else the folder's own mtime. */
-async function archivedFinishedAt(directory: string): Promise<number> {
+/** When an archived folder counts as finished for the caps: its manifest's
+ * finishedAt, else exit.txt's mtime, else the folder's own mtime. `finished`
+ * is a completed, failed or cancelled manifest or an exit.txt; only such a
+ * folder is ever deleted for the byte ceiling. */
+async function archivedFinishedAt(directory: string): Promise<{ age: number; finished: boolean }> {
+  let status: unknown;
   const manifestFile = await lstat(path.join(directory, "manifest.json")).catch(() => undefined);
   if (manifestFile?.isFile() && !manifestFile.isSymbolicLink() && manifestFile.size <= MAX_MANIFEST_BYTES) {
     try {
-      const value = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8")) as { finishedAt?: unknown };
+      const value = JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8")) as { finishedAt?: unknown; status?: unknown };
+      status = value.status;
       const finished = typeof value.finishedAt === "string" ? Date.parse(value.finishedAt) : NaN;
-      if (Number.isFinite(finished)) return finished;
+      if (Number.isFinite(finished)) return { age: finished, finished: ARCHIVED_STATUSES.has(String(status)) || await exitStamp(directory) !== undefined };
     } catch { /* Missing, torn, or synthesized manifests fall back to the exit stamp. */ }
   }
   const exit = await exitStamp(directory);
-  if (exit !== undefined) return exit;
-  return (await stat(directory).catch(() => undefined))?.mtimeMs ?? 0;
+  if (exit !== undefined) return { age: exit, finished: true };
+  return { age: (await stat(directory).catch(() => undefined))?.mtimeMs ?? 0, finished: ARCHIVED_STATUSES.has(String(status)) };
+}
+
+/** A folder's bytes, without following symlinks. */
+async function folderBytes(target: string): Promise<number> {
+  const metadata = await lstat(target).catch(() => undefined);
+  if (!metadata) return 0;
+  if (!metadata.isDirectory()) return metadata.isFile() ? metadata.size : 0;
+  const names = await readdir(target).catch(() => []);
+  let total = 0;
+  for (const name of names) total += await folderBytes(path.join(target, name));
+  return total;
+}
+
+/** The byte ceiling from the store's retention policy, read only when the caller gave none. */
+async function archiveMaxBytes(env: NodeJS.ProcessEnv): Promise<number> {
+  try {
+    const { getRetentionPolicy } = await import("../governance/policy.js");
+    return Math.round(getRetentionPolicy(storeRoot(env)).budgets.fanoutArchiveMB * 1024 * 1024);
+  } catch { return ARCHIVE_MAX_BYTES; }
 }
 
 /** Move finished fan-out job folders into the archive.
@@ -400,12 +425,14 @@ async function archivedFinishedAt(directory: string): Promise<number> {
  * ARCHIVE_AGE_MS old. A folder with no manifest goes too once its exit.txt is
  * that old, gaining a synthesized {status: failed, reason: "no manifest"}
  * manifest in the archive. The archive keeps ARCHIVE_MAX_FOLDERS folders,
- * deleting the oldest beyond that. `dryRun` reports the same work without
+ * deleting the oldest beyond that, and then deletes the oldest finished
+ * folders until it is under `maxBytes` (the store's `budgets.fanoutArchiveMB`,
+ * 512 MB unless set; 0 is no ceiling). `dryRun` reports the same work without
  * touching anything. `olderThanMs` replaces the 24 hour age (0 archives every
  * finished job), and `parent` limits the sweep to one parent session's jobs;
  * a folder without a manifest has no parent and is left alone then. */
 export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.env,
-  options: { dryRun?: boolean; now?: number; olderThanMs?: number; parent?: { session: string; provider?: Provider } } = {}): Promise<FanoutArchiveResult> {
+  options: { dryRun?: boolean; now?: number; olderThanMs?: number; parent?: { session: string; provider?: Provider }; maxBytes?: number } = {}): Promise<FanoutArchiveResult> {
   const now = options.now ?? Date.now(), dryRun = options.dryRun ?? false;
   const age = options.olderThanMs ?? ARCHIVE_AGE_MS, parent = options.parent;
   const moves: Array<{ name: string; basis: number }> = [];
@@ -450,18 +477,33 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
   const archived = (await readdir(archive).catch(() => [])).filter(name => jobID.safeParse(name).success);
   // Up to ARCHIVE_MAX_FOLDERS + n folders at two or three file reads each:
   // one at a time that takes seconds on Windows, where every stat is slow.
-  const entries: Array<{ name: string; age: number }> = [];
+  const entries: Array<{ name: string; age: number; finished: boolean; directory: string }> = [];
   for (let index = 0; index < archived.length; index += 32) {
     entries.push(...await Promise.all(archived.slice(index, index + 32)
-      .map(async name => ({ name, age: await archivedFinishedAt(path.join(archive, name)) }))));
+      .map(async name => ({ name, directory: path.join(archive, name), ...await archivedFinishedAt(path.join(archive, name)) }))));
   }
   // On a dry run the moves never landed, so weigh them at their finish stamp.
-  if (dryRun) for (const move of moves) entries.push({ name: move.name, age: move.basis });
+  if (dryRun && root) for (const move of moves) entries.push({ name: move.name, age: move.basis, finished: true, directory: path.join(root, move.name) });
+  entries.sort((a, b) => a.age - b.age || a.name.localeCompare(b.name));
   let deleted = 0;
-  if (entries.length > ARCHIVE_MAX_FOLDERS) {
-    const excess = entries.sort((a, b) => a.age - b.age || a.name.localeCompare(b.name)).slice(0, entries.length - ARCHIVE_MAX_FOLDERS);
-    for (const entry of excess) if (!dryRun) await rm(path.join(archive, entry.name), { recursive: true, force: true });
-    deleted = excess.length;
+  const remove = async (entry: { directory: string }) => {
+    if (!dryRun) await rm(entry.directory, { recursive: true, force: true });
+    deleted++;
+  };
+  const kept = entries.slice(Math.max(0, entries.length - ARCHIVE_MAX_FOLDERS));
+  for (const entry of entries.slice(0, entries.length - kept.length)) await remove(entry);
+  // Then the byte ceiling: the oldest finished folders go until the rest fit.
+  const maxBytes = options.maxBytes ?? await archiveMaxBytes(env);
+  if (maxBytes > 0) {
+    const sizes: number[] = [];
+    for (let index = 0; index < kept.length; index += 32) sizes.push(...await Promise.all(kept.slice(index, index + 32).map(entry => folderBytes(entry.directory))));
+    let total = sizes.reduce((sum, size) => sum + size, 0);
+    for (const [index, entry] of kept.entries()) {
+      if (total <= maxBytes) break;
+      if (!entry.finished) continue;
+      await remove(entry);
+      total -= sizes[index];
+    }
   }
   return { moved: moves.map(move => move.name), deleted };
 }

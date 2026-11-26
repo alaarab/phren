@@ -113,6 +113,8 @@ teammates, not a security boundary against a local user.
 - **Extraction.** Candidates mined from git history that score below `autoAcceptThreshold` (default 0.75, `PHREN_MEMORY_AUTO_ACCEPT`) are queued **instead of** being written to `FINDINGS.md`. The queue line is the only copy.
 - **Governance.** `phren maintain govern` and TTL enforcement queue findings that already live in `FINDINGS.md` under `## Stale` and `## Conflicts`, asking you to confirm they are still true.
 
+The tool hook's finding candidates and a dream's proposals land there too. All of these are machine-generated, and none is queued while the project's queue is over its review budget (see [Budgets](#budgets)).
+
 So a queue line can point at three different realities, and the verbs behave accordingly.
 
 #### Approve
@@ -160,6 +162,21 @@ Both verbs write to the audit log (`review_approve` / `review_reject`, with the 
 
 Configure via `phren config policy`.
 
+### Budgets
+
+Budgets bound what phren adds on its own. Nothing a person or agent wrote is ever removed for one, and every budget can be set to 0 to turn it off. They live in the retention policy (`budgets` in `.config/retention-policy.json`), and the two per-project ones can be overridden per project:
+
+| Budget | Default | Past it |
+|---|---|---|
+| `openTasks` (per project) | 150 | The prompt hook files no new task for the project, and its trace line ends `tasks=paused open <n>/<budget>`. A prompt that asks for a task ("add this to the task list"), `add_task`, `phren tasks add` and the apps still add tasks, and a prompt that matches an Active task still moves it. |
+| `reviewEntries` (per project) | 150 | Governance (stale, broken-citation and low-value findings), TTL review, extraction, the tool hook and dreams queue nothing more in the project's `review.md`. An entry a person or agent queues still goes in. |
+| `runtimeMB` | 1024 | Reported only: this computer's `.runtime` folder is flagged. |
+| `fanoutArchiveMB` | 512 | The fan-out archive sweep deletes the oldest finished folders until the archive fits, beside its 500-folder cap. |
+
+Daily store health (`.runtime/store-health.jsonl`) lists each component over its budget with its count, budget and what that stops, groups `.runtime` bytes by class (code indexes, fanout archive, live fanouts, sessions, packages, logs, other), and counts the prompts in the last 24 hours that filed no task for budget. `phren doctor` shows the latest line's over-budget components as a warning that never fails the check.
+
+**Runtime age-out** (`runtimeAgeOut`, off by default) removes regenerable `.runtime` files: a code index whose project has no checkout on this computer, or no project of that name in any store, once it has not been rebuilt for `runtimeAgeOutDays` (30), and a fan-out archive folder that finished that long ago. Running workers, sessions, logs, caches, the store's markdown and `.git` are never touched. Turned on, it still waits until the health log is a week old, and the health line says each day what it removed or, until then, would remove.
+
 ### The phren shell: human review before agent consumption
 
 `phren shell` is a model-free terminal interface for reviewing, approving, and cleaning memories before any agent consumes them. 8 views, 30+ commands, single-key navigation.
@@ -191,6 +208,12 @@ phren config policy get
 phren config policy set --ttlDays=90 --retentionDays=365 --minInjectConfidence=0.35
 phren config policy set --project my-app --retentionDays=3650   # per-project override
 phren config policy set --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65
+
+# Budgets (0 turns one off); a project can override openTasks and reviewEntries
+phren config policy set --budgets.openTasks=150 --budgets.reviewEntries=150
+phren config policy set --project my-app --budgets.openTasks=300
+phren config policy set --budgets.runtimeMB=1024 --budgets.fanoutArchiveMB=512
+phren config policy set --budgets.runtimeAgeOut=true --budgets.runtimeAgeOutDays=30
 
 # Access control: admins, contributors, readers
 phren config access get
@@ -230,7 +253,7 @@ phren review reject  <project> <text> # delete the content wherever it lives, th
 
 Findings age out of `FINDINGS.md` into `reference/topics/<topic>.md`, and a store a year old carries hundreds of thousands of words there, reachable only by keyword. `phren maintain summarize [project] [--llm] [--force]` writes a `## Now` block at the top of each topic file — structural by default (how many findings, which tags, what keeps being mentioned, the newest headlines) or a prose paragraph when an LLM is configured and `--llm` is passed — and a `What phren knows` block at the end of `summary.md`. A model's paragraph is kept only if every identifier it names appears in the findings; a small local model will otherwise invent the stack, and a summary that adds facts is worse than none, so such a paragraph is dropped for the structural one. Hand-written documents that live under `reference/topics/` (no archived bullets) get no block. Most people run phren inside an agent that already is a capable model: the `/phren-summarize` skill has that agent write the paragraphs through `get_topic_summaries` and `set_topic_summary`, under the same identifier check, with no API key or local model involved. The prompt hook injects that block once per session for the project at hand, before any individual bullets. Both blocks live between markers and are replaced, never accumulated; the archive's own bullets are not rewritten. A topic file past 400 bullets is split, oldest sections first, into `<topic>.older.md`, which stays indexed.
 
-Daily background maintenance (scheduled by the stop hook) covers the primary store and writable attached team stores. It queues stale, conflicting and low-value findings in each project's own `review.md`, consolidates findings, prunes dead memories using that store's retention policy, refreshes structural topic summaries, and moves done tasks past thirty into that store's `.config/task-archive/<project>.md`. The primary's profile filters only primary projects; attached stores use their own project subscriptions.
+Daily background maintenance (scheduled by the stop hook) covers the primary store and writable attached team stores. It queues stale, conflicting and low-value findings in each project's own `review.md` (none while that queue is over its review budget), consolidates findings, prunes dead memories using that store's retention policy, refreshes structural topic summaries, and moves done tasks past thirty into that store's `.config/task-archive/<project>.md`. The primary's profile filters only primary projects; attached stores use their own project subscriptions.
 
 Background maintenance also prunes local session files in the primary store's `.sessions/` and logs in `.runtime/` older than 30 days (never the mirrored agent conversations in `.runtime/sessions/`), at most once every 24 hours. It preserves audit and telemetry files, directories and symlinks. Pruning failures are logged and do not stop other maintenance. `phren maintain gc [--dry-run]` runs Git garbage collection and the same pruning by hand, preserving commit history. Background pruning does not run Git garbage collection.
 
