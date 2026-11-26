@@ -3124,7 +3124,8 @@ schedules:
       const conductor = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Owner", kind: "codex", role: "conductor" });
       expect(conductor.status).toBe(200);
       // Asked to open beside the conductor, a worker labelled like one gets its own workspace and a worker's name.
-      const worker = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Conductor voice fluency", kind: "claude", workspaceId: conductor.data.workspaceId });
+      // Name the account so the Hook skips discovery, which can leave a host Claude auth probe running at teardown.
+      const worker = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Conductor voice fluency", kind: "claude", account: "default", workspaceId: conductor.data.workspaceId });
       expect(worker.status, JSON.stringify(worker.data)).toBe(200);
       expect(worker.data.workspaceId).not.toBe(conductor.data.workspaceId);
       expect(commands.filter(c => c.method === "tab.create")).toHaveLength(0);
