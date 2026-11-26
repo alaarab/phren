@@ -134,8 +134,9 @@ function repoRelative(root: string, file: string): string | undefined {
   };
   const direct = inside(root, file);
   if (direct) return direct;
-  // git reports the real path (macOS /private/var for /var), so compare real paths too.
-  try { return inside(fs.realpathSync(root), fs.realpathSync(file)); } catch { return undefined; }
+  // git reports the real path (macOS /private/var, Windows long names for 8.3 ones like RUNNER~1), so compare native real paths too.
+  const real = fs.realpathSync.native ?? fs.realpathSync;
+  try { return inside(real(root), real(file)); } catch { return undefined; }
 }
 
 // File paths a finding names, like `content/citation.ts` or `README.md`.

@@ -130,7 +130,9 @@ describe("a citation written on another computer", () => {
   });
 
   it("matches a remote whatever the case of its path", () => {
-    expect(checkoutForRemote(store, "github.com/Acme/Widgets")).toBe(here);
+    // On a case-insensitive disk (macOS, Windows) the folder named like the remote is the same folder.
+    const real = (dir: string | undefined) => dir && fs.realpathSync.native(dir);
+    expect(real(checkoutForRemote(store, "github.com/Acme/Widgets"))).toBe(real(here));
   });
 
   it("never uses a same-named folder whose origin is another remote", () => {

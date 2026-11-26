@@ -20,6 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- On Windows, a finding saved with a file path that uses a short folder name (like `RUNNER~1`) now gets a portable citation, the repo's clone URL plus a file relative to it, instead of the absolute path.
 - Hook install and update now remove old versions after a successful install, keeping the current version and the two most recently installed others. Versions still running or referenced by a launch script or service file are kept too.
 - A finding with an older citation, one that names a folder on the computer that saved it, is now checked by the prompt hook and `search_knowledge` the way a new citation is: from what the daily check last recorded on this computer, with no git process. Before, they never looked at these citations. A cited file that's gone now keeps the finding out of your agent's context, and a cited line that changed lowers its confidence. A finding that cites code also no longer loses confidence as if it cited nothing; one saved with only its date still counts as uncited.
 
