@@ -12,12 +12,12 @@
 {"id":"neg-off-domain-04","prompt":"Explain the difference between a sonnet and a villanelle.","project":"lilacforge","kind":"negative","class":"off-domain","relevant":[],"tier":null}
 {"id":"neg-off-domain-05","prompt":"How do I tune a violin using harmonics?","project":null,"kind":"negative","class":"off-domain","relevant":[],"tier":null}
 {"id":"neg-off-domain-06","prompt":"Which geological processes form limestone caves?","project":"dunepocket","kind":"negative","class":"off-domain","relevant":[],"tier":null}
-{"id":"neg-cross-project-lure-01","prompt":"The terminal compositor has no network transport. Does it use parcel spool acknowledgements?","project":"velvetquay","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
-{"id":"neg-cross-project-lure-02","prompt":"For the audio mixer, can we reuse the basalt migrations schema bell?","project":"frostbobbin","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
-{"id":"neg-cross-project-lure-03","prompt":"Does the archive packer have reef phrase matching offsets?","project":"russetcove","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
-{"id":"neg-cross-project-lure-04","prompt":"In the metric collector, should saffron journal keys rotate after the footer seal?","project":"dunepocket","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
-{"id":"neg-cross-project-lure-05","prompt":"For the dependency resolver, is prism tile overlap relevant?","project":"ferncradle","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
-{"id":"neg-cross-project-lure-06","prompt":"Does the template engine need brine queue leases and heartbeats?","project":"wrenkiln","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
+{"id":"neg-cross-project-lure-01","prompt":"Does this use parcel spool acknowledgements before releasing the lease?","project":"velvetquay","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
+{"id":"neg-cross-project-lure-02","prompt":"Can we reuse the basalt migrations schema bell here?","project":"frostbobbin","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
+{"id":"neg-cross-project-lure-03","prompt":"Do we have reef phrase matching offsets anywhere?","project":"russetcove","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
+{"id":"neg-cross-project-lure-04","prompt":"Should saffron journal keys rotate after the footer seal?","project":"dunepocket","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
+{"id":"neg-cross-project-lure-05","prompt":"Is prism tile overlap relevant to us?","project":"ferncradle","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
+{"id":"neg-cross-project-lure-06","prompt":"Do we need brine queue leases and heartbeats?","project":"wrenkiln","kind":"negative","class":"cross-project-lure","relevant":[],"tier":null}
 {"id":"neg-typo-01","prompt":"plz cmpr thse n gve ur thots","project":null,"kind":"negative","class":"typo","relevant":[],"tier":null}
 {"id":"neg-typo-02","prompt":"whcih iz beter btwn thm","project":"coralspindle","kind":"negative","class":"typo","relevant":[],"tier":null}
 {"id":"neg-typo-03","prompt":"xylphn grvty cnflx quzzl?","project":null,"kind":"negative","class":"typo","relevant":[],"tier":null}

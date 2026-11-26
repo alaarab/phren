@@ -1,0 +1,24 @@
+{
+  "cases": 66,
+  "negatives": 33,
+  "positives": 33,
+  "falseInjectionRate": 0,
+  "falseInjectionByClass": {
+    "conversational": 0,
+    "off-domain": 0,
+    "cross-project-lure": 0,
+    "typo": 0,
+    "envelope": 0,
+    "other-tool": 0
+  },
+  "hitAt3": 0.9091,
+  "hitAt3ByTier": {
+    "active": 0.9091,
+    "topic": 0.8333,
+    "older": 1
+  },
+  "abstainRate": 0.5303,
+  "positiveAbstainRate": 0.0606,
+  "retiredInjected": 0,
+  "meanUsedTokens": 94.2903
+}

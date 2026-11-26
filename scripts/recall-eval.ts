@@ -4,7 +4,7 @@
  *   mise x pnpm@12.9.1 -- pnpm exec tsx scripts/recall-eval.ts
  *   mise x pnpm@12.9.1 -- pnpm exec tsx scripts/recall-eval.ts --write-baseline
  *   mise x pnpm@12.9.1 -- pnpm exec tsx scripts/recall-eval.ts --check
- *   mise x pnpm@12.9.1 -- pnpm exec tsx scripts/recall-eval.ts --store <snapshot> --cases <jsonl>
+ *   mise x pnpm@12.9.1 -- pnpm exec tsx scripts/recall-eval.ts --store <snapshot> --cases <jsonl> [--profile <name>]
  *
  * Private runs print aggregates only. --out writes case rows outside the repo.
  */
@@ -43,6 +43,7 @@ async function main(): Promise<void> {
     store: { type: "string" },
     cases: { type: "string" },
     out: { type: "string" },
+    profile: { type: "string" },
   } });
   if (values["write-baseline"] && values.check) throw new Error("Choose --write-baseline or --check");
   if (values.store && !values.cases) throw new Error("--store requires --cases");
@@ -56,7 +57,7 @@ async function main(): Promise<void> {
     const cases = values.cases ? loadCases(values.cases) : undefined;
     const { pipelineRunner } = await import("../packages/cli/src/recall/eval/runner.js");
     const report = values.store
-      ? await runRecallStoreEval({ runner: pipelineRunner, cases: cases!, phrenPath: values.store })
+      ? await runRecallStoreEval({ runner: pipelineRunner, cases: cases!, phrenPath: values.store, profile: values.profile })
       : await runRecallEval({ runner: pipelineRunner, cases });
     console.log(formatRecallScore(report.score));
     if (out) fs.writeFileSync(out, report.rows.map(row => JSON.stringify(row)).join("\n") + "\n", { mode: 0o600 });

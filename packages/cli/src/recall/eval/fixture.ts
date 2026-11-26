@@ -89,7 +89,7 @@ export function buildRecallFixture(root: string): RecallFixture {
       for (const i of slots) {
         if (lastAge !== age(i)) lines.push(`## ${tier === 0 ? "" : "Archived "}${dayAgo(now, age(i))}`, "");
         lastAge = age(i);
-        const text = i === 0 ? target : pi === 0 && tier === 1 && i === 1 ? ARCHIVED_BUG : `${name} ${domain} checkpoint ${i}: ${EVERYDAY[(pi + i) % EVERYDAY.length]}`;
+        const text = i === 0 ? target : pi === 0 && tier === 1 && i === 1 ? ARCHIVED_BUG : `Checkpoint ${i}: ${EVERYDAY[(pi + i) % EVERYDAY.length]}`;
         lines.push(bullet(text, tier, i, age(i)), "");
       }
       for (const [i, status] of ["superseded", "retracted"].entries()) {
