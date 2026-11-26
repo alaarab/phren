@@ -75,6 +75,8 @@ Findings can cite the source file and line number that motivated them:
 
 When the cited file changes significantly or disappears, phren penalizes the finding's confidence. This creates a feedback loop: as code evolves, outdated findings naturally decay out of injection range without manual curation.
 
+Each computer checks a citation against its own disk and gets one of four states. **Valid**: everything named checks out. **Drifted**: the cited line changed since the cited commit, or is past the end of the file; the finding may still be right, so its confidence drops by 0.7×, like a cited file that changed since the finding was written. **Broken**: the repo is on this computer but does not know the cited commit, or the cited file is gone; the finding is not injected. **Unverifiable**: the citation names no repo or file, the repo path is not on this computer (a `/Users/...` path on Linux), or git could not run; nothing changes. Daily governance records the states it checks, for `FINDINGS.md`, topic files and `.older.md` splits, in the machine-local `.runtime/citation-states.json` (at most 300 git calls per run; the rest wait for the next run), and only the store's maintenance lease holder files broken citations under `## Conflicts`.
+
 ### Role-based access control
 
 Three roles, enforced on mutating operations:
