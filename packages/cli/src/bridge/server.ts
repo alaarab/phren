@@ -8,6 +8,7 @@ import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
+import { StaleTaskSources } from "./task-stale.js";
 import { Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
 import { liveProcessCwds } from "./housekeeping/safety.js";
 import { dockerUsage, listSimulators, sessionRowsFromOverview, xcodebuildRunning } from "./housekeeping/inventory.js";
@@ -154,9 +155,10 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }
   // Assigned once resources exist below; the inbox only reads it on its ticks.
   let housekeeper: Housekeeper | undefined;
+  const staleTasks = modules.has("tasks") ? new StaleTaskSources() : undefined;
   const inbox = dispatches ? new OwnerInbox(async () => {
     const observed = await ownerInboxSources(agentHooks);
-    return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? []] };
+    return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? [], ...staleTasks?.sources() ?? []] };
   }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
