@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -284,6 +284,92 @@ describe("finding provenance", () => {
     expect(content).not.toContain('"commit":');
     expect(content).not.toContain('"file":');
     expect(content).not.toContain('"line":');
+  });
+});
+
+describe("portable citations", () => {
+  let checkout: string;
+  let head: string;
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: checkout, encoding: "utf8" }).trim();
+  const lastCitation = () => {
+    const line = fs.readFileSync(findingsPath(), "utf-8").split("\n").find(l => l.includes("phren:cite"))!;
+    return JSON.parse(line.replace(/^\s*<!-- phren:cite /, "").replace(/ -->\s*$/, ""));
+  };
+
+  beforeEach(() => {
+    checkout = path.join(tmp.path, "..", `${path.basename(tmp.path)}-checkout`);
+    fs.mkdirSync(checkout);
+    git("init", "-q");
+    writeFile(path.join(checkout, "src", "net", "retry.ts"), "export const budget = 3;\n");
+    writeFile(path.join(checkout, "src", "net", "index.ts"), "export {};\n");
+    writeFile(path.join(checkout, "src", "ui", "index.ts"), "export {};\n");
+    git("add", "-A");
+    git("commit", "-qm", "seed");
+    head = git("rev-parse", "HEAD");
+    git("remote", "add", "origin", "https://x-access-token:not-a-real-token@github.com/Acme/Widgets.git");
+    writeFile(path.join(tmp.path, PROJECT, "phren.project.yaml"), `sourcePath: ${checkout}\n`);
+  });
+
+  afterEach(() => fs.rmSync(checkout, { recursive: true, force: true }));
+
+  it("cites the project's checkout by its remote and HEAD when the caller gives no citation", () => {
+    expect(addFindingToFile(tmp.path, PROJECT, "Retries back off exponentially with jitter").ok).toBe(true);
+    expect(lastCitation()).toEqual({ created_at: expect.any(String), remote: "github.com/Acme/Widgets", commit: head });
+    expect(fs.readFileSync(findingsPath(), "utf-8")).not.toContain("not-a-real-token");
+  });
+
+  it("cites the one tracked file a finding names, and no line", () => {
+    addFindingToFile(tmp.path, PROJECT, "The retry budget lives in src/net/retry.ts and nowhere else");
+    expect(lastCitation()).toMatchObject({ remote: "github.com/Acme/Widgets", file: "src/net/retry.ts", commit: head });
+    expect(lastCitation().line).toBeUndefined();
+  });
+
+  it("cites no file when the named path is ambiguous or more than one file is named", () => {
+    addFindingToFile(tmp.path, PROJECT, "Every barrel file is called index.ts in this repo");
+    expect(lastCitation().file).toBeUndefined();
+    fs.rmSync(findingsPath());
+    addFindingsToFile(tmp.path, PROJECT, ["Both net/retry.ts and ui/index.ts read the retry budget at start-up"]);
+    expect(lastCitation()).toMatchObject({ remote: "github.com/Acme/Widgets", commit: head });
+    expect(lastCitation().file).toBeUndefined();
+  });
+
+  it("makes a caller's absolute file repo-relative and keeps the caller's line and commit", () => {
+    addFindingToFile(tmp.path, PROJECT, "The budget constant is read once", { file: path.join(checkout, "src", "net", "retry.ts"), line: 1, commit: "abc1234" });
+    expect(lastCitation()).toEqual({ created_at: expect.any(String), remote: "github.com/Acme/Widgets", file: "src/net/retry.ts", line: 1, commit: "abc1234" });
+  });
+
+  it("cites a repo registered at a folder inside it by the repo's root", () => {
+    fs.mkdirSync(path.join(checkout, "packages", "net"), { recursive: true });
+    writeFile(path.join(tmp.path, PROJECT, "phren.project.yaml"), `sourcePath: ${path.join(checkout, "packages", "net")}\n`);
+    addFindingToFile(tmp.path, PROJECT, "The retry budget lives in src/net/retry.ts and nowhere else");
+    expect(lastCitation()).toMatchObject({ remote: "github.com/Acme/Widgets", file: "src/net/retry.ts", commit: head });
+  });
+
+  it("uses a checkout found by name only when its remote is the project's configured remote", () => {
+    const projects = path.join(tmp.path, "..", `${path.basename(tmp.path)}-projects`);
+    fs.mkdirSync(projects);
+    fs.renameSync(checkout, path.join(projects, PROJECT));
+    checkout = path.join(projects, PROJECT);
+    vi.stubEnv("PROJECTS_DIR", projects);
+    try {
+      writeFile(path.join(tmp.path, PROJECT, "phren.project.yaml"), "remote: https://github.com/acme/intended.git\n");
+      addFindingToFile(tmp.path, PROJECT, "Retries back off exponentially with jitter");
+      expect(lastCitation().remote).toBeUndefined();
+      expect(lastCitation().commit).toBeUndefined();
+      fs.rmSync(findingsPath());
+      git("remote", "set-url", "origin", "git@github.com:acme/intended.git");
+      addFindingToFile(tmp.path, PROJECT, "Retries back off exponentially with jitter");
+      expect(lastCitation()).toMatchObject({ remote: "github.com/acme/intended", commit: head });
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(projects, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a local-only repo's path and never guesses a file from the commit", () => {
+    git("remote", "remove", "origin");
+    addFindingToFile(tmp.path, PROJECT, "The seed commit set up the network module", { repo: checkout, commit: head });
+    expect(lastCitation()).toEqual({ created_at: expect.any(String), repo: checkout, commit: head });
   });
 });
 

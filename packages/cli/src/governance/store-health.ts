@@ -3,6 +3,8 @@ import * as path from "path";
 import { parseFindingsContent, readReviewQueue, type FindingItem } from "../data/access.js";
 import { readTasks } from "../data/tasks.js";
 import { isCitationLine, normalizeFindingText } from "../content/metadata.js";
+import { parseCitationComment } from "../content/citation.js";
+import { citationStateKey, readCitationStates, type CitationStates } from "../content/citation-states.js";
 import { listTopicFiles, NOW_START, NOW_END } from "../content/summarize.js";
 import { getMachineName } from "../machine-identity.js";
 import { atomicWriteText, runtimeDir } from "../phren-paths.js";
@@ -19,7 +21,12 @@ export interface StoreHealthCounts {
   bulletsWithoutFid: number;
   duplicateFids: number;
   duplicateTexts: number;
-  citations: { none: number; timestampOnly: number; withFile: number; withCommit: number; withSymbol: number };
+  citations: { none: number; timestampOnly: number; withFile: number; withCommit: number; withSymbol: number; withRemote: number };
+  /**
+   * Active findings whose citation this computer last checked to valid, drifted or broken (the daily
+   * sweep's `.runtime/citation-states.json`), and of those the ones that name a file.
+   */
+  checkableCitations: { any: number; withFile: number };
   openTasks: number;
   doneTasks: number;
   reviewEntries: number;
@@ -42,6 +49,8 @@ export interface StoreHealth {
     path: string;
     projects: Array<StoreHealthCounts & { project: string }>;
     totals: StoreHealthCounts;
+    /** Share of the store's active findings whose citation is checkable on this computer, to three places. */
+    citationCoverage: number;
   }>;
   runtimeBytes: Record<string, number>;
   recall: StoreHealthRecall | null;
@@ -52,7 +61,8 @@ function emptyCounts(): StoreHealthCounts {
     activeFindings: 0, archivedBullets: 0, olderBullets: 0,
     retiredBullets: 0, contradictedBullets: 0, bulletsWithoutFid: 0,
     duplicateFids: 0, duplicateTexts: 0,
-    citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0 },
+    citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
+    checkableCitations: { any: 0, withFile: 0 },
     openTasks: 0, doneTasks: 0, reviewEntries: 0,
   };
 }
@@ -67,10 +77,27 @@ function parseBullets(content: string): FindingItem[] {
   return parseFindingsContent(lines.join("\n"), { includeArchived: true });
 }
 
-function projectHealth(storePath: string, project: string): StoreHealthCounts & { project: string } {
+// Active bullets whose recorded citation state is decided here; a bare timestamp is never swept, so never counts.
+function checkableCitations(findingsPath: string, content: string, states: CitationStates): StoreHealthCounts["checkableCitations"] {
+  const counts = { any: 0, withFile: 0 };
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (!lines[i].startsWith("- ")) continue;
+    const citation = parseCitationComment(lines[i + 1]);
+    const state = citation ? states[citationStateKey(findingsPath, lines[i])]?.state : undefined;
+    if (!state || state === "unverifiable") continue;
+    counts.any++;
+    if (citation?.file) counts.withFile++;
+  }
+  return counts;
+}
+
+function projectHealth(storePath: string, project: string, states: CitationStates): StoreHealthCounts & { project: string } {
   const counts = { project, ...emptyCounts() };
   const findingsPath = path.join(storePath, project, "FINDINGS.md");
-  const active = fs.existsSync(findingsPath) ? parseBullets(fs.readFileSync(findingsPath, "utf8")) : [];
+  const activeContent = fs.existsSync(findingsPath) ? fs.readFileSync(findingsPath, "utf8") : "";
+  const active = activeContent ? parseBullets(activeContent) : [];
+  counts.checkableCitations = checkableCitations(findingsPath, activeContent, states);
   const topics = listTopicFiles(storePath, project);
   const archived = topics.flatMap(topic => parseBullets(fs.readFileSync(topic.file, "utf8")));
   const topicsDir = path.join(storePath, project, "reference", "topics");
@@ -98,7 +125,8 @@ function projectHealth(storePath: string, project: string): StoreHealthCounts & 
       if (citation.file) counts.citations.withFile++;
       if (citation.commit) counts.citations.withCommit++;
       if (citation.symbol) counts.citations.withSymbol++;
-      if (!citation.file && !citation.commit && !citation.symbol) counts.citations.timestampOnly++;
+      if (citation.remote) counts.citations.withRemote++;
+      if (!citation.file && !citation.commit && !citation.symbol && !citation.remote) counts.citations.timestampOnly++;
     }
   }
   const tasks = readTasks(storePath, project);
@@ -146,20 +174,28 @@ function recallHealth(phrenPath: string, now: Date): StoreHealthRecall | null {
   return counts;
 }
 
+function addCounts(into: Record<string, unknown>, from: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(into)) {
+    if (typeof value === "number") into[key] = value + (from[key] as number);
+    else addCounts(value as Record<string, unknown>, from[key] as Record<string, unknown>);
+  }
+}
+
 // Read-only: duplicate counts are extra occurrences within a project, across all tiers.
-export function collectStoreHealth(phrenPath: string, now = new Date(), computer = getMachineName()): StoreHealth {
+// Citation coverage reads the states this computer's last sweep recorded; it runs no git.
+export function collectStoreHealth(
+  phrenPath: string,
+  now = new Date(),
+  computer = getMachineName(),
+  citationStates: CitationStates = readCitationStates(phrenPath),
+): StoreHealth {
   const stores = resolveAllStores(phrenPath, { migrateAttachments: false }).map(entry => {
     const store = entry.role === "primary" ? { ...entry, path: phrenPath } : entry;
-    const projects = getStoreProjectDirs(store).sort().map(dir => projectHealth(store.path, path.basename(dir)));
+    const projects = getStoreProjectDirs(store).sort().map(dir => projectHealth(store.path, path.basename(dir), citationStates));
     const totals = emptyCounts();
-    for (const project of projects) {
-      for (const key of Object.keys(totals) as Array<keyof StoreHealthCounts>) {
-        if (key === "citations") {
-          for (const kind of Object.keys(totals.citations) as Array<keyof StoreHealthCounts["citations"]>) totals.citations[kind] += project.citations[kind];
-        } else totals[key] += project[key];
-      }
-    }
-    return { name: store.name, path: path.relative(phrenPath, store.path).split(path.sep).join("/") || ".", projects, totals };
+    for (const { project: _name, ...counts } of projects) addCounts(totals as unknown as Record<string, unknown>, counts);
+    const citationCoverage = totals.activeFindings ? Math.round((totals.checkableCitations.any / totals.activeFindings) * 1000) / 1000 : 0;
+    return { name: store.name, path: path.relative(phrenPath, store.path).split(path.sep).join("/") || ".", projects, totals, citationCoverage };
   });
   const runtime = runtimeDir(phrenPath);
   const runtimeBytes = Object.fromEntries(fs.existsSync(runtime)

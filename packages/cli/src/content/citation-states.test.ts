@@ -98,6 +98,17 @@ describe("sweepCitationStates", () => {
     expect(bounded.states["fid:abcd1234"].state).toBe("valid");
   });
 
+  it("checks a citation that names its repo by remote against this computer's clone of it", () => {
+    git("remote", "add", "origin", "git@github.com:acme/parser.git");
+    writeFile(path.join(store.path, "proj", "phren.project.yaml"), `sourcePath: ${repo.path}\n`);
+    const findings = path.join(store.path, "proj", "FINDINGS.md");
+    fs.appendFileSync(findings, cited("- Written on the other laptop <!-- fid:feed0001 -->", { remote: "github.com/acme/parser", commit: first, file: "a.ts" })
+      + cited("- Cites a file that was never committed <!-- fid:feed0002 -->", { remote: "github.com/acme/parser", commit: first, file: "b.ts" })
+      + cited("- Cites a repo this computer has no clone of <!-- fid:feed0003 -->", { remote: "github.com/acme/other", commit: first, file: "a.ts" }));
+    const { states } = sweepCitationStates(store.path, [{ storePath: store.path, project: "proj" }], { save: false });
+    expect([states["fid:feed0001"]?.state, states["fid:feed0002"]?.state, states["fid:feed0003"]?.state]).toEqual(["valid", "unverifiable", "unverifiable"]);
+  });
+
   it("writes nothing when asked not to save", () => {
     sweepCitationStates(store.path, [{ storePath: store.path, project: "proj" }], { save: false });
     expect(fs.existsSync(statesFile())).toBe(false);

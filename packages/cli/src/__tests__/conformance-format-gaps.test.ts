@@ -238,4 +238,26 @@ describe("format conformance gaps (docs/store-format.md §7)", () => {
       expect(newEntry?.text).toContain("NEW-FINDING-TAIL");
     });
   });
+
+  // --- §3: a citation that names its repo by `remote` with a repo-relative
+  // file. The keys inside phren:cite are part of the format, and a reader that
+  // knows none of them (or one added later) must carry the line through an
+  // edit byte for byte.
+  describe("portable citation: remote, repo-relative file, unknown citation key", () => {
+    it("reads the remote and carries the citation line through an edit unchanged", () => {
+      fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), readFixture("findings-portable-citation.md"));
+      const parsed = readFindings(tmpDir, PROJECT);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.data).toEqual(JSON.parse(readFixture("findings-portable-citation-parsed.json")));
+      expect(parsed.data[0].citationData).toMatchObject({ remote: "github.com/acme/widgets", file: "src/net/retry.ts" });
+      expect(parsed.data[2].citationData?.remote).toBeUndefined();
+
+      const edited = editFinding(tmpDir, PROJECT, "Retries back off exponentially with jitter in the network client", "[pattern] Retries back off exponentially with full jitter in the network client");
+      expect(edited.ok).toBe(true);
+      const after = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
+      expect(after).toBe(readFixture("findings-portable-citation-after-edit.md"));
+      expect(after).toContain('"future_key":"kept verbatim"');
+    });
+  });
 });

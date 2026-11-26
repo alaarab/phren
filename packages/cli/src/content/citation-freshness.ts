@@ -28,7 +28,7 @@ const RESOLUTION_TTL = 24 * 60 * MINUTE;
 const cacheMemo = new Map<string, { mtimeMs: number; size: number; entries: Cache }>();
 const isChanged = (entry?: CacheEntry): entry is CitationFreshness => !!entry && "state" in entry && entry.state === "changed";
 const resolutionKey = (citation: FreshnessCitation, opts: CitationFreshnessOptions) =>
-  `repo:${citation.repo ?? ""}\0${citation.projectRemote ?? opts.projectRemote ?? ""}`;
+  `repo:${citation.repo ?? ""}\0${citation.projectRemote ?? opts.projectRemote ?? ""}${citation.remote ? `\0${citation.remote}` : ""}`;
 const pending = new Map<string, Promise<void>>();
 const off = () => process.env.PHREN_CITATION_FRESHNESS?.trim().toLowerCase() === "off";
 
@@ -70,7 +70,8 @@ function repository(citation: FreshnessCitation, opts: CitationFreshnessOptions,
   const local = checkoutRoot(citation.repo, deadline);
   const read = (...args: string[]) => git(local, Math.min(GIT_TIMEOUT_MS, deadline - Date.now()), ...args);
   const remote = local ? read("remote", "get-url", "origin") : "";
-  const parsed = parseRemoteUrl(remote || fallback || "");
+  // A citation that names its repo by remote needs no checkout here; the project's remote is the last resort.
+  const parsed = parseRemoteUrl(remote || (citation.remote ? `https://${citation.remote}` : "") || fallback || "");
   let value = null;
   if (parsed && validDomain(parsed.domain) && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(parsed.path)
     && !parsed.path.split("/").some(part => part === "." || part === "..")) {

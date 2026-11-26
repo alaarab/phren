@@ -1,15 +1,22 @@
 import * as fs from "fs";
 import * as path from "path";
-import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "../shared.js";
+import { debugLog, EXEC_TIMEOUT_QUICK_MS } from "../shared.js";
 import { errorMessage, runGitOrThrow } from "../utils.js";
 import type { RetentionPolicy } from "../shared/governance.js";
 import { findingIdFromLine } from "../finding/impact.js";
 import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./metadata.js";
 import { FINDING_TYPE_DECAY, extractFindingType } from "../finding/lifecycle.js";
+import { checkedOutCommit, checkoutForRemote, checkoutGitCallCount, checkoutsNamedLike } from "./citation-checkouts.js";
 
 export interface FindingCitation {
   created_at: string;
+  /** The repo's absolute path on the computer that wrote the citation; written now only for a repo with no clone URL. */
   repo?: string;
+  /**
+   * The repo by its `origin` remote, as `host/owner/repo` (content/citation-checkouts.ts),
+   * so every computer with a clone of it can check the citation. `file` is then relative to the repo root.
+   */
+  remote?: string;
   file?: string;
   line?: number;
   commit?: string;
@@ -66,6 +73,11 @@ export interface TrustFilterOptions {
   highImpactFindingIds?: Set<string>;
   /** States already known (governance's bounded sweep); an undefined answer counts as unverifiable. Unset checks live. */
   citationState?: (citation: FindingCitation, bullet: string) => CitationState | undefined;
+  /**
+   * The citation of a bullet whose comment is not in `content` (the search index strips citation comments),
+   * checked like one on the next line. Whether the bullet counts as cited for its confidence still follows `content`.
+   */
+  sourceCitation?: (bullet: string) => FindingCitation | undefined;
 }
 
 export function getHeadCommit(cwd: string): string | undefined {
@@ -86,26 +98,6 @@ export function getRepoRoot(cwd: string): string | undefined {
     debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${errorMessage(err)}`);
     return undefined;
   }
-}
-
-export function inferCitationLocation(repoPath: string, commit: string): { file?: string; line?: number } {
-  try {
-    const raw = runGitOrThrow(repoPath, ["show", "--pretty=format:", "--unified=0", "--no-color", commit], EXEC_TIMEOUT_MS);
-    let currentFile = "";
-    for (const line of raw.split("\n")) {
-      if (line.startsWith("+++ b/")) {
-        currentFile = line.slice(6).trim();
-        continue;
-      }
-      const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (hunk && currentFile) {
-        return { file: currentFile, line: Number.parseInt(hunk[1], 10) };
-      }
-    }
-  } catch (err: unknown) {
-    debugLog(`citationLocationFromCommit: git show failed: ${errorMessage(err)}`);
-  }
-  return {};
 }
 
 export function buildCitationComment(citation: FindingCitation): string {
@@ -204,6 +196,7 @@ export function parseCitationComment(line: string): FindingCitation | null {
     return {
       created_at,
       repo: typeof parsed.repo === "string" ? parsed.repo : undefined,
+      remote: typeof parsed.remote === "string" && parsed.remote.trim() ? parsed.remote : undefined,
       file: typeof parsed.file === "string" ? parsed.file : undefined,
       line: typeof parsed.line === "number" ? parsed.line : undefined,
       commit: typeof parsed.commit === "string" ? parsed.commit : undefined,
@@ -245,7 +238,9 @@ function resolveCitationFile(citation: FindingCitation): string | null {
  * What this computer can tell about a citation:
  * - valid: everything it names checks out.
  * - drifted: the cited line changed since the cited commit, or is past the end of the file; the finding may still be right.
- * - broken: the repo is here but the cited file is gone.
+ * - broken: the repo is here but the cited file is gone. In a checkout other than the one the citation was
+ *   written in (found by `remote`, or another computer's repo path relocated here), only when the file was in
+ *   the cited commit and that commit is in the checkout's history.
  * - unverifiable: nothing to check, the repo is not on this computer, git could not run,
  *   or the repo does not know the commit while the file is still there (squash-merged or unfetched).
  */
@@ -261,7 +256,7 @@ let gitCalls = 0;
 
 /** Git processes citation checks have started in this process; governance caps a run by it. */
 export function citationGitCallCount(): number {
-  return gitCalls;
+  return gitCalls + checkoutGitCallCount();
 }
 
 function evictOldest<K, V>(cache: Map<K, V>): void {
@@ -291,8 +286,9 @@ function cachedGit(cache: Map<string, boolean>, key: string, repoPath: string, a
   return out !== false;
 }
 
-function cachedBlame(repoPath: string, relFile: string, line: number): string | false | undefined {
-  const key = `${repoPath}\0${relFile}\0${line}`;
+// `head` keys a checkout other than the writer's by the commit it has out, so a branch switch asks again.
+function cachedBlame(repoPath: string, relFile: string, line: number, head = ""): string | false | undefined {
+  const key = `${repoPath}\0${head}\0${relFile}\0${line}`;
   const cached = blameCache.get(key);
   if (cached !== undefined) return cached;
   const out = citationGit(repoPath, ["blame", "-L", `${line},${line}`, "--porcelain", relFile], 10_000);
@@ -313,23 +309,112 @@ function lineState(file: string, line: number | undefined): CitationState {
   }
 }
 
-export function checkFindingCitation(citation: FindingCitation): CitationState {
+export interface CitationCheckOptions {
+  /**
+   * The primary store, so a citation's `remote` resolves to this computer's checkout of it. Without it a remote is
+   * unverifiable. Mapping a remote scans folders and may start git, so only the daily sweep passes it; the prompt
+   * hook reads the states the sweep recorded.
+   */
+  phrenPath?: string;
+  /**
+   * Also look for another computer's absolute repo path among this computer's checkouts with the same folder
+   * name, taking the first that has the cited commit. It costs git calls, so the daily sweep sets it, not the hook.
+   */
+  relocate?: boolean;
+}
+
+/** Where a remote or relocated citation points in this computer's checkout. */
+interface CitationTarget {
+  root: string;
+  /** The cited file in the checkout, absolute, and repo-relative with forward slashes. */
+  file?: string;
+  relFile?: string;
+}
+
+// A cited file inside `root`: relative to it, or absolute under the repo path the citation was written with.
+function targetIn(root: string, citation: FindingCitation, writtenRoot?: string): CitationTarget | null {
+  if (!citation.file) return { root };
+  const relative = path.isAbsolute(citation.file)
+    ? (writtenRoot ? path.relative(writtenRoot, citation.file) : null)
+    : citation.file;
+  if (relative === null) return null;
+  const relFile = path.posix.normalize(relative.split(path.sep).join("/"));
+  if (!relFile || relFile === "." || relFile.startsWith("../") || relFile === ".." || path.isAbsolute(relFile)) return null;
+  return { root, file: path.join(root, ...relFile.split("/")), relFile };
+}
+
+function commitKnownIn(root: string, commit: string): boolean | undefined {
+  if (cachedGit(checkoutCache, root, root, ["rev-parse", "--git-dir"]) !== true) return undefined;
+  return cachedGit(commitExistsCache, `${root}\0${commit}`, root, ["cat-file", "-e", `${commit}^{commit}`]);
+}
+
+// This computer's checkout for a citation that names its repo by remote, or by another computer's path.
+function resolveTarget(citation: FindingCitation, opts: CitationCheckOptions): CitationTarget | null {
+  if (!opts.phrenPath) return null;
+  if (citation.remote) {
+    const root = checkoutForRemote(opts.phrenPath, citation.remote);
+    return root ? targetIn(root, citation) : null;
+  }
+  if (!opts.relocate || !citation.repo || !citation.commit) return null;
+  // The cited commit is the proof that a same-named folder holds the same repo.
+  const root = checkoutsNamedLike(opts.phrenPath, citation.repo).find(dir => commitKnownIn(dir, citation.commit!) === true);
+  return root ? targetIn(root, citation, citation.repo) : null;
+}
+
+// The line check shared by both kinds of checkout: in range, and blamed on the cited commit when both are given.
+function fileState(root: string, file: string, citation: FindingCitation, head?: string): CitationState {
+  const range = lineState(file, citation.line);
+  if (range !== "valid" || citation.line === undefined || !citation.commit) return range;
+  const first = cachedBlame(root, path.relative(root, file), citation.line, head);
+  if (first === undefined) return "unverifiable";
+  return first !== false && first.startsWith(citation.commit) ? "valid" : "drifted";
+}
+
+// The commit a checkout has out: from its git files, else from git.
+function checkoutHead(root: string): string | undefined {
+  const head = checkedOutCommit(root);
+  if (head) return head;
+  const out = citationGit(root, ["rev-parse", "HEAD"], EXEC_TIMEOUT_QUICK_MS);
+  return out ? out.trim() || undefined : undefined;
+}
+
+// Another checkout of the repo may be behind, ahead or on another branch than the writer's, so it says
+// something about a cited file only when the cited commit is in the history it has out: then a changed
+// line is drifted and a file that was in the commit and is gone now is broken. Anything else is
+// unverifiable. The answer is cached per checked-out commit, so a branch switch asks git again.
+function portableState(target: CitationTarget, citation: FindingCitation): CitationState {
+  const { root, file, relFile } = target;
+  if (!citation.commit) return file && fs.existsSync(file) ? lineState(file, citation.line) : "unverifiable";
+  if (commitKnownIn(root, citation.commit) !== true) return "unverifiable";
+  if (!file || !relFile) return "valid";
+  const head = checkoutHead(root);
+  if (!head) return "unverifiable";
+  const inHistory = cachedGit(commitExistsCache, `${root}\0${head}\0ancestor\0${citation.commit}`, root, ["merge-base", "--is-ancestor", citation.commit, head]);
+  if (inHistory !== true) return "unverifiable";
+  if (fs.existsSync(file)) return fileState(root, file, citation, head);
+  const inCommit = cachedGit(commitExistsCache, `${root}\0${citation.commit}:${relFile}`, root, ["cat-file", "-e", `${citation.commit}:${relFile}`]);
+  return inCommit === true ? "broken" : "unverifiable";
+}
+
+export function checkFindingCitation(citation: FindingCitation, opts: CitationCheckOptions = {}): CitationState {
   // A symbol citation is resolved against the project's code index at write
   // time (the index lives outside the synced store, so it is not available
   // here). The write path records `symbol_unresolved` when it could not
   // resolve one; that is the symbol counterpart of a missing cited file.
   if (citation.symbol && citation.symbol_unresolved) return "broken";
+  if (citation.remote || (citation.repo && !fs.existsSync(citation.repo))) {
+    // A remote names the repo on every computer; a repo path from another computer may have a checkout here.
+    const target = resolveTarget(citation, opts);
+    return target ? portableState(target, citation) : "unverifiable";
+  }
   if (!citation.repo) {
     // Without a repo only an absolute file this computer has can be checked.
     if (!citation.file || !path.isAbsolute(citation.file) || !fs.existsSync(citation.file)) return "unverifiable";
     return lineState(citation.file, citation.line);
   }
-  // Repo paths are per computer (/Users/... on a Mac, /home/... on Linux), so a missing one says nothing.
-  if (!fs.existsSync(citation.repo)) return "unverifiable";
   let commitKnown = true;
   if (citation.commit) {
-    if (cachedGit(checkoutCache, citation.repo, citation.repo, ["rev-parse", "--git-dir"]) !== true) return "unverifiable";
-    const known = cachedGit(commitExistsCache, `${citation.repo}\0${citation.commit}`, citation.repo, ["cat-file", "-e", `${citation.commit}^{commit}`]);
+    const known = commitKnownIn(citation.repo, citation.commit);
     if (known === undefined) return "unverifiable";
     commitKnown = known;
   }
@@ -339,16 +424,12 @@ export function checkFindingCitation(citation: FindingCitation): CitationState {
   if (!resolvedFile) return "unverifiable";
   if (!fs.existsSync(resolvedFile)) return "broken";
   if (!commitKnown) return "unverifiable";
-  const range = lineState(resolvedFile, citation.line);
-  if (range !== "valid" || citation.line === undefined || !citation.commit) return range;
-  const first = cachedBlame(citation.repo, path.relative(citation.repo, resolvedFile), citation.line);
-  if (first === undefined) return "unverifiable";
-  return first !== false && first.startsWith(citation.commit) ? "valid" : "drifted";
+  return fileState(citation.repo, resolvedFile, citation);
 }
 
 /** False only when this computer knows the citation is broken or its line drifted; one it cannot check passes. */
-export function validateFindingCitation(citation: FindingCitation): boolean {
-  const state = checkFindingCitation(citation);
+export function validateFindingCitation(citation: FindingCitation, opts: CitationCheckOptions = {}): boolean {
+  const state = checkFindingCitation(citation, opts);
   return state === "valid" || state === "unverifiable";
 }
 
@@ -521,12 +602,14 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
       }
     }
 
-    const citationState = citation
-      ? (options.citationState ? options.citationState(citation, line) ?? "unverifiable" : checkFindingCitation(citation))
+    // Only a cited file or an unresolved symbol can be broken or drifted, so a commit-only citation costs no git here.
+    const checked = citation ?? options.sourceCitation?.(line);
+    const citationState = checked && (checked.file || checked.symbol_unresolved)
+      ? (options.citationState ? options.citationState(checked, line) ?? "unverifiable" : checkFindingCitation(checked))
       : undefined;
     if (citationState === "broken") {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "invalid_citation" });
-      i++;
+      if (citation) i++;
       continue;
     }
 
