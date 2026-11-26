@@ -40,6 +40,15 @@ jobs:
       matrix:
         os: ${{ fromJSON((github.event_name == 'schedule' || inputs.release_candidate) && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
         node-version: [22, 26]
+        # Node 22 (the oldest supported) runs on Linux only. A platform bug
+        # fails both Nodes alike (RC 45760142933 failed cli-govern on Windows
+        # 22 and 26 the same way), and Windows 22 was the slowest RC job and
+        # waited 14 minutes for a runner on 2026-11-26.
+        exclude:
+          - os: macos-latest
+            node-version: 22
+          - os: windows-latest
+            node-version: 22
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
