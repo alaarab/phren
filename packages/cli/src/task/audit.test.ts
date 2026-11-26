@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { grantAdmin, makeTempDir } from "../test-helpers.js";
-import { readTasks, type TaskItem } from "../data/tasks.js";
+import { readTasks, updateTask, type TaskItem } from "../data/tasks.js";
 import { tryFileLock } from "../governance/locks.js";
 import type { DreamRunner } from "../dream/run.js";
 import {
@@ -210,6 +210,22 @@ describe("auditTasks", () => {
       expect(findTask("cccc3333")?.context).toBeUndefined();
       expect(readAuditLastRun(store, PROJECT)?.counts).toMatchObject({ denied: 2, closed: 0 });
     } finally { delete process.env.PHREN_ACTOR; }
+  });
+
+  it("applies no verdict to a task edited while the model ran", async () => {
+    const { runner: reply } = fakeRunner([
+      { bid: "bbbb2222", verdict: "done", evidence: "PR #12" },
+      { bid: "cccc3333", verdict: "done", evidence: "PR #13" },
+    ]);
+    const runner: DreamRunner = async (request, project, phrenPath) => {
+      // The owner rewrites one task's requirements mid-run.
+      expect(updateTask(store, PROJECT, "bid:bbbb2222", { context: "now also needs the Windows path" }).ok).toBe(true);
+      return reply(request, project, phrenPath);
+    };
+    const result = await run({ runner });
+    expect(result.counts).toMatchObject({ closed: 1, failed: 1 });
+    expect(findTask("bbbb2222")?.section).toBe("Active");
+    expect(findTask("cccc3333")?.section).toBe("Done");
   });
 
   it("ignores unknown bids and records why", async () => {

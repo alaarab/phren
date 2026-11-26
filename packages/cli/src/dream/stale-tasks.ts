@@ -4,7 +4,7 @@
  * this is what settles them. The move stamps lastActivity, so a requeued task
  * is fresh again. `PHREN_TASK_STALE=off` turns it off. */
 import { readTasks, updateTask } from "../data/tasks.js";
-import { permissionDeniedError } from "../governance/rbac.js";
+import { taskWriteDenied } from "../task/write-access.js";
 import { isStale, taskLastTouched, taskStaleEnabled, taskTitle } from "../task/session-tasks.js";
 
 /** A task this run returned to the Queue: its stable id and its line without metadata. */
@@ -13,7 +13,7 @@ export interface RequeuedTask { stableId: string; title: string }
 const dayOf = (at: number) => new Date(at).toISOString().slice(0, 10);
 
 export function requeueStaleTasks(phrenPath: string, project: string, now: Date): { requeued: RequeuedTask[]; errors: number } {
-  if (!taskStaleEnabled() || permissionDeniedError(phrenPath, "update_task", project)) return { requeued: [], errors: 0 };
+  if (!taskStaleEnabled() || taskWriteDenied(phrenPath, project, "update_task")) return { requeued: [], errors: 0 };
   const doc = readTasks(phrenPath, project);
   if (!doc.ok) return { requeued: [], errors: 0 };
   const requeued: RequeuedTask[] = [];

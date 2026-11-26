@@ -104,13 +104,22 @@ describe("the worker session's task ledger in dispatch returns", () => {
     expect(answer.workers[0]).not.toHaveProperty("hook");
   });
 
+  it("counts an open task past 32 settled ones, and sends open rows first", async () => {
+    const settled = Array.from({ length: 32 }, (_, index) => task("done", index.toString(16).padStart(8, "0"), { section: "Done" }));
+    const answer = await workerStates({ targets: [target] }, readers([...settled, task("open", "ffff0001")]));
+    expect(answer.workers[0].unfinished).toBe("1 task(s) not settled: bid:ffff0001");
+    expect(answer.workers[0].tasks).toHaveLength(32);
+    expect(answer.workers[0].tasks?.[0]).toMatchObject({ stableId: "ffff0001", resolution: "open" });
+  });
+
   it("bounds what it carries: 32 rows, and a reason capped at 200 characters", async () => {
     const many = Array.from({ length: 40 }, (_, index) => task("open", index.toString(16).padStart(8, "0")));
     const answer = await workerStates({ targets: [target] }, readers(many));
     expect(answer.workers[0].tasks?.length).toBe(32);
     const reason = answer.workers[0].unfinished!;
     expect(reason.length).toBeLessThanOrEqual(200);
-    expect(reason).toMatch(/^32 task\(s\) not settled: bid:/);
+    // Every open task is still owed even though only 32 rows travel.
+    expect(reason).toMatch(/^40 task\(s\) not settled: bid:/);
   });
 
   it("keeps the latest tasks on the receipt's returned record and its return row", async () => {

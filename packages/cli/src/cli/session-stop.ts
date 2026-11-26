@@ -184,7 +184,12 @@ export function nextSyncStatus(
  * is the only place that runs on every turn, so silence here is what let a
  * two-month outage go unnoticed. Rate-limited via a marker file.
  */
+/** Set once this Stop printed its block decision: stdout must then stay that one JSON object. */
+let stdoutIsDecision = false;
+
 function warnIfSyncDegraded(phrenPath: string): void {
+  // The notice waits for a Stop that prints nothing else; its marker is untouched, so it comes then.
+  if (stdoutIsDecision) return;
   try {
     const assessment = assessSyncOutage(getRuntimeHealth(phrenPath).lastSync);
     if (!assessment.degraded) return;
@@ -266,6 +271,7 @@ export async function handleHookStop() {
   const taskStop = taskStopDecision({ phrenPath: ctx.phrenPath, payload: stdinPayload, tool: ctx.hookTool });
   if (taskStop) {
     writeTaskStopDecision(taskStop);
+    stdoutIsDecision = true;
     appendAuditLog(phrenPath, "hook_stop", `task_resolution open=${taskStop.open.length}`);
   }
 

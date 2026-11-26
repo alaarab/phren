@@ -702,13 +702,15 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Standard update path
+        // A move to Active is one this session took on. Resolve the task before the write: a positional id
+        // (Q1) or the old text names another task, or none, once the move and a new text are on disk.
+        const movingToActive = updates.section?.toLowerCase() === "active";
+        const before = movingToActive ? resolveTaskItem(targetPath, project, item!) : undefined;
         const result = updateTaskStore(targetPath, project, item!, updates, phrenPath);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, targetPath, project);
         const noted = withTitleNotes(result.data, { project, item, updates }, updates.text ? titleNotes([updates.text]) : []);
-        // A task moved to Active is one this session took on; its stable ID comes from the written file.
-        const reread = updates.section?.toLowerCase() === "active" ? resolveTaskItem(targetPath, project, item!) : undefined;
-        const warning = reread?.ok ? sessionTaskNote(phrenPath, currentSessionId(), targetPath, project, reread.data) : undefined;
+        const warning = before?.ok ? sessionTaskNote(phrenPath, currentSessionId(), targetPath, project, before.data) : undefined;
         return mcpResponse({ ok: true, ...withWipWarning(noted.message, noted.data, warning) });
       });
     }

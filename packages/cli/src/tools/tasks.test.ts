@@ -384,4 +384,13 @@ describe("session task ledger and title advice", () => {
       expect.objectContaining({ store: tmp.path, project: PROJECT, stableId: "eeeeeeee" }),
     ]);
   });
+
+  it("records the task a positional id moved, not the one that takes its place", async () => {
+    fs.writeFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME),
+      "# demo\n\n## Active\n\n## Queue\n\n- [ ] first <!-- bid:11111111 -->\n- [ ] second <!-- bid:22222222 -->\n\n## Done\n");
+    process.env.CLAUDE_CODE_SESSION_ID = "sess-positional";
+    const res = parse(await manage({ action: "update", project: PROJECT, item: "Q1", updates: { section: "Active", text: "first, renamed" } }));
+    expect(res.ok).toBe(true);
+    expect(ledgerRows("sess-positional").map(row => row.stableId)).toEqual(["11111111"]);
+  });
 });

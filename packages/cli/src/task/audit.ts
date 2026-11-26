@@ -15,7 +15,7 @@ import { completeTask, readTasks, updateTask, type TaskDoc, type TaskItem } from
 import { projectDirsFor, projectStoreDir } from "../dream/collect.js";
 import { defaultDreamRunner, newRunId, type DreamRunner, type DreamRunnerResult } from "../dream/run.js";
 import { tryFileLock } from "../governance/locks.js";
-import { permissionDeniedError } from "../governance/rbac.js";
+import { taskWriteDenied } from "./write-access.js";
 import { findPhrenPath, renameOverSync, runtimeDir } from "../phren-paths.js";
 import { findSkill } from "../skill/registry.js";
 import { isValidProjectName } from "../utils-paths.js";
@@ -331,8 +331,8 @@ export async function auditTasks(project: string, opts: AuditOptions = {}): Prom
     }
 
     // Apply: a done task closes with its evidence; the rest get a dated note at most.
-    const completeDenied = permissionDeniedError(phrenPath, "complete_task", project);
-    const updateDenied = permissionDeniedError(phrenPath, "update_task", project);
+    const completeDenied = taskWriteDenied(phrenPath, project, "complete_task");
+    const updateDenied = taskWriteDenied(phrenPath, project, "update_task");
     const day = dayStamp(now);
     const applied: AuditApplied[] = [];
     const note = (bid: string, text: string): AuditApplied => {
@@ -340,7 +340,20 @@ export async function auditTasks(project: string, opts: AuditOptions = {}): Prom
       const updated = updateTask(phrenPath, project, `bid:${bid}`, { context: text });
       return updated.ok ? { bid, action: "noted", detail: text } : { bid, action: "failed", detail: updated.error };
     };
+    // The model ran for minutes on a snapshot: a task edited since (its line or context changed, or it
+    // left the open sections) gets no verdict applied, since the evidence was for the old wording.
+    const snapshot = new Map(candidates.map((item) => [item.stableId!, `${item.line}\n${item.context ?? ""}`]));
+    const unchanged = (bid: string): boolean => {
+      const now = readTasks(phrenPath, project);
+      const item = now.ok ? [...now.data.items.Active, ...now.data.items.Queue].find((entry) => entry.stableId === bid) : undefined;
+      return !!item && `${item.line}\n${item.context ?? ""}` === snapshot.get(bid);
+    };
     for (const verdict of verdicts) {
+      if ((verdict.verdict === "done" || verdict.verdict === "partial" || verdict.verdict === "obsolete") && !unchanged(verdict.bid)) {
+        counts.failed++;
+        applied.push({ bid: verdict.bid, action: "failed", detail: "the task changed or closed during the audit; verdict not applied" });
+        continue;
+      }
       if (verdict.verdict === "done") {
         if (completeDenied || updateDenied) {
           counts.denied++;

@@ -256,10 +256,12 @@ function liveReader(record: TurnRecord | undefined, source: Provider, session: s
  * observation: the rows the wire carries (no store path, at most 32, nothing
  * when the session took on no task) and the ones it still owes. */
 function sessionLedger(session: string | undefined, readers: WorkerReaders): { fields: Pick<WorkerObservation, "tasks">; open: SessionTaskState[] } {
-  const states = session && readers.sessionTasks ? readers.sessionTasks(session).slice(0, 32) : [];
-  return { fields: states.length ? { tasks: states.map(state => ({ project: state.project, stableId: state.stableId,
-      title: state.title.slice(0, 200), section: state.section, resolution: state.resolution })) } : {},
-    open: unresolvedTasks(states) };
+  const states = session && readers.sessionTasks ? readers.sessionTasks(session) : [];
+  const open = unresolvedTasks(states);
+  // Every open task counts; only the wire is capped, open rows first so none is the one left off.
+  const shown = [...open, ...states.filter(state => state.resolution !== "open")].slice(0, 32);
+  return { fields: shown.length ? { tasks: shown.map(state => ({ project: state.project, stableId: state.stableId,
+      title: state.title.slice(0, 200), section: state.section, resolution: state.resolution })) } : {}, open };
 }
 
 /** Why a turn that ended with tasks still open is not done: the bids the session still owes. */
