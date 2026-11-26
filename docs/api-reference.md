@@ -2762,15 +2762,29 @@ independently of report persistence. Nothing is written to GitHub. See
 
 Full profile or `phren_admin(action:"owner_inbox",...)` in core. `operation` defaults
 to `list`; optional `includeResolved` shows history. `add` requires `title`, with
-optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
-`resolution` and `computer` (the listed item's `inboxComputer`, omitted for
-local). A resolve does not answer or approve a prompt. Lists include local and
-linked computers' inboxes plus `unreachable` entries. Automatic items are
-deduplicated by pane, session and question and shown only while verified live.
-Answered or disappeared sources resolve automatically on reads or the five-second
-Hook tick; manual items require explicit resolution. The first reconciliation
-after upgrade resolves legacy stale automatic rows with `stale: source gone`.
-Unreachable workers are hidden as unverified without resolving their items.
+optional `project`, stable UUID `id`, `command` (a paste-able shell command,
+at most 20 lines; phren never runs it), `task` (`bid:xxxxxxxx`), `pr` (an HTTPS
+pull or merge request URL, stored normalized) and `key` (a dedupe key).
+`resolve` requires `id`, with optional `resolution` and `computer` (the listed
+item's `inboxComputer`, omitted for local). A resolve does not answer or approve
+a prompt. Lists include local and linked computers' inboxes plus `unreachable`
+entries. Every listed manual item with a `command` carries a computed `paste`:
+the command, then the `resolve` that closes the item (`&&`-chained after a
+one-line command, on its own line after a multi-line one), addressed to the
+item's `inboxComputer`; it is never stored. Manual adds upsert: re-adding the
+same `key` or PR updates the open item with that key instead of duplicating it
+(unchanged re-adds write nothing), and an explicit `id` naming a resolved
+manual item with changed fields reopens it while an identical retry returns it
+unchanged; an explicit `id` naming an automatic row is still refused. Open
+manual items also resolve themselves on the list tick when their `pr` merges or
+closes (`done: PR merged`, `done: PR closed without merging`) or their linked
+`task` sits Done (`done: task <bid> is Done`), read through the live forge cache
+without ever waiting on it. Automatic items are deduplicated by pane, session
+and question and shown only while verified live. Answered or disappeared
+sources resolve automatically on reads or the five-second Hook tick. The first
+reconciliation after upgrade resolves legacy stale automatic rows with
+`stale: source gone`. Unreachable workers are hidden as unverified without
+resolving their items.
 
 Dispatch additions: optional `closeOnFinish` defaults to true, closing a
 verified finished pane after reading its done return; false keeps it open.

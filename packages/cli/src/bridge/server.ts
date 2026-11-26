@@ -8,6 +8,7 @@ import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
+import { ownerInboxDone } from "./owner-inbox-done.js";
 import { Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
 import { liveProcessCwds } from "./housekeeping/safety.js";
 import { dockerUsage, listSimulators, sessionRowsFromOverview, xcodebuildRunning } from "./housekeeping/inventory.js";
@@ -157,7 +158,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const inbox = dispatches ? new OwnerInbox(async () => {
     const observed = await ownerInboxSources(agentHooks);
     return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? []] };
-  }) : undefined;
+  }, path.join(root, "owner-inbox.json"), items => ownerInboxDone(items)) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);

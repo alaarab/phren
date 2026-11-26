@@ -306,7 +306,7 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/housekeeping/command.js")).runHousekeeping(args),
   },
   {
-    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] | add <title> [--project <slug>] [--id <uuid>] | resolve <id> [--computer <name>] [--resolution <text>]]",
+    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] | add <title> [--project <slug>] [--id <uuid>] [--command <text>] [--task bid:xxxxxxxx] [--pr <url>] [--key <key>] | resolve <id> [--computer <name>] [--resolution <text>]]",
     summary: "List, add and resolve what waits on the owner",
     run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),
   },

@@ -4,7 +4,8 @@ import { fork } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OwnerInbox, type InboxItem, type InboxSource } from "./owner-inbox.js";
+import { z } from "zod";
+import { OwnerInbox, pasteCommand, type InboxItem, type InboxSource } from "./owner-inbox.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import { hookPeers, peerRequest } from "./peers.js";
 vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
@@ -18,10 +19,112 @@ describe("owner inbox", () => {
     const box = inbox(), id = "11111111-1111-4111-8111-111111111111";
     const add = { action: "add", id, title: "Restart the router", project: "phren" };
     await Promise.all([box.run(add), box.run(add)]); expect((await box.run({})).items).toHaveLength(1);
-    await expect(box.run({ ...add, title: "Other" })).rejects.toThrow("another item");
+    const updated = await box.run({ ...add, title: "Other" });
+    expect(updated.updated).toBe(true);
+    expect((await inbox().run({})).items).toMatchObject([{ id, title: "Other", project: "phren" }]);
     await box.run({ action: "resolve", id, resolution: "Router restarted" });
     expect((await inbox().run({})).items).toEqual([]);
     expect((await inbox().run({ includeResolved: true })).items).toMatchObject([{ state: "resolved", resolution: "Router restarted" }]);
+  });
+  it("validates the command, task, pr and key fields of a manual add", async () => {
+    const box = inbox();
+    const added = await box.run({ action: "add", title: "Merge the release", command: "gh pr merge 877 --squash\necho\tmerged", task: "bid:c2cc33d0", pr: "https://github.com/alaarab/phren/pull/877/" });
+    expect(added.item).toMatchObject({ command: "gh pr merge 877 --squash\necho\tmerged", task: "bid:c2cc33d0", pr: "https://github.com/alaarab/phren/pull/877" });
+    expect(added.item).toHaveProperty("paste", `gh pr merge 877 --squash\necho\tmerged\nphren owner-inbox resolve ${(added.item as InboxItem).id} --resolution done`);
+    for (const bad of [
+      { task: "bid:zzzzzzzz" }, { task: "c2cc33d0" }, { pr: "https://github.com/o/r/issues/5" }, { pr: "http://github.com/o/r/pull/1" },
+      { pr: "https://github.com/o/r/pull/not-a-number" }, { command: "echo hi\r\necho bye" }, { command: "echo \x07bell" },
+      { command: "echo\x00" }, { command: "" }, { command: Array.from({ length: 21 }, (_, i) => `line ${i + 1}`).join("\n") }, { key: "has space" },
+    ]) await expect(box.run({ action: "add", title: "Bad add", ...bad })).rejects.toThrow(z.ZodError);
+    const twenty = await box.run({ action: "add", title: "Twenty lines is fine", command: Array.from({ length: 20 }, (_, i) => `step ${i + 1}\t`).join("\n") });
+    expect((twenty.item as InboxItem).command).toContain("step 20");
+  });
+  it("upserts by explicit key, by the default pr key and by id; an unchanged re-add writes nothing", async () => {
+    const box = inbox(), file = path.join(root, "owner-inbox.json");
+    const first = (await box.run({ action: "add", title: "Renew the certificate", command: "certbot renew", key: "certs:weekly" })).item as InboxItem;
+    const updated = await box.run({ action: "add", title: "Renew the certificate again", command: "certbot renew --quiet", key: "certs:weekly" });
+    expect(updated.updated).toBe(true);
+    expect(updated.item).toMatchObject({ id: first.id, title: "Renew the certificate again", command: "certbot renew --quiet" });
+    const pr = "https://github.com/alaarab/phren/pull/877";
+    const prFirst = (await box.run({ action: "add", title: "Merge the release", pr })).item as InboxItem;
+    const prAgain = await box.run({ action: "add", title: "Merge the release now", pr: `${pr}/` });
+    expect(prAgain.updated).toBe(true);
+    expect(prAgain.item).toMatchObject({ id: prFirst.id, title: "Merge the release now", pr });
+    expect((await box.run({})).items).toHaveLength(2);
+    const before = await readFile(file, "utf8");
+    const unchanged = await box.run({ action: "add", title: "Merge the release now", pr });
+    expect(unchanged.updated).toBeUndefined();
+    expect(await readFile(file, "utf8")).toBe(before);
+    await box.run({ action: "resolve", id: first.id, resolution: "done" });
+    const fresh = await box.run({ action: "add", title: "Renew the certificate", command: "certbot renew", key: "certs:weekly" });
+    expect(fresh.updated).toBeUndefined();
+    expect((fresh.item as InboxItem).id).not.toBe(first.id);
+  });
+  it("reopens a resolved manual item when its explicit id brings changed fields; an identical retry stays resolved", async () => {
+    const box = inbox(), id = "22222222-2222-4222-8222-222222222222";
+    const add = { action: "add", id, title: "Renew the token", command: "phren secret login", project: "hub" };
+    await box.run(add);
+    await box.run({ action: "resolve", id, resolution: "done: token renewed" });
+    const retry = await box.run(add);
+    expect(retry.reopened).toBeUndefined();
+    expect(retry.item).toMatchObject({ id, state: "resolved", title: "Renew the token", resolution: "done: token renewed" });
+    const reopened = await box.run({ ...add, title: "Renew the newer token" });
+    expect(reopened.reopened).toBe(true);
+    expect(reopened.item).toMatchObject({ id, state: "open", title: "Renew the newer token", command: "phren secret login" });
+    expect((reopened.item as InboxItem).resolvedAt).toBeUndefined();
+    expect((reopened.item as InboxItem).resolution).toBeUndefined();
+    expect((await inbox().run({})).items).toMatchObject([{ id, state: "open" }]);
+  });
+  it("still refuses an explicit id that names an automatic row", async () => {
+    sources = [{ source: "prompt:1", kind: "blocked", title: "Approve the tool" }];
+    const [auto] = (await inbox().run({})).items as InboxItem[];
+    await expect(inbox().run({ action: "add", id: auto.id, title: "Approve it all" })).rejects.toThrow("another item");
+  });
+  it("computes paste commands for one line and for several, with and without a computer", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    expect(pasteCommand({ id, command: "gh pr merge 877" })).toBe(`gh pr merge 877 && phren owner-inbox resolve ${id} --resolution done`);
+    expect(pasteCommand({ id, command: "cd ~phren\npnpm test" })).toBe(`cd ~phren\npnpm test\nphren owner-inbox resolve ${id} --resolution done`);
+    expect(pasteCommand({ id, command: "gh pr merge 877" }, "Desk")).toBe(`gh pr merge 877 && phren owner-inbox resolve ${id} --resolution done --computer Desk`);
+    expect(pasteCommand({ id, command: "cd ~phren\npnpm test" }, "local")).toBe(`cd ~phren\npnpm test\nphren owner-inbox resolve ${id} --resolution done`);
+  });
+  it("auto-resolves the manual items the done probe reports, and only those", async () => {
+    const done = vi.fn(async (items: InboxItem[]) => new Map<string, string>(items.filter(item => item.title === "A").map(item => [item.id, "done: PR merged"])));
+    const box = new OwnerInbox(async () => sources, path.join(root, "owner-inbox.json"), done);
+    const a = (await box.run({ action: "add", title: "A" })).item as InboxItem;
+    const b = (await box.run({ action: "add", title: "B" })).item as InboxItem;
+    await box.tick();
+    expect(done.mock.calls[0][0].map(item => item.id)).toEqual([a.id, b.id]);
+    expect((await box.run({})).items).toMatchObject([{ id: b.id, state: "open" }]);
+    expect((await box.run({ includeResolved: true })).items).toMatchObject([
+      { id: a.id, state: "resolved", resolution: "done: PR merged" }, { id: b.id, state: "open" }]);
+    done.mockClear();
+    await box.run({ action: "add", title: "C" });
+    await box.run({ action: "resolve", id: b.id, resolution: "owner answered" });
+    expect(done).not.toHaveBeenCalled();
+  });
+  it("leaves manual items untouched when the done probe fails", async () => {
+    const failing = new OwnerInbox(async () => sources, path.join(root, "failing.json"), async () => { throw new Error("forge down"); });
+    await failing.run({ action: "add", title: "Merge the release" });
+    await failing.tick();
+    const rows = (await failing.run({ includeResolved: true })).items as InboxItem[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].state).toBe("open");
+    expect(rows[0].resolvedAt).toBeUndefined();
+    expect(rows[0].resolution).toBeUndefined();
+  });
+  it("recomputes paste per inbox computer, overwriting a peer's", async () => {
+    vi.mocked(hookPeers).mockResolvedValue([linked("Desk")] as never);
+    const id = "33333333-3333-4333-8333-333333333333";
+    vi.mocked(peerRequest).mockResolvedValue({ items: [
+      { id, kind: "manual", state: "open", title: "Remote merge", command: "gh pr merge 9", paste: "stale from the peer" },
+    ] });
+    const box = inbox();
+    const local = (await box.run({ action: "add", title: "Log in to the forge", command: "gh auth login" })).item as InboxItem;
+    const view = await ownerInboxView(box, {});
+    expect(view.items).toMatchObject([
+      { title: "Log in to the forge", inboxComputer: "local", paste: `gh auth login && phren owner-inbox resolve ${local.id} --resolution done` },
+      { id, inboxComputer: "Desk", paste: `gh pr merge 9 && phren owner-inbox resolve ${id} --resolution done --computer Desk` },
+    ]);
   });
   it("retires automatic waits when answered and preserves manual decisions and history", async () => {
     const box = inbox();
