@@ -59,14 +59,18 @@ export const STOP_WORDS = new Set([
   "those", "these", "both",
 ]);
 
-// Extract meaningful keywords from a prompt, including bigrams (2-word noun phrases).
-// Bigrams capture intent better than isolated words (e.g., "rate limit" vs "rate" + "limit").
-export function extractKeywordEntries(text: string): string[] {
-  const words = text
+export function extractKeywordWords(text: string): string[] {
+  return text
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
     .split(/\s+/)
     .filter(w => w.length > 1 && !STOP_WORDS.has(w));
+}
+
+// Extract meaningful keywords from a prompt, including bigrams (2-word noun phrases).
+// Bigrams capture intent better than isolated words (e.g., "rate limit" vs "rate" + "limit").
+export function extractKeywordEntries(text: string): string[] {
+  const words = extractKeywordWords(text);
 
   // Build bigrams from adjacent non-stop-words
   const bigrams: string[] = [];

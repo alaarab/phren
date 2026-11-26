@@ -293,18 +293,18 @@ export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content
 /** How rare each prompt token is across the index: normalised IDF, 1 for a
  * token in one doc, near 0 for one in every doc. One FTS count per token. */
 /** `tokenRarity` for a prompt's keywords, tokenised as the floor tokenises them. */
-export function promptRarity(db: SqlJsDatabase | null | undefined, keywords: string): Map<string, number> {
-  return tokenRarity(db, tokenizeForOverlap(keywords));
+export function promptRarity(db: SqlJsDatabase | null | undefined, keywords: string, maxTokens = 12): Map<string, number> {
+  return tokenRarity(db, tokenizeForOverlap(keywords), maxTokens);
 }
 
-export function tokenRarity(db: SqlJsDatabase | null | undefined, queryTokens: string[]): Map<string, number> {
+export function tokenRarity(db: SqlJsDatabase | null | undefined, queryTokens: string[], maxTokens = 12): Map<string, number> {
   const rarity = new Map<string, number>();
   if (!db || !queryTokens.length) return rarity;
   try {
     const total = Number(queryRows(db, "SELECT COUNT(*) FROM docs", [])?.[0]?.[0] ?? 0);
     if (!(total > 1)) return rarity;
     const scale = Math.log(total + 1);
-    for (const token of queryTokens.slice(0, 12)) {
+    for (const token of queryTokens.slice(0, Math.min(maxTokens, 24))) {
       if (!/^[a-z0-9_-]+$/.test(token)) continue;
       const df = Number(queryRows(db, "SELECT COUNT(*) FROM docs WHERE docs MATCH ?", [`"${token}"*`])?.[0]?.[0] ?? 0);
       rarity.set(token, Math.max(0, Math.min(1, Math.log((total + 1) / (df + 1)) / scale)));

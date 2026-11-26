@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, extractKeywords } from "./utils.js";
+import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, extractKeywordEntries, extractKeywordWords, extractKeywords } from "./utils.js";
 import { extractSnippet } from "./shared/index.js";
 
 describe("buildRobustFtsQuery edge cases", () => {
@@ -84,6 +84,16 @@ describe("extractSnippet", () => {
 });
 
 describe("extractKeywords", () => {
+  it("exposes all candidate words without changing the default keyword cap", () => {
+    const prompt = "The one two three four five six seven eight nine ten eleven twelve thirteen ledger";
+    expect(extractKeywordWords(prompt)).toEqual([
+      "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "ledger",
+    ]);
+    expect(extractKeywordEntries(prompt)).toEqual([
+      "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    ]);
+  });
+
   it("removes stop words from the result", () => {
     const result = extractKeywords("the quick brown fox is very fast");
     expect(result).not.toContain("the");

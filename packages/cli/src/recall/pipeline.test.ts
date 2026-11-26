@@ -29,12 +29,30 @@ describe("runPromptPipeline", () => {
     write("atlas/FINDINGS.md", "# atlas Findings\n\n- The ledger export retries webhook delivery three times before parking the batch.\n- Parked batches wait for an operator.\n");
     write("atlas/tasks.md", "# atlas Tasks\n\n## Queue\n\n- [ ] Polish the zorblat quintessa report\n");
     write("harbor/FINDINGS.md", "# harbor Findings\n\n- The saxophone tuner caches chart tiles for ten minutes.\n");
-    for (let i = 0; i < 6; i++) write(`harbor/reference/notes-${i}.md`, `# notes ${i}\n\n- Widget ${i} settings live in the panel.\n`);
+    for (let i = 0; i < 6; i++) write(`harbor/reference/notes-${i}.md`, `# notes ${i}\n\n- Widget ${i} settings live in the panel.\n- Comparison projects honest detailed overview behavior design tradeoffs approach workflow maintenance usability context.\n`);
     // Four docs that each answer a kiln question: more than selection's three slots.
     for (let i = 0; i < 4; i++) write(`quarry/reference/kiln-${i}.md`, `# kiln ${i}\n\n- Kiln ${i} furnace scheduler fires batch ${i} after the glaze cures.\n`);
     db = await buildIndex(tmp.path);
   });
   afterAll(() => tmp?.cleanup());
+
+  it("searches a distinctive fourteenth word and keeps chosen words in prompt order", async () => {
+    const result = await run("comparison projects honest detailed overview behavior design tradeoffs approach workflow maintenance usability context ledger webhook", "atlas");
+    expect(result.keywords).toEqual([
+      "comparison", "projects", "honest", "detailed", "overview", "behavior", "design", "tradeoffs", "ledger", "webhook",
+    ]);
+    expect(result.candidates).toEqual(expect.arrayContaining([expect.objectContaining({ project: "atlas", filename: "FINDINGS.md" })]));
+    expect(result.floor.find((d) => d.project === "atlas")?.matched).toEqual(["ledger", "webhook"]);
+    expect(result.selected[0]?.snippet).toContain("ledger export retries webhook");
+  });
+
+  it.each([
+    ["rate limit config", ["rate", "limit", "config", "rate limit", "limit config"]],
+    ["ledger ledger webhook", ["ledger", "webhook", "ledger ledger", "ledger webhook"]],
+    ["one two three four five six seven eight nine ten", ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]],
+  ])("preserves short-prompt keywords for %s", async (prompt, expected) => {
+    expect((await run(prompt)).keywords).toEqual(expected);
+  });
 
   it.each([
     ["machine-prompt", '<agent-message from="worker-1">ledger webhook retries</agent-message>'],
