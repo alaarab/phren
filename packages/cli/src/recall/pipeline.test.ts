@@ -35,6 +35,7 @@ describe("runPromptPipeline", () => {
   afterAll(() => tmp?.cleanup());
 
   it.each([
+    ["machine-prompt", '<agent-message from="worker-1">ledger webhook retries</agent-message>'],
     ["no-keywords", "?!"],
     ["no-query", "__"],
     ["no-search-results", "glimmerwick throttlebottom"],

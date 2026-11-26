@@ -63,6 +63,17 @@ Archived content inside `<details>` and `<!-- phren:archive:start/end -->` block
 
 ## 3. Context Injection Tuning
 
+### Recall eval
+
+Run `mise x pnpm@12.9.1 -- pnpm exec tsx scripts/recall-eval.ts` to measure
+false injections by negative class, hit@3 across active and archived findings,
+abstentions, retired-memory leaks, injected tokens and stage latency. The public
+synthetic fixture guards known failure classes; tune retrieval thresholds only
+against a private snapshot with `--store <path> --cases <file>`. Private runs
+print aggregates, and per-case `--out <file>` is allowed only outside the
+repository. Use `--write-baseline` to record the public fixture's score and
+`--check` to detect changes; baselines omit machine-dependent timings.
+
 These variables control how much memory context the `hook-prompt` injects into each prompt:
 
 | Variable | Default | Range | Effect |

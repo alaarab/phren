@@ -17,6 +17,7 @@ import {
 } from "../shared/retrieval.js";
 import { debugLog } from "../shared.js";
 import { buildRobustFtsQuery, clampFloat, clampInt, extractKeywordEntries } from "../utils.js";
+import { isMachinePrompt } from "./prompt-source.js";
 import type { RecallAbstainReason, RecallDocRef, RecallPipelineInput, RecallResult } from "./types.js";
 
 function docRef(row: DocRow): RecallDocRef {
@@ -49,6 +50,7 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
     return result;
   };
 
+  if (isMachinePrompt(prompt)) return abstain("machine-prompt");
   if (!keywords) return abstain("no-keywords");
 
   const safeQuery = buildRobustFtsQuery(keywords, detectedProject, phrenPath);
