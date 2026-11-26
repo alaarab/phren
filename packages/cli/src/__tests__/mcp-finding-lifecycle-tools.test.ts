@@ -177,3 +177,60 @@ describe("mcp-finding lifecycle tools", () => {
     expect(all.data.contradictions).toHaveLength(3);
   });
 });
+
+describe("mcp-finding lifecycle tools on archived findings", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let indexed: string[];
+  let topics: string;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-finding-lifecycle-archive-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+    seedProject(tmp.path, "demo");
+    writeFindings(tmp.path, ["- Live finding <!-- fid:1111aaaa -->"]);
+    topics = path.join(tmp.path, "demo", "reference", "topics");
+    fs.mkdirSync(topics, { recursive: true });
+    indexed = [];
+    register(server as any, {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {},
+      updateFileInIndex: (file: string) => { indexed.push(file); },
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    } as McpContext);
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("supersede_finding on a topic bullet re-indexes that file, not FINDINGS.md", async () => {
+    const topicFile = path.join(topics, "rules.md");
+    fs.writeFileSync(topicFile, "## Archived 2026-02-01\n\n- Old retry rule <!-- fid:aaaabbbb -->\n");
+
+    const res = parseResult(await server.call("supersede_finding", { project: "demo", finding_text: "fid:aaaabbbb", superseded_by: "New retry rule" }));
+    expect(res).toMatchObject({ ok: true, data: { status: "superseded", tier: "topic", file: topicFile } });
+    expect(indexed).toEqual([topicFile]);
+    expect(fs.readFileSync(topicFile, "utf8")).toContain('- Old retry rule <!-- fid:aaaabbbb --> <!-- phren:superseded_by "New retry rule"');
+  });
+
+  it("returns every candidate and changes nothing when the text matches more than one archived finding", async () => {
+    const topicFile = path.join(topics, "rules.md");
+    const olderFile = path.join(topics, "rules.older.md");
+    fs.writeFileSync(topicFile, "- Same archived text <!-- fid:aaaa0001 -->\n");
+    fs.writeFileSync(olderFile, "- Other bullet\n- Same archived text\n");
+
+    const res = parseResult(await server.call("retract_finding", { project: "demo", finding_text: "Same archived text", reason: "wrong" }));
+    expect(res.ok).toBe(false);
+    expect(res.data.candidates).toEqual([
+      { tier: "topic", file: topicFile, line: 1, fid: "aaaa0001", text: "Same archived text" },
+      { tier: "older", file: olderFile, line: 2, text: "Same archived text" },
+    ]);
+    expect(fs.readFileSync(topicFile, "utf8")).toBe("- Same archived text <!-- fid:aaaa0001 -->\n");
+    expect(fs.readFileSync(olderFile, "utf8")).toBe("- Other bullet\n- Same archived text\n");
+    expect(indexed).toEqual([]);
+  });
+});

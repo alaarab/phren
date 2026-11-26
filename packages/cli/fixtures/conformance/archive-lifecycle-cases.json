@@ -1,0 +1,39 @@
+{
+  "project": "myproj",
+  "today": "2026-08-02",
+  "store": {
+    "FINDINGS.md": "findings-after-edit.md",
+    "reference/topics/database.md": "topic-archive-before.md",
+    "reference/topics/database.older.md": "topic-older-before.md"
+  },
+  "cases": [
+    {
+      "op": "supersede",
+      "finding": "fid:0000e001",
+      "superseded_by": "Use pg_advisory_xact_lock for transaction-scoped locks",
+      "file": "reference/topics/database.md",
+      "after": "topic-archive-after-supersede.md"
+    },
+    {
+      "op": "retract",
+      "finding": "fid:0000e001",
+      "reason": "Wrong for transaction-mode poolers",
+      "file": "reference/topics/database.md",
+      "after": "topic-archive-after-retract.md"
+    },
+    {
+      "op": "supersede",
+      "finding": "Connection pools must be recreated after fork",
+      "superseded_by": "Open pools lazily in each child after fork",
+      "file": "reference/topics/database.older.md",
+      "after": "topic-older-after-supersede.md"
+    },
+    {
+      "op": "retract",
+      "finding": "Connection pools must be recreated after fork",
+      "reason": "Fixed upstream in the driver",
+      "file": "reference/topics/database.older.md",
+      "after": "topic-older-after-retract.md"
+    }
+  ]
+}
