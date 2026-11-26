@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.93] - 2026-11-25
+
 ### Added
 
 - Background maintenance records daily store health counts in a local log, keeping the newest 400 entries.
