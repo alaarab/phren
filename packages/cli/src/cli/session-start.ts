@@ -46,6 +46,7 @@ import { runBestEffortGit, countUnsyncedCommits, pullAtSessionStart } from "./se
 import { scheduleBackgroundMaintenance, scheduleBackgroundSync } from "./session-background.js";
 import { runDoctor } from "./hooks-context.js";
 import { readClaudeHookPayload, registerUnmanagedClaude } from "./claude-unmanaged.js";
+import { clearRecallSeen } from "../recall/repeat.js";
 
 const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
 const SYNC_WARN_MARKER = "sync-broken-warned-v1";
@@ -151,6 +152,8 @@ export async function handleHookSessionStart() {
   const startedAt = new Date().toISOString();
   const ctx = buildHookContext();
   const { phrenPath, cwd, activeProject, manifest } = ctx;
+  // A compacted or cleared conversation lost the bullets the prompt hook injected: let them come back.
+  if (payload?.session_id && (payload.source === "compact" || payload.source === "clear")) clearRecallSeen(phrenPath, payload.session_id);
 
   // Check common guards (hooks enabled, tool enabled)
   if (!ctx.hooksEnabled) {

@@ -293,6 +293,11 @@ nothing to that checkout.
   passed or failed the relevance floor and why, what was injected, or why
   nothing was. Kept to the newest 5,000 lines once it passes 4 MB; local
   runtime state, never synced.
+- `<store>/.sessions/recall-seen-<session>.json` holds, for one session, how
+  many prompts the prompt hook has answered and a short hash of each memory
+  bullet it injected in the last 12, so it does not inject them again. Removed
+  when Claude Code compacts or clears that conversation, and swept once it is
+  a day old.
 - OpenCode's mirrored session event logs can have a `.preview.json` sidecar in
   `<store>/.runtime/sessions/`, holding temporary live reply text for Hook.
   An interactive phren agent writes the same sidecar beside its event log in
