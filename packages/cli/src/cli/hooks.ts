@@ -136,6 +136,16 @@ export interface HookPromptInput {
   sessionId?: string;
 }
 
+// Another agent's message relayed into this session: a sub-agent hand-back, a
+// message from another session, or the harness's idle or delivery notice.
+const AGENT_RELAY_PROMPT_RE = /^\s*(?:<(?:agent-message|cross-session-message)\b|\[Cross-session (?:delivery|idle) notice\])/i;
+
+/** A prompt nobody typed: a background agent's result, a teammate's message,
+ *  another agent's report or a harness notice. The prompt hook answers none of them. */
+export function isMachinePrompt(prompt: string): boolean {
+  return classifyClaudePromptText(prompt).category === "notification" || AGENT_RELAY_PROMPT_RE.test(prompt);
+}
+
 export function parseHookInput(raw: string): HookPromptInput | null {
   try {
     const data = JSON.parse(raw);
@@ -165,9 +175,9 @@ export async function handleHookPrompt() {
 
   const { prompt, cwd, sessionId } = input;
 
-  // A background agent's result or a teammate's message is not the owner asking anything:
+  // Another agent's result, report or message is not the owner asking anything:
   // the context pass (about a second on a busy store) has nothing to answer.
-  if (classifyClaudePromptText(prompt).category === "notification") process.exit(0);
+  if (isMachinePrompt(prompt)) process.exit(0);
 
   if (!getHooksEnabledPreference(getPhrenPath())) {
     appendAuditLog(getPhrenPath(), "hook_prompt", "status=disabled");

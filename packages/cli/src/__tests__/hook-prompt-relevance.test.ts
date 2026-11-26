@@ -78,4 +78,17 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
   it("skips a background agent's result, even one asking the same question", () => {
     expect(run("<task-notification><task-id>a1</task-id><status>completed</status><result>how do I deploy stockview</result></task-notification>", store)).toBe("");
   });
+
+  it.each([
+    ["a sub-agent hand-back", '<agent-message from="worker-1">\nhow do I deploy stockview\n</agent-message>'],
+    ["another session's message", '<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="lead-1">\nhow do I deploy stockview\n</cross-session-message>'],
+    ["an idle notice", '[Cross-session idle notice] "lead-1", which you asked to be notified about, is idle now: how do I deploy stockview'],
+  ])("skips %s, even one asking the same question", (_label, prompt) => {
+    expect(run(prompt, store)).toBe("");
+  });
+
+  it("still answers the owner when a pasted block quotes an agent's message", () => {
+    const output = run('how do I deploy stockview\n<pasted_content id="1">\n<agent-message from="worker-1">done</agent-message>\n</pasted_content id="1">', store);
+    expect(injected(output)).toContain("stockview/FINDINGS.md");
+  });
 });
