@@ -319,8 +319,10 @@ export function storePathExists(storePath: string): boolean {
  * returned**: callers must be able to see that a store claims a project before
  * deciding what to do, otherwise its writes would land in the primary store.
  */
-export function resolveAllStores(phrenPath: string): StoreEntry[] {
-  const registry = readStoreRegistry(phrenPath);
+export function resolveAllStores(phrenPath: string, options: { migrateAttachments?: boolean } = {}): StoreEntry[] {
+  const registry = options.migrateAttachments === false
+    ? readStoreRegistryDetailed(phrenPath, options).registry
+    : readStoreRegistry(phrenPath);
   return resolveStoreEntries(phrenPath, registry);
 }
 
