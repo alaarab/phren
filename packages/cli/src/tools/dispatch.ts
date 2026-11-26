@@ -57,14 +57,25 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_returns", {
     title: "◆ phren · dispatch returns",
-    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. A stalled row flags an unchanged working screen and transcript. A done row can include structured prs and integratorDelivery. Reading a done return closes its finished pane unless closeOnFinish:false was specified, after rechecking new and queued work. Each row has the dispatch id, computer, project, label and the worker's target for hand_off. When the owner has turned on `phren config account-failover on` (off by default), a Claude worker that stopped at its usage limit is continued on another signed-in account with room (same computer first, never the same login before its window resets): its row comes back with continued (the new dispatch id, computer and account, or why none could) and the error says \"Continued on account X\".",
+    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. A stalled row flags an unchanged working screen and transcript. A done row can include structured prs and integratorDelivery. A done, needs-you or failed row can also carry tasks: every task the worker's session took on (project, bid, resolution, title); resolution open means it still owes the work, and a return whose turn left one open reads needs-you with the bids in its question. Reading a done return closes its finished pane unless closeOnFinish:false was specified, after rechecking new and queued work. Each row has the dispatch id, computer, project, label and the worker's target for hand_off. When the owner has turned on `phren config account-failover on` (off by default), a Claude worker that stopped at its usage limit is continued on another signed-in account with room (same computer first, never the same login before its window resets): its row comes back with continued (the new dispatch id, computer and account, or why none could) and the error says \"Continued on account X\".",
     inputSchema: {},
   }, async () => {
     try {
       const origin = await terminalPaneFromEnv();
       const result = await hookRequest("/v1/dispatch/returns", { ...(origin ? { origin } : {}) });
       const returns = Array.isArray(result.returns) ? result.returns : [];
-      return mcpResponse({ ok: true, data: result, message: returns.length ? `${returns.length} unread returns.` : "No unread returns." });
+      // The worker session's task ledger (session-tasks.ts): one line per task under its return.
+      const blocks = returns.flatMap(row => {
+        const tasks = Array.isArray(object(row).tasks) ? object(row).tasks : [];
+        return tasks.length ? [`- ${String(object(row).computer)} ${String(object(row).label)} ${String(object(row).state)}`,
+          ...tasks.map(task => {
+            const entry = object(task);
+            const title = String(entry.title ?? "");
+            return `  - ${String(entry.project)} bid:${String(entry.stableId)} ${String(entry.resolution)}${title ? `: ${title}` : ""}`;
+          })] : [];
+      });
+      return mcpResponse({ ok: true, data: result, message: returns.length
+        ? [`${returns.length} unread returns.`, ...blocks].join("\n") : "No unread returns." });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read dispatch returns." });
     }

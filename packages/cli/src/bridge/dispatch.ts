@@ -80,6 +80,16 @@ export const originPaneSchema = z.object({ server: serverName, workspace: id, ta
 export type OriginPane = z.infer<typeof originPaneSchema>;
 export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "stalled", "gone"] as const;
 export type WorkerState = typeof workerStates[number];
+/** One task of the worker session's ledger (task/session-tasks.ts), as an
+ * observation or a return carries it: no store path on the wire. */
+export const workerTaskSchema = z.object({
+  project: projectName.describe("The task's project."),
+  stableId: z.string().regex(/^[a-f0-9]{8}$/).describe("The task's stable id, as bid: comments name it."),
+  title: z.string().max(200).describe("The task line without metadata; empty when the task is gone."),
+  section: z.enum(["Active", "Queue", "Done", "missing"]).describe("Where the task sits now."),
+  resolution: z.enum(["done", "queue", "parked", "open", "missing"]).describe("Whether the session settled it; open means it still owes the work."),
+}).strict();
+export type WorkerTask = z.infer<typeof workerTaskSchema>;
 const timestamp = z.string().datetime();
 const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
@@ -135,6 +145,8 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
     waited: z.number().int().min(1).max(999).optional().describe("The most background tasks the worker waited on before it finished."),
+    tasks: z.array(workerTaskSchema).max(32).optional()
+      .describe("The worker session's task ledger (session-tasks.ts): every task it took on and whether each is settled."),
   }).strict().optional().describe("The latest return: the worker finished, needs the owner, failed, is blocked or is gone."),
   approval: z.object({
     actionId: z.string().min(1).max(200), tool: z.string().max(200), title: z.string().max(200).optional(), request: z.string().max(500).optional(),
