@@ -1247,7 +1247,9 @@ export function selectSnippets(
   keywords: string,
   tokenBudget: number,
   lineBudget: number,
-  charBudget: number
+  charBudget: number,
+  /** The prompt's keyword rarity, so the bullet shown is the one the relevance floor accepted. */
+  rarity?: Map<string, number>,
 ): { selected: SelectedSnippet[]; usedTokens: number } {
   const selected: SelectedSnippet[] = [];
   let usedTokens = 36;
@@ -1272,7 +1274,7 @@ export function selectSnippets(
     // unconditionally true of everything injected, so it is checked here too.
     if (!isInjectableDocType(doc.type)) continue;
     // The bullet that matched, not the doc's opening lines.
-    const match = bestChunkMatch(queryTokens, doc);
+    const match = bestChunkMatch(queryTokens, doc, rarity);
     const source = match && match.distinct >= MIN_CHUNK_MATCHES ? match.chunk : extractSnippet(doc.content, keywords, 8);
     // Read cached freshness before compaction can cut a citation comment. No refresh here.
     let annotated = source;
