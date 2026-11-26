@@ -109,7 +109,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ key, feedback }) => {
       const phrenPath = ctx.phrenPath;
       return withWriteQueue(async () => {
-        recordFeedback(phrenPath, key, feedback);
+        recordFeedback(phrenPath, key, feedback, undefined, "explicit");
         flushEntryScores(phrenPath);
 
         const feedbackWeights: Record<string, number> = {

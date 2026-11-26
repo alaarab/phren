@@ -122,7 +122,7 @@ describe("handleQualityFeedback", () => {
 
     expect(stdout.join("\n")).toContain(`Recorded feedback: helpful for ${key}`);
     const scores = JSON.parse(fs.readFileSync(path.join(phrenPath, ".runtime", "memory-scores.json"), "utf8"));
-    expect(scores.entries[key]).toMatchObject({ helpful: 1 });
+    expect(scores.entries[key]).toMatchObject({ helpful: 1, explicitHelpful: 1 });
   });
 
   it("rejects an unknown feedback type without touching the audit log", async () => {

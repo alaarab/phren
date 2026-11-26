@@ -1333,6 +1333,8 @@ Read all pinned truths for a project. Returns the full list of truth entries fro
 
 Record feedback on whether an injected memory was helpful or noisy.
 
+Only explicit feedback moves the feedback multiplier in retrieval ranking: this tool (also available as `revise_finding action=feedback`), CLI `quality-feedback`, and CI failures tied to a finding. Each `helpful` adds 0.15, `reprompt` subtracts 0.2, and `regression` subtracts 0.4 from a starting multiplier of 1, clamped to 0.2–1.5. Impressions, recent use, and heuristic session counts do not affect it; entries without explicit feedback keep a multiplier of 1.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `key` | string | yes | Memory key to score. |

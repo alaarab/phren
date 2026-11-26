@@ -14,6 +14,9 @@ export interface EntryScore {
   helpful: number;
   repromptPenalty: number;
   regressionPenalty: number;
+  explicitHelpful?: number;
+  explicitReprompt?: number;
+  explicitRegression?: number;
   lastUsedAt: string;
 }
 
@@ -24,7 +27,7 @@ interface VersionedEntriesFile<T> {
 
 interface ScoreJournalEntry {
   key: string;
-  delta: { impressions?: number; helpful?: number; repromptPenalty?: number; regressionPenalty?: number };
+  delta: Partial<Omit<EntryScore, "lastUsedAt">>;
   at: string;
 }
 
@@ -48,6 +51,9 @@ function isEntryScore(value: unknown): value is EntryScore {
     && isFiniteNumber(value.helpful)
     && isFiniteNumber(value.repromptPenalty)
     && isFiniteNumber(value.regressionPenalty)
+    && (value.explicitHelpful === undefined || isFiniteNumber(value.explicitHelpful))
+    && (value.explicitReprompt === undefined || isFiniteNumber(value.explicitReprompt))
+    && (value.explicitRegression === undefined || isFiniteNumber(value.explicitRegression))
     && typeof value.lastUsedAt === "string";
 }
 
@@ -117,6 +123,7 @@ function appendScoreJournal(phrenPath: string, key: string, delta: ScoreJournalE
   withFileLock(file, () => {
     fs.appendFileSync(file, JSON.stringify(entry) + "\n");
   });
+  journalCache = null;
 }
 
 function parseScoreJournal(raw: string, context: string): ScoreJournalEntry[] {
@@ -171,8 +178,8 @@ function claimScoreJournal(phrenPath: string): ScoreJournalEntry[] {
   }
 }
 
-function aggregateJournalScores(entries: ScoreJournalEntry[]): Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number; lastUsedAt: string }> {
-  const aggregated: Record<string, { impressions: number; helpful: number; repromptPenalty: number; regressionPenalty: number; lastUsedAt: string }> = {};
+function aggregateJournalScores(entries: ScoreJournalEntry[]): Record<string, EntryScore> {
+  const aggregated: Record<string, EntryScore> = {};
   for (const entry of entries) {
     if (!aggregated[entry.key]) {
       aggregated[entry.key] = { impressions: 0, helpful: 0, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: "" };
@@ -182,6 +189,9 @@ function aggregateJournalScores(entries: ScoreJournalEntry[]): Record<string, { 
     if (entry.delta.helpful) current.helpful += entry.delta.helpful;
     if (entry.delta.repromptPenalty) current.repromptPenalty += entry.delta.repromptPenalty;
     if (entry.delta.regressionPenalty) current.regressionPenalty += entry.delta.regressionPenalty;
+    current.explicitHelpful = (current.explicitHelpful ?? 0) + (entry.delta.explicitHelpful ?? 0);
+    current.explicitReprompt = (current.explicitReprompt ?? 0) + (entry.delta.explicitReprompt ?? 0);
+    current.explicitRegression = (current.explicitRegression ?? 0) + (entry.delta.explicitRegression ?? 0);
     // Q24: carry the max journal timestamp so lastUsedAt is persisted correctly during flush
     if (entry.at && entry.at > current.lastUsedAt) current.lastUsedAt = entry.at;
   }
@@ -195,6 +205,9 @@ function ensureScoreEntry(scores: Record<string, EntryScore>, key: string): Entr
       helpful: 0,
       repromptPenalty: 0,
       regressionPenalty: 0,
+      explicitHelpful: 0,
+      explicitReprompt: 0,
+      explicitRegression: 0,
       lastUsedAt: new Date(0).toISOString(),
     };
   }
@@ -230,7 +243,10 @@ export function flushEntryScores(phrenPath: string): void {
       entry.helpful += deltas.helpful;
       entry.repromptPenalty += deltas.repromptPenalty;
       entry.regressionPenalty += deltas.regressionPenalty;
-      // Q24: persist the max journal timestamp into lastUsedAt so recency boost advances correctly
+      entry.explicitHelpful = (entry.explicitHelpful ?? 0) + (deltas.explicitHelpful ?? 0);
+      entry.explicitReprompt = (entry.explicitReprompt ?? 0) + (deltas.explicitReprompt ?? 0);
+      entry.explicitRegression = (entry.explicitRegression ?? 0) + (deltas.explicitRegression ?? 0);
+      // Persist the latest usage timestamp for diagnostics.
       if (deltas.lastUsedAt && deltas.lastUsedAt > entry.lastUsedAt) {
         entry.lastUsedAt = deltas.lastUsedAt;
       }
@@ -286,12 +302,18 @@ export function recordFeedback(
   rawKey: string,
   feedback: "helpful" | "reprompt" | "regression",
   sessionId?: string,
+  source: "heuristic" | "explicit" = "heuristic",
 ): void {
   const key = normalizeFeedbackKey(rawKey);
   const delta: ScoreJournalEntry["delta"] = {};
   if (feedback === "helpful") delta.helpful = 1;
   if (feedback === "reprompt") delta.repromptPenalty = 1;
   if (feedback === "regression") delta.regressionPenalty = 1;
+  if (source === "explicit") {
+    if (feedback === "helpful") delta.explicitHelpful = 1;
+    if (feedback === "reprompt") delta.explicitReprompt = 1;
+    if (feedback === "regression") delta.explicitRegression = 1;
+  }
   appendScoreJournal(phrenPath, key, delta);
   appendAuditLog(phrenPath, "memory_feedback", `key=${key} feedback=${feedback}`);
   // When feedback is "helpful", mark correlated query entries for future boost
@@ -306,25 +328,16 @@ export function recordFeedback(
 
 
 // Module-level cache for the journal aggregation used by getQualityMultiplier.
-// Invalidated whenever flushEntryScores runs (at which point the journal is cleared).
-let journalCache: Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }> | null = null;
+// Invalidated whenever a score is appended or flushEntryScores clears the journal.
+let journalCache: Map<string, EntryScore> | null = null;
 let journalCachePath: string | null = null;
 
-function getJournalCache(phrenPath: string): Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }> {
+function getJournalCache(phrenPath: string): Map<string, EntryScore> {
   const file = scoresJournalFile(phrenPath);
   if (journalCache && journalCachePath === file) return journalCache;
   // Build the cache by reading the journal once and aggregating by key
   const entries = readScoreJournal(phrenPath);
-  const cache = new Map<string, { helpful: number; repromptPenalty: number; regressionPenalty: number; impressions: number; lastUsedAt: string }>();
-  for (const entry of entries) {
-    const cur = cache.get(entry.key) ?? { helpful: 0, repromptPenalty: 0, regressionPenalty: 0, impressions: 0, lastUsedAt: "" };
-    if (entry.delta.helpful) cur.helpful += entry.delta.helpful;
-    if (entry.delta.repromptPenalty) cur.repromptPenalty += entry.delta.repromptPenalty;
-    if (entry.delta.regressionPenalty) cur.regressionPenalty += entry.delta.regressionPenalty;
-    if (entry.delta.impressions) cur.impressions += entry.delta.impressions;
-    if (entry.at && entry.at > cur.lastUsedAt) cur.lastUsedAt = entry.at;
-    cache.set(entry.key, cur);
-  }
+  const cache = new Map(Object.entries(aggregateJournalScores(entries)));
   journalCache = cache;
   journalCachePath = file;
   return cache;
@@ -333,43 +346,18 @@ function getJournalCache(phrenPath: string): Map<string, { helpful: number; repr
 export function getQualityMultiplier(phrenPath: string, key: string): number {
   const scores = loadEntryScores(phrenPath);
   const entry = scores[key];
-  let helpful = entry ? entry.helpful : 0;
-  let repromptPenalty = entry ? entry.repromptPenalty : 0;
-  let regressionPenalty = entry ? entry.regressionPenalty : 0;
-  let impressions = entry ? entry.impressions : 0;
-  let lastUsedAt = entry ? entry.lastUsedAt : "";
+  let helpful = entry?.explicitHelpful ?? 0;
+  let reprompt = entry?.explicitReprompt ?? 0;
+  let regression = entry?.explicitRegression ?? 0;
 
   // Use the cached journal aggregation to avoid O(n×m) reads during ranking
   const journalAgg = getJournalCache(phrenPath).get(key);
-  const hasJournalData = journalAgg !== undefined;
   if (journalAgg) {
-    helpful += journalAgg.helpful;
-    repromptPenalty += journalAgg.repromptPenalty;
-    regressionPenalty += journalAgg.regressionPenalty;
-    impressions += journalAgg.impressions;
-    if (journalAgg.lastUsedAt && journalAgg.lastUsedAt > lastUsedAt) lastUsedAt = journalAgg.lastUsedAt;
+    helpful += journalAgg.explicitHelpful ?? 0;
+    reprompt += journalAgg.explicitReprompt ?? 0;
+    regression += journalAgg.explicitRegression ?? 0;
   }
 
-  if (!entry && !hasJournalData) return 1;
-
-  let recencyBoost = 0;
-  if (lastUsedAt) {
-    const lastUsedMs = new Date(lastUsedAt).getTime();
-    if (!Number.isNaN(lastUsedMs)) {
-      const daysSinceUse = Math.max(0, (Date.now() - lastUsedMs) / 86_400_000);
-      if (daysSinceUse <= 7) {
-        recencyBoost = 0.15;
-      } else if (daysSinceUse <= 30) {
-        recencyBoost = 0;
-      } else {
-        recencyBoost = -0.1 * Math.min(3, (daysSinceUse - 30) / 30);
-      }
-    }
-  }
-
-  const frequencyBoost = impressions > 0 ? Math.min(0.2, Math.log2(impressions + 1) * 0.05) : 0;
-  const penalties = repromptPenalty + regressionPenalty * 2;
-  const feedbackScore = helpful * 0.15 - penalties * 0.2;
-  const raw = 1 + feedbackScore + recencyBoost + frequencyBoost;
+  const raw = 1 + 0.15 * helpful - 0.2 * (reprompt + 2 * regression);
   return Math.max(0.2, Math.min(1.5, raw));
 }
