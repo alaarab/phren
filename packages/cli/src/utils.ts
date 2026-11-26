@@ -26,6 +26,7 @@ export {
 export {
   STOP_WORDS,
   extractKeywordEntries,
+  extractKeywordWords,
   extractKeywords,
   learnedSynonymsPath,
   loadLearnedSynonyms,

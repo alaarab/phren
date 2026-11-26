@@ -13,10 +13,11 @@ import {
   rankResults,
   searchDocumentsAsync,
   selectSnippets,
+  tokenizeForOverlap,
   wantsTasks,
 } from "../shared/retrieval.js";
 import { debugLog } from "../shared.js";
-import { buildRobustFtsQuery, clampFloat, clampInt, extractKeywordEntries } from "../utils.js";
+import { buildRobustFtsQuery, clampFloat, clampInt, extractKeywordEntries, extractKeywordWords } from "../utils.js";
 import { isMachinePrompt } from "./prompt-source.js";
 import type { RecallAbstainReason, RecallDocRef, RecallPipelineInput, RecallResult } from "./types.js";
 
@@ -28,8 +29,8 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   const { prompt, phrenPath, db, detectedProject, cwd } = input;
   const gitCtx = input.gitCtx ?? null;
   const hotTopics = input.hotTopics ?? [];
-  const keywordEntries = extractKeywordEntries(prompt);
-  const keywords = keywordEntries.join(" ");
+  let keywordEntries = extractKeywordEntries(prompt);
+  let keywords = keywordEntries.join(" ");
   const intent = detectTaskIntent(prompt);
   const result: RecallResult = {
     keywords: keywordEntries,
@@ -53,6 +54,21 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
 
   if (isMachinePrompt(prompt)) return abstain("machine-prompt");
   if (!keywords) return abstain("no-keywords");
+
+  let rarity: Map<string, number> | undefined;
+  const candidateWords = [...new Set(extractKeywordWords(prompt))].slice(0, 24);
+  if (candidateWords.length > 10) {
+    rarity = promptRarity(db, candidateWords.join(" "), 24);
+    keywordEntries = candidateWords
+      // Rarity 1 means no document has the word (a typo, a word the store never uses): it cannot match, so it goes last.
+      .map((word, index) => { const r = rarity!.get(tokenizeForOverlap(word)[0]) ?? 0.5; return { word, index, rarity: r >= 1 ? -1 : r }; })
+      .sort((a, b) => b.rarity - a.rarity || a.index - b.index)
+      .slice(0, 10)
+      .sort((a, b) => a.index - b.index)
+      .map(({ word }) => word);
+    keywords = keywordEntries.join(" ");
+    result.keywords = keywordEntries;
+  }
 
   const safeQuery = buildRobustFtsQuery(keywords, detectedProject, phrenPath);
   if (!safeQuery) return abstain("no-query");
@@ -95,7 +111,7 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
   const preFloorCount = rows.length;
   debugLog(`relevance-floor candidates: ${rows.slice(0, 12).map((row) => `${row.project}/${row.filename}`).join(", ")}`);
-  const rarity = promptRarity(db, keywords);
+  rarity ??= promptRarity(db, keywords);
   rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, rarity,
     (row, decision) => result.floor.push({ ...docRef(row), ...decision }));
   if (rows.length !== preFloorCount) {
