@@ -226,6 +226,11 @@ environment setting because the Hook service doesn't see shell env (see
 that name a task, closing a task whose linked pull request merged or linked issue
 closed) and the recording of dispatch workers on tasks; see
 [task work links](task-responsibility.md#task-work-links).
+`PHREN_TASK_STOP_CHECK=off` stops the Stop hook from asking a session to settle
+the tasks it claimed or moved to Active; `PHREN_TASK_STALE=off` stops the owner
+inbox rows for Active tasks untouched for a day and the scheduled dream's move of
+them back to the Queue; `PHREN_TASK_AUDIT=off` stops the Hook's weekly task
+audit. See [settling tasks](task-responsibility.md#settling-tasks).
 `PHREN_DREAMING=off` stops the Hook's dreaming ticker, whatever each project's
 `dreaming` config says; `PHREN_DREAM_COMMAND` names the `phren` binary the
 ticker runs `phren dream run --scheduled` with (default: `phren` on the Hook's

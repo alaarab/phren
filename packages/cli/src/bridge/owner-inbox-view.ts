@@ -33,7 +33,14 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
     if (data.includeResolved || item.kind === "manual") return true;
     if (item.live !== true || item.state !== "open") return false;
     const t = item.target as Json | undefined;
-    if (!t) return true;
+    if (!t) {
+      // Computers share the synced store, so two Hooks can list the same unclaimed stale task.
+      if (typeof item.source === "string" && item.source.startsWith("task-stale:")) {
+        if (seen.has(item.source)) return false;
+        seen.add(item.source);
+      }
+      return true;
+    }
     const computer = String(item.computer ?? item.inboxComputer);
     const key = JSON.stringify([isLocalComputer(computer) ? "local" : computer, t.server, t.workspace, t.tab, t.pane,
       t.source, t.session ?? t.startingToken, item.actionId ?? "waiting"]);

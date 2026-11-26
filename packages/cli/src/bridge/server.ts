@@ -8,6 +8,7 @@ import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
+import { StaleTaskSources } from "./task-stale.js";
 import { Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
 import { liveProcessCwds } from "./housekeeping/safety.js";
 import { dockerUsage, listSimulators, sessionRowsFromOverview, xcodebuildRunning } from "./housekeeping/inventory.js";
@@ -62,6 +63,7 @@ import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules
 import { taskWorkEnabled } from "./task-work.js";
 import { TASK_WORK_TICK_MS, TaskWorkSweeper } from "./task-work-live.js";
 import { DREAM_TICK_MS, DreamScheduler, dreamProjectOf, effectiveDreamSessions, dreamStoreProjects, dreamTickerEnabled, readLastRun, runDreamChild } from "./dream-schedule.js";
+import { readAuditLastRun, TASK_AUDIT_TICK_MS, TaskAuditScheduler, runTaskAuditChild, taskAuditEnabled } from "./task-audit-schedule.js";
 import { getDreamingConfig } from "../config/dreaming.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -154,9 +156,10 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }
   // Assigned once resources exist below; the inbox only reads it on its ticks.
   let housekeeper: Housekeeper | undefined;
+  const staleTasks = modules.has("tasks") ? new StaleTaskSources() : undefined;
   const inbox = dispatches ? new OwnerInbox(async () => {
     const observed = await ownerInboxSources(agentHooks);
-    return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? []] };
+    return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? [], ...staleTasks?.sources() ?? []] };
   }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
@@ -376,6 +379,16 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       effectiveDreamSessions(String(server.session), await sharedSnapshot(String(server.session), 4000), dreamProject, agentHooks, codexQuestions)))).flat(),
     run: project => runDreamChild(scheduleStore, project) }) : undefined;
   const dreamTimer = dreams ? setInterval(() => { countTick("dreams"); void dreams.tick().catch(() => {}); }, DREAM_TICK_MS) : undefined;
+  // Weekly per-project task audits (bridge/task-audit-schedule.ts): each project's dreaming
+  // config gates them the same way, so an audit rides the window the owner already tuned.
+  const taskAudits = modules.has("tasks") && taskAuditEnabled() ? new TaskAuditScheduler({ now: () => new Date(),
+    projects: () => dreamStoreProjects(scheduleStore, modules.profile),
+    config: project => getDreamingConfig(scheduleStore, project),
+    lastRun: project => readAuditLastRun(scheduleStore, project),
+    liveSessions: async () => (await Promise.all((await recentServers()).map(async server =>
+      effectiveDreamSessions(String(server.session), await sharedSnapshot(String(server.session), 4000), dreamProject, agentHooks, codexQuestions)))).flat(),
+    run: project => runTaskAuditChild(scheduleStore, project) }) : undefined;
+  const taskAuditTimer = taskAudits ? setInterval(() => { countTick("task-audit"); void taskAudits.tick().catch(() => {}); }, TASK_AUDIT_TICK_MS) : undefined;
   // Task work links (task-work.ts): pull requests that name a task are linked to it, and a
   // merged linked pull request or a closed linked issue moves the task to Done.
   const taskWork = modules.has("tasks") && taskWorkEnabled() ? new TaskWorkSweeper(scheduleStore) : undefined;
@@ -451,7 +464,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     const stop = () => {
       process.off("SIGTERM", stop); process.off("SIGINT", stop);
       browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention();
-      for (const timer of [scheduleTimer, dreamTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
+      for (const timer of [scheduleTimer, dreamTimer, taskAuditTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
       scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close();
       ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections();
       stopProbes();

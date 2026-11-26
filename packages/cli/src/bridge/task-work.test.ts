@@ -150,6 +150,43 @@ describe("task work sweep", () => {
   });
 });
 
+describe("closes bid: on merge", () => {
+  it("a merged pull request that closes a task replaces an earlier link and closes it; a mention does not", async () => {
+    project("app", [
+      "## Active", "",
+      "- [ ] First attempt closed unmerged <!-- bid:12121212 -->", work({ pr: pr(120) }),
+      "- [ ] Linked to an open PR, merged PR only mentions it <!-- bid:13131313 -->", work({ pr: pr(130) }),
+      "- [ ] Reopened after this PR closed it <!-- bid:14141414 -->", work({ pr: pr(140), autoClosed: { at: "2026-11-24T10:00:00.000Z", reason: "PR #141 merged", url: pr(141).url } }),
+      "",
+    ].join("\n"));
+    pulls = [
+      { number: 121, url: pr(121).url, state: "merged", head: "fix/again", body: "Second try. Fixes bid:12121212" },
+      { number: 131, url: pr(131).url, state: "merged", head: "fix/part", body: "Part of bid:13131313." },
+      { number: 141, url: pr(141).url, state: "merged", head: "fix/old", body: "Closes bid:14141414" },
+    ];
+    items.set("pull:120", { state: "closed" });
+    items.set("pull:121", { state: "merged", mergedAt: "2026-11-25T10:00:00Z" });
+    items.set("pull:130", { state: "open" });
+    items.set("pull:140", { state: "open" });
+
+    expect(await new TaskWorkSweeper(root).tick()).toEqual({ linked: 1, closed: 1, errors: 0 });
+    expect(item("12121212")).toMatchObject({ section: "Done", work: { pr: pr(121), autoClosed: { url: pr(121).url } } });
+    expect(item("13131313")).toMatchObject({ section: "Active", work: { pr: pr(130) } });
+    expect(item("14141414")).toMatchObject({ section: "Active", work: { pr: pr(140) } });
+  });
+
+  it("closes a task when its gitboy pull request that says Closes bid: merges", async () => {
+    project("app", "## Active\n\n- [ ] Ship it on gitboy <!-- bid:15151515 -->\n");
+    const gitboyPr = "https://gitboy.example.com/me/app/pulls/7";
+    vi.mocked(hosts.detectHost).mockResolvedValue(hosts.hostInfo("gitboy", { domain: "gitboy.example.com", webUrl: "https://gitboy.example.com/me/app", remote: "origin", source: "url" }));
+    pulls = [{ number: 7, url: gitboyPr, state: "merged", head: "feat/ship", body: "Closes bid:15151515" }];
+    items.set("pull:7", { state: "merged", mergedAt: "2026-11-25T10:00:00Z" });
+
+    expect(await new TaskWorkSweeper(root).tick()).toEqual({ linked: 1, closed: 1, errors: 0 });
+    expect(item("15151515")).toMatchObject({ section: "Done", work: { pr: { forge: "gitboy", number: 7, url: gitboyPr }, autoClosed: { url: gitboyPr } } });
+  });
+});
+
 describe("task API", () => {
   it("serves work links with live worker, CI and mergeability state and the row's status line", async () => {
     project("app", `## Active\n\n- [ ] Fix the sync race <!-- bid:aaaaaaaa -->\n${work({ worker: { dispatchId: "33333333-3333-4333-8333-333333333333", computer: "PJ", state: "working", at: "2026-11-25T10:00:00.000Z" }, branch: "feat/sync", pr: pr(201) })}\n- [ ] Plain <!-- bid:bbbbbbbb -->\n`);

@@ -960,10 +960,13 @@ export function updateTask(
         item.checked = section === "Done";
         parsed.data.items[section].unshift(item);
         changes.push(`moved ${found.match.section} -> ${section}`);
+        // A claim holds Active work; a task leaving Active is no longer anyone's.
+        if (section !== "Active" && item.claim) { changes.push(`released claim by ${item.claim.computer}`); item.claim = undefined; }
       }
     }
 
     if (changes.length && (item.responsibility !== undefined || item.dependencies !== undefined || item.history !== undefined)) item.history = [...(item.history ?? []), { at: new Date().toISOString(), change: changes.join(", ") }];
+    if (changes.length) item.lastActivity = new Date().toISOString();
     writeTaskDoc(parsed.data);
     return phrenOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
   }));
@@ -1138,6 +1141,7 @@ export function promoteTask(phrenPath: string, project: string, match: string, m
       item.checked = false;
       parsed.data.items.Active.unshift(item);
     }
+    item.lastActivity = new Date().toISOString();
 
     writeTaskDoc(parsed.data);
     return phrenOk(item);
@@ -1192,12 +1196,14 @@ export function claimTask(phrenPath: string, project: string, match: string, cla
         parsed.data.items.Active.unshift(item);
       }
     }
+    item.lastActivity = new Date().toISOString();
     writeTaskDoc(parsed.data);
     return phrenOk(item);
   }));
 }
 
-export function workNextTask(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<string> {
+/** Pick the highest-priority ready Queue item and move it to Active; returns the moved item. */
+export function workNextTaskItem(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<TaskItem> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
   const preCheck = ensureProject(phrenPath, project);
@@ -1223,10 +1229,16 @@ export function workNextTask(phrenPath: string, project: string, graphRoot = phr
     if (item.history !== undefined) item.history.push({ at: new Date().toISOString(), change: "moved Queue -> Active by next" });
     item.section = "Active";
     item.checked = false;
+    item.lastActivity = new Date().toISOString();
     parsed.data.items.Active.push(item);
     writeTaskDoc(parsed.data);
-    return phrenOk(`Moved next queue item to Active in ${project}: ${item.line}`);
+    return phrenOk(item);
   }));
+}
+
+export function workNextTask(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<string> {
+  const result = workNextTaskItem(phrenPath, project, graphRoot);
+  return result.ok ? phrenOk(`Moved next queue item to Active in ${project}: ${result.data.line}`) : forwardErr(result);
 }
 
 export function tidyDoneTasks(phrenPath: string, project: string, keep: number = 30, dryRun?: boolean): PhrenResult<string> {
@@ -1314,6 +1326,7 @@ export function updateTaskWork(phrenPath: string, project: string, match: string
       item.claim = undefined;
       parsed.data.items.Done.unshift(item);
     }
+    item.lastActivity = new Date().toISOString();
     writeTaskDoc(parsed.data);
     return phrenOk({ item, changed: true });
   });

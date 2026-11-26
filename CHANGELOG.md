@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Agents now settle the tasks they take on (#934). A session that claims a task or moves one to Active has it recorded, and when its turn ends with such a task still open, the Claude Code and Codex Stop hook asks it once to complete the task with evidence, park it (`Blocker: …; Next: …` in its context) or return it to the Queue. `PHREN_TASK_STOP_CHECK=off` turns this off.
+- Dispatch returns list the tasks the worker's session took on and how each stands (done, queue, parked or open). A finished turn that leaves one open returns needs-you, naming the task.
+- An Active task untouched for a day appears in the owner inbox, and the next scheduled dream for its project moves it back to the Queue with a note. `PHREN_TASK_STALE=off` turns both off.
+- `phren task audit` checks a project's open tasks against its code with the helper model. It closes the tasks shown done with evidence and adds a dated note to partial or obsolete ones. The Hook runs it weekly for projects with dreaming enabled, 40 tasks at a time, starting with the tasks audited longest ago. `PHREN_TASK_AUDIT=off` stops the weekly run.
+- Task tools warn when a session holds more than three Active tasks, and when a task title runs past 80 characters. The title warning suggests a short title and the context to move the rest into.
+
+### Fixed
+
+- A merged pull request whose body says `Closes bid:<id>` now closes the task even when another pull request was linked to it first, on GitHub and gitboy. Every task write records its last activity, and moving a task out of Active releases its claim.
+
 ## [0.3.95] - 2026-11-26
 
 ### Added

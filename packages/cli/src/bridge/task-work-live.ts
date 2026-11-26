@@ -141,18 +141,22 @@ export class TaskWorkSweeper {
         const matches = open.filter(task => ids.includes(task.identity.stableId)
           || (task.project === project && (branchIds.includes(task.identity.stableId)
             || (!!pull.head && !SHARED_BRANCH.test(pull.head) && task.item.work?.branch === pull.head && !task.item.work?.pr))));
-        for (const task of matches) if (this.linkPull(task, host.kind, pull)) result.linked++;
+        for (const task of matches) if (this.linkPull(task, host.kind, pull, pull.state === "merged" && ids.includes(task.identity.stableId))) result.linked++;
       }
     }
   }
 
   /** The first pull request that names a task is its pull request; a later
-   * one doesn't replace it (a dispatch report can). */
-  private linkPull(task: OpenTask, forge: Forge, pull: RecentPull): boolean {
+   * one doesn't replace it (a dispatch report can), except a merged one that
+   * says it closes the task: "Closes bid:" on a merged pull request closes the
+   * task whichever pull request was linked first (a first attempt closed
+   * unmerged, a split follow-up), unless that very link closed it before. */
+  private linkPull(task: OpenTask, forge: Forge, pull: RecentPull, closes = false): boolean {
     const url = parseForgeUrl(pull.url);
     if (!url || url.kind !== "pull" || url.number !== pull.number) return false;
     const written = updateTaskWork(task.root, task.project, `bid:${task.identity.stableId}`, (work, item) => {
-      if (item.stableId !== task.identity.stableId || (work?.pr && work.pr.url !== url.url)) return undefined;
+      if (item.stableId !== task.identity.stableId) return undefined;
+      if (work?.pr && work.pr.url !== url.url && (!closes || work.autoClosed?.url === url.url)) return undefined;
       return { work: { version: 1, ...work, pr: { forge, number: pull.number, url: url.url }, ...(pull.head && !work?.branch ? { branch: pull.head.slice(0, 256) } : {}) } };
     });
     return written.ok && written.data.changed;
