@@ -5,17 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Agents now settle the tasks they take on (#934). A session that claims a task or moves one to Active has it recorded, and when its turn ends with such a task still open, the Claude Code and Codex Stop hook asks it once to complete the task with evidence, park it (`Blocker: …; Next: …` in its context) or return it to the Queue. `PHREN_TASK_STOP_CHECK=off` turns this off.
+- Dispatch returns list the tasks the worker's session took on and how each stands (done, queue, parked or open). A finished turn that leaves one open returns needs-you, naming the task.
+- An Active task untouched for a day appears in the owner inbox, and the next scheduled dream for its project moves it back to the Queue with a note. `PHREN_TASK_STALE=off` turns both off.
+- `phren task audit` checks a project's open tasks against its code with the helper model. It closes the tasks shown done with evidence and adds a dated note to partial or obsolete ones. The Hook runs it weekly for projects with dreaming enabled, 40 tasks at a time, starting with the tasks audited longest ago. `PHREN_TASK_AUDIT=off` stops the weekly run.
+- Task tools warn when a session holds more than three Active tasks, and when a task title runs past 80 characters. The title warning suggests a short title and the context to move the rest into.
+
+### Fixed
+
+- A merged pull request whose body says `Closes bid:<id>` now closes the task even when another pull request was linked to it first, on GitHub and gitboy. Every task write records its last activity, and moving a task out of Active releases its claim.
+
 ## [0.3.95] - 2026-11-26
 
 ### Added
 
 - The recall eval reports judged precision: how many injected snippets were useful for their prompt, from cached relevance judgments (partial counts half), with the number of pairs not judged yet. It never calls a model. `--list-unjudged <file>` writes the pairs a judge still has to answer, `--judgments <file>` points a private run at its own cache, and `--check` fails when precision drops more than 2 points. The public fixture's judgments are committed beside its cases.
 - Daily store health counts the ids clanker mode injected and how many of them the same session opened with `get_memory_detail`. The prompt hook's trace now keeps each printed id, and `get_memory_detail` calls in a Claude Code session are logged to `.runtime/memory-detail-opens.jsonl`.
-- Agents now settle the tasks they take on (#934). A session that claims a task or moves one to Active has it recorded, and when its turn ends with such a task still open, the Claude Code and Codex Stop hook asks it once to complete the task with evidence, park it (`Blocker: …; Next: …` in its context) or return it to the Queue. `PHREN_TASK_STOP_CHECK=off` turns this off.
-- Dispatch returns list the tasks the worker's session took on and how each stands (done, queue, parked or open). A finished turn that leaves one open returns needs-you, naming the task.
-- An Active task untouched for a day appears in the owner inbox, and the next scheduled dream for its project moves it back to the Queue with a note. `PHREN_TASK_STALE=off` turns both off.
-- `phren task audit` checks a project's open tasks against its code with the helper model. It closes the tasks shown done with evidence and adds a dated note to partial or obsolete ones. The Hook runs it weekly for projects with dreaming enabled, 40 tasks at a time, starting with the tasks audited longest ago. `PHREN_TASK_AUDIT=off` stops the weekly run.
-- Task tools warn when a session holds more than three Active tasks, and when a task title runs past 80 characters. The title warning suggests a short title and the context to move the rest into.
 - `phren status` shows the latest daily store health snapshot. It counts budget breaches, names them when there are at most three, and shows citation coverage, retired bullets, duplicate texts and IDs, and the size and largest class of `.runtime`. It flags snapshots older than three days.
 
 ### Changed
@@ -27,7 +34,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- A merged pull request whose body says `Closes bid:<id>` now closes the task even when another pull request was linked to it first, on GitHub and gitboy. Every task write records its last activity, and moving a task out of Active releases its claim.
 - When two identical phone messages are queued in Claude Code, a delayed hook no longer marks the second delivered after the transcript has already confirmed the first. Claude can confirm a message before its transcript row arrives, and joined messages keep their confirmation across a Hook restart.
 - The prompt hook now uses an archived finding's creation date or, when it has none, the date of its archive section. Old bug notes expire after 30 days, and a recently written finding whose cited code changed can still reach the prompt. Untagged findings in topic archives last up to 365 days.
 - After Claude's reply, the phone keeps a session working while the background agents its Stop listed may still be running, instead of briefly showing idle before the Hook has found them. The overview, activity clock and dreaming use the same rule, and a child lookup that hangs or fails is retried rather than counted as zero.
