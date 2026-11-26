@@ -18,9 +18,9 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget", () => {
     fs.mkdirSync(path.dirname(path.join(store, file)), { recursive: true });
     fs.writeFileSync(path.join(store, file), text);
   };
-  const run = (prompt: string, session: string) => spawnSync(process.execPath, [cli, "hook-prompt"], {
+  const run = (prompt: string, session: string, clanker: string) => spawnSync(process.execPath, [cli, "hook-prompt"], {
     input: JSON.stringify({ prompt, cwd: workRepo, session_id: session }),
-    env: { ...process.env, PHREN_PATH: store, PHREN_PROFILE: "personal", HOME: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0" },
+    env: { ...process.env, PHREN_PATH: store, PHREN_PROFILE: "personal", HOME: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0", PHREN_CLANKER: clanker },
     encoding: "utf8", timeout: 60_000,
   }).stdout ?? "";
   const lastTrace = () => {
@@ -37,17 +37,26 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget", () => {
     initTestPhrenRoot(store);
     write("profiles/personal.yaml", "name: personal\nprojects:\n  - global\n  - myproject\n");
     write("global/FINDINGS.md", "# global Findings\n\n- Keep notes short.\n");
-    write("myproject/FINDINGS.md", "# myproject Findings\n\n- The render callback reads the frame size the main thread pushed before it.\n");
+    write("myproject/FINDINGS.md", "# myproject Findings\n\n- The render callback reads the frame size the main thread pushed before it using tokens_budget.\n");
     write("myproject/tasks.md", tasks);
     write(".config/workflow-policy.json", JSON.stringify({ schemaVersion: 1, taskMode: "auto" }));
     write(".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 2 } }));
   });
   afterAll(() => tmp?.cleanup());
 
-  it("injects memory but files no task, and notes the pause in the trace line and the recall trace", () => {
-    const output = run("Fix the render callback so it reads the frame size from the main thread", "budget-session");
+  it.each(["off", "on"])("injects memory but files no task, with Clanker %s", (clanker) => {
+    const output = run("Fix the render callback so it reads the frame size from the main thread using tokens_budget", `budget-session-${clanker}`, clanker);
     expect(output).toContain("myproject/FINDINGS.md");
-    expect(output).toMatch(/trace: .*; tasks=paused open 3\/2/);
+    const line = output.split("\n").find(p => p.startsWith("◆ phren · trace:") || p.startsWith("◆ phren · matched="));
+    if (clanker === "off") {
+      expect(line).toMatch(/^◆ phren · trace: intent=debug; matched=[^;]*tokens_budget; budget=\d+\/2000;tokens≈\d+\/550; stages=[^\n]*; tasks=paused open 3\/2$/);
+    } else {
+      expect(line).toMatch(/^◆ phren · matched=[^;]*tokens_budget$/);
+      expect(output).toContain(`</phren-context>\n${line}\n`);
+      expect(output).not.toContain("trace:");
+      expect(output).not.toContain("budget=");
+      expect(output).not.toContain("tasks=paused");
+    }
     expect(output).not.toContain("Queued task");
     expect(fs.readFileSync(path.join(store, "myproject", "tasks.md"), "utf8")).toBe(tasks);
     expect(lastTrace().taskCapturePaused).toEqual({ open: 3, budget: 2 });
@@ -84,7 +93,7 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget for a team-st
   it("uses the budget of the store that owns the project", () => {
     const output = spawnSync(process.execPath, [cli, "hook-prompt"], {
       input: JSON.stringify({ prompt: "Fix the render callback so it reads the frame size from the main thread", cwd: workRepo, session_id: "team-budget" }),
-      env: { ...process.env, PHREN_PATH: primary, PHREN_PROFILE: "", HOME: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0" },
+      env: { ...process.env, PHREN_PATH: primary, PHREN_PROFILE: "", HOME: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0", PHREN_CLANKER: "off" },
       encoding: "utf8", timeout: 60_000,
     }).stdout ?? "";
     expect(output).toContain("teamproj/FINDINGS.md");

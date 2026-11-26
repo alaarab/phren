@@ -1,7 +1,8 @@
 // The prompt-time recall pipeline's contract: what goes in, what comes out.
 // The UserPromptSubmit hook, the recall trace log and the recall eval all read this shape.
 
-import type { DocRow, SqlJsDatabase } from "../shared/index.js";
+import type { SqlJsDatabase } from "../shared/index.js";
+import type { SelectedSnippet } from "../shared/retrieval.js";
 import type { GitContext } from "../cli/session-git.js";
 
 /** Why the pipeline injected nothing. Null on the result when it selected something. */
@@ -94,7 +95,7 @@ export interface RecallResult {
   /** What selection chose, before the hook's once-per-session summary block and injection-budget trim. */
   selected: RecallSelected[];
   /** Internal: the selected rows with full documents, for the hook's output. Not part of the eval or trace. */
-  selectedRows: Array<{ doc: DocRow; snippet: string; key: string; bulletHash?: string }>;
+  selectedRows: SelectedSnippet[];
   /** Rows selection skipped because their bullet was in `recentlyInjected`. */
   suppressedRepeats: number;
   usedTokens: number;

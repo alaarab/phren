@@ -122,6 +122,7 @@ describe("buildHookOutput", () => {
     expect(trace).toContain("branch=feature/test");
     expect(trace).toContain("changed_files=1");
     expect(trace).toContain("intent=debug");
+    expect(trace).toBe("◆ phren · trace: intent=debug; reasons=file:0,branch:0; branch=feature/test; changed_files=1; tokens≈80/550; stages=index:0ms,search:0ms,trust:0ms,rank:0ms,select:0ms");
   });
 
   it("formats multiple results correctly", () => {
@@ -194,12 +195,14 @@ describe("buildHookOutput", () => {
       // The snippet budget cut the bullet before its trailing id comment.
       snippet: `${bullet.slice(0, 200)}\u2026`,
       key: "k1",
+      matched: ["scratch", "index", "mtime"],
     }];
     const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
     try {
       const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, phrenDir, undefined, "scratch index mtime");
       expect(parts.some((p) => p.startsWith("fid:abcd1234 fb:k1 Hook change capture"))).toBe(true);
       expect(parts.some((p) => p.includes("trace:"))).toBe(false);
+      expect(parts.slice(-2)).toEqual(["</phren-context>", "◆ phren · matched=scratch,index,mtime"]);
     } finally {
       delete process.env.PHREN_CLANKER;
     }

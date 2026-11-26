@@ -1181,6 +1181,8 @@ export interface SelectedSnippet {
   doc: DocRow;
   snippet: string;
   key: string;
+  /** Prompt keywords the recall pipeline's best chunk matched; absent on summary blocks. */
+  matched?: string[];
   /** `bulletHash` of the chosen chunk; absent on the hook's summary block. */
   bulletHash?: string;
 }

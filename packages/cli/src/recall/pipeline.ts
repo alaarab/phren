@@ -112,9 +112,13 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   // than pad to a quota with noise (env PHREN_MIN_QUERY_RELEVANCE=0 disables).
   const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
   const preFloorCount = rows.length;
+  const matchedByDoc = new Map<DocRow, string[]>();
   debugLog(`relevance-floor candidates: ${rows.slice(0, 12).map((row) => `${row.project}/${row.filename}`).join(", ")}`);
   rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor, rarity,
-    (row, decision) => result.floor.push({ ...docRef(row), ...decision }));
+    (row, decision) => {
+      result.floor.push({ ...docRef(row), ...decision });
+      matchedByDoc.set(row, decision.matched);
+    });
   if (rows.length !== preFloorCount) {
     debugLog(`relevance-floor: ${preFloorCount} -> ${rows.length} rows (floor=${relevanceFloor})`);
   }
@@ -137,7 +141,7 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   result.stageMs.selectMs = Date.now() - tSelect0;
   result.usedTokens = usedTokens;
   result.suppressedRepeats = suppressedRepeats;
-  result.selectedRows = selected;
+  result.selectedRows = selected.map((s) => ({ ...s, matched: matchedByDoc.get(s.doc) ?? [] }));
   result.selected = selected.map((s) => ({ ...docRef(s.doc), key: s.key, snippet: s.snippet }));
   if (!selected.length) return abstain(suppressedRepeats > 0 ? "all-repeats" : "nothing-selected");
 
