@@ -268,14 +268,15 @@ export function contentChunks(content: string, maxChunks = 600): string[] {
 
 export interface ChunkMatch { chunk: string; distinct: number; rarity: number; matched: string[] }
 
-// Ranking, the floor and selection read the same rows within one prompt: tokenise each row's chunks once.
-const chunkTokenCache = new WeakMap<object, { content: string; chunks: Array<{ chunk: string; tokens: Set<string> }> }>();
+// Ranking, the floor and selection read the same rows within one prompt: split each row once, tokenise a chunk once.
+type CachedChunk = { chunk: string; lower: string; tokens?: Set<string> };
+const chunkCache = new WeakMap<object, { content: string; chunks: CachedChunk[] }>();
 
-function tokenizedChunks(doc: Pick<DocRow, "content">): Array<{ chunk: string; tokens: Set<string> }> {
-  const cached = chunkTokenCache.get(doc);
+function cachedChunks(doc: Pick<DocRow, "content">): CachedChunk[] {
+  const cached = chunkCache.get(doc);
   if (cached && cached.content === doc.content) return cached.chunks;
-  const chunks = contentChunks(doc.content).map((chunk) => ({ chunk, tokens: new Set(tokenizeForOverlap(chunk, Number.POSITIVE_INFINITY)) }));
-  chunkTokenCache.set(doc, { content: doc.content, chunks });
+  const chunks = contentChunks(doc.content).map((chunk) => ({ chunk, lower: chunk.toLowerCase() }));
+  chunkCache.set(doc, { content: doc.content, chunks });
   return chunks;
 }
 
@@ -285,7 +286,11 @@ export function bestChunkMatch(queryTokens: string[], doc: Pick<DocRow, "content
   if (!queryTokens.length) return null;
   const wanted = new Set(queryTokens);
   let best: ChunkMatch | null = null;
-  for (const { chunk, tokens } of tokenizedChunks(doc)) {
+  for (const entry of cachedChunks(doc)) {
+    // A chunk's tokens are substrings of its lowercase text, so one containing no keyword matches none.
+    if (!queryTokens.some((token) => entry.lower.includes(token))) continue;
+    entry.tokens ??= new Set(tokenizeForOverlap(entry.chunk, Number.POSITIVE_INFINITY));
+    const { chunk, tokens } = entry;
     const matched: string[] = [];
     let weight = 0;
     for (const token of wanted) {
