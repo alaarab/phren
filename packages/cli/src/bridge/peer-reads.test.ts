@@ -112,17 +112,28 @@ skipOnWindows("shares one login among reads of a route, reuses an answer only fo
 });
 
 skipOnWindows("marks a peer off after a timeout only when its SSH port does not answer", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   await mode("hang");
+  const timedOutRead = async (started: number) => {
+    // Freeze the deadline until the fake SSH has actually started. A loaded
+    // runner can take longer to start Node than the old 200 ms timeout.
+    const read = failure(peerRead(peer, "/v1/usage", { timeout: 60_000 }));
+    await vi.waitFor(async () => expect(await logins()).toBe(started), { timeout: 10_000 });
+    await vi.advanceTimersToNextTimerAsync();
+    const error = await read;
+    // The timeout starts a real TCP check in the background. Its timer is
+    // cleared when the socket answers or refuses, before the next read.
+    await vi.waitUntil(() => vi.getTimerCount() === 0);
+    return error;
+  };
   // Port open: a slow Hook. Every read dials.
   listener = await listen(peer.port);
-  expect(await failure(peerRead(peer, "/v1/usage", { timeout: 200 }))).toEqual({ status: 504, code: "peer-timeout" });
-  await new Promise(resolve => setTimeout(resolve, 200));
-  expect(await failure(peerRead(peer, "/v1/usage", { timeout: 200 }))).toEqual({ status: 504, code: "peer-timeout" });
+  expect(await timedOutRead(1)).toEqual({ status: 504, code: "peer-timeout" });
+  expect(await timedOutRead(2)).toEqual({ status: 504, code: "peer-timeout" });
   expect(await logins()).toBe(2);
   // Port closed: the peer is off, and the next read says so without a login.
   await close();
-  expect(await failure(peerRead(peer, "/v1/usage", { timeout: 200 }))).toEqual({ status: 504, code: "peer-timeout" });
-  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(await timedOutRead(3)).toEqual({ status: 504, code: "peer-timeout" });
   expect(await failure(peerRead(peer, "/v1/health", { timeout: 200 }))).toEqual({ status: 503, code: "peer-offline" });
   expect(await logins()).toBe(3);
 });

@@ -1921,20 +1921,21 @@ schedules:
     it("flags a terminal password prompt only while the pane is reading one", async () => {
       agentStatus = "blocked";
       paneLines = "This command will run with elevated privileges.\nPassword:";
-      // The previous test's pane read may be inside the throttle window.
-      await sleep(DIALOG_THROTTLE_MS + 50);
-      const status = async () => {
-        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
-        const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+      try {
         await once(socket, "open");
-        await waitFor(() => frames.length, 2_000);
-        socket.terminate();
-        return frames[0].agentStatus;
-      };
-      expect((await status()).passwordPrompt).toBe(true);
-      // The pane leaves waiting: nothing is being read any more.
-      agentStatus = "working";
-      expect((await status()).passwordPrompt).toBeUndefined();
+        // Status streams share snapshots and throttle dialog reads. Wait for
+        // the observation instead of assuming the first frame is current.
+        await waitFor(() => frames.at(-1)?.agentStatus?.passwordPrompt === true, 5_000);
+        expect(frames.at(-1)?.agentStatus?.passwordPrompt).toBe(true);
+        // The pane leaves waiting: nothing is being read any more. Verify the
+        // flag on the first frame that has observed the working status.
+        agentStatus = "working";
+        await waitFor(() => frames.at(-1)?.agentStatus?.status === "working", 5_000);
+        expect(frames.at(-1)?.agentStatus?.status).toBe("working");
+        expect(frames.at(-1)?.agentStatus?.passwordPrompt).toBeUndefined();
+      } finally { socket.terminate(); }
     });
 
     it("lists the models a computer's agents offer", async () => {
