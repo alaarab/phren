@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const RECALL_NEGATIVE_CLASSES = ["conversational", "off-domain", "cross-project-lure", "typo", "envelope", "other-tool"] as const;
+export const RECALL_NEGATIVE_CLASSES = ["conversational", "off-domain", "cross-project-lure", "typo", "envelope", "other-tool", "trust-expiry"] as const;
 export const RECALL_TIERS = ["active", "topic", "older"] as const;
 
 export const recallEvalCaseSchema = z.object({
@@ -9,6 +9,7 @@ export const recallEvalCaseSchema = z.object({
   project: z.string().trim().min(1).nullable(),
   kind: z.enum(["negative", "positive"]),
   class: z.string().trim().min(1),
+  reason: z.string().trim().min(1).optional(),
   relevant: z.array(z.object({
     project: z.string().trim().min(1),
     fid: z.string().regex(/^[a-f0-9]{8}$/),

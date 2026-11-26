@@ -57,6 +57,84 @@ describe("recorded citation states on the indexed prompt path", () => {
   });
 });
 
+describe("archived finding dates on the indexed prompt path", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let db: SqlJsDatabase;
+  const date = (age: number) => new Date(Date.now() - age * 86_400_000).toISOString().slice(0, 10);
+
+  beforeAll(async () => {
+    tmp = makeTempDir("recall-archive-dates-");
+    initTestPhrenRoot(tmp.path);
+    const topics = path.join(tmp.path, "widgets", "reference", "topics");
+    fs.mkdirSync(topics, { recursive: true });
+    fs.writeFileSync(path.join(topics, "export.md"), [
+      "# Export", "", `## Archived ${date(45)}`, "",
+      "- [bug] The legacy exporter stalls on empty manifests.",
+      `  <!-- phren:cite ${JSON.stringify({ created_at: date(45), remote: "github.com/acme/widgets" })} -->`, "",
+      `## Archived ${date(5)}`, "",
+      `- The quokka exporter writes manifests nightly. <!-- created: ${date(10)} -->`,
+      `- The quokka exporter mirrors manifests weekly. <!-- created: ${date(65)} -->`,
+      "- [bug] The new exporter stalls on oversized manifests.",
+      "- The quokka exporter verifies checksums. <!-- fid:feed0003 -->",
+      `  <!-- phren:cite ${JSON.stringify({ created_at: date(120), file: "src/quokka.ts" })} -->`,
+      "",
+    ].join("\n"));
+    fs.writeFileSync(path.join(topics, "export.older.md"), [
+      "# Older export", "", `## Archived ${date(370)}`, "",
+      "- Store the first exporter with its original snapshots.", "",
+      `## Archived ${date(200)}`, "",
+      "- Store the second exporter with its rollback snapshots.", "",
+      `## Archived ${date(80)}`, "",
+      "- Keep the retired exporter on cold storage.", "",
+      `## Archived ${date(20)}`, "",
+      "- Keep the current exporter on warm storage.", "",
+    ].join("\n"));
+    fs.mkdirSync(path.join(tmp.path, ".runtime"), { recursive: true });
+    fs.writeFileSync(path.join(tmp.path, ".runtime", "citation-states.json"), JSON.stringify({
+      "fid:feed0003": { state: "drifted", checkedAt: date(0) },
+    }));
+    db = await buildIndex(tmp.path);
+  });
+  afterAll(() => { db?.close(); tmp?.cleanup(); });
+
+  function filter(filename: string, minConfidence: number) {
+    const rows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ?", ["widgets", filename]) ?? [];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).not.toContain("<!-- created:");
+    return applyTrustFilter(rows, 120, minConfidence, {}, tmp.path);
+  }
+
+  it("uses each bullet's created date in preference to its archive heading", () => {
+    const { rows } = filter("export.md", 0.75);
+    expect(rows[0].content).toContain("writes manifests nightly");
+    expect(rows[0].content).not.toContain("mirrors manifests weekly");
+  });
+
+  it("uses the nearest archive heading when a bullet has no created date", () => {
+    const { rows } = filter("export.older.md", 0.7);
+    expect(rows[0].content).toContain("current exporter on warm storage");
+    expect(rows[0].content).not.toContain("retired exporter on cold storage");
+  });
+
+  it("expires a 45-day-old archived bug and retains a recent one", () => {
+    const { rows, queueItems } = filter("export.md", 0.35);
+    expect(rows[0].content).not.toContain("stalls on empty manifests");
+    expect(queueItems).toEqual([{ project: "widgets", section: "Stale", items: [expect.stringContaining("stalls on empty manifests")] }]);
+    expect(rows[0].content).toContain("stalls on oversized manifests");
+  });
+
+  it("applies citation drift to the confidence from the archived date", () => {
+    expect(filter("export.md", 0.35).rows[0].content).toContain("verifies checksums");
+    expect(filter("export.md", 0.75).rows[0].content).not.toContain("verifies checksums");
+  });
+
+  it("gives untagged archived findings a year before they expire", () => {
+    const { rows } = filter("export.older.md", 0.35);
+    expect(rows[0].content).toContain("second exporter with its rollback snapshots");
+    expect(rows[0].content).not.toContain("first exporter with its original snapshots");
+  });
+});
+
 // No fid: the state is keyed by the bullet's text, which the index rewrites (it drops `created`, turns `source` into `[from:…]`).
 describe("a finding without a fid keeps its recorded state through the index", () => {
   let tmp: { path: string; cleanup: () => void };

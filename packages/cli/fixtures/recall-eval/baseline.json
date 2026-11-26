@@ -1,7 +1,7 @@
 {
   "cases": 66,
-  "negatives": 33,
-  "positives": 33,
+  "negatives": 34,
+  "positives": 32,
   "falseInjectionRate": 0,
   "falseInjectionByClass": {
     "conversational": 0,
@@ -9,16 +9,17 @@
     "cross-project-lure": 0,
     "typo": 0,
     "envelope": 0,
-    "other-tool": 0
+    "other-tool": 0,
+    "trust-expiry": 0
   },
-  "hitAt3": 0.9697,
+  "hitAt3": 1,
   "hitAt3ByTier": {
     "active": 1,
-    "topic": 0.9167,
+    "topic": 1,
     "older": 1
   },
-  "abstainRate": 0.5,
+  "abstainRate": 0.5152,
   "positiveAbstainRate": 0,
   "retiredInjected": 0,
-  "meanUsedTokens": 94.1212
+  "meanUsedTokens": 94.1563
 }

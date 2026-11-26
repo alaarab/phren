@@ -42,7 +42,7 @@ describe("recall eval", () => {
       const cases = loadCases(casesFile);
       const fixture = buildRecallFixture(root);
       expect(cases).toHaveLength(66);
-      expect(cases.filter(c => c.kind === "negative")).toHaveLength(33);
+      expect(cases.filter(c => c.kind === "negative")).toHaveLength(34);
       expect(fs.existsSync(path.join(root, "checkouts", "global"))).toBe(false);
       expect(fs.existsSync(path.join(fixture.phrenPath, "global", "phren.project.yaml"))).toBe(false);
       expect(cases.filter(c => c.kind === "positive" && c.project !== null && c.project !== "global" && c.relevant.some(r => r.project === "global")).length).toBeGreaterThanOrEqual(2);
@@ -71,10 +71,7 @@ describe("recall eval", () => {
           expect(findings[0], c.id).toContain(relevant.match);
           expect(findings[0], c.id).not.toMatch(/phren:status "(?:superseded|retracted)"/);
           expect(fixture.retiredTexts.some(text => findings[0].includes(text)), c.id).toBe(false);
-          // The labeled expiry case stays positive so fixing trust can improve its score.
-          if (c.class !== "trust-expiry") {
-            expect(filterTrustedFindingsDetailed(content, { ttlDays: 120 }).content, c.id).toContain(`fid:${relevant.fid}`);
-          }
+          expect(filterTrustedFindingsDetailed(content, { ttlDays: 120 }).content, c.id).toContain(`fid:${relevant.fid}`);
         }
       }
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -104,7 +101,7 @@ describe("recall eval", () => {
     const score = scoreRecall(rows, { retiredTexts: [retired] });
     expect(score).toEqual({
       cases: 6, negatives: 2, positives: 4, falseInjectionRate: 0.5,
-      falseInjectionByClass: { conversational: 1, "off-domain": 0, "cross-project-lure": 0, typo: 0, envelope: 0, "other-tool": 0 },
+      falseInjectionByClass: { conversational: 1, "off-domain": 0, "cross-project-lure": 0, typo: 0, envelope: 0, "other-tool": 0, "trust-expiry": 0 },
       hitAt3: 0.5, hitAt3ByTier: { active: 0.5, topic: 1, older: 0 },
       abstainRate: 1 / 3, positiveAbstainRate: 0.25, retiredInjected: 1,
       meanUsedTokens: 150, p50StageMs: 30, p95StageMs: 60,

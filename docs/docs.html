@@ -1137,9 +1137,10 @@ stateDiagram-v2
             <tr><td>60 days</td><td>0.85</td><td>0.68</td></tr>
             <tr><td>90 days</td><td>0.65</td><td>0.52</td></tr>
             <tr><td>120 days</td><td>0.45</td><td>0.36</td></tr>
-            <tr><td>Past 120 days</td><td colspan="2">Stale: past the default TTL (<code>ttlDays</code>)</td></tr>
+            <tr><td>Past 120 days</td><td>0.45 until expiry</td><td>0.36 until expiry</td></tr>
           </tbody>
         </table></div>
+        <p>For topic archives, the prompt hook uses the finding's <code>created</code> date or the nearest <code>## Archived &lt;date&gt;</code> heading above it. Untagged findings use <code>ttlDays</code> (120 days by default), and untagged findings in topic archives have a 365-day limit. Tagged findings use the age limit for their tag.</p>
         <p>A finding below 0.35 confidence (<code>minInjectConfidence</code>) is left out of injected context. A cited finding is one whose citation names a repo, file or symbol; one saved with only its <code>created_at</code> time counts as uncited.</p>
 
         <div class="decay-curve">

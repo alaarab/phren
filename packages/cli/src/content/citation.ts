@@ -78,6 +78,8 @@ export interface TrustFilterOptions {
    * checked and counted as cited like one on the next line.
    */
   sourceCitation?: (bullet: string) => FindingCitation | undefined;
+  /** The date of an archived bullet from the source file. */
+  sourceArchiveDate?: (bullet: string) => string | undefined;
 }
 
 export function getHeadCommit(cwd: string): string | undefined {
@@ -564,11 +566,12 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
 
     if (!line.startsWith("- ")) continue;
 
-    // Determine the effective date for this bullet: heading date, inline created tag, or citation
+    // Archived bullets carry their own dates from the source file.
     const next = lines[i + 1] ?? "";
     const citation = parseCitationComment(next);
 
-    let effectiveDate = currentDate;
+    const archivedDate = options.sourceArchiveDate?.(line);
+    let effectiveDate = archivedDate ?? currentDate;
     if (!effectiveDate) {
       const inlineCreated = line.match(METADATA_REGEX.createdDate);
       if (inlineCreated) {
@@ -583,7 +586,8 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
 
     // Checked first: a long-lived type would otherwise be cut off at the TTL.
     const typeConfig = leadingTypeConfig(line);
-    const stale = effectiveDate ? isDateStale(effectiveDate, findingAgeLimitDays(line, ttlDays)) : false;
+    const ageLimit = typeConfig?.maxAgeDays ?? (archivedDate ? FINDING_TYPE_DECAY.pattern.maxAgeDays : ttlDays);
+    const stale = effectiveDate ? isDateStale(effectiveDate, ageLimit) : false;
     if (stale) {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
       if (citation) i++;
