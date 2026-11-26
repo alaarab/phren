@@ -1396,10 +1396,11 @@ Dispatch can carry `task:{storeId,project,stableId}` privately with its launch.
 report response to confirm the link was saved. Keep task identities and context
 out of all commits, PRs and GitHub comments.
 
-A dispatch without `task` is bound to the open task its brief names: a `bid:<id>`
-reference, a bare stable id of the dispatch's project, or the task's quoted line
-or title (`Phren task (project phren): "Fix the sync race"`). Two candidates bind
-none. The task's `Work:` record then shows the worker and follows the dispatch's
+A dispatch without `task` is bound to the open task its brief names, strongest
+first: a `bid:<id>` it closes (`fixes bid:…`), the task's quoted line or title
+(`Phren task (project phren): "Fix the sync race"`), the brief's only `bid:`, or a
+bare stable id of the dispatch's project. A task mentioned for context does not
+outrank the quoted one, and two candidates at one level bind none. The task's `Work:` record then shows the worker and follows the dispatch's
 state, and the report's pull request (on GitHub, GitLab or gitboy) becomes the
 task's pull request; the response's `taskWork` says whether it was saved. See
 [task work links](task-responsibility.md#task-work-links).

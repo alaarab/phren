@@ -49,12 +49,15 @@ export function openTasks(base: string, project?: string): OpenTask[] {
   return found;
 }
 
-/** The one open task a worker brief names: a `bid:` id, else a bare stable
- * id of the dispatch's project, else quoted text that is a task's line or its
- * title (the dispatch's project first). Two candidates at one level name none. */
+/** The one open task a worker brief names, strongest first: a `bid:` it
+ * closes (`fixes bid:…`), the quoted line or title of a task (the dispatch's
+ * project first), the brief's only `bid:`, a bare stable id of the dispatch's
+ * project. A brief that mentions other tasks for context still binds to the
+ * one it quotes. Two candidates at one level name none. */
 export function resolveBriefTask(base: string, prompt: string, project: string): TaskDependency | undefined {
   const refs = briefReferences(prompt);
   if (!refs.ids.length && !refs.bareIds.length && !refs.texts.length) return undefined;
+  // Several bid: references with no closing one and no quoted title name no task.
   const open = openTasks(base);
   const one = (matches: OpenTask[]) => {
     const unique = [...new Map(matches.map(match => [`${match.identity.storeId}/${match.identity.project}/${match.identity.stableId}`, match])).values()];
@@ -62,10 +65,11 @@ export function resolveBriefTask(base: string, prompt: string, project: string):
   };
   const here = open.filter(task => task.project === project);
   for (const level of [
-    () => open.filter(task => refs.ids.includes(task.item.stableId!)),
-    () => here.filter(task => refs.bareIds.includes(task.item.stableId!)),
+    () => open.filter(task => refs.closes.includes(task.item.stableId!)),
     () => here.filter(task => refs.texts.some(text => textNamesTask(text, task.item.line))),
     () => open.filter(task => refs.texts.some(text => textNamesTask(text, task.item.line))),
+    () => refs.ids.length === 1 ? open.filter(task => task.item.stableId === refs.ids[0]) : [],
+    () => here.filter(task => refs.bareIds.includes(task.item.stableId!)),
   ]) {
     const result = one(level());
     if (result !== undefined) return result ?? undefined;
@@ -106,8 +110,9 @@ export function recordDispatchWorker(receipt: DispatchReceiptView): void {
   if (!receipt.task || !taskWorkEnabled()) return;
   const base = phrenStoreRoot();
   const state = dispatchWorkerState(receipt);
+  // Only the branch phren made for the dispatch: a worker's own checkout may be on main.
   const worktree = receipt.cloneDir ?? receipt.returned?.checkout?.path;
-  const branch = receipt.branch ?? receipt.returned?.checkout?.branch;
+  const branch = receipt.branch;
   const key = JSON.stringify([receipt.task, receipt.computer, receipt.target?.session, receipt.label, receipt.harness, state, branch, worktree]);
   if (recorded.get(receipt.id) === key) return;
   const store = taskStores(base).filter(candidate => candidate.taskStoreId === receipt.task!.storeId && candidate.available !== false && candidate.role !== "readonly");
@@ -153,7 +158,7 @@ export async function linkReportedWork(reports: readonly { url: string; branch: 
   const target = targets[0];
   if (permissionDeniedError(target.root, "update_task", target.project)) return { linked: false, error: "Task update denied." };
   const written = updateTaskWork(target.root, target.project, `bid:${target.identity.stableId}`, (work, item) => item.stableId !== target.identity.stableId ? undefined
-    : { work: { version: 1, ...work, pr: { forge, number: url.number, url: url.url }, branch: report.branch.slice(0, 256), ...(work?.pr?.url !== url.url ? { autoClosed: undefined } : {}) } });
+    : { work: { version: 1, ...work, pr: { forge, number: url.number, url: url.url }, branch: report.branch.slice(0, 256) } });
   return written.ok ? { linked: true } : { linked: false, error: written.error };
 }
 

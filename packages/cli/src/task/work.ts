@@ -30,9 +30,10 @@ export const taskWorkSchema = z.object({
   worktree: line(4096).optional(),
   pr: forgeRef.optional(),
   issue: forgeRef.optional(),
-  /** Set when phren moved the task to Done itself. A task the owner reopens
-   * keeps it, so the same merge or close never closes the task again. */
-  autoClosed: z.object({ at: z.string().datetime(), reason: line(300) }).strict().optional(),
+  /** Set when phren moved the task to Done itself, naming the link that did
+   * it. A task the owner reopens keeps it, so that link never closes the task
+   * again; another link still can. */
+  autoClosed: z.object({ at: z.string().datetime(), reason: line(300), url: z.string().max(2048).optional() }).strict().optional(),
 }).strict();
 export type TaskWork = z.infer<typeof taskWorkSchema>;
 export type ForgeRef = z.infer<typeof forgeRef>;
@@ -92,7 +93,7 @@ export function branchTaskIds(branch: string): string[] {
   return [...new Set([...(branch ?? "").matchAll(/(?<![0-9A-Za-z])([0-9a-f]{8})(?![0-9A-Za-z])/g)].map(match => match[1]))];
 }
 
-export interface BriefReferences { ids: string[]; bareIds: string[]; texts: string[] }
+export interface BriefReferences { closes: string[]; ids: string[]; bareIds: string[]; texts: string[] }
 /** What a worker brief says about its task: `bid:` ids, bare stable ids and
  * quoted text (`Phren task (project phren): "Fix the sync race"`). */
 export function briefReferences(prompt: string): BriefReferences {
@@ -100,7 +101,7 @@ export function briefReferences(prompt: string): BriefReferences {
   const ids = [...closes, ...mentions];
   const bareIds = [...new Set([...prompt.matchAll(/(?<![\w:/.@=?&#-])([0-9a-f]{8})(?![\w-])/g)].map(match => match[1]))].filter(id => !ids.includes(id));
   const texts = [...new Set([...prompt.matchAll(/["“]([^"\n“”]{6,400})["”]/g)].map(match => match[1].trim()))];
-  return { ids, bareIds, texts };
+  return { closes, ids, bareIds, texts };
 }
 const comparable = (value: string) => value.replace(/\s*\[(?:high|medium|low|pinned)\]/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
 /** A quoted brief text names a task when it is the task's whole line or its
@@ -148,9 +149,11 @@ export function mergeableWord(mergeState: unknown, draft?: boolean): ForgeItem["
   }
 }
 
+/** A forge reading: the last successful one (with `error` when the latest
+ * refresh failed), the error alone when none succeeded, or null before the first. */
+export type LiveForge = (ForgeItem & { checkedAt: string; error?: string }) | { error: string; checkedAt: string } | null;
 export interface LiveWork { worker?: { phase: "live" | "waiting" | "done"; state: WorkWorkerState; at: string; source: "dispatch" | "task" };
-  pr?: (ForgeItem & { checkedAt: string }) | { error: string; checkedAt?: string } | null;
-  issue?: (ForgeItem & { checkedAt: string }) | { error: string; checkedAt?: string } | null }
+  pr?: LiveForge; issue?: LiveForge }
 
 /** The one line a Tasks row shows. What needs the owner comes first, then
  * the pull request, then a worker still going, then the issue. */
@@ -172,7 +175,7 @@ export function workStatusLine(work: TaskWork | undefined, live: LiveWork): stri
     return `${ref} · ${pr.checks === "passing" ? "checks passing" : "open"}${pr.mergeable === "clean" ? " · ready to merge" : ""}`;
   }
   if (worker?.phase === "live") return `Worker ${worker.state === "launching" ? "starting" : "working"}${on}`;
-  if (work.pr) return `${ref} open`;
+  if (work.pr) return live.pr && "error" in live.pr ? `${ref} · state unknown` : ref;
   if (worker) return `Worker ${worker.state}${on}`;
   const issue = live.issue && "state" in live.issue ? live.issue : undefined;
   if (work.issue) return `Issue #${work.issue.number}${issue ? ` ${issue.state}` : ""}`;
@@ -180,15 +183,16 @@ export function workStatusLine(work: TaskWork | undefined, live: LiveWork): stri
   return undefined;
 }
 
-/** Why phren may move an open task to Done now, or nothing. A merged pull
- * request or a closed issue closes it once; a task the owner reopened after
- * that (autoClosed already set) stays open. A pull request closed without
- * merging closes nothing. */
-export function autoCloseReason(work: TaskWork | undefined, live: Pick<LiveWork, "pr" | "issue">): string | undefined {
-  if (!work || work.autoClosed) return undefined;
+/** Why phren may move an open task to Done now, and the link that says so,
+ * or nothing. A merged pull request or a closed issue closes it; the link that
+ * closed it before (the owner reopened the task since) does not again. A pull
+ * request closed without merging closes nothing. */
+export function autoCloseReason(work: TaskWork | undefined, live: Pick<LiveWork, "pr" | "issue">): { reason: string; url: string } | undefined {
+  if (!work) return undefined;
   const pr = live.pr && "state" in live.pr ? live.pr : undefined;
   const issue = live.issue && "state" in live.issue ? live.issue : undefined;
-  if (work.pr && pr?.state === "merged") return `PR #${work.pr.number} merged (${work.pr.url})`;
-  if (work.issue && issue?.state === "closed") return `issue #${work.issue.number} closed (${work.issue.url})`;
+  const fresh = (url: string) => !work.autoClosed || (work.autoClosed.url !== undefined && work.autoClosed.url !== url);
+  if (work.pr && pr?.state === "merged" && fresh(work.pr.url)) return { reason: `PR #${work.pr.number} merged (${work.pr.url})`, url: work.pr.url };
+  if (work.issue && issue?.state === "closed" && fresh(work.issue.url)) return { reason: `issue #${work.issue.number} closed (${work.issue.url})`, url: work.issue.url };
   return undefined;
 }

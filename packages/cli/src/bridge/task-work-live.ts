@@ -8,15 +8,28 @@ import { homedir } from "node:os";
 import { updateTaskWork } from "../data/tasks.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { autoCloseReason, bidReferences, branchTaskIds, parseForgeUrl, workerPhase, workStatusLine,
-  type Forge, type ForgeItem, type ForgeRef, type LiveWork, type TaskWork } from "../task/work.js";
+  type Forge, type ForgeItem, type ForgeRef, type LiveForge, type LiveWork, type TaskWork } from "../task/work.js";
 import { dispatchProjectDirectory, dispatchReceipt } from "./dispatch.js";
 import { detectHost, hostInfo, providerFor, type RecentPull } from "./git-hosts.js";
 import { dispatchWorkerState, openTasks, taskWorkEnabled, type DispatchReceiptView, type OpenTask } from "./task-work.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
 const FORGE_TTL_MS = 60_000;
-interface Cached { at: number; value?: ForgeItem; error?: string; pending?: Promise<void> }
+/** `at` is the last attempt, `readAt` the last success, so a failed refresh
+ * shows its error beside the reading it could not replace. */
+interface Cached { at: number; readAt?: number; value?: ForgeItem; error?: string; pending?: Promise<void> }
 const forgeCache = new Map<string, Cached>();
+
+/** At most this many forge reads (`gh` processes, gitboy calls) at once,
+ * whatever a long task list asks for; the rest queue and fill the cache. */
+const FORGE_CONCURRENCY = 4;
+let forgeRunning = 0;
+const forgeQueue: (() => void)[] = [];
+async function limited<T>(run: () => Promise<T>): Promise<T> {
+  if (forgeRunning >= FORGE_CONCURRENCY) await new Promise<void>(resolve => forgeQueue.push(resolve));
+  forgeRunning++;
+  try { return await run(); } finally { forgeRunning--; forgeQueue.shift()?.(); }
+}
 
 async function fetchForge(ref: ForgeRef, kind: "pull" | "issue"): Promise<ForgeItem> {
   const parsed = parseForgeUrl(ref.url);
@@ -24,7 +37,7 @@ async function fetchForge(ref: ForgeRef, kind: "pull" | "issue"): Promise<ForgeI
   const host = hostInfo(ref.forge, { domain: parsed.domain, webUrl: `https://${parsed.domain}/${parsed.repo}`, remote: null, source: "url" });
   const provider = providerFor(host);
   if (!provider?.item) throw new Error(`Phren cannot read ${provider?.name ?? ref.forge} ${kind === "pull" ? "requests" : "issues"} yet.`);
-  return provider.item(homedir(), kind, parsed.number, host);
+  return limited(() => provider.item!(homedir(), kind, parsed.number, host));
 }
 
 /** The cached reading of one pull request or issue, refreshed when older than
@@ -35,7 +48,7 @@ async function forgeState(ref: ForgeRef, kind: "pull" | "issue", waitMs: number)
   let entry = forgeCache.get(key);
   if (!entry || (Date.now() - entry.at >= FORGE_TTL_MS && !entry.pending)) {
     const next: Cached = entry ? { ...entry } : { at: 0 };
-    next.pending = fetchForge(ref, kind).then(value => { next.value = value; next.error = undefined; },
+    next.pending = fetchForge(ref, kind).then(value => { next.value = value; next.error = undefined; next.readAt = Date.now(); },
       error => { next.error = (error instanceof Error ? error.message : String(error)).slice(0, 300); })
       .finally(() => { next.at = Date.now(); next.pending = undefined; });
     forgeCache.set(key, next);
@@ -46,10 +59,10 @@ async function forgeState(ref: ForgeRef, kind: "pull" | "issue", waitMs: number)
   return entry.at ? entry : undefined;
 }
 
-function shown(entry: Cached | undefined): LiveWork["pr"] {
+function shown(entry: Cached | undefined): LiveForge {
   if (!entry) return null;
-  const checkedAt = new Date(entry.at).toISOString();
-  return entry.value ? { ...entry.value, checkedAt } : { error: entry.error ?? "Not read yet.", checkedAt };
+  if (entry.value && entry.readAt) return { ...entry.value, checkedAt: new Date(entry.readAt).toISOString(), ...(entry.error ? { error: entry.error } : {}) };
+  return { error: entry.error ?? "Not read yet.", checkedAt: new Date(entry.at).toISOString() };
 }
 
 export interface TaskLive extends LiveWork { status?: string }
@@ -83,6 +96,8 @@ async function readReceipt(id: string): Promise<DispatchReceiptView | undefined>
 
 export const TASK_WORK_TICK_MS = 5 * 60_000;
 const FORGE_READS_PER_TICK = 60;
+/** Branch names many pull requests share (a fork's main, say): never a task's own. */
+const SHARED_BRANCH = /^(?:main|master|develop|development|dev|trunk|default|staging|release|production|gh-pages|HEAD)$/i;
 /** Where the next sweep's forge reads start, so a long list is covered over a few sweeps. */
 let closeCursor = 0;
 
@@ -124,7 +139,8 @@ export class TaskWorkSweeper {
         // A body links only the tasks it closes: a mention ("the Hook half of bid:…") is not the task's work.
         const ids = bidReferences(pull.body).closes, branchIds = branchTaskIds(pull.head);
         const matches = open.filter(task => ids.includes(task.identity.stableId)
-          || (task.project === project && (branchIds.includes(task.identity.stableId) || (!!pull.head && task.item.work?.branch === pull.head && !task.item.work?.pr))));
+          || (task.project === project && (branchIds.includes(task.identity.stableId)
+            || (!!pull.head && !SHARED_BRANCH.test(pull.head) && task.item.work?.branch === pull.head && !task.item.work?.pr))));
         for (const task of matches) if (this.linkPull(task, host.kind, pull)) result.linked++;
       }
     }
@@ -137,14 +153,13 @@ export class TaskWorkSweeper {
     if (!url || url.kind !== "pull" || url.number !== pull.number) return false;
     const written = updateTaskWork(task.root, task.project, `bid:${task.identity.stableId}`, (work, item) => {
       if (item.stableId !== task.identity.stableId || (work?.pr && work.pr.url !== url.url)) return undefined;
-      return { work: { version: 1, ...work, pr: { forge, number: pull.number, url: url.url }, ...(pull.head && !work?.branch ? { branch: pull.head.slice(0, 256) } : {}),
-        ...(work?.pr ? {} : { autoClosed: undefined }) } };
+      return { work: { version: 1, ...work, pr: { forge, number: pull.number, url: url.url }, ...(pull.head && !work?.branch ? { branch: pull.head.slice(0, 256) } : {}) } };
     });
     return written.ok && written.data.changed;
   }
 
   private async close(result: SweepResult): Promise<void> {
-    const linked = openTasks(this.base).filter(task => task.item.work && !task.item.work.autoClosed && (task.item.work.pr || task.item.work.issue) && this.writable(task, "complete_task"));
+    const linked = openTasks(this.base).filter(task => task.item.work && (task.item.work.pr || task.item.work.issue) && this.writable(task, "complete_task"));
     const start = linked.length ? closeCursor % linked.length : 0;
     let reads = 0, visited = 0;
     for (const task of [...linked.slice(start), ...linked.slice(0, start)]) {
@@ -152,12 +167,13 @@ export class TaskWorkSweeper {
       if ((reads += (work.pr ? 1 : 0) + (work.issue ? 1 : 0)) > FORGE_READS_PER_TICK) break;
       visited++;
       const live = await liveWork({ ...work, worker: undefined }, 20_000);
-      const reason = live && autoCloseReason(work, live);
-      if (!reason) continue;
+      const close = live && autoCloseReason(work, live);
+      if (!close) continue;
       const written = updateTaskWork(task.root, task.project, `bid:${task.identity.stableId}`, (current, item) => {
-        // Re-checked under the lock: the same links, and not closed by phren before.
-        if (item.stableId !== task.identity.stableId || !current || current.autoClosed || current.pr?.url !== work.pr?.url || current.issue?.url !== work.issue?.url) return undefined;
-        return { work: { ...current, autoClosed: { at: new Date().toISOString(), reason: reason.slice(0, 300) } }, complete: reason };
+        // Re-checked under the lock: the same links, and not closed by this link before.
+        if (item.stableId !== task.identity.stableId || !current || current.pr?.url !== work.pr?.url || current.issue?.url !== work.issue?.url
+          || current.autoClosed?.url !== work.autoClosed?.url || current.autoClosed?.at !== work.autoClosed?.at) return undefined;
+        return { work: { ...current, autoClosed: { at: new Date().toISOString(), reason: close.reason.slice(0, 300), url: close.url } }, complete: close.reason };
       });
       if (written.ok && written.data.changed) result.closed++;
       else if (!written.ok) result.errors++;

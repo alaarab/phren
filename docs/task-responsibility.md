@@ -147,9 +147,11 @@ the worker doing it, its branch or worktree, its pull request and its issue.
 state: `launching`, `working`, `uncertain`, `needs-you`, `blocked`, `stalled`,
 `done`, `failed`, `gone` or `closed`. A record from a newer phren (another version
 or field) is kept verbatim and refuses work-link writes until phren is updated.
-A legacy `GitHub: #41 https://github.com/o/r/issues/41` line reads as the Work
-issue and moves into the record on the next write; `githubIssue`/`githubUrl` keep
-reporting it, and unlinking them drops it. A bare `GitHub: #41` stays as it is.
+A GitHub issue stays on its `GitHub: #41 https://github.com/o/r/issues/41` line,
+which every phren version reads and edits, and reads as the Work issue too
+(`work.issue` with forge `github`, beside `githubIssue`/`githubUrl`); unlinking
+drops both. A bare `GitHub: #41` names no repository and is no Work issue.
+Issues on other forges are stored in the record.
 
 Links fill themselves:
 
@@ -165,17 +167,19 @@ Links fill themselves:
   open task when its body closes it (`Closes bid:<id>`, `Fixes …`, `Resolves …`,
   or a list after one, as gitboy reads references), its branch names the stable
   id as a whole segment (`feat/c2cc33d0-sync`), or its branch is the task's
-  recorded branch. A body that only mentions a task (`the Hook half of
+  recorded branch (never a shared name such as `main`). A body that only mentions a task (`the Hook half of
   bid:<id>`) links nothing, and a pull request closed without merging is never
   linked. The first pull request linked stays linked.
 
 The same sweep closes a task once: a merged linked pull request, or a closed
 linked issue, moves the open task to Done, with `completed: PR #877 merged (<url>)`
 or `completed: issue #12 closed (<url>)` in its history (in its context when the
-store has no task metadata) and `autoClosed` in its record. A pull request closed
-without merging closes nothing. A task the owner reopens keeps `autoClosed` and
-is not closed again by the same link; a new linked pull request clears it. Phren
-never reopens a task, pull request or issue, and never writes to a forge.
+store has no task metadata) and `autoClosed` (with the link's `url`) in its
+record. A pull request closed without merging closes nothing. A task the owner
+reopens is never closed again by the link that closed it; another link (a newly
+linked pull request merging) still closes it. Phren never reopens a task, pull
+request or issue, and never writes to a forge. At most four forge reads run at
+once, whatever a task list asks for.
 `PHREN_TASK_WORK=off` stops the sweep and the dispatch recording.
 
 CI, mergeability and issue state are never stored. `GET /v1/tasks` adds `live` to
@@ -200,6 +204,7 @@ receipt, else `task` (the state the task recorded). `live.pr.checks` is
 `passing`, `failing`, `pending` or null (no checks); `mergeable` (open pull
 requests) is `clean`, `blocked`, `conflicts`, `behind`, `draft` or `unknown`;
 `state` is `open`, `merged` or `closed`. `live.issue.state` is `open` or `closed`.
-A forge that could not be read gives `{"error":"…","checkedAt":"…"}`, and one not
-read yet gives null. `live.status` is the one line a Tasks row shows: what needs
+When the latest refresh failed, the last reading keeps its `checkedAt` and gains
+`error`; a forge never read successfully gives `{"error":"…","checkedAt":"…"}`, and
+one not read yet gives null. `live.status` is the one line a Tasks row shows: what needs
 the owner first, then the pull request, then a worker still going, then the issue.

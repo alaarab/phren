@@ -65,14 +65,14 @@ export interface GitHostProvider {
    * tool picks it rather than the remote (gh prefers an `upstream` or its `repo set-default`). Without it,
    * the remote's `webUrl` is that repository. Null when it cannot be told. */
   repository?(root: string, host: GitHost): Promise<string | null>;
-  /** Who a token signs in as, for Connect; HTTP hosts only. A gitboy agent
-   * token also reports the agent identity the host attached to it. */
   /** One pull request or issue by number, now: state, title, and for a pull
    * request its checks and mergeability. Throws when the host can't say. */
   item?(root: string, kind: "pull" | "issue", number: number, host: GitHost): Promise<ForgeItem>;
   /** The newest pull requests (any state) with their head branch and body, for
    * finding the ones that name a task. Throws when the host can't say. */
   recent?(root: string, host: GitHost): Promise<RecentPull[]>;
+  /** Who a token signs in as, for Connect; HTTP hosts only. A gitboy agent
+   * token also reports the agent identity the host attached to it. */
   whoami?(root: string, host: GitHost, token: string, api?: string): Promise<{ user: string; agent?: { name?: string; repo_ids?: unknown[]; expires_at?: string }; agent_token?: { name?: string; repo_ids?: unknown[]; expires_at?: string } }>;
 }
 
@@ -321,7 +321,8 @@ const github: GitHostProvider = {
   },
 
   async recent(root, host) {
-    const { stdout } = await exec("gh", ["pr", "list", "--repo", ghRepo(host), "--state", "all", "--limit", "40", "--json", "number,url,state,headRefName,body"],
+    // In the checkout, as list() does: gh picks the repository (a fork's upstream), not origin.
+    const { stdout } = await exec("gh", ["pr", "list", "--state", "all", "--limit", "40", "--json", "number,url,state,headRefName,body"],
       { cwd: root, timeout: 20_000, maxBuffer: 8_388_608, env: ghEnv(host) });
     const parsed = JSON.parse(stdout || "[]");
     return (Array.isArray(parsed) ? parsed : []).filter((pull: Json) => typeof pull.number === "number" && typeof pull.url === "string")

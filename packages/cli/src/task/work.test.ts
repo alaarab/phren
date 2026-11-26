@@ -45,20 +45,18 @@ describe("task Work record in tasks.md", () => {
     expect(fs.readFileSync(file, "utf8")).toBe(text);
   });
 
-  it("reads a legacy GitHub issue line as the Work issue, migrates it on write, and drops it on unlink", () => {
+  it("reads a GitHub issue line as the Work issue, keeps it on that line for older phren, and drops it on unlink", () => {
     const { root, file } = store("# app tasks\n\n## Queue\n\n- [ ] Crash on launch <!-- bid:cccccccc -->\n  GitHub: #41 https://github.com/me/app/issues/41\n- [ ] Bare <!-- bid:dddddddd -->\n  GitHub: #7\n");
     const before = first(root).items.Queue;
     expect(before[0]).toMatchObject({ githubIssue: 41, githubUrl: "https://github.com/me/app/issues/41", work: { issue: { forge: "github", number: 41, url: "https://github.com/me/app/issues/41" } } });
     expect(before[1]).toMatchObject({ githubIssue: 7 });
     expect(before[1].work).toBeUndefined();
 
-    expect(updateTask(root, "app", "bid:cccccccc", { priority: "high" }).ok).toBe(true);
+    expect(updateTaskWork(root, "app", "bid:cccccccc", work => ({ work: { ...work!, branch: "fix/crash" } })).ok).toBe(true);
     let text = fs.readFileSync(file, "utf8");
-    expect(text).toContain('  Work: {"version":1,"issue":{"forge":"github","number":41,"url":"https://github.com/me/app/issues/41"}}');
-    expect(text).not.toContain("GitHub: #41");
-    // An issue number without a URL has no repository to migrate to.
+    expect(text).toContain('  Work: {"version":1,"branch":"fix/crash"}\n  GitHub: #41 https://github.com/me/app/issues/41');
     expect(text).toContain("  GitHub: #7");
-    expect(first(root).items.Queue[0]).toMatchObject({ githubIssue: 41, githubUrl: "https://github.com/me/app/issues/41" });
+    expect(first(root).items.Queue[0]).toMatchObject({ githubIssue: 41, work: { branch: "fix/crash", issue: { forge: "github", number: 41 } } });
 
     expect(linkTaskIssue(root, "app", "bid:cccccccc", { unlink: true }).ok).toBe(true);
     text = fs.readFileSync(file, "utf8");
@@ -119,7 +117,9 @@ describe("work status line", () => {
     ["ready", { version: 1, pr }, { pr: { state: "open", checks: "passing", mergeable: "clean", checkedAt: at } }, "PR #9 · checks passing · ready to merge"],
     ["conflicts", { version: 1, pr }, { pr: { state: "open", checks: "passing", mergeable: "conflicts", checkedAt: at } }, "PR #9 · merge conflicts"],
     ["merged", { version: 1, pr }, { pr: { state: "merged", checkedAt: at } }, "PR #9 merged"],
-    ["PR not read yet", { version: 1, worker: { ...worker, state: "done" }, pr }, { worker: { phase: "done", state: "done", at, source: "task" }, pr: null }, "PR #9 open"],
+    ["PR not read yet", { version: 1, worker: { ...worker, state: "done" }, pr }, { worker: { phase: "done", state: "done", at, source: "task" }, pr: null }, "PR #9"],
+    ["PR unreadable", { version: 1, pr }, { pr: { error: "gh is not signed in", checkedAt: at } }, "PR #9 · state unknown"],
+    ["stale reading still shown", { version: 1, pr }, { pr: { state: "open", checks: "pending", error: "timeout", checkedAt: at } }, "PR #9 · checks running"],
     ["worker only", { version: 1, worker }, { worker: { phase: "live", state: "working", at, source: "task" } }, "Worker working on PJ"],
     ["issue", { version: 1, issue: { forge: "gitboy", number: 4, url: "https://gitboy.example.com/me/app/issues/4" } }, { issue: { state: "closed", checkedAt: at } }, "Issue #4 closed"],
   ] as const)("%s", (_name, work, live, want) => expect(workStatusLine(work as TaskWork, live as never)).toBe(want));

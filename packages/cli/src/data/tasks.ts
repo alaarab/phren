@@ -167,14 +167,13 @@ function formatGitHubIssueReference(item: TaskItem): string | undefined {
   return item.githubUrl;
 }
 
-/** The Work record to write. githubIssue/githubUrl stay the GitHub issue's
- * source of truth (every existing writer edits them), so a legacy `GitHub:`
- * line with a URL migrates into `issue` here, and unlinking drops it. */
+/** The Work record to write. A GitHub issue stays on its `GitHub:` line,
+ * which every phren reads and edits (an older one would neither see an issue
+ * moved into `Work:` nor make an unlink stick); readers get it as
+ * `work.issue` too. Other forges' issues live in the record. */
 function renderedWork(item: TaskItem): TaskWork | undefined {
-  let issue = item.work?.issue?.forge === "github" ? undefined : item.work?.issue;
-  const url = item.githubUrl ? parseForgeUrl(item.githubUrl) : undefined;
-  if (url?.kind === "issue" && url.domain === "github.com") issue = { forge: "github", number: url.number, url: url.url };
-  try { return cleanTaskWork(item.work || issue ? { version: 1, ...item.work, issue } : undefined); } catch { return item.work; }
+  const issue = item.work?.issue?.forge === "github" ? undefined : item.work?.issue;
+  try { return cleanTaskWork(item.work ? { ...item.work, issue } : undefined); } catch { return item.work; }
 }
 
 function parseContinuation(lines: string[], idx: number): {
@@ -255,9 +254,8 @@ function parseContinuation(lines: string[], idx: number): {
     contract = parseTaskMetadata(taskContractRecords[0]);
     if (!contract) taskContractRaw = taskContractRecords[0];
   } else if (taskContractRecords.length > 1) taskContractRaw = taskContractRecords[0];
-  // The GitHub issue moved into the Work record; read it back into the old
-  // fields. A legacy GitHub: line with a URL reads as the Work issue and is
-  // written there on the next write.
+  // A GitHub issue lives on its GitHub: line (see renderedWork) and reads as
+  // the Work issue too; one a Work record carries is read into the old fields.
   if (work?.issue?.forge === "github" && githubIssue === undefined && githubUrl === undefined) {
     githubIssue = work.issue.number;
     githubUrl = work.issue.url;
@@ -463,8 +461,7 @@ function renderTask(doc: TaskDoc): string {
       const work = renderedWork(item);
       if (work) out.push(`  Work: ${JSON.stringify(work)}`);
       if (item.context) out.push(`  Context: ${item.context}`);
-      // A GitHub issue with its URL is written in the Work record instead.
-      const githubRef = work?.issue?.forge === "github" ? undefined : formatGitHubIssueReference(item);
+      const githubRef = formatGitHubIssueReference(item);
       if (githubRef) out.push(`  GitHub: ${githubRef}`);
       if (item.claim) out.push(`  ${formatClaim(item.claim)}`);
       if (item.opaqueContinuationLines?.length) out.push(...item.opaqueContinuationLines);
