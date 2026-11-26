@@ -45,6 +45,7 @@ import { markStaleCitations, rankResults, searchKnowledgeRows, applyTrustFilter,
 import { parseCitationComment, formatActorAttribution, parseScopeComment, parseSourceComment, collectSymbolCitations } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
+import { recordMemoryOpen } from "../recall/trace.js";
 import { CLANKER_FETCH_HINT, type ClankerRow, clankerEnabled, findEntry, formatRow, queryTerms, rowKeywords, rowTitle, rowsForDoc } from "../clanker.js";
 import { DETAIL_PAGE_CHARS, LIST_TEXT_MAX_CHARS, SUMMARY_MAX_CHARS, SUMMARY_MAX_TRUTHS, clipText, shrinkToBudget, snippetBudget } from "../response-budget.js";
 
@@ -167,6 +168,8 @@ async function handleGetMemoryDetail(ctx: McpContext, { id: rawId, offset }: { i
     return mcpResponse({ ok: false, error: `Invalid memory ID format: "${rawId}" contains malformed URL encoding.` });
   }
   const entryId = rawId.trim().toLowerCase().match(/^(fid:[a-z0-9]{8}|bid:[a-f0-9]{8})$/)?.[1];
+  // Paired with the ids clanker mode injected this session, for the open rate in store health.
+  recordMemoryOpen(phrenPath, entryId ?? id);
   if (entryId) return handleGetEntryDetail(ctx, entryId);
   const match = id.match(/^mem:([^/]+)\/(.+)$/);
   if (!match) {

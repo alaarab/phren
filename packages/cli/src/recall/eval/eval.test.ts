@@ -7,7 +7,8 @@ import type { RecallResult } from "../types.js";
 import type { RecallEvalCase } from "./cases.js";
 import { buildRecallFixture } from "./fixture.js";
 import { loadCases, runRecallEval } from "./index.js";
-import { compareToBaseline, recallBaseline, scoreRecall } from "./score.js";
+import { judgmentKey, loadJudgments, writeUnjudged, type RecallJudgments } from "./judgments.js";
+import { compareToBaseline, failsCheck, recallBaseline, scoreRecall } from "./score.js";
 
 const scratch = fileURLToPath(new URL("../../../../../.scratch/", import.meta.url));
 const casesFile = fileURLToPath(new URL("../../../fixtures/recall-eval/cases.jsonl", import.meta.url));
@@ -104,7 +105,7 @@ describe("recall eval", () => {
       falseInjectionByClass: { conversational: 1, "off-domain": 0, "cross-project-lure": 0, typo: 0, envelope: 0, "other-tool": 0, "trust-expiry": 0 },
       hitAt3: 0.5, hitAt3ByTier: { active: 0.5, topic: 1, older: 0 },
       abstainRate: 1 / 3, positiveAbstainRate: 0.25, retiredInjected: 1,
-      meanUsedTokens: 150, p50StageMs: 30, p95StageMs: 60,
+      meanUsedTokens: 150, judgedPairs: 0, unjudgedPairs: 7, judgedPrecision: 0, p50StageMs: 30, p95StageMs: 60,
     });
     const baseline = recallBaseline(score);
     expect(baseline).not.toHaveProperty("p50StageMs");
@@ -115,6 +116,70 @@ describe("recall eval", () => {
       { metric: "hitAt3", baseline: 0.5, current: 0.75, delta: 0.25 },
     ]);
     expect(Object.values(scoreRecall([], { retiredTexts: [] })).filter(value => typeof value === "number").every(Number.isFinite)).toBe(true);
+  });
+
+  it("keys a judgment by prompt and bullet text, not by ids, dates, case or spacing", () => {
+    const key = judgmentKey("Where is the glyph ferry gutter?", "- Glyph ferry uses a seven-cell gutter. <!-- fid:00010000 --> <!-- created: 2026-11-20 -->");
+    expect(key).toMatch(/^[a-f0-9]{16}$/);
+    expect(judgmentKey("where is the  glyph ferry gutter?", "- glyph ferry uses a seven-cell\n gutter. <!-- fid:0001ffff --> <!-- created: 2026-11-26 -->")).toBe(key);
+    expect(judgmentKey("Where is the cursor gutter?", "- Glyph ferry uses a seven-cell gutter.")).not.toBe(key);
+    expect(judgmentKey("Where is the glyph ferry gutter?", "- Glyph ferry uses a six-cell gutter.")).not.toBe(key);
+  });
+
+  it("scores judged precision with partial as half and counts pairs without a judgment", () => {
+    const prompt = positive("active").prompt;
+    const judge = (snippet: string, judgment: "relevant" | "partial" | "irrelevant") =>
+      [judgmentKey(prompt, snippet), { key: judgmentKey(prompt, snippet), judgment, reason: "fixture" }] as const;
+    const judgments: RecallJudgments = new Map([judge("A", "relevant"), judge("B", "partial"), judge("C", "irrelevant"), judge("D", "relevant")]);
+    const rows = [
+      { case: positive("active"), result: result(["A", "B", "unjudged"], 100, 10) },
+      { case: positive("topic"), result: result(["C", "D"], 100, 10) },
+      { case: negative, result: result([], 0, 10) },
+    ];
+    const score = scoreRecall(rows, { retiredTexts: [], judgments });
+    expect([score.judgedPairs, score.unjudgedPairs, score.judgedPrecision]).toEqual([4, 1, 2.5 / 4]);
+    expect(recallBaseline(score)).toMatchObject({ judgedPairs: 4, unjudgedPairs: 1, judgedPrecision: 0.625 });
+  });
+
+  it("fails a check on a judged precision drop of more than two points, and on any other change", () => {
+    const row = (metric: string, delta: number | null) => ({ metric, baseline: 0.9, current: delta === null ? null : 0.9 + delta, delta });
+    expect(failsCheck(row("judgedPrecision", -0.0201))).toBe(true);
+    expect(failsCheck(row("judgedPrecision", -0.02))).toBe(false);
+    expect(failsCheck(row("judgedPrecision", 0.05))).toBe(false);
+    expect(failsCheck(row("judgedPrecision", null))).toBe(true);
+    expect(failsCheck(row("unjudgedPairs", 1))).toBe(true);
+    expect(failsCheck(row("hitAt3", -0.01))).toBe(true);
+    expect(failsCheck(row("hitAt3", 0))).toBe(false);
+  });
+
+  it("lists each unjudged pair once after the rubric, and reads judgments back with the last one winning", () => {
+    const root = tempDir();
+    try {
+      const cache = path.join(root, "judgments.jsonl");
+      expect(loadJudgments(cache).size).toBe(0);
+      const c = positive("active");
+      const rows = [
+        { case: c, result: result(["judged", "new one"], 100, 10) },
+        { case: { ...c, id: "again" }, result: result(["new one <!-- fid:00010001 -->", "other"], 100, 10) },
+      ];
+      fs.writeFileSync(cache, [
+        JSON.stringify({ rubric: "header" }),
+        JSON.stringify({ key: judgmentKey(c.prompt, "judged"), judgment: "partial", reason: "first" }),
+        JSON.stringify({ key: judgmentKey(c.prompt, "judged"), judgment: "relevant", reason: "revised" }),
+      ].join("\n") + "\n");
+      const judgments = loadJudgments(cache);
+      expect([...judgments.values()]).toEqual([{ key: judgmentKey(c.prompt, "judged"), judgment: "relevant", reason: "revised" }]);
+      const out = path.join(root, "unjudged.jsonl");
+      expect(writeUnjudged(out, rows, judgments)).toBe(2);
+      const lines = fs.readFileSync(out, "utf8").trim().split("\n").map(line => JSON.parse(line));
+      expect(lines[0]).toHaveProperty("rubric");
+      expect(lines.slice(1)).toEqual([
+        { key: judgmentKey(c.prompt, "new one"), case: c.id, project: "velvetquay", prompt: c.prompt, snippet: "new one" },
+        { key: judgmentKey(c.prompt, "other"), case: "again", project: "velvetquay", prompt: c.prompt, snippet: "other" },
+      ]);
+      fs.appendFileSync(cache, JSON.stringify({ key: "0123456789abcdef", judgment: "maybe", reason: "x" }) + "\n");
+      expect(() => loadJudgments(cache)).toThrow(`${cache}:4:`);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   it("restores retrieval settings and removes the fixture after a runner fails", async () => {

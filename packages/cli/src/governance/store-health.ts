@@ -9,7 +9,7 @@ import { citationStateKey, readCitationStates, type CitationStates } from "../co
 import { listTopicFiles, NOW_START, NOW_END } from "../content/summarize.js";
 import { getMachineName } from "../machine-identity.js";
 import { atomicWriteText, debugLog, runtimeDir } from "../phren-paths.js";
-import { readRecallTrace, recallTraceFile } from "../recall/trace.js";
+import { readMemoryOpens, readRecallTrace, recallTraceFile } from "../recall/trace.js";
 import { getStoreProjectDirs, resolveAllStores } from "../store-registry.js";
 import { errorMessage, isValidProjectName } from "../utils.js";
 import { withFileLock } from "./locks.js";
@@ -44,6 +44,8 @@ export interface StoreHealthRecall {
   /** Prompts that filed no task because their project was over its open-task budget. */
   taskCapturePaused: number;
   byAbstainReason: Record<string, number>;
+  /** Distinct session and id pairs clanker mode injected, and of those the ones get_memory_detail opened later in that session. */
+  clankerIds: { injected: number; opened: number };
 }
 
 /** What `.runtime` holds, by kind: the first two are regenerable and the only ones age-out may remove. */
@@ -189,8 +191,9 @@ function bytes(file: string): number {
 
 function recallHealth(phrenPath: string, now: Date): StoreHealthRecall | null {
   if (!fs.existsSync(recallTraceFile(phrenPath))) return null;
-  const counts: StoreHealthRecall = { prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, taskCapturePaused: 0, byAbstainReason: {} };
+  const counts: StoreHealthRecall = { prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, taskCapturePaused: 0, byAbstainReason: {}, clankerIds: { injected: 0, opened: 0 } };
   const reasons = new Map<string, number>();
+  const injectedIds = new Map<string, number>();
   for (const entry of readRecallTrace(phrenPath)) {
     const at = Date.parse(entry.at);
     if (!Number.isFinite(at) || at < now.getTime() - 86_400_000 || at > now.getTime()) continue;
@@ -206,8 +209,19 @@ function recallHealth(phrenPath: string, now: Date): StoreHealthRecall | null {
       counts.suppressedRepeats += entry.suppressedRepeats;
     }
     if (entry.taskCapturePaused && typeof entry.taskCapturePaused === "object") counts.taskCapturePaused++;
+    for (const row of Array.isArray(entry.injected) && typeof entry.session === "string" ? entry.injected : []) {
+      const key = `${entry.session}\n${row?.id}`;
+      if (typeof row?.id === "string" && !injectedIds.has(key)) injectedIds.set(key, at);
+    }
   }
   counts.byAbstainReason = Object.fromEntries(reasons);
+  // The latest open per session and id; an injection counts as opened when that open came at or after it.
+  const lastOpen = new Map<string, number>();
+  for (const open of readMemoryOpens(phrenPath)) {
+    const key = `${open.session}\n${open.id}`;
+    lastOpen.set(key, Math.max(lastOpen.get(key) ?? -Infinity, Date.parse(open.at)));
+  }
+  counts.clankerIds = { injected: injectedIds.size, opened: [...injectedIds].filter(([key, at]) => (lastOpen.get(key) ?? -Infinity) >= at).length };
   return counts;
 }
 

@@ -7,6 +7,7 @@ import { buildIndex, type SqlJsDatabase } from "../shared/index.js";
 import type { McpContext } from "../tools/types.js";
 import { resolveClanker } from "../clanker.js";
 import { writeInstallPreferences } from "../init/preferences.js";
+import { readMemoryOpens } from "../recall/trace.js";
 
 type ToolResult = { content: { type: string; text: string }[] };
 type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
@@ -75,6 +76,25 @@ describe("clanker mode tools", () => {
 
     const missing = await call("get_memory_detail", { id: "fid:eeee5555" });
     expect(missing.json.ok).toBe(false);
+  });
+
+  it("records each get_memory_detail id with the Claude Code session, and nothing without one", async () => {
+    const saved = process.env.CLAUDE_CODE_SESSION_ID;
+    try {
+      delete process.env.CLAUDE_CODE_SESSION_ID;
+      await call("get_memory_detail", { id: "fid:aaaa1111" });
+      expect(readMemoryOpens(tmp.path)).toEqual([]);
+      process.env.CLAUDE_CODE_SESSION_ID = "session-1";
+      await call("get_memory_detail", { id: "FID:AAAA1111" });
+      await call("get_memory_detail", { id: "mem:app/FINDINGS.md" });
+      expect(readMemoryOpens(tmp.path).map(({ session, id }) => ({ session, id }))).toEqual([
+        { session: "session-1", id: "fid:aaaa1111" },
+        { session: "session-1", id: "mem:app/FINDINGS.md" },
+      ]);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+      else process.env.CLAUDE_CODE_SESSION_ID = saved;
+    }
   });
 
   it("get_findings and get_tasks list ids and titles without the full text", async () => {

@@ -6,6 +6,7 @@ import { buildIndex, type SqlJsDatabase } from "../../shared/index.js";
 import type { RecallResult } from "../types.js";
 import { recallEvalCaseSchema, type RecallEvalCase } from "./cases.js";
 import { buildRecallFixture } from "./fixture.js";
+import { loadJudgments, type RecallJudgments } from "./judgments.js";
 import { scoreRecall, type RecallEvalRow, type RecallScore } from "./score.js";
 
 export type { RecallEvalCase } from "./cases.js";
@@ -29,6 +30,7 @@ export function loadCases(file: string): RecallEvalCase[] {
 }
 
 const CASES_FILE = fileURLToPath(new URL("../../../fixtures/recall-eval/cases.jsonl", import.meta.url));
+const JUDGMENTS_FILE = fileURLToPath(new URL("../../../fixtures/recall-eval/judgments.jsonl", import.meta.url));
 const SCRATCH = fileURLToPath(new URL("../../../../../.scratch/", import.meta.url));
 const ENV_KEYS = [
   "PHREN_PATH", "HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP", "PHREN_PROFILE",
@@ -65,22 +67,24 @@ function swapEnv(phrenPath: string, root: string, profile: string, embeddings: b
 export interface RecallEvalReport {
   score: RecallScore;
   rows: RecallEvalRow[];
+  /** The judgments the score read, so unjudged pairs can be listed against the same cache. */
+  judgments: RecallJudgments;
 }
 
-async function runCases(runner: RecallRunner, cases: RecallEvalCase[], phrenPath: string, retiredTexts: string[], root: string, profile: string, embeddings = false): Promise<RecallEvalReport> {
+async function runCases(runner: RecallRunner, cases: RecallEvalCase[], phrenPath: string, retiredTexts: string[], judgments: RecallJudgments, root: string, profile: string, embeddings = false): Promise<RecallEvalReport> {
   const restore = swapEnv(phrenPath, root, profile, embeddings);
   let db: SqlJsDatabase | undefined;
   try {
     db = await buildIndex(phrenPath, profile || undefined, { force: true });
     const rows: RecallEvalRow[] = [];
     for (const c of cases) rows.push({ case: c, result: await runner(c, { phrenPath, db }) });
-    return { score: scoreRecall(rows, { retiredTexts }), rows };
+    return { score: scoreRecall(rows, { retiredTexts, judgments }), rows, judgments };
   } finally {
     try { db?.close(); } finally { restore(); }
   }
 }
 
-export async function runRecallEval(options: { runner: RecallRunner; cases?: RecallEvalCase[]; root?: string; keep?: boolean }): Promise<RecallEvalReport> {
+export async function runRecallEval(options: { runner: RecallRunner; cases?: RecallEvalCase[]; judgments?: RecallJudgments; root?: string; keep?: boolean }): Promise<RecallEvalReport> {
   if (running) throw new Error("Recall eval changes process environment; run evaluations sequentially");
   fs.mkdirSync(SCRATCH, { recursive: true });
   const root = options.root ? path.resolve(options.root) : fs.mkdtempSync(path.join(SCRATCH, "recall-eval-"));
@@ -89,14 +93,15 @@ export async function runRecallEval(options: { runner: RecallRunner; cases?: Rec
   running = true;
   try {
     const fixture = buildRecallFixture(root);
-    return await runCases(options.runner, options.cases ?? loadCases(CASES_FILE), fixture.phrenPath, fixture.retiredTexts, root, FIXTURE_PROFILE);
+    const judgments = options.judgments ?? loadJudgments(JUDGMENTS_FILE);
+    return await runCases(options.runner, options.cases ?? loadCases(CASES_FILE), fixture.phrenPath, fixture.retiredTexts, judgments, root, FIXTURE_PROFILE);
   } finally {
     running = false;
     if (!options.keep) fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
-export async function runRecallStoreEval(options: { runner: RecallRunner; cases: RecallEvalCase[]; phrenPath: string; profile?: string; embeddings?: boolean }): Promise<RecallEvalReport> {
+export async function runRecallStoreEval(options: { runner: RecallRunner; cases: RecallEvalCase[]; judgments?: RecallJudgments; phrenPath: string; profile?: string; embeddings?: boolean }): Promise<RecallEvalReport> {
   if (running) throw new Error("Recall eval changes process environment; run evaluations sequentially");
   const phrenPath = fs.realpathSync(options.phrenPath);
   if (!fs.statSync(phrenPath).isDirectory()) throw new Error("Store must be a directory");
@@ -106,7 +111,7 @@ export async function runRecallStoreEval(options: { runner: RecallRunner; cases:
   const root = fs.mkdtempSync(path.join(SCRATCH, "recall-private-"));
   running = true;
   try {
-    return await runCases(options.runner, options.cases, phrenPath, [], root, profile, options.embeddings);
+    return await runCases(options.runner, options.cases, phrenPath, [], options.judgments ?? new Map(), root, profile, options.embeddings);
   } finally {
     running = false;
     fs.rmSync(root, { recursive: true, force: true });

@@ -1,0 +1,37 @@
+{"rubric":"Judge the snippet against the prompt alone, as the agent answering it would, not against the case's known item: relevant = it answers the prompt or states something the agent would act on for it; partial = on the prompt's subject without answering it, background or a neighbouring fact the agent might use; irrelevant = it shares words or the project but not the subject. The reason is one line naming what the snippet does or does not answer."}
+{"key":"87cd80671ce3a906","judgment":"relevant","reason":"Gives the gutter width: seven cells."}
+{"key":"72b99af4b81e9897","judgment":"irrelevant","reason":"Atlas page glyph padding, not the cursor gutter the prompt asks about."}
+{"key":"47a3afa91f109804","judgment":"relevant","reason":"Says the sender releases its lease once the acknowledgement persists."}
+{"key":"9b131b8b44b44df0","judgment":"relevant","reason":"Names the lock: the schema bell."}
+{"key":"11b5a2576f5d496f","judgment":"relevant","reason":"Names the version in the salt: the shader dialect version."}
+{"key":"c63fa65e585db8bd","judgment":"relevant","reason":"Gives the lease expiry: 47 seconds without a heartbeat."}
+{"key":"05339566c1c90eb0","judgment":"relevant","reason":"Says keys rotate only after the footer seal is durable."}
+{"key":"6fe5a6325640c846","judgment":"relevant","reason":"Says ties break on the lock digest."}
+{"key":"5e31486a71731db6","judgment":"relevant","reason":"Gives the overlap: six pixels."}
+{"key":"417ebdc996ffd7eb","judgment":"relevant","reason":"Says position deltas are unsigned varints."}
+{"key":"7cff8bdec4b50a49","judgment":"relevant","reason":"Says the recovery command goes before the diagnosis."}
+{"key":"1e59449b83798901","judgment":"irrelevant","reason":"A general recovery truth; says nothing about where the recovery command goes in incident notes."}
+{"key":"3ce24a1f78a57e4b","judgment":"irrelevant","reason":"Project instructions about keeping changes small; nothing about incident note layout."}
+{"key":"17c8f40dc40c1040","judgment":"relevant","reason":"Says recovery opens the twin header with the larger generation counter."}
+{"key":"b7545756b496828e","judgment":"relevant","reason":"Says the grey stack is recorded before descending into children."}
+{"key":"84387d7455e28629","judgment":"relevant","reason":"Says the chain stops when either dimension falls below three pixels."}
+{"key":"94bb1fda5bc31392","judgment":"relevant","reason":"Says offsets must be adjacent within the same field."}
+{"key":"0abdfa4d024a6145","judgment":"relevant","reason":"Says transfers verify the segment digest first."}
+{"key":"1f7ebb18eaf59be3","judgment":"relevant","reason":"Says locale passes through an explicit render scope."}
+{"key":"c20f798bb655313f","judgment":"relevant","reason":"Says counters publish the interval start with each value."}
+{"key":"d3d81a85043012a3","judgment":"relevant","reason":"Says virtual time advances only at a recorded yield point."}
+{"key":"5d594b5a3cc23f71","judgment":"relevant","reason":"Says resamplers preserve fractional phase."}
+{"key":"91dded9b8b4632a5","judgment":"relevant","reason":"Says readers verify the trailing directory first."}
+{"key":"7fe12781afbde873","judgment":"relevant","reason":"Gives the moat size: two pixels."}
+{"key":"fc19e56e3d336cb2","judgment":"relevant","reason":"Says rings reject packets with a reversed hop seal."}
+{"key":"26c00b6e92e27058","judgment":"relevant","reason":"Says journals keep the previous codec until verification."}
+{"key":"97ce80850ae4900f","judgment":"relevant","reason":"Says the source stamp is pinned before pruning an edge."}
+{"key":"836c85ddeb07d95b","judgment":"relevant","reason":"Says the barrier waits for the last leased ticket."}
+{"key":"1960af615ecb88b4","judgment":"relevant","reason":"Gives the reservation: 4096 values."}
+{"key":"a0239e858142a8e5","judgment":"relevant","reason":"Says mirrors validate the manifest seal."}
+{"key":"494710eb9a8a5525","judgment":"relevant","reason":"Says the cache evicts the widest cold slab first."}
+{"key":"0ed0e3c002fa78f6","judgment":"relevant","reason":"Says promotion waits for the watermark to catch up."}
+{"key":"a98326d7451b197c","judgment":"relevant","reason":"Says repair needs three matching ledger tails."}
+{"key":"2ef557c098882839","judgment":"relevant","reason":"Shared note: the recovery command goes before the diagnosis."}
+{"key":"501a934525c034e6","judgment":"relevant","reason":"Shared note: the rejected alternative sits beside the chosen invariant."}
+{"key":"7576cd8640d726ba","judgment":"partial","reason":"Neighbouring fact about amber fences and the frame latch; does not say how ember fence repair retries."}

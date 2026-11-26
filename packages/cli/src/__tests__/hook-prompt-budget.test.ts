@@ -60,6 +60,13 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget", () => {
     expect(output).not.toContain("Queued task");
     expect(fs.readFileSync(path.join(store, "myproject", "tasks.md"), "utf8")).toBe(tasks);
     expect(lastTrace().taskCapturePaused).toEqual({ open: 3, budget: 2 });
+    // Clanker mode's printed ids go into the trace, so store health can pair them with get_memory_detail opens.
+    const ids = lastTrace().injected.map((row: { id?: string }) => row.id);
+    if (clanker === "off") expect(ids.every((id: string | undefined) => id === undefined)).toBe(true);
+    else {
+      expect(ids.length).toBeGreaterThan(0);
+      for (const id of ids) expect(output).toContain(`${id} fb:`);
+    }
   });
 });
 

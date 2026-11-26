@@ -175,12 +175,35 @@ describe("store health collection", () => {
     put(primary, ".runtime/recall-trace.jsonl", trace.join("\n") + '\n{"at":');
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
       prompts: 7, injected: 1, abstained: 3, skipped: 2, suppressedRepeats: 4, taskCapturePaused: 1,
-      byAbstainReason: { "below-floor": 2, "no-candidates": 1 },
+      byAbstainReason: { "below-floor": 2, "no-candidates": 1 }, clankerIds: { injected: 0, opened: 0 },
     });
     put(primary, ".runtime/recall-trace.jsonl", "");
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
       prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, taskCapturePaused: 0, byAbstainReason: {},
+      clankerIds: { injected: 0, opened: 0 },
     });
+  });
+
+  it("counts clanker ids injected in the last 24 hours and the ones the same session opened afterwards", () => {
+    const row = (id?: string) => ({ path: "app/FINDINGS.md", key: "k", type: "findings", ...(id ? { id } : {}) });
+    const trace = [
+      { at: "2026-11-25T10:00:00.000Z", session: "s1", injected: [row("fid:aaaa1111"), row("mem:app/summary.md"), row()] },
+      { at: "2026-11-25T10:05:00.000Z", session: "s1", injected: [row("fid:aaaa1111")] },
+      { at: "2026-11-25T10:00:00.000Z", session: "s2", injected: [row("fid:aaaa1111"), row("fid:bbbb2222")] },
+      { at: "2026-11-25T10:00:00.000Z", injected: [row("fid:cccc3333")] },
+      { at: "2026-11-24T10:00:00.000Z", session: "s1", injected: [row("fid:dddd4444")] },
+    ];
+    const opens = [
+      { at: "2026-11-25T10:01:00.000Z", session: "s1", id: "fid:aaaa1111" },
+      { at: "2026-11-25T09:00:00.000Z", session: "s2", id: "fid:bbbb2222" },
+      { at: "2026-11-25T10:01:00.000Z", session: "s3", id: "fid:aaaa1111" },
+      { at: "2026-11-25T10:01:00.000Z", session: "s1", id: "fid:dddd4444" },
+    ];
+    put(primary, ".runtime/recall-trace.jsonl", trace.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    expect(collectStoreHealth(primary, now, "test-computer").recall?.clankerIds).toEqual({ injected: 4, opened: 0 });
+    put(primary, ".runtime/memory-detail-opens.jsonl", opens.map(entry => JSON.stringify(entry)).join("\n") + '\n{"at":');
+    // s1's fid opened after its first injection; s2's fid was opened only before it was injected.
+    expect(collectStoreHealth(primary, now, "test-computer").recall?.clankerIds).toEqual({ injected: 4, opened: 1 });
   });
 
   it("returns zero totals and null recall for an empty store without creating runtime state", () => {
