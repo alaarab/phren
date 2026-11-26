@@ -11,14 +11,14 @@
     "envelope": 0,
     "other-tool": 0
   },
-  "hitAt3": 0.9091,
+  "hitAt3": 0.9697,
   "hitAt3ByTier": {
-    "active": 0.9091,
-    "topic": 0.8333,
+    "active": 1,
+    "topic": 0.9167,
     "older": 1
   },
-  "abstainRate": 0.5303,
-  "positiveAbstainRate": 0.0606,
+  "abstainRate": 0.5,
+  "positiveAbstainRate": 0,
   "retiredInjected": 0,
-  "meanUsedTokens": 94.2903
+  "meanUsedTokens": 94.1212
 }
