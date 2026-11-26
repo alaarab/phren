@@ -45,9 +45,10 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
   tests, notes?}`, on their own Hook before ending the turn. The done return
   carries that evidence, and the Hook queues it to the configured integrator.
   In core use `phren_admin(action: "dispatch_report", prs)`.
-- `owner_inbox` (CLI `phren owner-inbox`): list what waits on the owner across
-  linked computers, add a title with optional project, or resolve an id with
-  optional resolution. In core use `phren_admin(action: "owner_inbox", ...)`.
+- `owner_inbox` (CLI `phren owner-inbox`): the one list of what waits on the
+  owner across linked computers. Add an item as one line (`title`) plus a
+  paste-able `command`, with `task` (bid) and `pr` links; list it; or resolve an
+  id with an optional resolution. In core use `phren_admin(action: "owner_inbox", ...)`.
   Use an item's `inboxComputer` as `computer` when resolving a remote item;
   omit it for `local`. Say which computers were unreachable.
 - `machine_health`: named health findings for this computer and every linked
@@ -100,6 +101,10 @@ file ownership; give each remote lead a base revision, acceptance checks, local
 fanout limit, report time and integration instructions. Every brief repeats the
 owner's repository constraints, including any prohibition on commits, pushes,
 branches or particular tests. Dispatch never expands the owner's authorization.
+Every brief also says: post each owner-only action (merge, release, login,
+token, root step, decision) to the owner inbox with a paste-able command, the
+task bid and the PR, and end the turn with the report, not with a question
+the inbox already holds.
 A worker that needs root runs `sudo -A <command>`: its launch sets
 `SUDO_ASKPASS`, and the owner approves the exact command and types the
 password on the phone. Plain `sudo` fails without a terminal.
@@ -190,12 +195,19 @@ The Hook rechecks its ended turn and skips a pane with new work, background
 tasks, queued messages or uncertain delivery. Intentional closes do not return
 `gone`. Reading returns can close panes, so record any follow-up first.
 
-Keep one owner inbox item for each decision or action that waits on the owner.
-Needs-you returns and blocked prompts appear automatically, even if their
-returns were read. Add other actions such as restarting the router with
-`owner_inbox(operation:"add", title, project?, id?)` in full or
-`phren_admin(action:"owner_inbox", operation:"add", title, project?, id?)` in
-core; keep the id on retries.
+The owner inbox is the one place for every action only the owner can do:
+merges, releases, logins, tokens, root-only steps and decisions. Never leave
+such an ask only in a return, a report or a chat line. Post it as one line plus
+a paste-able command, linked to its task and PR:
+`owner_inbox(operation:"add", title:"Merge phren#940: owner inbox", command:"gh pr merge 940 -R alaarab/phren --squash", task:"bid:ac70edca", pr:"https://github.com/alaarab/phren/pull/940", project:"phren")`
+in full, `phren_admin(action:"owner_inbox", operation:"add", ...)` in core, or
+`phren owner-inbox add <title> --command <cmd> --task <bid> --pr <url>`.
+Posting the same PR or `key` again updates the item rather than adding a
+second one, so post again when the command changes. Items resolve themselves
+when the PR merges or closes, when the linked task is Done, or when the owner
+runs the item's `paste` (the command followed by `phren owner-inbox resolve
+<id>`). Needs-you returns and blocked prompts appear automatically, even if
+their returns were read.
 Resolve an item only once the owner decided or completed the action. Resolution
 does not send an answer, approve a prompt, or mark a task complete. Send an
 owner's answer separately with queued `hand_off`. A source that stopped waiting
