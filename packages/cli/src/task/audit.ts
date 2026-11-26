@@ -148,13 +148,14 @@ export function writeAuditLastRun(phrenPath: string, project: string, marker: Au
   writeAtomic(auditLastRunFile(phrenPath, project), `${JSON.stringify(marker, null, 2)}\n`);
 }
 
+// Loose on purpose: a field a newer phren adds must not hide the last run from the scheduler.
+const lastRunShape = z.object({ at: z.string(), status: z.enum(["ok", "busy", "empty", "failed"]), trigger: z.enum(["manual", "scheduled"]),
+  runId: z.string().optional(), counts: z.record(z.string(), z.number()).optional() }).passthrough();
+
 export function readAuditLastRun(phrenPath: string, project: string): AuditLastRun | undefined {
   try {
-    const value: unknown = JSON.parse(fs.readFileSync(auditLastRunFile(phrenPath, project), "utf8"));
-    if (!value || typeof value !== "object") return undefined;
-    const marker = value as Record<string, unknown>;
-    if (typeof marker.at !== "string" || !Number.isFinite(Date.parse(marker.at))) return undefined;
-    return marker as AuditLastRun;
+    const parsed = lastRunShape.safeParse(JSON.parse(fs.readFileSync(auditLastRunFile(phrenPath, project), "utf8")));
+    return parsed.success && Number.isFinite(Date.parse(parsed.data.at)) ? parsed.data as AuditLastRun : undefined;
   } catch { return undefined; }
 }
 
