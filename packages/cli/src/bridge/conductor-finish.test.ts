@@ -329,6 +329,17 @@ describe("finished worker lifecycle", () => {
     expect(await stat(paths.gitConfigFile).catch(() => undefined)).toBeUndefined();
     expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
   });
+  it("keeps a worker's pane open while its finished turn waits on CI", async () => {
+    const turn = (event: string, reply?: string) => noteTurn(target.server, target.pane,
+      { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, dispatch, ...(reply ? { reply } : {}) });
+    await turn("UserPromptSubmit"); await turn("Stop", "PR #940 is up. Waiting on CI for #940.");
+    const seen = (await workerStates({ targets: [target] })).workers[0];
+    expect(seen).toMatchObject({ state: "done", completed: true, waiting: "Waiting on CI for #940." });
+    const value = receipt(); observe(value, seen, Date.now());
+    expect(value.returned).toMatchObject({ state: "waiting", waitingOn: "ci", waitingFor: "Waiting on CI for #940." });
+    expect(await closeFinishedWorker({ target, dispatch, turn: value.returned!.turn })).toEqual({ ok: true, closed: false });
+    expect(closePane).not.toHaveBeenCalled();
+  });
   it("refuses to close a different completed turn", async () => {
     const wrong = createHash("sha256").update("wrong turn").digest("hex").slice(0, 16);
     expect(await closeFinishedWorker({ target, dispatch, turn: wrong })).toHaveProperty("closed", false); expect(closePane).not.toHaveBeenCalled();
