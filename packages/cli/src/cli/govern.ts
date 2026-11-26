@@ -61,10 +61,12 @@ function maintenanceTargets(projectArg?: string, dryRun = false): MaintenanceTar
       if (store.role === "readonly" || store.sync === "pull-only") throw new Error("read-only");
       if (store.available === false) throw new Error("missing");
       fs.accessSync(store.path, fs.constants.W_OK);
-      const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      // Empty only at the checkout root. Comparing --show-toplevel with the store
+      // path fails on Windows, where git prints the long form of an 8.3 name.
+      const cdup = execFileSync("git", ["rev-parse", "--show-cdup"], {
         cwd: store.path, env: nonInteractiveGitEnv(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 5000,
       }).trim();
-      if (fs.realpathSync(root) !== fs.realpathSync(store.path)) throw new Error("not a git checkout root");
+      if (cdup) throw new Error("not a git checkout root");
       const projects = getStoreProjectDirs(store).map((dir) => path.basename(dir))
         .filter((project) => projectArg ? project === projectArg : project !== "global");
       if (!projects.length) continue;
