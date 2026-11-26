@@ -24,6 +24,7 @@ export type RecallFloorReason =
   | "no-chunk" // dropped: no chunk matched any keyword
   | "too-few-matches" // dropped: best chunk matched fewer distinct keywords than required
   | "low-rarity" // dropped: matched keywords' summed rarity under the bar
+  | "no-anchor" // dropped: matched only two keywords and neither is rare
   | "low-overlap"; // dropped: overlap under the (cross-project) floor
 
 export interface RecallDocRef {
