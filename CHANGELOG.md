@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.94] - 2026-11-26
+
 ### Added
 
 - Daily store health reports citation coverage: how many active findings have a citation this computer could check, how many of those name a file, and the share of each store's active findings that is.
