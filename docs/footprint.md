@@ -99,7 +99,8 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
   store's own `.git/config`.
 - `.runtime/citation-states.json`: what daily governance last found for each
   cited finding on this computer (valid, drifted, broken or unverifiable, with
-  the check time), keyed by fid. Never synced; entries unchecked for 30 days
+  the check time), keyed by fid, or for a finding without one by a hash of its
+  file and its text without metadata comments. Never synced; entries unchecked for 30 days
   are dropped, and it holds at most 5000. Store health reads it for citation
   coverage.
 

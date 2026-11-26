@@ -42,11 +42,20 @@ export interface CitationSweep {
   gitCalls: number;
 }
 
-/** The finding's fid, else a hash of the file it is in and its bullet text. */
+/**
+ * A bullet's text as the store file and the search index both give it: metadata comments and the index's
+ * `[from:actor@machine]` attribution removed (the index drops `created` and turns `source` into that).
+ * The sweep and retrieval key unrecorded-fid bullets by it, so they cannot disagree.
+ */
+export function bulletKeyText(bullet: string): string {
+  return bullet.replace(/<!--[\s\S]*?-->/g, " ").replace(/\[from:[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** The finding's fid, else a hash of the file it is in and its bullet's key text. */
 export function citationStateKey(file: string, bullet: string): string {
   const fid = parseFindingId(bullet);
   if (fid) return `fid:${fid.toLowerCase()}`;
-  const source = `${path.resolve(file)}\0${bullet.trim()}`;
+  const source = `${path.resolve(file)}\0${bulletKeyText(bullet)}`;
   return `hash:${crypto.createHash("sha1").update(source).digest("hex").slice(0, 16)}`;
 }
 

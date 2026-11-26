@@ -23,7 +23,7 @@ import {
 } from "./content.js";
 import { cachedCitationFreshness, citationFreshnessAnnotation, type CitationFreshnessOptions } from "../content/citation-freshness.js";
 import { checkFindingCitation, parseCitationComment, type CitationState, type FindingCitation } from "../content/citation.js";
-import { citationStateKey, readCitationStates, type CitationStates } from "../content/citation-states.js";
+import { bulletKeyText, citationStateKey, readCitationStates, type CitationStates } from "../content/citation-states.js";
 import { getHighImpactFindings } from "../finding/impact.js";
 import { parseFindingLifecycle } from "../finding/lifecycle.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
@@ -877,8 +877,8 @@ export type TrustFilterQueueItem = { project: string; section: "Stale" | "Confli
 
 export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueItem[]; auditEntries: string[] };
 
-// A bullet's key in its source file: its fid, else its text without comments.
-const citationKey = (line: string) => /<!--\s*fid:([a-z0-9]{8})/i.exec(line)?.[1] ?? line.replace(/<!--[\s\S]*?-->/g, "").trim();
+// A bullet's key in its source file and in the index alike: its fid, else the citation-state key text.
+const citationKey = (line: string) => /<!--\s*fid:([a-z0-9]{8})/i.exec(line)?.[1] ?? bulletKeyText(line);
 
 /** The citation line under each bullet of a document's source file; the FTS index omits comments. */
 function sourceCitationLines(sourceFile: string | undefined): Map<string, string> {

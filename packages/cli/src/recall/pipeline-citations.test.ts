@@ -1,10 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildIndex, type SqlJsDatabase } from "../shared/index.js";
 import { queryDocRows } from "../index-query.js";
 import { applyTrustFilter } from "../shared/retrieval.js";
 import { citationGitCallCount } from "../content/citation.js";
+import { sweepCitationStates } from "../content/citation-states.js";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { runPromptPipeline } from "./pipeline.js";
 
@@ -52,5 +54,55 @@ describe("recorded citation states on the indexed prompt path", () => {
     const result = applyTrustFilter(rows, 120, 0, {}, tmp.path);
     expect(result.queueItems).toEqual([{ project: "widgets", section: "Conflicts", items: [expect.stringContaining("skips zebrafish archives")] }]);
     expect(result.rows[0].content).toContain('"file":"src/quokka.ts"');
+  });
+});
+
+// No fid: the state is keyed by the bullet's text, which the index rewrites (it drops `created`, turns `source` into `[from:…]`).
+describe("a finding without a fid keeps its recorded state through the index", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let db: SqlJsDatabase;
+  const today = new Date().toISOString().slice(0, 10);
+
+  beforeAll(async () => {
+    tmp = makeTempDir("recall-citation-nofid-");
+    const repo = path.join(tmp.path, "checkout");
+    const store = path.join(tmp.path, "store");
+    fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" }).trim();
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo, "src", "zebra.ts"), "zebra\n");
+    git("add", "-A");
+    git("commit", "-qm", "add zebra.ts");
+    const commit = git("rev-parse", "HEAD");
+    git("rm", "-q", "src/zebra.ts");
+    git("commit", "-qm", "drop zebra.ts");
+    git("remote", "add", "origin", "https://github.com/acme/widgets.git");
+    fs.mkdirSync(path.join(store, "widgets"), { recursive: true });
+    initTestPhrenRoot(store);
+    fs.writeFileSync(path.join(store, "widgets", "phren.project.yaml"), `sourcePath: ${repo}\n`);
+    const cite = `  <!-- phren:cite ${JSON.stringify({ created_at: new Date().toISOString(), remote: "github.com/acme/widgets", file: "src/zebra.ts", commit })} -->`;
+    fs.writeFileSync(path.join(store, "widgets", "FINDINGS.md"), [
+      "# widgets Findings", "", `## ${today}`, "",
+      `- The quokka exporter skips zebrafish archives on weekends <!-- created: ${today} -->`, cite,
+      `- The quokka importer drops zebrafish manifests on holidays <!-- created: ${today} --> <!-- source:agent machine:laptop actor:tester -->`, cite,
+      "- The quokka exporter writes zebrafish reports nightly",
+      "",
+    ].join("\n"));
+    const sweep = sweepCitationStates(store, [{ storePath: store, project: "widgets" }]);
+    expect(Object.values(sweep.states).map(entry => entry.state)).toEqual(["broken", "broken"]);
+    db = await buildIndex(store);
+  });
+  afterAll(() => tmp?.cleanup());
+
+  it("drops both broken findings on the prompt path and reports them as conflicts", async () => {
+    const store = path.join(tmp.path, "store");
+    const result = await runPromptPipeline({ prompt: "quokka zebrafish", phrenPath: store, db, detectedProject: "widgets" });
+    const filtered = result.selectedRows.map(row => row.doc.content).join("\n");
+    expect(filtered).toContain("writes zebrafish reports nightly");
+    expect(filtered).not.toContain("skips zebrafish archives");
+    expect(filtered).not.toContain("drops zebrafish manifests");
+    const rows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND filename = ?", ["widgets", "FINDINGS.md"]) ?? [];
+    const conflicts = applyTrustFilter(rows, 120, 0, {}, store).queueItems.filter(item => item.section === "Conflicts").flatMap(item => item.items);
+    expect(conflicts).toEqual([expect.stringContaining("skips zebrafish archives"), expect.stringContaining("drops zebrafish manifests")]);
   });
 });
