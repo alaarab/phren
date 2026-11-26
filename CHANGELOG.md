@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.95] - 2026-11-26
+
 ### Added
 
 - The recall eval reports judged precision: how many injected snippets were useful for their prompt, from cached relevance judgments (partial counts half), with the number of pairs not judged yet. It never calls a model. `--list-unjudged <file>` writes the pairs a judge still has to answer, `--judgments <file>` points a private run at its own cache, and `--check` fails when precision drops more than 2 points. The public fixture's judgments are committed beside its cases.
