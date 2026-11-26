@@ -21,11 +21,11 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
     fs.mkdirSync(path.dirname(path.join(store, file)), { recursive: true });
     fs.writeFileSync(path.join(store, file), text);
   };
-  const run = (prompt: string, cwd: string) => {
+  const env = () => ({ ...process.env, PHREN_PATH: store, PHREN_PROFILE: "personal", HOME: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0" });
+  const run = (prompt: string, cwd: string, session = `relevance-${Math.random().toString(16).slice(2)}`) => {
     const result = spawnSync(process.execPath, [cli, "hook-prompt"], {
-      input: JSON.stringify({ prompt, cwd, session_id: `relevance-${Math.random().toString(16).slice(2)}` }),
-      env: { ...process.env, PHREN_PATH: store, PHREN_PROFILE: "personal", HOME: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0" },
-      encoding: "utf8", timeout: 60_000,
+      input: JSON.stringify({ prompt, cwd, session_id: session }),
+      env: env(), encoding: "utf8", timeout: 60_000,
     });
     return result.stdout ?? "";
   };
@@ -107,4 +107,21 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
     const output = run('how do I deploy stockview\n<pasted_content id="1">\n<agent-message from="worker-1">done</agent-message>\n</pasted_content id="1">', store);
     expect(injected(output)).toContain("stockview/FINDINGS.md");
   });
+
+  it("injects a bullet once per session, again after 12 other prompts or once the conversation is compacted", () => {
+    const session = "repeat-session";
+    const deploy = (id = session) => run("how do I deploy stockview", store, id).includes("deploy.sh is the only deploy path");
+    expect(deploy()).toBe(true); // prompt 1
+    expect(deploy()).toBe(false); // prompt 2: the agent already has it
+    expect(deploy("another-session")).toBe(true);
+    for (let i = 3; i <= 12; i++) run("Push these notes to main", workRepo, session);
+    expect(deploy()).toBe(false); // prompt 13: still within 12 prompts of the injection
+    expect(deploy()).toBe(true); // prompt 14
+    expect(deploy()).toBe(false);
+    spawnSync(process.execPath, [cli, "hook-session-start"], {
+      input: JSON.stringify({ session_id: session, source: "compact", cwd: store }),
+      env: { ...env(), PHREN_FEATURE_DAILY_MAINTENANCE: "0" }, encoding: "utf8", timeout: 60_000,
+    });
+    expect(deploy()).toBe(true);
+  }, 180_000);
 });

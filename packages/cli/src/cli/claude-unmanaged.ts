@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { jobsRoot, listJobs, readJob, writeManifest } from "../fanout/launcher.js";
 import { uuid } from "../fanout/adapters/types.js";
 
-export interface ClaudeHookPayload { session_id?: string; transcript_path?: string; cwd?: string }
+export interface ClaudeHookPayload { session_id?: string; transcript_path?: string; cwd?: string; source?: string }
 
 export function readClaudeHookPayload(): ClaudeHookPayload | undefined {
   if (process.stdin.isTTY) return;

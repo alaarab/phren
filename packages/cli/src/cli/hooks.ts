@@ -95,6 +95,7 @@ import type { SelectedSnippet } from "../shared/retrieval.js";
 import { runPromptPipeline } from "../recall/pipeline.js";
 import { isMachinePrompt } from "../recall/prompt-source.js";
 import { recordRecallTrace, skippedTraceEntry, traceEntryFromResult } from "../recall/trace.js";
+import { readRecallSeen, recentlyInjected, writeRecallSeen } from "../recall/repeat.js";
 import { buildHookOutput } from "./hooks-output.js";
 import {
   getGitContext,
@@ -223,6 +224,10 @@ export async function handleHookPrompt() {
       .map(([topic]) => topic);
   }
 
+  // Repeat suppression: this prompt's number in the session, and the bullets injected in the window before it.
+  const seen = sessionId ? readRecallSeen(getPhrenPath(), sessionId) : null;
+  if (seen) seen.prompt += 1;
+
   const tIndex0 = Date.now();
   // Never block the prompt on a rebuild: serve the current/stale snapshot and
   // refresh in a detached process (see loadIndexForHook).
@@ -234,7 +239,8 @@ export async function handleHookPrompt() {
   const gitCtx = moduleEnabled(getPhrenPath(), "git") ? getGitContext(cwd) : null;
 
   try {
-    const result = await runPromptPipeline({ prompt, phrenPath: getPhrenPath(), db, detectedProject, cwd, gitCtx, hotTopics });
+    const result = await runPromptPipeline({ prompt, phrenPath: getPhrenPath(), db, detectedProject, cwd, gitCtx, hotTopics,
+      recentlyInjected: seen ? recentlyInjected(seen) : undefined });
 
     // Auto-extract once rows survive the trust filter, even if a later stage abstained.
     if (result.trustSurvivors > 0) {
@@ -254,6 +260,7 @@ export async function handleHookPrompt() {
       }
     }
     if (result.abstained) {
+      if (seen && sessionId) writeRecallSeen(getPhrenPath(), sessionId, seen);
       recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result, [], { session: sessionId, indexMs }));
       process.exit(0);
     }
@@ -392,7 +399,7 @@ export async function handleHookPrompt() {
           const sessDir = sessionsDir(getPhrenPath());
           if (fs.existsSync(sessDir)) {
             for (const f of fs.readdirSync(sessDir)) {
-              if (!f.startsWith("noticed-") && !f.startsWith("extracted-")) continue;
+              if (!f.startsWith("noticed-") && !f.startsWith("extracted-") && !f.startsWith("recall-seen-")) continue;
               const fp = `${sessDir}/${f}`;
               try {
                 if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
@@ -442,6 +449,10 @@ export async function handleHookPrompt() {
     const prePromptOutput = runPrePromptHooks(getPhrenPath(), raw);
     if (prePromptOutput) parts.unshift(prePromptOutput);
 
+    if (seen && sessionId) {
+      for (const s of budgetSelected) if (s.bulletHash) seen.seen[s.bulletHash] = seen.prompt;
+      writeRecallSeen(getPhrenPath(), sessionId, seen);
+    }
     console.log(parts.join("\n"));
   } catch (err: unknown) {
     const msg = errorMessage(err);
