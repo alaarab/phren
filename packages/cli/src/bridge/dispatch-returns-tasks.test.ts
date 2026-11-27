@@ -96,6 +96,17 @@ describe("the worker session's task ledger in dispatch returns", () => {
       tasks: [{ stableId: "aaaa0001", resolution: "open" }] });
   });
 
+  it("leaves a turn that waits on CI waiting, with the task it still owes on the return", async () => {
+    const waiting: WorkerReaders = { ...readers([task("open", "aaaa0001")]), turn: async () => endedTurn("Opened #940. Waiting on CI for #940.") };
+    const answer = await workerStates({ targets: [target] }, waiting);
+    expect(answer.workers[0]).toMatchObject({ state: "done", waiting: "Waiting on CI for #940.", tasks: [{ stableId: "aaaa0001", resolution: "open" }] });
+    expect(answer.workers[0]).not.toHaveProperty("unfinished");
+    const value = receipt();
+    observe(value, answer.workers[0], now);
+    expect(value.returned).toMatchObject({ state: "waiting", waitingOn: "ci", tasks: [{ stableId: "aaaa0001", resolution: "open" }] });
+    expect(value.returned).not.toHaveProperty("question");
+  });
+
   it("reads the ledger on the snapshot path too, without a turn record", async () => {
     const final: FinalTurn = { completed: true, lastAssistant: "Done." };
     const answer = await workerStates({ targets: [target] }, readers([task("open", "aaaa0001")], { turn: undefined, finalTurn: async () => final }));

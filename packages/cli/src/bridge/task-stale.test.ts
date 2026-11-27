@@ -39,7 +39,7 @@ describe("StaleTaskSources", () => {
   it("lists a stale Active task as a needs-you row naming its project and date", () => {
     project("app", `## Active\n\n- [ ] Fix the sync race <!-- bid:aaaaaaaa lastActivity:${OLD} -->\n`);
     expect(rows()).toEqual([{
-      source: "task-stale:app:aaaaaaaa", kind: "needs-you", project: "app",
+      source: "task-stale:app:aaaaaaaa", kind: "needs-you", project: "app", task: "bid:aaaaaaaa",
       title: "Stale task in app: Fix the sync race (Active, untouched since 2026-11-25)",
     }]);
   });

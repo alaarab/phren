@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tabWaiting, waitingKind } from "./tab-waiting.js";
+import { tabWaiting } from "./tab-waiting.js";
 import type { TurnRecord } from "./turn-records.js";
 
 const at = "2026-11-26T22:00:00.000Z";
@@ -27,10 +27,4 @@ describe("tabWaiting", () => {
     expect(tabWaiting(undefined, { agentStatus: "idle", backgroundTasks: 1 })).toBeUndefined();
   });
 
-  it("reads an awaited sentence's kind", () => {
-    expect(waitingKind("Waiting on the iOS workflow.")).toBe("ci");
-    expect(waitingKind("Queued behind the release build.")).toBe("ci");
-    expect(waitingKind("Queued behind the RC.")).toBe("queue");
-    expect(waitingKind("Waiting on the owner's laptop.")).toBe("other");
-  });
 });

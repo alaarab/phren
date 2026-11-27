@@ -258,7 +258,7 @@ characters and suggest a short title plus context to move the rest into.
 for 24 hours (its last activity, claim or worker update, else its creation) is
 stale:
 
-- the owner inbox lists it (`task-stale:<project>:<bid>`, kind `needs-you`), at
+- the owner inbox lists it (`task-stale:<project>:<bid>`, kind `needs-you`, `task: "bid:<bid>"`), at
   most 20, oldest first, from the computer that claimed it or, when unclaimed,
   from every Hook sharing the store (the merged inbox shows it once). The row
   resolves itself once the task is touched, done or back in the Queue;

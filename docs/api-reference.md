@@ -2488,7 +2488,13 @@ transcript shows finishing after that Stop (a task-notification with a final
 status, including one still queued in an idle session), and none count two
 hours after the Stop, so an old count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
 on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
-list carries the same field. `title` is the dispatch label for a dispatched
+list carries the same field. A tab whose turn ended but is not done has
+`waiting`: `ci` or `queue` when its reply's closing sentence waits on CI or a
+queue, else `background` while its background work runs, else `other` when the
+sentence names something else. It is absent while a turn runs, on a `blocked` or
+`waiting` tab (the owner is needed), and when nothing is waited on; the kinds are
+a dispatch return's `waitingOn`. A `working` tab with `backgroundTasks` keeps its
+`lastReply`. `title` is the dispatch label for a dispatched
 worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels
 were kept uses its tab or workspace label. Otherwise it is the harness's own
 title, except a title made from the brief launch's first prompt ("Read and
