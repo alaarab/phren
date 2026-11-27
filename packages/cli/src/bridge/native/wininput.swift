@@ -151,7 +151,8 @@ func fraction(_ value: String) -> Double? {
 }
 
 // The Hook is our parent: if it dies we are reparented to launchd (pid 1) and
-// must stop typing rather than finish a message into whatever is in front.
+// must stop before the next press rather than send input into whatever is in
+// front.
 func checkAlive() {
     if getppid() == 1 { fail(7, "orphaned") }
 }
@@ -204,6 +205,7 @@ func typeText(_ text: String) {
 }
 
 func press(_ code: CGKeyCode, modifiers: [String]) {
+    checkAlive()
     checkCancel()
     ensureFocus()
     var flags: CGEventFlags = []
@@ -226,6 +228,7 @@ case "tap":
     let bounds = raised.bounds
     // The -1 keeps a tap at fraction 1.0 inside the frame.
     let point = CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
+    checkAlive()
     checkCancel()
     ensureFocus()
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
