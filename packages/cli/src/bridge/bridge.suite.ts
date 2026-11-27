@@ -2851,8 +2851,9 @@ schedules:
     });
 
     it("reports stalled working sessions in overview and worker observations through a real Hook", async () => {
-      // Fixture threshold is short; both screen and transcript must stay fixed.
+      // Prime both clocks before holding the screen and transcript steady.
       await api("/v1/workspaces");
+      await api("/v1/dispatch/workers", { targets: [target] });
       await sleep(1100);
       const overview = (await api("/v1/workspaces")).data;
       expect(overview.groups[0].children[0]).toMatchObject({ agentStatus: "working", stalled: true });

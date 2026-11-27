@@ -1293,6 +1293,8 @@ the flag. Failed reads do not count as inactivity. Awaited background work
 (a build, a running child agent) restarts the clock for at most two hours, so
 work that never ends does not hide a stall. A stall is a supervision
 signal; it does not interrupt the worker or authorize a replacement.
+A dispatching Hook on 0.3.100 or later reports a detected unsent Claude draft once as `needs-you` and keeps the text private.
+Restarting the worker Hook resets draft deduplication, so the same draft may be reported once more.
 
 ## Finish cleanup and PR-ready reports
 
@@ -1303,6 +1305,7 @@ terminal and ended turn before closing only that pane. New work, background
 work, queued messages and uncertain hand-offs keep it open. Offline close
 requests remain pending across restarts. Intentional pane, tab and workspace
 closes are recorded before the terminal action and never produce gone returns.
+Auto-close checks that the Claude composer is empty on worker Hooks at 0.3.100 or later. This fresh check is best-effort because typing can occur between the read and the close.
 
 Before ending its turn, a worker calls `dispatch_report(prs)` or
 `phren dispatch report --prs '<JSON array>'`. Each entry has `url` (HTTPS),

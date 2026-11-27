@@ -1,11 +1,19 @@
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
+import { claudeDraft, readClaudeComposerScreen } from "./claude-suggestion.js";
 import { targetTranscriptPath } from "./transcripts.js";
 import { terminalProvider } from "./terminal.js";
 import type { Json, Target } from "./protocol.js";
 import { BACKGROUND_STALE_MS } from "./session-activity.js";
 
 export interface Stall { stalled: true; stalledSince: string; stallFor: number }
+interface StallEntry {
+  signature: string;
+  since: number;
+  liveSince?: number;
+  draft?: Promise<string | undefined>;
+}
+interface DraftStall { draftSince: string }
 export interface StallReaders {
   screen: (target: Target) => Promise<string>;
   transcript: (target: Target) => Promise<string>;
@@ -34,26 +42,65 @@ async function transcriptStamp(target: Target): Promise<string> {
  * BACKGROUND_STALE_MS: work that never ends (a build deadlocked on a lock, a
  * child that died without its completion record) does not hide a stall forever. */
 export class StallDetector {
-  private entries = new Map<string, { signature: string; since: number; liveSince?: number }>();
+  private entries = new Map<string, StallEntry>();
+  // Keep the last draft identity across resets of the activity clock. Only
+  // its first stall's timestamp can leave this detector.
+  private drafts = new Map<string, { fingerprint: string; since: string }>();
   constructor(private readers: StallReaders = {
     screen: target => terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 120, stripAnsi: true, timeoutMs: 1000 }),
-    transcript: transcriptStamp, now: Date.now, threshold: stallThreshold,
+    transcript: transcriptStamp, now: () => Date.now(), threshold: stallThreshold,
   }) {}
+  reset({ server, pane }: Pick<Target, "server" | "pane">): void {
+    this.entries.delete(JSON.stringify([server, pane]));
+  }
+
   async observe(target: Target, pane: Json, live?: () => Promise<number | undefined>): Promise<Stall | undefined> {
+    return (await this.track(target, pane, live))?.stall;
+  }
+
+  async observeWorker(target: Target, pane: Json, live?: () => Promise<number | undefined>): Promise<Stall | DraftStall | undefined> {
+    const tracked = await this.track(target, pane, live);
+    if (!tracked || target.source !== "claude") return tracked?.stall;
+    const { entry, stall, binding } = tracked;
+    // Share the styled read across concurrent polls of the same stall.
+    const draftSince = await (entry.draft ??= this.draftSince(target, binding, stall.stalledSince));
+    return draftSince ? { draftSince } : stall;
+  }
+
+  private async draftSince(target: Target, binding: string, since: string): Promise<string | undefined> {
+    const screen = await readClaudeComposerScreen(target);
+    const draft = screen === undefined ? undefined : claudeDraft(screen);
+    if (draft === undefined) return undefined;
+    const fingerprint = createHash("sha256").update(draft).digest("hex").slice(0, 16);
+    const prior = this.drafts.get(binding);
+    const first = prior?.fingerprint === fingerprint ? prior.since : since;
+    this.drafts.delete(binding);
+    this.drafts.set(binding, { fingerprint, since: first });
+    if (this.drafts.size > 1024) this.drafts.delete(this.drafts.keys().next().value!);
+    return first;
+  }
+
+  private async track(target: Target, pane: Json, live?: () => Promise<number | undefined>): Promise<{ entry: StallEntry; stall: Stall; binding: string } | undefined> {
     const key = JSON.stringify([target.server, target.pane]);
     if (pane.agent_status !== "working" || this.readers.threshold() === 0) { this.entries.delete(key); return undefined; }
     let screen: string, transcript: string;
     try { [screen, transcript] = await Promise.all([this.readers.screen(target), this.readers.transcript(target)]); }
     catch { this.entries.delete(key); return undefined; }
-    const signature = createHash("sha256").update(JSON.stringify([target, pane.terminal_id, screen, transcript])).digest("hex");
+    const binding = JSON.stringify([target, pane.terminal_id]);
+    const signature = createHash("sha256").update(JSON.stringify([binding, screen, transcript])).digest("hex");
     const now = this.readers.now(), prior = this.entries.get(key);
     if (!prior || prior.signature !== signature) { this.entries.delete(key); this.entries.set(key, { signature, since: now }); }
     while (this.entries.size > 1024) this.entries.delete(this.entries.keys().next().value!);
     const entry = this.entries.get(key)!, since = entry.since;
     if (now - since < this.readers.threshold()) return undefined;
     const held = entry.liveSince === undefined || now - entry.liveSince < BACKGROUND_STALE_MS;
-    if (live && held && await live().catch(() => undefined)) { entry.since = now; entry.liveSince ??= since; return undefined; }
-    return { stalled: true, stalledSince: new Date(since).toISOString(), stallFor: Math.floor((now - since) / 1000) };
+    if (live && held && await live().catch(() => undefined)) {
+      entry.since = now;
+      entry.liveSince ??= since;
+      delete entry.draft;
+      return undefined;
+    }
+    return { entry, binding, stall: { stalled: true, stalledSince: new Date(since).toISOString(), stallFor: Math.floor((now - since) / 1000) } };
   }
 }
 export const sessionStalls = new StallDetector();
