@@ -182,6 +182,11 @@ func mappedPoint(_ bounds: CGRect, _ fx: Double, _ fy: Double) -> CGPoint {
 func requireTarget(_ point: CGPoint) {
     guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
 }
+// Whether the window under a screen point is still the one being driven.
+func isTarget(_ point: CGPoint) -> Bool {
+    guard let hitWindow = pointWindow(point) else { return false }
+    return CFEqual(hitWindow, window)
+}
 // Absolute deadlines keep the drag's steps evenly spaced even when posting an
 // event runs late; a step already due is not delayed.
 func sleepUntil(_ deadline: UInt64) {
@@ -218,9 +223,10 @@ func scrollGesture(at point: CGPoint, dx: Int32, dy: Int32) {
 }
 // Every event is built before the button goes down, so nothing can fail
 // between down and up. The point is hit-tested before the move and again before
-// the button. Once left-down is posted the gesture always ends with left-up,
-// even when Stop or a dead Hook lands mid-drag; the bounded remaining steps are
-// abandoned and the up goes out first.
+// the button, and the whole path is sampled before pressing. Once left-down is
+// posted the gesture always ends with left-up, even when Stop or a dead Hook
+// lands mid-drag; the bounded remaining steps are abandoned and the up goes out
+// first.
 func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
     guard let source = CGEventSource(stateID: .hidSystemState),
           let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: .left),
@@ -228,11 +234,13 @@ func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
           let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)
     else { fail(4, "event") }
     let steps = (durationMs + 15) / 16
+    var points: [CGPoint] = []
     var dragged: [CGEvent] = []
     for step in 1...steps {
         let t = CGFloat(step) / CGFloat(steps)
         let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
         guard let event = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left) else { fail(4, "event") }
+        points.append(point)
         dragged.append(event)
     }
     checkAlive()
@@ -246,18 +254,35 @@ func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
     ensureFocus()
     checkAlive()
     checkCancel()
+    // A panel can cover any part of the path while the start stays visible, so
+    // every sampled point must belong to the target before the button goes
+    // down; a native drag destination must never receive the drop instead.
+    for share in [0.25, 0.5, 0.75, 1.0] {
+        requireTarget(CGPoint(x: start.x + (end.x - start.x) * CGFloat(share), y: start.y + (end.y - start.y) * CGFloat(share)))
+    }
     let began = DispatchTime.now().uptimeNanoseconds
     down.post(tap: .cghidEventTap)
-    var stopped: Int32?
+    var failure: (code: Int32, message: String)?
     for (index, event) in dragged.enumerated() {
         let deadline = began + UInt64(Double(durationMs) * 1_000_000 * Double(index + 1) / Double(steps))
         sleepUntil(deadline)
-        if getppid() == 1 { stopped = 7; break }
-        if isCancelled() { stopped = 8; break }
+        if getppid() == 1 { failure = (7, "orphaned"); break }
+        if isCancelled() { failure = (8, "cancelled"); break }
+        // About every fourth step, and always before the final point, the
+        // window under the next point must still be the target.
+        if index % 4 == 0 || index == dragged.count - 1, !isTarget(points[index]) {
+            failure = (6, "focus")
+            break
+        }
         event.post(tap: .cghidEventTap)
     }
+    // Every recoverable exit after left-down releases the button exactly once
+    // before the helper exits.
+    if let failure {
+        up.post(tap: .cghidEventTap)
+        fail(failure.code, failure.message)
+    }
     up.post(tap: .cghidEventTap)
-    if let code = stopped { fail(code, code == 7 ? "orphaned" : "cancelled") }
 }
 
 // The Hook is our parent: if it dies we are reparented to launchd (pid 1) and
