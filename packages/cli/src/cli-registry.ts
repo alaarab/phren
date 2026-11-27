@@ -138,7 +138,8 @@ const SCHEDULE_SUBCOMMANDS: Subcommand[] = [
 
 const DREAM_SUBCOMMANDS: Subcommand[] = [
   { name: "run", usage: "phren dream run [--project <p>] [--dry-run] [--apply|--propose] [--force] [--json]", summary: "Run a dream now" },
-  { name: "status", usage: "phren dream status [--project <p>] [--json]", summary: "Enabled, cadence, last run, next eligible time" },
+  { name: "apply", usage: "phren dream apply <runId> [--project <p>] [--only <n,m,...>] [--reject|--resolve <applied|rejected>] [--reason <text>] [--json]", summary: "Apply, reject or resolve proposals from a stored run" },
+  { name: "status", usage: "phren dream status [--project <p>] [--limit <n>] [--json]", summary: "Dream timing and proposal acceptance by operation" },
   { name: "log", usage: "phren dream log [--project <p>] [--limit <n>] [--json]", summary: "Read the dream journal" },
   { name: "eval", usage: "phren dream eval [--real] [--model <m>] [--json]", summary: "Score the dream engine on its fixture store" },
 ];

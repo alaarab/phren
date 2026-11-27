@@ -16,21 +16,20 @@ import { retractFinding, supersedeFinding } from "../finding/lifecycle.js";
 import { withFileLock } from "../governance/locks.js";
 import { appendReviewQueue } from "../governance/policy.js";
 import { PhrenError } from "../phren-core.js";
-import { renameOverSync, runtimeFile } from "../phren-paths.js";
+import { atomicWriteText as writeAtomic, renameOverSync, runtimeFile } from "../phren-paths.js";
 import { appendArchivedEntriesToTopicDoc, readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
-import { journalFile, projectStoreDir } from "./collect.js";
+import { projectStoreDir } from "./collect.js";
 import { checkPromotion } from "./budget.js";
 import { writePage } from "./pages.js";
-import type { DreamChange, DreamChangeset, DreamEvidence, DreamOp } from "./types.js";
+import type { DreamChange, DreamChangeset, DreamEvidence } from "./types.js";
 
-export type DreamMode = "propose" | "apply";
-/** `deferred`: a proposal held back because the project's review queue is over its budget. */
-export type DreamOutcomeStatus = "applied" | "proposed" | "skipped" | "deferred" | "failed";
-
-export interface DreamOutcome { index: number; op: DreamOp; status: DreamOutcomeStatus; detail: string }
-/** A change validation refused, with why; `index` is its position in the model's answer. */
-export interface DreamDrop { index: number; op: string; reason: string }
+import {
+  activeDreamDecisions, clean, dreamRecordFile, effectiveDreamOutcome, isPendingProposal, isStructuredProposal,
+  readDreamDecisions, readDreamRecord, recoverDreamDecision, writeDreamDecision,
+  type DreamDecision, type DreamEffectiveOutcome, type DreamMode, type DreamOutcome, type DreamOutcomeStatus, type DreamRecord,
+} from "./records.js";
+export { countOutcomes, recordDream, readLastRun, writeLastRun, type DreamCounts, type DreamDrop, type DreamMode, type DreamOutcome } from "./records.js";
 
 export interface ApplyOptions {
   mode: DreamMode;
@@ -211,7 +210,6 @@ async function applyOne(phrenPath: string, project: string, change: DreamChange,
 }
 
 const evidenceOf = (change: DreamChange): DreamEvidence[] => "evidence" in change ? change.evidence : [];
-const clean = (text: string, max = 200) => text.replace(/\s+/g, " ").replace(/--+/g, "-").trim().slice(0, max);
 
 /** The review line a person reads for one proposed change. add_finding is just the finding, so approving it adds it. */
 export function proposalText(change: DreamChange): string {
@@ -258,141 +256,89 @@ export async function applyChangeset(phrenPath: string, changeset: DreamChangese
   return outcomes;
 }
 
-// ── Records ──────────────────────────────────────────────────────────────────
-
-export interface DreamRecord {
-  changeset: DreamChangeset;
-  findingVersions?: Record<string, string>;
-  warnings?: string[];
-  mode: DreamMode;
-  model?: string;
-  finishedAt: string;
-  outcomes: DreamOutcome[];
-  dropped: DreamDrop[];
-  costUSD?: number;
-}
-
-export interface DreamCounts { applied: number; proposed: number; skipped: number; deferred: number; failed: number; dropped: number }
-
-export function countOutcomes(outcomes: DreamOutcome[], dropped: DreamDrop[]): DreamCounts {
-  const counts: DreamCounts = { applied: 0, proposed: 0, skipped: 0, deferred: 0, failed: 0, dropped: dropped.length };
-  for (const outcome of outcomes) counts[outcome.status]++;
-  return counts;
-}
-
-export function dreamsDir(phrenPath: string, project: string): string {
-  return path.join(projectStoreDir(phrenPath, project), "dreams");
-}
-
-export function lastRunFile(phrenPath: string, project: string): string {
-  return path.join(dreamsDir(phrenPath, project), "last-run.json");
-}
-
-function writeAtomic(file: string, content: string): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmp, content);
-  renameOverSync(tmp, file);
-}
-
-/** dreams/<runId>.json plus one journal line. Returns the record's path. */
-export function recordDream(phrenPath: string, project: string, record: DreamRecord): string {
-  record = sanitizeDream(record);
-  const dir = dreamsDir(phrenPath, project);
-  const file = path.join(dir, `${record.changeset.runId}.json`);
-  writeAtomic(file, `${JSON.stringify(record, null, 2)}\n`);
-  const counts = countOutcomes(record.outcomes, record.dropped);
-  const notes = clean(record.changeset.notes, 160);
-  const line = `- ${record.changeset.startedAt} ${record.changeset.runId} ${record.mode}: ${counts.applied} applied, ${counts.proposed} proposed, `
-    + `${counts.skipped} skipped, ${counts.deferred ? `${counts.deferred} deferred (review queue over budget), ` : ""}${counts.failed} failed, ${counts.dropped} dropped (${record.changeset.inputs.transcripts} sessions)${notes ? ` — ${notes}` : ""}${record.warnings?.length ? ` — ${record.warnings.join("; ")}` : ""}\n`;
-  appendJournal(phrenPath, project, line);
-  return file;
-}
-
-export function appendJournal(phrenPath: string, project: string, line: string): void {
-  line = sanitizeDream(line);
-  const journal = journalFile(phrenPath, project);
-  fs.mkdirSync(path.dirname(journal), { recursive: true });
-  withFileLock(journal, () => {
-    if (!fs.existsSync(journal)) fs.writeFileSync(journal, `# ${project} dream journal\n\n`);
-    fs.appendFileSync(journal, line);
-  });
-}
-
-export interface DreamLastRun { at: string; trigger: "manual" | "scheduled"; runId: string; startedAt: string; finishedAt: string; to: string; mode: DreamMode; status: string; counts?: DreamCounts }
-
-export function writeLastRun(phrenPath: string, project: string, marker: Omit<DreamLastRun, "at">): void {
-  writeAtomic(lastRunFile(phrenPath, project), `${JSON.stringify({ ...marker, at: marker.finishedAt }, null, 2)}\n`);
-}
-
-export function readLastRun(phrenPath: string, project: string): DreamLastRun | undefined {
-  try {
-    const value = JSON.parse(fs.readFileSync(lastRunFile(phrenPath, project), "utf8"));
-    return value && typeof value.to === "string" && Number.isFinite(Date.parse(value.to)) ? value as DreamLastRun : undefined;
-  } catch { return undefined; }
-}
-
-/** Pending structured operations, plus additions the review budget deferred; queued additions are owned by the review queue. */
-export function pendingDreamProposals(phrenPath: string, project: string): number {
-  let names: string[];
-  try { names = fs.readdirSync(dreamsDir(phrenPath, project)); } catch { return 0; }
-  let count = 0;
-  for (const name of names.filter(n => n.endsWith(".json") && n !== "last-run.json")) {
-    try {
-      const record = JSON.parse(fs.readFileSync(path.join(dreamsDir(phrenPath, project), name), "utf8")) as DreamRecord;
-      count += record.outcomes.filter(o => (o.status === "proposed" && o.op !== "add_finding") || o.status === "deferred").length;
-    } catch { /* Not a run record. */ }
-  }
-  return count;
-}
-
-/** Apply selected zero-based indices from a stored run, never replay completed changes. */
-export async function applyDreamProposals(phrenPath: string, project: string, runId: string, only?: number[]): Promise<DreamRecord> {
-  if (!/^[a-zA-Z0-9_-]+$/.test(runId)) throw new Error("Invalid dream run ID.");
+/** Apply, reject or resolve selected zero-based indices from a stored run. */
+export async function applyDreamProposals(
+  phrenPath: string, project: string, runId: string, only?: number[],
+  decision: { reject?: boolean; resolve?: DreamDecision["outcome"]; reason?: string } = {},
+): Promise<Omit<DreamRecord, "outcomes"> & { outcomes: DreamEffectiveOutcome[] }> {
+  const file = dreamRecordFile(phrenPath, project, runId);
+  if (decision.reason !== undefined && !decision.reject && !decision.resolve) throw new Error("A reason requires rejection or conflict resolution.");
+  if (decision.resolve && (decision.reject || only?.length !== 1)) throw new Error("Conflict resolution requires exactly one proposal index and its chosen outcome.");
   if (only?.some(n => !Number.isSafeInteger(n) || n < 0)) throw new Error("Proposal indices must be nonnegative integers.");
   const { dreamLockPath, readDreamConfig } = await import("./run.js");
   return withFileLock(dreamLockPath(phrenPath, project), async () => {
-    const file = path.join(dreamsDir(phrenPath, project), `${runId}.json`);
-    const record = JSON.parse(fs.readFileSync(file, "utf8")) as DreamRecord;
-    if (record.changeset.project !== project || record.changeset.runId !== runId) throw new Error("Dream record identity mismatch.");
+    const record = readDreamRecord(file, project, runId);
     if (only?.some(n => !record.changeset.changes[n])) throw new Error("Unknown proposal index.");
+    const selected = record.outcomes.filter(o => !only || only.includes(o.index));
+    const tracked = record.mode === "propose" ? selected.filter(isStructuredProposal) : [];
+    if ((decision.reject || decision.resolve) && only && selected.some(o => o.op === "add_finding")) {
+      throw new Error("Addition proposals are decided in the review queue.");
+    }
+    for (const { index } of tracked) recoverDreamDecision(phrenPath, project, runId, index, record.changeset.changes[index]);
+    const decisions = readDreamDecisions(phrenPath, project, runId);
+    const active = (o: DreamOutcome) => activeDreamDecisions(runId, o, decisions.get(o.index));
+    const pending = tracked.filter(o => isPendingProposal(o) && !active(o).length);
+    const attempts = new Map<number, DreamOutcome>();
+    const result = () => {
+      const current = readDreamDecisions(phrenPath, project, runId);
+      const outcomes = record.outcomes.map(o => {
+        const entries = record.mode === "propose" ? activeDreamDecisions(runId, o, current.get(o.index)) : [];
+        return entries.length ? effectiveDreamOutcome(o, entries) : (attempts.get(o.index) ?? o);
+      });
+      return sanitizeDream({ ...record, outcomes });
+    };
+    if (decision.resolve) {
+      const proposal = tracked[0];
+      const entries = proposal ? active(proposal) : [];
+      if (!proposal || effectiveDreamOutcome(proposal, entries).status !== "conflicted") throw new Error("This proposal has no opposing decisions to resolve.");
+      writeDreamDecision(phrenPath, project, { runId, index: proposal.index, op: proposal.op, outcome: decision.resolve,
+        reason: decision.reason?.trim() || undefined, supersedes: entries.map(d => d.id) });
+      return result();
+    }
+    if (decision.reject) {
+      for (const { index, op } of pending) {
+        writeDreamDecision(phrenPath, project, { runId, index, op, outcome: "rejected", reason: decision.reason?.trim() || undefined });
+      }
+      return result();
+    }
     const config = readDreamConfig(phrenPath, project);
     // Validate all targets before our own earlier operations can modify them.
     const current = findingVersions(phrenPath, project);
-    // An addition the review budget deferred is queued again, never written to memory directly.
-    for (const { index } of record.outcomes.filter(o => o.status === "deferred" && o.op === "add_finding" && (!only || only.includes(o.index)))) {
-      const outcome = sanitizeDream({ index, op: "add_finding" as const, ...proposeOne(phrenPath, project, runId, index, record.changeset.changes[index]) });
-      record.outcomes = record.outcomes.map(o => o.index === index ? outcome : o);
+    // Keep the release queue publication checkpoint for deferred additions.
+    for (const proposal of selected.filter(o => o.status === "deferred" && o.op === "add_finding")) {
+      const { index } = proposal;
+      const publication = sanitizeDream({ ...proposal, ...proposeOne(phrenPath, project, runId, index, record.changeset.changes[index]) });
+      record.outcomes = record.outcomes.map(o => o.index === index ? publication : o);
       writeAtomic(file, `${JSON.stringify(sanitizeDream(record), null, 2)}\n`);
-      appendJournal(phrenPath, project, `- ${new Date().toISOString()} ${runId}#${index} ${outcome.status}: ${outcome.detail}\n`);
     }
-    const eligible = new Set(record.outcomes.filter(o => o.status === "proposed" && o.op !== "add_finding" && (!only || only.includes(o.index))).map(o => o.index));
-    const stale = new Set([...eligible].filter(index => targetIds(record.changeset.changes[index]).some(id => {
+    const eligible = pending.map(o => o.index);
+    const stale = new Set(eligible.filter(index => targetIds(record.changeset.changes[index]).some(id => {
       const fid = id.replace(/^fid:/, "");
       return !current[fid] || !record.findingVersions?.[fid] || current[fid] !== record.findingVersions[fid];
     })));
+    const applicable = eligible.filter(i => !stale.has(i)).map(i => record.changeset.changes[i]);
     for (const index of eligible) {
       const change = record.changeset.changes[index];
-      let result: { status: DreamOutcomeStatus; detail: string };
-      if (stale.has(index)) result = { status: "failed", detail: "target finding missing or changed since the run" };
-      else {
-        const ids = targetIds(change).map(id => id.replace(/^fid:/, ""));
-        const selected = [...eligible].filter(i => !stale.has(i)).map(i => record.changeset.changes[i]);
-        try {
-          result = await applyOne(phrenPath, project, change, selected, {
-            mode: "apply", injectBudgetKB: config.injectBudgetKB, model: record.model,
-            expectedFindings: Object.fromEntries(ids.map(fid => [fid, current[fid]])),
-          });
-          const after = findingVersions(phrenPath, project);
-          for (const fid of ids) current[fid] = after[fid];
-        } catch (err) { result = { status: "failed", detail: errorText(err) }; }
+      if (stale.has(index)) {
+        attempts.set(index, { index, op: change.op, status: "failed", detail: "target finding missing or changed since the run" });
+        continue;
       }
-      const outcome = sanitizeDream({ index, op: change.op, ...result });
-      record.outcomes = record.outcomes.map(o => o.index === index ? outcome : o);
-      // Checkpoint each outcome before proceeding to the next proposal.
-      writeAtomic(file, `${JSON.stringify(sanitizeDream(record), null, 2)}\n`);
-      appendJournal(phrenPath, project, `- ${new Date().toISOString()} ${runId}#${index} ${outcome.status}: ${outcome.detail}\n`);
+      const ids = targetIds(change).map(id => id.replace(/^fid:/, ""));
+      let outcome: { status: DreamOutcomeStatus; detail: string };
+      try {
+        outcome = await applyOne(phrenPath, project, change, applicable, {
+          mode: "apply", injectBudgetKB: config.injectBudgetKB, model: record.model,
+          expectedFindings: Object.fromEntries(ids.map(fid => [fid, current[fid]])),
+        });
+      } catch (err) {
+        attempts.set(index, { index, op: change.op, status: "failed", detail: errorText(err) });
+        continue;
+      }
+      if (outcome.status === "applied") writeDreamDecision(phrenPath, project, { runId, index, op: change.op, outcome: "applied" }, change);
+      else attempts.set(index, { index, op: change.op, ...outcome });
+      const after = findingVersions(phrenPath, project);
+      for (const fid of ids) current[fid] = after[fid];
     }
-    return sanitizeDream(record);
+    return result();
   });
 }

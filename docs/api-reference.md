@@ -1755,11 +1755,11 @@ Update configuration for a specific domain. Unified setter for all config domain
 
 ## Dreaming
 
-An offline pass that reorganizes a project's memory between sessions ([Dreaming](dreaming.md)). The Hook starts scheduled dreams on its own when a project's `dreaming` config enables them; these tools run, inspect and read them. In the core profile they are reached through `phren_admin`. CLI: `phren dream run|status|log`.
+An offline pass that reorganizes a project's memory between sessions ([Dreaming](dreaming.md)). The Hook starts scheduled dreams on its own when a project's `dreaming` config enables them; these tools run, inspect and read them. In the core profile they are reached through `phren_admin`. CLI: `phren dream run|apply|status|log`.
 
 ### `dream_run`
 
-Run a dream now. Returns `busy` while another dream for the project runs, and `disabled` while dreaming is off unless `force`.
+Run a dream now. Returns `busy` while another dream or proposal decision holds the project lock, and `disabled` while dreaming is off unless `force`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1772,19 +1772,25 @@ Run a dream now. Returns `busy` while another dream for the project runs, and `d
 
 Enabled, mode, cadence, window, last run (`dreams/last-run.json`), next eligible time and the last run's outcome counts. Without `project`, every project in the active profile. The next eligible time follows timing only; the Hook also waits while an agent works in the project.
 
+`acceptance.runs` is the number of stored runs in the window. Each `acceptance.byOp` entry reports `proposed`, `applied`, `rejected`, `pending`, `conflicted`, `skipped` and `acceptRate` for a structured operation in propose mode. The rate is `applied / (applied + rejected)`, or `null` while no proposal has been applied or rejected. Structured `applied` and `skipped` outcomes from 0.3.97 are counted. Additions approved through the review queue are not counted. The acceptance trial covers `correct` and `prune`. `conflicts` lists unresolved proposals by `runId`, `index`, `op` and active decisions.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name, optionally store-qualified. |
+| `limit` | number | no | Most recent stored runs to summarize per project (1–500, default 20). |
 
 ### `dream_apply`
 
-Apply pending structured proposals from a stored dream (`dreams/<runId>.json`) through the same paths a dream in apply mode uses. Each target finding is re-checked first; a proposal whose finding is missing or changed since the run is refused. Proposed new findings are approved through the review queue instead.
+Apply or reject pending structured proposals from a stored dream (`dreams/<runId>.json`), or explicitly resolve opposing decisions. Applying rechecks its target findings and refuses missing or changed targets. A successful mutation whose decision could not be saved is recorded on retry through a local receipt. After reconciling the memory changes for a conflicted proposal, use `resolve` to append a decision that supersedes its active decisions. A plain apply can retry publication of deferred additions through the ordinary review queue.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
 | `runId` | string | yes | The dream's run id (`phren dream log` lists them). |
-| `only` | number[] | no | Zero-based proposal indices to apply; all pending proposals when omitted. |
+| `only` | number[] | no | Zero-based proposal indices. Omit to select all pending proposals. |
+| `reject` | boolean | no | Reject the selected proposals. Defaults to `false`. |
+| `resolve` | enum | no | `applied` or `rejected`. Supply one conflicted index in `only`. |
+| `reason` | string | no | Reason to record with a rejection or resolution. |
 
 ### `dream_log`
 
