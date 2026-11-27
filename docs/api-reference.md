@@ -1398,6 +1398,7 @@ Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under
 ### `export_project`
 
 Export a project's data (findings, task, summary, AGENTS.md) as portable JSON.
+Use `phren export vault <dir>` to generate linked Markdown notes across projects. [Obsidian vault export](obsidian.md)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

@@ -477,6 +477,15 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "export",
+    topic: "core",
+    usage: "phren export vault <dir> [[--project <name>]... [--dry-run] | --force-unlock]",
+    cheatUsage: "phren export vault <dir>",
+    summary: "Export findings and fragment links to an Obsidian vault",
+    featured: true,
+    run: async (args, ctx) => (await import("./cli-handlers.js")).runExportCommand(args, ctx.phrenPath),
+  },
+  {
     name: "code",
     topic: "core",
     usage: "phren code <index|status|search|outline|refs|def|usage> [project]",

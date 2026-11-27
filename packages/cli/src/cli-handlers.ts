@@ -10,6 +10,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { parseArgs } from "util";
 import {
   defaultPhrenPath,
   findPhrenPath,
@@ -57,6 +58,29 @@ async function promptProjectOwnership(phrenPath: string, fallback: ProjectOwners
 }
 
 // ── Native handlers ─────────────────────────────────────────────────────────
+
+export async function runExportCommand(args: string[], phrenPath: () => string): Promise<number> {
+  const { positionals, values } = parseArgs({
+    args, allowPositionals: true,
+    options: { project: { type: "string", multiple: true }, "dry-run": { type: "boolean" }, "force-unlock": { type: "boolean" } },
+  });
+  if (positionals.length !== 2 || positionals[0] !== "vault" || !positionals[1]) {
+    console.error("Usage: phren export vault <dir> [[--project <name>]... [--dry-run] | --force-unlock]");
+    return 1;
+  }
+  const { exportVault, forceUnlockVault } = await import("./export/vault.js");
+  const dryRun = values["dry-run"] ?? false;
+  if (values["force-unlock"]) {
+    if (dryRun || values.project?.length) throw new Error("Use --force-unlock by itself.");
+    const removed = forceUnlockVault(phrenPath(), positionals[1]);
+    console.log(removed ? "Removed the vault export lock." : "The vault has no export lock.");
+    return 0;
+  }
+  const counts = await exportVault(phrenPath(), positionals[1], values.project ?? [], dryRun);
+  const count = (total: number, noun: string) => `${total} ${noun}${total === 1 ? "" : "s"}`;
+  console.log(`${dryRun ? "Would export" : "Exported"} ${count(counts.projects, "project")}, ${count(counts.findings, "finding")}, and ${count(counts.fragments, "fragment")}.`);
+  return 0;
+}
 
 export async function runAddCommand(args: string[]): Promise<number> {
   const positional = getPositionalArgs(args, ["--ownership"]);
