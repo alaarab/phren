@@ -265,6 +265,20 @@ describe("mac windows: requests", () => {
     expect(killed).toBe(true);
   });
 
+  it("reports a window that lost focus before the input landed", async () => {
+    behaviour = call => call.helper === "wininput" && call.args[0] === "tap" ? { code: 6, stderr: "focus\n" } : undefined;
+    await expect(macWindowsAct({ action: "tap", id: 7, x: 0.2, y: 0.2 })).rejects.toMatchObject({
+      status: 409, message: "That window lost focus on the Mac before the input landed. Nothing more was sent.", details: { code: "mac-windows-focus" },
+    });
+  });
+
+  it("reports a helper that stopped because its parent died", async () => {
+    behaviour = call => call.helper === "wininput" && call.args[0] === "tap" ? { code: 7, stderr: "orphaned\n" } : undefined;
+    await expect(macWindowsAct({ action: "tap", id: 7, x: 0.2, y: 0.2 })).rejects.toMatchObject({
+      status: 409, message: "The Mac window helper stopped.", details: { code: "mac-windows-helper" },
+    });
+  });
+
   it("maps helper exit codes to permission and missing-window errors, prompting once", async () => {
     behaviour = call => call.helper === "wininput" && call.args[0] === "tap" ? { code: 3, stderr: "accessibility\n" } : undefined;
     await expect(macWindowsAct({ action: "tap", id: 7, x: 0.1, y: 0.1 })).rejects.toMatchObject({ status: 403, details: { code: "mac-windows-accessibility" } });

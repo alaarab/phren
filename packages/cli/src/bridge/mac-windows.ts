@@ -315,6 +315,8 @@ function helperError(result: MacWindowsHelperResult): BridgeError {
   const said = result.stderr.replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 160);
   if (result.code === 3 && /screen-recording/.test(said)) return new BridgeError(403, screenRecordingHelp(), { code: "mac-windows-screen-recording" });
   if (result.code === 3 && /accessibility/.test(said)) return new BridgeError(403, accessibilityHelp(), { code: "mac-windows-accessibility" });
+  if (result.code === 6 || /^focus/i.test(said)) return new BridgeError(409, "That window lost focus on the Mac before the input landed. Nothing more was sent.", { code: "mac-windows-focus" });
+  if (result.code === 7 || /^orphaned/i.test(said)) return new BridgeError(409, "The Mac window helper stopped.", { code: "mac-windows-helper" });
   if (result.code === 5 || /^no window/i.test(said)) return new BridgeError(404, "That window is gone from this Mac.");
   if (result.code === 3) return new BridgeError(403, said || "macOS did not grant that permission.", { code: "mac-windows-permission" });
   if (result.code === 2) return new BridgeError(400, `The Mac window helper refused that command: ${said || "bad arguments"}`);
