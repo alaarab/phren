@@ -148,21 +148,29 @@ func raise() {
 // The window under a screen point, found from the hit element itself or by
 // walking up to the first ancestor with a window or the AXWindow role.
 let systemWide = AXUIElementCreateSystemWide()
-func pointWindow(_ point: CGPoint) -> AXUIElement? {
+func pointWindow(_ point: CGPoint, deadline: UInt64? = nil) -> AXUIElement? {
+    func canQuery() -> Bool {
+        guard let deadline else { return true }
+        return DispatchTime.now().uptimeNanoseconds < deadline && getppid() != 1 && !isCancelled()
+    }
     var hitRef: AXUIElement?
-    guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &hitRef) == .success,
+    guard canQuery(),
+          AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &hitRef) == .success,
           var element = hitRef else { return nil }
     for _ in 0..<64 {
+        guard canQuery() else { return nil }
         var windowRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
            let value = windowRef, CFGetTypeID(value) == AXUIElementGetTypeID() {
-            return value as! AXUIElement
+            return (value as! AXUIElement)
         }
+        guard canQuery() else { return nil }
         var roleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
            let role = roleRef as? String, role == kAXWindowRole as String {
             return element
         }
+        guard canQuery() else { return nil }
         var parentRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentRef) == .success,
               let value = parentRef, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
@@ -179,13 +187,10 @@ func fraction(_ value: String) -> Double? {
 func mappedPoint(_ bounds: CGRect, _ fx: Double, _ fy: Double) -> CGPoint {
     CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
 }
-// A synchronous AX call can block, and while the button is down a stall would
-// run past the Hook's kill grace and leave the button pressed. A hit test that
-// times out then reads as "not the target", which ends the gesture through its
-// normal release.
+// Set the timeout process-wide so the elements returned during traversal
+// inherit it as well.
 func boundAXMessaging() {
-    _ = AXUIElementSetMessagingTimeout(systemWide, 0.1)
-    _ = AXUIElementSetMessagingTimeout(element, 0.1)
+    guard AXUIElementSetMessagingTimeout(systemWide, 0.1) == .success else { fail(6, "focus") }
 }
 // The window under a screen point must be the one being driven before anything
 // is posted there: a panel or another window floating above the target hands
@@ -193,10 +198,10 @@ func boundAXMessaging() {
 func requireTarget(_ point: CGPoint) {
     guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
 }
-// Whether the window under a screen point is still the one being driven.
-func isTarget(_ point: CGPoint) -> Bool {
-    guard let hitWindow = pointWindow(point) else { return false }
-    return CFEqual(hitWindow, window)
+func dragInterruption() -> (code: Int32, message: String)? {
+    if getppid() == 1 { return (7, "orphaned") }
+    if isCancelled() { return (8, "cancelled") }
+    return nil
 }
 // Absolute deadlines keep the drag's steps evenly spaced even when posting an
 // event runs late; a step already due is not delayed.
@@ -272,8 +277,13 @@ func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
     // down; a native drag destination must never receive the drop instead.
     for share in [0.25, 0.5, 0.75, 1.0] {
         requireTarget(CGPoint(x: start.x + (end.x - start.x) * CGFloat(share), y: start.y + (end.y - start.y) * CGFloat(share)))
+        checkAlive()
+        checkCancel()
     }
     let began = DispatchTime.now().uptimeNanoseconds
+    // Cap all held-button hit tests at 1 s. At most one 100 ms AX call can
+    // overrun that deadline, leaving time to release before the 1.5 s kill.
+    let releaseDeadline = began + 1_000_000_000
     down.post(tap: .cghidEventTap)
     // Where the button last was: an interrupted gesture releases there, not at
     // a point the drag never reached.
@@ -282,12 +292,13 @@ func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
     for (index, event) in dragged.enumerated() {
         let deadline = began + UInt64(Double(durationMs) * 1_000_000 * Double(index + 1) / Double(steps))
         sleepUntil(deadline)
-        if getppid() == 1 { failure = (7, "orphaned"); break }
-        if isCancelled() { failure = (8, "cancelled"); break }
+        if let interrupted = dragInterruption() { failure = interrupted; break }
         // The window under the next point must still be the target: a panel can
         // cover any step, so every one is hit-tested (bounded) before it is
         // posted, and the first failure ends the drag through the release.
-        if !isTarget(points[index]) {
+        let hit = pointWindow(points[index], deadline: releaseDeadline).map { CFEqual($0, window) } ?? false
+        if let interrupted = dragInterruption() { failure = interrupted; break }
+        guard hit, DispatchTime.now().uptimeNanoseconds < releaseDeadline else {
             failure = (6, "focus")
             break
         }
