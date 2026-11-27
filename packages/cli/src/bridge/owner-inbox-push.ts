@@ -40,6 +40,8 @@ const entrySchema = z.object({
 const ledgerSchema = z.object({
   version: z.literal(1),
   initializedAt: z.string().datetime(),
+  /** Absent in ledgers written before the initial snapshot IDs were saved. */
+  initialRowIds: z.array(z.string().uuid()).optional(),
   entries: z.array(entrySchema).max(MAX_ENTRIES),
 }).strict();
 type LedgerEntry = z.infer<typeof entrySchema>;
@@ -140,7 +142,9 @@ export class OwnerInboxPushSweep {
       return;
     }
     const owned = openItems.filter(isOwnerInboxPushSource);
-    const ledger = loaded ?? { version: 1 as const, initializedAt: at, entries: this.seed(owned, now) };
+    const ledger: Ledger = loaded ?? {
+      version: 1, initializedAt: at, initialRowIds: openItems.map(item => item.id), entries: this.seed(owned, now),
+    };
     if (!loaded) {
       // The candidate must be durable before any provider sees it.
       try { await atomicInPrivateDir(this.file, ledger); }
@@ -149,9 +153,15 @@ export class OwnerInboxPushSweep {
         return;
       }
     } else {
+      const legacy = ledger.initialRowIds === undefined;
+      if (legacy) {
+        // Recover the baseline once using the cutoff recorded by older ledgers.
+        const cutoff = Date.parse(ledger.initializedAt);
+        ledger.initialRowIds = openItems.filter(item => Date.parse(item.createdAt) <= cutoff).map(item => item.id);
+      }
       const reconciled = this.reconcile(ledger, owned, now);
       const merged = this.mergeAccepted(ledger);
-      if (reconciled) {
+      if (legacy || reconciled) {
         try { await atomicInPrivateDir(this.file, ledger); }
         catch (error) {
           this.log(`Phren Inbox push: could not save the new candidate, so no Inbox alert was sent: ${error instanceof Error ? error.message : String(error)}`);
@@ -197,9 +207,8 @@ export class OwnerInboxPushSweep {
     return chosen.map(item => ({ id: item.id, updatedAt: item.updatedAt, expiresAt, sentDeviceIDs: [] }));
   }
 
-  /** Add rows created after the initial snapshot and drop expired entries.
-   * Retired rows never re-enter: their creation time is either before the
-   * cursor or their 24-hour window already closed. */
+  /** Add rows absent from the initial snapshot and drop expired entries.
+   * Retired rows are either in that snapshot or past their 24-hour window. */
   private reconcile(ledger: Ledger, openItems: ObservedItem[], now: number): boolean {
     let changed = false;
     const kept = ledger.entries.filter(entry => Date.parse(entry.expiresAt) > now);
@@ -208,12 +217,10 @@ export class OwnerInboxPushSweep {
       ledger.entries = kept; changed = true;
     }
     const known = new Set(ledger.entries.map(entry => entry.id));
-    const initializedAt = Date.parse(ledger.initializedAt);
+    const initialRows = new Set(ledger.initialRowIds);
     for (const item of openItems) {
-      if (item.state !== "open" || item.firstOpen === false || known.has(item.id)) continue;
-      const created = Date.parse(item.createdAt);
-      if (!(created > initializedAt)) continue;
-      const expiresAt = created + DAY_MS;
+      if (item.state !== "open" || item.firstOpen === false || known.has(item.id) || initialRows.has(item.id)) continue;
+      const expiresAt = Date.parse(item.createdAt) + DAY_MS;
       // A row whose window already closed must not churn back in.
       if (expiresAt <= now || ledger.entries.length >= MAX_ENTRIES) continue;
       ledger.entries.push({ id: item.id, updatedAt: item.updatedAt, expiresAt: new Date(expiresAt).toISOString(), sentDeviceIDs: [] });
@@ -230,11 +237,8 @@ export class OwnerInboxPushSweep {
   private async deliver(ledger: Ledger): Promise<void> {
     const devices = [...new Set(this.sender.ownerInboxPushDevices())].filter(device => deviceIDSchema.safeParse(device).success).sort();
     if (!devices.length) return;
-    const initializedAt = Date.parse(ledger.initializedAt);
-    const age = (entry: LedgerEntry) => {
-      const created = Date.parse(entry.expiresAt) - DAY_MS;
-      return created === initializedAt ? Date.parse(entry.updatedAt) : created;
-    };
+    const initialRows = new Set(ledger.initialRowIds);
+    const age = (entry: LedgerEntry) => initialRows.has(entry.id) ? Date.parse(entry.updatedAt) : Date.parse(entry.expiresAt) - DAY_MS;
     const candidates = [...ledger.entries].sort((a, b) => age(a) - age(b) || a.id.localeCompare(b.id));
     const openItem = (id: string) => this.latest.find(item => item.id === id && item.state === "open" && item.firstOpen !== false && isOwnerInboxPushSource(item));
     let selected = 0;

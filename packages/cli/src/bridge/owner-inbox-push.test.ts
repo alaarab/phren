@@ -81,10 +81,11 @@ describe("owner inbox push sweep", () => {
     if (process.platform !== "win32") expect((await stat(file)).mode & 0o077).toBe(0);
 
     sender.devices.push(DEVICE_A);
-    await first.observe(rows);
+    const restarted = sweep(sender);
+    await restarted.observe(rows);
     expect(sender.attempts.map(attempt => attempt.split(":")[0]).sort()).toEqual([ids[1], ids[2], ids[3]].sort());
     expect(sender.sent).toHaveLength(3);
-    await first.observe(rows);
+    await restarted.observe(rows);
     expect(sender.attempts).toHaveLength(3);
   });
 

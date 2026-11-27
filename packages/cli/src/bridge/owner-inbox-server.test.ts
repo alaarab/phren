@@ -54,7 +54,7 @@ function inboxRead(query: string, peer = false): Promise<unknown> {
   });
 }
 
-it("sends a persisted CLI add from the activity timer with an origin/main peer", async () => {
+it("sends a CLI add made in the ledger's initialization millisecond with an origin/main peer", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "inbox-"));
   const ledgerFile = path.join(root, "owner-inbox-push.json");
   const previousUmask = process.umask();
@@ -87,7 +87,7 @@ it("sends a persisted CLI add from the activity timer with an origin/main peer",
   let startupError: unknown;
   void serving.catch(error => { startupError = error; });
 
-  const readLedger = async () => JSON.parse(await readFile(ledgerFile, "utf8")) as unknown;
+  const readLedger = async () => JSON.parse(await readFile(ledgerFile, "utf8")) as { initializedAt: string; entries: unknown[] };
   try {
     await vi.waitFor(() => {
       if (startupError) throw startupError;
@@ -96,9 +96,12 @@ it("sends a persisted CLI add from the activity timer with an origin/main peer",
     // Let the actual interval initialize the ledger before adding any rows.
     await vi.advanceTimersByTimeAsync(5000);
     await vi.waitFor(async () => expect(await readLedger()).toMatchObject({ entries: [] }));
+    const { initializedAt } = await readLedger();
+    vi.setSystemTime(new Date(initializedAt));
 
     const cliInbox = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
     const { item } = await cliInbox.run({ action: "add", title: "OVH US VPS-2 is in stock" });
+    expect(item).toMatchObject({ createdAt: initializedAt });
     const { id, title } = item as { id: string; title: string };
     devices.mockReturnValue([DEVICE]);
     staleSources.mockReturnValue([staleTask]);
