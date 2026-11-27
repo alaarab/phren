@@ -143,10 +143,13 @@ function parseSample(body: Buffer, codec: MacWindowCodec, maxSide: number): Pars
 
 /** Close code and reason for an admission refusal (BridgeError with a stable code). */
 function admissionClose(error: unknown): { code: number; reason: string } {
+  // Section 1's 1008 reason tokens only. The slice-1 permission code is the
+  // same refusal as the stream's Screen Recording token.
   const stable = new Set(["mac-windows-owner-only", "mac-windows-disabled", "mac-windows-stopped", "mac-windows-badge",
-    "mac-windows-screen-recording", "unsupported-platform", "mac-windows-permission"]);
+    "mac-windows-screen-recording", "unsupported-platform"]);
   const details = error instanceof BridgeError ? error.details : undefined;
   const code = details && typeof details === "object" && !Array.isArray(details) && typeof details.code === "string" ? details.code : undefined;
+  if (code === "mac-windows-permission") return { code: 1008, reason: "mac-windows-screen-recording" };
   return code && stable.has(code) ? { code: 1008, reason: code } : { code: 1011, reason: "capture-failed" };
 }
 

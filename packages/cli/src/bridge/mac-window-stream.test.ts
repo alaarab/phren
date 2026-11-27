@@ -620,6 +620,32 @@ describe("lease outcomes", () => {
   });
 });
 
+describe("admission close mapping", () => {
+  it.each([
+    ["mac-windows-disabled", 1008, "mac-windows-disabled"],
+    ["mac-windows-stopped", 1008, "mac-windows-stopped"],
+    ["mac-windows-owner-only", 1008, "mac-windows-owner-only"],
+    ["mac-windows-badge", 1008, "mac-windows-badge"],
+    ["mac-windows-screen-recording", 1008, "mac-windows-screen-recording"],
+    ["unsupported-platform", 1008, "unsupported-platform"],
+    ["mac-windows-permission", 1008, "mac-windows-screen-recording"],
+  ])("maps the %s admission refusal to %i %s", async (failCode, code, why) => {
+    admission.failCode = failCode;
+    const { deps } = harness();
+    const client = await start(`id=${ID}`, deps);
+    expect(client.closed).toEqual({ code, reason: why });
+    expect(activeMacWindowStreams()).toBe(0);
+    expect(deps.helper).not.toHaveBeenCalled();
+  });
+  it("uses capture-failed for a token outside the wire contract", async () => {
+    admission.failCode = "mac-windows-accessibility";
+    const { deps } = harness();
+    const client = await start(`id=${ID}`, deps);
+    expect(client.closed).toEqual({ code: 1011, reason: "capture-failed" });
+    expect(activeMacWindowStreams()).toBe(0);
+  });
+});
+
 describe("tier changes and recovery", () => {
   it("applies a set at the next pull, starts a new epoch and changes the pull rate", async () => {
     const { deps, children } = harness();
