@@ -81,6 +81,17 @@ describe("gitboy-read scope admission", () => {
     }
   });
 
+  it("refuses the four Mac window routes under both scopes", () => {
+    for (const scope of ["gitboy-read", "gitboy-write"] as const) {
+      for (const method of ["GET", "POST"]) {
+        for (const route of ["/v1/mac/windows", "/v1/mac/windows/snapshot", "/v1/mac/windows/action", "/v1/mac/windows/permissions"]) {
+          expect(admit(`${method} ${route} HTTP/1.1`, ["Host: phren.local", "Content-Length: 0"], "", scope), `${scope} ${method} ${route}`)
+            .toMatchObject({ ok: false, status: 403 });
+        }
+      }
+    }
+  });
+
   it("admits only an exact-id task completion on the write scope", () => {
     const body = JSON.stringify({ id: "bid:cccc0001" });
     const line = "POST /v1/projects/app/tasks/complete HTTP/1.1";
