@@ -1,11 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { queryDocBySourceKey, queryRows, queryFragmentLinks, queryCrossProjectFragments, ensureGlobalEntitiesTable, logFragmentMiss } from "../shared/index.js";
 import { runtimeFile } from "../shared.js";
+import { getNonPrimaryStores } from "../store-registry.js";
 import { withFileLock } from "../shared/governance.js";
 import { logger } from "../logger.js";
 
@@ -111,14 +112,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: true, data: [], message: `No docs found referencing fragment "${entity}".` });
       }
 
+      const attachedStorePaths = getNonPrimaryStores(ctx.phrenPath).map(store => store.path);
       const results: { sourceDoc: string; snippet: string }[] = [];
       for (const doc of relatedDocs) {
-        const docProject = doc.split("/")[0];
-        let docPhrenPath = ctx.phrenPath;
-        try {
-          docPhrenPath = resolveStoreForProject(ctx, docProject, "read").phrenPath;
-        } catch { /* fall back to primary */ }
-        const docRow = queryDocBySourceKey(db, docPhrenPath, doc);
+        const docRow = queryDocBySourceKey(db, ctx.phrenPath, doc, attachedStorePaths);
         const snippet = docRow?.content ? docRow.content.slice(0, 200) : "";
         results.push({ sourceDoc: doc, snippet });
       }

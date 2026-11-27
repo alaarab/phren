@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import { runTopLevelCommand } from "../entrypoint.js";
 import { buildIndex, queryFragmentLinks, queryRows } from "../shared/index.js";
+import { writeStoreRegistry } from "../store-registry.js";
 import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
 
 const interruption = vi.hoisted(() => ({ beforeWrite: undefined as ((file: string) => void) | undefined }));
@@ -62,9 +65,13 @@ describe("phren import vault", () => {
     }
   }
 
+  function importRoots(projectReference = reference) {
+    const parent = path.join(projectReference, "obsidian");
+    return fs.readdirSync(parent, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => path.join(parent, entry.name));
+  }
+
   function importRoot() {
-    const parent = path.join(reference, "obsidian");
-    return path.join(parent, fs.readdirSync(parent)[0]);
+    return importRoots()[0];
   }
 
   it("uses the current PHREN_PATH when the next import targets a different store", async () => {
@@ -77,9 +84,53 @@ describe("phren import vault", () => {
 
     vi.stubEnv("PHREN_PATH", nextStore);
     expect(await run()).toMatchObject({ code: 0, error: "" });
-    const parent = path.join(nextReference, "obsidian");
-    expect(fs.readFileSync(path.join(parent, fs.readdirSync(parent)[0], "Note.md"), "utf8")).toBe("Import to the selected store\n");
+    expect(fs.readFileSync(path.join(importRoots(nextReference)[0], "Note.md"), "utf8")).toBe("Import to the selected store\n");
     expect(fs.existsSync(path.join(reference, "obsidian"))).toBe(false);
+  });
+
+  it("only routes imports to subscribed projects in attached stores", async () => {
+    const team = path.join(tmp.path, "team-store");
+    const teamDemo = path.join(team, "demo", "reference");
+    const teamGuides = path.join(team, "guides", "reference");
+    fs.mkdirSync(teamDemo, { recursive: true });
+    fs.mkdirSync(teamGuides, { recursive: true });
+    writeStoreRegistry(store, { version: 1, stores: [
+      { id: "aaa11111", name: "personal", path: store, role: "primary", sync: "managed-git" },
+      { id: "bbb22222", name: "team", path: team, role: "team", sync: "managed-git", projects: ["guides"] },
+    ] });
+    writeFile(path.join(vault, "Note.md"), "Visible reference\n");
+
+    const unsubscribed = await run([], vault, "team/demo");
+    expect(unsubscribed).toMatchObject({ code: 1, error: expect.stringContaining('Project "demo" not found in store "team"') });
+    expect(fs.existsSync(path.join(teamDemo, "obsidian"))).toBe(false);
+    expect((await run()).code).toBe(0);
+    expect(fs.readFileSync(path.join(importRoot(), "Note.md"), "utf8")).toBe("Visible reference\n");
+    expect((await run([], vault, "team/guides")).code).toBe(0);
+    expect(fs.readFileSync(path.join(importRoots(teamGuides)[0], "Note.md"), "utf8")).toBe("Visible reference\n");
+  });
+
+  it("preserves LF and CRLF copies across a Git checkout with autocrlf", async () => {
+    const exec = promisify(execFile);
+    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: path.join(tmp.path, "gitconfig") };
+    const git = (...args: string[]) => exec("git", ["-c", "core.autocrlf=true", "-c", "core.safecrlf=false", ...args], { cwd: store, env });
+    await git("init", "--quiet");
+    const notes = [["LF.md", "First line\nSecond line\n"], ["CRLF.md", "First line\r\nSecond line\r\n"]] as const;
+    for (const [name, text] of notes) writeFile(path.join(vault, "Guides", name), text);
+    expect((await run()).code).toBe(0);
+    const root = importRoot();
+    const originals = notes.map(([name, text]) => ({ file: path.join(root, "Guides", name), text }));
+    const control = path.join(reference, "existing.md");
+    const files = [control, ...originals.map(note => note.file)];
+    await git("add", "--", "demo/reference");
+    for (const file of files) fs.unlinkSync(file);
+    await git("checkout-index", "--", ...files.map(file => path.relative(store, file).split(path.sep).join("/")));
+
+    expect(fs.readFileSync(control, "utf8")).toBe("Original reference\r\n");
+    for (const { file, text } of originals) expect(fs.readFileSync(file, "utf8")).toBe(text);
+    expect((await run()).output).toContain("0 added, 0 updated, 2 unchanged");
+    for (const [name] of notes) fs.unlinkSync(path.join(vault, "Guides", name));
+    expect((await run(["--prune"])).output).toContain("2 missing, 2 pruned");
+    expect(originals.every(note => !fs.existsSync(note.file))).toBe(true);
   });
 
   it("previews, filters and indexes a nested vault without altering note bytes", async () => {
@@ -266,10 +317,9 @@ describe("phren import vault", () => {
     expect((await run()).code).toBe(0);
     const firstRoot = importRoot();
     expect((await run([], second)).code).toBe(0);
-    const parent = path.dirname(firstRoot);
-    const roots = fs.readdirSync(parent);
+    const roots = importRoots();
     expect(roots).toHaveLength(2);
-    const secondRoot = path.join(parent, roots.find(root => root !== path.basename(firstRoot))!);
+    const secondRoot = roots.find(root => root !== firstRoot)!;
 
     fs.unlinkSync(path.join(second, "Shared.md"));
     expect((await run(["--prune"], second)).output).toContain("1 missing, 1 pruned");

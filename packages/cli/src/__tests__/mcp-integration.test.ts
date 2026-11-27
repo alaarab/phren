@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
+import { writeStoreRegistry } from "../store-registry.js";
 import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared/index.js";
 import { register as registerSearch } from "../tools/search.js";
 import { register as registerFinding } from "../tools/finding.js";
+import { register as registerGraph } from "../tools/graph.js";
 import { register as registerTask } from "../tools/tasks.js";
 import type { McpContext } from "../tools/types.js";
 
@@ -35,6 +37,35 @@ function makeProject(phrenPath: string, name: string, files: Record<string, stri
     writeFile(path.join(dir, file), content);
   }
 }
+
+it("get_related_docs returns indexed vault notes from an attached store without project claims", async () => {
+  const tmp = makeTempDir("mcp-related-docs-");
+  const primary = path.join(tmp.path, "primary");
+  const team = path.join(tmp.path, "team");
+  const relative = "reference/obsidian/Field Notes/Survey.md";
+  makeProject(primary, "demo", { "reference/local/Survey.md": "Local reference with the same filename.\n" });
+  makeProject(team, "demo", { [relative]: "# Survey\n\nSee [[waypoint]] for the attached survey results.\n" });
+  writeStoreRegistry(primary, { version: 1, stores: [
+    { id: "aaa11111", name: "personal", path: primary, role: "primary", sync: "managed-git" },
+    { id: "bbb22222", name: "team", path: team, role: "team", sync: "managed-git" },
+  ] });
+
+  const db = await buildIndex(primary);
+  try {
+    const server = makeMockServer();
+    registerGraph(server as never, {
+      phrenPath: primary, profile: "", db: () => db, rebuildIndex: async () => {},
+      updateFileInIndex: () => {}, withWriteQueue: async fn => fn(),
+    });
+    const result = parseResult(await server.call("get_related_docs", { entity: "waypoint", project: "demo" }));
+    expect(result).toMatchObject({ ok: true, data: [
+      { sourceDoc: `demo/${relative}`, snippet: expect.stringContaining("attached survey results") },
+    ] });
+  } finally {
+    db.close();
+    tmp.cleanup();
+  }
+});
 
 describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
   let tmp: { path: string; cleanup: () => void };

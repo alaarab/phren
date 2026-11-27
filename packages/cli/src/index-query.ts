@@ -116,7 +116,9 @@ export function queryDocRows(db: SqlJsDatabase, sql: string, params: (string | n
   return raw.map(rowToDoc);
 }
 
-export function queryDocBySourceKey(db: SqlJsDatabase, phrenPath: string, sourceKey: string): DocRow | null {
+export function queryDocBySourceKey(
+  db: SqlJsDatabase, phrenPath: string, sourceKey: string, attachedStorePaths: readonly string[] = [],
+): DocRow | null {
   const match = sourceKey.match(/^([^/]+)\/(.+)$/);
   if (!match) return null;
   const [, project, rest] = match;
@@ -127,6 +129,17 @@ export function queryDocBySourceKey(db: SqlJsDatabase, phrenPath: string, source
     [project, filename]
   );
   if (!rows) return null;
+  if (attachedStorePaths.length) {
+    // Check indexed paths against their store roots before trying legacy basename keys.
+    for (const storePath of [phrenPath, ...attachedStorePaths]) {
+      const projectRoot = getProjectRoot(storePath, project);
+      const exact = rows.find(row => {
+        const relative = path.relative(projectRoot, row.path);
+        return !path.isAbsolute(relative) && !relative.startsWith(`..${path.sep}`) && normalizeDocSegment(relative) === rest;
+      });
+      if (exact) return exact;
+    }
+  }
   return rows.find((row) => getDocSourceKey(row, phrenPath) === sourceKey) ?? null;
 }
 
