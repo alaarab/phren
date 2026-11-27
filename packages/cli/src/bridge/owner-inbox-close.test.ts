@@ -175,6 +175,18 @@ describe("POST /v1/owner-inbox/close", () => {
     expect(again.data.error).toContain("already handled");
   });
 
+  it("rejects a signed malformed body at the route with 400", async () => {
+    const row = await add({ id: ID, title: TITLE });
+    const bad = await close({ id: row.id, ifUpdatedAt: row.updatedAt, decision: "undo" });
+    expect(bad.status).toBe(400);
+    const extra = await close({ id: row.id, ifUpdatedAt: row.updatedAt, decision: "resolve", computer: "Desk" });
+    expect(extra.status).toBe(400);
+    const missing = await close({ id: row.id, decision: "resolve" });
+    expect(missing.status).toBe(400);
+    // None of them touched the row.
+    expect((await stored())[0]).toMatchObject({ state: "open" });
+  });
+
   it("passes the owned row's 404 through the signed route", async () => {
     const missing = await close({ id: randomUUID(), ifUpdatedAt: AT, decision: "resolve" });
     expect(missing.status).toBe(404);
