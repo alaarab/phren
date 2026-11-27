@@ -4,6 +4,8 @@
 // stopped with SIGTERM; see mac-windows.ts.
 import Cocoa
 
+func fail(_ code: Int32, _ message: String) -> Never { FileHandle.standardError.write((message + "\n").data(using: .utf8)!); exit(code) }
+
 // The pill itself: a rounded system-red bar with the white label on top.
 final class PillView: NSView {
     override var isOpaque: Bool { false }
@@ -22,6 +24,9 @@ final class Controller: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         statusItem = makeStatusItem()
         rebuild()
+        // A signal is not evidence of a panel: a session with no screens, or
+        // panels that never became visible, must not report ready.
+        guard !NSScreen.screens.isEmpty, panels.contains(where: { $0.isVisible }) else { fail(4, "no screen") }
         // The Hook waits for this line before admitting an action, so the
         // panels must be ordered front by now.
         print("ready")
