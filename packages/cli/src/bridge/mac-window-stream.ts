@@ -55,6 +55,7 @@ export const STOP_GRACE_MS = 250;
 export const SIGKILL_AFTER_MS = 2_000;
 
 const OPEN = 1;
+const STDIN_EXIT_GRACE_MS = 1_000;
 
 export interface MacWindowStreamOptions { id: number; codec: MacWindowCodec; tier: number }
 
@@ -205,7 +206,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   /** The first terminal outcome, kept for a lease that arrives after it. */
   let outcome: string | undefined;
   const finishLease = () => {
-    if (finishedLease || !lease) return;
+    if (!ended || finishedLease || !lease) return;
     finishedLease = true;
     void lease.finish(outcome).catch(() => undefined);
   };
@@ -215,6 +216,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   /** The absolute time the pending `pullTimer` was scheduled for. */
   let pullDueAt = Infinity;
   let pullDeadline: ReturnType<typeof setTimeout> | undefined;
+  let stdinExitTimer: ReturnType<typeof setTimeout> | undefined;
   let ackDeadline: ReturnType<typeof setTimeout> | undefined;
   let tokenTimer: ReturnType<typeof setTimeout> | undefined;
   let termTimer: ReturnType<typeof setTimeout> | undefined;
@@ -274,7 +276,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   const sendText = (message: Record<string, unknown>, done?: () => void) => {
     if (ended) return;
-    if (client.readyState !== OPEN) { sending = false; end(); return; }
+    if (client.readyState !== OPEN) { sending = false; return; }
     try {
       client.send(JSON.stringify(message), { binary: false }, error => {
         if (error) { sending = false; if (!ended) end(1011, "capture-failed"); return; }
@@ -284,20 +286,20 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   };
 
   const sendFrame = (message: Buffer): boolean => {
-    if (client.readyState !== OPEN) { end(); return false; }
+    if (client.readyState !== OPEN) return false;
     try {
       client.send(message, { binary: true }, error => { if (error && !ended) end(1011, "capture-failed"); });
     } catch { end(1011, "capture-failed"); return false; }
     return true;
   };
 
-  const end = (code?: number, why?: string) => {
+  const end = (code: number | undefined, why: string) => {
     if (ended) return;
     ended = true;
     outcome = why;
-    connection.abort(why ?? "done");
-    for (const timer of [firstSendTimer, pullTimer, pullDeadline, ackDeadline, tokenTimer, termTimer, killTimer]) clear(timer);
-    firstSendTimer = pullTimer = pullDeadline = ackDeadline = tokenTimer = termTimer = killTimer = undefined;
+    connection.abort(why);
+    for (const timer of [firstSendTimer, pullTimer, pullDeadline, stdinExitTimer, ackDeadline, tokenTimer, termTimer, killTimer]) clear(timer);
+    firstSendTimer = pullTimer = pullDeadline = stdinExitTimer = ackDeadline = tokenTimer = termTimer = killTimer = undefined;
     staged = undefined; outstanding = undefined; pullOutstanding = false; sending = false;
     live.delete(shutdown);
     if (child && !childExited) {
@@ -313,13 +315,13 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     }
     releaseIfDone();
     finishLease();
-    if (code !== undefined) closeNow(code, why ?? "capture-failed");
+    if (code !== undefined) closeNow(code, why);
   };
 
   function shutdown(code: number, why: string): void { end(code, why); }
   live.add(shutdown);
-  client.once("close", () => end());
-  client.once("error", () => end());
+  client.once("close", code => end(undefined, code === 1000 ? "done" : "capture-failed"));
+  client.once("error", () => end(undefined, "capture-failed"));
 
   /** The exit code decides the close, but only after stdout was judged. */
   const settleExit = () => {
@@ -345,7 +347,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   const tryPull = () => {
     if (inChunk) { pullWanted = true; return; }
     // A child that exited is only draining whatever stdout already holds.
-    if (ended || !spawned || childExited || pullOutstanding || staged || outstanding || sending) return;
+    if (ended || client.readyState !== OPEN || !spawned || childExited || stdinExitTimer || pullOutstanding || staged || outstanding || sending) return;
     // Pace off the tier the latest clamped request would use, so an upshift
     // shortens a pending wait and a superseded downshift never commits.
     const due = lastPullAt + 1000 / MAC_WINDOW_TIERS[requestedTier].fps;
@@ -377,9 +379,19 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     });
   };
 
+  const stdinFailed = () => {
+    if (ended || stdinExitTimer) return;
+    // A failed write can precede a classified exit. Keep any pending answer
+    // eligible for stdout validation while waiting for the child's status.
+    clear(firstSendTimer); firstSendTimer = undefined;
+    clear(pullTimer); pullTimer = undefined;
+    clear(pullDeadline); pullDeadline = undefined;
+    stdinExitTimer = later(STDIN_EXIT_GRACE_MS, () => end(1011, "capture-failed"));
+  };
+
   const submit = (line: string): boolean => {
-    if (!child?.stdin || childExited) { end(1011, "capture-failed"); return false; }
-    try { child.stdin.write(line); return true; } catch { end(1011, "capture-failed"); return false; }
+    if (!child?.stdin) { stdinFailed(); return false; }
+    try { child.stdin.write(line); return true; } catch { stdinFailed(); return false; }
   };
 
   /** Debit the bucket for the whole staged message, then send it. */
@@ -542,6 +554,8 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     if (ended || client.readyState !== OPEN) { finishLease(); return; }
     const binary = await deps.helper();
     if (ended || client.readyState !== OPEN) return;
+    await lease.recheckAdmission();
+    if (ended || client.readyState !== OPEN) return;
     const spawnedChild = deps.spawn(binary, ["stream", String(options.id), options.codec]);
     child = spawnedChild;
     spawnedChild.once("spawn", () => { childStarted = true; });
@@ -561,7 +575,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
       if (!ended) end(1011, "capture-failed");
     });
     // A helper that exits mid-write makes Node emit EPIPE here, asynchronously.
-    spawnedChild.stdin?.on("error", () => { if (!ended) end(1011, "capture-failed"); });
+    spawnedChild.stdin?.on("error", stdinFailed);
     const stdout = spawnedChild.stdout;
     if (!stdout) stdoutEnded = true;
     stdout?.on("data", (chunk: Buffer) => {

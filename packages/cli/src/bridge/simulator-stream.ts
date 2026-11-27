@@ -127,7 +127,8 @@ export interface StreamClient {
   readonly readyState: number;
   send(data: string | Buffer, options: { binary: boolean }, done?: (error?: Error) => void): void;
   close(code?: number, reason?: string): void;
-  once(event: "close" | "error", listener: () => void): unknown;
+  once(event: "close", listener: (code: number) => void): unknown;
+  once(event: "error", listener: () => void): unknown;
   on(event: "message", listener: (data: Buffer, isBinary: boolean) => void): unknown;
 }
 

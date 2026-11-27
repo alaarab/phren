@@ -752,7 +752,10 @@ export function macWindowsOwnerOnly(owner: boolean): void {
 export type MacWindowStreamEnd = "mac-windows-disabled" | "mac-windows-stopped" | "mac-windows-badge" | "shutdown";
 
 /** One admitted stream: the session it pins, released by `finish`. */
-export interface MacWindowStreamLease { finish(reason?: string): Promise<void> }
+export interface MacWindowStreamLease {
+  recheckAdmission(): Promise<void>;
+  finish(reason?: string): Promise<void>;
+}
 
 /** Every stable stream outcome the audit log may carry (the contract's close reasons plus `done`). */
 const MAC_WINDOW_STREAM_OUTCOMES = new Set([
@@ -806,21 +809,22 @@ export async function beginMacWindowStream(owner: boolean, id: number, onEnd: (r
     }
 
     const target = openSession();
+    const recheckAdmission = async () => checkStreamAdmission(target, await macWindowsEnabled(), connection);
     // Startup failures mark the session ended before rejecting the shared promise.
     await target.ready.catch(() => undefined);
-    checkStreamAdmission(target, await macWindowsEnabled(), connection);
+    await recheckAdmission();
     let screenRecording: MacWindowPermissionState;
     try {
       screenRecording = await permissionCheck("wincap", target.abort.signal);
     } finally {
-      checkStreamAdmission(target, await macWindowsEnabled(), connection);
+      await recheckAdmission();
     }
     if (!screenRecording.granted) {
       if (screenRecording.unavailable) {
         throw new BridgeError(409, `The Mac window helper could not run: ${screenRecording.unavailable}`, { code: "mac-windows-helper" });
       }
       await promptOnce("screen-recording", target.abort.signal);
-      checkStreamAdmission(target, await macWindowsEnabled(), connection);
+      await recheckAdmission();
       throw new BridgeError(403, screenRecordingHelp(), { code: "mac-windows-screen-recording" });
     }
 
@@ -829,6 +833,7 @@ export async function beginMacWindowStream(owner: boolean, id: number, onEnd: (r
     let admission: Promise<void>;
     let final: Promise<void> | undefined;
     const lease: MacWindowStreamLease = {
+      recheckAdmission,
       finish(reason) {
         if (final) return final;
         const outcome = streamOutcome(connection?.aborted ? connection.reason : reason);
@@ -857,7 +862,7 @@ export async function beginMacWindowStream(owner: boolean, id: number, onEnd: (r
     try {
       await admission;
       recorded = true;
-      checkStreamAdmission(target, await macWindowsEnabled(), connection);
+      await recheckAdmission();
       return lease;
     } catch (error) {
       const outcome = target.ended ?? errorCode(error);

@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FrameReader } from "./frame-reader.js";
+import { BridgeError } from "./protocol.js";
 import {
   activeMacWindowStreams, closeMacWindowStreams, type MacWindowCodec, type MacWindowStreamDeps,
   MAX_MESSAGE_BYTES, streamMacWindow, streamQuery,
@@ -12,6 +13,7 @@ import {
 const admission = vi.hoisted(() => ({
   defer: false,
   failCode: undefined as string | undefined,
+  recheck: undefined as (() => Promise<void>) | undefined,
   waiters: [] as (() => void)[],
   onEnd: [] as ((reason: string) => void)[],
   finishes: [] as (string | undefined)[],
@@ -24,7 +26,10 @@ vi.mock("./mac-windows.js", async () => {
       if (admission.defer) await new Promise<void>(resolve => admission.waiters.push(resolve));
       if (admission.failCode) throw new BridgeError(403, "refused", { code: admission.failCode });
       admission.onEnd.push(onEnd);
-      return { finish: async (reason?: string) => { admission.finishes.push(reason); } };
+      return {
+        recheckAdmission: async () => { await admission.recheck?.(); },
+        finish: async (reason?: string) => { admission.finishes.push(reason); },
+      };
     },
     logMacWindowStreamRefusal: async () => undefined,
   };
@@ -86,7 +91,7 @@ class FakeClient extends EventEmitter {
   }
   close(code?: number, reason?: string) {
     if (this.readyState !== 1) return;
-    this.readyState = 3; this.closed = { code, reason }; this.emit("close");
+    this.readyState = 3; this.closed = { code, reason }; this.emit("close", code);
   }
   control(message: unknown) { this.emit("message", Buffer.from(JSON.stringify(message)), false); }
   raw(data: Buffer, isBinary: boolean) { this.emit("message", data, isBinary); }
@@ -152,6 +157,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   admission.defer = false;
   admission.failCode = undefined;
+  admission.recheck = undefined;
   admission.waiters.length = 0;
   admission.onEnd.length = 0;
   admission.finishes.length = 0;
@@ -256,17 +262,34 @@ describe("stream admission", () => {
     expect(thrown.closed).toEqual({ code: 1011, reason: "capture-failed" });
     expect(activeMacWindowStreams()).toBe(0);
   });
+  it("refuses to spawn if admission changes during helper verification", async () => {
+    const { deps } = harness();
+    deps.helper = async () => {
+      admission.recheck = async () => {
+        throw new BridgeError(409, "disabled", { code: "mac-windows-disabled" });
+      };
+      return "/bridge/native/wincap";
+    };
+    const client = await start(`id=${ID}`, deps);
+    expect(client.closed).toEqual({ code: 1008, reason: "mac-windows-disabled" });
+    expect(deps.spawn).not.toHaveBeenCalled();
+  });
 });
 
 describe("child lifecycle", () => {
-  it("closes capture-failed on a stdin pipe error instead of crashing, and stays closed", async () => {
+  it("falls back to capture-failed when a stdin pipe error has no helper exit within 1 s", async () => {
     const { deps, children } = harness();
     const client = await start(`id=${ID}`, deps);
-    children[0].stdin.emit("error", new Error("EPIPE"));
+    const child = children[0];
+    child.stdin.emit("error", new Error("EPIPE"));
+    child.stdout.write(framed(Buffer.from([0])));
     await flush();
+    vi.advanceTimersByTime(999);
+    expect(client.closed).toBeUndefined();
+    expect(pulls(child)).toHaveLength(1);
+    vi.advanceTimersByTime(1);
     expect(client.closed).toEqual({ code: 1011, reason: "capture-failed" });
-    // The teardown's own STOP write may hit the same closed pipe; it must not throw.
-    expect(() => children[0].stdin.emit("error", new Error("EPIPE"))).not.toThrow();
+    expect(() => child.stdin.emit("error", new Error("EPIPE"))).not.toThrow();
   });
   it("releases the slot at once when the spawn itself fails", async () => {
     const { deps, children } = harness();
@@ -591,6 +614,17 @@ describe("acknowledgements and stats", () => {
 });
 
 describe("lease outcomes", () => {
+  it.each([
+    ["normal close", (client: FakeClient) => client.close(1000), "done"],
+    ["abnormal close", (client: FakeClient) => client.close(1006), "capture-failed"],
+    ["socket error", (client: FakeClient) => client.emit("error", new Error("socket details")), "capture-failed"],
+  ])("records the fixed audit outcome for a %s", async (_name, disconnect, outcome) => {
+    const { deps } = harness();
+    const client = await start(`id=${ID}`, deps);
+    disconnect(client);
+    await flush();
+    expect(admission.finishes).toEqual([outcome]);
+  });
   it("finishes a lease that arrives after shutdown with the shutdown outcome", async () => {
     const { deps } = harness();
     admission.defer = true;
@@ -996,9 +1030,10 @@ describe("teardown", () => {
     [6, 4415, "codec-unavailable"],
     [0, 1011, "capture-failed"],
     [4, 1011, "capture-failed"],
-  ])("maps helper exit %i to %i %s", async (exit, code, why) => {
+  ])("maps helper exit %i to %i %s even after a pipe error", async (exit, code, why) => {
     const { deps, children } = harness();
     const client = await start(`id=${ID}`, deps);
+    children[0].stdin.emit("error", new Error("EPIPE"));
     children[0].exit(exit);
     await flush();
     expect(client.closed).toEqual({ code, reason: why });
