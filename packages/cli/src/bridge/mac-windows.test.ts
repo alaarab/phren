@@ -5,7 +5,26 @@ import type { EventEmitter as Emitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The real helper runner is exercised by the pre-spawn and CLI probe tests.
-const runner = vi.hoisted(() => ({ spawns: [] as string[][], signals: [] as string[], code: 0, hold: false }));
+const runner = vi.hoisted(() => ({
+  spawns: [] as string[][], signals: [] as string[], code: 0, hold: false, stdoutEOF: false,
+}));
+const audit = vi.hoisted(() => ({ beforeAdmission: undefined as (() => Promise<void>) | undefined }));
+const setting = vi.hoisted(() => ({ reads: 0 }));
+vi.mock("node:fs/promises", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    readFile: async (...args: Parameters<typeof fs.readFile>) => {
+      const data = await fs.readFile(...args);
+      if (typeof args[0] === "string" && args[0].endsWith("mac-windows.json")) setting.reads++;
+      return data;
+    },
+    appendFile: async (...args: Parameters<typeof fs.appendFile>) => {
+      if (String(args[1]).includes('"action":"stream-start"') && String(args[1]).includes('"admitted":true')) await audit.beforeAdmission?.();
+      return fs.appendFile(...args);
+    },
+  };
+});
 vi.mock("./native-helpers.js", () => ({ verifiedHelper: async () => "/fake/phren-helper" }));
 vi.mock("node:child_process", async () => {
   const { EventEmitter } = await import("node:events");
@@ -19,6 +38,7 @@ vi.mock("node:child_process", async () => {
           if (signal === "SIGKILL") child.emit("close", null);
         },
       });
+      if (runner.stdoutEOF) queueMicrotask(() => child.stdout.emit("end"));
       if (!runner.hold) queueMicrotask(() => child.emit("close", runner.code));
       return child;
     },
@@ -102,8 +122,9 @@ beforeEach(async () => {
   vi.useFakeTimers();
   calls = []; spawns = 0; badge = new FakeBadge(); releaseValue = "23.6.0";
   behaviour = () => undefined; custom = undefined; spawnDelay = undefined;
-  runner.spawns = []; runner.signals = []; runner.code = 0; runner.hold = false;
+  runner.spawns = []; runner.signals = []; runner.code = 0; runner.hold = false; runner.stdoutEOF = false;
   ranBeforeReady = false; callWaiters = []; spawnWaiters = [];
+  audit.beforeAdmission = undefined;
   resetMacWindowsState();
   restore = setMacWindowsDeps({
     platform: () => "darwin",
@@ -540,16 +561,34 @@ describe("mac windows: live stream admission", () => {
     expect((await logRows()).at(-1)).toMatchObject({ action: "stream-end", windowId: 7, ok: true });
   });
 
-  it("refuses when the badge stays silent past 5 s after its spawn", async () => {
+  it("shares the original five-second badge deadline with a late stream", async () => {
     badge = new FakeBadge(false);
-    const pending = beginMacWindowStream(true, 7, () => {}).catch(error => error);
+    let startedAt = 0;
+    spawnDelay = async () => { startedAt = Date.now(); return badge; };
+    const listing = macWindowsList().catch(error => error);
     await vi.waitFor(() => expect(spawns).toBe(1));
-    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_STREAM_READY_MS - 1);
-    // Not refused yet: the readiness clock runs from the spawn.
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_STREAM_READY_MS - 1_000);
+    const reads = setting.reads;
+    const pending = beginMacWindowStream(true, 7, () => {}).catch(error => error);
+    await vi.waitFor(() => expect(setting.reads).toBeGreaterThan(reads));
+    await vi.advanceTimersByTimeAsync(startedAt + MAC_WINDOWS_STREAM_READY_MS - Date.now());
+    badge.becomeReady();
+    await expect(listing).resolves.toMatchObject({ details: { code: "mac-windows-indicator" } });
     await expect(pending).resolves.toMatchObject({ status: 409, details: { code: "mac-windows-badge" } });
+    expect(badge.kills).toEqual(["SIGTERM"]);
     expect((await logRows()).at(-1)).toMatchObject({ action: "stream-start", windowId: 7, ok: false, error: "mac-windows-badge" });
   });
+
+  it("fails immediately when badge stdout ends before ready while the process is still alive", async () => {
+    restore?.(); restore = undefined;
+    setMacWindowsDeps({ platform: () => "darwin", release: () => "23.6.0" });
+    runner.hold = true;
+    runner.stdoutEOF = true;
+    const pending = beginMacWindowStream(true, 7, () => {});
+    const refusal = expect(pending).rejects.toMatchObject({ details: { code: "mac-windows-badge" } });
+    await refusal;
+    expect(runner.signals).toEqual(["SIGTERM"]);
+  }, 1_000);
 
   it("prompts once for Screen Recording and refuses without the grant", async () => {
     behaviour = call => call.helper === "wincap" && call.args[0] === "check" ? { code: 3 } : undefined;
@@ -569,6 +608,52 @@ describe("mac windows: live stream admission", () => {
     badge.becomeReady();
     await expect(pending).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
     expect(calls).toEqual([]);
+  });
+
+  it.each(["off", "Stop"] as const)("refuses with the specific reason when %s lands during the permission probe", async event => {
+    let release!: () => void;
+    custom = call => call.helper === "wincap" && call.args[0] === "check"
+      ? new Promise(resolve => { release = () => resolve(answer(call)); }) : undefined;
+    const pending = beginMacWindowStream(true, 7, () => {}).catch(error => error);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    if (event === "off") await setMacWindowsEnabled(false);
+    else badge.exit(10);
+    release();
+    const code = event === "off" ? "mac-windows-disabled" : "mac-windows-stopped";
+    await expect(pending).resolves.toMatchObject({ details: { code } });
+    expect((await logRows()).filter(row => row.action === "stream-start")).toEqual([
+      expect.objectContaining({ ok: false, error: code }),
+    ]);
+  });
+
+  it.each([
+    { event: "off", code: "mac-windows-disabled", outcome: "mac-windows-disabled" },
+    { event: "Stop", code: "mac-windows-stopped", outcome: "mac-windows-stopped" },
+    { event: "disconnect then Stop", code: "mac-windows-stopped", outcome: "done" },
+  ])("pairs the admitted audit row with one end when $event lands during its write", async ({ event, code, outcome }) => {
+    let release!: () => void;
+    audit.beforeAdmission = () => new Promise(resolve => { release = resolve; });
+    const reasons: string[] = [];
+    const connection = new AbortController();
+    const pending = beginMacWindowStream(true, 7, why => reasons.push(why), connection.signal).catch(error => error);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    if (event === "off") await setMacWindowsEnabled(false);
+    else {
+      if (event === "disconnect then Stop") connection.abort("done");
+      badge.exit(10);
+      expect(reasons).toEqual(["mac-windows-stopped"]);
+      await setMacWindowsEnabled(false);
+    }
+    release();
+    await expect(pending).resolves.toMatchObject({ details: { code } });
+    expect(reasons).toEqual([code]);
+    const rows = (await logRows()).filter(row => row.action.startsWith("stream-"));
+    expect(rows).toEqual([
+      expect.objectContaining({ action: "stream-start", ok: true, admitted: true }),
+      expect.objectContaining({
+        action: "stream-end", ok: outcome === "done", ...(outcome === "done" ? {} : { error: outcome }), session: rows[0].session,
+      }),
+    ]);
   });
 
   it("pins the session so a static stream outlives the idle timer, then rearms it", async () => {
@@ -612,15 +697,6 @@ describe("mac windows: live stream admission", () => {
     expect(ends.map(row => row.error)).toEqual(["mac-windows-badge", "mac-windows-disabled"]);
   });
 
-  it("stops an admitted stream when the Hook shuts down", async () => {
-    const reasons: string[] = [];
-    const lease = await beginMacWindowStream(true, 7, why => reasons.push(why));
-    const stopping = stopMacWindows();
-    expect(reasons).toEqual(["mac-windows-badge"]);
-    await stopping;
-    await lease.finish("shutdown");
-    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-end", ok: false, error: "shutdown" });
-  });
 });
 
 describe("mac windows: scroll and drag", () => {

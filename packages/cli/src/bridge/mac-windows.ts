@@ -22,15 +22,13 @@ export const MAC_WINDOWS_IDLE_MS = 120_000;
 export const MAC_WINDOWS_STOP_MS = 60_000;
 /** The whole indicator startup (swiftc build included). */
 export const MAC_WINDOWS_BUILD_MS = 240_000;
-/** The badge's "ready" line, counted from the spawn. */
-export const MAC_WINDOWS_READY_MS = 10_000;
 /** How often an open session re-reads the enable file. */
 export const MAC_WINDOWS_ENABLE_POLL_MS = 500;
 /** How long wininput gets to finish its event pair after SIGTERM. */
 export const MAC_WINDOWS_TERM_GRACE_MS = 500;
 /** A drag can take up to 800 ms and must finish by posting mouse-up. */
 const MAC_WINDOWS_DRAG_TERM_GRACE_MS = 1_500;
-/** A live stream gets this long to see the badge's `ready` line, counted from its spawn. */
+/** One deadline for the badge's `ready` line, counted from spawn. */
 export const MAC_WINDOWS_STREAM_READY_MS = 5_000;
 /** macOS 14 is Darwin 23; ScreenCaptureKit's single-window capture needs it. */
 const MACOS_14_DARWIN_MAJOR = 23;
@@ -87,6 +85,11 @@ export function macWindowsSupported(platform: NodeJS.Platform = process.platform
   return platform === "darwin" && Number(release.split(".")[0]) >= MACOS_14_DARWIN_MAJOR;
 }
 
+/** The stream route checks this before reading its query or reserving a slot. */
+export function macWindowStreamSupported(): boolean {
+  return macWindowsSupported(deps.platform(), deps.release());
+}
+
 export interface MacWindowsHelperCall { helper: NativeHelper; args: string[]; input?: string; timeoutMs?: number; local?: boolean }
 export interface MacWindowsHelperResult { stdout: Buffer; stderr: string; code: number }
 /** The winbadge child: its stdin stays open for the session, `ready` when it shows. */
@@ -116,11 +119,15 @@ function disabledError(): BridgeError {
   return new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
 }
 
-function within<T>(promise: Promise<T>, ms: number): Promise<T> {
+function within<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timed out")), ms);
+    const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
+    const abort = () => { finish(); reject(cancelled()); };
+    const timer = setTimeout(() => { finish(); reject(new Error("timed out")); }, ms);
     timer.unref?.();
-    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+    promise.then(value => { finish(); resolve(value); }, error => { finish(); reject(error); });
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -173,25 +180,24 @@ async function spawnBadgeProcess(signal: AbortSignal): Promise<MacWindowsBadge> 
   const binary = await verifiedHelper("winbadge");
   // The build can outlast the session or the setting; a child that nobody wants must not start.
   if (signal.aborted) throw new Error("the session ended while the indicator was building");
-  if (!await macWindowsEnabled()) throw new Error("phone control is off");
+  if (!await macWindowsEnabled()) throw disabledError();
+  if (signal.aborted) throw cancelled();
   const child = spawn(binary, [], { stdio: ["pipe", "pipe", "ignore"] });
   child.stdin?.on("error", () => undefined);
-  child.on("error", () => undefined);
   // The helper prints one line once its panels are on screen.
   const ready = new Promise<void>((resolve, reject) => {
     let settled = false, said = "";
     const done = (error?: Error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       if (error) reject(error); else resolve();
     };
-    const timer = setTimeout(() => done(new Error("the indicator did not report ready")), MAC_WINDOWS_READY_MS);
-    timer.unref?.();
     child.stdout?.on("data", (chunk: Buffer) => {
       said += chunk.toString("utf8");
       if (/^ready\r?\n/.test(said)) done();
     });
+    child.stdout?.once("end", () => done(new Error("the indicator closed stdout before ready")));
+    child.on("error", done);
     child.on("close", code => done(new Error(`the indicator exited (${code ?? "signal"})`)));
   });
   // A caller that gives up early must not leave an unhandled rejection behind.
@@ -226,14 +232,11 @@ type Session = {
   poll?: ReturnType<typeof setInterval>;
   inflight: number;
   readyDone: boolean;
-  ended: boolean;
-  /** Resolves when the badge process exists (after its build), for the stream's 5 s ready clock. */
-  spawned: Promise<void>;
-  markSpawned: () => void;
+  ended?: MacWindowStreamEnd;
   /** Leases pinning this session against the idle timer; one live window per Hook. */
   pinned: number;
   /** Leases to invalidate, synchronously, when the session ends. */
-  streams: Set<(reason: MacWindowStreamEnd) => void>;
+  streams: Set<(reason: MacWindowStreamEnd) => Promise<void>>;
 };
 
 let session: Session | undefined;
@@ -341,7 +344,7 @@ function watchEnabled(target: Session): void {
 async function endSession(target?: Session, why: MacWindowStreamEnd = "mac-windows-badge"): Promise<void> {
   const ending = target ?? session;
   if (!ending || ending.ended) return;
-  ending.ended = true;
+  ending.ended = why;
   if (session === ending) session = undefined;
   if (ending.timer) clearTimeout(ending.timer);
   if (ending.poll) clearInterval(ending.poll);
@@ -350,13 +353,13 @@ async function endSession(target?: Session, why: MacWindowStreamEnd = "mac-windo
   // a stopped or revoked session gates the stream's next send immediately.
   const leases = [...ending.streams];
   ending.streams.clear();
-  for (const invalidate of leases) { try { invalidate(why); } catch { /* the end never waits on a lease */ } }
+  const finals = leases.map(invalidate => invalidate(why));
   // Cancels a running helper and refuses whatever is still queued.
   ending.abort.abort();
   const running = badge;
   badge = undefined;
   running?.kill("SIGTERM");
-  sessionEnding = appendSessionRow({ session: ending.id, action: "session-end", ok: true }).catch(() => undefined);
+  sessionEnding = Promise.all([...finals, appendSessionRow({ session: ending.id, action: "session-end", ok: true }).catch(() => undefined)]).then(() => undefined);
   await sessionEnding;
 }
 
@@ -368,8 +371,8 @@ export async function stopMacWindows(): Promise<void> {
   // Set before any await, so a handler resuming later cannot start a session.
   shuttingDown = true;
   const pending = session?.ready;
-  await endSession();
-  // A badge still being built is disposed of by its own startup check; wait for it to get there.
+  await endSession(undefined, "shutdown");
+  // A badge still being built is disposed of when the spawn resolves.
   await pending?.catch(() => undefined);
 }
 
@@ -504,14 +507,13 @@ async function startIndicator(target: Session): Promise<void> {
     }).catch(() => undefined);
     let spawned: MacWindowsBadge;
     try {
-      spawned = await within(spawning, MAC_WINDOWS_BUILD_MS);
+      spawned = await within(spawning, MAC_WINDOWS_BUILD_MS, target.abort.signal);
     } catch (error) {
       late = true;
       throw error;
     }
     if (target.ended || target.abort.signal.aborted) { spawned.kill("SIGTERM"); throw indicatorError(); }
     badge = spawned;
-    target.markSpawned();
     let earlyExit: (() => void) | undefined;
     const exit = new Promise<never>((_resolve, reject) => {
       earlyExit = () => reject(indicatorError());
@@ -523,13 +525,13 @@ async function startIndicator(target: Session): Promise<void> {
       if (code === 10) { stoppedUntil = deps.now() + MAC_WINDOWS_STOP_MS; stoppedSession = target.id; }
       void endSession(target, code === 10 ? "mac-windows-stopped" : "mac-windows-badge").catch(() => undefined);
     });
-    await within(Promise.race([spawned.ready, exit]), MAC_WINDOWS_READY_MS);
+    await within(Promise.race([spawned.ready, exit]), MAC_WINDOWS_STREAM_READY_MS, target.abort.signal);
     if (target.ended || target.abort.signal.aborted) throw indicatorError();
     target.readyDone = true;
     watchEnabled(target);
     armIdle(target);
-  } catch {
-    await endSession(target).catch(() => undefined);
+  } catch (error) {
+    await endSession(target, errorCode(error) === "mac-windows-disabled" ? "mac-windows-disabled" : "mac-windows-badge").catch(() => undefined);
     throw indicatorError();
   }
 }
@@ -540,10 +542,8 @@ function openSession(): Session {
   const stopped = stoppage();
   if (stopped) throw stopped;
   if (session) return session;
-  let markSpawned!: () => void;
-  const spawned = new Promise<void>(resolve => { markSpawned = resolve; });
-  const target: Session = { id: randomUUID(), ready: Promise.resolve(), abort: new AbortController(), inflight: 0, readyDone: false, ended: false,
-    spawned, markSpawned, pinned: 0, streams: new Set() };
+  const target: Session = { id: randomUUID(), ready: Promise.resolve(), abort: new AbortController(), inflight: 0, readyDone: false,
+    pinned: 0, streams: new Set() };
   lastSession = target.id;
   session = target;
   target.ready = startIndicator(target);
@@ -749,7 +749,7 @@ export function macWindowsOwnerOnly(owner: boolean): void {
 // enable file or Stop ends the session; the stream loop turns that into 1008.
 
 /** Why a lease ended without the phone closing it. */
-export type MacWindowStreamEnd = "mac-windows-disabled" | "mac-windows-stopped" | "mac-windows-badge";
+export type MacWindowStreamEnd = "mac-windows-disabled" | "mac-windows-stopped" | "mac-windows-badge" | "shutdown";
 
 /** One admitted stream: the session it pins, released by `finish`. */
 export interface MacWindowStreamLease { finish(reason?: string): Promise<void> }
@@ -762,9 +762,9 @@ const MAC_WINDOW_STREAM_OUTCOMES = new Set([
 ]);
 
 /** A fixed code for the audit log: a clean phone close is `done`, anything unknown is a capture failure. */
-function streamOutcome(reason: string | undefined): string {
+function streamOutcome(reason: unknown): string {
   if (reason === undefined) return "done";
-  return MAC_WINDOW_STREAM_OUTCOMES.has(reason) ? reason : "capture-failed";
+  return typeof reason === "string" && MAC_WINDOW_STREAM_OUTCOMES.has(reason) ? reason : "capture-failed";
 }
 
 /** A refused stream start (owner, bad query, busy, disabled, stopped, badge, permission), never its own text. */
@@ -774,103 +774,102 @@ export async function logMacWindowStreamRefusal(reason: string, id?: number): Pr
     .catch(() => undefined);
 }
 
-function badgeError(): BridgeError {
-  return new BridgeError(409, "The on-Mac indicator did not start, so the live window cannot be shown.", { code: "mac-windows-badge" });
+function streamEnded(reason: string): BridgeError {
+  return new BridgeError(reason === "shutdown" ? 503 : 409, "Phone control ended before the live window could start.", { code: reason });
 }
 
-/**
- * The badge's `ready` line, granting a stream only 5 s after the badge actually
- * spawned. Slice 1's own startup keeps its build and ready deadlines; this is
- * the stream's shorter clock, and it races the same shared startup.
- */
-async function streamReady(target: Session): Promise<void> {
-  if (target.readyDone) return;
-  await Promise.race([
-    target.ready,
-    target.spawned.then(() => within(target.ready, MAC_WINDOWS_STREAM_READY_MS)),
-  ]);
+/** Check liveness again after the setting read, keeping an earlier invalidation reason. */
+function checkStreamAdmission(target: Session, enabled: boolean, connection?: AbortSignal): void {
+  if (target.ended) throw streamEnded(target.ended);
+  if (session !== target || target.abort.signal.aborted) throw streamEnded("mac-windows-badge");
+  if (!enabled) {
+    void endSession(target, "mac-windows-disabled");
+    throw disabledError();
+  }
+  if (connection?.aborted) throw streamEnded(streamOutcome(connection.reason));
 }
 
-/**
- * Admission for one live window: owner, platform, the setting, the Stop window
- * and Screen Recording (prompting once), then the shared badge's ready line,
- * then the enable file again. A granted lease pins the session; `finish`
- * releases it and writes the one `stream-end` row. `onEnd` is called
- * synchronously when the session ends under the lease.
- */
-export async function beginMacWindowStream(owner: boolean, id: number, onEnd: (reason: MacWindowStreamEnd) => void): Promise<MacWindowStreamLease> {
-  let target: Session | undefined;
+/** Admit one live window and pin its session until the stream ends. */
+export async function beginMacWindowStream(owner: boolean, id: number, onEnd: (reason: MacWindowStreamEnd) => void,
+  connection?: AbortSignal): Promise<MacWindowStreamLease> {
+  let recorded = false;
   try {
     if (!owner) throw ownerOnlyError();
-    if (!macWindowsSupported(deps.platform(), deps.release())) {
+    if (!macWindowStreamSupported()) {
       throw new BridgeError(404, "Live Mac windows need macOS 14 or later.", { code: "unsupported-platform" });
     }
-    if (!await macWindowsEnabled()) {
+    const enabled = await macWindowsEnabled();
+    if (shuttingDown) throw streamEnded("shutdown");
+    if (!enabled) {
       await endSession(undefined, "mac-windows-disabled");
       throw disabledError();
     }
-    const stopped = stoppage();
-    if (stopped) throw stopped;
-    target = openSession();
+
+    const target = openSession();
+    // Startup failures mark the session ended before rejecting the shared promise.
+    await target.ready.catch(() => undefined);
+    checkStreamAdmission(target, await macWindowsEnabled(), connection);
+    let screenRecording: MacWindowPermissionState;
     try {
-      await streamReady(target);
-    } catch {
-      // A badge that never printed `ready` (or died before it) leaves no stream.
-      const stopped = stoppage();
-      if (stopped) throw stopped;
-      if (!await macWindowsEnabled()) throw disabledError();
-      throw badgeError();
+      screenRecording = await permissionCheck("wincap", target.abort.signal);
+    } finally {
+      checkStreamAdmission(target, await macWindowsEnabled(), connection);
     }
-    requireLive(target);
-    // The admission awaited a build and the ready line: the setting may have changed.
-    if (!await macWindowsEnabled()) {
-      await endSession(target, "mac-windows-disabled");
-      throw disabledError();
-    }
-    requireLive(target);
-    const screenRecording = await permissionCheck("wincap", target.abort.signal);
-    requireLive(target);
     if (!screenRecording.granted) {
       if (screenRecording.unavailable) {
         throw new BridgeError(409, `The Mac window helper could not run: ${screenRecording.unavailable}`, { code: "mac-windows-helper" });
       }
-      // One system dialog per Hook run, then the phone offers slice 1's permission UI.
       await promptOnce("screen-recording", target.abort.signal);
-      requireLive(target);
+      checkStreamAdmission(target, await macWindowsEnabled(), connection);
       throw new BridgeError(403, screenRecordingHelp(), { code: "mac-windows-screen-recording" });
     }
-    const held = target;
-    const invalidate = (why: MacWindowStreamEnd) => onEnd(why);
-    // Pinned before the admitted row so an `off` racing the write still invalidates the lease.
-    held.pinned += 1;
-    held.streams.add(invalidate);
-    armIdle(held);
-    try {
-      await appendSessionRow({ session: held.id, action: "stream-start", windowId: id, ok: true, admitted: true });
-    } catch {
-      held.streams.delete(invalidate);
-      held.pinned = Math.max(0, held.pinned - 1);
-      armIdle(held);
-      throw new BridgeError(503, "The Mac window audit log could not be written, so nothing was captured.", { code: "mac-windows-audit" });
-    }
-    requireLive(held);
-    let finished = false;
-    return {
-      async finish(reason?: string): Promise<void> {
-        if (finished) return;
-        finished = true;
-        held.streams.delete(invalidate);
-        if (!held.ended) {
-          held.pinned = Math.max(0, held.pinned - 1);
-          armIdle(held);
+
+    // The lease can end while its admission is still being written. Wait for
+    // that write before logging the end, and memoize cleanup and its outcome.
+    let admission: Promise<void>;
+    let final: Promise<void> | undefined;
+    const lease: MacWindowStreamLease = {
+      finish(reason) {
+        if (final) return final;
+        const outcome = streamOutcome(connection?.aborted ? connection.reason : reason);
+        target.streams.delete(invalidate);
+        if (!target.ended) {
+          target.pinned -= 1;
+          armIdle(target);
         }
-        const outcome = streamOutcome(reason);
-        await appendSessionRow({ session: held.id, action: "stream-end", windowId: id, ok: outcome === "done", ...(outcome === "done" ? {} : { error: outcome }) })
-          .catch(() => undefined);
+        final = admission.then(() => appendSessionRow({
+          session: target.id, action: "stream-end", windowId: id, ok: outcome === "done",
+          ...(outcome === "done" ? {} : { error: outcome }),
+        })).catch(() => undefined);
+        return final;
       },
     };
+    const invalidate = (why: MacWindowStreamEnd) => {
+      // The callback stops sends before any asynchronous cleanup starts.
+      try { onEnd(why); } catch { /* still finalize the lease */ }
+      return lease.finish(why);
+    };
+    target.pinned += 1;
+    target.streams.add(invalidate);
+    armIdle(target);
+
+    admission = appendSessionRow({ session: target.id, action: "stream-start", windowId: id, ok: true, admitted: true });
+    try {
+      await admission;
+      recorded = true;
+      checkStreamAdmission(target, await macWindowsEnabled(), connection);
+      return lease;
+    } catch (error) {
+      const outcome = target.ended ?? errorCode(error);
+      await lease.finish(outcome ?? "capture-failed");
+      if (target.ended) throw streamEnded(target.ended);
+      if (!recorded) {
+        throw new BridgeError(503, "The Mac window audit log could not be written, so nothing was captured.", { code: "mac-windows-audit" });
+      }
+      throw error;
+    }
   } catch (error) {
-    if (error instanceof BridgeError) {
+    if (error instanceof BridgeError && !recorded) {
       await logMacWindowStreamRefusal(errorCode(error) ?? "capture-failed", id);
       throw audited(error);
     }

@@ -1,6 +1,6 @@
 import { spawn as spawnChild, type ChildProcess } from "node:child_process";
 import { FrameReader } from "./frame-reader.js";
-import { beginMacWindowStream, logMacWindowStreamRefusal, type MacWindowStreamEnd, type MacWindowStreamLease } from "./mac-windows.js";
+import { beginMacWindowStream, logMacWindowStreamRefusal, type MacWindowStreamLease } from "./mac-windows.js";
 import { verifiedHelper } from "./native-helpers.js";
 import { BridgeError } from "./protocol.js";
 import type { StreamClient } from "./simulator-stream.js";
@@ -60,7 +60,7 @@ export interface MacWindowStreamOptions { id: number; codec: MacWindowCodec; tie
 
 const STREAM_FIELDS = new Set(["id", "codec", "tier"]);
 
-/** The stream query, validated before owner state or the helper is touched. */
+/** The stream query, validated before reserving a slot or starting a helper. */
 export function streamQuery(query: URLSearchParams): MacWindowStreamOptions {
   for (const field of query.keys()) {
     if (!STREAM_FIELDS.has(field)) throw new BridgeError(400, "Unknown mac window stream option.");
@@ -149,6 +149,7 @@ function admissionClose(error: unknown): { code: number; reason: string } {
     "mac-windows-screen-recording", "unsupported-platform"]);
   const details = error instanceof BridgeError ? error.details : undefined;
   const code = details && typeof details === "object" && !Array.isArray(details) && typeof details.code === "string" ? details.code : undefined;
+  if (code === "shutdown") return { code: 1001, reason: code };
   if (code === "mac-windows-permission") return { code: 1008, reason: "mac-windows-screen-recording" };
   return code && stable.has(code) ? { code: 1008, reason: code } : { code: 1011, reason: "capture-failed" };
 }
@@ -200,6 +201,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   let stdoutEnded = false;
   let lease: MacWindowStreamLease | undefined;
   let finishedLease = false;
+  const connection = new AbortController();
   /** The first terminal outcome, kept for a lease that arrives after it. */
   let outcome: string | undefined;
   const finishLease = () => {
@@ -293,6 +295,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     if (ended) return;
     ended = true;
     outcome = why;
+    connection.abort(why ?? "done");
     for (const timer of [firstSendTimer, pullTimer, pullDeadline, ackDeadline, tokenTimer, termTimer, killTimer]) clear(timer);
     firstSendTimer = pullTimer = pullDeadline = ackDeadline = tokenTimer = termTimer = killTimer = undefined;
     staged = undefined; outstanding = undefined; pullOutstanding = false; sending = false;
@@ -535,7 +538,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   try {
     if (ended || client.readyState !== OPEN) return;
-    lease = await beginMacWindowStream(owner, options.id, (why: MacWindowStreamEnd) => end(1008, why));
+    lease = await beginMacWindowStream(owner, options.id, why => end(why === "shutdown" ? 1001 : 1008, why), connection.signal);
     if (ended || client.readyState !== OPEN) { finishLease(); return; }
     const binary = await deps.helper();
     if (ended || client.readyState !== OPEN) return;
