@@ -92,6 +92,15 @@ describe("gitboy-read scope admission", () => {
     }
   });
 
+  it("refuses the live Mac window stream, upgrade or not, under both scopes", () => {
+    for (const scope of ["gitboy-read", "gitboy-write"] as const) {
+      expect(admit("GET /v1/mac/windows/stream?id=7&tier=1 HTTP/1.1",
+        ["Host: phren.local", "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Version: 13", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="], "", scope))
+        .toMatchObject({ ok: false });
+      expect(admit("GET /v1/mac/windows/stream?id=7 HTTP/1.1", ["Host: phren.local"], "", scope)).toMatchObject({ ok: false, status: 403 });
+    }
+  });
+
   it("admits only an exact-id task completion on the write scope", () => {
     const body = JSON.stringify({ id: "bid:cccc0001" });
     const line = "POST /v1/projects/app/tasks/complete HTTP/1.1";

@@ -1,10 +1,10 @@
 // Phone control of one Mac app's window, without AppleScript: the window is
 // found by its CGWindow id, its app raised through the Accessibility API, and
-// taps, text and keys are posted with CGEvent. Built on demand by Phren Hook
-// with swiftc; see mac-windows.ts.
-// Exit codes: 2 usage, 3 Accessibility not granted, 5 no such window,
-// 6 focus could not be verified, 7 the Hook (our parent) went away,
-// 8 the Hook cancelled the action.
+// taps, text, keys, scrolls and drags are posted with CGEvent. Built on demand
+// by Phren Hook with swiftc; see mac-windows.ts.
+// Exit codes: 2 usage, 3 Accessibility not granted, 4 an event could not be
+// built, 5 no such window, 6 focus could not be verified, 7 the Hook (our
+// parent) went away, 8 the Hook cancelled the action.
 import ApplicationServices
 import Carbon.HIToolbox
 import Cocoa
@@ -44,8 +44,29 @@ let keyCodes: [String: CGKeyCode] = [
 ]
 
 let args = CommandLine.arguments
-guard args.count >= 2 else { fail(2, "usage: wininput check | prompt | tap <id> <fx> <fy> | type <id> | key <id> <name> [cmd] [shift] [option] [control] | raise <id>") }
+guard args.count >= 2 else { fail(2, "usage: wininput check | prompt | tap <id> <fx> <fy> | type <id> | key <id> <name> [cmd] [shift] [option] [control] | raise <id> | scroll <id> <fx> <fy> <dx> <dy> | drag <id> <fx1> <fy1> <fx2> <fy2> <durationMs>") }
 let command = args[1]
+
+// Gesture arguments, including the window id, are validated before the grant
+// and the window lookups, so a bad scroll or drag exits 2 rather than 3 or 5.
+var scrollArgs: (fx: Double, fy: Double, dx: Int32, dy: Int32)?
+if command == "scroll" {
+    guard args.count == 7, let raw = UInt32(args[2]), raw > 0,
+          let fx = fraction(args[3]), let fy = fraction(args[4]),
+          let dx = Int32(args[5]), let dy = Int32(args[6]),
+          dx >= -240, dx <= 240, dy >= -240, dy <= 240, dx != 0 || dy != 0
+    else { fail(2, "scroll needs a window id, fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
+    scrollArgs = (fx, fy, dx, dy)
+}
+var dragArgs: (fx1: Double, fy1: Double, fx2: Double, fy2: Double, durationMs: Int)?
+if command == "drag" {
+    guard args.count == 8, let raw = UInt32(args[2]), raw > 0,
+          let fx1 = fraction(args[3]), let fy1 = fraction(args[4]),
+          let fx2 = fraction(args[5]), let fy2 = fraction(args[6]),
+          let durationMs = Int(args[7]), durationMs >= 80, durationMs <= 800
+    else { fail(2, "drag needs a window id, fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
+    dragArgs = (fx1, fy1, fx2, fy2, durationMs)
+}
 
 // "prompt" asks macOS for the grant: it adds this helper to Privacy & Security
 // → Accessibility (switched off) and shows the system's own dialog, so the
@@ -126,21 +147,30 @@ func raise() {
 }
 // The window under a screen point, found from the hit element itself or by
 // walking up to the first ancestor with a window or the AXWindow role.
-func pointWindow(_ point: CGPoint) -> AXUIElement? {
+let systemWide = AXUIElementCreateSystemWide()
+func pointWindow(_ point: CGPoint, deadline: UInt64? = nil) -> AXUIElement? {
+    func canQuery() -> Bool {
+        guard let deadline else { return true }
+        return DispatchTime.now().uptimeNanoseconds < deadline && getppid() != 1 && !isCancelled()
+    }
     var hitRef: AXUIElement?
-    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hitRef) == .success,
+    guard canQuery(),
+          AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &hitRef) == .success,
           var element = hitRef else { return nil }
     for _ in 0..<64 {
+        guard canQuery() else { return nil }
         var windowRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
            let value = windowRef, CFGetTypeID(value) == AXUIElementGetTypeID() {
-            return value as! AXUIElement
+            return (value as! AXUIElement)
         }
+        guard canQuery() else { return nil }
         var roleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
            let role = roleRef as? String, role == kAXWindowRole as String {
             return element
         }
+        guard canQuery() else { return nil }
         var parentRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentRef) == .success,
               let value = parentRef, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
@@ -151,6 +181,135 @@ func pointWindow(_ point: CGPoint) -> AXUIElement? {
 func post(_ event: CGEvent?, pause: useconds_t = 20_000) { event?.post(tap: .cghidEventTap); usleep(pause) }
 func fraction(_ value: String) -> Double? {
     Double(value).flatMap { $0.isFinite && $0 >= 0 && $0 <= 1 ? $0 : nil }
+}
+// A fraction of the window's current bounds, in the top-left space CGEvent
+// uses; the -1 keeps a point at 1.0 inside the frame.
+func mappedPoint(_ bounds: CGRect, _ fx: Double, _ fy: Double) -> CGPoint {
+    CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
+}
+// Set the timeout process-wide so the elements returned during traversal
+// inherit it as well.
+func boundAXMessaging() {
+    guard AXUIElementSetMessagingTimeout(systemWide, 0.1) == .success else { fail(6, "focus") }
+}
+// The window under a screen point must be the one being driven before anything
+// is posted there: a panel or another window floating above the target hands
+// hover, clicks and drags to itself.
+func requireTarget(_ point: CGPoint) {
+    guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
+}
+func dragInterruption() -> (code: Int32, message: String)? {
+    if getppid() == 1 { return (7, "orphaned") }
+    if isCancelled() { return (8, "cancelled") }
+    return nil
+}
+// Absolute deadlines keep the drag's steps evenly spaced even when posting an
+// event runs late; a step already due is not delayed.
+func sleepUntil(_ deadline: UInt64) {
+    let now = DispatchTime.now().uptimeNanoseconds
+    guard deadline > now else { return }
+    let remaining = deadline - now
+    var request = timespec()
+    request.tv_sec = Int(remaining / 1_000_000_000)
+    request.tv_nsec = Int(remaining % 1_000_000_000)
+    _ = nanosleep(&request, nil)
+}
+// Positive dy scrolls up and positive dx scrolls left: one pixel-unit wheel
+// event with both axes at the mapped point. The source, the pointer move and
+// the wheel must exist before anything is posted; the point is hit-tested
+// before the move and again after it, before the wheel.
+func scrollGesture(at point: CGPoint, dx: Int32, dy: Int32) {
+    boundAXMessaging()
+    guard let source = CGEventSource(stateID: .hidSystemState),
+          let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
+          let wheel = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
+    else { fail(4, "event") }
+    wheel.location = point
+    checkAlive()
+    checkCancel()
+    requireTarget(point)
+    ensureFocus()
+    post(move)
+    // The move and the hit test take time: a Stop, a dead Hook or a window that
+    // stopped being the target must not post the wheel.
+    requireTarget(point)
+    ensureFocus()
+    checkAlive()
+    checkCancel()
+    wheel.post(tap: .cghidEventTap)
+}
+// Every event is built before the button goes down, so nothing can fail
+// between down and up. The point is hit-tested before the move and again before
+// the button, and the whole path is sampled before pressing. Once left-down is
+// posted the gesture always ends with left-up, even when Stop or a dead Hook
+// lands mid-drag; the bounded remaining steps are abandoned and the up goes out
+// first, at the last point the button reached.
+func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
+    boundAXMessaging()
+    guard let source = CGEventSource(stateID: .hidSystemState),
+          let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: .left),
+          let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)
+    else { fail(4, "event") }
+    let steps = (durationMs + 15) / 16
+    var points: [CGPoint] = []
+    var dragged: [CGEvent] = []
+    for step in 1...steps {
+        let t = CGFloat(step) / CGFloat(steps)
+        let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+        guard let event = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left) else { fail(4, "event") }
+        points.append(point)
+        dragged.append(event)
+    }
+    checkAlive()
+    checkCancel()
+    requireTarget(start)
+    ensureFocus()
+    post(move)
+    // The move and the hit test take time: a Stop, a dead Hook or a window that
+    // stopped being the target must not press the button.
+    requireTarget(start)
+    ensureFocus()
+    checkAlive()
+    checkCancel()
+    // A panel can cover any part of the path while the start stays visible, so
+    // every sampled point must belong to the target before the button goes
+    // down; a native drag destination must never receive the drop instead.
+    for share in [0.25, 0.5, 0.75, 1.0] {
+        requireTarget(CGPoint(x: start.x + (end.x - start.x) * CGFloat(share), y: start.y + (end.y - start.y) * CGFloat(share)))
+        checkAlive()
+        checkCancel()
+    }
+    let began = DispatchTime.now().uptimeNanoseconds
+    // Cap all held-button hit tests at 1 s. At most one 100 ms AX call can
+    // overrun that deadline, leaving time to release before the 1.5 s kill.
+    let releaseDeadline = began + 1_000_000_000
+    down.post(tap: .cghidEventTap)
+    // Where the button last was: an interrupted gesture releases there, not at
+    // a point the drag never reached.
+    var last = start
+    var failure: (code: Int32, message: String)?
+    for (index, event) in dragged.enumerated() {
+        let deadline = began + UInt64(Double(durationMs) * 1_000_000 * Double(index + 1) / Double(steps))
+        sleepUntil(deadline)
+        if let interrupted = dragInterruption() { failure = interrupted; break }
+        // The window under the next point must still be the target: a panel can
+        // cover any step, so every one is hit-tested (bounded) before it is
+        // posted, and the first failure ends the drag through the release.
+        let hit = pointWindow(points[index], deadline: releaseDeadline).map { CFEqual($0, window) } ?? false
+        if let interrupted = dragInterruption() { failure = interrupted; break }
+        guard hit, DispatchTime.now().uptimeNanoseconds < releaseDeadline else {
+            failure = (6, "focus")
+            break
+        }
+        event.post(tap: .cghidEventTap)
+        last = points[index]
+    }
+    // Every recoverable exit after left-down releases the button exactly once
+    // before the helper exits; a completed drag releases at the endpoint.
+    up.location = last
+    up.post(tap: .cghidEventTap)
+    if let failure { fail(failure.code, failure.message) }
 }
 
 // The Hook is our parent: if it dies we are reparented to launchd (pid 1) and
@@ -234,23 +393,32 @@ case "tap":
     guard args.count >= 5, let fx = fraction(args[3]), let fy = fraction(args[4]) else { fail(2, "tap needs fx fy in 0 to 1") }
     raise()
     guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
-    let bounds = raised.bounds
-    // The -1 keeps a tap at fraction 1.0 inside the frame.
-    let point = CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
+    let point = mappedPoint(raised.bounds, fx, fy)
     checkAlive()
     checkCancel()
+    // Hit-test before the pointer moves: a covering panel must not receive hover.
+    requireTarget(point)
     ensureFocus()
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
-    // The element under the point must belong to this window, not an alert
-    // panel or another window of the same app floating above it.
-    guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
+    // The move and the hit test take time, so the target and focus are checked
+    // again before the click goes out.
+    requireTarget(point)
     ensureFocus()
-    // The hit test and focus check take time: a Stop or a dead Hook in that
-    // window must not start the click.
     checkAlive()
     checkCancel()
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
+case "scroll":
+    guard let gesture = scrollArgs else { fail(2, "scroll needs fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
+    raise()
+    guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
+    scrollGesture(at: mappedPoint(raised.bounds, gesture.fx, gesture.fy), dx: gesture.dx, dy: gesture.dy)
+case "drag":
+    guard let gesture = dragArgs else { fail(2, "drag needs fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
+    raise()
+    guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
+    let bounds = raised.bounds
+    dragGesture(from: mappedPoint(bounds, gesture.fx1, gesture.fy1), to: mappedPoint(bounds, gesture.fx2, gesture.fy2), durationMs: gesture.durationMs)
 case "type":
     guard let stdinText = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else { fail(2, "type needs UTF-8 on stdin") }
     // The limit is user-perceived characters, without a single submit newline.

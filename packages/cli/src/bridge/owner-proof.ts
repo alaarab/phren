@@ -34,12 +34,12 @@ const ROUTES = new Set([
   "POST /v1/sets/link",
   "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
   "POST /v1/owner-confirms/answer",
-  "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot",
+  "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot", "GET /v1/mac/windows/stream",
   "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
 ]);
 /** The Mac window routes are new, so no older phone depends on unsigned access: they require proof from the first request. */
 const STRICT_ROUTES = new Set([
-  "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot",
+  "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot", "GET /v1/mac/windows/stream",
   "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
 ]);
 

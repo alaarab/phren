@@ -35,7 +35,10 @@ import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { relayLiveSpeech } from "./speech-live.js";
 import { streamSimulator } from "./simulator-stream.js";
-import { stopMacWindows } from "./mac-windows.js";
+import { logMacWindowStreamRefusal, macWindowStreamSupported, stopMacWindows } from "./mac-windows.js";
+import { closeMacWindowStreams, streamMacWindow } from "./mac-window-stream.js";
+import { bodyDigest, OwnerProof } from "./owner-proof.js";
+import { ownerRequest } from "./request-origin.js";
 import { failRelay, relayTranscription } from "./speech-transcribe.js";
 import { ActivityJournal } from "./activity.js";
 import { countTick } from "./metrics.js";
@@ -335,17 +338,40 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   const socketPools = new SocketBudget<WebSocket>();
-  http.on("upgrade", (request, socket, head) => {
+  const macWindowProof = new OwnerProof();
+  let stopping = false;
+  http.on("upgrade", async (request, socket, head) => {
+    socket.on("error", () => socket.destroy());
     try {
       const url = new URL(request.url || "/", "http://phren.local");
-      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/git/watch", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/browsers/stream"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
+      if (!["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/git/watch", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/browsers/stream", "/v1/mac/windows/stream"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
       requireRoute(modules, "WS", url.pathname);
+      const macWindow = url.pathname === "/v1/mac/windows/stream";
+      if (macWindow) {
+        // Verify the actual GET before sending 101 or admitting it to the socket budget.
+        try {
+          if (request.method !== "GET" || !ownerRequest(request, {})) throw new Error("Owner upgrade required");
+          await macWindowProof.check(request, url.pathname, {}, bodyDigest(Buffer.alloc(0)));
+        } catch {
+          await logMacWindowStreamRefusal("mac-windows-owner-only");
+          if (!socket.destroyed) socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+          return;
+        }
+      }
+      if (stopping || socket.destroyed) { socket.destroy(); return; }
+      const unsupportedMacWindow = macWindow && !macWindowStreamSupported();
       // Parsed before the upgrade: an invalid server name is refused as the other routes refuse it.
       const overviewServer = url.pathname === "/v1/overview" ? selectedServer(url) : undefined;
       // Sockets are budgeted per authenticated identity (socket-budget.ts); the
       // x-phren-client header only picks a sub-pool inside that budget.
       const identity = socketIdentity(request), kind = socketKind(request);
       ws.handleUpgrade(request, socket, head, client => {
+        client.on("error", () => { /* ws handles protocol closes; a route may add its own cleanup. */ });
+        if (unsupportedMacWindow) {
+          void logMacWindowStreamRefusal("unsupported-platform");
+          closeGracefully(client, 1008, "unsupported-platform");
+          return;
+        }
         client.once("close", () => socketPools.remove(client));
         for (const oldest of socketPools.add(client, identity, kind)) {
           // The close frame goes first so the phone learns it was evicted, not that SSH died.
@@ -356,6 +382,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => failRelay(client)); return; }
         if (url.pathname === "/v1/browsers/stream") { streamBrowser(client, url.searchParams, browsers); return; }
         if (url.pathname === "/v1/simulators/stream") { void streamSimulator(client, url.searchParams).catch(() => client.close(1011, "Simulator stream unavailable")); return; }
+        if (macWindow) { void streamMacWindow(client, url.searchParams, true).catch(() => client.close(1011, "capture-failed")); return; }
         if (url.pathname === "/v1/speech/live") { void relayLiveSpeech(client, url.searchParams).catch(() => client.close(1011, "Spoken replies unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });
@@ -467,11 +494,15 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   await new Promise<void>(resolve => {
     const stop = () => {
       process.off("SIGTERM", stop); process.off("SIGINT", stop);
-      void stopMacWindows();
+      stopping = true;
+      // Active leases close through their session callback before badge cleanup.
+      // Also close streams whose admission has not reached the lease yet.
+      const macWindowsStopped = stopMacWindows();
+      closeMacWindowStreams();
       browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention();
       for (const timer of [scheduleTimer, dreamTimer, taskAuditTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
       scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close();
-      ws.clients.forEach(c => c.terminate()); terminateClosing(); ws.close(); http.close(() => resolve()); http.closeAllConnections();
+      ws.clients.forEach(c => c.terminate()); terminateClosing(); ws.close(); http.close(() => resolve(macWindowsStopped)); http.closeAllConnections();
       stopProbes();
     };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
