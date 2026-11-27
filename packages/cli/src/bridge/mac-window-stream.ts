@@ -103,7 +103,7 @@ function tierRate(tier: number): number {
 interface ParsedSample { sync: boolean; width: number; height: number; ptsUs: bigint; body: Buffer }
 
 /** The wire layout of one helper tag-1 record, before the Hook assigns its seq. */
-function parseSample(body: Buffer, codec: MacWindowCodec): ParsedSample {
+function parseSample(body: Buffer, codec: MacWindowCodec, maxSide: number): ParsedSample {
   if (body.length < HEADER_BYTES + 4) throw new Error("short sample");
   if (body.length > MAX_MESSAGE_BYTES) throw new Error("sample over the wire cap");
   if (body.toString("latin1", 0, 4) !== "MWV1") throw new Error("bad magic");
@@ -114,15 +114,20 @@ function parseSample(body: Buffer, codec: MacWindowCodec): ParsedSample {
   const width = body.readUInt16BE(6), height = body.readUInt16BE(8);
   if (width < 2 || width > 960 || height < 2 || height > 960) throw new Error("bad dimensions");
   if ((width & 1) !== 0 || (height & 1) !== 0) throw new Error("odd dimensions");
+  if (Math.max(width, height) > maxSide) throw new Error("longer side than the pulled tier");
   if (body.readUInt16BE(10) !== 0) throw new Error("reserved field set");
   if (body.readUInt32BE(12) !== 0) throw new Error("helper set the sequence");
   const ptsUs = body.readBigUInt64BE(16);
   if (params !== (sync ? (codec === "h264" ? 2 : 3) : 0)) throw new Error("bad parameter-set count");
+  // SPS/PPS for H.264, VPS/SPS/PPS for HEVC, in that wire order.
+  const nalTypes = codec === "h264" ? [7, 8] : [32, 33, 34];
   let offset = HEADER_BYTES;
   for (let i = 0; i < params; i++) {
     if (offset + 2 > body.length) throw new Error("truncated parameter set");
     const length = body.readUInt16BE(offset); offset += 2;
     if (length === 0 || offset + length > body.length) throw new Error("bad parameter set");
+    const type = codec === "h264" ? body[offset] & 0x1f : (body[offset] >> 1) & 0x3f;
+    if (type !== nalTypes[i]) throw new Error("parameter sets out of order");
     offset += length;
   }
   let units = 0;
@@ -237,6 +242,8 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   let lastSeq = 0;
   let pullOutstanding = false;
   let lastPullAt = -Infinity;
+  /** The tier of the PULL whose one answer is outstanding. */
+  let pullTier = options.tier;
   let oversize = 0;
   let spawned = false;
   /** Inside one stdout chunk: a PULL waits until the chunk is fully judged. */
@@ -350,6 +357,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     if (!submit(`PULL ${tier} ${needsSync ? 1 : 0}\n`)) return;
     lastPullAt = now;
     pullOutstanding = true;
+    pullTier = tier;
     pullDeadline = later(PULL_DEADLINE_MS, () => {
       pullDeadline = undefined;
       if (!ended && pullOutstanding) end(1011, "capture-failed");
@@ -410,7 +418,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   const onSample = (body: Buffer) => {
     let sample: ParsedSample;
-    try { sample = parseSample(body, options.codec); } catch { end(1011, "bad-helper-frame"); return; }
+    try { sample = parseSample(body, options.codec, MAC_WINDOW_TIERS[pullTier].size); } catch { end(1011, "bad-helper-frame"); return; }
     if (lastPts !== undefined && sample.ptsUs <= lastPts) { end(1011, "bad-helper-frame"); return; }
     lastPts = sample.ptsUs;
     if (needsSync && !sample.sync) { end(1011, "bad-helper-frame"); return; }

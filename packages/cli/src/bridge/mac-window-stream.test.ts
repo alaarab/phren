@@ -439,6 +439,32 @@ describe("frames", () => {
     await flush();
     expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
   });
+  it("refuses a sample longer than the tier that pulled it", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&tier=0`, deps);
+    children[0].stdout.write(record(1, wire({ sync: true, width: 960, height: 600, pts: 1_000n })));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+  });
+  it.each([
+    ["h264", [Buffer.from([0x68, 0x01]), Buffer.from([0x67, 0x01])], "PPS before SPS"],
+    ["hevc", [Buffer.from([0x42, 0x01]), Buffer.from([0x40, 0x01]), Buffer.from([0x44, 0x01])], "SPS before VPS"],
+  ] as const)("refuses %s parameter sets out of wire order (%s)", async (codec, params) => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&codec=${codec}`, deps);
+    children[0].stdout.write(record(1, wire({ sync: true, codec, params: [...params], pts: 1_000n })));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+  });
+  it("accepts a HEVC sync frame with VPS, SPS and PPS in order", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&codec=hevc`, deps);
+    children[0].stdout.write(record(1, wire({ sync: true, codec: "hevc", pts: 1_000n })));
+    await flush();
+    expect(client.texts()[0]).toMatchObject({ type: "start", codec: "hevc" });
+    expect(client.binary()).toHaveLength(1);
+    expect(client.closed).toBeUndefined();
+  });
   it("accepts a sync frame with new coded dimensions as a new epoch", async () => {
     const { deps, children } = harness();
     const client = await start(`id=${ID}`, deps);
