@@ -105,7 +105,9 @@ describe("mac windows: off, validation and the setting file", () => {
   });
 
   it("is owner-only", () => {
-    expect(() => macWindowsOwnerOnly(false)).toThrow(expect.objectContaining({ status: 403, details: { code: "mac-windows-owner-only" } }));
+    let refusal: unknown;
+    try { macWindowsOwnerOnly(false); } catch (error) { refusal = error; }
+    expect(refusal).toMatchObject({ status: 403, details: { code: "mac-windows-owner-only" } });
     expect(() => macWindowsOwnerOnly(true)).not.toThrow();
   });
 });
