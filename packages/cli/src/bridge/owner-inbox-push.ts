@@ -17,9 +17,6 @@ export interface OwnerInboxPushSender {
   notifyOwnerInbox(value: OwnerInboxPushValue, deviceID: string): Promise<boolean>;
 }
 
-/** The internal tick snapshot adds first-open eligibility to the public row. */
-type ObservedItem = InboxItem & { firstOpen?: boolean };
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A failed candidate/device pair waits this long before another attempt. */
 export const OWNER_INBOX_RETRY_MS = 60_000;
@@ -28,13 +25,19 @@ const MAX_SEEDS = 3;
 /** One sweep attempts at most this many distinct candidate rows (each to all
  * of its eligible phones). */
 const MAX_CANDIDATES = 3;
+/** Receipts retained per ledger entry; the reader schema matches this so a
+ * candidate that outlives many registrations never disables the ledger. */
+const MAX_RECEIPTS = 16;
+
+/** The internal tick snapshot adds first-open eligibility to the public row. */
+type ObservedItem = InboxItem & { firstOpen?: boolean };
 
 const entrySchema = z.object({
   id: z.string().uuid(),
   /** The observed revision, frozen when the candidate was created. */
   updatedAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
-  sentDeviceIDs: z.array(z.string().uuid()).max(16),
+  sentDeviceIDs: z.array(z.string().uuid()).max(MAX_RECEIPTS),
 }).strict();
 const ledgerSchema = z.object({
   version: z.literal(1),
@@ -43,6 +46,12 @@ const ledgerSchema = z.object({
 }).strict();
 type LedgerEntry = z.infer<typeof entrySchema>;
 type Ledger = z.infer<typeof ledgerSchema>;
+
+/** Receipts keep the newest 16 acceptances; the reader applies the same limit
+ * so a long-lived candidate with many registrations still reads as valid. */
+function recordReceipt(entry: LedgerEntry, deviceID: string): void {
+  entry.sentDeviceIDs = [...entry.sentDeviceIDs.filter(id => id !== deviceID), deviceID].slice(-MAX_RECEIPTS);
+}
 
 export interface OwnerInboxPushOptions {
   /** `<bridge>/owner-inbox-push.json` by default. */
@@ -75,6 +84,9 @@ export class OwnerInboxPushSweep {
   private latest: ObservedItem[] = [];
   /** `${id}:${deviceID}` → earliest epoch ms the pair may be attempted again. */
   private readonly retryAfter = new Map<string, number>();
+  /** Acceptances whose receipt write failed, so a live Hook retries persistence
+   * without sending the same phone another alert. */
+  private readonly accepted = new Set<string>();
   private corruptReported = false;
 
   constructor(private readonly sender: OwnerInboxPushSender, options: OwnerInboxPushOptions = {}) {
@@ -132,14 +144,49 @@ export class OwnerInboxPushSweep {
       return;
     }
     const ledger = loaded ?? { version: 1 as const, initializedAt: at, entries: this.seed(openItems, now) };
-    if (!loaded) await atomicInPrivateDir(this.file, ledger);
-    else if (this.reconcile(ledger, openItems, now)) await atomicInPrivateDir(this.file, ledger);
+    if (!loaded) {
+      // The candidate must be durable before any provider sees it.
+      try { await atomicInPrivateDir(this.file, ledger); }
+      catch (error) {
+        this.log(`Phren Inbox push: could not write ${this.file}, so no Inbox alert was sent: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+    } else {
+      const reconciled = this.reconcile(ledger, openItems, now);
+      const merged = this.mergeAccepted(ledger);
+      if (reconciled) {
+        try { await atomicInPrivateDir(this.file, ledger); }
+        catch (error) {
+          this.log(`Phren Inbox push: could not save the new candidate, so no Inbox alert was sent: ${error instanceof Error ? error.message : String(error)}`);
+          return;
+        }
+      } else if (merged) {
+        // A phone already accepted these; a broken write only delays the
+        // receipt, never earns that phone another alert.
+        try { await atomicInPrivateDir(this.file, ledger); }
+        catch (error) { this.log(`Phren Inbox push: could not save accepted receipts: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+    }
     await this.deliver(ledger);
+  }
+
+  /** Merge acceptances whose receipt write failed into a freshly loaded ledger. */
+  private mergeAccepted(ledger: Ledger): boolean {
+    let changed = false;
+    for (const key of this.accepted) {
+      const split = key.indexOf(":");
+      const id = key.slice(0, split), deviceID = key.slice(split + 1);
+      const entry = ledger.entries.find(candidate => candidate.id === id);
+      if (!entry || entry.sentDeviceIDs.includes(deviceID)) continue;
+      recordReceipt(entry, deviceID); changed = true;
+    }
+    return changed;
   }
 
   /** The initial snapshot: up to three rows updated in the preceding day,
    * newest first with a UUID tie-break. The override row takes the first slot
-   * regardless of age so a known row (OVH) is still backfilled. */
+   * regardless of age so a known row (OVH) is still backfilled. A same-id
+   * reopen never takes a seed slot. */
   private seed(openItems: ObservedItem[], now: number): LedgerEntry[] {
     const open = openItems.filter(item => item.state === "open" && item.firstOpen !== false);
     const expiresAt = new Date(now + DAY_MS).toISOString();
@@ -159,7 +206,10 @@ export class OwnerInboxPushSweep {
   private reconcile(ledger: Ledger, openItems: ObservedItem[], now: number): boolean {
     let changed = false;
     const kept = ledger.entries.filter(entry => Date.parse(entry.expiresAt) > now);
-    if (kept.length !== ledger.entries.length) { ledger.entries = kept; changed = true; }
+    if (kept.length !== ledger.entries.length) {
+      for (const entry of ledger.entries) if (!kept.includes(entry)) for (const key of this.accepted) if (key.startsWith(`${entry.id}:`)) this.accepted.delete(key);
+      ledger.entries = kept; changed = true;
+    }
     const known = new Set(ledger.entries.map(entry => entry.id));
     const initializedAt = Date.parse(ledger.initializedAt);
     for (const item of openItems) {
@@ -194,8 +244,11 @@ export class OwnerInboxPushSweep {
     for (const entry of candidates) {
       if (selected >= MAX_CANDIDATES) break;
       if (Date.parse(entry.expiresAt) <= this.now()) continue;
-      const pending = devices.filter(deviceID => !entry.sentDeviceIDs.includes(deviceID)
-        && (this.retryAfter.get(`${entry.id}:${deviceID}`) ?? 0) <= this.now());
+      const pending = devices.filter(deviceID => {
+        const key = `${entry.id}:${deviceID}`;
+        return !entry.sentDeviceIDs.includes(deviceID) && !this.accepted.has(key)
+          && (this.retryAfter.get(key) ?? 0) <= this.now();
+      });
       // A row with no eligible phone does not consume one of the three slots.
       if (!pending.length) continue;
       selected++;
@@ -206,7 +259,7 @@ export class OwnerInboxPushSweep {
         const current = this.now();
         if (Date.parse(entry.expiresAt) <= current) break;
         if ((this.retryAfter.get(key) ?? 0) > current) continue;
-        if (entry.sentDeviceIDs.includes(deviceID)) continue;
+        if (entry.sentDeviceIDs.includes(deviceID) || this.accepted.has(key)) continue;
         const live = this.latest.find(item => item.id === entry.id && item.state === "open");
         if (!live) break;
         const attemptedAt = this.now();
@@ -215,9 +268,12 @@ export class OwnerInboxPushSweep {
           accepted = await this.sender.notifyOwnerInbox({ id: entry.id, title: live.title, expiresAt: entry.expiresAt }, deviceID);
         } catch { accepted = false; }
         if (accepted) {
-          if (!entry.sentDeviceIDs.includes(deviceID)) entry.sentDeviceIDs.push(deviceID);
-          this.retryAfter.delete(key);
-          await atomicInPrivateDir(this.file, ledger);
+          this.accepted.add(key);
+          recordReceipt(entry, deviceID);
+          try { await atomicInPrivateDir(this.file, ledger); }
+          catch (error) {
+            this.log(`Phren Inbox push: ${key} was accepted but its receipt could not be saved; the phone will not be alerted again while this Hook runs: ${error instanceof Error ? error.message : String(error)}`);
+          }
         } else {
           // Time the retry from this attempt, not from the sweep's entry.
           this.retryAfter.set(key, attemptedAt + OWNER_INBOX_RETRY_MS);

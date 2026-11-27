@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -10,6 +10,8 @@ const DAY = 24 * 60 * 60 * 1000;
 const AT = Date.parse("2026-11-27T10:00:00.000Z");
 const DEVICE_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const DEVICE_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+/** A distinct valid device UUID for registration-cap tests. */
+const deviceId = (index: number) => `${String(index).padStart(8, "0")}-0000-4000-8000-000000000000`;
 
 let root: string, file: string, now: number;
 const iso = (value: number) => new Date(value).toISOString();
@@ -229,6 +231,59 @@ describe("owner inbox push sweep", () => {
     expect(sender.sent.map(item => item.deviceID)).toEqual([DEVICE_A, DEVICE_B]);
   });
 
+  it("budgets three distinct rows per sweep and offers each to every eligible phone", async () => {
+    const sender = fakeSender();
+    sender.devices.push(DEVICE_A, DEVICE_B);
+    const box = sweep(sender);
+    await box.observe([]);
+    advance(1000);
+    const rows = Array.from({ length: 4 }, (_, index) => row({
+      id: `${index + 1}9191919-1919-4919-8919-191919191919`,
+      title: `Budgeted ${index + 1}`, createdAt: iso(now + index * 1000), updatedAt: iso(now + index * 1000),
+    }));
+    await box.observe(rows);
+    expect(sender.attempts).toHaveLength(6);
+    expect(new Set(sender.attempts.map(attempt => attempt.split(":")[0]))).toEqual(new Set(rows.slice(0, 3).map(item => item.id)));
+    expect(sender.attempts.filter(attempt => attempt.endsWith(DEVICE_A))).toHaveLength(3);
+    expect(sender.attempts.filter(attempt => attempt.endsWith(DEVICE_B))).toHaveLength(3);
+    await box.observe(rows);
+    expect(sender.attempts).toHaveLength(8);
+    expect(sender.attempts.filter(attempt => attempt.startsWith(`${rows[3].id}:`))).toHaveLength(2);
+  });
+
+  it("starts each phone's retry timer at its own attempt, not at the sweep's entry", async () => {
+    const sender = fakeSender();
+    sender.devices.push(DEVICE_A);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started!: () => void;
+    const firstStarted = new Promise<void>(resolve => { started = resolve; });
+    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue, deviceID: string) => {
+      sender.attempts.push(`${value.id}:${deviceID}`);
+      if (value.id === first.id) { started(); await gate; return true; }
+      return false;
+    });
+    const box = sweep(sender);
+    await box.observe([]);
+    advance(1000);
+    const first = row({ id: "1c1c1c1c-1c1c-4c1c-8c1c-1c1c1c1c1c1c" });
+    const second = row({ id: "1d1d1d1d-1d1d-4d1d-8d1d-1d1d1d1d1d1d", createdAt: iso(now + 1000), updatedAt: iso(now + 1000) });
+    const running = box.observe([first, second]);
+    await firstStarted;
+    // The first send takes 90 seconds; the second attempt starts only then.
+    advance(90_000);
+    release();
+    await running;
+    expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`, `${second.id}:${DEVICE_A}`]);
+    // The old sweep-wide timer would already be expired here.
+    advance(59_999);
+    await box.observe([first, second]);
+    expect(sender.attempts).toHaveLength(2);
+    advance(1);
+    await box.observe([first, second]);
+    expect(sender.attempts).toHaveLength(3);
+  });
+
   it("does not resend after a restart, and a phone registering later still gets the retained row", async () => {
     const sender = fakeSender();
     sender.devices.push(DEVICE_A);
@@ -243,28 +298,6 @@ describe("owner inbox push sweep", () => {
     restarted.devices.push(DEVICE_A, DEVICE_B);
     await sweep(restarted).observe([rowNow]);
     expect(restarted.sent.map(item => item.deviceID)).toEqual([DEVICE_B]);
-  });
-
-  it("never alerts a manual row that was resolved and reopened between ticks", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(AT));
-    const box = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
-    const sender = fakeSender();
-    sender.devices.push(DEVICE_A);
-    const push = new OwnerInboxPushSweep(sender, { file, now: Date.now });
-    await push.observe(await box.tick());
-    vi.setSystemTime(new Date(AT + 1000));
-    const added = (await box.run({ action: "add", title: "OVH US VPS-2 is in stock" })).item as InboxItem;
-    await box.run({ action: "resolve", id: added.id, resolution: "done" });
-    await box.run({ action: "add", id: added.id, title: "OVH US VPS-2 is back in stock" });
-    await push.observe(await box.tick());
-    expect(sender.attempts).toEqual([]);
-
-    // A genuinely new row created after the cursor still alerts.
-    vi.setSystemTime(new Date(AT + 2000));
-    await box.run({ action: "add", title: "OVH has a second plan" });
-    await push.observe(await box.tick());
-    expect(sender.sent.map(item => item.value.title)).toEqual(["OVH has a second plan"]);
   });
 
   it("rechecks the newest snapshot right before a later provider call", async () => {
@@ -320,57 +353,67 @@ describe("owner inbox push sweep", () => {
     expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`]);
   });
 
-  it("budgets three distinct rows per sweep and offers each to every eligible phone", async () => {
-    const sender = fakeSender();
-    sender.devices.push(DEVICE_A, DEVICE_B);
-    const box = sweep(sender);
-    await box.observe([]);
-    advance(1000);
-    const rows = Array.from({ length: 4 }, (_, index) => row({
-      id: `${index + 1}9191919-1919-4919-8919-191919191919`,
-      title: `Budgeted ${index + 1}`, createdAt: iso(now + index * 1000), updatedAt: iso(now + index * 1000),
-    }));
-    await box.observe(rows);
-    expect(sender.attempts).toHaveLength(6);
-    expect(new Set(sender.attempts.map(attempt => attempt.split(":")[0]))).toEqual(new Set(rows.slice(0, 3).map(item => item.id)));
-    expect(sender.attempts.filter(attempt => attempt.endsWith(DEVICE_A))).toHaveLength(3);
-    expect(sender.attempts.filter(attempt => attempt.endsWith(DEVICE_B))).toHaveLength(3);
-    await box.observe(rows);
-    expect(sender.attempts).toHaveLength(8);
-    expect(sender.attempts.filter(attempt => attempt.startsWith(`${rows[3].id}:`))).toHaveLength(2);
-  });
-
-  it("starts each phone's retry timer at its own attempt, not at the sweep's entry", async () => {
+  it("never alerts a manual row that was resolved and reopened between ticks", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(AT));
+    const box = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
     const sender = fakeSender();
     sender.devices.push(DEVICE_A);
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    let started!: () => void;
-    const firstStarted = new Promise<void>(resolve => { started = resolve; });
-    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue, deviceID: string) => {
-      sender.attempts.push(`${value.id}:${deviceID}`);
-      if (value.id === first.id) { started(); await gate; return true; }
-      return false;
-    });
+    const push = new OwnerInboxPushSweep(sender, { file, now: Date.now });
+    await push.observe(await box.tick());
+    vi.setSystemTime(new Date(AT + 1000));
+    const added = (await box.run({ action: "add", title: "OVH US VPS-2 is in stock" })).item as InboxItem;
+    await box.run({ action: "resolve", id: added.id, resolution: "done" });
+    await box.run({ action: "add", id: added.id, title: "OVH US VPS-2 is back in stock" });
+    await push.observe(await box.tick());
+    expect(sender.attempts).toEqual([]);
+
+    // A genuinely new row created after the cursor still alerts.
+    vi.setSystemTime(new Date(AT + 2000));
+    await box.run({ action: "add", title: "OVH has a second plan" });
+    await push.observe(await box.tick());
+    expect(sender.sent.map(item => item.value.title)).toEqual(["OVH has a second plan"]);
+  });
+
+  it("caps receipts at the newest 16 and keeps a long-lived ledger readable after 17 registrations", async () => {
+    const sender = fakeSender();
     const box = sweep(sender);
     await box.observe([]);
     advance(1000);
-    const first = row({ id: "1c1c1c1c-1c1c-4c1c-8c1c-1c1c1c1c1c1c" });
-    const second = row({ id: "1d1d1d1d-1d1d-4d1d-8d1d-1d1d1d1d1d1d", createdAt: iso(now + 1000), updatedAt: iso(now + 1000) });
-    const running = box.observe([first, second]);
-    await firstStarted;
-    // The first send takes 90 seconds; the second attempt starts only then.
-    advance(90_000);
-    release();
-    await running;
-    expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`, `${second.id}:${DEVICE_A}`]);
-    // The old sweep-wide timer would already be expired here.
-    advance(59_999);
-    await box.observe([first, second]);
-    expect(sender.attempts).toHaveLength(2);
-    advance(1);
-    await box.observe([first, second]);
-    expect(sender.attempts).toHaveLength(3);
+    const rowNow = row({ id: "2c2c2c2c-2c2c-4c2c-8c2c-2c2c2c2c2c2c" });
+    for (let index = 0; index < 17; index++) {
+      sender.devices = [deviceId(index)];
+      await box.observe([rowNow]);
+    }
+    const entries = (await ledger()).entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].sentDeviceIDs).toEqual(Array.from({ length: 16 }, (_, index) => deviceId(index + 1)));
+    const log = vi.fn(), reader = fakeSender();
+    reader.devices = [deviceId(16)];
+    await sweep(reader, { log }).observe([rowNow]);
+    expect(log).not.toHaveBeenCalled();
+    expect(reader.attempts).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps an acceptance in memory when its receipt write fails", async () => {
+    const sender = fakeSender(), log = vi.fn();
+    const box = sweep(sender, { log });
+    await box.observe([]);
+    advance(1000);
+    const rowNow = row({ id: "2d2d2d2d-2d2d-4d2d-8d2d-2d2d2d2d2d2d" });
+    await box.observe([rowNow]);
+    sender.devices.push(DEVICE_A);
+    await chmod(root, 0o500);
+    try {
+      await box.observe([rowNow]);
+      expect(sender.attempts).toEqual([`${rowNow.id}:${DEVICE_A}`]);
+      // The failed receipt is retried from memory, never as another alert.
+      await box.observe([rowNow]);
+      expect(sender.attempts).toHaveLength(1);
+    } finally { await chmod(root, 0o700); }
+    await box.observe([rowNow]);
+    expect(sender.attempts).toHaveLength(1);
+    expect((await ledger()).entries[0].sentDeviceIDs).toEqual([DEVICE_A]);
   });
 
   it("fails closed on a corrupt ledger and explains how to recover", async () => {
