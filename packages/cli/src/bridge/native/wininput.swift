@@ -176,24 +176,11 @@ func fraction(_ value: String) -> Double? {
 func mappedPoint(_ bounds: CGRect, _ fx: Double, _ fy: Double) -> CGPoint {
     CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
 }
-// The shared start of a pointer gesture: a cancelled helper, a dead Hook or a
-// window that lost focus posts nothing, and the pointer is placed where the
-// person sees it before the hit test.
-func startGesture(at point: CGPoint, source: CGEventSource?) {
-    checkAlive()
-    checkCancel()
-    ensureFocus()
-    post(CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
-}
-// After the pointer moves: the element under the point must belong to this
-// window, not an alert panel or another window of the same app floating above
-// it. The hit test and focus check take time, so a Stop or a dead Hook is
-// checked once more before the first button or wheel event goes out.
-func verifyStart(_ point: CGPoint) {
+// The window under a screen point must be the one being driven before anything
+// is posted there: a panel or another window floating above the target hands
+// hover, clicks and drags to itself.
+func requireTarget(_ point: CGPoint) {
     guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
-    ensureFocus()
-    checkAlive()
-    checkCancel()
 }
 // Absolute deadlines keep the drag's steps evenly spaced even when posting an
 // event runs late; a step already due is not delayed.
@@ -207,34 +194,58 @@ func sleepUntil(_ deadline: UInt64) {
     _ = nanosleep(&request, nil)
 }
 // Positive dy scrolls up and positive dx scrolls left: one pixel-unit wheel
-// event with both axes at the mapped point.
+// event with both axes at the mapped point. The source, the pointer move and
+// the wheel must exist before anything is posted; the point is hit-tested
+// before the move and again after it, before the wheel.
 func scrollGesture(at point: CGPoint, dx: Int32, dy: Int32) {
-    let source = CGEventSource(stateID: .hidSystemState)
-    guard let wheel = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) else { fail(4, "scroll") }
+    guard let source = CGEventSource(stateID: .hidSystemState),
+          let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
+          let wheel = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
+    else { fail(4, "event") }
     wheel.location = point
-    startGesture(at: point, source: source)
-    verifyStart(point)
+    checkAlive()
+    checkCancel()
+    requireTarget(point)
+    ensureFocus()
+    post(move)
+    // The move and the hit test take time: a Stop, a dead Hook or a window that
+    // stopped being the target must not post the wheel.
+    requireTarget(point)
+    ensureFocus()
+    checkAlive()
+    checkCancel()
     wheel.post(tap: .cghidEventTap)
 }
 // Every event is built before the button goes down, so nothing can fail
-// between down and up. Once left-down is posted the gesture always ends with
-// left-up at the endpoint, even when Stop or a dead Hook lands mid-drag; the
-// bounded remaining steps are abandoned and the up still goes out first.
+// between down and up. The point is hit-tested before the move and again before
+// the button. Once left-down is posted the gesture always ends with left-up,
+// even when Stop or a dead Hook lands mid-drag; the bounded remaining steps are
+// abandoned and the up goes out first.
 func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
-    let source = CGEventSource(stateID: .hidSystemState)
+    guard let source = CGEventSource(stateID: .hidSystemState),
+          let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: .left),
+          let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)
+    else { fail(4, "event") }
     let steps = (durationMs + 15) / 16
     var dragged: [CGEvent] = []
     for step in 1...steps {
         let t = CGFloat(step) / CGFloat(steps)
         let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
-        guard let event = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left) else { fail(4, "drag") }
+        guard let event = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left) else { fail(4, "event") }
         dragged.append(event)
     }
-    guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
-          let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)
-    else { fail(4, "drag") }
-    startGesture(at: start, source: source)
-    verifyStart(start)
+    checkAlive()
+    checkCancel()
+    requireTarget(start)
+    ensureFocus()
+    post(move)
+    // The move and the hit test take time: a Stop, a dead Hook or a window that
+    // stopped being the target must not press the button.
+    requireTarget(start)
+    ensureFocus()
+    checkAlive()
+    checkCancel()
     let began = DispatchTime.now().uptimeNanoseconds
     down.post(tap: .cghidEventTap)
     var stopped: Int32?
@@ -331,8 +342,18 @@ case "tap":
     raise()
     guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
     let point = mappedPoint(raised.bounds, fx, fy)
-    startGesture(at: point, source: nil)
-    verifyStart(point)
+    checkAlive()
+    checkCancel()
+    // Hit-test before the pointer moves: a covering panel must not receive hover.
+    requireTarget(point)
+    ensureFocus()
+    post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
+    // The move and the hit test take time, so the target and focus are checked
+    // again before the click goes out.
+    requireTarget(point)
+    ensureFocus()
+    checkAlive()
+    checkCancel()
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
 case "scroll":
