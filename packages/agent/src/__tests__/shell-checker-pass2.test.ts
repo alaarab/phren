@@ -4,7 +4,7 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkPermission } from "../permissions/checker.js";
 import { isAutoApprovableCommand } from "../permissions/shell-classify.js";
 import type { PermissionConfig } from "../permissions/types.js";
@@ -18,18 +18,18 @@ const verdict = (command: string) => {
 const write = (file: string, text = "x\n") => { fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); fs.writeFileSync(path.join(root, file), text); };
 
 beforeAll(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "phren-pass2-")));
   outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "phren-pass2-out-")));
   fs.writeFileSync(path.join(outside, "public.txt"), "x\n");
 });
 afterAll(() => {
-  fs.rmSync(root, { recursive: true, force: true });
-  fs.rmSync(outside, { recursive: true, force: true });
+  fs.rmSync(outside, { recursive: true, force: true, maxRetries: 10 });
 });
 beforeEach(() => {
+  // A fresh repository per test: clearing and re-initing one root let a git
+  // process still hold a file from the previous test, so `git commit` could exit 128.
+  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "phren-pass2-")));
   vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
   vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
-  for (const entry of fs.readdirSync(root)) fs.rmSync(path.join(root, entry), { recursive: true, force: true });
   write("README.md", "TOKEN\n");
   write("public.txt");
   write("file.json", "{}\n");
@@ -41,6 +41,9 @@ beforeEach(() => {
   git("commit", "-qm", "one");
   write("README.md", "TOKEN 2\n");
   git("commit", "-qam", "two");
+});
+afterEach(() => {
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 });
 });
 
 describe("the second pass's gaps ask", () => {
