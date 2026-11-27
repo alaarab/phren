@@ -47,22 +47,24 @@ let args = CommandLine.arguments
 guard args.count >= 2 else { fail(2, "usage: wininput check | prompt | tap <id> <fx> <fy> | type <id> | key <id> <name> [cmd] [shift] [option] [control] | raise <id> | scroll <id> <fx> <fy> <dx> <dy> | drag <id> <fx1> <fy1> <fx2> <fy2> <durationMs>") }
 let command = args[1]
 
-// Gesture arguments are validated before the grant and the window lookups, so
-// a bad scroll or drag exits 2 rather than 3 or 5.
+// Gesture arguments, including the window id, are validated before the grant
+// and the window lookups, so a bad scroll or drag exits 2 rather than 3 or 5.
 var scrollArgs: (fx: Double, fy: Double, dx: Int32, dy: Int32)?
 if command == "scroll" {
-    guard args.count == 7, let fx = fraction(args[3]), let fy = fraction(args[4]),
+    guard args.count == 7, let raw = UInt32(args[2]), raw > 0,
+          let fx = fraction(args[3]), let fy = fraction(args[4]),
           let dx = Int32(args[5]), let dy = Int32(args[6]),
           dx >= -240, dx <= 240, dy >= -240, dy <= 240, dx != 0 || dy != 0
-    else { fail(2, "scroll needs fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
+    else { fail(2, "scroll needs a window id, fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
     scrollArgs = (fx, fy, dx, dy)
 }
 var dragArgs: (fx1: Double, fy1: Double, fx2: Double, fy2: Double, durationMs: Int)?
 if command == "drag" {
-    guard args.count == 8, let fx1 = fraction(args[3]), let fy1 = fraction(args[4]),
+    guard args.count == 8, let raw = UInt32(args[2]), raw > 0,
+          let fx1 = fraction(args[3]), let fy1 = fraction(args[4]),
           let fx2 = fraction(args[5]), let fy2 = fraction(args[6]),
           let durationMs = Int(args[7]), durationMs >= 80, durationMs <= 800
-    else { fail(2, "drag needs fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
+    else { fail(2, "drag needs a window id, fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
     dragArgs = (fx1, fy1, fx2, fy2, durationMs)
 }
 
