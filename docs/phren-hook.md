@@ -1949,12 +1949,13 @@ phone pairing for actions and pushes. It is gated by the conductor module like
 the rest of this contract.
 
 Each Hook sends Inbox alerts for rows it owns: manual adds accepted by that
-Hook, prompts from its panes and sessions, its dispatch receipts and returns,
-and its housekeeping and machine-health warnings. A dispatch return belongs to
-the Hook that holds the receipt, even when the worker runs on a peer. Rows from
-the synced Phren store, including claimed and unclaimed stale tasks, appear
-only in the Inbox list. Alert eligibility is independent of peer names and
-versions. Retries use the row's collapse ID, `inbox-<id>`.
+Hook, prompts from its panes and sessions, dispatch returns for workers running
+on that Hook, and its housekeeping and machine-health warnings. The Hook where
+the worker runs owns the ask. Mirrored returns on a dispatching Hook appear only
+in the Inbox list when the worker runs on a peer. Rows from the synced Phren
+store, including claimed and unclaimed stale tasks, also appear only in the
+list. Alert eligibility is independent of peer names and versions. Retries use
+the row's collapse ID, `inbox-<id>`.
 
 The follow-up phone screen should show one open list with source, project,
 computer, question and a link to `target`; show unreachable computers as

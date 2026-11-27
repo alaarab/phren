@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHooks } from "./agent-hooks.js";
 import { OwnerInbox } from "./owner-inbox.js";
+import { OwnerInboxPushSweep } from "./owner-inbox-push.js";
 import { AGED_CHECK_MS, ownerInboxSources, resetAgedChecks } from "./owner-inbox-sources.js";
 import { dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
 import { paneChatState, recentServers, snapshot, rpc } from "./herdr.js";
@@ -123,6 +124,37 @@ describe("dispatches on other computers", () => {
   // Each worker in a pane of its own: the inbox keeps one item per pane.
   const remote = (id: string, fields: Json) => ({ id, computer: "Desk", target: { ...target, pane: `w1:p${id.slice(-1)}` }, project: "phren", label: "worker",
     createdAt: new Date().toISOString(), returned: { state: "blocked", at: new Date().toISOString() }, ...fields });
+
+  it("sends one alert from the worker Hook when both Hooks list its approval", async () => {
+    const workerInbox = box();
+    const dispatchInbox = new OwnerInbox(() => ownerInboxSources(hooks), path.join(root, "dispatch-inbox.json"));
+    const device = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const workerSend = vi.fn(async () => true), dispatchSend = vi.fn(async () => true);
+    const workerPush = new OwnerInboxPushSweep({ ownerInboxPushDevices: () => [device], notifyOwnerInbox: workerSend }, {
+      file: path.join(root, "worker-push.json"), isOpenForPush: id => workerInbox.isOpenForPush(id),
+    });
+    const dispatchPush = new OwnerInboxPushSweep({ ownerInboxPushDevices: () => [device], notifyOwnerInbox: dispatchSend }, {
+      file: path.join(root, "dispatch-push.json"), isOpenForPush: id => dispatchInbox.isOpenForPush(id),
+    });
+
+    const approval = { actionId: "a-1", tool: "Bash", request: "Run the suite?", at: new Date().toISOString() };
+    vi.spyOn(hooks, "workerApproval").mockReturnValue(approval);
+    const workerRows = await workerInbox.tick();
+    expect(workerRows).toMatchObject([{ actionId: approval.actionId, target }]);
+    await workerPush.observe(workerRows);
+
+    panes = [];
+    vi.mocked(dispatchStatus).mockResolvedValue([
+      remote("dddddddd-1111-4111-8111-000000000001", { approval }),
+    ] as never);
+    const dispatchRows = await dispatchInbox.tick();
+    expect(dispatchRows).toMatchObject([{ actionId: approval.actionId, computer: "Desk", target }]);
+    await dispatchPush.observe(dispatchRows);
+
+    expect([...workerSend.mock.calls, ...dispatchSend.mock.calls]).toEqual([
+      [{ id: workerRows[0].id, title: approval.request, expiresAt: expect.any(String) }, device],
+    ]);
+  });
 
   it("are shown from what the returns loop stored, with no SSH however many ticks run", async () => {
     panes = [];

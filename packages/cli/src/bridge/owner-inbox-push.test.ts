@@ -108,7 +108,7 @@ describe("owner inbox push sweep", () => {
       const manual = row();
       const session = row({ kind: "blocked", source: `prompt:${JSON.stringify(target)}:waiting`, target, live: true });
       const claimedTask = row({ ...shared, source: "task-stale:phren:9876abcd", computer: "Studio" });
-      const dispatch = row({ kind: "needs-you", source: `dispatch:${randomUUID()}:waiting`, computer: "Remote", target, live: true });
+      const dispatch = row({ kind: "needs-you", source: `dispatch:${randomUUID()}:waiting`, target, live: true });
       const open = [initialTask, manual, session, claimedTask, dispatch];
       await box.observe(open);
       await box.observe(open);

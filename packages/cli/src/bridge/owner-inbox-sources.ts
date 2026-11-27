@@ -12,11 +12,14 @@ const clean = (text: unknown) => String(text).replace(/[\x00-\x1f\x7f]+/g, " ").
 
 /** Push eligibility for rows from this Hook's reconciliation. Classify each
  * source prefix here. Peer aggregation is only used to list rows. */
-export function isOwnerInboxPushSource(item: Pick<InboxItem, "kind" | "source">): boolean {
+export function isOwnerInboxPushSource(item: Pick<InboxItem, "kind" | "source" | "computer">): boolean {
   if (item.kind === "manual") return true; // Persisted by the Hook that accepted the add.
   switch (item.source?.split(":", 1)[0]) {
+    case "dispatch":
+      // The worker's Hook owns the ask. A dispatch row with a remote subject
+      // is a list-only mirror. Local returns omit the subject computer.
+      return item.computer === undefined;
     case "prompt": // This Hook's own panes and sessions.
-    case "dispatch": // This Hook's receipts and returns, including workers running on peers.
     case "housekeeping": // This Hook's housekeeping and machine-health warnings.
       return true;
     case "task-stale": // Materialized from the synced task store, even with a claim.
