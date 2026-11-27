@@ -8,6 +8,7 @@ const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-retrieval-test-"))
 process.env.PHREN_PATH = tmpPhren;
 
 import { rankResults, searchDocuments, applyRelevanceFloor, applyTrustFilter, selectSnippets } from "../cli/hooks.js";
+import { sortScoreGroups } from "../shared/retrieval.js";
 import type { DocRow } from "../shared/index.js";
 import { buildRobustFtsQuery } from "../utils.js";
 
@@ -33,6 +34,59 @@ describe("rankResults", () => {
     if (claudeIdx !== -1 && learningsIdx !== -1) {
       expect(learningsIdx).toBeLessThan(claudeIdx);
     }
+  });
+
+  it("orders findings by score first, date only breaking a near-tie", () => {
+    const newerWeak = makeDocRow("myapp", "FINDINGS.md", "findings",
+      `## ${new Date().toISOString().slice(0, 10)}\n- The webhook retries three times before giving up.`);
+    const olderStrong = makeDocRow("other", "FINDINGS.md", "findings",
+      "## 2020-01-01\n- Slack alerts go through the webhook monitor at the queue.");
+    const ranked = rankResults([newerWeak, olderStrong], "general", null, null, tmpPhren, null as any,
+      undefined, "webhook slack alerts monitor");
+    // A better match wins even when the other findings doc is newer.
+    expect(ranked.map((row) => row.project)).toEqual(["other", "myapp"]);
+
+    const now = Date.now();
+    const today = new Date(now).toISOString().slice(0, 10);
+    const yesterday = new Date(now - 86_400_000).toISOString().slice(0, 10);
+    // The alphabetically earlier project holds the older date, so path order cannot stand in for
+    // date. A wider cross-project decay makes the older doc's one extra matched word a lead under
+    // 0.01: the date still has to win inside the score group.
+    const olderLead = makeDocRow("a-older", "FINDINGS.md", "findings",
+      `## ${yesterday}\n- Slack alerts go through the webhook monitor.`);
+    const newerTie = makeDocRow("z-newer", "FINDINGS.md", "findings",
+      `## ${today}\n- Slack alerts go through the webhook.`);
+    const decay = process.env.PHREN_CROSS_PROJECT_DECAY_DAYS;
+    process.env.PHREN_CROSS_PROJECT_DECAY_DAYS = "14";
+    try {
+      const scores = new Map<string, number>();
+      const tied = rankResults([olderLead, newerTie], "general", null, "local", tmpPhren, null as any,
+        undefined, "webhook slack alerts monitor", undefined,
+        (row, score) => scores.set(row.project, score));
+      const lead = (scores.get("a-older") ?? 0) - (scores.get("z-newer") ?? 0);
+      expect(lead).toBeGreaterThan(0);
+      expect(lead).toBeLessThanOrEqual(0.01);
+      expect(tied.map((row) => row.project)).toEqual(["z-newer", "a-older"]);
+    } finally {
+      if (decay === undefined) delete process.env.PHREN_CROSS_PROJECT_DECAY_DAYS;
+      else process.env.PHREN_CROSS_PROJECT_DECAY_DAYS = decay;
+    }
+  });
+
+  it("dates settle each score group within 0.01, whatever the input order", () => {
+    const items = [
+      { name: "a-older", score: 3.85, date: "2020-01-01" },
+      { name: "b-middle", score: 3.8438, date: "2020-03-01" },
+      { name: "c-newest", score: 3.8375, date: "2020-06-01" },
+    ];
+    const order = (list: typeof items) => sortScoreGroups(
+      list,
+      (item) => item.score,
+      (a, b) => b.date.localeCompare(a.date) || a.name.localeCompare(b.name),
+    ).map((item) => item.name);
+    // The first two are 62 units apart, one group that date settles; the third is 125 units below.
+    expect(order(items)).toEqual(["b-middle", "a-older", "c-newest"]);
+    expect(order([...items].reverse())).toEqual(["b-middle", "a-older", "c-newest"]);
   });
 
   it("keeps a single strong task result when it clearly beats non-task noise", () => {
@@ -185,6 +239,16 @@ describe("applyRelevanceFloor", () => {
     const together = makeDocRow("other", "reference/topics/ops.md", "reference",
       "- Unrelated bullet.\n- Slack alerts go through the webhook proxy.");
     expect(applyRelevanceFloor([together], KEYWORDS, null, "myapp")).toHaveLength(1);
+  });
+
+  it("holds every row to the cross-project floor when no project is detected (a conductor session)", () => {
+    const rows = [makeDocRow("zeta", "notes.md", "findings", "- Alpha beta ship together in the daily build.")];
+    const rarity = new Map([["alpha", 0.7], ["beta", 0.7]]);
+    // Two of nine prompt words: clears the plain floor, below the cross-project floor.
+    const keywords = "alpha beta gamma delta epsilon zeta eta theta iota";
+    expect(applyRelevanceFloor(rows, keywords, null, null, undefined, rarity)).toHaveLength(0);
+    // The same overlap is enough beside the doc's own project.
+    expect(applyRelevanceFloor(rows, keywords, null, "zeta", undefined, rarity)).toHaveLength(1);
   });
 
   it("weighs keywords by rarity: common words together clear nothing", () => {

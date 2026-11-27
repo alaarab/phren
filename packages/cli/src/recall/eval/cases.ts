@@ -10,6 +10,8 @@ export const recallEvalCaseSchema = z.object({
   kind: z.enum(["negative", "positive"]),
   class: z.string().trim().min(1),
   reason: z.string().trim().min(1).optional(),
+  /** Which eval store the case runs against; the public fixture unless named. */
+  fixture: z.literal("ranking").optional(),
   relevant: z.array(z.object({
     project: z.string().trim().min(1),
     fid: z.string().regex(/^[a-f0-9]{8}$/),

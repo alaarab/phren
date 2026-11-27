@@ -1,7 +1,7 @@
 {
-  "cases": 67,
-  "negatives": 35,
-  "positives": 32,
+  "cases": 74,
+  "negatives": 38,
+  "positives": 36,
   "falseInjectionRate": 0,
   "falseInjectionByClass": {
     "conversational": 0,
@@ -18,11 +18,11 @@
     "topic": 1,
     "older": 1
   },
-  "abstainRate": 0.5224,
+  "abstainRate": 0.5135,
   "positiveAbstainRate": 0,
   "retiredInjected": 0,
-  "meanUsedTokens": 89.5,
-  "judgedPairs": 32,
+  "meanUsedTokens": 95.3611,
+  "judgedPairs": 40,
   "unjudgedPairs": 0,
-  "judgedPrecision": 1
+  "judgedPrecision": 0.9
 }

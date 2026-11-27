@@ -5,7 +5,7 @@ import { resolveRuntimeProfile } from "../../runtime-profile.js";
 import { buildIndex, type SqlJsDatabase } from "../../shared/index.js";
 import type { RecallResult } from "../types.js";
 import { recallEvalCaseSchema, type RecallEvalCase } from "./cases.js";
-import { buildRecallFixture } from "./fixture.js";
+import { buildRankingFixture, buildRecallFixture } from "./fixture.js";
 import { loadJudgments, type RecallJudgments } from "./judgments.js";
 import { scoreRecall, type RecallEvalRow, type RecallScore } from "./score.js";
 
@@ -92,9 +92,22 @@ export async function runRecallEval(options: { runner: RecallRunner; cases?: Rec
   if (fs.existsSync(root) && fs.readdirSync(root).length) throw new Error("Recall fixture root must be empty");
   running = true;
   try {
-    const fixture = buildRecallFixture(root);
+    const cases = options.cases ?? loadCases(CASES_FILE);
+    const fixture = buildRecallFixture(path.join(root, "main"));
+    const ranking = cases.filter((c) => c.fixture === "ranking");
+    const rankingFixture = ranking.length ? buildRankingFixture(path.join(root, "ranking")) : null;
     const judgments = options.judgments ?? loadJudgments(JUDGMENTS_FILE);
-    return await runCases(options.runner, options.cases ?? loadCases(CASES_FILE), fixture.phrenPath, fixture.retiredTexts, judgments, root, FIXTURE_PROFILE);
+    const main = await runCases(options.runner, cases.filter((c) => c.fixture !== "ranking"), fixture.phrenPath, fixture.retiredTexts, judgments, path.join(root, "main"), FIXTURE_PROFILE);
+    const rank = rankingFixture
+      ? await runCases(options.runner, ranking, rankingFixture.phrenPath, rankingFixture.retiredTexts, judgments, path.join(root, "ranking"), FIXTURE_PROFILE)
+      : null;
+    // One score over both stores, in the caller's case order. Keyed by the case object, so duplicate
+    // ids passed directly in options.cases still produce one row per input position.
+    const byCase = new Map<RecallEvalCase, RecallEvalRow>();
+    for (const row of [...main.rows, ...(rank?.rows ?? [])]) byCase.set(row.case, row);
+    const rows = cases.flatMap((c) => byCase.get(c) ?? []);
+    const retiredTexts = [...fixture.retiredTexts, ...(rankingFixture?.retiredTexts ?? [])];
+    return { score: scoreRecall(rows, { retiredTexts, judgments }), rows, judgments };
   } finally {
     running = false;
     if (!options.keep) fs.rmSync(root, { recursive: true, force: true });
@@ -103,6 +116,7 @@ export async function runRecallEval(options: { runner: RecallRunner; cases?: Rec
 
 export async function runRecallStoreEval(options: { runner: RecallRunner; cases: RecallEvalCase[]; judgments?: RecallJudgments; phrenPath: string; profile?: string; embeddings?: boolean }): Promise<RecallEvalReport> {
   if (running) throw new Error("Recall eval changes process environment; run evaluations sequentially");
+  if (options.cases.some((c) => c.fixture)) throw new Error("Ranking cases run only against the public fixture");
   const phrenPath = fs.realpathSync(options.phrenPath);
   if (!fs.statSync(phrenPath).isDirectory()) throw new Error("Store must be a directory");
   // Resolved before the environment swap, the way the hook resolves it on this computer.
