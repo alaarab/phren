@@ -87,7 +87,7 @@ import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.js";
 import { localNames } from "./computer-names.js";
 import { startStoreSyncLoop } from "../sync/store-sync.js";
-import { SocketBudget, socketIdentity, socketKind } from "./socket-budget.js";
+import { closeGracefully, SocketBudget, socketIdentity, socketKind, terminateClosing } from "./socket-budget.js";
 import { stopProbes } from "./probe-processes.js";
 import { logger } from "../logger.js";
 
@@ -345,8 +345,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       ws.handleUpgrade(request, socket, head, client => {
         client.once("close", () => socketPools.remove(client));
         for (const oldest of socketPools.add(client, identity, kind)) {
-          oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
-          ws.clients.delete(oldest);
+          // The close frame goes first so the phone learns it was evicted, not that SSH died.
+          closeGracefully(oldest, 1008, "Too many connections; reconnect"); ws.clients.delete(oldest);
         }
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1", url.searchParams.get("secrets") === "1", url.searchParams.get("confirms") === "1"); return; }
         if (url.pathname === "/v1/git/watch") { void gitWatch.stream(client, url); return; }
@@ -467,7 +467,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention();
       for (const timer of [scheduleTimer, dreamTimer, taskAuditTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
       scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close();
-      ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections();
+      ws.clients.forEach(c => c.terminate()); terminateClosing(); ws.close(); http.close(() => resolve()); http.closeAllConnections();
       stopProbes();
     };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);

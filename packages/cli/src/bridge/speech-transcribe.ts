@@ -95,6 +95,8 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
     }
     const origin = options.origin ?? (await resolveSpeechRegion()).origin;
     if (hungUp) return;
+    // Evicted while the settings were read: the close handshake is under way, so open nothing.
+    if (client.readyState !== OPEN) return;
     const upstream = connect(transcribeURL(query, origin), key);
     // Held until ElevenLabs answers; null is the phone's stop, kept in its place.
     let pending: Array<Buffer | null> = [], pendingBytes = 0, closed = false;
@@ -106,13 +108,15 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
       if (client.readyState === OPEN) client.close(code, reason);
     };
     const end = (reason: string) => { if (!closed) tell({ type: "end", reason }); };
+    // An evicted client is CLOSING, not gone yet: it is torn down on the first frame either way.
+    const gone = () => { if (client.readyState === OPEN) return false; finish(); return true; };
     const limit = setTimeout(() => { end("session-limit"); finish(1000, "Session limit"); }, options.maxSessionMs ?? MAX_SESSION_MS);
     limit.unref?.();
     const chunk = (audio: Buffer, commit = false) => JSON.stringify({
       message_type: "input_audio_chunk", audio_base_64: audio.toString("base64"), commit, sample_rate: TRANSCRIBE_RATE });
 
     receive = (data, isBinary) => {
-      if (closed) return;
+      if (closed || gone()) return;
       if (!isBinary) {
         // The phone's only text frame: the person stopped, commit what's left.
         if (upstream.readyState === OPEN) upstream.send(chunk(Buffer.alloc(0), true));
@@ -130,11 +134,13 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
     client.on("error", () => finish());
 
     upstream.on("open", () => {
+      if (gone()) return;
       for (const audio of pending) upstream.send(audio ? chunk(audio) : chunk(Buffer.alloc(0), true));
       pending = []; pendingBytes = 0;
       if (!closed) tell({ type: "ready" });
     });
     upstream.on("message", data => {
+      if (gone()) return;
       let message: { message_type?: unknown; text?: unknown };
       try { message = JSON.parse(data.toString("utf8")); } catch { return; }
       const type = String(message.message_type ?? "");
@@ -149,7 +155,7 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
         finish(1011);
       }
     });
-    upstream.on("error", () => { tell({ type: "error", code: "transcribe-failed", error: "Couldn't reach ElevenLabs." }); finish(1011); });
-    upstream.on("close", () => { end("upstream-closed"); finish(1000, "ElevenLabs closed"); });
+    upstream.on("error", () => { if (gone()) return; tell({ type: "error", code: "transcribe-failed", error: "Couldn't reach ElevenLabs." }); finish(1011); });
+    upstream.on("close", () => { if (gone()) return; end("upstream-closed"); finish(1000, "ElevenLabs closed"); });
   })();
 }

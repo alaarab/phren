@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Hook WebSocket eviction gives the 1008 close frame up to one second to reach the client before cutting the socket.
 - `@phren/code`: code lookups now find citing findings in the oldest archive halves (`.older.md`) too.
 
 ## [0.3.99] - 2026-11-27

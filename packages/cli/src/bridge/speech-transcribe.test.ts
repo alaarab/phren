@@ -79,6 +79,32 @@ describe("Scribe transcription relay", () => {
     answer("sk-test");
     await late;
     expect(opened).toBe(false);
+
+    // One evicted while the key was read is CLOSING, with no close event yet.
+    const cut = new FakeSocket(); opened = false;
+    const cutRelay = relayTranscription(cut, new URLSearchParams(), { key: async () => "sk-test", origin: "wss://api.elevenlabs.io", connect: () => { opened = true; return new FakeSocket(); } });
+    cut.readyState = 2;
+    await cutRelay;
+    expect(opened).toBe(false);
+  });
+
+  // An evicted client is CLOSING before its close event: it forwards nothing either way, and tears down once.
+  it("stops relaying once the client is closing", async () => {
+    const client = new FakeSocket(), upstream = new FakeSocket();
+    await relayTranscription(client, new URLSearchParams(), { key: async () => "sk-test", connect: () => upstream });
+    upstream.emit("open");
+    expect(frames(client)).toEqual([{ type: "ready" }]);
+    client.readyState = 2;
+    const closing = vi.spyOn(upstream, "close");
+    upstream.emit("message", Buffer.from(JSON.stringify({ message_type: "partial_transcript", text: "late" })), false);
+    expect(frames(client)).toEqual([{ type: "ready" }]);
+    expect(closing).toHaveBeenCalledTimes(1);
+    expect(upstream.readyState).toBe(3);
+    client.emit("message", Buffer.from([1, 2]), true);
+    expect(upstream.sent).toEqual([]);
+    upstream.emit("message", Buffer.from(JSON.stringify({ message_type: "committed_transcript", text: "later" })), false);
+    expect(frames(client)).toEqual([{ type: "ready" }]);
+    expect(closing).toHaveBeenCalledTimes(1);
   });
 
   // A short reply ("yes") can end before ElevenLabs answers: its stop is
