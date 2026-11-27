@@ -176,16 +176,12 @@ when the version 1 sidecar matches the local computer and current round and
 both processes have exited. Reused PIDs and zombies count as exited. This is
 a read-only status in the Hook response.
 
-The wrappers send TERM to the provider's process group on cancellation or
-when the OpenCode loop watchdog trips. They wait up to ten seconds before
-killing any remaining group members and then write the terminal manifest
-and `exit.txt`.
+The store's launcher scripts that write the sidecar are not shipped yet, so
+today no job has one and every job reads as before.
 
 Known gaps include capacity accounting and archival for workers reported
-as `gone`, which still use the on-disk manifest and exit stamp. Background
-launches can inherit an ignored INT on systems without GNU `env`, including
-stock macOS. `phren fanout run` has a separate launcher that does not write
-the sidecar.
+as `gone`, which still use the on-disk manifest and exit stamp, and
+`phren fanout run`'s launcher, which does not write the sidecar.
 
 Claude's background `Task` and `Agent` children count as finished when the
 parent records a successful, matching `TaskStop` result or a task notification

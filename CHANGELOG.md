@@ -5,10 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.100] - 2026-11-27
+
+### Added
+
+- Phone control of a Mac's windows (macOS 14+, off by default; `phren mac-windows on|off|status` per computer). The phone lists windows with Screen Recording and Accessibility state, sees a still or a live H.264/HEVC view of one window (`WS /v1/mac/windows/stream`, paced for a phone's Tailscale link), and taps, types, presses keys, scrolls and drags in it. Every route requires the paired phone's owner-proof signature. A red indicator and a menu-bar Stop show on the Mac while a session runs; sessions end after 120 s idle. Requests are logged to `<bridge>/mac-windows/sessions.jsonl` without typed text. Capabilities `macWindows` and `macWindowStream`.
+
 ### Fixed
 
 - Hook WebSocket eviction gives the 1008 close frame up to one second to reach the client before cutting the socket.
-- The store's fan-out wrapper scripts now stop the provider's process group on TERM, INT or HUP and give it up to ten seconds before escalating to KILL. The Hook uses a versioned `liveness.json` sidecar to report workers whose wrapper and provider have both exited.
+- The Hook reports a fan-out worker as gone, instead of running forever, when its `liveness.json` sidecar shows that both its launcher and its provider have exited on this computer. The store's launcher scripts that write the sidecar ship separately; jobs without one read as before.
 - `@phren/code`: code lookups now find citing findings in the oldest archive halves (`.older.md`) too.
 - `@phren/cli`: the Hook now prunes each move's saved launch intent (`<bridge>/move-intents/<id>.json`) like its conversation copy, so settled moves no longer leave them behind.
 - `WS /v1/overview` now bounds each tick with one deadline, so a hung snapshot or read closes the socket with 1011 for a fresh reconnect instead of holding a stale overview indefinitely; a stalled resources read frees its slot after the same deadline. Hung shared Herdr snapshots and resource probes are retired after 30 s, unblocking their waiters with a stall error so a later read starts a fresh request; the overview's housekeeping badge read is bounded to 2 s with the last good badge as fallback.
