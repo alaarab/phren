@@ -1,7 +1,7 @@
 import type { AgentHooks } from "./agent-hooks.js";
 import { dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
-import { WATCH_MS, workerReaders, workerStates } from "./dispatch-returns.js";
+import { DRAFT_REASON, WATCH_MS, workerReaders, workerStates } from "./dispatch-returns.js";
 import { paneChatState, recentServers, snapshot } from "./herdr.js";
 import { inboxTargetSchema, type InboxSnapshot, type InboxSource } from "./owner-inbox.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
@@ -97,7 +97,8 @@ function liveSource(receipt: Receipt, seen: Json, computer?: string): InboxSourc
   const actionId = typeof approval.actionId === "string" ? approval.actionId : undefined;
   // An older peer Hook folded an awaited sentence into its unfinished reason;
   // a worker parked on CI or a queue is not waiting on the owner.
-  const unfinished = typeof seen.unfinished === "string" && !seen.unfinished.startsWith("Stopped waiting: ") ? seen.unfinished : undefined;
+  const unfinished = typeof seen.unfinished === "string" && seen.unfinished !== DRAFT_REASON
+    && !seen.unfinished.startsWith("Stopped waiting: ") ? seen.unfinished : undefined;
   const question = ["idle", "done"].includes(String(seen.state)) && seen.completed && !seen.error && !seen.interrupted
     ? (typeof seen.reply === "string" ? ownerQuestion(seen.reply) : undefined) ?? unfinished : undefined;
   if (!actionId && seen.state !== "blocked" && !question) return undefined;
@@ -138,11 +139,13 @@ async function agedStates(computer: string, receipts: Receipt[], peer: HookPeer 
  * question for the owner. A worker the loop saw back at work, or gone, has no row.
  */
 export function remoteSource(receipt: Receipt): InboxSource | undefined {
-  const approval = receipt.approval, state = receipt.worker?.state ?? receipt.returned?.state;
-  if (!approval && state !== "blocked" && state !== "needs-you") return undefined;
+  const { approval, returned } = receipt, state = receipt.worker?.state ?? returned?.state;
+  // A deduped draft updates the worker but leaves the last return in place.
+  const needsInput = state === "needs-you" && returned?.state === "needs-you" && returned.question !== DRAFT_REASON;
+  if (!approval && state !== "blocked" && !needsInput) return undefined;
   const actionId = approval?.actionId;
   return { source: `dispatch:${receipt.id}:${actionId ?? "waiting"}`, kind: actionId || state === "blocked" ? "blocked" : "needs-you",
-    title: clean(approval?.request ?? approval?.title ?? receipt.returned?.question ?? `${receipt.label} needs input`),
+    title: clean(approval?.request ?? approval?.title ?? returned?.question ?? `${receipt.label} needs input`),
     project: receipt.project, computer: receipt.computer, target: receipt.target as InboxSource["target"], dispatch: receipt.id,
     ...(actionId ? { actionId } : {}) };
 }

@@ -5,6 +5,9 @@
 // and no hook event carries it; `claude -p --prompt-suggestions` streams it as
 // a `prompt_suggestion` message, but only in print mode, never in a pane.
 import { stripTerminal } from "../terminal-text.js";
+import { screenDialog } from "./pane-status.js";
+import type { Target } from "./protocol.js";
+import { terminalProvider } from "./terminal.js";
 
 const MAX_SUGGESTION = 500;
 
@@ -71,6 +74,53 @@ export function claudeInputMatches(screen: string, text: string): boolean {
   // Remove only Claude's prompt and its separator space. Extra whitespace,
   // including ambiguous screen padding, cannot prove an exact match.
   return stripTerminal(line).replace(/^\s*❯[ \u00a0]/, "") === text;
+}
+
+type Composer = { state: "verified-empty" | "occupied" | "unreadable"; draft?: string };
+
+/** A styled visible read distinguishes Claude's dim hints from typed text. */
+export function readClaudeComposerScreen(target: Target): Promise<string | undefined> {
+  return terminalProvider().readScreen(target.server, target.pane, {
+    scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 1_000,
+  }).catch(() => undefined);
+}
+
+/** The full visible draft, when Claude displays it in an unambiguous single-line composer. */
+export function claudeDraft(screen: string): string | undefined {
+  return composer(screen).draft;
+}
+
+export function claudeComposerState(screen: string | undefined): Composer["state"] {
+  return screen === undefined ? "unreadable" : composer(screen).state;
+}
+
+function composer(screen: string): Composer {
+  const line = singleLineComposer(screen);
+  if (line === undefined || screenDialog("claude", screen)) return { state: "unreadable" };
+  // tmux captures the cursor at the end as a reverse-video blank. Preserve
+  // the other characters, including whitespace, for the draft fingerprint.
+  const text = stripTerminal(line.replace(/\x1b\[7m \x1b\[0m$/, "")).replace(/^\s*❯[ \u00a0]?/, "");
+  const dim = dimText(line);
+  if (!text || (dim && !SUBAGENT_VIEW.test(dim))) return { state: "verified-empty" };
+  // A plain placeholder could be literal text typed by the owner. It cannot
+  // prove an empty composer, even though it also cannot prove a draft.
+  if (dim || PLACEHOLDERS.some(pattern => pattern.test(text.trim()))) return { state: "occupied" };
+  return { state: "occupied", draft: text };
+}
+
+function singleLineComposer(screen: string): string | undefined {
+  const lines = screen.split(/\r?\n/);
+  // Start at the last complete, unindented rule. A continuation can begin
+  // with rule glyphs, so use the lower border to check the entire box.
+  for (let bottom = lines.length - 1; bottom >= 2; bottom--) {
+    const border = /^([─━═])\1{2,}[ \t]*$/.exec(stripTerminal(lines[bottom]));
+    if (!border) continue;
+    const line = lines[bottom - 1];
+    if (!/^❯(?:[ \u00a0]|$)/.test(stripTerminal(line))
+      || !stripTerminal(lines[bottom - 2]).startsWith(border[1].repeat(3))) return undefined;
+    return line;
+  }
+  return undefined;
 }
 
 /** The dim text in the live input box (between its two rules), "" when the

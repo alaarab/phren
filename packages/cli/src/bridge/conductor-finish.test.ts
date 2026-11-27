@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeError, type Json, type Target, atomicInPrivateDir } from "./protocol.js";
-import { snapshot, sharedSnapshot, paneIdentity, validateTarget } from "./herdr.js";
+import { snapshot, sharedSnapshot, paneIdentity, recentServers, validateTarget } from "./herdr.js";
 import { closeFinishedWorker, closeOwnPane, markWorkerClosed } from "./worker-close.js";
 import { reportWorker } from "./worker-reports.js";
-import { DispatchReturns, observe, PR_RETRY_MAX_MS, PR_RETRY_MS, workerStates } from "./dispatch-returns.js";
+import { DispatchReturns, hookWorkers, observe, PR_RETRY_MAX_MS, PR_RETRY_MS, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { noteTurn, turnPath } from "./turn-records.js";
 import { recordBriefArrival } from "./launch-brief.js";
@@ -18,8 +19,12 @@ import { readFinalTurn } from "./schedule-watch.js";
 import { recentUncommitted } from "./worker-unfinished.js";
 import { dispatchClonePaths } from "./dispatch-clone.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
+import { stripTerminal } from "../terminal-text.js";
+import { ownerInboxSources, remoteSource } from "./owner-inbox-sources.js";
+import type { AgentHooks } from "./agent-hooks.js";
+import { sessionStalls } from "./stalls.js";
 
-vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), sharedSnapshot: vi.fn(), paneIdentity: vi.fn(), validateTarget: vi.fn() }));
+vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), sharedSnapshot: vi.fn(), paneIdentity: vi.fn(), recentServers: vi.fn(), validateTarget: vi.fn() }));
 vi.mock("./schedule-watch.js", async original => ({ ...await original<object>(), readFinalTurn: vi.fn() }));
 vi.mock("./hand-off.js", async original => ({ ...await original<object>(), handOff: vi.fn() }));
 vi.mock("./worker-unfinished.js", async original => ({ ...await original<object>(), recentUncommitted: vi.fn() }));
@@ -28,6 +33,11 @@ const dispatch = "22222222-2222-4222-8222-222222222222";
 const prs = [{ url: "https://github.com/alaarab/phren/pull/999", repo: "alaarab/phren", branch: "feat/checks", tests: "12 passed", notes: "Review the behavior" }];
 let root: string, pane: Json, panes: Json[], restore: () => void;
 const closePane = vi.fn();
+const readScreen = vi.fn<TerminalProvider["readScreen"]>();
+const recorded = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8");
+const claudeScreen = (file: string) => recorded(`./fixtures/claude/${file}`);
+const emptyComposer = claudeScreen("2.1.284/empty-prompt-herdr.ansi");
+const draftReason = "stopped with unsent text in its input box";
 const event = (event: string) => noteTurn(target.server, target.pane, { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, dispatch, reply: event === "Stop" ? "Checks passed" : undefined });
 // A lead's own turn events: no dispatch id, so close-self defers on its own.
 const leadEvent = (event: string, stop: { background?: number } = {}) => noteTurn(target.server, target.pane,
@@ -39,13 +49,144 @@ beforeEach(async () => {
   pane = { pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, terminal_id: "term1", agent: "claude", agent_status: "idle" }; panes = [pane];
   vi.mocked(snapshot).mockImplementation(async () => ({ panes })); vi.mocked(sharedSnapshot).mockImplementation(async () => ({ panes }));
   vi.mocked(paneIdentity).mockResolvedValue(target.session); vi.mocked(validateTarget).mockImplementation(async () => ({ ...pane }));
-  closePane.mockReset().mockImplementation(async () => { panes = []; }); restore = setTerminalProvider({ closePane, processes: async () => ({ foregroundPids: pane.agent === "opencode" ? [41] : [] }) } as unknown as TerminalProvider);
+  readScreen.mockReset().mockResolvedValue(emptyComposer);
+  closePane.mockReset().mockImplementation(async () => { panes = []; }); restore = setTerminalProvider({ closePane, readScreen, processes: async () => ({ foregroundPids: pane.agent === "opencode" ? [41] : [] }) } as unknown as TerminalProvider);
   vi.mocked(readFinalTurn).mockReset().mockResolvedValue({ completed: true, lastAssistant: "Checks passed" });
   vi.mocked(handOff).mockReset().mockResolvedValue({ ok: true, delivered: false, queued: true, target });
   vi.mocked(recentUncommitted).mockReset().mockResolvedValue(0);
   await event("UserPromptSubmit"); await event("Stop");
 });
 afterEach(async () => { vi.clearAllTimers(); vi.useRealTimers(); restore(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+
+const STALL_MS = 300_000;
+async function startStallClock(status: "idle" | "working" = "working") {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.stubEnv("PHREN_STALL_MS", String(STALL_MS));
+  vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(root, "claude"));
+  const folder = path.join(root, "claude", "projects", "fixture");
+  await mkdir(folder, { recursive: true });
+  const transcript = path.join(folder, `${target.session}.jsonl`);
+  await writeFile(transcript, '{"type":"user","message":{"role":"user","content":"Run the checks"}}\n');
+  pane.terminal_id = path.basename(root);
+  pane.agent_status = status;
+  await event("UserPromptSubmit");
+  return transcript;
+}
+
+describe("a stalled Claude dispatch", () => {
+  it("returns an unsent draft once through the worker, receipt and notice, even after a stall clock reset", async () => {
+    const transcript = await startStallClock();
+    const old: Receipt = JSON.parse(recorded("./fixtures/dispatch/legacy-stalled-receipt.json"));
+    vi.setSystemTime(new Date(old.updatedAt));
+    await save(old);
+    expect(await dispatchStatus()).toMatchObject([{ id: dispatch, returned: { state: "stalled", read: true } }]);
+    const drafts = ["Check the blue fixture before publishing.", "Check the green fixture before publishing."];
+    let screen = claudeScreen("2.1.332/unsent-draft-tmux.ansi"), approval: Json | undefined;
+    readScreen.mockImplementation(async (_server, _pane, options) => options.format === "ansi" ? screen : stripTerminal(screen));
+    const styledReads = () => readScreen.mock.calls.filter(([, , options]) => options.format === "ansi").length;
+    const observations: unknown[] = [];
+    const forward = vi.fn(async () => ({ delivered: true }));
+    const observeWorker = hookWorkers({ leaseDispatch: () => {}, workerApproval: () => approval });
+    const returns = new DispatchReturns({ peers: async () => [], isLocal: () => true, forward, localWorkers: async input => {
+      const answer = await observeWorker(input);
+      observations.push(answer);
+      return answer;
+    } });
+    const tick = async (elapsed: number) => { vi.setSystemTime(Date.now() + elapsed); await returns.poll(); await returns.notify(); };
+    await tick(0);
+    expect(styledReads()).toBe(0);
+    await tick(STALL_MS);
+    const [first] = await dispatchStatus();
+    expect(first.returned).toMatchObject({ state: "needs-you", question: draftReason, read: false });
+    expect(styledReads()).toBe(1);
+    expect(forward.mock.calls).toHaveLength(1);
+    expect(remoteSource(first)).toBeUndefined();
+    // The local inbox re-observes the actual pane instead of using the receipt.
+    expect(first.computer).toBe("local");
+    vi.mocked(recentServers).mockResolvedValue([]);
+    const hooks = { workerApproval: () => undefined } as unknown as AgentHooks;
+    expect(await ownerInboxSources(hooks)).toEqual({ sources: [], unavailableDispatches: [] });
+    expect(await returns.take()).toMatchObject([{ state: "needs-you", question: draftReason }]);
+    await tick(STALL_MS);
+    expect(styledReads()).toBe(1);
+    await writeFile(transcript, "{}\n", { flag: "a" });
+    await tick(1);
+    await tick(STALL_MS);
+    expect((await dispatchStatus())[0].returned).toMatchObject({ at: first.returned!.at, read: true });
+    expect(styledReads()).toBe(2);
+    expect(forward.mock.calls).toHaveLength(1);
+
+    screen = claudeScreen("2.1.332/changed-unsent-draft-tmux.ansi");
+    await tick(1);
+    await tick(STALL_MS);
+    await tick(STALL_MS);
+    const [second] = await dispatchStatus();
+    expect(second.returned).toMatchObject({ state: "needs-you", question: draftReason, read: false });
+    expect(second.returned!.at).not.toBe(first.returned!.at);
+    expect(styledReads()).toBe(3);
+    expect(forward.mock.calls).toHaveLength(2);
+    expect(JSON.stringify(forward.mock.calls)).toContain(draftReason);
+    const persisted = await readFile(path.join(root, "dispatches", `${dispatch}.json`), "utf8");
+    const output = JSON.stringify({ observations, persisted, notices: forward.mock.calls, rows: await returns.take() });
+    for (const draft of drafts) {
+      expect(output).not.toContain(draft);
+      expect(output).not.toContain(createHash("sha256").update(draft).digest("hex").slice(0, 16));
+    }
+    approval = { actionId: "approve-fixture", tool: "Read" };
+    await tick(STALL_MS);
+    expect(remoteSource((await dispatchStatus())[0])).toMatchObject({ kind: "blocked", actionId: "approve-fixture" });
+    expect(await returns.take()).toMatchObject([{ state: "blocked" }]);
+    approval = undefined;
+    await tick(STALL_MS);
+    expect(await returns.take()).toEqual([]);
+    const [cleared] = await dispatchStatus();
+    expect(cleared).toMatchObject({ worker: { state: "needs-you" }, returned: { state: "blocked", read: true } });
+    expect(remoteSource(cleared)).toBeUndefined();
+
+    // Reset the clock while the acknowledged approval is still the last
+    // return. Seeing the same draft again updates the worker's state alone.
+    await writeFile(transcript, "{}\n", { flag: "a" });
+    await tick(1);
+    expect((await dispatchStatus())[0].worker?.state).toBe("working");
+    await tick(STALL_MS);
+    const [deduped] = await dispatchStatus();
+    expect(deduped).toMatchObject({ worker: { state: "needs-you" }, returned: cleared.returned });
+    expect(remoteSource(deduped)).toBeUndefined();
+  });
+
+  it("reports a draft in an idle pane with an unfinished turn despite the activity tick", async () => {
+    await startStallClock("idle");
+    vi.mocked(readFinalTurn).mockResolvedValue({ completed: false });
+    readScreen.mockResolvedValue(claudeScreen("2.1.332/unsent-draft-tmux.ansi"));
+    await save(receipt());
+    const returns = new DispatchReturns({ peers: async () => [], isLocal: () => true });
+    await returns.poll();
+    vi.setSystemTime(Date.now() + 5_000);
+    await sessionStalls.observe(target, pane);
+    vi.setSystemTime(Date.now() + STALL_MS - 5_000);
+    await returns.poll();
+    expect(await returns.take()).toMatchObject([{ state: "needs-you", question: draftReason }]);
+  });
+
+  it.each([
+    ["the bare prompt after a question", () => recorded("./__fixtures__/claude-questions/answered.txt")],
+    ["a dim suggestion", () => claudeScreen("2.1.284/next-suggestion-herdr.ansi")],
+    ["a styled placeholder", () => claudeScreen("2.1.284/fresh-placeholder-tmux.ansi")],
+    ["an unstyled placeholder", () => stripTerminal(claudeScreen("2.1.284/fresh-placeholder-tmux.ansi"))],
+    ["a permission dialog", () => claudeScreen("permission-narrow.txt")],
+    ["a question form", () => recorded("./__fixtures__/claude-questions/q2-other.txt")],
+  ] as const)("still reports an ordinary stall when the screen shows %s", async (_label, capture) => {
+    await startStallClock();
+    const screen = capture();
+    readScreen.mockImplementation(async (_server, _pane, options) => options.format === "ansi" ? screen : stripTerminal(screen));
+    await save(receipt());
+    const returns = new DispatchReturns({ peers: async () => [], isLocal: () => true });
+    await returns.poll();
+    vi.setSystemTime(Date.now() + STALL_MS);
+    await returns.poll();
+    expect(await returns.take()).toMatchObject([{ state: "stalled", stalled: true }]);
+  });
+});
 
 describe("an agent closing its own pane", () => {
   const origin = { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane };
@@ -293,6 +434,50 @@ describe("finished worker lifecycle", () => {
     const closed = (await workerStates({ targets: [target] })).workers[0]; expect(closed.state).toBe("closed");
     const current = (await dispatchStatus())[0]; observe(current, closed, Date.now()); expect(current.returned!.state).toBe("done");
     await returns.take(); await returns.cleanup(); expect(closePane).toHaveBeenCalledTimes(1);
+  });
+  it.each(["empty", "occupied", "unreadable", "unrecognized", "blank first line of a multiline draft", "prompt submitted during read"])("only auto-closes a finished Claude pane with a verified empty composer: %s", async composer => {
+    await save(receipt());
+    const returns = new DispatchReturns({ peers: async () => [], isLocal: () => true,
+      close: current => closeFinishedWorker({ target, dispatch, turn: current.closePending!.turn }) });
+    await returns.poll();
+    expect((await dispatchStatus())[0].returned).toMatchObject({ state: "done", read: false });
+    expect(readScreen).not.toHaveBeenCalled();
+    if (composer === "occupied") {
+      // The owner types after the done return, during the final binding check.
+      vi.mocked(validateTarget).mockResolvedValueOnce({ ...pane }).mockImplementationOnce(async () => {
+        readScreen.mockResolvedValue(claudeScreen("2.1.332/unsent-draft-tmux.ansi"));
+        return { ...pane };
+      });
+    }
+    if (composer === "unreadable") readScreen.mockRejectedValue(new Error("screen read timed out"));
+    if (composer === "unrecognized") readScreen.mockResolvedValue(claudeScreen("permission-narrow.txt"));
+    if (composer === "blank first line of a multiline draft") readScreen.mockResolvedValue(claudeScreen("2.1.332/multiline-unsent-draft-tmux.ansi"));
+    if (composer === "prompt submitted during read") readScreen.mockImplementationOnce(async () => {
+      await event("UserPromptSubmit");
+      return emptyComposer;
+    });
+    expect(await returns.take()).toMatchObject([{ state: "done" }]);
+    expect(readScreen).toHaveBeenCalledTimes(1);
+    expect(closePane).toHaveBeenCalledTimes(composer === "empty" ? 1 : 0);
+    expect(Boolean((await dispatchStatus())[0].closedAt)).toBe(composer === "empty");
+  });
+  it("preserves a recorded PR report when a later draft would replace a stall return", async () => {
+    await save(receipt());
+    const returns = new DispatchReturns({ peers: async () => [], isLocal: () => true });
+    const { server, workspace, tab, pane } = target;
+    await reportWorker({ origin: { server, workspace, tab, pane }, prs, dispatch });
+    await returns.poll();
+    expect((await dispatchStatus())[0].returned).toMatchObject({ state: "done", prs });
+    expect(readScreen).not.toHaveBeenCalled();
+    await startStallClock();
+    readScreen.mockResolvedValue(claudeScreen("2.1.332/unsent-draft-tmux.ansi"));
+    await returns.poll();
+    vi.setSystemTime(Date.now() + STALL_MS);
+    await returns.poll();
+    await writeFile(path.join(root, "integrator.json"), JSON.stringify({ target: { ...target, pane: "integrator" } }));
+    await returns.forwardPrs();
+    expect((await dispatchStatus())[0].returned).toMatchObject({ state: "done", prs, integratorDelivery: { state: "queued" } });
+    expect(vi.mocked(handOff).mock.calls[0][0]).toMatchObject({ text: expect.stringContaining(JSON.stringify(prs)) });
   });
   it("keeps a genuine gone return after the terminal refuses an automatic close", async () => {
     const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now()); await save(value);

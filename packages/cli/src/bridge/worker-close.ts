@@ -5,6 +5,7 @@ import { z } from "zod";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, objects, provider, type Json, type Target, type StartingTarget, targetSchema, startingTargetSchema } from "./protocol.js";
 import { validateTarget, paneIdentity, paneChatState, paneStartingToken, clearStartingToken, clearStartingTokenByToken } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
+import { claudeComposerState, readClaudeComposerScreen } from "./claude-suggestion.js";
 import { briefId } from "./launch-brief.js";
 import { paneTurn, workerStates, workerTurnKey, type WorkerObservation } from "./dispatch-returns.js";
 import type { TurnRecord } from "./turn-records.js";
@@ -316,10 +317,15 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
   // One final fresh binding before the terminal mutation.
   const current = await validateTarget(data.target, false, true);
   if (current.terminal_id !== pane.terminal_id || !["idle", "done"].includes(String(current.agent_status))) throw new BridgeError(409, "The worker resumed before it could close.");
+  // The owner can type after the done observation without submitting a new
+  // prompt or changing the Stop record. Check the composer, then the turn in
+  // case the owner submitted a prompt during the screen read.
+  if (data.target.source === "claude" && claudeComposerState(await readClaudeComposerScreen(data.target)) !== "verified-empty")
+    return { ok: true, closed: false };
   const record = await paneTurn(data.target.server, current, data.target.source);
   if ((seen.stopSeq !== undefined || record?.prompt) && (!record?.stop || (record.prompt && record.stop.seq <= record.prompt.seq) || record.terminal !== current.terminal_id
     || record.session !== data.target.session || workerTurnKey({ endedAt: record.stop.at, stopSeq: record.stop.seq }) !== data.turn)) return { ok: true, closed: false };
-  await closeBoundPane(data.target, pane);
+  await closeBoundPane(data.target, current);
   // Clean up files only for the dispatch durably bound to this exact pane and
   // session: a request naming another dispatch must never delete its clone.
   const owner = await updateReceipt(data.dispatch, () => false).catch(() => undefined);

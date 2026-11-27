@@ -3,7 +3,7 @@ import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "
 import { removeWorkerFile, workerAlive } from "./worker-identity.js";
 import { workerPrs, readIntegrator } from "./worker-reports.js";
 import { prsSchema, type PullRequest } from "./return-contract.js";
-import { sessionStalls } from "./stalls.js";
+import { StallDetector } from "./stalls.js";
 import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { execProbe as run } from "./probe-processes.js";
@@ -56,6 +56,7 @@ export const PR_RETRY_MAX_MS = 10 * 60_000;
 /** Receipts older than this are no longer watched. */
 export const WATCH_MS = 24 * 60 * 60 * 1000;
 export const WAIT_UNFINISHED_PREFIX = "Stopped waiting: ";
+export const DRAFT_REASON = "stopped with unsent text in its input box";
 /** How long a stopped worker whose harness still runs background tasks is
  * waited on before it counts as done anyway. Measured from the latest Stop,
  * and every task that finishes wakes the worker (a new prompt, a new Stop), so
@@ -134,7 +135,8 @@ export interface WorkerReaders {
    * worker's conversation, counted like the session rows count them. */
   children?: (source: Provider, session: string) => Promise<number>;
   now?: () => number;
-  stall?: typeof sessionStalls.observe;
+  stall?: StallDetector["observeWorker"];
+  resetStall?: StallDetector["reset"];
   /** The turn a Codex pane lost with its app-server, which no Stop will end. */
   lost?: (server: string, pane: string, session?: string) => LostTurn | undefined;
   /** Tracked files with uncommitted changes in the worker's checkout. */
@@ -168,6 +170,9 @@ export async function paneTurn(server: string, pane: Json, source: Provider): Pr
   return opencodeTurn((await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids, pane.terminal_id, servicePane(server, String(pane.pane_id))?.session);
 }
 
+// The activity tick sees the raw terminal status. Dispatch can see an
+// unfinished turn in the same idle pane and needs its own inactivity clock.
+const dispatchStalls = new StallDetector();
 const defaultReaders: WorkerReaders = {
   snapshot: server => sharedSnapshot(server, SNAPSHOT_AGE_MS),
   freshSnapshot: snapshot,
@@ -175,7 +180,8 @@ const defaultReaders: WorkerReaders = {
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" || source === "copilot" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
   children: (source, session) => childAgentTree(source, session).then(runningChildAgents).then(children => children.length),
-  stall: (target, pane, live) => sessionStalls.observe(target, pane, live),
+  stall: (target, pane, live) => dispatchStalls.observeWorker(target, pane, live),
+  resetStall: target => dispatchStalls.reset(target),
   lost: (server, pane, session) => codexServers.lostTurn(server, pane, session),
   uncommitted: directory => recentUncommitted(directory),
   shared: sharedCheckout,
@@ -258,6 +264,15 @@ function liveReader(record: TurnRecord | undefined, source: Provider, session: s
     ]);
     return liveWork(record, final, children, (readers.now ?? Date.now)());
   };
+}
+
+async function stallFields(target: Target, pane: Json, live: () => Promise<number | undefined>, readers: WorkerReaders): Promise<Partial<WorkerObservation>> {
+  const stalled = await readers.stall?.(target, pane, live);
+  // Older conductors already turn a completed observation with an unfinished
+  // reason into needs-you. The timestamp identifies this draft's first stall.
+  return stalled && "draftSince" in stalled
+    ? { state: "idle", completed: true, unfinished: DRAFT_REASON, stalledSince: stalled.draftSince }
+    : stalled ?? {};
 }
 
 /** The worker session's task ledger (task/session-tasks.ts), read once per
@@ -343,13 +358,15 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
       const full = targetSchema.safeParse({ ...target, session: seen.session });
       const prs = full.success && seen.state === "done" ? await workerPrs(full.data, own) : undefined;
       return { ...seen, ...tasks.fields, ...(prs ? { prs } : {}), ...await unfinished(seen, tasks.open, own.stop?.cwd ?? paneDirectory(pane), readers, s, pane, prs),
-        ...await limitCheckout(seen, own.stop?.cwd ?? paneDirectory(pane), readers), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers)) : {}) };
+        ...await limitCheckout(seen, own.stop?.cwd ?? paneDirectory(pane), readers), ...(full.success && seen.state === "working"
+          ? await stallFields(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers), readers) : {}) };
     }
     const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
     if ((state !== "idle" && state !== "done") || !session) {
       const full = targetSchema.safeParse({ ...target, session });
-      return { state, ...(session ? { session } : {}), ...sessionLedger(session, readers).fields, ...(full.success && state === "working" ? await readers.stall?.(full.data, pane, liveReader(undefined, target.source, full.data.session, readers)) : {}) };
+      return { state, ...(session ? { session } : {}), ...sessionLedger(session, readers).fields, ...(full.success && state === "working"
+        ? await stallFields(full.data, pane, liveReader(undefined, target.source, full.data.session, readers), readers) : {}) };
     }
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
     const children = readers.children ? await readers.children(target.source, session).catch(() => 0) : 0;
@@ -384,6 +401,8 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
   // Only a conversation this dispatch named can be answered; a starting target has no session yet.
   return { workers: workers.map((seen, index) => {
     const { dispatch: _dispatch, ...target } = effective[index];
+    const hasDraft = seen.unfinished === DRAFT_REASON && seen.stalledSince !== undefined;
+    if (seen.state === "done" || seen.state === "blocked" || (seen.state === "idle" && !hasDraft)) readers.resetStall?.(target);
     const full = "session" in target ? targetSchema.safeParse(target) : undefined;
     const approval = full?.success && seen.state !== "gone" && seen.state !== "closed" && seen.state !== "unavailable" ? readers.approval?.(full.data) : undefined;
     return approval ? { ...seen, approval } : seen;
@@ -467,7 +486,7 @@ function turnKey(value: string | undefined): string | undefined {
 }
 
 /** Apply one observation to a receipt. Returns true when the receipt changed. */
-export function observe(receipt: Receipt, value: unknown, now: number, peers: readonly HookPeer[] = [], self?: { id: string; name: string; verifiedHomeMove?: string }): boolean {
+export function observe(receipt: Receipt, value: unknown, now: number, peers: readonly HookPeer[] = [], self?: { id: string; name: string; verifiedHomeMove?: string }, lastDraftTurn?: string): boolean {
   const parsed = observationSchema.safeParse(value);
   if (receipt.closedAt) return false;
   const moved = parsed.success && parsed.data.moved !== undefined && observeMove(receipt, parsed.data.moved, peers, self);
@@ -475,7 +494,7 @@ export function observe(receipt: Receipt, value: unknown, now: number, peers: re
   if (parsed.data.state === "closed") { receipt.closedAt = new Date(now).toISOString(); return true; }
   if (parsed.data.state === "gone" && receipt.brief === "launch" && !receipt.worker?.sawWorking && !receipt.returned
     && now - Date.parse(receipt.createdAt) < LAUNCH_GRACE_MS) return moved;
-  const state = observeState(receipt, parsed.data, now);
+  const state = observeState(receipt, parsed.data, now, lastDraftTurn);
   return observeApproval(receipt, parsed.data.approval, now) || state || moved;
 }
 
@@ -498,7 +517,7 @@ function observeApproval(receipt: Receipt, value: unknown, now: number): boolean
   return true;
 }
 
-function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema>, now: number): boolean {
+function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema>, now: number, lastDraftTurn?: string): boolean {
   let seen = parsed;
   const at = new Date(now).toISOString();
   let changed = false;
@@ -546,9 +565,12 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   // The worker's own hooks say no turn has ended: it has not taken its
   // brief yet. Without them, idle after being seen working is the only sign.
   else next = !seen.hook && sawWorking ? "done" : "working";
-  // A Stop's time names its turn; without one, the final reply does.
-  const turn = next === "done" || next === "needs-you" || next === "waiting" || next === "failed"
-    ? workerTurnKey(seen, failed) : undefined;
+  const draftSince = next === "needs-you" && receipt.harness === "claude" && question === DRAFT_REASON ? seen.stalledSince : undefined;
+  const returned = receipt.returned;
+  // Draft returns have no submitted turn. Use the first stall's time as the
+  // return identity, in the existing slot used to dedupe finished returns.
+  const turn = draftSince ? turnKey("draft:" + draftSince)
+    : next === "done" || next === "needs-you" || next === "waiting" || next === "failed" ? workerTurnKey(seen, failed) : undefined;
   const previous = receipt.worker?.state;
   // The same finished state with a different final reply is a new turn: the
   // worker took more work (a hand_off) and finished again between two polls.
@@ -556,13 +578,17 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   // and needs-you or waiting on the next (its checkout read late, the owner
   // committed its edits, or its wait was noticed late) is not a second return.
   const finished = (state: WorkerState | undefined) => state === "done" || state === "needs-you" || state === "waiting";
-  const returned = receipt.returned;
   const sameTurn = !!turn && returned?.turn === turn;
+  // Another return (for example, a terminal approval) may have occupied the
+  // receipt's slot since this draft was reported. Still update the live state.
+  const repeatedDraft = !!draftSince && (sameTurn || turn === lastDraftTurn);
+  // Keep a done return's PR evidence available to the conductor and integrator.
+  const keepPrReturn = draftSince && returned?.state === "done" && returned.prs;
   const reread = finished(previous) && finished(next) && sameTurn;
   // Correct legacy waits in place so the same turn keeps its read and notice history.
   const legacyWait = next === "waiting" && sameTurn && returned?.state === "needs-you"
     && returned.question?.startsWith(WAIT_UNFINISHED_PREFIX) ? returned : undefined;
-  const repeated = reread || (previous === next && !(turn && receipt.returned?.turn && turn !== receipt.returned.turn));
+  const repeated = reread || (previous === next && (draftSince ? repeatedDraft : !(turn && returned?.turn && !sameTurn)));
   // A turn whose Stop or completed final exists but whose background work
   // still runs is waiting on that work: said on the worker row, no return.
   const workingWait = next === "working" && seen.ended === true && !!seen.background ? "background" : undefined;
@@ -588,7 +614,7 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
     legacyWait.waitingOn = waitingOn(waitingFor!);
     legacyWait.waitingFor = waitingFor!.slice(0, 200);
     delete legacyWait.question;
-  } else if (next !== "working") {
+  } else if (next !== "working" && !repeatedDraft && !keepPrReturn) {
     receipt.returned = { state: next, at, read: false,
       // A worker stopped by its usage limit keeps its last reply: the dispatch that continues it hands it over.
       ...(seen.reply && (next === "done" || next === "needs-you" || next === "waiting" || next === "failed" && isClaudeUsageLimit(failed)) ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
@@ -752,6 +778,7 @@ export function noticeDeliveryId(receipts: readonly Receipt[]): string {
 
 /** Dispatching side: follows open dispatches and delivers their returns. */
 export class DispatchReturns {
+  private lastDraftTurns = new Map<string, string>();
   private readonly forward?: DispatchReturnsOptions["forward"];
   private readonly localComputer?: DispatchReturnsOptions["localComputer"];
   private readonly peers: () => Promise<HookPeer[]>;
@@ -961,10 +988,16 @@ export class DispatchReturns {
           const seen = await this.grantAnswered(receipt, observation);
           let fresh: NonNullable<Receipt["approval"]> | undefined;
           const current = await updateReceipt(receipt.id, value => {
-            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), routingPeers, this.localComputer ? { ...this.localComputer, verifiedHomeMove } : undefined);
+            const before = value.approval?.actionId, changed = observe(value, seen, this.now(), routingPeers,
+              this.localComputer ? { ...this.localComputer, verifiedHomeMove } : undefined, this.lastDraftTurns.get(value.id));
             if (value.approval && value.approval.actionId !== before) fresh = value.approval;
             return changed;
           }).catch(() => undefined);
+          if (current?.returned?.state === "needs-you" && current.returned.question === DRAFT_REASON && current.returned.turn) {
+            this.lastDraftTurns.delete(current.id);
+            this.lastDraftTurns.set(current.id, current.returned.turn);
+            if (this.lastDraftTurns.size > 1024) this.lastDraftTurns.delete(this.lastDraftTurns.keys().next().value!);
+          }
           if (!fresh || !current) continue;
           const pushed = await Promise.resolve(this.onApproval?.(current, fresh)).catch(() => undefined);
           if (pushed === true) {
