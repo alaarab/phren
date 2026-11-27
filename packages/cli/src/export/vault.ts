@@ -56,10 +56,26 @@ interface VaultFragment extends Note {
   mention: RegExp;
 }
 
-function realDestination(target: string): string {
-  if (fs.lstatSync(target, { throwIfNoEntry: false })) return fs.realpathSync.native(target);
-  const parent = path.dirname(target);
-  return parent === target ? target : path.join(realDestination(parent), path.basename(target));
+function pathLocations(target: string): { resolved: string; forms: string[] } {
+  const forms = new Set([target]);
+  let resolved: string | undefined;
+  // Keep the route through a symlink's parent as well as the final target.
+  for (let ancestor = target; ;) {
+    if (fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+      const form = path.join(fs.realpathSync.native(ancestor), path.relative(ancestor, target));
+      resolved ??= form;
+      forms.add(form);
+    }
+    const parent = path.dirname(ancestor);
+    if (ancestor === parent) break;
+    ancestor = parent;
+  }
+  return { resolved: resolved ?? target, forms: [...forms].map(comparisonPath) };
+}
+
+function comparisonPath(value: string): string {
+  if (process.platform === "win32") return path.toNamespacedPath(value).toLowerCase();
+  return process.platform === "darwin" ? value.toLowerCase() : value;
 }
 
 function inside(root: string, target: string): boolean {
@@ -358,16 +374,16 @@ function destinationGuard(phrenPath: string, target: string) {
   const checkouts = new Set([sourceCheckout(process.cwd()), sourceCheckout(path.dirname(fileURLToPath(import.meta.url)))].flatMap(root =>
     root ? [root, resolveRepoRootForPath(root)] : []));
   return (registered: ReturnType<typeof exportStores>): string => {
-    const resolved = realDestination(destination);
+    const { resolved, forms } = pathLocations(destination);
     for (const storePath of new Set([phrenPath, ...registered.map(store => store.path)])) {
-      const root = path.resolve(storePath);
-      const canonical = realDestination(root);
-      if ([destination, resolved].some(dir => [root, canonical].some(store => inside(store, dir) || inside(dir, store)))) {
+      const storeForms = pathLocations(path.resolve(storePath)).forms;
+      if (forms.some(dir => storeForms.some(store => inside(store, dir) || inside(dir, store)))) {
         throw new Error(`Choose a vault directory outside the Phren store at ${storePath} that does not contain the store.`);
       }
     }
     for (const root of checkouts) {
-      if (inside(root, destination) || inside(realDestination(root), resolved)) {
+      const checkoutForms = pathLocations(root).forms;
+      if (forms.some(dir => checkoutForms.some(checkout => inside(checkout, dir)))) {
         throw new Error(`Choose a vault directory outside the source checkout at ${root}.`);
       }
     }

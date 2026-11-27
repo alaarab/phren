@@ -41,6 +41,18 @@ function attachTeam(team = path.join(tmp.path, "team")): string {
   return team;
 }
 
+function linkDirectory(target: string, alias: string, skip: (note: string) => never): void {
+  try {
+    fs.symlinkSync(target, alias, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code && ["EACCES", "ENOSYS", "ENOTSUP", "EOPNOTSUPP", "EPERM"].includes(code)) {
+      skip(`Directory links are unavailable on this filesystem (${code}).`);
+    }
+    throw error;
+  }
+}
+
 function notes() {
   return fs.readdirSync(vault).flatMap(file => {
     if (!file.endsWith(".md")) return [];
@@ -138,19 +150,19 @@ it("exports all finding tiers, lifecycle links, fragment links, and citations", 
   expect(current.body).toMatch(/## Citation[\s\S]*example\.com\/team\/atlas[\s\S]*src\/fanout\.ts[\s\S]*41[\s\S]*1a2b3c4[\s\S]*pace/);
 });
 
-it("rejects destinations inside or containing stores and destinations inside the checkout", async () => {
+it("rejects destinations inside or containing stores and destinations inside the checkout", async ({ skip }) => {
   const teamParent = path.join(tmp.path, "teams");
   const team = attachTeam(path.join(teamParent, "team"));
   const alias = path.join(tmp.path, "alias");
-  fs.symlinkSync(team, alias, "junction");
+  linkDirectory(team, alias, skip);
   const parentAlias = path.join(tmp.path, "ancestor-alias");
-  fs.symlinkSync(teamParent, parentAlias, "junction");
+  linkDirectory(teamParent, parentAlias, skip);
   const relativeStore = path.relative(process.cwd(), path.join(store, "nested", "vault"));
   for (const target of [store, relativeStore, path.join(team, "vault"), path.join(alias, "nested", "vault"), tmp.path, teamParent, parentAlias]) {
     await expect(exportVault(store, target, [], false)).rejects.toThrow(/outside the Phren store/);
   }
   const checkoutAlias = path.join(tmp.path, "checkout-alias");
-  fs.symlinkSync(process.cwd(), checkoutAlias, "junction");
+  linkDirectory(process.cwd(), checkoutAlias, skip);
   const checkoutFolder = `./vault-rejection-${path.basename(tmp.path)}`;
   for (const target of [checkoutFolder, path.join(checkoutAlias, checkoutFolder)]) {
     await expect(exportVault(store, target, [], false)).rejects.toThrow(/outside the source checkout/);
@@ -161,15 +173,16 @@ it("rejects destinations inside or containing stores and destinations inside the
   expect(fs.existsSync(path.join(team, "nested"))).toBe(false);
 });
 
-it("rejects a destination alias that contains a registered store symlink", async () => {
+it("rejects a destination alias that contains a registered store symlink", async ({ skip }) => {
   const physicalTeam = path.join(tmp.path, "physical-team");
   initTestPhrenRoot(physicalTeam);
   fs.mkdirSync(vault);
-  const storeAlias = path.join(vault, "team");
-  fs.symlinkSync(physicalTeam, storeAlias, "junction");
-  attachTeam(storeAlias);
+  const registeredParent = path.join(tmp.path, "registered-parent");
+  linkDirectory(vault, registeredParent, skip);
+  linkDirectory(physicalTeam, path.join(vault, "team"), skip);
+  attachTeam(path.join(registeredParent, "team"));
   const destinationAlias = path.join(tmp.path, "destination-alias");
-  fs.symlinkSync(vault, destinationAlias, "junction");
+  linkDirectory(vault, destinationAlias, skip);
 
   await expect(exportVault(store, destinationAlias, [], false)).rejects.toThrow(/outside the Phren store/);
   expect(fs.readdirSync(vault)).toEqual(["team"]);
