@@ -1023,6 +1023,25 @@ function crossProjectAgeMultiplier(doc: DocRow, detectedProject: string | null, 
   return Math.max(0.1, 1 - (ageInDays / decayDays));
 }
 
+/**
+ * Order scored items by score groups: each group holds the highest remaining score and everything
+ * within 0.01 (100 ten-thousandths) of it, so a near-tie can be settled by date or another tiebreak.
+ * Integer units keep the boundary exact; taking each group from the highest remaining score keeps the
+ * result independent of input order.
+ */
+export function sortScoreGroups<T>(items: T[], scoreOf: (item: T) => number, within: (a: T, b: T) => number): T[] {
+  const byScore = [...items].sort((a, b) => scoreOf(b) - scoreOf(a));
+  const ordered: T[] = [];
+  for (let i = 0; i < byScore.length;) {
+    const top = Math.round(scoreOf(byScore[i]) * 10000);
+    let end = i + 1;
+    while (end < byScore.length && top - Math.round(scoreOf(byScore[end]) * 10000) <= 100) end++;
+    for (const item of byScore.slice(i, end).sort(within)) ordered.push(item);
+    i = end;
+  }
+  return ordered;
+}
+
 export function rankResults(
   rows: DocRow[],
   intent: string,
@@ -1094,7 +1113,6 @@ export function rankResults(
 
   // Precompute per-doc ranking metadata once — avoids recomputing inside sort comparator.
   const changedFiles = gitCtx?.changedFiles || new Set<string>();
-  const FILE_MATCH_BOOST = 1.5;
   type ScoredDoc = {
     doc: DocRow;
     score: number;
@@ -1105,7 +1123,7 @@ export function rankResults(
     date: string;
     queryOverlap: number;
   };
-  const scored: ScoredDoc[] = ranked.map((doc) => {
+  let scored: ScoredDoc[] = ranked.map((doc) => {
     const globBoost = getProjectGlobBoost(phrenPathLocal, doc.project, cwd, gitCtx?.changedFiles);
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
     const entity = entityBoostPaths.has(doc.path) ? 1.3 : 1;
@@ -1139,25 +1157,19 @@ export function rankResults(
     return { doc, score, fileMatch, globBoost, qualityMult, entity, date, queryOverlap };
   });
 
-  // Single composite sort on cached values.
-  scored.sort((a, b) => {
-    if (isFeatureEnabled("PHREN_FEATURE_GIT_CONTEXT_FILTER", false)) {
-      if (gitCtx && gitCtx.changedFiles.size > 0) {
-        const scoreDiff = (b.fileMatch ? FILE_MATCH_BOOST : 1) - (a.fileMatch ? FILE_MATCH_BOOST : 1);
-        if (scoreDiff !== 0) return scoreDiff;
-      }
-    }
-
-    const isFindingsA = a.doc.type === "findings";
-    const isFindingsB = b.doc.type === "findings";
-    if (isFindingsA !== isFindingsB) return isFindingsA ? -1 : 1;
-    if (isFindingsA && isFindingsB) {
+  // Composite order: git priority (when on), findings first, as before. Non-findings keep the legacy
+  // comparator; only findings are ordered by score groups within 0.01, so a near-tie is settled by
+  // date and then the remaining cached values. Groups are taken from the highest remaining score in
+  // integer units, which keeps the boundary exact and the order independent of input order.
+  const gitPriority = (entry: ScoredDoc): number =>
+    isFeatureEnabled("PHREN_FEATURE_GIT_CONTEXT_FILTER", false) && gitCtx && gitCtx.changedFiles.size > 0
+      ? (entry.fileMatch ? 0 : 1)
+      : 0;
+  const withinGroup = (a: ScoredDoc, b: ScoredDoc): number => {
+    if (a.doc.type === "findings" && b.doc.type === "findings") {
       const byDate = b.date.localeCompare(a.date);
       if (byDate !== 0) return byDate;
     }
-
-    const scoreDelta = b.score - a.score;
-    if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
 
     const overlapDelta = b.queryOverlap - a.queryOverlap;
     if (Math.abs(overlapDelta) > 0.01) return overlapDelta;
@@ -1171,7 +1183,24 @@ export function rankResults(
     if (b.entity !== a.entity) return b.entity - a.entity;
 
     return (a.doc.path || `${a.doc.project}/${a.doc.filename}`).localeCompare(b.doc.path || `${b.doc.project}/${b.doc.filename}`);
-  });
+  };
+  const legacyOrder = (a: ScoredDoc, b: ScoredDoc): number => {
+    const gitDelta = gitPriority(a) - gitPriority(b);
+    if (gitDelta !== 0) return gitDelta;
+    const findingsDelta = Number(a.doc.type !== "findings") - Number(b.doc.type !== "findings");
+    if (findingsDelta !== 0) return findingsDelta;
+    const scoreDelta = b.score - a.score;
+    if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
+    return withinGroup(a, b);
+  };
+  const ordered: ScoredDoc[] = [];
+  for (const priority of [0, 1]) {
+    const findings = scored.filter((entry) => gitPriority(entry) === priority && entry.doc.type === "findings");
+    const others = scored.filter((entry) => gitPriority(entry) === priority && entry.doc.type !== "findings");
+    for (const entry of sortScoreGroups(findings, (item) => item.score, withinGroup)) ordered.push(entry);
+    for (const entry of others.sort(legacyOrder)) ordered.push(entry);
+  }
+  scored = ordered;
 
   const shouldFilterTask = intent !== "build" && !opts?.skipTaskFilter && opts?.filterType !== "task";
   const rescuedTaskPaths = new Set<string>();
@@ -1283,7 +1312,9 @@ export type RelevanceFloorVerdict = Omit<RecallFloorDecision, keyof RecallDocRef
  * doc only when it has a real connection to the prompt:
  *   - a structural signal: it's a changed file, or matches the branch name, or
  *   - it's a canonical doc for the project you're actually in, or
- *   - its text clears a query-overlap floor (higher for cross-project docs)
+ *   - its text clears a query-overlap floor (higher for cross-project docs, and
+ *     for every doc when no project is detected: a conductor session has no
+ *     same-project rows to be lenient with)
  *     and keeps a share of the strongest row's matched rarity (no side matches).
  *
  * When there's no usable query signal (no tokens) it is a no-op. Setting the
@@ -1326,7 +1357,7 @@ export function applyRelevanceFloor(
       && !match.matched.some((token) => (rarity.get(token) ?? DEFAULT_TOKEN_RARITY) >= MIN_ANCHOR_RARITY)) {
       return { ...seen, passed: false, reason: "no-anchor" };
     }
-    const isCrossProject = Boolean(detectedProject) && doc.project !== detectedProject;
+    const isCrossProject = !detectedProject || doc.project !== detectedProject;
     const overlap = overlapScore(queryTokens, match.chunk);
     const passed = overlap >= (isCrossProject ? crossFloor : floor);
     return { ...seen, overlap, passed, reason: passed ? "pass" : "low-overlap" };

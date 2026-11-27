@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { filterTrustedFindingsDetailed } from "../../content/citation.js";
 import type { RecallResult } from "../types.js";
 import type { RecallEvalCase } from "./cases.js";
-import { buildRecallFixture } from "./fixture.js";
+import { buildRankingFixture, buildRecallFixture } from "./fixture.js";
 import { loadCases, runRecallEval } from "./index.js";
 import { judgmentKey, loadJudgments, writeUnjudged, type RecallJudgments } from "./judgments.js";
 import { compareToBaseline, failsCheck, recallBaseline, scoreRecall } from "./score.js";
@@ -41,10 +41,11 @@ describe("recall eval", () => {
     const root = tempDir();
     try {
       const cases = loadCases(casesFile);
-      const fixture = buildRecallFixture(root);
-      expect(cases).toHaveLength(67);
-      expect(cases.filter(c => c.kind === "negative")).toHaveLength(35);
-      expect(fs.existsSync(path.join(root, "checkouts", "global"))).toBe(false);
+      const fixture = buildRecallFixture(path.join(root, "main"));
+      const rankingFixture = buildRankingFixture(path.join(root, "ranking"));
+      expect(cases).toHaveLength(74);
+      expect(cases.filter(c => c.kind === "negative")).toHaveLength(38);
+      expect(fs.existsSync(path.join(root, "main", "checkouts", "global"))).toBe(false);
       expect(fs.existsSync(path.join(fixture.phrenPath, "global", "phren.project.yaml"))).toBe(false);
       expect(cases.filter(c => c.kind === "positive" && c.project !== null && c.project !== "global" && c.relevant.some(r => r.project === "global")).length).toBeGreaterThanOrEqual(2);
       const archiveBullets: string[] = [];
@@ -62,17 +63,26 @@ describe("recall eval", () => {
       expect(untaggedFraction).toBeLessThan(0.95);
       for (const tag of ["pitfall", "bug", "context", "decision"]) expect(archiveBullets.some(line => line.startsWith(`- [${tag}] `))).toBe(true);
       for (const c of cases) {
-        if (c.project !== null) expect(fixture.projects, c.id).toContain(c.project);
+        const source = c.fixture === "ranking" ? rankingFixture : fixture;
+        if (c.project !== null) expect(source.projects, c.id).toContain(c.project);
         for (const relevant of c.relevant) {
           const filename = c.tier === "active" ? "FINDINGS.md" : `reference/topics/mechanics${c.tier === "older" ? ".older" : ""}.md`;
-          const content = fs.readFileSync(path.join(fixture.phrenPath, relevant.project, filename), "utf8");
+          const content = fs.readFileSync(path.join(source.phrenPath, relevant.project, filename), "utf8");
           const lines = content.split("\n");
           const findings = lines.filter(line => line.includes(`<!-- fid:${relevant.fid} -->`));
           expect(findings, c.id).toHaveLength(1);
           expect(findings[0], c.id).toContain(relevant.match);
           expect(findings[0], c.id).not.toMatch(/phren:status "(?:superseded|retracted)"/);
-          expect(fixture.retiredTexts.some(text => findings[0].includes(text)), c.id).toBe(false);
+          expect(source.retiredTexts.some(text => findings[0].includes(text)), c.id).toBe(false);
           expect(filterTrustedFindingsDetailed(content, { ttlDays: 120 }).content, c.id).toContain(`fid:${relevant.fid}`);
+        }
+        if (source === rankingFixture) {
+          const latest = (project: string) =>
+            fs.readFileSync(path.join(rankingFixture.phrenPath, project, "FINDINGS.md"), "utf8").match(/^## (\d{4}-\d{2}-\d{2})/m)![1];
+          const answer = latest(c.relevant[0].project);
+          const distractors = rankingFixture.distractors[c.relevant[0].project];
+          expect(distractors, c.id).toHaveLength(3);
+          for (const distractor of distractors) expect(latest(distractor) > answer, `${c.id} ${distractor}`).toBe(true);
         }
       }
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
