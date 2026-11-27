@@ -103,29 +103,35 @@ export const CONVERSATION_FILE = "conversation.md";
 /** In a summary-by-target brief's opening line, so the receiving launch asks for a copy only for those moves. */
 export const CONVERSATION_MARKER = "Phren copied its conversation instead";
 
+const conversationName = /^([0-9a-f-]{36})\.conversation\.md(\.[0-9a-f-]{36}\.tmp)?$/i;
+const intentName = /^([0-9a-f-]{36})\.json(\.[0-9a-f-]{36}\.tmp)?$/i;
+const moveId = z.string().uuid();
+
 /**
- * Removes the saved conversations no move needs any more, as `done` decides from the move id and the copy's age
- * (the move moved or failed, or it has no record at all), and any older than `maxAgeMs` whatever `done` says.
- * A destination reads a copy only while its launch runs, which is over once the move is moved or failed. A write
- * a crash left behind (`<copy>.<uuid>.tmp`) goes after an hour. Returns the move ids whose copy was removed.
+ * Removes the saved conversations and intents no move needs any more, as `done` decides from the move id and the
+ * file's age (the move moved or failed, or it has no record at all), and any older than `maxAgeMs` whatever `done`
+ * says. A destination reads a copy only while its launch runs, and a receiving Hook reads an intent only while its
+ * move runs: both are over once the move is moved or failed. A write a crash left behind
+ * (`<file>.<uuid>.tmp`) goes after an hour. Returns the move ids whose files were removed, once each.
  */
-export async function pruneContinuationConversations(done: (id: string, ageMs: number) => boolean | Promise<boolean>, now = Date.now(), maxAgeMs = 7 * 24 * 60 * 60 * 1000): Promise<string[]> {
+export async function pruneContinuationFiles(done: (id: string, ageMs: number) => boolean | Promise<boolean>, now = Date.now(), maxAgeMs = 7 * 24 * 60 * 60 * 1000): Promise<string[]> {
   const root = path.join(bridgeRoot(), "move-intents");
   const names = await readdir(root).catch(() => [] as string[]);
-  const removed: string[] = [];
+  const removed = new Set<string>();
   for (const name of names) {
-    const match = /^([0-9a-f-]{36})\.conversation\.md(\.[0-9a-f-]{36}\.tmp)?$/i.exec(name);
-    if (!match) continue;
+    const match = conversationName.exec(name) ?? intentName.exec(name);
+    // A 36-character name that is not a UUID names no move; asking `done` about it would fail the whole sweep.
+    if (!match || !moveId.safeParse(match[1]).success) continue;
     const file = path.join(root, name);
     const info = await lstat(file).catch(() => undefined);
     if (!info?.isFile()) continue;
     const age = now - info.mtimeMs;
     const remove = match[2] ? age > ORPHAN_GRACE_MS : age > maxAgeMs || await done(match[1], age);
-    if (remove) await rm(file, { force: true }).then(() => { if (!match[2]) removed.push(match[1]); }, () => undefined);
+    if (remove) await rm(file, { force: true }).then(() => { if (!match[2]) removed.add(match[1]); }, () => undefined);
   }
-  return removed;
+  return [...removed];
 }
-/** How long a copy with no move record (or a write a crash left) is kept: a move in another process records itself first. */
+/** How long a file with no move record (or a write a crash left) is kept: a move in another process records itself first. */
 export const ORPHAN_GRACE_MS = 60 * 60 * 1000;
 
 /** Saved once per move: a run of the move that starts again keeps the first copy, which a destination may be part way through reading. */

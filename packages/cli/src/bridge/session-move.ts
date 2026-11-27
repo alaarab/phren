@@ -1,6 +1,6 @@
 import { capacityRoom, type AccountUsage } from "./usage.js";
 import { targetTranscriptPath } from "./transcripts.js";
-import { CONVERSATION_LIMIT, CONVERSATION_MARKER, ORPHAN_GRACE_MS, pruneContinuationConversations, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
+import { CONVERSATION_LIMIT, CONVERSATION_MARKER, ORPHAN_GRACE_MS, pruneContinuationFiles, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
 import type { ConductorSuccessionService } from "./conductor-succession.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 // Moving a live session to another agent: the Hook saves its history and an
@@ -172,20 +172,26 @@ export async function readMove(id: string): Promise<MoveRecord | undefined> {
   try { return moveRecordSchema.parse(JSON.parse(await readFile(file, "utf8"))); } catch { return undefined; }
 }
 
-/** Recent moves, newest first; old ones are removed on the way. */
+/** The sweep's record check; a test swaps it to act out a moves folder it cannot read. */
+export const recordStat: { lstat: typeof lstat } = { lstat };
+/** Whether the move has no record file at all; a record it merely cannot read may be a pending move's. */
+const recordMissing = (id: string) => recordStat.lstat(recordFile(id)).then(() => false, (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+
+/** Recent moves, newest first; old ones are removed on the way. A move keeps its id's spelling. */
 export async function listMoves(now = Date.now()): Promise<MoveRecord[]> {
-  const names = (await readdir(movesRoot()).catch(() => [] as string[])).filter(name => /^[a-f0-9-]{36}\.json$/.test(name));
+  const names = (await readdir(movesRoot()).catch(() => [] as string[])).filter(name => /^[a-f0-9-]{36}\.json$/i.test(name));
   const records = (await Promise.all(names.map(name => readMove(name.slice(0, -5))))).filter((record): record is MoveRecord => !!record)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const settled = (record: MoveRecord) => record.state === "moved" || record.state === "failed";
   const stale = records.filter((record, index) => settled(record) && (index >= MAX_MOVES || now - Date.parse(record.updatedAt) > MOVE_KEEP_MS));
   await Promise.all(stale.flatMap(record => [recordFile(record.id), interruptFile(record.id)].map(file => rm(file, { force: true }).catch(() => undefined))));
-  // A summary-by-target move's saved conversation is read by its destination only while the move runs: removed
-  // once its record says it moved or failed, an hour after it if it has no record file at all, and after seven
-  // days in any case. A record that exists but could not be read keeps its copy: it may be a running move's.
+  // A summary-by-target move's saved conversation and its intent are read by their destination only while the move
+  // runs: removed once its record says it moved or failed, an hour after them if it has no record file at all, and
+  // after seven days in any case. A record that exists but could not be read keeps them: it may be a running move's.
+  // A late duplicate peer launch after the sweep is refused for lack of an intent; its placement GET still answers.
   const finished = new Set(records.filter(settled).map(record => record.id));
-  await pruneContinuationConversations(async (id, age) => finished.has(id)
-    || (age > ORPHAN_GRACE_MS && !await Promise.resolve().then(() => lstat(recordFile(id))).then(() => true, () => false)), now, MOVE_KEEP_MS).catch(() => undefined);
+  await pruneContinuationFiles(async (id, age) => finished.has(id)
+    || (age > ORPHAN_GRACE_MS && await recordMissing(id)), now, MOVE_KEEP_MS).catch(() => undefined);
   return records.filter(record => !stale.includes(record));
 }
 

@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { continuationConversationPage, fetchContinuationConversation, pruneContinuationConversations, saveContinuationConversation, withConversationPointer } from "./continuation-launch.js";
+import { continuationConversationPage, continuationIntent, fetchContinuationConversation, ORPHAN_GRACE_MS, pruneContinuationFiles, saveContinuationConversation, saveContinuationIntent, withConversationPointer } from "./continuation-launch.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import type { Json } from "./protocol.js";
 
@@ -27,32 +27,49 @@ it("serves a saved conversation in pages that each fit one peer answer, and reas
   expect(pages.length).toBeGreaterThan(Math.ceil(text.length / 262_144));
 });
 
-it("prunes a copy its move is done with, and any older than seven days, and leaves a crash's half-written copy an hour", async () => {
+it("prunes a copy and an intent its move is done with, and any older than seven days, and leaves a crash's half-written file an hour", async () => {
   const running = "a0000000-0000-4000-8000-0000000000d1", done = "a0000000-0000-4000-8000-0000000000d2", old = "a0000000-0000-4000-8000-0000000000d3";
+  const orphan = "a0000000-0000-4000-8000-0000000000d4", orphanOld = "a0000000-0000-4000-8000-0000000000d5";
   for (const id of [running, done, old]) await saveContinuationConversation(id, `conversation of ${id}`);
+  for (const id of [running, done, old, orphan, orphanOld]) await saveContinuationIntent({ brief: { id } });
   const intents = path.join(root, "move-intents");
-  // An intent beside the copies is not a copy and is never touched.
-  await writeFile(path.join(intents, `${running}.json`), "{}");
   const week = 7 * 24 * 60 * 60 * 1000, now = Date.now();
-  const aged = new Date(now - week - 60_000);
-  await utimes(path.join(intents, `${old}.conversation.md`), aged, aged);
-  // Writes a crash left: one fresh, one two hours old.
-  const fresh = `${running}.conversation.md.b0000000-0000-4000-8000-000000000001.tmp`, stale = `${running}.conversation.md.b0000000-0000-4000-8000-000000000002.tmp`;
+  const aged = new Date(now - week - 60_000), twoHours = new Date(now - 2 * 60 * 60 * 1000);
+  // `old` is still running but past the backstop, whatever its record says.
+  for (const name of [`${old}.conversation.md`, `${old}.json`]) await utimes(path.join(intents, name), aged, aged);
+  // A move in another process records itself first: neither orphan has a record at all.
+  await utimes(path.join(intents, `${orphanOld}.json`), twoHours, twoHours);
+  // Writes a crash left: one fresh, one two hours old, for a copy and for an intent.
+  const fresh = `${running}.conversation.md.b0000000-0000-4000-8000-000000000001.tmp`;
+  const stale = `${running}.json.b0000000-0000-4000-8000-000000000002.tmp`;
   await writeFile(path.join(intents, fresh), "partial"); await writeFile(path.join(intents, stale), "partial");
-  const twoHours = new Date(now - 2 * 60 * 60 * 1000);
   await utimes(path.join(intents, stale), twoHours, twoHours);
-  // `done` is the only one its move is done with; `old` is still running but past the backstop.
-  const asked: string[] = [];
-  const removed = await pruneContinuationConversations(id => { asked.push(id); return id === done; }, now);
-  expect(removed.sort()).toEqual([done, old].sort());
-  expect(asked.sort()).toEqual([done, running].sort());
-  expect((await readdir(intents)).sort()).toEqual([`${running}.conversation.md`, fresh, `${running}.json`].sort());
+  // Other files in the folder are not continuation files and are never touched.
+  const unrelated = ["notes.txt", "extra.json", `${running}.json.bak`];
+  for (const name of unrelated) await writeFile(path.join(intents, name), "keep");
+  // A 36-character name that is not a UUID sits before a removable file and must not stop the sweep.
+  const stray = `${"0".repeat(36)}.json`;
+  await writeFile(path.join(intents, stray), "keep");
+  // The rule listMoves applies: a finished move is done with its files, one with no record file gets an hour,
+  // and nothing outlives seven days.
+  const written = new Set([running, done, old]), finished = new Set([done]);
+  const removed = await pruneContinuationFiles((id, age) => {
+    // `done` is handed a move id, which recordFile parses as a UUID.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error(`not a move id: ${id}`);
+    return finished.has(id) || (age > ORPHAN_GRACE_MS && !written.has(id));
+  }, now);
+  // `done` lost its copy and its intent and is still named once.
+  expect(removed.sort()).toEqual([done, old, orphanOld].sort());
+  expect((await readdir(intents)).sort()).toEqual([`${running}.conversation.md`, `${running}.json`, `${orphan}.json`, fresh, stray, ...unrelated].sort());
   expect(await fetchContinuationConversation(offset => continuationConversationPage(running, offset), value => value)).toBe(`conversation of ${running}`);
+  expect(await continuationIntent(running)).toMatchObject({ brief: { id: running } });
+  expect(await continuationIntent(orphan)).toMatchObject({ brief: { id: orphan } });
   await expect(continuationConversationPage(done, 0)).rejects.toMatchObject({ status: 404 });
+  await expect(continuationIntent(done)).rejects.toMatchObject({ status: 404 });
   // Nothing to prune, or no folder at all: no error.
-  expect(await pruneContinuationConversations(() => false, now)).toEqual([]);
+  expect(await pruneContinuationFiles(() => false, now)).toEqual([]);
   await rm(intents, { recursive: true });
-  expect(await pruneContinuationConversations(() => true, now)).toEqual([]);
+  expect(await pruneContinuationFiles(() => true, now)).toEqual([]);
 });
 
 it("keeps the first copy of a move when its run starts again, so a reader part way through is not cut off", async () => {

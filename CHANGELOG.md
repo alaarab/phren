@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook WebSocket eviction gives the 1008 close frame up to one second to reach the client before cutting the socket.
 - `@phren/code`: code lookups now find citing findings in the oldest archive halves (`.older.md`) too.
+- `@phren/cli`: the Hook now prunes each move's saved launch intent (`<bridge>/move-intents/<id>.json`) like its conversation copy, so settled moves no longer leave them behind.
 
 ## [0.3.99] - 2026-11-27
 
