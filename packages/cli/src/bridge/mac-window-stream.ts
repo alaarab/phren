@@ -192,7 +192,9 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   let stdoutEnded = false;
   let lease: MacWindowStreamLease | undefined;
   let finishedLease = false;
-  const finishLease = (outcome?: string) => {
+  /** The first terminal outcome, kept for a lease that arrives after it. */
+  let outcome: string | undefined;
+  const finishLease = () => {
     if (finishedLease || !lease) return;
     finishedLease = true;
     void lease.finish(outcome).catch(() => undefined);
@@ -274,6 +276,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   const end = (code?: number, why?: string) => {
     if (ended) return;
     ended = true;
+    outcome = why;
     for (const timer of [firstSendTimer, pullTimer, pullDeadline, ackDeadline, tokenTimer, termTimer, killTimer]) clear(timer);
     firstSendTimer = pullTimer = pullDeadline = ackDeadline = tokenTimer = termTimer = killTimer = undefined;
     staged = undefined; outstanding = undefined; pullOutstanding = false;
@@ -290,7 +293,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
       });
     }
     releaseIfDone();
-    finishLease(why);
+    finishLease();
     if (code !== undefined) closeNow(code, why ?? "capture-failed");
   };
 

@@ -8,6 +8,28 @@ import {
   MAX_MESSAGE_BYTES, streamMacWindow, streamQuery,
 } from "./mac-window-stream.js";
 
+/** Admission is worker B's module; the mock gives each test control of it. */
+const admission = vi.hoisted(() => ({
+  defer: false,
+  failCode: undefined as string | undefined,
+  waiters: [] as (() => void)[],
+  onEnd: [] as ((reason: string) => void)[],
+  finishes: [] as (string | undefined)[],
+}));
+
+vi.mock("./mac-window-lease-stub.js", async () => {
+  const { BridgeError } = await import("./protocol.js");
+  return {
+    beginMacWindowStream: async (_owner: boolean, _id: number, onEnd: (reason: string) => void) => {
+      if (admission.defer) await new Promise<void>(resolve => admission.waiters.push(resolve));
+      if (admission.failCode) throw new BridgeError(403, "refused", { code: admission.failCode });
+      admission.onEnd.push(onEnd);
+      return { finish: async (reason?: string) => { admission.finishes.push(reason); } };
+    },
+    logMacWindowStreamRefusal: async () => undefined,
+  };
+});
+
 /** The window id and layout the tests stream. */
 const ID = "9";
 
@@ -122,7 +144,14 @@ async function start(query: string, deps: MacWindowStreamDeps, owner = true) {
 const pulls = (child: FakeChild) => child.commands.filter(command => command.startsWith("PULL "));
 const stamps = (client: FakeClient) => client.texts().filter(message => message.type === "stats");
 
-beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  admission.defer = false;
+  admission.failCode = undefined;
+  admission.waiters.length = 0;
+  admission.onEnd.length = 0;
+  admission.finishes.length = 0;
+});
 afterEach(async () => {
   for (const client of open.splice(0)) client.close(1000);
   vi.advanceTimersByTime(2_500);
@@ -482,6 +511,54 @@ describe("acknowledgements and stats", () => {
     const client = await start(`id=${ID}`, deps);
     send(client);
     expect(client.closed).toEqual({ code: 1008, reason: "bad-control" });
+  });
+});
+
+describe("lease outcomes", () => {
+  it("finishes a lease that arrives after shutdown with the shutdown outcome", async () => {
+    const { deps } = harness();
+    admission.defer = true;
+    const client = new FakeClient(); open.push(client);
+    const running = streamMacWindow(client, new URLSearchParams(`id=${ID}`), true, deps);
+    await flush();
+    closeMacWindowStreams();
+    expect(client.closed).toEqual({ code: 1001, reason: "shutdown" });
+    admission.waiters.shift()!();
+    await running;
+    await flush();
+    expect(admission.finishes).toEqual(["shutdown"]);
+    expect(activeMacWindowStreams()).toBe(0);
+    expect(deps.helper).not.toHaveBeenCalled();
+  });
+  it("finishes a granted lease once, with the first terminal outcome", async () => {
+    const { deps } = harness();
+    const client = await start(`id=${ID}`, deps);
+    closeMacWindowStreams();
+    await flush();
+    expect(admission.finishes).toEqual(["shutdown"]);
+    client.close(1000);
+    await flush();
+    expect(admission.finishes).toEqual(["shutdown"]);
+  });
+  it("sends and pulls nothing after the lease ends while a sample is staged", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&tier=3`, deps);
+    const child = children[0];
+    child.stdout.write(record(1, wire({ sync: true, unitBytes: MAX_MESSAGE_BYTES - 24 - 10 - 4, pts: 1_000n })));
+    await flush();
+    client.control({ type: "ack", seq: 1 });
+    vi.advanceTimersByTime(84);
+    child.stdout.write(record(1, wire({ unitBytes: 20_000, pts: 2_000n })));
+    await flush();
+    const sent = client.binary().length;
+    const pulled = pulls(child).length;
+    admission.onEnd[0]("mac-windows-stopped");
+    expect(client.closed).toEqual({ code: 1008, reason: "mac-windows-stopped" });
+    vi.advanceTimersByTime(2_000);
+    await flush();
+    expect(client.binary()).toHaveLength(sent);
+    expect(pulls(child)).toHaveLength(pulled);
+    expect(admission.finishes).toEqual(["mac-windows-stopped"]);
   });
 });
 
