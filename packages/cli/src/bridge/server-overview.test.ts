@@ -1,7 +1,12 @@
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import { logger } from "../logger.js";
 import type { Json } from "./protocol.js";
+import { workspacesReader } from "./server-routes.js";
 import { overviewStream, type OverviewClient } from "./server-overview.js";
 
 class FakeClient extends EventEmitter implements OverviewClient {
@@ -191,6 +196,121 @@ describe("overview stream", () => {
     resolveResources({ level: "ok" });
     await settle();
     expect(client.frames.map(frame => frame.type)).toEqual(["overview", "resources"]);
+    connection.stop();
+  });
+
+  it("closes the stream when a snapshot stalls past the deadline", async () => {
+    vi.useFakeTimers();
+    const stream = overviewStream({
+      snapshot: () => new Promise<Json>(() => {}),
+      read: async () => ({ groups: [], phren: {} }),
+      info: () => ({}), renew: () => {},
+      tickMs: 60_000, deadlineMs: 1_000,
+    });
+    const client = new FakeClient();
+    stream(client, "default", false);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(client.closed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(client.closed?.code).toBe(1011);
+    expect(client.closed?.reason).toBe("Overview stalled; reconnect");
+  });
+
+  it("spends one deadline budget across the snapshot and the read", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const stream = overviewStream({
+      snapshot: () => new Promise<Json>(resolve => setTimeout(() => resolve({ panes: [] }), 29_000)),
+      read: () => { reads++; return new Promise<Json>(() => {}); },
+      info: () => ({}), renew: () => {},
+      tickMs: 60_000, deadlineMs: 30_000,
+    });
+    const client = new FakeClient();
+    stream(client, "default", false);
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(reads).toBe(1);
+    expect(client.closed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(client.closed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(client.closed?.code).toBe(1011);
+    expect(client.closed?.reason).toBe("Overview stalled; reconnect");
+  });
+
+  it("does not renew approvals when the read finishes after the stream closes", async () => {
+    vi.useFakeTimers();
+    const root = await mkdtemp(path.join(tmpdir(), "phren-overview-live-"));
+    vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    try {
+      const renew = vi.fn();
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const reader = workspacesReader({
+        modules: { has: () => false } as never, info: {} as never,
+        agentHooks: { overview: { renew }, pendingPanes: () => new Set<string>() } as never,
+        journal: { record: async () => {} } as never,
+        tabActivity: { observe: async () => { await gate; return { generation: 0, stamps: new Map() }; }, recordStatus: async () => new Map() } as never,
+        contextUsage: { read: async () => new Map() } as never,
+      });
+      let late: Promise<Json> | undefined;
+      const client = new FakeClient();
+      overviewStream({
+        read: (server, s, watch, live) => (late = reader(server, s, watch, live)),
+        snapshot: async () => ({ panes: [] }),
+        info: () => ({}), renew, tickMs: 60_000, deadlineMs: 1_000,
+      })(client, "default", true);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(client.closed?.code).toBe(1011);
+      release();
+      await late;
+      expect(renew).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not report a timeout or close again after the client disconnects", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const stream = overviewStream({
+      snapshot: () => new Promise<Json>(() => {}),
+      read: async () => ({ groups: [], phren: {} }),
+      info: () => ({}), renew: () => {},
+      tickMs: 60_000, deadlineMs: 1_000,
+    });
+    const client = new FakeClient();
+    stream(client, "default", false);
+    await vi.advanceTimersByTimeAsync(999);
+    client.close(1000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(client.closed).toEqual({ code: 1000, reason: undefined });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("frees the resources slot when a read outruns the deadline", async () => {
+    vi.useFakeTimers();
+    let now = 0, reads = 0, hang = true;
+    const stream = overviewStream({
+      snapshot: async () => ({ panes: [] }),
+      read: async () => ({ groups: [], phren: {} }),
+      info: () => ({}), renew: () => {},
+      resources: () => { reads++; return hang ? new Promise<never>(() => {}) : Promise.resolve({ level: "ok" }); },
+      now: () => now, tickMs: 60_000, resourcesMs: 1_000, deadlineMs: 1_000,
+    });
+    const client = new FakeClient(), connection = stream(client, "default", false, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads).toBe(1);
+    // The hung read frees its slot at the deadline, so the next resources tick runs.
+    now = 1_000;
+    await vi.advanceTimersByTimeAsync(1_000);
+    hang = false;
+    await connection.tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads).toBe(2);
+    expect(client.frames.map(frame => frame.type)).toEqual(["overview", "resources"]);
+    expect(client.closed).toBeUndefined();
     connection.stop();
   });
 });

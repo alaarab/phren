@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { logger } from "../logger.js";
 import { atomicInPrivateDir, bridgeRoot, object, objects, type Json } from "./protocol.js";
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+const MAX_PENDING_WRITES = 8;
 type Stamp = { signature: string; statusSignature?: string; lastChangedAt: string; statusSince: string };
 type StatusRow = { workspace: unknown; tab: unknown; status: unknown };
 export type TabActivityStamp = Pick<Stamp, "lastChangedAt" | "statusSince">;
@@ -29,6 +31,9 @@ export class TabActivityStore {
   private loaded = false;
   private dirty = false;
   private pending: Promise<unknown> = Promise.resolve();
+  private writes: Array<() => Promise<void>> = [];
+  private writing = false;
+  private idle: Promise<void> = Promise.resolve();
   private nextGeneration = new Map<string, number>();
   private committedGeneration = new Map<string, number>();
   constructor(private readonly file = path.join(bridgeRoot(), "tab-activity.json"),
@@ -65,7 +70,7 @@ export class TabActivityStore {
         if (key.startsWith(prefix) && !seen.has(key)) { this.entries.delete(key); changed = true; }
       }
       this.dirty ||= changed;
-      await this.persist();
+      this.persistSoon();
       return { generation, stamps };
     });
     this.pending = operation;
@@ -101,11 +106,27 @@ export class TabActivityStore {
         stamps.set(tabKey, { lastChangedAt: current.lastChangedAt, statusSince: current.statusSince });
       }
       this.dirty ||= changed;
-      await this.persist();
+      this.persistSoon();
       return stamps;
     });
     this.pending = operation;
     return operation;
+  }
+  /** Cache writes are fire-and-forget and ordered; at most 8 wait, the oldest dropped since each writes the latest state. */
+  private persistSoon(): void {
+    if (this.writes.length >= MAX_PENDING_WRITES) this.writes.shift();
+    this.writes.push(() => this.persist().catch(error => logger.warn("stream", `tab activity save failed: ${String(error)}`)));
+    if (!this.writing) {
+      this.writing = true;
+      this.idle = this.drainWrites().finally(() => { this.writing = false; });
+    }
+  }
+  private async drainWrites(): Promise<void> {
+    while (this.writes.length) await this.writes.shift()!();
+  }
+  /** Waits for queued cache writes; the live path never does, since this is a cache. */
+  async flush(): Promise<void> {
+    while (this.writing) await this.idle;
   }
   private async load() {
     if (!this.loaded) {
@@ -129,14 +150,16 @@ export class TabActivityStore {
       }
   }
   private async persist() {
-      if (this.dirty) {
-        try {
-          await atomicInPrivateDir(this.file, JSON.stringify({ version: 1, entries: Object.fromEntries(this.entries) }));
-          this.dirty = false;
-        } catch {
-          // A full/unwritable disk must not hide live sessions. Keep the clock
-          // in memory and retry saving on the next successful snapshot.
-        }
+      if (!this.dirty) return;
+      // Snapshot before the write: changes made meanwhile stay dirty for the next queued write.
+      const body = JSON.stringify({ version: 1, entries: Object.fromEntries(this.entries) });
+      this.dirty = false;
+      try {
+        await atomicInPrivateDir(this.file, body);
+      } catch {
+        // A full/unwritable disk must not hide live sessions. Keep the clock
+        // in memory and retry saving on the next successful snapshot.
+        this.dirty = true;
       }
   }
   pruneServers(servers: string[]): Promise<void> {
@@ -146,7 +169,7 @@ export class TabActivityStore {
       for (const key of this.entries.keys()) if (!prefixes.some(prefix => key.startsWith(prefix))) {
         this.entries.delete(key); this.dirty = true;
       }
-      await this.persist();
+      this.persistSoon();
     });
     this.pending = operation;
     return operation;

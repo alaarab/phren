@@ -36,6 +36,26 @@ export const OVERVIEW_TICK_MS = intervalFromEnv("PHREN_OVERVIEW_TICK_MS", 5_000,
 export const OVERVIEW_REFRESH_MS = intervalFromEnv("PHREN_OVERVIEW_REFRESH_MS", 10_000, 1_000, 120_000);
 export const OVERVIEW_HEARTBEAT_MS = intervalFromEnv("PHREN_OVERVIEW_HEARTBEAT_MS", 20_000, 1_000, 60_000);
 export const OVERVIEW_RESOURCES_MS = intervalFromEnv("PHREN_OVERVIEW_RESOURCES_MS", 12_000, 1_000, 120_000);
+/** A read that outruns this would wedge the loop, so the stream closes and the phone reconnects. */
+export const OVERVIEW_TICK_DEADLINE_MS = Math.max(30_000, 3 * OVERVIEW_REFRESH_MS);
+
+/** Thrown by `withinDeadline` when awaited work never settles, so a hung read cannot wedge the stream. */
+class OverviewStalledError extends Error {
+  constructor(ms: number) { super(`overview read stalled past ${ms}ms`); }
+}
+
+/** Races `work` against `ms`; the timer stays in `timers` so `stop()` can clear it. */
+function withinDeadline<T>(work: Promise<T>, ms: number, timers: Set<NodeJS.Timeout>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => { timers.delete(timer); reject(new OverviewStalledError(ms)); }, ms);
+    timer.unref();
+    timers.add(timer);
+    work.then(
+      value => { timers.delete(timer); clearTimeout(timer); resolve(value); },
+      error => { timers.delete(timer); clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 export interface OverviewStreamOptions {
   read: WorkspacesReader;
@@ -57,6 +77,8 @@ export interface OverviewStreamOptions {
   refreshMs?: number;
   heartbeatMs?: number;
   resourcesMs?: number;
+  /** Overrides how long one snapshot or read may take before the stream gives up. */
+  deadlineMs?: number;
 }
 
 /** A socket-like peer: the `ws` client, or a test double. */
@@ -75,6 +97,7 @@ export function overviewStream(options: OverviewStreamOptions) {
   const refreshMs = options.refreshMs ?? OVERVIEW_REFRESH_MS;
   const heartbeatMs = options.heartbeatMs ?? OVERVIEW_HEARTBEAT_MS;
   const resourcesMs = options.resourcesMs ?? OVERVIEW_RESOURCES_MS;
+  const deadlineMs = options.deadlineMs ?? OVERVIEW_TICK_DEADLINE_MS;
 
   function send(client: OverviewClient, frame: Json): boolean {
     if (client.readyState !== WebSocket.OPEN) return false;
@@ -91,6 +114,7 @@ export function overviewStream(options: OverviewStreamOptions) {
    * tick function, for tests that drive time themselves. */
   return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false, typedMux = false, withSudo = false, withSecrets = false, withConfirms = false) {
     let closed = false, busy = false, resourcesPending = false, first = true, overviewSent = false;
+    const deadlineTimers = new Set<NodeJS.Timeout>();
     // Subscribed at once, so the phone counts as able to answer while the first overview builds.
     const unsubscribe = withSudo && options.sudo
       ? options.sudo.subscribe(requests => { if (!closed && overviewSent) send(client, { type: "sudo", requests }); }) : undefined;
@@ -104,25 +128,34 @@ export function overviewStream(options: OverviewStreamOptions) {
       if (!withResources || !options.resources || resourcesPending || at - resourcesAt < resourcesMs) return;
       resourcesPending = true;
       resourcesAt = at;
-      void Promise.resolve().then(() => options.resources!()).then(resources => {
+      void withinDeadline(Promise.resolve().then(() => options.resources!()), deadlineMs, deadlineTimers).then(resources => {
         if (!closed && resources) send(client, { type: "resources", resources });
       }).catch(error => {
-        logger.warn("stream", `/v1/overview resources read failed: ${streamCloseReason(error)}`);
+        if (!closed) logger.warn("stream", error instanceof OverviewStalledError
+          ? `/v1/overview resources ${error.message}`
+          : `/v1/overview resources read failed: ${streamCloseReason(error)}`);
       }).finally(() => { resourcesPending = false; });
     };
     const tick = async (): Promise<void> => {
       if (busy || closed) return;
       busy = true;
+      let tickTimer: NodeJS.Timeout | undefined;
       try {
         countTick("overview-stream");
         const at = now();
+        // One timer covers the snapshot and the rebuild, so a slow pair still closes on time.
+        const deadline = new Promise<never>((_, reject) => {
+          tickTimer = setTimeout(() => reject(new OverviewStalledError(deadlineMs)), deadlineMs);
+          tickTimer.unref();
+          deadlineTimers.add(tickTimer);
+        });
         // The first frame reads a fresh snapshot, as a poll would.
-        const held = await snapshot(server, first ? 0 : tickMs);
+        const held = await Promise.race([snapshot(server, first ? 0 : tickMs), deadline]);
         if (closed) return;
         const key = JSON.stringify(held);
         if (first || key !== snapshotKey || at - builtAt >= refreshMs) {
           snapshotKey = key; builtAt = at;
-          const overview = muxReplyForClient(await options.read(server, held, watchApprovals), typedMux);
+          const overview = muxReplyForClient(await Promise.race([options.read(server, held, watchApprovals, () => !closed), deadline]), typedMux);
           if (closed) return;
           const { phren: _phren, ...rows } = overview;
           const rowsKey = JSON.stringify(rows);
@@ -137,24 +170,35 @@ export function overviewStream(options: OverviewStreamOptions) {
             first = false;
             return;
           }
-        } else if (watchApprovals) {
+        } else if (!closed && watchApprovals) {
           options.renew(server);
         }
         first = false;
-        if (at - sentAt >= heartbeatMs && send(client, { type: "heartbeat", phren: options.info() })) sentAt = at;
+        if (!closed && at - sentAt >= heartbeatMs && send(client, { type: "heartbeat", phren: options.info() })) sentAt = at;
       } catch (error) {
-        const reason = streamCloseReason(error);
+        // A disconnect already ended the stream: no timeout report and no second close.
+        if (closed) return;
+        const reason = error instanceof OverviewStalledError ? "Overview stalled; reconnect" : streamCloseReason(error);
         logger.warn("stream", `/v1/overview closed: ${reason}`);
         stop();
         client.close(1011, reason);
       } finally {
+        if (tickTimer) {
+          clearTimeout(tickTimer);
+          deadlineTimers.delete(tickTimer);
+        }
         busy = false;
         // Start this separately so ps and pane ownership cannot hold up the overview.
         if (!closed) collectResources();
       }
     };
     const timer = setInterval(() => { void tick(); }, tickMs);
-    const stop = () => { closed = true; clearInterval(timer); unsubscribe?.(); unsubscribeSecrets?.(); unsubscribeConfirms?.(); };
+    const stop = () => {
+      closed = true; clearInterval(timer);
+      for (const deadline of deadlineTimers) clearTimeout(deadline);
+      deadlineTimers.clear();
+      unsubscribe?.(); unsubscribeSecrets?.(); unsubscribeConfirms?.();
+    };
     client.once("close", stop);
     client.once("error", stop);
     void tick();

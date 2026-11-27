@@ -4,13 +4,13 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HealthFinding } from "../machine-health.js";
 import { OwnerInbox } from "../owner-inbox.js";
 import type { ComputerResources } from "../resources.js";
 import { createRouteHandler } from "../server-routes.js";
-import { type Check, Housekeeper, HousekeepingStore, healthCheck } from "./housekeeper.js";
-import { approveResultSchema, type ItemDraft, viewSchema } from "./report.js";
+import { type Check, boundedBadge, Housekeeper, HousekeepingStore, healthCheck } from "./housekeeper.js";
+import { approveResultSchema, type Badge, type ItemDraft, viewSchema } from "./report.js";
 
 const GB = 1024 ** 3;
 const created: string[] = [];
@@ -325,5 +325,27 @@ describe("the /v1/housekeeping contract", () => {
       const areas = new Set([...fixture.warnings, ...fixture.suggestions, ...fixture.kept, ...fixture.cleaned].map((item: { area: string }) => item.area));
       expect([...areas].sort()).toEqual(["disk", "docker", "memory", "sessions", "simulators", "worktrees"]);
     }
+  });
+});
+
+describe("bounded badge", () => {
+  it("falls back to the last good badge when a read outlives the wait, with one read in flight", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    let release!: (value: Badge | undefined) => void;
+    const first = new Promise<Badge | undefined>(resolve => { release = resolve; });
+    const badge = boundedBadge(() => { reads++; return reads === 1 ? first : new Promise<Badge | undefined>(() => {}); }, 2_000);
+    const timed = badge();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(timed).resolves.toBeUndefined();
+    const good: Badge = { revision: "rev", warnings: 1, suggestions: 0, worst: null, freedTodayBytes: 0 };
+    release(good);
+    await vi.advanceTimersByTimeAsync(0);
+    // Both calls share the one read still in flight, and fall back to the last good badge.
+    const joined = [badge(), badge()];
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(reads).toBe(2);
+    await expect(joined[0]).resolves.toEqual(good);
+    await expect(joined[1]).resolves.toEqual(good);
   });
 });
