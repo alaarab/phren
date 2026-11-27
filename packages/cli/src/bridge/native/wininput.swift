@@ -226,7 +226,7 @@ func scrollGesture(at point: CGPoint, dx: Int32, dy: Int32) {
 // the button, and the whole path is sampled before pressing. Once left-down is
 // posted the gesture always ends with left-up, even when Stop or a dead Hook
 // lands mid-drag; the bounded remaining steps are abandoned and the up goes out
-// first.
+// first, at the last point the button reached.
 func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
     guard let source = CGEventSource(stateID: .hidSystemState),
           let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: .left),
@@ -262,6 +262,9 @@ func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
     }
     let began = DispatchTime.now().uptimeNanoseconds
     down.post(tap: .cghidEventTap)
+    // Where the button last was: an interrupted gesture releases there, not at
+    // a point the drag never reached.
+    var last = start
     var failure: (code: Int32, message: String)?
     for (index, event) in dragged.enumerated() {
         let deadline = began + UInt64(Double(durationMs) * 1_000_000 * Double(index + 1) / Double(steps))
@@ -275,14 +278,13 @@ func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
             break
         }
         event.post(tap: .cghidEventTap)
+        last = points[index]
     }
     // Every recoverable exit after left-down releases the button exactly once
-    // before the helper exits.
-    if let failure {
-        up.post(tap: .cghidEventTap)
-        fail(failure.code, failure.message)
-    }
+    // before the helper exits; a completed drag releases at the endpoint.
+    up.location = last
     up.post(tap: .cghidEventTap)
+    if let failure { fail(failure.code, failure.message) }
 }
 
 // The Hook is our parent: if it dies we are reparented to launchd (pid 1) and
