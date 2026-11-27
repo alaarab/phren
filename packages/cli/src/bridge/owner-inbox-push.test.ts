@@ -4,7 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OwnerInboxPushSweep, type OwnerInboxPushSender, type OwnerInboxPushValue } from "./owner-inbox-push.js";
-import type { InboxItem } from "./owner-inbox.js";
+import { OwnerInbox, type InboxItem } from "./owner-inbox.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const AT = Date.parse("2026-11-27T10:00:00.000Z");
@@ -55,6 +55,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   delete process.env.PHREN_OWNER_INBOX_BACKFILL_ID;
+  vi.useRealTimers();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -242,6 +243,28 @@ describe("owner inbox push sweep", () => {
     restarted.devices.push(DEVICE_A, DEVICE_B);
     await sweep(restarted).observe([rowNow]);
     expect(restarted.sent.map(item => item.deviceID)).toEqual([DEVICE_B]);
+  });
+
+  it("never alerts a manual row that was resolved and reopened between ticks", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(AT));
+    const box = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
+    const sender = fakeSender();
+    sender.devices.push(DEVICE_A);
+    const push = new OwnerInboxPushSweep(sender, { file, now: Date.now });
+    await push.observe(await box.tick());
+    vi.setSystemTime(new Date(AT + 1000));
+    const added = (await box.run({ action: "add", title: "OVH US VPS-2 is in stock" })).item as InboxItem;
+    await box.run({ action: "resolve", id: added.id, resolution: "done" });
+    await box.run({ action: "add", id: added.id, title: "OVH US VPS-2 is back in stock" });
+    await push.observe(await box.tick());
+    expect(sender.attempts).toEqual([]);
+
+    // A genuinely new row created after the cursor still alerts.
+    vi.setSystemTime(new Date(AT + 2000));
+    await box.run({ action: "add", title: "OVH has a second plan" });
+    await push.observe(await box.tick());
+    expect(sender.sent.map(item => item.value.title)).toEqual(["OVH has a second plan"]);
   });
 
   it("fails closed on a corrupt ledger and explains how to recover", async () => {

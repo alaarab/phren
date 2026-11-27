@@ -21,10 +21,17 @@ const itemSchema = z.object({
   project: z.string().max(200).optional(), computer: z.string().max(253).optional(),
   target: inboxTargetSchema.optional(), dispatch: z.string().uuid().optional(), actionId: z.string().max(200).optional(),
   source: z.string().max(500).optional(), live: z.boolean().optional(),
+  // Internal: this row was resolved and reopened by the same id. The push
+  // sweep must never treat that second open as a first-open alert, and the
+  // public list strips the field before returning it.
+  reopened: z.boolean().optional(),
   // Manual extras: what the owner should run, and the task and pull request it links.
   command: command.optional(), task: taskRef.optional(), pr: prRef.optional(), key: dedupeKey.optional(),
 }).strict();
 export type InboxItem = z.infer<typeof itemSchema>;
+/** The internal tick snapshot: the public open row plus whether this is the
+ * row's first open, which a reword or a same-id reopen must not reset. */
+export type InboxTickItem = InboxItem & { firstOpen: boolean };
 export const ownerInboxSchema = z.object({
   action: z.enum(["add", "list", "resolve"]).default("list"),
   title: title.optional(), project: z.string().max(200).optional(),
@@ -43,10 +50,19 @@ export function pasteCommand(item: { id: string; command: string; updatedAt: str
   return `${run} && ${resolve}`;
 }
 
+/** The internal reopen marker never leaves the store. */
+const withoutMarker = (item: InboxItem): InboxItem => {
+  const row = { ...item };
+  delete row.reopened;
+  return row;
+};
 /** `paste` is computed on the way out, never stored. */
-const withPaste = (item: InboxItem): Json => item.command
-  ? { ...item, paste: pasteCommand({ id: item.id, command: item.command, updatedAt: item.updatedAt }) }
-  : item;
+const withPaste = (item: InboxItem): Json => {
+  const row = withoutMarker(item);
+  return row.command
+    ? { ...row, paste: pasteCommand({ id: row.id, command: row.command, updatedAt: row.updatedAt }) }
+    : row;
+};
 
 // Prompt prose, counters and timestamps are observations, not identities.
 function sourceKey(row: Pick<InboxItem, "target" | "actionId" | "source" | "computer" | "dispatch">): string | undefined {
@@ -169,7 +185,7 @@ export class OwnerInbox {
             throw new BridgeError(409, "These inbox identifiers name different items.");
           }
           if (prior && prior.state === "resolved") {
-            apply(prior); prior.state = "open"; delete prior.resolvedAt; delete prior.resolution;
+            apply(prior); prior.state = "open"; prior.reopened = true; delete prior.resolvedAt; delete prior.resolution;
             await atomicInPrivateDir(this.file, rows);
             return { ok: true, item: withPaste(prior), reopened: true };
           }
@@ -194,11 +210,11 @@ export class OwnerInbox {
           if (data.ifUpdatedAt !== undefined && item.updatedAt !== data.ifUpdatedAt) throw new BridgeError(409, "This inbox item changed. Refresh it and try again.");
           if (item.state !== "resolved") { item.state = "resolved"; item.resolvedAt = at; item.updatedAt = nextUpdate(item); item.resolution = data.resolution; changed = true; }
           if (changed) await atomicInPrivateDir(this.file, rows);
-          return { ok: true, item };
+          return { ok: true, item: withoutMarker(item) };
         }
         if (changed) await atomicInPrivateDir(this.file, rows);
         const visible = rows.filter(row => data.includeResolved || (row.state === "open" && (row.kind === "manual" || row.live === true))).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        return { ok: true, items: visible.map(row => row.kind === "manual" ? withPaste(row) : row) };
+        return { ok: true, items: visible.map(row => row.kind === "manual" ? withPaste(row) : withoutMarker(row)) };
       } finally { release(); }
     });
     this.pending = run.catch(() => {}); return run;
@@ -237,14 +253,19 @@ export class OwnerInbox {
         // reconciliation sees that wait end; a manual row has no live wait.
         if (item.kind !== "manual") item.live = true;
         await atomicInPrivateDir(this.file, rows);
-        return item;
+        return withoutMarker(item);
       } finally { release(); }
     });
     this.pending = run.catch(() => {}); return run;
   }
-  /** Reconcile and return the open snapshot a push sweep may alert about. */
-  async tick(): Promise<InboxItem[]> {
+  /** Reconcile and return the open snapshot a push sweep may alert about.
+   * `firstOpen` is carried separately from the public list so a reword or a
+   * same-id reopen can never look like a first creation. */
+  async tick(): Promise<InboxTickItem[]> {
     const result = await this.run({ action: "list" });
-    return Array.isArray(result.items) ? result.items as InboxItem[] : [];
+    const items = Array.isArray(result.items) ? result.items as InboxItem[] : [];
+    // The public list strips the internal marker, so read it back here.
+    const reopened = new Set((await this.read()).filter(row => row.reopened).map(row => row.id));
+    return items.map(item => ({ ...item, firstOpen: !reopened.has(item.id) }));
   }
 }

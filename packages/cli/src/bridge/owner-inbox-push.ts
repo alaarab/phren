@@ -17,6 +17,9 @@ export interface OwnerInboxPushSender {
   notifyOwnerInbox(value: OwnerInboxPushValue, deviceID: string): Promise<boolean>;
 }
 
+/** The internal tick snapshot adds first-open eligibility to the public row. */
+type ObservedItem = InboxItem & { firstOpen?: boolean };
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A failed candidate/device pair waits this long before another attempt. */
 export const OWNER_INBOX_RETRY_MS = 60_000;
@@ -65,7 +68,7 @@ export class OwnerInboxPushSweep {
   private readonly backfillId: () => string | undefined;
   private chain: Promise<void> = Promise.resolve();
   private active = false;
-  private queued?: InboxItem[];
+  private queued?: ObservedItem[];
   /** `${id}:${deviceID}` → earliest epoch ms the pair may be attempted again. */
   private readonly retryAfter = new Map<string, number>();
   private corruptReported = false;
@@ -83,7 +86,7 @@ export class OwnerInboxPushSweep {
    * a sweep runs replaces the snapshot the next pass uses instead of starting
    * a second sender run; callers share the same promise.
    */
-  observe(openItems: InboxItem[]): Promise<void> {
+  observe(openItems: ObservedItem[]): Promise<void> {
     this.queued = openItems;
     if (this.active) return this.chain;
     this.active = true;
@@ -111,7 +114,7 @@ export class OwnerInboxPushSweep {
     try { return ledgerSchema.parse(JSON.parse(await readFile(this.file, "utf8"))); } catch { return "corrupt"; }
   }
 
-  private async sweep(openItems: InboxItem[]): Promise<void> {
+  private async sweep(openItems: ObservedItem[]): Promise<void> {
     const now = this.now(), at = new Date(now).toISOString();
     const loaded = await this.load();
     if (loaded === "corrupt") {
@@ -132,8 +135,8 @@ export class OwnerInboxPushSweep {
   /** The initial snapshot: up to three rows updated in the preceding day,
    * newest first with a UUID tie-break. The override row takes the first slot
    * regardless of age so a known row (OVH) is still backfilled. */
-  private seed(openItems: InboxItem[], now: number): LedgerEntry[] {
-    const open = openItems.filter(item => item.state === "open");
+  private seed(openItems: ObservedItem[], now: number): LedgerEntry[] {
+    const open = openItems.filter(item => item.state === "open" && item.firstOpen !== false);
     const expiresAt = new Date(now + DAY_MS).toISOString();
     const recent = open
       .filter(item => Date.parse(item.updatedAt) >= now - DAY_MS)
@@ -148,14 +151,14 @@ export class OwnerInboxPushSweep {
   /** Add rows created after the initial snapshot and drop expired entries.
    * Retired rows never re-enter: their creation time is either before the
    * cursor or their 24-hour window already closed. */
-  private reconcile(ledger: Ledger, openItems: InboxItem[], now: number): boolean {
+  private reconcile(ledger: Ledger, openItems: ObservedItem[], now: number): boolean {
     let changed = false;
     const kept = ledger.entries.filter(entry => Date.parse(entry.expiresAt) > now);
     if (kept.length !== ledger.entries.length) { ledger.entries = kept; changed = true; }
     const known = new Set(ledger.entries.map(entry => entry.id));
     const initializedAt = Date.parse(ledger.initializedAt);
     for (const item of openItems) {
-      if (item.state !== "open" || known.has(item.id)) continue;
+      if (item.state !== "open" || item.firstOpen === false || known.has(item.id)) continue;
       const created = Date.parse(item.createdAt);
       if (!(created > initializedAt)) continue;
       const expiresAt = created + DAY_MS;
