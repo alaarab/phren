@@ -35,6 +35,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.3.97] - 2026-11-27
 
+Not published to npm: its release candidate hit a Windows test timing flake that 0.3.98 fixes, so these changes first ship in 0.3.98.
+
 ### Added
 
 - The owner inbox is the one place for owner actions (#932). An item can carry the command to paste, the task (`bid:`) and the pull request it is about, and a `key` that updates the same item instead of adding another. Its paste line ends with the `phren owner-inbox resolve` command for it. An item resolves itself once its pull request is merged or closed or its task is Done. The conductor and fanout skills tell workers to post merge commands, logins, tokens and decisions there.
