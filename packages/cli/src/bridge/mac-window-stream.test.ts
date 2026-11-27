@@ -337,6 +337,41 @@ describe("frames", () => {
       expect(activeMacWindowStreams()).toBe(0);
     }
   });
+  it("rejects a second record that arrived in the same chunk before the next pull", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    const child = children[0];
+    vi.advanceTimersByTime(125);
+    child.stdout.write(Buffer.concat([idle(), idle()]));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+    expect(pulls(child)).toHaveLength(1);
+  });
+  it("rejects a partial next prefix that arrived before the next pull", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    const child = children[0];
+    vi.advanceTimersByTime(125);
+    child.stdout.write(Buffer.concat([idle(), Buffer.from([0, 0, 0])]));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+    expect(pulls(child)).toHaveLength(1);
+  });
+  it("rejects helper bytes while a staged sample holds the pull slot", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&tier=3`, deps);
+    const child = children[0];
+    child.stdout.write(record(1, wire({ sync: true, unitBytes: MAX_MESSAGE_BYTES - 24 - 10 - 4, pts: 1_000n })));
+    await flush();
+    client.control({ type: "ack", seq: 1 });
+    vi.advanceTimersByTime(84);
+    child.stdout.write(record(1, wire({ unitBytes: 20_000, pts: 2_000n })));
+    await flush();
+    expect(pulls(child)).toHaveLength(2);
+    child.stdout.write(idle());
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+  });
   it("treats stdout ending mid-record as bad-helper-frame", async () => {
     const { deps, children } = harness();
     const client = await start(`id=${ID}`, deps);

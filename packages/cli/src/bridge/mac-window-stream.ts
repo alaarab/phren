@@ -232,6 +232,9 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   let lastPullAt = -Infinity;
   let oversize = 0;
   let spawned = false;
+  /** Inside one stdout chunk: a PULL waits until the chunk is fully judged. */
+  let inChunk = false;
+  let pullWanted = false;
 
   const reader = new FrameReader(MAX_RECORD_BYTES);
 
@@ -305,6 +308,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   };
 
   const tryPull = () => {
+    if (inChunk) { pullWanted = true; return; }
     if (ended || !spawned || pullOutstanding || staged || outstanding || pullTimer) return;
     if (requestedTier !== tier) {
       // Applied at the first pull after the outstanding sample was resolved.
@@ -492,9 +496,22 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     const stdout = spawnedChild.stdout;
     stdout?.on("data", (chunk: Buffer) => {
       if (ended) return;
+      // The buffer is empty after every chunk (trailing bytes are rejected
+      // below), so any byte now belongs to an answer to the one PULL.
+      if (!pullOutstanding) { end(1011, "bad-helper-frame"); return; }
       let records: Buffer[];
       try { records = reader.push(chunk); } catch { end(1011, "bad-helper-frame"); return; }
-      for (const record of records) { if (ended) return; onRecord(record); }
+      inChunk = true; pullWanted = false;
+      try {
+        for (const record of records) { if (ended) break; onRecord(record); }
+      } finally {
+        inChunk = false;
+      }
+      if (ended) return;
+      // A second record had no PULL of its own, and extra bytes cannot be the
+      // start of the next answer: both were already on the wire before it.
+      if (records.length > 0 && reader.pending() > 0) { end(1011, "bad-helper-frame"); return; }
+      if (pullWanted) { pullWanted = false; tryPull(); }
     });
     stdout?.on("end", () => {
       if (ended) return;

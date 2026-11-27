@@ -29,6 +29,9 @@ export class FrameReader {
     return frames;
   }
 
+  /** Bytes held for a record that has not completed yet. */
+  pending(): number { return this.bytes; }
+
   /** The helper's stdout ended: a partially written record is a broken helper. */
   finish(): void {
     if (this.bytes > 0) throw new Error(`trailing ${this.bytes} bytes`);
