@@ -10,7 +10,7 @@ import { permissionDeniedError } from "../governance/rbac.js";
 import { autoCloseReason, bidReferences, branchTaskIds, parseForgeUrl, workerPhase, workStatusLine,
   type Forge, type ForgeItem, type ForgeRef, type LiveForge, type LiveWork, type TaskWork } from "../task/work.js";
 import { dispatchProjectDirectory, dispatchReceipt } from "./dispatch.js";
-import { detectHost, hostInfo, providerFor, type RecentPull } from "./git-hosts.js";
+import { detectHost, hostInfo, kindFromDomain, providerFor, type RecentPull } from "./git-hosts.js";
 import { dispatchWorkerState, openTasks, taskWorkEnabled, type DispatchReceiptView, type OpenTask } from "./task-work.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
@@ -57,6 +57,17 @@ async function forgeState(ref: ForgeRef, kind: "pull" | "issue", waitMs: number)
   }
   if (entry.pending && waitMs > 0) await Promise.race([entry.pending, new Promise(resolve => setTimeout(resolve, waitMs).unref())]);
   return entry.at ? entry : undefined;
+}
+
+/** One pull request as the live cache last read it, or undefined until a read
+ * succeeds. The wait is 0, so a caller only starts a read and never blocks on
+ * the forge; a later tick sees the value. Domains phren cannot name a forge
+ * for are read as github. */
+export async function cachedPull(url: string, waitMs = 0): Promise<ForgeItem | undefined> {
+  const parsed = parseForgeUrl(url);
+  if (!parsed || parsed.kind !== "pull") return undefined;
+  const entry = await forgeState({ forge: kindFromDomain(parsed.domain) ?? "github", number: parsed.number, url: parsed.url }, "pull", waitMs);
+  return entry?.readAt ? entry.value : undefined;
 }
 
 function shown(entry: Cached | undefined): LiveForge {

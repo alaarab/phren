@@ -1,7 +1,7 @@
 import { BridgeError, type Json, objects } from "./protocol.js";
 import { peerRead } from "./peer-reads.js";
 import { hookPeers, peerRequest } from "./peers.js";
-import { ownerInboxSchema, type OwnerInbox } from "./owner-inbox.js";
+import { ownerInboxSchema, pasteCommand, type OwnerInbox } from "./owner-inbox.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 
 /** Aggregate each Hook's own inbox once, without recursively listing peers.
@@ -18,12 +18,20 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   }
   const result = await inbox.run(local);
   if (data.action !== "list" || localOnly) return result;
-  const items: Json[] = objects(result.items).map(item => ({ ...item, inboxComputer: "local" })), unreachable: Json[] = [];
+  // paste names the computer the resolution must reach, so it is recomputed
+  // here: a peer's own paste would name the wrong resolve target.
+  const placed = (item: Json, inboxComputer: string): Json => {
+    const { id, command } = item;
+    return item.kind === "manual" && typeof command === "string"
+      ? { ...item, inboxComputer, paste: pasteCommand({ id: String(id), command }, inboxComputer) }
+      : { ...item, inboxComputer };
+  };
+  const items: Json[] = objects(result.items).map(item => placed(item, "local")), unreachable: Json[] = [];
   await Promise.all(peers.map(async peer => {
     try {
       // No kept answer: the owner resolves a row and reads the list straight back.
       const view = await peerRead(peer, `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}`);
-      items.push(...objects(view.items).map(item => ({ ...item, inboxComputer: peer.name })));
+      items.push(...objects(view.items).map(item => placed(item, peer.name)));
     } catch (error) { unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." }); }
   }));
   // Older peers can still send stale automatic rows during a rolling upgrade.

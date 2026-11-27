@@ -7,6 +7,11 @@ Fan out when independent tasks can make progress alongside the lead's work.
 Give each writer a separate worktree and a concrete output to validate. A brief
 should name the goal, owned files, constraints, tests, and completion report.
 Include relevant findings and exact review issues; avoid sending the whole chat.
+It also says that owner-only actions (merge, release, login, token, root step,
+decision) go to the owner inbox as one line plus a paste-able command, linked
+to the task and PR: `phren owner-inbox add <title> --command <cmd> --task
+<bid> --pr <url>`. They resolve themselves when the PR merges or the owner
+runs the paste.
 
 Start every worker through `phren fanout run`, never with `opencode run`,
 `codex exec` or `claude -p` of your own (directly, in a loop, or from a script

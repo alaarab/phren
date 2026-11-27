@@ -1310,16 +1310,26 @@ its new target configured. Workers need no direct messaging or GitHub comment.
 
 ## Owner inbox
 
-`owner_inbox(operation:"list")` and `phren owner-inbox list` show needs-you returns,
-blocked prompts and manual items across the linked computers. The owning Hook
-persists each item. An item's `inboxComputer` tells clients where to resolve it;
-its `computer` can instead name the remote worker. Unreachable inboxes are
-reported. `add` takes `title`, optional `project` and an optional stable UUID
-`id` to keep on retries. `resolve` takes `id`, optional `computer` (the
-`inboxComputer`, omitted for local) and optional `resolution`. CLI examples:
+The owner inbox is the one list of actions only the owner can take: merges,
+releases, logins, tokens, root-only steps and decisions, plus needs-you
+returns and blocked prompts. `owner_inbox(operation:"list")` and `phren
+owner-inbox list` show it across the linked computers. The owning Hook persists
+each item. An item's `inboxComputer` tells clients where to resolve it; its
+`computer` can instead name the remote worker. Unreachable inboxes are
+reported. `add` takes `title`, optional `project`, an optional stable UUID `id`
+to keep on retries, and for an owner action a paste-able `command`, the `task`
+(`bid:xxxxxxxx`), the `pr` URL and an optional dedupe `key`. Each item with a
+command lists a `paste`: the command followed by `phren owner-inbox resolve
+<id>`, so running it also clears the item. Posting the same PR or `key` again
+updates the open item instead of adding another, and a resolved item posted
+again under its id with new text reopens. A manual item resolves itself when
+its PR merges or closes, or when its linked task is Done. `resolve` takes `id`,
+optional `computer` (the `inboxComputer`, omitted for local) and optional
+`resolution`. CLI examples:
 
 ```sh
 phren owner-inbox add "Restart the router" --project phren
+phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --task bid:ac70edca --pr https://github.com/alaarab/phren/pull/940
 phren owner-inbox list --all
 phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
 ```
