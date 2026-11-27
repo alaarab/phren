@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `@phren/code`: code lookups now find citing findings in the oldest archive halves (`.older.md`) too.
+
 ## [0.3.99] - 2026-11-27
 
 ### Added
