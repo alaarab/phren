@@ -135,10 +135,13 @@ case "tap":
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
 case "type":
-    guard let text = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else { fail(2, "type needs UTF-8 on stdin") }
-    guard text.count <= 2000 else { fail(2, "type needs at most 2000 characters") }
+    guard let stdinText = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else { fail(2, "type needs UTF-8 on stdin") }
+    // A submit's trailing newline is punctuation, not a typed character.
+    var typed = stdinText
+    if typed.hasSuffix("\n") { typed.removeLast() }
+    guard typed.count <= 2000 else { fail(2, "type needs at most 2000 characters") }
     raise()
-    typeText(text)
+    typeText(stdinText)
 case "key":
     guard args.count >= 4, let code = keyCodes[args[3].lowercased()] else { fail(2, "key needs return, escape, tab, delete, forwarddelete, space, an arrow, home, end, pageup, pagedown, a-z or 0-9") }
     raise()
