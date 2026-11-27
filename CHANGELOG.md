@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.98] - 2026-11-27
+
+### Changed
+
+- Prompt recall in a session with no detected project (a conductor, or a session outside any project folder) holds every finding to the stricter cross-project relevance floor, so it injects less on loose word overlap (MQ 2.3).
+- Findings are ranked by score first; a newer finding wins only when two scores are within 0.01 of each other (MQ 2.6). Other documents rank as before.
+
+### Fixed
+
+- Two flaky release-candidate tests: the agent's shell-checker tests use a fresh repository per test, and the 64-conversation search test batches its inserts.
+
+### Tests
+
+- Resolving a contradiction on an archived finding has conformance fixtures for topic archives and `.older.md` files, starting from a contradicted pair (MQ 3.5).
+- The public recall eval has 7 new cases for project-less sessions and score-before-date ranking.
+
 ## [0.3.97] - 2026-11-27
 
 ### Added
