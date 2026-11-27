@@ -47,6 +47,25 @@ let args = CommandLine.arguments
 guard args.count >= 2 else { fail(2, "usage: wininput check | prompt | tap <id> <fx> <fy> | type <id> | key <id> <name> [cmd] [shift] [option] [control] | raise <id> | scroll <id> <fx> <fy> <dx> <dy> | drag <id> <fx1> <fy1> <fx2> <fy2> <durationMs>") }
 let command = args[1]
 
+// Gesture arguments are validated before the grant and the window lookups, so
+// a bad scroll or drag exits 2 rather than 3 or 5.
+var scrollArgs: (fx: Double, fy: Double, dx: Int32, dy: Int32)?
+if command == "scroll" {
+    guard args.count == 7, let fx = fraction(args[3]), let fy = fraction(args[4]),
+          let dx = Int32(args[5]), let dy = Int32(args[6]),
+          dx >= -240, dx <= 240, dy >= -240, dy <= 240, dx != 0 || dy != 0
+    else { fail(2, "scroll needs fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
+    scrollArgs = (fx, fy, dx, dy)
+}
+var dragArgs: (fx1: Double, fy1: Double, fx2: Double, fy2: Double, durationMs: Int)?
+if command == "drag" {
+    guard args.count == 8, let fx1 = fraction(args[3]), let fy1 = fraction(args[4]),
+          let fx2 = fraction(args[5]), let fy2 = fraction(args[6]),
+          let durationMs = Int(args[7]), durationMs >= 80, durationMs <= 800
+    else { fail(2, "drag needs fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
+    dragArgs = (fx1, fy1, fx2, fy2, durationMs)
+}
+
 // "prompt" asks macOS for the grant: it adds this helper to Privacy & Security
 // → Accessibility (switched off) and shows the system's own dialog, so the
 // person switches it on instead of hunting for a hidden folder behind +.
@@ -317,22 +336,16 @@ case "tap":
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
 case "scroll":
-    guard args.count == 7, let fx = fraction(args[3]), let fy = fraction(args[4]),
-          let dx = Int32(args[5]), let dy = Int32(args[6]),
-          dx >= -240, dx <= 240, dy >= -240, dy <= 240, dx != 0 || dy != 0
-    else { fail(2, "scroll needs fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
+    guard let gesture = scrollArgs else { fail(2, "scroll needs fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
     raise()
     guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
-    scrollGesture(at: mappedPoint(raised.bounds, fx, fy), dx: dx, dy: dy)
+    scrollGesture(at: mappedPoint(raised.bounds, gesture.fx, gesture.fy), dx: gesture.dx, dy: gesture.dy)
 case "drag":
-    guard args.count == 8, let fx1 = fraction(args[3]), let fy1 = fraction(args[4]),
-          let fx2 = fraction(args[5]), let fy2 = fraction(args[6]),
-          let durationMs = Int(args[7]), durationMs >= 80, durationMs <= 800
-    else { fail(2, "drag needs fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
+    guard let gesture = dragArgs else { fail(2, "drag needs fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
     raise()
     guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
     let bounds = raised.bounds
-    dragGesture(from: mappedPoint(bounds, fx1, fy1), to: mappedPoint(bounds, fx2, fy2), durationMs: durationMs)
+    dragGesture(from: mappedPoint(bounds, gesture.fx1, gesture.fy1), to: mappedPoint(bounds, gesture.fx2, gesture.fy2), durationMs: gesture.durationMs)
 case "type":
     guard let stdinText = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else { fail(2, "type needs UTF-8 on stdin") }
     // The limit is user-perceived characters, without a single submit newline.
