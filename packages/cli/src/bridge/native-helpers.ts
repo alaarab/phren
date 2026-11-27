@@ -21,7 +21,8 @@ const exec = (file: string, args: readonly string[], options: { timeout: number;
  * wincap (native/wincap.swift) lists Mac windows and captures one picture,
  * wininput (native/wininput.swift) taps, types and keys into one, and winbadge
  * (native/winbadge.swift) is the visible "your phone is controlling this Mac"
- * indicator. See .scratch/CONTRACT.md for the window helpers' commands.
+ * indicator. Their commands and exit codes are in docs/phren-hook.md ("Mac
+ * windows on a Mac").
  */
 export type NativeHelper = "simtap" | "simcast" | "wincap" | "wininput" | "winbadge";
 const HELPER_LABEL: Record<NativeHelper, string> = {

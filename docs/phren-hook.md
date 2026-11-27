@@ -1176,7 +1176,28 @@ for 60 seconds with 409 `mac-windows-stopped`.
 
 Screen Recording is for `wincap` (listing and snapshots); Accessibility is for
 `wininput` (taps, keys, typing). A rebuilt helper is a new binary, so macOS asks
-for its grant once more.
+for its grant once more. `phren mac-windows status` reports a helper that cannot
+build or run as `helper unavailable: <reason>`, separately from a missing grant.
+
+The three helpers compile on demand from `packages/cli/src/bridge/native/*.swift`
+(they also ride inside the Hook bundle, and the CLI build copies them beside the
+compiled CLI). Their commands and exit codes:
+
+- `wincap check` exits 0 when Screen Recording is granted and 3 when not;
+  `wincap prompt` asks macOS; `wincap list` prints one JSON object
+  `{ "windows": [ { id, app, bundleId, pid, title, frame, onScreen } ] }`;
+  `wincap snapshot <id> <maxSide> <quality 0.1-1>` writes one JPEG to stdout.
+- `wininput check` and `wininput prompt` are the Accessibility equivalents.
+  `wininput tap <id> <fx> <fy>` taps a fraction of the window,
+  `wininput type <id>` reads the text from stdin (a trailing newline is Return),
+  `wininput key <id> <name> [cmd] [shift] [option] [control]` presses one key,
+  and `wininput raise <id>` only activates and raises the window.
+- Both exit 2 on bad usage, 3 on a missing grant (stderr `screen-recording` or
+  `accessibility`), 4 on another failure and 5 when the window is gone (stderr
+  `no window`).
+- `winbadge` shows the indicator and prints `ready` once its panels are on
+  screen; it exits 10 when the person presses Stop, and on SIGTERM, stdin EOF
+  or after four hours.
 
 ### sudo from the phone
 
