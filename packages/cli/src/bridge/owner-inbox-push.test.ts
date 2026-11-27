@@ -187,7 +187,7 @@ describe("owner inbox push sweep", () => {
     expect(sender.sent.map(item => item.value.id)).toEqual([first.id, third.id]);
   });
 
-  it("attempts at most three candidate/device pairs per sweep, oldest first", async () => {
+  it("attempts at most three distinct rows per sweep, oldest first", async () => {
     const sender = fakeSender();
     sender.devices.push(DEVICE_A);
     const box = sweep(sender);
@@ -318,6 +318,59 @@ describe("owner inbox push sweep", () => {
     release();
     await running;
     expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`]);
+  });
+
+  it("budgets three distinct rows per sweep and offers each to every eligible phone", async () => {
+    const sender = fakeSender();
+    sender.devices.push(DEVICE_A, DEVICE_B);
+    const box = sweep(sender);
+    await box.observe([]);
+    advance(1000);
+    const rows = Array.from({ length: 4 }, (_, index) => row({
+      id: `${index + 1}9191919-1919-4919-8919-191919191919`,
+      title: `Budgeted ${index + 1}`, createdAt: iso(now + index * 1000), updatedAt: iso(now + index * 1000),
+    }));
+    await box.observe(rows);
+    expect(sender.attempts).toHaveLength(6);
+    expect(new Set(sender.attempts.map(attempt => attempt.split(":")[0]))).toEqual(new Set(rows.slice(0, 3).map(item => item.id)));
+    expect(sender.attempts.filter(attempt => attempt.endsWith(DEVICE_A))).toHaveLength(3);
+    expect(sender.attempts.filter(attempt => attempt.endsWith(DEVICE_B))).toHaveLength(3);
+    await box.observe(rows);
+    expect(sender.attempts).toHaveLength(8);
+    expect(sender.attempts.filter(attempt => attempt.startsWith(`${rows[3].id}:`))).toHaveLength(2);
+  });
+
+  it("starts each phone's retry timer at its own attempt, not at the sweep's entry", async () => {
+    const sender = fakeSender();
+    sender.devices.push(DEVICE_A);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started!: () => void;
+    const firstStarted = new Promise<void>(resolve => { started = resolve; });
+    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue, deviceID: string) => {
+      sender.attempts.push(`${value.id}:${deviceID}`);
+      if (value.id === first.id) { started(); await gate; return true; }
+      return false;
+    });
+    const box = sweep(sender);
+    await box.observe([]);
+    advance(1000);
+    const first = row({ id: "1c1c1c1c-1c1c-4c1c-8c1c-1c1c1c1c1c1c" });
+    const second = row({ id: "1d1d1d1d-1d1d-4d1d-8d1d-1d1d1d1d1d1d", createdAt: iso(now + 1000), updatedAt: iso(now + 1000) });
+    const running = box.observe([first, second]);
+    await firstStarted;
+    // The first send takes 90 seconds; the second attempt starts only then.
+    advance(90_000);
+    release();
+    await running;
+    expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`, `${second.id}:${DEVICE_A}`]);
+    // The old sweep-wide timer would already be expired here.
+    advance(59_999);
+    await box.observe([first, second]);
+    expect(sender.attempts).toHaveLength(2);
+    advance(1);
+    await box.observe([first, second]);
+    expect(sender.attempts).toHaveLength(3);
   });
 
   it("fails closed on a corrupt ledger and explains how to recover", async () => {

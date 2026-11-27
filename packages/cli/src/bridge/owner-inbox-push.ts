@@ -25,8 +25,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const OWNER_INBOX_RETRY_MS = 60_000;
 /** The first sweep alerts about at most this many existing open rows. */
 const MAX_SEEDS = 3;
-/** One sweep attempts at most this many candidate/device pairs. */
-const MAX_ATTEMPTS = 3;
+/** One sweep attempts at most this many distinct candidate rows (each to all
+ * of its eligible phones). */
+const MAX_CANDIDATES = 3;
 
 const entrySchema = z.object({
   id: z.string().uuid(),
@@ -133,7 +134,7 @@ export class OwnerInboxPushSweep {
     const ledger = loaded ?? { version: 1 as const, initializedAt: at, entries: this.seed(openItems, now) };
     if (!loaded) await atomicInPrivateDir(this.file, ledger);
     else if (this.reconcile(ledger, openItems, now)) await atomicInPrivateDir(this.file, ledger);
-    await this.deliver(ledger, openItems, now);
+    await this.deliver(ledger);
   }
 
   /** The initial snapshot: up to three rows updated in the preceding day,
@@ -174,43 +175,53 @@ export class OwnerInboxPushSweep {
     return changed;
   }
 
-  /** At most three candidate/device pairs per sweep, oldest candidate first.
-   * Each accepted pair is persisted before the next attempt, so retrying one
-   * phone never repeats an alert another phone already took. */
-  private async deliver(ledger: Ledger, openItems: InboxItem[], now: number): Promise<void> {
-    const open = new Map(openItems.filter(item => item.state === "open").map(item => [item.id, item]));
+  /** Up to three distinct candidate rows per sweep, oldest first: a new row by
+   * its creation time and a backfill by its own updatedAt (they all share the
+   * initialization deadline). Each selected row is offered to all of its
+   * eligible phones. Every provider call rechecks the row against the newest
+   * snapshot and the current clock, so a row that closed or expired while an
+   * earlier send was pending is never sent late. */
+  private async deliver(ledger: Ledger): Promise<void> {
     const devices = [...new Set(this.sender.ownerInboxPushDevices())].filter(device => typeof device === "string" && device.length > 0).sort();
     if (!devices.length) return;
-    const attempts: Array<{ entry: LedgerEntry; item: InboxItem; deviceID: string }> = [];
-    for (const entry of ledger.entries) {
-      if (Date.parse(entry.expiresAt) <= now) continue;
-      const item = open.get(entry.id);
-      if (!item) continue;
-      for (const deviceID of devices) {
+    const initializedAt = Date.parse(ledger.initializedAt);
+    const age = (entry: LedgerEntry) => {
+      const created = Date.parse(entry.expiresAt) - DAY_MS;
+      return created === initializedAt ? Date.parse(entry.updatedAt) : created;
+    };
+    const candidates = [...ledger.entries].sort((a, b) => age(a) - age(b) || a.id.localeCompare(b.id));
+    let selected = 0;
+    for (const entry of candidates) {
+      if (selected >= MAX_CANDIDATES) break;
+      if (Date.parse(entry.expiresAt) <= this.now()) continue;
+      const pending = devices.filter(deviceID => !entry.sentDeviceIDs.includes(deviceID)
+        && (this.retryAfter.get(`${entry.id}:${deviceID}`) ?? 0) <= this.now());
+      // A row with no eligible phone does not consume one of the three slots.
+      if (!pending.length) continue;
+      selected++;
+      for (const deviceID of pending) {
+        // Recheck immediately before provider I/O: the newest snapshot may
+        // have closed this row, and the ledger deadline may have passed.
+        const key = `${entry.id}:${deviceID}`;
+        const current = this.now();
+        if (Date.parse(entry.expiresAt) <= current) break;
+        if ((this.retryAfter.get(key) ?? 0) > current) continue;
         if (entry.sentDeviceIDs.includes(deviceID)) continue;
-        if ((this.retryAfter.get(`${entry.id}:${deviceID}`) ?? 0) > now) continue;
-        attempts.push({ entry, item, deviceID });
-      }
-    }
-    attempts.sort((a, b) => Date.parse(a.entry.expiresAt) - Date.parse(b.entry.expiresAt)
-      || a.entry.id.localeCompare(b.entry.id) || a.deviceID.localeCompare(b.deviceID));
-    for (const attempt of attempts.slice(0, MAX_ATTEMPTS)) {
-      // Recheck immediately before provider I/O: the newest snapshot may have
-      // closed this row, and its ledger deadline may have passed.
-      if (Date.parse(attempt.entry.expiresAt) <= this.now()) continue;
-      const live = this.latest.find(item => item.id === attempt.entry.id && item.state === "open");
-      if (!live) continue;
-      let accepted = false;
-      try {
-        accepted = await this.sender.notifyOwnerInbox({ id: attempt.entry.id, title: live.title, expiresAt: attempt.entry.expiresAt }, attempt.deviceID);
-      } catch { accepted = false; }
-      const key = `${attempt.entry.id}:${attempt.deviceID}`;
-      if (accepted) {
-        if (!attempt.entry.sentDeviceIDs.includes(attempt.deviceID)) attempt.entry.sentDeviceIDs.push(attempt.deviceID);
-        this.retryAfter.delete(key);
-        await atomicInPrivateDir(this.file, ledger);
-      } else {
-        this.retryAfter.set(key, now + OWNER_INBOX_RETRY_MS);
+        const live = this.latest.find(item => item.id === entry.id && item.state === "open");
+        if (!live) break;
+        const attemptedAt = this.now();
+        let accepted = false;
+        try {
+          accepted = await this.sender.notifyOwnerInbox({ id: entry.id, title: live.title, expiresAt: entry.expiresAt }, deviceID);
+        } catch { accepted = false; }
+        if (accepted) {
+          if (!entry.sentDeviceIDs.includes(deviceID)) entry.sentDeviceIDs.push(deviceID);
+          this.retryAfter.delete(key);
+          await atomicInPrivateDir(this.file, ledger);
+        } else {
+          // Time the retry from this attempt, not from the sweep's entry.
+          this.retryAfter.set(key, attemptedAt + OWNER_INBOX_RETRY_MS);
+        }
       }
     }
   }
