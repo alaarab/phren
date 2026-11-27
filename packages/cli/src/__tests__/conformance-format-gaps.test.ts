@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFindings, editFinding, removeFinding, readReviewQueue } from "../data/access.js";
 import { readTasks, updateTask } from "../data/tasks.js";
 import { addFindingToFile } from "../content/learning.js";
@@ -165,7 +165,9 @@ describe("format conformance gaps (docs/store-format.md §7)", () => {
 
     it("ACTUAL behaviour: a text-only rename silently drops both", () => {
       fs.copyFileSync(path.join(FIXTURES_DIR, "tasks-pinned-before-text-edit.md"), path.join(projectDir, "tasks.md"));
-      const result = updateTask(tmpDir, PROJECT, "Ship urgent fix", { text: "Ship urgent fix (renamed)" });
+      // Every task write stamps lastActivity (#934); a fixed clock keeps the fixture byte-exact.
+      vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-07-24T10:00:00.000Z") });
+      const result = (() => { try { return updateTask(tmpDir, PROJECT, "Ship urgent fix", { text: "Ship urgent fix (renamed)" }); } finally { vi.useRealTimers(); } })();
       expect(result.ok).toBe(true);
 
       const after = readTasks(tmpDir, PROJECT);
