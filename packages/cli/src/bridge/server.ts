@@ -10,7 +10,7 @@ import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
 import { StaleTaskSources } from "./task-stale.js";
 import { ownerInboxDone } from "./owner-inbox-done.js";
-import { Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
+import { boundedBadge, Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
 import { liveProcessCwds } from "./housekeeping/safety.js";
 import { dockerUsage, listSimulators, sessionRowsFromOverview, xcodebuildRunning } from "./housekeeping/inventory.js";
 import { closeFinishedWorker } from "./worker-close.js";
@@ -314,13 +314,15 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const { stream } = streams;
   // One workspaces reader for the overview stream and the housekeeping inventory's sessions.
   const readWorkspaces = workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage, turnQueue });
+  // The overview's badge: one read at a time, bounded so a slow housekeeping read cannot hold up resources.
+  const overviewBadge = boundedBadge(() => housekeeper ? housekeeper.badge() : Promise.resolve(undefined));
   // The phone's overview, pushed over a WebSocket when it changes.
   const overview = overviewStream({
     read: readWorkspaces,
     info: () => ({ ...info, capabilities: info.capabilities }),
     renew: server => agentHooks.overview.renew(server),
     // The overview's resources frame carries the housekeeping badge; the phone re-fetches /v1/housekeeping when its revision changes.
-    resources: async () => { const value = await resources.read(); const badge = await housekeeper?.badge().catch(() => undefined); return badge ? { ...value, housekeeping: badge } : value; },
+    resources: async () => { const value = await resources.read(); const badge = await overviewBadge(); return badge ? { ...value, housekeeping: badge } : value; },
     sudo: agentHooks.sudo,
     secrets: agentHooks.secrets,
     ownerConfirms: agentHooks.ownerConfirms,

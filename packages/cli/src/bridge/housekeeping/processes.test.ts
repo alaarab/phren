@@ -59,6 +59,24 @@ describe("processes", () => {
     expect(restarted).not.toBe(first);
   });
 
+  it("treats a failed snapshot or conductor lookup as unknown, never as an empty set", async () => {
+    // A snapshot failure on any server rejects the conductor lookup; no row may look safe.
+    const stalledConductors = sources(table, {
+      owners: async () => owners,
+      conductors: async () => { throw new Error("Herdr did not answer the snapshot in time; retry."); },
+    });
+    const list = await listProcesses(stalledConductors);
+    expect(list.every(row => row.action.allowed === false && row.action.reason === "couldn't verify which panes own this process; try again")).toBe(true);
+    const conductor = list.find(row => row.pid === 901)!;
+    expect(conductor.pane).toMatchObject({ server: "default", pane: "w1:p1" });
+    // Approval re-checks and refuses to signal the conductor-like process.
+    expect(await endProcess(conductor.id, stalledConductors)).toEqual({ status: "refused", reason: "couldn't verify which panes own this process; try again" });
+
+    // The same applies when pane ownership itself fails.
+    const stalledOwners = sources(table, { owners: async () => { throw new Error("snapshot stalled"); }, conductors: async () => new Set() });
+    expect((await listProcesses(stalledOwners)).every(row => !row.action.allowed)).toBe(true);
+  });
+
   it("ends the approved program, and refuses one that is gone or protected", async () => {
     const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
     await new Promise(done => child.once("spawn", done));

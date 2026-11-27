@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook WebSocket eviction gives the 1008 close frame up to one second to reach the client before cutting the socket.
 - `@phren/code`: code lookups now find citing findings in the oldest archive halves (`.older.md`) too.
+- `WS /v1/overview` now bounds each tick with one deadline, so a hung snapshot or read closes the socket with 1011 for a fresh reconnect instead of holding a stale overview indefinitely; a stalled resources read frees its slot after the same deadline. Hung shared Herdr snapshots and resource probes are retired after 30 s, unblocking their waiters with a stall error so a later read starts a fresh request; the overview's housekeeping badge read is bounded to 2 s with the last good badge as fallback.
 
 ## [0.3.99] - 2026-11-27
 

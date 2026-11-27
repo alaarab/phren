@@ -25,6 +25,8 @@ import { PlatformProbes } from "./machine-probes.js";
  */
 
 export const RESOURCES_MAX_AGE_MS = intervalFromEnv("PHREN_RESOURCES_MAX_AGE_MS", 10_000, 1_000, 60_000);
+/** A collection this old is not coming back; the next read starts a fresh probe. */
+export const RESOURCES_RETIRE_MS = 30_000;
 /** Below this much free disk, or above twice the cores in load, a computer is stressed. */
 export const LOW_DISK_BYTES = 10 * 1024 ** 3;
 const GB = 1024 ** 3;
@@ -427,15 +429,15 @@ export async function livePanes(): Promise<{ panes: Set<string>; servers: Set<st
   return { panes, servers };
 }
 
-/** Every pid a Herdr or tmux pane holds (its shell and foreground), for naming a job's pane. */
+/** Every pid a Herdr or tmux pane holds (its shell and foreground), for naming a job's pane.
+ * A server whose snapshot fails rejects: callers must treat ownership as unknown, never partial. */
 export async function paneOwners(): Promise<Map<number, PaneRef>> {
   const owners = new Map<number, PaneRef>();
   const { terminalProvider } = await import("./terminal.js");
   const provider = terminalProvider();
   for (const server of (await recentServers()).slice(0, 8)) {
     const name = String(server.session);
-    const s = await sharedSnapshot(name, RESOURCES_MAX_AGE_MS).catch(() => undefined);
-    if (!s) continue;
+    const s = await sharedSnapshot(name, RESOURCES_MAX_AGE_MS);
     const workspaces = new Map(objects(s.workspaces).map(w => [String(w.workspace_id), typeof w.label === "string" ? w.label : undefined]));
     await Promise.all(objects(s.panes).slice(0, 64).map(async pane => {
       const processes = await provider.processes(name, String(pane.pane_id)).catch(() => undefined);
@@ -506,7 +508,8 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
 /** One collection at a time, reused for `RESOURCES_MAX_AGE_MS`. */
 export class ResourceMonitor {
   private cached?: { at: number; value: ComputerResources };
-  private pending?: Promise<ComputerResources>;
+  private pending?: { at: number; generation: number; promise: Promise<ComputerResources>; reject: (error: Error) => void };
+  private generation = 0;
   private readonly deps: ResourceDeps;
   private readonly registry: JobSource;
   constructor(deps: Partial<ResourceDeps> = {}, private maxAgeMs = RESOURCES_MAX_AGE_MS) {
@@ -515,12 +518,39 @@ export class ResourceMonitor {
     this.deps = { platform: process.platform, now: Date.now, home: homeDir, processes: processTable, owners: paneOwners, panes: livePanes,
       health: (value, rows) => health.assess(value, rows, this.deps.now()), budget: pressure => agentBudget(pressure, this.deps.now()), ...deps, jobs: this.registry };
   }
+  private retire(entry: { generation: number; reject: (error: Error) => void }): void {
+    if (this.pending !== entry) return;
+    this.pending = undefined;
+    // Bumped so a retired probe can never publish its late answer.
+    if (this.generation === entry.generation) this.generation++;
+    entry.reject(new Error("Resource collection stalled; retry."));
+  }
   async read(): Promise<ComputerResources> {
     if (this.cached && this.deps.now() - this.cached.at < this.maxAgeMs) return this.cached.value;
-    this.pending ??= collectResources(this.deps)
-      .then(value => { this.cached = { at: this.deps.now(), value }; return value; })
-      .finally(() => { this.pending = undefined; });
-    return this.pending;
+    if (this.pending) {
+      if (Date.now() - this.pending.at < RESOURCES_RETIRE_MS) return this.pending.promise;
+      // Too old to answer: unblock its waiters and start a fresh probe.
+      this.retire(this.pending);
+    }
+    const generation = ++this.generation;
+    const started = Date.now();
+    let entry: { at: number; generation: number; promise: Promise<ComputerResources>; reject: (error: Error) => void } | undefined;
+    let rejectStalled!: (error: Error) => void;
+    const stalled = new Promise<never>((_, reject) => { rejectStalled = reject; });
+    let timer: NodeJS.Timeout | undefined;
+    const result = collectResources(this.deps).then(value => {
+      if (this.generation === generation) this.cached = { at: this.deps.now(), value };
+      return value;
+    }).finally(() => {
+      clearTimeout(timer);
+      if (this.pending === entry) this.pending = undefined;
+    });
+    const promise = Promise.race([result, stalled]);
+    entry = { at: started, generation, promise, reject: rejectStalled };
+    this.pending = entry;
+    timer = setTimeout(() => this.retire(entry!), RESOURCES_RETIRE_MS);
+    timer.unref();
+    return promise;
   }
   /**
    * End only the registered process groups whose owning pane is gone. The

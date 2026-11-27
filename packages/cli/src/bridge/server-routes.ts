@@ -266,7 +266,7 @@ export function selectedServer(url: URL): string {
  * `session.snapshot`. `GET /v1/workspaces` passes a fresh snapshot; the
  * `/v1/overview` stream passes the shared one it already holds.
  */
-export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean) => Promise<Json>;
+export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean, live?: () => boolean) => Promise<Json>;
 
 /** The pane's turn record for its session row. OpenCode's plugin stamps its
  * turns per PID instead of writing a lifecycle record. */
@@ -279,9 +279,9 @@ async function paneTurnRecord(server: string, pane: Json, session: string): Prom
 
 export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "agentHooks" | "journal" | "tabActivity" | "contextUsage" | "turnQueue">): WorkspacesReader {
   const { modules, info, agentHooks, journal, tabActivity, contextUsage } = ctx;
-  return async (server, s, watchApprovals) => {
+  return async (server, s, watchApprovals, live) => {
     const { generation, stamps: lastChanged } = await tabActivity.observe(server, s);
-    if (watchApprovals) agentHooks.overview.renew(server);
+    if (watchApprovals && (live?.() ?? true)) agentHooks.overview.renew(server);
     const context = await contextUsage.read(server, s);
     await journal.record(server, objects(s.panes));
     const chatStates = new Map(await Promise.all(objects(s.panes).filter(p => p.agent).map(async p =>

@@ -16,10 +16,16 @@ function snapshot(status = "working", seq = 1, title = "Build", label = "Tab"): 
 }
 const key = tabActivityKey("w1", "t1");
 const statusRows = (snapshot: Json) => objects(snapshot.tabs).map(tab => ({ workspace: tab.workspace_id, tab: tab.tab_id, status: tab.agent_status }));
-const observe = async (store: TabActivityStore, snapshot: Json, server = "default") => (await store.observe(server, snapshot)).stamps;
+const observe = async (store: TabActivityStore, snapshot: Json, server = "default") => {
+  const stamps = (await store.observe(server, snapshot)).stamps;
+  await store.flush();
+  return stamps;
+};
 async function observed(store: TabActivityStore, snapshot: Json, server = "default") {
   const { generation } = await store.observe(server, snapshot);
-  return store.recordStatus(server, statusRows(snapshot), generation);
+  const stamps = await store.recordStatus(server, statusRows(snapshot), generation);
+  await store.flush();
+  return stamps;
 }
 
 describe("persisted tab activity clock", () => {
@@ -84,9 +90,11 @@ describe("persisted tab activity clock", () => {
     const location = await file(), before = new Date("2026-09-15T10:00:00Z"), after = new Date("2026-09-15T11:00:00Z");
     const store = new TabActivityStore(location, () => before);
     await Promise.all([store.observe("default", snapshot()), store.observe("work", snapshot())]);
+    await store.flush();
     const restarted = new TabActivityStore(location, () => after);
     expect((await observe(restarted, snapshot())).get(key)?.lastChangedAt).toBe(before.toISOString());
     await restarted.observe("default", { tabs: [], panes: [] });
+    await restarted.flush();
     const entries = JSON.parse(await readFile(location, "utf8")).entries;
     expect(Object.keys(entries)).toHaveLength(1);
     expect((await observe(restarted, snapshot(), "work")).get(key)?.lastChangedAt).toBe(before.toISOString());
@@ -120,10 +128,13 @@ describe("persisted tab activity clock", () => {
     const store = new TabActivityStore(location, () => now);
     await store.observe("default", snapshot("working", 1, "PRIVATE TITLE"));
     await store.observe("gone", snapshot("waiting", 1, "PRIVATE OTHER"));
+    await store.flush();
     let saved = await readFile(location, "utf8");
     expect(saved).not.toContain("PRIVATE"); expect(saved).not.toContain("Tab");
     for (const stamp of Object.values(JSON.parse(saved).entries) as { signature: string }[]) expect(stamp.signature).toMatch(/^[a-f0-9]{64}$/);
-    await new TabActivityStore(location).pruneServers(["default"]);
+    const pruner = new TabActivityStore(location);
+    await pruner.pruneServers(["default"]);
+    await pruner.flush();
     saved = await readFile(location, "utf8");
     expect(saved).not.toContain("gone"); expect(Object.keys(JSON.parse(saved).entries)).toHaveLength(1);
     const plain = JSON.stringify(["working", null, "Tab", null, [["p1", "codex", null, 1, "PRIVATE TITLE"]]]);
