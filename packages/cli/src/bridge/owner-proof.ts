@@ -11,7 +11,8 @@ import { ownerRequest } from "./request-origin.js";
 /**
  * Owner proof for the actions an agent must not take for itself: release
  * authority, raising a pane's permission mode, making or stopping the
- * conductor, registering for this computer's alerts and linking computers.
+ * conductor, registering for this computer's alerts, linking computers and
+ * controlling the Mac's windows (GET and POST).
  *
  * Agents run as the same Unix user as the Hook, so no header or local file can
  * tell the owner's phone from an agent's `nc -U hook.sock`. The phone holds its
@@ -31,11 +32,13 @@ const ROUTES = new Set([
   "POST /v1/sets/link",
   "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
   "POST /v1/owner-confirms/answer",
+  "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot",
+  "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
 ]);
 
 const payloadSchema = z.object({
   domain: z.literal(DOMAIN), nonce: z.string().uuid(), at: z.string().datetime({ offset: true }),
-  method: z.enum(["POST", "DELETE"]), path: z.string().min(1).max(4096), body: z.string().regex(/^[a-f0-9]{64}$/),
+  method: z.enum(["POST", "DELETE", "GET"]), path: z.string().min(1).max(4096), body: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 const envelopeSchema = z.object({ payload: z.string().min(1).max(8192), signature: z.string().min(1).max(128), publicKey: z.string().min(1).max(64) }).strict();
 

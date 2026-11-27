@@ -524,6 +524,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "GET") {
         // The owner asked for a fresh reading (pull to refresh, `phren computers`): peers are dialed again.
         if (url.searchParams.get("refresh") === "1") refreshPeerReads();
+        // Owner actions that a phone signs carry no body on GET: the signed digest is of zero bytes.
+        await ownerProof.check(request, url.pathname, {}, bodyDigest(Buffer.alloc(0)));
         switch (url.pathname) {
           case "/v1/tasks": result = await getTaskListRoute(modules.store, url); break;
           case "/v1/tasks/detail": result = await getTaskDetailRoute(modules.store, url); break;
