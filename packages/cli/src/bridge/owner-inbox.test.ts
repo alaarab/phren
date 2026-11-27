@@ -244,6 +244,55 @@ describe("owner inbox", () => {
     sources = [{ source: "prompt:1", kind: "blocked", title: "Another wait" }];
     expect((await inbox().run({})).items).toHaveLength(1);
   });
+  it("closes with the exact revision, distinguishing a stale and an already handled row", async () => {
+    const box = inbox(), id = "44444444-4444-4444-8444-444444444444";
+    await box.run({ action: "add", id, title: "OVH US VPS-2 is in stock" });
+    const [first] = (await box.run({})).items as InboxItem[];
+    await expect(box.close(id, "2020-01-01T00:00:00.000Z", "resolve")).rejects.toMatchObject({ status: 409 });
+    await expect(box.close(randomUUID(), first.updatedAt, "resolve")).rejects.toMatchObject({ status: 404 });
+    const resolved = await box.close(id, first.updatedAt, "resolve");
+    expect(resolved).toMatchObject({ id, state: "resolved", resolution: "done" });
+    expect(resolved.resolvedAt).toBe(resolved.updatedAt);
+    expect(Date.parse(resolved.updatedAt)).toBeGreaterThan(Date.parse(first.updatedAt));
+    await expect(box.close(id, resolved.updatedAt, "dismiss")).rejects.toMatchObject({ status: 409 });
+    expect((await box.run({ includeResolved: true })).items).toMatchObject([{ id, state: "resolved", resolution: "done" }]);
+    const other = (await box.run({ action: "add", title: "Turn off the old VPS" })).item as InboxItem;
+    expect(await box.close(other.id, other.updatedAt, "dismiss")).toMatchObject({ state: "resolved", resolution: "dismissed" });
+    expect((await box.run({})).items).toEqual([]);
+  });
+  it("suppresses a closed live wait until it ends, and keeps that suppression through an unavailable dispatch", async () => {
+    const dispatch = randomUUID();
+    const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex" as const, session: randomUUID() };
+    const wait: InboxSource = { source: "prompt:1", kind: "blocked", title: "Approve the tool", dispatch, computer: "Desk", target };
+    const box = inbox();
+    sources = [wait];
+    const [first] = (await box.run({})).items as InboxItem[];
+    const closed = await box.close(first.id, first.updatedAt, "dismiss");
+    expect(closed).toMatchObject({ state: "resolved", resolution: "dismissed", live: true });
+    // The same wait is still running; it must not come back as a new row.
+    sources = [wait];
+    expect((await inbox().run({})).items).toEqual([]);
+    // Its dispatch cannot be read: the suppression stays.
+    const offline = new OwnerInbox(async () => ({ sources: [], unavailableDispatches: [dispatch] }), path.join(root, "owner-inbox.json"));
+    await offline.tick();
+    expect((await offline.run({})).items).toEqual([]);
+    expect((await inbox().run({})).items).toEqual([]);
+    // The wait ends; a later distinct wait on the same pane is a new row.
+    sources = []; await inbox().tick();
+    sources = [{ ...wait, source: "prompt:2", actionId: "ask2" }];
+    const [next] = (await inbox().run({})).items as InboxItem[];
+    expect(next.id).not.toBe(first.id);
+    expect(next).toMatchObject({ state: "open", live: true });
+  });
+  it("returns the open snapshot a push sweep reads from a tick", async () => {
+    sources = [{ source: "prompt:1", kind: "needs-you", title: "Choose a target" }];
+    const box = inbox();
+    await box.run({ action: "add", title: "Restart the router" });
+    const items = await box.tick();
+    expect(items.map(item => item.title).sort()).toEqual(["Choose a target", "Restart the router"]);
+    sources = [];
+    expect(await box.tick()).toEqual([expect.objectContaining({ title: "Restart the router" })]);
+  });
   it("migrates legacy stale and duplicate rows once without touching manual items", async () => {
     const at = "2026-10-06T10:00:00.000Z", target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", session: "11111111-1111-4111-8111-111111111111" };
     const row = { kind: "blocked", title: "codex needs terminal input.", state: "open", createdAt: at, updatedAt: at };

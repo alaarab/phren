@@ -105,7 +105,10 @@ export class OwnerInbox {
             if (row.state === "resolved" && !row.live) continue;
             const key = sourceKey(row), source = key ? active.get(key) : undefined;
             const unavailable = !!row.dispatch && unavailableDispatches.includes(row.dispatch);
-            const live = !!source && !retained.has(key!);
+            // An owner-closed live row still suppresses its wait while the
+            // dispatch cannot be read: forgetting it here would let the next
+            // successful tick create a second row for the same wait.
+            const live = unavailable && row.state === "resolved" ? row.live : !!source && !retained.has(key!);
             if (row.live !== live) { row.live = live; row.updatedAt = at; changed = true; }
             if (!source) {
               if (row.state === "open" && !unavailable) resolve(row, "stale: source gone");
@@ -200,5 +203,42 @@ export class OwnerInbox {
     });
     this.pending = run.catch(() => {}); return run;
   }
-  async tick(): Promise<void> { await this.run({ action: "list" }); }
+  /** A signed phone decision on one row, guarded by the exact revision the
+   * phone read. Resolve means handled; dismiss removes the row from this
+   * Hook's shared list. Both are final in v1. Check and write under the same
+   * lock an ordinary read takes, so a concurrent tick cannot resurrect it. */
+  async close(id: string, ifUpdatedAt: string, decision: "resolve" | "dismiss"): Promise<InboxItem> {
+    const run = this.pending.then(async () => {
+      await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
+      const deadline = Date.now() + 30_000;
+      let release = tryFileLock(this.file);
+      while (!release) {
+        if (Date.now() >= deadline) throw new BridgeError(503, "The owner inbox is busy; retry the operation.");
+        await new Promise(resolve => setTimeout(resolve, 20));
+        release = tryFileLock(this.file);
+      }
+      try {
+        const rows = await this.read(), now = Date.now();
+        const item = rows.find(row => row.id === id);
+        if (!item) throw new BridgeError(404, "No owner inbox item with that id.");
+        if (item.state !== "open") throw new BridgeError(409, "This inbox item was already handled.");
+        if (item.updatedAt !== ifUpdatedAt) throw new BridgeError(409, "This inbox item changed. Refresh it and try again.");
+        // Edits in the same millisecond still need distinct paste revisions.
+        const at = new Date(Math.max(now, Date.parse(item.updatedAt) + 1)).toISOString();
+        item.state = "resolved"; item.updatedAt = at; item.resolvedAt = at;
+        item.resolution = decision === "resolve" ? "done" : "dismissed";
+        // A closed automatic row keeps suppressing its current wait until a
+        // reconciliation sees that wait end; a manual row has no live wait.
+        if (item.kind !== "manual") item.live = true;
+        await atomicInPrivateDir(this.file, rows);
+        return item;
+      } finally { release(); }
+    });
+    this.pending = run.catch(() => {}); return run;
+  }
+  /** Reconcile and return the open snapshot a push sweep may alert about. */
+  async tick(): Promise<InboxItem[]> {
+    const result = await this.run({ action: "list" });
+    return Array.isArray(result.items) ? result.items as InboxItem[] : [];
+  }
 }
