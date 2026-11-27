@@ -1924,13 +1924,19 @@ return 409 with `code: "owner-inbox-actions-unsupported"`.
 with only `{id,title,kind,state,createdAt,updatedAt,inboxComputer?,project?,
 computer?,target?}`. The aggregate always carries `inboxComputer`. The flag is
 forwarded to peer reads and the aggregate is projected again here, so older
-peers that ignore it still answer safely. Full reads and history keep their
+peers that ignore it still answer safely. A compact peer read also carries
+`reconcile=1`, which adds `live`, `source` and `actionId` so the reading Hook can
+filter and dedupe before it strips them again; a phone never receives those
+keys. Compact peer reads use a six-second deadline, so one slow Hook lands in
+`unreachable` while the other sections stay. Full reads and history keep their
 current shapes.
 
 `POST /v1/owner-inbox/close` takes the strict body
 `{"id":"<uuid>","ifUpdatedAt":"<exact wire string>","decision":"resolve|dismiss"}`
 and answers `{ok:true,item}` with the stored item and `inboxComputer:"local"`.
-Send it to the Hook that owns the row. An unknown id is 404; a changed revision
+Send it to the Hook that owns the row. The id matches case-insensitively, since
+a legacy add may have kept an uppercase UUID; two stored rows that differ only
+by case are ambiguous and answer 409. An unknown id is 404; a changed revision
 or an already closed row is 409. Resolve means handled, dismiss removes the row
 from the shared list for everyone reading that Hook; both set `state:"resolved"`,
 bump `updatedAt`, and record `resolvedAt` and `resolution:"done"|"dismissed"`.
