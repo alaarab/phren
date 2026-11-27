@@ -1131,6 +1131,53 @@ Updating the input helper rebuilds it, and macOS ties the Accessibility grant
 to the binary. So after this change macOS asks once more: switch simtap on
 again in System Settings → Privacy & Security → Accessibility.
 
+### Mac windows on a Mac
+
+On a Mac the phone can list the Mac's own windows, see a still snapshot of one,
+tap a point in it and type into it. It is off on every Mac until the owner turns
+it on there; work machines simply never do.
+
+```bash
+phren mac-windows on       # writes <bridge>/mac-windows.json (0600)
+phren mac-windows status   # on/off, plus the Screen Recording and Accessibility grants
+phren mac-windows off
+```
+
+The routes are listed in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`; the
+`/v1/status` capability is `macWindows` on macOS. Every route is owner-only:
+MCP agents, peers and scoped gitboy keys get 403 with code
+`mac-windows-owner-only`.
+
+- `GET /v1/mac/windows` answers `{ enabled, permissions, windows }`. When off
+  it answers 200 with `enabled: false` and an empty list, so the phone can explain
+  how to turn it on. When Screen Recording is missing the list is empty and
+  `permissions` says so.
+- `GET /v1/mac/windows/snapshot?id=<1..2^32-1>&size=<160..2400, default 1600>&quality=<30..90, default 70>`
+  answers one JPEG (`image/jpeg`). 409 `mac-windows-disabled` when off, 403
+  `mac-windows-screen-recording` when the grant is missing (it asks macOS once
+  per Hook run), 404 when the window is gone.
+- `POST /v1/mac/windows/action` takes `{ id, action: "tap", x, y }` (fractions
+  of the snapshot), `{ id, action: "type", text, submit? }` (1–2000 characters;
+  `submit` types Return), `{ id, action: "key", key, modifiers? }` or
+  `{ id, action: "raise" }`, and answers `{ ok: true }`. 403
+  `mac-windows-accessibility` when the grant is missing. Inputs run one at a
+  time; typed text goes on the helper's stdin, never its arguments.
+- `POST /v1/mac/windows/permissions` with `{ permission: "screen-recording" }`
+  or `{ permission: "accessibility" }` asks macOS for that grant and answers the
+  current `permissions`.
+
+A session starts at the first request and ends after 120 seconds without one.
+Every request is appended to `<bridge>/mac-windows/sessions.jsonl` (folder 0700,
+file 0600) with its session id, action, window id, result and error; typed text
+is never written, only `chars: <length>`. The `winbadge` helper shows a red
+"Your phone is controlling this Mac" pill and a menu-bar item for the whole
+session; its "Stop phone control" item ends the session and refuses requests
+for 60 seconds with 409 `mac-windows-stopped`.
+
+Screen Recording is for `wincap` (listing and snapshots); Accessibility is for
+`wininput` (taps, keys, typing). A rebuilt helper is a new binary, so macOS asks
+for its grant once more.
+
 ### sudo from the phone
 
 A `sudo` with no terminal, such as a Claude Code `!` command or an agent's

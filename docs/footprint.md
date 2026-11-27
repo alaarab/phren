@@ -211,6 +211,14 @@ referenced payload fields) and `<bridge>/schedule-runs.jsonl.deliveries.json`
 (hashes of the newest 1000 event delivery IDs). Raw event payloads are not saved.
 See [event schedules](schedules.md#event-schedules-hook-capability-scheduleevents).
 
+Phone control of the Mac's own windows is off until the owner runs
+`phren mac-windows on` there, which writes private `<bridge>/mac-windows.json`
+(0600). While it is on, `<bridge>/mac-windows/sessions.jsonl` (folder 0700, file
+0600) holds one audit row per request: session, action, window id, outcome and
+error. Typed text is never written, only its character count. The `wincap`,
+`wininput` and `winbadge` helpers compile into `<bridge>/native/` beside the
+simulator helpers. See [Mac windows](phren-hook.md#mac-windows-on-a-mac).
+
 The Hook keeps the shipped conductor instructions at
 `<bridge>/conductor/brief.md` (0600). Its agent-only socket returns a bounded
 role reminder for the recorded conductor's turn; OpenCode and phren-agent ask through
