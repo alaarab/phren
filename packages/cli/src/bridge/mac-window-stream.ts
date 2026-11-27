@@ -197,6 +197,8 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   let firstSendTimer: ReturnType<typeof setTimeout> | undefined;
   let pullTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The absolute time the pending `pullTimer` was scheduled for. */
+  let pullDueAt = Infinity;
   let pullDeadline: ReturnType<typeof setTimeout> | undefined;
   let ackDeadline: ReturnType<typeof setTimeout> | undefined;
   let tokenTimer: ReturnType<typeof setTimeout> | undefined;
@@ -245,13 +247,6 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
       refilledAt = now;
     }
   };
-  /** Switch tiers: credit already earned stays, the new rate starts now. */
-  const applyTier = (next: number) => {
-    refill();
-    tier = next;
-    rate = tierRate(next);
-  };
-
   /** Resolve the outstanding pull without producing a frame. */
   const resolvePull = () => {
     pullOutstanding = false;
@@ -309,17 +304,27 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   const tryPull = () => {
     if (inChunk) { pullWanted = true; return; }
-    if (ended || !spawned || pullOutstanding || staged || outstanding || pullTimer) return;
-    if (requestedTier !== tier) {
-      // Applied at the first pull after the outstanding sample was resolved.
-      restartEpoch();
-      applyTier(requestedTier);
-    }
-    const due = lastPullAt + 1000 / MAC_WINDOW_TIERS[tier].fps;
+    if (ended || !spawned || pullOutstanding || staged || outstanding) return;
+    // Pace off the tier the latest clamped request would use, so an upshift
+    // shortens a pending wait and a superseded downshift never commits.
+    const due = lastPullAt + 1000 / MAC_WINDOW_TIERS[requestedTier].fps;
     const now = deps.now();
     if (now < due) {
-      pullTimer = later(due - now, () => { pullTimer = undefined; tryPull(); });
+      if (pullTimer && pullDueAt !== due) { clear(pullTimer); pullTimer = undefined; }
+      if (!pullTimer) {
+        pullDueAt = due;
+        pullTimer = later(due - now, () => { pullTimer = undefined; pullDueAt = Infinity; tryPull(); });
+      }
       return;
+    }
+    clear(pullTimer); pullTimer = undefined; pullDueAt = Infinity;
+    if (requestedTier !== tier) {
+      // The tier and its rate take effect only here, at the PULL they pace.
+      // Credit earned so far was earned at the old tier's rate.
+      refill();
+      tier = requestedTier;
+      rate = tierRate(tier);
+      restartEpoch();
     }
     if (!submit(`PULL ${tier} ${needsSync ? 1 : 0}\n`)) return;
     lastPullAt = now;

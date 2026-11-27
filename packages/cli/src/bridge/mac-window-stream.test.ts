@@ -476,6 +476,46 @@ describe("tier changes and recovery", () => {
     expect(client.texts().at(-1)).toEqual({ type: "start", version: 1, codec: "h264", epoch: 2, width: 320, height: 200, tier: 0, maxTier: 3 });
     expect(client.binary().at(-1)!.readUInt32BE(12)).toBe(2);
   });
+  it("refills at the old tier's rate until the PULL that commits the new tier", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&tier=0`, deps);
+    const child = children[0];
+    // A full-cap tier-0 frame drains the bucket.
+    child.stdout.write(record(1, wire({ sync: true, width: 320, height: 200, unitBytes: MAX_MESSAGE_BYTES - 24 - 10 - 4, pts: 1_000n })));
+    await flush();
+    client.control({ type: "ack", seq: 1 });
+    // Ask for the top tier at once: the pending pull moves from 200 ms to 84 ms...
+    client.control({ type: "set", tier: 3 });
+    vi.advanceTimersByTime(83);
+    expect(pulls(child)).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(pulls(child)).toEqual(["PULL 0 1\n", "PULL 3 1\n"]);
+    // ...but 84 ms at tier 0's 12000 B/s earns 1008 bytes, not tier 3's 4032.
+    child.stdout.write(record(1, wire({ sync: true, width: 960, height: 600, unitBytes: 1_400 - 24 - 10 - 4, pts: 2_000n })));
+    await flush();
+    expect(client.binary()).toHaveLength(1);
+    vi.advanceTimersByTime(8);
+    expect(client.binary()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(client.binary().map(frame => frame.length)).toEqual([MAX_MESSAGE_BYTES, 1_400]);
+  });
+  it("does not start a new epoch when a downshift is superseded before the next pull", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&tier=2`, deps);
+    const child = children[0];
+    child.stdout.write(record(1, wire({ sync: true, width: 640, height: 400, pts: 1_000n })));
+    await flush();
+    client.control({ type: "ack", seq: 1 });
+    client.control({ type: "set", tier: 0 });
+    client.control({ type: "set", tier: 2 });
+    vi.advanceTimersByTime(100);
+    expect(pulls(child).at(-1)).toBe("PULL 2 0\n");
+    child.stdout.write(record(1, wire({ width: 640, height: 400, pts: 2_000n })));
+    await flush();
+    expect(client.texts().filter(message => message.type === "start")).toHaveLength(1);
+    expect(client.binary().at(-1)!.readUInt32BE(12)).toBe(2);
+    expect(client.closed).toBeUndefined();
+  });
   it("lowers maxTier on an oversize sample and restarts sync at the clamped tier", async () => {
     const { deps, children } = harness();
     const client = await start(`id=${ID}&tier=2`, deps);
