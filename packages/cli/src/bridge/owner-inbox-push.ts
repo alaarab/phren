@@ -1,20 +1,19 @@
+import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomicInPrivateDir, bridgeRoot } from "./protocol.js";
 import type { InboxItem } from "./owner-inbox.js";
-
-/** The value slice 3's push transport sends: the row and the deadline the
- * ledger froze when it first observed that row. Structurally the `OwnerInboxPush`
- * in push.ts, so the two stay assignable. */
-export interface OwnerInboxPushValue { id: string; title: string; expiresAt: string }
+import { isLocalComputer } from "./dispatch-hosts.js";
+import { ownerInboxKey } from "./owner-inbox-key.js";
+import type { OwnerInboxPush } from "./push.js";
 
 /** What the sweep needs from `ApprovalPushService`, injected so tests never
  * reach a provider. Both calls re-check reachability, registration and the
  * `ownerInbox` kind at send time. */
 export interface OwnerInboxPushSender {
   ownerInboxPushDevices(): string[];
-  notifyOwnerInbox(value: OwnerInboxPushValue, deviceID: string): Promise<boolean>;
+  notifyOwnerInbox(value: OwnerInboxPush, deviceID: string): Promise<boolean>;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,6 +59,10 @@ export interface OwnerInboxPushOptions {
   /** The open manual row that takes the first backfill slot; defaults to
    * `PHREN_OWNER_INBOX_BACKFILL_ID` read on each sweep. */
   backfillId?: string;
+  /** First name is the hostname, followed by local aliases. */
+  computerNames: readonly [string, ...string[]];
+  /** Read linked computer names locally. Undefined means the configuration could not be read. */
+  peerNames: () => Promise<readonly string[] | undefined>;
 }
 
 /**
@@ -73,6 +76,9 @@ export class OwnerInboxPushSweep {
   private readonly log: (message: string) => void;
   private readonly backfillId: () => string | undefined;
   private readonly isOpenForPush: OwnerInboxPushOptions["isOpenForPush"];
+  private readonly computerNames: readonly string[];
+  private readonly computer: string;
+  private readonly peerNames: OwnerInboxPushOptions["peerNames"];
   private chain: Promise<void> = Promise.resolve();
   private active = false;
   private queued?: ObservedItem[];
@@ -88,6 +94,9 @@ export class OwnerInboxPushSweep {
 
   constructor(private readonly sender: OwnerInboxPushSender, options: OwnerInboxPushOptions) {
     this.file = options.file ?? path.join(bridgeRoot(), "owner-inbox-push.json");
+    this.computerNames = options.computerNames;
+    this.computer = options.computerNames[0];
+    this.peerNames = options.peerNames;
     this.isOpenForPush = options.isOpenForPush;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (message => console.error(message));
@@ -119,6 +128,20 @@ export class OwnerInboxPushSweep {
     return this.chain;
   }
 
+  private async ownership(items: ObservedItem[]): Promise<(item: ObservedItem) => boolean> {
+    // Targeted rows follow the worker, and a stale task follows its claim.
+    // For unclaimed tasks use the first configured computer, regardless of
+    // reachability, so a transient outage cannot elect a second sender.
+    const needsElection = items.some(item => !item.target && !item.computer && ownerInboxKey(item, this.computer) !== undefined);
+    const peers = needsElection ? await this.peerNames() : undefined;
+    const first = peers?.every(peer => isLocalComputer(peer, this.computerNames) || this.computer.toLowerCase() < peer.toLowerCase()) ?? false;
+    return item => {
+      if (ownerInboxKey(item, this.computer) === undefined) return true;
+      if (item.computer) return isLocalComputer(item.computer, this.computerNames);
+      return !!item.target || first;
+    };
+  }
+
   private async load(): Promise<Ledger | "corrupt" | undefined> {
     let info;
     try { info = await lstat(this.file); } catch (error) {
@@ -142,7 +165,9 @@ export class OwnerInboxPushSweep {
       }
       return;
     }
-    const ledger = loaded ?? { version: 1 as const, initializedAt: at, entries: this.seed(openItems, now) };
+    const owns = await this.ownership(openItems);
+    const owned = openItems.filter(owns);
+    const ledger = loaded ?? { version: 1 as const, initializedAt: at, entries: this.seed(owned, now) };
     if (!loaded) {
       // The candidate must be durable before any provider sees it.
       try { await atomicInPrivateDir(this.file, ledger); }
@@ -151,7 +176,7 @@ export class OwnerInboxPushSweep {
         return;
       }
     } else {
-      const reconciled = this.reconcile(ledger, openItems, now);
+      const reconciled = this.reconcile(ledger, owned, now);
       const merged = this.mergeAccepted(ledger);
       if (reconciled) {
         try { await atomicInPrivateDir(this.file, ledger); }
@@ -166,7 +191,7 @@ export class OwnerInboxPushSweep {
         catch (error) { this.log(`Phren Inbox push: could not save accepted receipts: ${error instanceof Error ? error.message : String(error)}`); }
       }
     }
-    await this.deliver(ledger);
+    await this.deliver(ledger, owns);
   }
 
   /** Merge acceptances whose receipt write failed into a freshly loaded ledger. */
@@ -229,7 +254,7 @@ export class OwnerInboxPushSweep {
    * initialization deadline). Each selected row is offered to all of its
    * eligible phones. Recheck persisted state, the newest snapshot and the
    * deadline before each call. A row consumes a slot on its first attempt. */
-  private async deliver(ledger: Ledger): Promise<void> {
+  private async deliver(ledger: Ledger, owns: (item: ObservedItem) => boolean): Promise<void> {
     const devices = [...new Set(this.sender.ownerInboxPushDevices())].filter(device => deviceIDSchema.safeParse(device).success).sort();
     if (!devices.length) return;
     const initializedAt = Date.parse(ledger.initializedAt);
@@ -238,7 +263,7 @@ export class OwnerInboxPushSweep {
       return created === initializedAt ? Date.parse(entry.updatedAt) : created;
     };
     const candidates = [...ledger.entries].sort((a, b) => age(a) - age(b) || a.id.localeCompare(b.id));
-    const openItem = (id: string) => this.latest.find(item => item.id === id && item.state === "open" && item.firstOpen !== false);
+    const openItem = (id: string) => this.latest.find(item => item.id === id && item.state === "open" && item.firstOpen !== false && owns(item));
     let selected = 0;
     for (const entry of candidates) {
       if (selected >= MAX_CANDIDATES) break;
@@ -260,7 +285,10 @@ export class OwnerInboxPushSweep {
         }
         let accepted = false;
         try {
-          accepted = await this.sender.notifyOwnerInbox({ id: entry.id, title: live.title, expiresAt: entry.expiresAt }, deviceID);
+          const sharedKey = ownerInboxKey(live, this.computer);
+          const collapseId = sharedKey === undefined ? undefined : `inbox-${createHash("sha256").update(sharedKey).digest("base64url")}`;
+          accepted = await this.sender.notifyOwnerInbox(
+            { id: entry.id, title: live.title, expiresAt: entry.expiresAt, ...(collapseId ? { collapseId } : {}) }, deviceID);
         } catch { accepted = false; }
         if (accepted) {
           this.accepted.add(key);

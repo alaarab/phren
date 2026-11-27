@@ -314,12 +314,13 @@ describe("owner inbox push delivery", () => {
       return new Response("{}", { status: 200 });
     }) as unknown as typeof fetch);
 
-    expect(await push.notifyOwnerInbox(item, deviceID)).toBe(true);
+    const collapseId = "inbox-shared-task";
+    expect(await push.notifyOwnerInbox({ ...item, collapseId }, deviceID)).toBe(true);
     expect(sent!.url).toBe("https://push.example.com/v1/send");
     expect(sent!.headers["x-phren-signature"]).toBe(relaySignature(registration.secret, sent!.headers["x-phren-timestamp"], sent!.body));
     const request = JSON.parse(sent!.body) as { ciphertext: string; category: string; collapseId: string; expiration: number };
     expect(request.category).toBe("PHREN_OWNER_INBOX");
-    expect(request.collapseId).toBe(`inbox-${id}`);
+    expect(request.collapseId).toBe(collapseId);
     expect(request.expiration).toBe(Math.floor(Date.parse(item.expiresAt) / 1000));
 
     const sealed = Buffer.from(request.ciphertext, "base64url");

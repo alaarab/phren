@@ -45,6 +45,7 @@ export class StaleTaskSources {
       source: `task-stale:${task.project}:${task.item.stableId}`,
       kind: "needs-you" as const,
       project: task.project,
+      computer: task.item.claim?.computer,
       // The row links its task, so the app can open it.
       task: `bid:${task.item.stableId}`,
       title: clean(`Stale task in ${task.project}: ${taskTitle(task.item.line).slice(0, 120)} (Active, untouched since ${dayOf(taskLastTouched(task.item) ?? now)})`).slice(0, 500),

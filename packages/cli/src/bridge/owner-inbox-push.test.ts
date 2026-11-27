@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OwnerInboxPushSweep, type OwnerInboxPushSender, type OwnerInboxPushValue } from "./owner-inbox-push.js";
+import { OwnerInboxPushSweep, type OwnerInboxPushSender } from "./owner-inbox-push.js";
+import type { OwnerInboxPush } from "./push.js";
 import { OwnerInbox, type InboxItem } from "./owner-inbox.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -26,7 +27,7 @@ function row(overrides: Partial<InboxItem> = {}): InboxItem {
 
 interface FakeSender extends OwnerInboxPushSender {
   devices: string[];
-  sent: Array<{ value: OwnerInboxPushValue; deviceID: string }>;
+  sent: Array<{ value: OwnerInboxPush; deviceID: string }>;
   attempts: string[];
   ok: (deviceID: string) => boolean;
 }
@@ -34,7 +35,7 @@ function fakeSender(ok: (deviceID: string) => boolean = () => true): FakeSender 
   const sender: FakeSender = {
     devices: [], sent: [], attempts: [], ok,
     ownerInboxPushDevices: () => [...sender.devices],
-    notifyOwnerInbox: vi.fn(async (value: OwnerInboxPushValue, deviceID: string) => {
+    notifyOwnerInbox: vi.fn(async (value: OwnerInboxPush, deviceID: string) => {
       sender.attempts.push(`${value.id}:${deviceID}`);
       if (!sender.ok(deviceID)) return false;
       sender.sent.push({ value, deviceID }); return true;
@@ -43,8 +44,9 @@ function fakeSender(ok: (deviceID: string) => boolean = () => true): FakeSender 
   return sender;
 }
 
+const standalone = { computerNames: ["Desk"] as const, peerNames: async () => [] };
 const sweep = (sender: FakeSender, options: { log?: (message: string) => void; backfillId?: string } = {}) =>
-  new OwnerInboxPushSweep(sender, { file, now: () => now, isOpenForPush: async () => true, ...options });
+  new OwnerInboxPushSweep(sender, { ...standalone, file, now: () => now, isOpenForPush: async () => true, ...options });
 const ledger = async () => JSON.parse(await readFile(file, "utf8")) as {
   version: number; initializedAt: string; entries: Array<{ id: string; updatedAt: string; expiresAt: string; sentDeviceIDs: string[] }>;
 };
@@ -85,6 +87,38 @@ describe("owner inbox push sweep", () => {
     expect(sender.sent).toHaveLength(3);
     await first.observe(rows);
     expect(sender.attempts).toHaveLength(3);
+  });
+
+  it("elects one Hook for shared rows while each Hook alerts on its own manual row", async () => {
+    const shared = { kind: "needs-you", source: "task-stale:phren:1234abcd", live: true } as const;
+    const deskTask = row(shared), studioTask = row(shared);
+    const deskManual = row(), studioManual = row();
+    const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude",
+      session: randomUUID() } as const;
+    const worker = row({ kind: "blocked", target, live: true });
+    const forwarded = row({ kind: "blocked", target, live: true, computer: "Studio" });
+    const claimed = row({ ...shared, source: "task-stale:phren:9876abcd", computer: "Studio" });
+    const desk = fakeSender(), studio = fakeSender();
+    desk.devices.push(DEVICE_A);
+    studio.devices.push(DEVICE_A);
+    const run = (sender: FakeSender, name: string, peers: string[], rows: InboxItem[]) => new OwnerInboxPushSweep(sender, {
+      file: path.join(root, `${name}-push.json`), now: () => now, isOpenForPush: async () => true,
+      computerNames: [name], peerNames: async () => peers,
+    }).observe(rows);
+
+    await run(desk, "Desk", ["Studio"], [deskTask, deskManual, forwarded]);
+    await run(studio, "Studio", ["Desk"], [studioTask, studioManual, worker, claimed]);
+    expect(desk.sent.map(({ value }) => value.id).sort()).toEqual([deskTask.id, deskManual.id].sort());
+    expect(studio.sent.map(({ value }) => value.id).sort()).toEqual([studioManual.id, worker.id, claimed.id].sort());
+
+    // During enrollment, Studio may not yet know about Desk. Its copy still
+    // collapses with Desk's alert even though its notification opens a different row.
+    const isolated = fakeSender();
+    isolated.devices.push(DEVICE_A);
+    await run(isolated, "Isolated", [], [studioTask]);
+    const original = desk.sent.find(({ value }) => value.id === deskTask.id)!.value;
+    expect(isolated.sent).toMatchObject([{ value: { id: studioTask.id, collapseId: expect.any(String) } }]);
+    expect(isolated.sent[0].value.collapseId).toBe(original.collapseId);
   });
 
   it("reserves the first backfill slot for the named open manual row regardless of its age", async () => {
@@ -258,7 +292,7 @@ describe("owner inbox push sweep", () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     let started!: () => void;
     const firstStarted = new Promise<void>(resolve => { started = resolve; });
-    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue, deviceID: string) => {
+    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPush, deviceID: string) => {
       sender.attempts.push(`${value.id}:${deviceID}`);
       if (value.id === first.id) { started(); await gate; return true; }
       return false;
@@ -307,7 +341,7 @@ describe("owner inbox push sweep", () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     let started!: () => void;
     const firstStarted = new Promise<void>(resolve => { started = resolve; });
-    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue) => {
+    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPush) => {
       sender.attempts.push(`${value.id}:${DEVICE_A}`);
       if (value.id === first.id) { started(); await gate; }
       return true;
@@ -334,7 +368,7 @@ describe("owner inbox push sweep", () => {
     const writer = new OwnerInbox(async () => [], inboxFile);
     const sender = fakeSender();
     sender.devices = [DEVICE_A, DEVICE_B];
-    const options = { file, now: Date.now, isOpenForPush: (id: string) => inbox.isOpenForPush(id) };
+    const options = { ...standalone, file, now: Date.now, isOpenForPush: (id: string) => inbox.isOpenForPush(id) };
     const push = new OwnerInboxPushSweep(sender, options);
     await push.observe(await inbox.tick());
     vi.setSystemTime(AT + 1000);
@@ -372,7 +406,7 @@ describe("owner inbox push sweep", () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     let started!: () => void;
     const firstStarted = new Promise<void>(resolve => { started = resolve; });
-    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue) => {
+    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPush) => {
       sender.attempts.push(`${value.id}:${DEVICE_A}`);
       if (value.id === first.id) { started(); await gate; }
       return true;
@@ -399,7 +433,7 @@ describe("owner inbox push sweep", () => {
     const box = new OwnerInbox(async () => [], inboxFile);
     const sender = fakeSender();
     sender.devices.push(DEVICE_A);
-    const push = new OwnerInboxPushSweep(sender, { file, now: Date.now, isOpenForPush: id => box.isOpenForPush(id) });
+    const push = new OwnerInboxPushSweep(sender, { ...standalone, file, now: Date.now, isOpenForPush: id => box.isOpenForPush(id) });
     await push.observe(await box.tick());
     vi.setSystemTime(new Date(AT + 1000));
     const added = (await box.run({ action: "add", title: "OVH US VPS-2 is in stock" })).item as InboxItem;

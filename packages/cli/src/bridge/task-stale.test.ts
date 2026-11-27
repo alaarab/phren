@@ -51,7 +51,7 @@ describe("StaleTaskSources", () => {
 
   it("keeps a task claimed by this computer", () => {
     project("app", `## Active\n\n- [ ] Fix the sync race <!-- bid:aaaaaaaa lastActivity:${OLD} -->\n  Claimed: this-host 2026-11-25T10:00:00.000Z\n`);
-    expect(rows()).toHaveLength(1);
+    expect(rows()).toMatchObject([{ computer: "this-host" }]);
   });
 
   it("ignores an old Queue task and a task without a stable id", () => {

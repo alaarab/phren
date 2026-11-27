@@ -1,8 +1,10 @@
+import { hostname } from "node:os";
 import { BridgeError, type Json, object, objects } from "./protocol.js";
 import { peerRead } from "./peer-reads.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { ownerInboxSchema, pasteCommand, type OwnerInbox } from "./owner-inbox.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
+import { ownerInboxKey } from "./owner-inbox-key.js";
 
 /** What the phone's list and a notification need. Everything else a Hook
  * computes for its own screen (commands, paste, dispatch links, live
@@ -87,18 +89,9 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   const current = items.filter(item => {
     if (data.includeResolved || item.kind === "manual") return true;
     if (item.live !== true || item.state !== "open") return false;
-    const t = item.target as Json | undefined;
-    if (!t) {
-      // Computers share the synced store, so two Hooks can list the same unclaimed stale task.
-      if (typeof item.source === "string" && item.source.startsWith("task-stale:")) {
-        if (seen.has(item.source)) return false;
-        seen.add(item.source);
-      }
-      return true;
-    }
     const computer = String(item.computer ?? item.inboxComputer);
-    const key = JSON.stringify([isLocalComputer(computer) ? "local" : computer, t.server, t.workspace, t.tab, t.pane,
-      t.source, t.session ?? t.startingToken, item.actionId ?? "waiting"]);
+    const key = ownerInboxKey(item, item.target && isLocalComputer(computer) ? hostname() : computer);
+    if (key === undefined) return true;
     if (seen.has(key)) return false;
     seen.add(key); return true;
   });
