@@ -3,10 +3,13 @@
 // taps, text and keys are posted with CGEvent. Built on demand by Phren Hook
 // with swiftc; see mac-windows.ts.
 // Exit codes: 2 usage, 3 Accessibility not granted, 5 no such window,
-// 6 focus could not be verified.
+// 6 focus could not be verified, 7 the Hook (our parent) went away.
 import ApplicationServices
 import Carbon.HIToolbox
 import Cocoa
+
+// A closed pipe from the Hook must not kill us mid-keystroke.
+_ = signal(SIGPIPE, SIG_IGN)
 
 func fail(_ code: Int32, _ message: String) -> Never { FileHandle.standardError.write((message + "\n").data(using: .utf8)!); exit(code) }
 
@@ -120,12 +123,20 @@ func fraction(_ value: String) -> Double? {
     Double(value).flatMap { $0.isFinite && $0 >= 0 && $0 <= 1 ? $0 : nil }
 }
 
+// The Hook is our parent: if it dies we are reparented to launchd (pid 1) and
+// must stop typing rather than finish a message into whatever is in front.
+func checkAlive() {
+    if getppid() == 1 { fail(7, "orphaned") }
+}
+
 // Text arrives as Unicode key events, packed by scalar into chunks of at most
 // 20 UTF-16 units so a surrogate pair is never split; a grapheme may span two
 // chunks. A newline is Return, as the phone sends for submit.
 func typeText(_ text: String) {
+    checkAlive()
     var chunk: [UniChar] = []
     func flush() {
+        checkAlive()
         guard !chunk.isEmpty else { return }
         ensureFocus()
         let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
@@ -138,6 +149,7 @@ func typeText(_ text: String) {
     for scalar in text.unicodeScalars {
         if scalar.value == 10 {
             flush()
+            checkAlive()
             ensureFocus()
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: true), pause: 0)
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: false), pause: 8_000)
