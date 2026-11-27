@@ -195,6 +195,62 @@ function pidGone(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
 }
 
+const MAX_LIVENESS_BYTES = 4 * 1024;
+
+/** The sidecar the store launchers write beside the manifest: their pids, the
+ * start identity of each and this computer's id. It stays out of the manifest
+ * so a Hook on an older version keeps reading every job. */
+const livenessSchema = z.object({
+  v: z.literal(1),
+  computer: z.string().min(1).max(200).nullable(),
+  wrapperPid: z.number().int().positive(),
+  wrapperStart: z.string().min(1).max(120),
+  childPid: z.number().int().positive(),
+  childStart: z.string().min(1).max(120),
+  round: timestamp,
+}).strict();
+
+/** This Hook's own computer id, read the way the bridge writes it at startup.
+ * A synced store holds other computers' jobs, whose pids mean nothing here. */
+async function localComputerID(env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  const root = env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge");
+  return (await readFile(path.join(root, "computer-id"), "utf8").catch(() => "")).trim() || undefined;
+}
+
+const startIdentity = (value: string) => value.trim().replace(/\s+/g, " ");
+
+/** A recorded process is gone when its pid is unused, is a zombie, or now
+ * belongs to another process. `ps -o lstart=` is the start identity both the
+ * launchers and the Hook read with the C locale and UTC, on Linux and macOS. */
+async function processGone(pid: number, start: string): Promise<boolean> {
+  try { process.kill(pid, 0); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+  let row: string;
+  try {
+    row = (await exec("ps", ["-o", "stat=", "-o", "lstart=", "-p", String(pid)],
+      { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, timeout: 2_000, maxBuffer: 4_096 })).stdout.trim();
+  }
+  catch { return false; }
+  if (!row) return false;
+  const [state, ...rest] = row.split(/\s+/);
+  if (state.startsWith("Z")) return true;
+  if (!rest.length) return false;
+  return startIdentity(rest.join(" ")) !== startIdentity(start);
+}
+
+/** The sidecar says the worker was killed, not merely quiet: it is this
+ * computer's, it names the current manifest round, and both pids are gone. */
+async function livenessGone(jobRoot: string, manifest: FanoutManifest, env: NodeJS.ProcessEnv): Promise<boolean> {
+  const file = await regularContainedFile(jobRoot, path.join(jobRoot, "liveness.json"), MAX_LIVENESS_BYTES);
+  if (!file) return false;
+  let sidecar: z.infer<typeof livenessSchema>;
+  try { sidecar = livenessSchema.parse(JSON.parse(await readFile(file, "utf8"))); } catch { return false; }
+  if (!sidecar.computer || sidecar.round !== manifest.startedAt) return false;
+  if (sidecar.computer !== await localComputerID(env)) return false;
+  if (!(await processGone(sidecar.wrapperPid, sidecar.wrapperStart))) return false;
+  return processGone(sidecar.childPid, sidecar.childStart);
+}
+
 async function readBlocked(jobRoot: string): Promise<Blocked | undefined> {
   const file = await regularContainedFile(jobRoot, path.join(jobRoot, "blocked.json"), MAX_BLOCKED_BYTES);
   if (file) {
@@ -246,16 +302,28 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
   const stamped = await Promise.all(entries.map(async name => ({ name, at: (await stat(path.join(root, name)).catch(() => undefined))?.mtimeMs ?? 0 })));
   const names = stamped.sort((a, b) => b.at - a.at).slice(0, MAX_JOBS).map(entry => entry.name);
   const children: FanoutChild[] = [];
+  const matchesParent = (manifest: FanoutManifest) => manifest.parent?.provider === parentProvider
+    && manifest.parent.session === parentSession
+    && (manifest.parent.computer === undefined || parentComputer === undefined || manifest.parent.computer === parentComputer);
   for (const name of names) {
     const directory = path.join(root, name);
     const manifestFile = await containedFileStat(root, path.join(directory, "manifest.json"), MAX_MANIFEST_BYTES);
     if (!manifestFile) continue;
     try {
-      const manifest = await readManifest(manifestFile);
-      if (manifest.id !== name || manifest.parent?.provider !== parentProvider || manifest.parent.session !== parentSession
-          || (manifest.parent.computer !== undefined && parentComputer !== undefined && manifest.parent.computer !== parentComputer)) continue;
+      let manifest = await readManifest(manifestFile);
+      if (manifest.id !== name || !matchesParent(manifest)) continue;
       const jobRoot = await realpath(directory);
       if (!jobRoot.startsWith(root + path.sep)) continue;
+      let sidecarGone = false;
+      if (["queued", "running"].includes(manifest.status) && await livenessGone(jobRoot, manifest, env)) {
+        // A terminal manifest or a later round may have landed during the probes.
+        const round = manifest.startedAt;
+        const fresh = await containedFileStat(root, path.join(directory, "manifest.json"), MAX_MANIFEST_BYTES);
+        if (!fresh) continue;
+        manifest = await readManifest(fresh);
+        if (manifest.id !== name || !matchesParent(manifest)) continue;
+        sidecarGone = manifest.startedAt === round && ["queued", "running"].includes(manifest.status);
+      }
       const transcript = manifest.nativeTranscript && manifest.session
         ? await nativeClaudeTranscript(manifest.nativeTranscript, manifest.session)
           ?? await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES)
@@ -269,7 +337,7 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       // A running worker waiting on the phone's answer to a permission ask.
       const asking = !blocked && manifest.status === "running" && manifest.provider === "opencode" && manifest.session
         ? await readOpencodeRequest(manifest.session, storeRoot(env)) : undefined;
-      const gone = manifest.status === "running" && manifest.unmanagedPid !== undefined && pidGone(manifest.unmanagedPid);
+      const gone = sidecarGone || (manifest.status === "running" && manifest.unmanagedPid !== undefined && pidGone(manifest.unmanagedPid));
       const finishedAt = manifest.finishedAt ?? blocked?.at
         ?? (gone ? manifest.updatedAt : undefined)
         ?? (ARCHIVED_STATUSES.has(manifest.status)

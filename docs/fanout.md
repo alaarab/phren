@@ -148,6 +148,7 @@ Each job is a directory under the store's private runtime root:
 ```
 <store>/.runtime/agent-fanouts/<job id>/
   manifest.json    # schemaVersion, id, parent, provider, taskLabel, worktree, eventLog, status, ...
+  liveness.json    # the store launchers' pid liveness sidecar (see below)
   events.jsonl     # the worker's projected event log
   stderr.log       # bounded tail inspected for OpenCode refusals
   exit.txt         # the launcher's recorded exit code
@@ -166,6 +167,25 @@ prevent a second row. The Stop hook marks this one-shot worker completed and
 writes `exit.txt`. If its process disappears before Stop, the reader reports
 the worker as gone. No usage routing or wrapper permission policy applies to
 workers started directly with `claude -p`.
+
+The store's wrapper scripts record a `liveness.json` sidecar with `v: 1`, the
+computer id, the wrapper and provider PIDs, their `ps` start times in the C
+locale and UTC, and the manifest round (`startedAt`). Older Hooks can still
+read the manifest. The Hook reports a `queued` or `running` worker as `gone`
+when the version 1 sidecar matches the local computer and current round and
+both processes have exited. Reused PIDs and zombies count as exited. This is
+a read-only status in the Hook response.
+
+The wrappers send TERM to the provider's process group on cancellation or
+when the OpenCode loop watchdog trips. They wait up to ten seconds before
+killing any remaining group members and then write the terminal manifest
+and `exit.txt`.
+
+Known gaps include capacity accounting and archival for workers reported
+as `gone`, which still use the on-disk manifest and exit stamp. Background
+launches can inherit an ignored INT on systems without GNU `env`, including
+stock macOS. `phren fanout run` has a separate launcher that does not write
+the sidecar.
 
 Claude's background `Task` and `Agent` children count as finished when the
 parent records a successful, matching `TaskStop` result or a task notification
