@@ -89,6 +89,8 @@ class FakeChild extends EventEmitter {
     if (!this.lingers || signal === "SIGKILL") setImmediate(() => this.exit(null));
     return true;
   }
+  /** The child process started, as Node's `spawn` event reports. */
+  spawned() { this.emit("spawn"); }
   exit(code: number | null = 0) { if (this.exited) return; this.exited = true; this.emit("exit", code, null); }
 }
 
@@ -213,6 +215,42 @@ describe("stream admission", () => {
     const spawn = harness();
     const thrown = await start(`id=${ID}`, { ...spawn.deps, spawn: () => { throw new Error("no helper"); } });
     expect(thrown.closed).toEqual({ code: 1011, reason: "capture-failed" });
+    expect(activeMacWindowStreams()).toBe(0);
+  });
+});
+
+describe("child lifecycle", () => {
+  it("closes capture-failed on a stdin pipe error instead of crashing, and stays closed", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    children[0].stdin.emit("error", new Error("EPIPE"));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "capture-failed" });
+    // The teardown's own STOP write may hit the same closed pipe; it must not throw.
+    expect(() => children[0].stdin.emit("error", new Error("EPIPE"))).not.toThrow();
+  });
+  it("releases the slot at once when the spawn itself fails", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    children[0].emit("error", new Error("ENOENT"));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "capture-failed" });
+    expect(activeMacWindowStreams()).toBe(0);
+  });
+  it("keeps the slot after a post-spawn error until the started child actually exits", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    const child = children[0];
+    child.spawned();
+    child.emit("error", new Error("kill failed"));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "capture-failed" });
+    // The child may still be alive: the next connection is refused, not admitted.
+    expect(activeMacWindowStreams()).toBe(1);
+    const busy = await start("id=10", deps);
+    expect(busy.closed).toEqual({ code: 1013, reason: "stream-busy" });
+    child.exit(0);
+    await flush();
     expect(activeMacWindowStreams()).toBe(0);
   });
 });

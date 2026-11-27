@@ -185,6 +185,8 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   let ended = false;
   let child: ChildProcess | undefined;
+  /** The child announced it started; an 'error' after this is not a spawn failure. */
+  let childStarted = false;
   let lease: MacWindowStreamLease | undefined;
   let finishedLease = false;
   const finishLease = (outcome?: string) => {
@@ -471,16 +473,22 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     if (ended || client.readyState !== OPEN) return;
     const spawnedChild = deps.spawn(binary, ["stream", String(options.id), options.codec]);
     child = spawnedChild;
+    spawnedChild.once("spawn", () => { childStarted = true; });
     spawnedChild.once("exit", (code: number | null) => {
       childExited = true;
       releaseIfDone();
       if (!ended) { const close = exitClose(code); end(close.code, close.reason); }
     });
     spawnedChild.once("error", () => {
-      childExited = true;
+      // Only a failure before 'spawn' is a failed start; a later error (a
+      // refused signal, say) leaves a started child running, so its slot stays
+      // taken until it actually exits.
+      if (!childStarted) childExited = true;
       releaseIfDone();
       if (!ended) end(1011, "capture-failed");
     });
+    // A helper that exits mid-write makes Node emit EPIPE here, asynchronously.
+    spawnedChild.stdin?.on("error", () => { if (!ended) end(1011, "capture-failed"); });
     const stdout = spawnedChild.stdout;
     stdout?.on("data", (chunk: Buffer) => {
       if (ended) return;
