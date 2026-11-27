@@ -22,6 +22,10 @@ final class Controller: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         statusItem = makeStatusItem()
         rebuild()
+        // The Hook waits for this line before admitting an action, so the
+        // panels must be ordered front by now.
+        print("ready")
+        fflush(stdout)
         watchSignal()
         watchStdin()
         // A forgotten badge should not outlive the session by much.
