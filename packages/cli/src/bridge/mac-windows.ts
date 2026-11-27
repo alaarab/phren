@@ -226,6 +226,7 @@ let badge: MacWindowsBadge | undefined;
 let stoppedUntil = 0;
 let stoppedSession: string | undefined;
 let shuttingDown = false;
+let sessionEnding: Promise<void> = Promise.resolve();
 
 /** Test seam: forget the session, badge and stop window. */
 export function resetMacWindowsState(): void {
@@ -239,6 +240,7 @@ export function resetMacWindowsState(): void {
   stoppedUntil = 0;
   stoppedSession = undefined;
   shuttingDown = false;
+  sessionEnding = Promise.resolve();
   inputQueue = Promise.resolve();
   promptedScreenRecording = false;
   promptedAccessibility = false;
@@ -328,8 +330,12 @@ async function endSession(target?: Session): Promise<void> {
   const running = badge;
   badge = undefined;
   running?.kill("SIGTERM");
-  await appendSessionRow({ session: ending.id, action: "session-end", ok: true }).catch(() => undefined);
+  sessionEnding = appendSessionRow({ session: ending.id, action: "session-end", ok: true }).catch(() => undefined);
+  await sessionEnding;
 }
+
+/** Test seam: the audit write of the most recent session end. */
+export function macWindowsSessionEnd(): Promise<void> { return sessionEnding; }
 
 /** Ends the current session and kills the badge; the Hook calls this when it stops. */
 export async function stopMacWindows(): Promise<void> {
@@ -635,7 +641,7 @@ export async function macWindowsAct(input: unknown): Promise<Json> {
       await target.ready;
       requireLive(target);
       // Re-read at the head of the queue: an `off` that landed while this waited refuses it.
-      if (!await macWindowsEnabled()) {
+      if (!await deps.enabled()) {
         await endSession(target);
         throw disabledError();
       }

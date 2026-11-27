@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { EventEmitter as Emitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The real helper runner is exercised by the pre-spawn and CLI probe tests.
@@ -11,7 +12,7 @@ vi.mock("node:child_process", async () => {
   return {
     spawn: (file: string, args: string[]) => {
       runner.spawns.push([file, ...args]);
-      const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; stdin: { on(): void; end(): void }; kill(): void };
+      const child = new EventEmitter() as Emitter & { stdout: Emitter; stderr: Emitter; stdin: { on(): void; end(): void }; kill(): void };
       Object.assign(child, { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { on() {}, end() {} }, kill() {} });
       queueMicrotask(() => child.emit("close", runner.code));
       return child;
@@ -22,8 +23,8 @@ vi.mock("node:child_process", async () => {
 import type { Json } from "./protocol.js";
 import {
   graphemeCount, MAC_WINDOWS_BUILD_MS, MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, macWindowAction, macWindowPermissions, macWindowsAct,
-  macWindowsEnabled, macWindowsList, macWindowsLocalPermissionReport, macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSnapshot,
-  macWindowsSupported, resetMacWindowsState, runMacWindowsHelper, setMacWindowsDeps, setMacWindowsEnabled, stopMacWindows,
+  macWindowsEnabled, macWindowsList, macWindowsLocalPermissionReport, macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSessionEnd,
+  macWindowsSnapshot, macWindowsSupported, resetMacWindowsState, runMacWindowsHelper, setMacWindowsDeps, setMacWindowsEnabled, stopMacWindows,
   type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult,
 } from "./mac-windows.js";
 
@@ -37,6 +38,7 @@ const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 
 class FakeBadge implements MacWindowsBadge {
   ready: Promise<void>;
+  becameReady = false;
   kills: string[] = [];
   exits: ((code: number | null) => void)[] = [];
   private resolveReady!: () => void;
@@ -44,12 +46,12 @@ class FakeBadge implements MacWindowsBadge {
   constructor(autoReady = true) {
     this.ready = new Promise<void>((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject; });
     this.ready.catch(() => undefined);
-    if (autoReady) this.resolveReady();
+    if (autoReady) this.becomeReady();
   }
   kill(signal: NodeJS.Signals) { this.kills.push(signal); }
   onExit(listener: (code: number | null) => void) { this.exits.push(listener); }
   exit(code: number) { for (const listener of [...this.exits]) listener(code); }
-  becomeReady() { this.resolveReady(); }
+  becomeReady() { this.becameReady = true; this.resolveReady(); }
   failReady(error = new Error("no ready line")) { this.rejectReady(error); }
 }
 
@@ -60,6 +62,19 @@ let behaviour: (call: MacWindowsHelperCall) => Partial<MacWindowsHelperResult> |
 let custom: ((call: MacWindowsHelperCall, signal: AbortSignal) => Promise<MacWindowsHelperResult> | undefined) | undefined;
 let spawnDelay: (() => Promise<FakeBadge>) | undefined;
 let restore: (() => void) | undefined;
+let ranBeforeReady = false;
+let callWaiters: { match: (call: Call) => boolean; remaining: number; resolve: () => void }[] = [];
+let spawnWaiters: (() => void)[] = [];
+
+/** Resolves when the fake runner has been called `count` times for matching calls. */
+function callsSignal(match: (call: Call) => boolean, count = 1): Promise<void> {
+  return new Promise(resolve => { callWaiters.push({ match, remaining: count, resolve }); });
+}
+
+/** Resolves when the session asks for its badge. */
+function spawnSignal(): Promise<void> {
+  return new Promise(resolve => { spawnWaiters.push(resolve); });
+}
 
 function answer(call: MacWindowsHelperCall): MacWindowsHelperResult {
   const base: MacWindowsHelperResult = call.helper === "wincap" && call.args[0] === "list"
@@ -75,15 +90,6 @@ const logRows = async (): Promise<Json[]> => {
   return text.split("\n").filter(Boolean).map(line => JSON.parse(line) as Json);
 };
 
-/** Polls a condition on real timers, for lifecycle tests that need actual events. */
-async function until(condition: () => boolean, label = "condition"): Promise<void> {
-  const deadline = Date.now() + 3_000;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
-    await new Promise(resolve => setTimeout(resolve, 5));
-  }
-}
-
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "phren-mac-windows-"));
   vi.stubEnv("PHREN_BRIDGE_HOME", root);
@@ -91,6 +97,7 @@ beforeEach(async () => {
   calls = []; spawns = 0; badge = new FakeBadge(); releaseValue = "23.6.0";
   behaviour = () => undefined; custom = undefined; spawnDelay = undefined;
   runner.spawns = []; runner.code = 0;
+  ranBeforeReady = false; callWaiters = []; spawnWaiters = [];
   resetMacWindowsState();
   restore = setMacWindowsDeps({
     platform: () => "darwin",
@@ -99,10 +106,23 @@ beforeEach(async () => {
     // The 500 ms enable poll would otherwise fire hundreds of times when a test advances the idle clock.
     pollMs: () => 3_600_000,
     run: async (call, signal) => {
-      calls.push({ helper: call.helper, args: call.args, ...(call.input !== undefined ? { input: call.input } : {}) });
+      const record = { helper: call.helper, args: call.args, ...(call.input !== undefined ? { input: call.input } : {}) };
+      if (!badge.becameReady) ranBeforeReady = true;
+      calls.push(record);
+      for (const waiter of [...callWaiters]) {
+        if (!waiter.match(record)) continue;
+        waiter.remaining--;
+        if (waiter.remaining > 0) continue;
+        callWaiters.splice(callWaiters.indexOf(waiter), 1);
+        waiter.resolve();
+      }
       return custom?.(call, signal) ?? answer(call);
     },
-    spawnBadge: async () => { spawns++; return spawnDelay ? spawnDelay() : badge; },
+    spawnBadge: async () => {
+      spawns++;
+      for (const waiter of spawnWaiters.splice(0)) waiter();
+      return spawnDelay ? spawnDelay() : badge;
+    },
   });
 });
 
@@ -219,25 +239,24 @@ describe("mac windows: requests", () => {
   });
 
   it("shares one indicator startup between concurrent first requests", async () => {
-    // The indicator build/spawn and its ready line happen on real timers here.
-    vi.useRealTimers();
     badge = new FakeBadge(false);
+    const spawned = spawnSignal();
     const first = macWindowsAct({ action: "tap", id: 7, x: 0.1, y: 0.1 });
     const second = macWindowsAct({ action: "tap", id: 7, x: 0.9, y: 0.9 });
-    await until(() => spawns === 1, "one badge spawn");
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await spawned;
     expect(spawns).toBe(1);
     expect(calls.filter(call => call.helper === "wininput" && call.args[0] === "tap")).toHaveLength(0);
     badge.becomeReady();
     await Promise.all([first, second]);
     expect(calls.filter(call => call.helper === "wininput" && call.args[0] === "tap")).toHaveLength(2);
+    expect(ranBeforeReady).toBe(false);
   });
 
   it("refuses when the indicator never reports ready", async () => {
-    vi.useRealTimers();
     badge = new FakeBadge(false);
+    const spawned = spawnSignal();
     const pending = macWindowsList();
-    await until(() => spawns === 1, "the badge spawn");
+    await spawned;
     badge.failReady();
     await expect(pending).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-indicator" } });
     expect(calls).toEqual([]);
@@ -252,12 +271,9 @@ describe("mac windows: requests", () => {
     expect(listed).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(MAC_WINDOWS_IDLE_MS + 1);
     expect(badge.kills).toEqual(["SIGTERM"]);
-    // The session-end row is written asynchronously; wait on real timers for it.
-    vi.useRealTimers();
-    await vi.waitFor(async () => {
-      const end = (await logRows()).at(-1);
-      expect(end).toMatchObject({ action: "session-end", session: listed[0].session });
-    });
+    await macWindowsSessionEnd();
+    const end = (await logRows()).at(-1);
+    expect(end).toMatchObject({ action: "session-end", session: listed[0].session });
     await macWindowsList();
     expect(spawns).toBe(2);
   });
@@ -272,7 +288,6 @@ describe("mac windows: requests", () => {
   });
 
   it("stops a running input cooperatively when Stop is pressed", async () => {
-    vi.useRealTimers();
     let stopped = false;
     custom = (call, signal) => call.helper === "wininput" && call.args[0] === "type"
       ? new Promise(resolve => signal.addEventListener("abort", () => {
@@ -280,8 +295,9 @@ describe("mac windows: requests", () => {
         resolve({ stdout: Buffer.alloc(0), stderr: "cancelled\n", code: 8 });
       }, { once: true }))
       : undefined;
+    const typingStarted = callsSignal(call => call.helper === "wininput" && call.args[0] === "type");
     const typing = macWindowsAct({ action: "type", id: 7, text: "secret" });
-    await until(() => calls.some(call => call.helper === "wininput" && call.args[0] === "type"), "the typing child");
+    await typingStarted;
     badge.exit(10);
     await expect(typing).rejects.toMatchObject({
       status: 409, message: "Phone control ended before that input finished; part of the text may have been typed.", details: { code: "mac-windows-cancelled" },
@@ -290,29 +306,28 @@ describe("mac windows: requests", () => {
   });
 
   it("reports success when the helper finished as cancellation arrived", async () => {
-    vi.useRealTimers();
     custom = (call, signal) => call.helper === "wininput" && call.args[0] === "type"
       ? new Promise(resolve => signal.addEventListener("abort", () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 }), { once: true }))
       : undefined;
+    const typingStarted = callsSignal(call => call.helper === "wininput" && call.args[0] === "type");
     const typing = macWindowsAct({ action: "type", id: 7, text: "hello" });
-    await until(() => calls.some(call => call.helper === "wininput" && call.args[0] === "type"), "the typing child");
+    await typingStarted;
     badge.exit(10);
     await expect(typing).resolves.toEqual({ ok: true });
   });
 
   it("refuses a queued action after the feature is turned off", async () => {
-    vi.useRealTimers();
+    let allow = true;
+    setMacWindowsDeps({ enabled: () => Promise.resolve(allow) });
     let releaseFirst!: () => void;
     custom = call => call.helper === "wininput" && call.args[0] === "tap"
-      ? new Promise(resolve => {
-        if (call.args[2] === "0.1") releaseFirst = () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 });
-        else resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 });
-      })
+      ? new Promise(resolve => { releaseFirst = () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 }); })
       : undefined;
+    const firstStarted = callsSignal(call => call.args[0] === "tap");
     const first = macWindowsAct({ action: "tap", id: 7, x: 0.1, y: 0.1 });
+    await firstStarted;
+    allow = false;
     const second = macWindowsAct({ action: "tap", id: 7, x: 0.2, y: 0.2 });
-    await until(() => calls.filter(call => call.args[0] === "tap").length === 1, "the first tap");
-    await setMacWindowsEnabled(false);
     releaseFirst();
     await expect(first).resolves.toEqual({ ok: true });
     await expect(second).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
@@ -324,9 +339,9 @@ describe("mac windows: requests", () => {
     custom = call => call.helper === "wininput" && call.args[0] === "raise"
       ? new Promise(resolve => { release = () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 }); })
       : undefined;
+    const raiseStarted = callsSignal(call => call.args[0] === "raise");
     const raising = macWindowsAct({ action: "raise", id: 7 });
-    for (let tick = 0; tick < 50 && !calls.some(call => call.args[0] === "raise"); tick++) await vi.advanceTimersByTimeAsync(5);
-    expect(calls.some(call => call.args[0] === "raise")).toBe(true);
+    await raiseStarted;
     await vi.advanceTimersByTimeAsync(MAC_WINDOWS_IDLE_MS + 1);
     expect(badge.kills).toEqual([]);
     release();
@@ -336,12 +351,12 @@ describe("mac windows: requests", () => {
   });
 
   it("refuses new sessions while shutting down and disposes a late badge", async () => {
-    vi.useRealTimers();
     let releaseSpawn!: () => void;
     const lateBadge = new FakeBadge(false);
     spawnDelay = () => new Promise<FakeBadge>(resolve => { releaseSpawn = () => resolve(lateBadge); });
+    const spawned = spawnSignal();
     const starting = macWindowsList().catch(error => error);
-    await until(() => spawns === 1, "the badge spawn");
+    await spawned;
     const stopping = stopMacWindows();
     releaseSpawn();
     await stopping;
@@ -354,9 +369,9 @@ describe("mac windows: requests", () => {
     let releaseSpawn!: () => void;
     const lateBadge = new FakeBadge(false);
     spawnDelay = () => new Promise<FakeBadge>(resolve => { releaseSpawn = () => resolve(lateBadge); });
+    const spawned = spawnSignal();
     const starting = macWindowsList().catch(error => error);
-    for (let tick = 0; tick < 50 && spawns === 0; tick++) await vi.advanceTimersByTimeAsync(5);
-    expect(spawns).toBe(1);
+    await spawned;
     await vi.advanceTimersByTimeAsync(MAC_WINDOWS_BUILD_MS + 1);
     releaseSpawn();
     await vi.advanceTimersByTimeAsync(0);
@@ -379,12 +394,17 @@ describe("mac windows: requests", () => {
   });
 
   it("does not spawn when the session ends during the pre-spawn setting read", async () => {
-    vi.useRealTimers();
-    let releaseRead!: (enabled: boolean) => void, reads = 0;
-    setMacWindowsDeps({ run: runMacWindowsHelper, enabled: () => { reads++; return new Promise<boolean>(resolve => { releaseRead = resolve; }); } });
+    let reads = 0, releaseRead!: (enabled: boolean) => void, signalRead!: () => void;
+    const preSpawnRead = new Promise<void>(resolve => { signalRead = resolve; });
+    setMacWindowsDeps({ run: runMacWindowsHelper, enabled: () => {
+      reads++;
+      if (reads === 1) return Promise.resolve(true);
+      signalRead();
+      return new Promise<boolean>(resolve => { releaseRead = resolve; });
+    } });
     await setMacWindowsEnabled(true);
     const acting = macWindowsAct({ action: "raise", id: 7 }).catch(error => error);
-    await until(() => reads === 1, "the pre-spawn setting read");
+    await preSpawnRead;
     const stopping = stopMacWindows();
     releaseRead(true);
     await stopping;
@@ -443,7 +463,6 @@ describe("mac windows: permissions", () => {
   });
 
   it("answers the CLI status probes while phone control is off", async () => {
-    vi.useRealTimers();
     setMacWindowsDeps({ run: runMacWindowsHelper });
     const report = await macWindowsLocalPermissionReport();
     expect(report).toEqual({ screenRecording: { granted: true }, accessibility: { granted: true } });
@@ -454,13 +473,13 @@ describe("mac windows: permissions", () => {
   });
 
   it("refuses the permission route when Stop arrives during its probes", async () => {
-    vi.useRealTimers();
     await setMacWindowsEnabled(true);
     custom = (call, signal) => call.args[0] === "check"
       ? new Promise(resolve => signal.addEventListener("abort", () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 }), { once: true }))
       : undefined;
+    const probesStarted = callsSignal(call => call.args[0] === "check", 2);
     const asking = macWindowsRequestPermission("accessibility").catch(error => error);
-    await until(() => calls.filter(call => call.args[0] === "check").length === 2, "both probes");
+    await probesStarted;
     badge.exit(10);
     await expect(asking).resolves.toMatchObject({ status: 409, details: { code: "mac-windows-cancelled" } });
   });
