@@ -77,7 +77,7 @@ describe("owner inbox push sweep", () => {
     const seeded = await ledger();
     expect(seeded.entries.map(entry => entry.id)).toEqual([ids[3], ids[2], ids[1]]);
     expect(seeded.entries.every(entry => entry.expiresAt === iso(AT + DAY) && entry.sentDeviceIDs.length === 0)).toBe(true);
-    expect((await stat(file)).mode & 0o077).toBe(0);
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o077).toBe(0);
 
     sender.devices.push(DEVICE_A);
     await first.observe(rows);
