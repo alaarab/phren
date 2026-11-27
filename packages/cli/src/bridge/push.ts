@@ -25,7 +25,7 @@ const deviceSchema = z.object({
   token: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   relay: relaySchema.optional(),
   environment: z.enum(["development", "production"]),
-  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"])).max(5).default(["approval"]),
+  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked", "ownerInbox"])).max(6).default(["approval"]),
 }).refine(device => device.token !== undefined || device.relay !== undefined, "A phone needs an APNs token or a relay registration.");
 export type PushDevice = z.infer<typeof deviceSchema>;
 
@@ -54,6 +54,9 @@ export interface SchedulePush {
   route?: string;
 }
 export interface SchedulePushResult { notified: boolean; reason?: string }
+/** One open owner-inbox row worth alerting: the ledger freezes `expiresAt` as
+ * the candidate deadline, which is also the APNs expiration. */
+export interface OwnerInboxPush { id: string; title: string; expiresAt: string }
 
 export function scheduleCollapseId(kind: SchedulePushKind, runId: string): string {
   return `${runId.slice(0, 63 - kind.length)}-${kind}`;
@@ -114,6 +117,26 @@ export function schedulePushPayload(value: SchedulePush): Record<string, unknown
     phren: { kind: value.kind, scheduleId: value.scheduleId, project: value.project, name: value.name,
       computer: value.computer, runId: value.runId, status: value.status, ...(value.reason ? { reason: value.reason } : {}),
       ...(value.route ? { route: value.route } : {}) },
+  };
+}
+
+/** The alert body is the item title, at most 500 UTF-8 bytes, cut between
+ * characters so a phone never shows a replacement glyph. */
+export function ownerInboxPushBody(value: string): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= 500) return value;
+  let end = 500;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+/** A new open owner-inbox row. The phone-local host and the item id are the
+ * only routing data: the alert opens Inbox, it never carries commands. */
+export function ownerInboxPushPayload(value: OwnerInboxPush, host: string): Record<string, unknown> {
+  return {
+    aps: { alert: { title: "Phren Inbox", body: ownerInboxPushBody(value.title) }, category: "PHREN_OWNER_INBOX",
+      "interruption-level": "active" },
+    phren: { version: 1, kind: "ownerInbox", host, id: value.id },
   };
 }
 
@@ -360,6 +383,23 @@ export class ApprovalPushService {
     return (await Promise.all(devices.map(device => this.send(device, machineHealthPushPayload(value, device.hostID), {
       expiration: "0", collapseId: `health-${value.id}`.slice(0, 64),
     })))).some(Boolean);
+  }
+  /** Phones that asked for Inbox alerts and can be reached now. The sweep
+   *  asks again for every send, so a forgotten phone never gets one. */
+  ownerInboxPushDevices(): string[] {
+    return this.reachable.filter(device => !!device.hostID && device.kinds.includes("ownerInbox"))
+      .map(device => device.deviceID);
+  }
+  /** One phone only: each inbox row is offered per device, so retrying one
+   *  phone never repeats an alert another phone already accepted. */
+  async notifyOwnerInbox(value: OwnerInboxPush, deviceID: string): Promise<boolean> {
+    const device = this.reachable.find(item => item.deviceID === deviceID);
+    if (!device || !device.hostID || !device.kinds.includes("ownerInbox")) return false;
+    const deadline = Date.parse(value.expiresAt);
+    return this.send(device, ownerInboxPushPayload(value, device.hostID), {
+      expiration: Number.isFinite(deadline) ? String(Math.floor(deadline / 1000)) : "0",
+      collapseId: `inbox-${value.id}`,
+    });
   }
   async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
     const reachable = this.reachable;
