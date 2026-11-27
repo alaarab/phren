@@ -26,10 +26,12 @@ and available dates. Findings from `FINDINGS.md`, topic archives, and `.older.md
 archives all appear, including superseded and retracted findings. Wikilinks connect
 projects, findings, and fragments through the fragment index and finding lifecycle
 references. Finding files resolve to regular files inside their selected project.
-The export reports and skips paths that violate that boundary. Fragment links are
-scoped to indexed documents in selected projects. A legacy manual link is exported
-when exactly one selected store owns the document key. A finding also links
-to a fragment when it names or explicitly annotates that fragment. Exact
+The export reports and skips paths that violate that boundary. Wikilinks in
+reference docs, including imported Obsidian notes, contribute fragments linked
+from their project note. Fragment links are scoped to indexed documents in
+selected projects. A legacy manual link is exported when exactly one selected
+store owns the document key. A finding also links to a fragment when it names
+or explicitly annotates that fragment. Exact
 lifecycle references take precedence over text prefixes. Unresolved lifecycle
 references and source wikilinks appear as literal text. Source wikilinks keep
 their heading target when that heading exists in the generated note.

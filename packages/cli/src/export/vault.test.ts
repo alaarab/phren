@@ -5,6 +5,7 @@ import { CORE_SCHEMA, load } from "js-yaml";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { formatCommand } from "../cli-help.js";
 import { lookupCommand } from "../cli-registry.js";
+import { importVault } from "../import/vault.js";
 import { attachedStoresFilePath, writeStoreRegistry } from "../store-registry.js";
 import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
 import { exportVault } from "./vault.js";
@@ -58,6 +59,28 @@ function manualLinks(root: string, links: Array<[string, string]>): void {
     { sourceDoc, entity, entityType: "fragment", relType: "mentions" }
   ))));
 }
+
+it("exports fragments linked from imported reference notes and skips generated notes on re-import", async () => {
+  const source = path.join(tmp.path, "source-vault");
+  const project = path.join(store, "demo");
+  const options = { dryRun: false, prune: false };
+  fs.mkdirSync(project);
+  writeFile(path.join(source, "Field note.md"), "# Field note\n\n[[Gamma]] and Redis\n");
+  writeFile(path.join(store, "other", "reference", "Note.md"), "[[Delta]]\n");
+  expect(importVault(source, project, options).added).toBe(1);
+
+  await expect(exportVault(store, vault, ["demo"], false)).resolves.toEqual({ projects: 1, findings: 0, fragments: 1 });
+  const exported = notes();
+  expect(exported.map(note => note.meta.kind).sort()).toEqual(["fragment", "project"]);
+  const fragment = exported.find(note => note.meta.fragment === "gamma")!;
+  const demo = exported.find(note => note.meta.project === "demo")!;
+  expect(demo.body).toContain(linkTo(fragment.file));
+  expect(fragment.body).toContain(linkTo(demo.file));
+
+  const reimport = importVault(vault, project, options);
+  expect(reimport).toMatchObject({ added: 0, updated: 0, generated: 2 });
+  expect(fs.existsSync(reimport.root)).toBe(false);
+});
 
 it("exports all finding tiers, lifecycle links, fragment links, and citations", async () => {
   writeFile(path.join(store, "atlas", "FINDINGS.md"), [
@@ -280,7 +303,7 @@ it("prefers exact lifecycle references and links only unique truncated reference
 it("uses generated note targets for source wikilinks and renders unresolved targets literally", async () => {
   writeFile(path.join(store, "atlas", "FINDINGS.md"), [
     "- Use `lattice` for fanout <!-- fid:aaaa0001 -->",
-    "- See [[atlas|our project]], [[atlas#findings|list]], [[atlas#Missing]], ![[fragment-lattice.md]], [[#Fragments|here]], [[Roadmap]] and ![[Diagram]] <!-- fid:aaaa0002 --> <!-- fragment: lattice -->", "",
+    "- See [[project-atlas|our project]], [[project-atlas#findings|list]], [[project-atlas#Missing]], ![[fragment-lattice.md]], [[#Fragments|here]], [[Research/Roadmap]] and ![[Diagram]] <!-- fid:aaaa0002 --> <!-- fragment: lattice -->", "",
   ].join("\n"));
   await exportVault(store, vault, [], false);
   const exported = notes();
@@ -289,9 +312,9 @@ it("uses generated note targets for source wikilinks and renders unresolved targ
   expect(body).toContain("[[project-atlas|our project]]");
   expect(body).toContain("[[project-atlas#Findings|list]]");
   expect(body).toContain(`[[${file.slice(0, -3)}#Fragments|here]]`);
-  expect(body).toContain("\\[\\[atlas#Missing\\]\\]");
+  expect(body).toContain("\\[\\[project-atlas#Missing\\]\\]");
   expect(body).toContain("![[fragment-lattice|lattice]]");
-  expect(body).toContain("\\[\\[Roadmap\\]\\]");
+  expect(body).toContain("\\[\\[Research/Roadmap\\]\\]");
   expect(body).toContain("!\\[\\[Diagram\\]\\]");
   for (const note of exported) for (const [, target, heading] of note.body.matchAll(/\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]*)?\]\]/g)) {
     const linked = documents.get(`${target}.md`);

@@ -1364,9 +1364,9 @@ export async function readStoreFragmentGraph(
     try {
       db.run("BEGIN");
       for (const [key, doc] of selected) {
-        if (doc.type !== "findings") continue;
+        if (doc.type !== "findings" && doc.type !== "reference") continue;
         const raw = readFileOrNull(doc.fullPath);
-        if (raw !== null) extractAndLinkFragments(db, raw, key, store);
+        if (raw !== null) extractAndLinkFragments(db, raw, key, store, doc.type === "reference");
       }
       // Legacy unqualified links can live in the primary store regardless of their source store.
       const unique = new Set([...selected.keys()].filter(key => owners.get(key) === 1));
