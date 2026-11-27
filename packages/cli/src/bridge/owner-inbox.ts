@@ -219,8 +219,14 @@ export class OwnerInbox {
       }
       try {
         const rows = await this.read(), now = Date.now();
-        const item = rows.find(row => row.id === id);
-        if (!item) throw new BridgeError(404, "No owner inbox item with that id.");
+        // Legacy adds kept an owner-supplied UUID as written; a phone sends the
+        // lowercase form it decodes. Two rows differing only by case are
+        // ambiguous, so neither is closed.
+        const wanted = id.toLowerCase();
+        const matches = rows.filter(row => row.id.toLowerCase() === wanted);
+        if (!matches.length) throw new BridgeError(404, "No owner inbox item with that id.");
+        if (matches.length > 1) throw new BridgeError(409, "More than one owner inbox item has that id. Fix the stored rows before retrying.");
+        const item = matches[0];
         if (item.state !== "open") throw new BridgeError(409, "This inbox item was already handled.");
         if (item.updatedAt !== ifUpdatedAt) throw new BridgeError(409, "This inbox item changed. Refresh it and try again.");
         // Edits in the same millisecond still need distinct paste revisions.

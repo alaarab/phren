@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BridgeError } from "./protocol.js";
+import type { Json } from "./protocol.js";
 import { bodyDigest, OWNER_PROOF_HEADER } from "./owner-proof.js";
-import { createRouteHandler, capabilitiesForModules, ownerInboxCloseSchema } from "./server-routes.js";
-import type { OwnerInbox } from "./owner-inbox.js";
+import { OwnerInbox } from "./owner-inbox.js";
+import { createRouteHandler, capabilitiesForModules } from "./server-routes.js";
 
 const state = vi.hoisted(() => ({ home: "" }));
 vi.mock("../home-paths.js", async original => ({
@@ -16,7 +16,8 @@ vi.mock("../home-paths.js", async original => ({
 
 const AT = "2026-11-27T10:00:00.000Z";
 const ID = "aaaaaaaa-1111-4111-8111-111111111111";
-const ROW = { id: ID, kind: "manual", title: "OVH US VPS-2 is in stock", state: "open", createdAt: AT, updatedAt: AT, project: "phren" };
+const UPPER = "AAAAAAAA-1111-4111-8111-111111111111";
+const TITLE = "OVH US VPS-2 is in stock";
 
 /** A paired phone: the key it signs with, and the authorized_keys line that makes it a device. */
 function phone() {
@@ -47,12 +48,12 @@ const snapshot = {
   modules: [{ name: "conductor", capabilities: ["ownerInbox"] }],
 };
 
-let root: string, owner: Phone, inbox: { close: ReturnType<typeof vi.fn>; run: ReturnType<typeof vi.fn> };
+let root: string, owner: Phone, inbox: OwnerInbox;
 let confirmed = 0;
 
 async function call(pathname: string, method: string, payload?: unknown, headers: Record<string, string> = {}) {
   const handler = createRouteHandler({
-    modules: snapshot, info: { computer: { id: "computer-1", name: "Test" } }, inbox: inbox as unknown as OwnerInbox,
+    modules: snapshot, info: { computer: { id: "computer-1", name: "Test" } }, inbox,
     streams: {}, agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set(), ownerConfirms: { confirm: async () => { confirmed++; } } },
     journal: { record: async () => {} }, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() },
     contextUsage: { read: async () => new Map() },
@@ -67,6 +68,18 @@ async function call(pathname: string, method: string, payload?: unknown, headers
   return { status: response.statusCode, data: JSON.parse(responseBody), raw };
 }
 
+/** A signed close of one exact body, as the phone sends it. */
+function close(payload: Json) {
+  return call("/v1/owner-inbox/close", "POST", payload, { [OWNER_PROOF_HEADER]: proof(owner, JSON.stringify(payload)) });
+}
+
+/** Add a real persisted row and hand back its stored revision. */
+async function add(fields: Json): Promise<{ id: string; updatedAt: string; title: string }> {
+  const result = await inbox.run({ action: "add", ...fields });
+  return result.item as { id: string; updatedAt: string; title: string };
+}
+const stored = async () => (await inbox.run({ action: "list", includeResolved: true })).items as Json[];
+
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "owner-inbox-close-"));
   state.home = path.join(root, "home");
@@ -75,13 +88,7 @@ beforeEach(async () => {
   await mkdir(path.join(state.home, ".ssh"), { recursive: true });
   await writeFile(path.join(state.home, ".ssh", "authorized_keys"), owner.authorizedKeys);
   confirmed = 0;
-  inbox = {
-    close: vi.fn(async (_id: string, _ifUpdatedAt: string, decision: "resolve" | "dismiss") => ({
-      ...ROW, state: "resolved", updatedAt: "2026-11-27T10:05:00.000Z", resolvedAt: "2026-11-27T10:05:00.000Z",
-      resolution: decision === "resolve" ? "done" : "dismissed",
-    })),
-    run: vi.fn(async () => ({ ok: true, items: [ROW] })),
-  };
+  inbox = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
 });
 afterEach(async () => {
   delete process.env.PHREN_BRIDGE_HOME;
@@ -89,9 +96,9 @@ afterEach(async () => {
 });
 
 describe("POST /v1/owner-inbox/close", () => {
-  const body = { id: ID, ifUpdatedAt: AT, decision: "resolve" };
-
   it("requires the paired phone's signature from the first request, with no terminal fallback", async () => {
+    const row = await add({ id: ID, title: TITLE });
+    const body = { id: row.id, ifUpdatedAt: row.updatedAt, decision: "resolve" };
     const unsigned = await call("/v1/owner-inbox/close", "POST", body);
     expect(unsigned.status).toBe(403);
     expect(unsigned.data).toMatchObject({ code: "owner-proof-required" });
@@ -99,19 +106,23 @@ describe("POST /v1/owner-inbox/close", () => {
     const waiting = await call("/v1/owner-inbox/close", "POST", body, { "x-phren-owner-confirm": "wait" });
     expect(waiting.status).toBe(403);
     expect(confirmed).toBe(0);
-    expect(inbox.close).not.toHaveBeenCalled();
+    expect((await stored())[0]).toMatchObject({ state: "open" });
   });
 
   it("refuses a peer gateway's origin and an agent's origin", async () => {
+    const row = await add({ id: ID, title: TITLE });
+    const body = { id: row.id, ifUpdatedAt: row.updatedAt, decision: "resolve" };
     const peer = await call("/v1/owner-inbox/close", "POST", body, { "x-phren-origin": "peer" });
     expect(peer.status).toBe(403);
     expect(peer.data.error).toContain("Only the owner's phone");
     const agent = await call("/v1/owner-inbox/close", "POST", { ...body, origin: { server: "default", workspace: "w", tab: "t", pane: "p" } });
     expect(agent.status).toBe(403);
-    expect(inbox.close).not.toHaveBeenCalled();
+    expect((await stored())[0]).toMatchObject({ state: "open" });
   });
 
   it("refuses a stranger's proof and a replayed proof", async () => {
+    const row = await add({ id: ID, title: TITLE });
+    const body = { id: row.id, ifUpdatedAt: row.updatedAt, decision: "resolve" };
     const stranger = phone();
     const refused = await call("/v1/owner-inbox/close", "POST", body, { [OWNER_PROOF_HEADER]: proof(stranger, JSON.stringify(body)) });
     expect(refused.status).toBe(403);
@@ -122,33 +133,51 @@ describe("POST /v1/owner-inbox/close", () => {
     expect(replay.status).toBe(403);
   });
 
-  it("resolves and dismisses with the stored row and its owner", async () => {
-    const raw = JSON.stringify(body);
-    const resolved = await call("/v1/owner-inbox/close", "POST", body, { [OWNER_PROOF_HEADER]: proof(owner, raw) });
+  it("resolves and dismisses a real persisted row with its owner", async () => {
+    const row = await add({ id: ID, title: TITLE, project: "phren" });
+    const resolved = await close({ id: row.id, ifUpdatedAt: row.updatedAt, decision: "resolve" });
     expect(resolved.status).toBe(200);
     expect(resolved.data).toMatchObject({ ok: true, item: { id: ID, state: "resolved", resolution: "done", inboxComputer: "local" } });
-    expect(inbox.close).toHaveBeenCalledWith(ID, AT, "resolve");
+    expect((await stored())[0]).toMatchObject({ state: "resolved", resolution: "done", resolvedAt: expect.any(String) });
+    expect((await stored())[0].updatedAt).not.toBe(row.updatedAt);
 
-    const dismissed = await call("/v1/owner-inbox/close", "POST", { ...body, decision: "dismiss" },
-      { [OWNER_PROOF_HEADER]: proof(owner, JSON.stringify({ ...body, decision: "dismiss" })) });
+    const second = await add({ id: "bbbbbbbb-2222-4222-8222-222222222222", title: "Dismiss me" });
+    const dismissed = await close({ id: second.id, ifUpdatedAt: second.updatedAt, decision: "dismiss" });
     expect(dismissed.status).toBe(200);
     expect(dismissed.data.item).toMatchObject({ resolution: "dismissed" });
-    expect(inbox.close).toHaveBeenLastCalledWith(ID, AT, "dismiss");
   });
 
-  it("passes the owned row's own 404 and 409 through the wire", async () => {
-    inbox.close.mockRejectedValueOnce(new BridgeError(404, "No owner inbox item with that id.")).mockRejectedValueOnce(new BridgeError(409, "This inbox item changed."));
-    const raw = JSON.stringify(body);
-    const missing = await call("/v1/owner-inbox/close", "POST", body, { [OWNER_PROOF_HEADER]: proof(owner, raw) });
+  it("finds a legacy uppercase UUID case-insensitively and keeps the exact revision check", async () => {
+    const row = await add({ id: UPPER, title: TITLE });
+    expect(row.id).toBe(UPPER);
+    const stale = await close({ id: ID, ifUpdatedAt: AT, decision: "resolve" });
+    expect(stale.status).toBe(409);
+    expect(stale.data.error).toContain("changed");
+    const closed = await close({ id: ID, ifUpdatedAt: row.updatedAt, decision: "resolve" });
+    expect(closed.status).toBe(200);
+    expect(closed.data.item).toMatchObject({ id: UPPER, resolution: "done" });
+  });
+
+  it("refuses an ambiguous legacy case collision with 409", async () => {
+    await add({ id: UPPER, title: "Uppercase copy" });
+    const lower = await add({ id: ID, title: "Lowercase copy" });
+    const refused = await close({ id: ID, ifUpdatedAt: lower.updatedAt, decision: "dismiss" });
+    expect(refused.status).toBe(409);
+    expect(refused.data.error).toContain("More than one");
+    expect((await stored()).every(row => row.state === "open")).toBe(true);
+  });
+
+  it("refuses an already handled row with 409", async () => {
+    const row = await add({ id: ID, title: TITLE });
+    expect((await close({ id: row.id, ifUpdatedAt: row.updatedAt, decision: "resolve" })).status).toBe(200);
+    const again = await close({ id: row.id, ifUpdatedAt: row.updatedAt, decision: "dismiss" });
+    expect(again.status).toBe(409);
+    expect(again.data.error).toContain("already handled");
+  });
+
+  it("passes the owned row's 404 through the signed route", async () => {
+    const missing = await close({ id: randomUUID(), ifUpdatedAt: AT, decision: "resolve" });
     expect(missing.status).toBe(404);
-    const changed = await call("/v1/owner-inbox/close", "POST", body, { [OWNER_PROOF_HEADER]: proof(owner, raw) });
-    expect(changed.status).toBe(409);
-  });
-
-  it("keeps the strict body free of extra keys", () => {
-    expect(ownerInboxCloseSchema.parse({ id: ID, ifUpdatedAt: AT, decision: "dismiss" })).toEqual({ id: ID, ifUpdatedAt: AT, decision: "dismiss" });
-    expect(() => ownerInboxCloseSchema.parse({ ...body, computer: "Desk" })).toThrow();
-    expect(() => ownerInboxCloseSchema.parse({ ...body, decision: "undo" })).toThrow();
   });
 });
 
@@ -162,8 +191,9 @@ describe("owner inbox capabilities and module gate", () => {
   });
 
   it("gates the close route on the conductor module", async () => {
+    const row = await add({ id: ID, title: TITLE });
     const handler = createRouteHandler({
-      modules: { ...snapshot, has: () => false, modules: [] }, info: {}, inbox: inbox as unknown as OwnerInbox,
+      modules: { ...snapshot, has: () => false, modules: [] }, info: {}, inbox,
       streams: {}, agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set(), ownerConfirms: { confirm: async () => {} } },
       journal: { record: async () => {} }, tabActivity: { observe: async () => ({ generation: 0, stamps: new Map() }), recordStatus: async () => new Map() },
       contextUsage: { read: async () => new Map() },
@@ -172,34 +202,51 @@ describe("owner inbox capabilities and module gate", () => {
     const response = { statusCode: 200, setHeader() {}, end(value: string) { body = value; } };
     await handler({
       url: "/v1/owner-inbox/close", method: "POST", headers: {},
-      [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify({ id: ID, ifUpdatedAt: AT, decision: "resolve" })); },
+      [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify({ id: row.id, ifUpdatedAt: row.updatedAt, decision: "resolve" })); },
     } as unknown as IncomingMessage, response as unknown as ServerResponse);
     expect(response.statusCode).toBe(404);
     expect(JSON.parse(body).error).toContain("conductor");
-    expect(inbox.close).not.toHaveBeenCalled();
+    expect((await stored())[0]).toMatchObject({ state: "open" });
   });
 });
 
 describe("existing owner inbox routes", () => {
-  it("keeps the legacy unsigned POST list and add", async () => {
-    const added = await call("/v1/owner-inbox", "POST", { action: "add", title: "Restart the router", project: "phren" });
+  it("keeps the legacy unsigned POST add and the GET read", async () => {
+    const added = await call("/v1/owner-inbox", "POST", { action: "add", id: ID, title: "Restart the router", project: "phren" });
     expect(added.status).toBe(200);
-    expect(added.data.ok).toBe(true);
-    expect(inbox.run).toHaveBeenCalledWith({ action: "add", title: "Restart the router", project: "phren" });
+    expect(added.data.item).toMatchObject({ id: ID, state: "open", title: "Restart the router" });
+    const read = await call("/v1/owner-inbox?local=1", "GET");
+    expect(read.status).toBe(200);
+    expect(read.data.items).toEqual([expect.objectContaining({ id: ID, state: "open", title: "Restart the router" })]);
   });
 
   it("answers a compact local read with only the phone's fields", async () => {
+    await add({ id: ID, title: TITLE });
     const read = await call("/v1/owner-inbox?local=1&compact=1", "GET");
     expect(read.status).toBe(200);
-    expect(read.data.items).toEqual([{ ...ROW }]);
+    expect(read.data.items).toEqual([{ id: ID, title: TITLE, kind: "manual", state: "open", createdAt: expect.any(String), updatedAt: expect.any(String) }]);
+  });
+
+  it("keeps the aggregation keys for a peer read that asks and strips them when it does not", async () => {
+    inbox = new OwnerInbox(async () => [{ source: "task-stale:phren:bid:c2cc33d0", kind: "blocked", title: "Claim the stale task" }], path.join(root, "owner-inbox.json"));
+    await inbox.run({ action: "list" });
+    const peer = await call("/v1/owner-inbox?local=1&compact=1&reconcile=1", "GET");
+    expect(peer.data.items).toEqual([expect.objectContaining({ kind: "blocked", live: true, source: "task-stale:phren:bid:c2cc33d0" })]);
+    const plain = await call("/v1/owner-inbox?local=1&compact=1", "GET");
+    expect(plain.data.items[0]).not.toHaveProperty("live");
+    expect(plain.data.items[0]).not.toHaveProperty("source");
+    // `reconcile` is mine to read only on a local read; an aggregate read ignores it.
+    const aggregate = await call("/v1/owner-inbox?compact=1&reconcile=1", "GET");
+    expect(aggregate.data.items[0]).not.toHaveProperty("live");
   });
 
   it("answers a compact aggregate read from this Hook alone", async () => {
+    await add({ id: ID, title: TITLE });
     const read = await call("/v1/owner-inbox?compact=1&includeResolved=true", "GET");
     expect(read.status).toBe(200);
     expect(read.data).toMatchObject({ ok: true, unreachable: [] });
-    expect(read.data.items).toEqual([{ ...ROW, inboxComputer: "local" }]);
-    // The local read still asks for history.
-    expect(inbox.run).toHaveBeenCalledWith({ action: "list", includeResolved: true });
+    expect(read.data.items).toHaveLength(1);
+    expect(read.data.items[0]).toMatchObject({ id: ID, inboxComputer: "local" });
+    expect(read.data.items[0]).not.toHaveProperty("live");
   });
 });
