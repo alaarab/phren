@@ -1,10 +1,10 @@
 // Phone control of one Mac app's window, without AppleScript: the window is
 // found by its CGWindow id, its app raised through the Accessibility API, and
-// taps, text and keys are posted with CGEvent. Built on demand by Phren Hook
-// with swiftc; see mac-windows.ts.
-// Exit codes: 2 usage, 3 Accessibility not granted, 5 no such window,
-// 6 focus could not be verified, 7 the Hook (our parent) went away,
-// 8 the Hook cancelled the action.
+// taps, text, keys, scrolls and drags are posted with CGEvent. Built on demand
+// by Phren Hook with swiftc; see mac-windows.ts.
+// Exit codes: 2 usage, 3 Accessibility not granted, 4 an event could not be
+// built, 5 no such window, 6 focus could not be verified, 7 the Hook (our
+// parent) went away, 8 the Hook cancelled the action.
 import ApplicationServices
 import Carbon.HIToolbox
 import Cocoa
@@ -44,7 +44,7 @@ let keyCodes: [String: CGKeyCode] = [
 ]
 
 let args = CommandLine.arguments
-guard args.count >= 2 else { fail(2, "usage: wininput check | prompt | tap <id> <fx> <fy> | type <id> | key <id> <name> [cmd] [shift] [option] [control] | raise <id>") }
+guard args.count >= 2 else { fail(2, "usage: wininput check | prompt | tap <id> <fx> <fy> | type <id> | key <id> <name> [cmd] [shift] [option] [control] | raise <id> | scroll <id> <fx> <fy> <dx> <dy> | drag <id> <fx1> <fy1> <fx2> <fy2> <durationMs>") }
 let command = args[1]
 
 // "prompt" asks macOS for the grant: it adds this helper to Privacy & Security
@@ -152,6 +152,83 @@ func post(_ event: CGEvent?, pause: useconds_t = 20_000) { event?.post(tap: .cgh
 func fraction(_ value: String) -> Double? {
     Double(value).flatMap { $0.isFinite && $0 >= 0 && $0 <= 1 ? $0 : nil }
 }
+// A fraction of the window's current bounds, in the top-left space CGEvent
+// uses; the -1 keeps a point at 1.0 inside the frame.
+func mappedPoint(_ bounds: CGRect, _ fx: Double, _ fy: Double) -> CGPoint {
+    CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
+}
+// The shared start of a pointer gesture: a cancelled helper, a dead Hook or a
+// window that lost focus posts nothing, and the pointer is placed where the
+// person sees it before the hit test.
+func startGesture(at point: CGPoint, source: CGEventSource?) {
+    checkAlive()
+    checkCancel()
+    ensureFocus()
+    post(CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
+}
+// After the pointer moves: the element under the point must belong to this
+// window, not an alert panel or another window of the same app floating above
+// it. The hit test and focus check take time, so a Stop or a dead Hook is
+// checked once more before the first button or wheel event goes out.
+func verifyStart(_ point: CGPoint) {
+    guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
+    ensureFocus()
+    checkAlive()
+    checkCancel()
+}
+// Absolute deadlines keep the drag's steps evenly spaced even when posting an
+// event runs late; a step already due is not delayed.
+func sleepUntil(_ deadline: UInt64) {
+    let now = DispatchTime.now().uptimeNanoseconds
+    guard deadline > now else { return }
+    let remaining = deadline - now
+    var request = timespec()
+    request.tv_sec = Int(remaining / 1_000_000_000)
+    request.tv_nsec = Int(remaining % 1_000_000_000)
+    _ = nanosleep(&request, nil)
+}
+// Positive dy scrolls up and positive dx scrolls left: one pixel-unit wheel
+// event with both axes at the mapped point.
+func scrollGesture(at point: CGPoint, dx: Int32, dy: Int32) {
+    let source = CGEventSource(stateID: .hidSystemState)
+    guard let wheel = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) else { fail(4, "scroll") }
+    wheel.location = point
+    startGesture(at: point, source: source)
+    verifyStart(point)
+    wheel.post(tap: .cghidEventTap)
+}
+// Every event is built before the button goes down, so nothing can fail
+// between down and up. Once left-down is posted the gesture always ends with
+// left-up at the endpoint, even when Stop or a dead Hook lands mid-drag; the
+// bounded remaining steps are abandoned and the up still goes out first.
+func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
+    let source = CGEventSource(stateID: .hidSystemState)
+    let steps = (durationMs + 15) / 16
+    var dragged: [CGEvent] = []
+    for step in 1...steps {
+        let t = CGFloat(step) / CGFloat(steps)
+        let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+        guard let event = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: point, mouseButton: .left) else { fail(4, "drag") }
+        dragged.append(event)
+    }
+    guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left)
+    else { fail(4, "drag") }
+    startGesture(at: start, source: source)
+    verifyStart(start)
+    let began = DispatchTime.now().uptimeNanoseconds
+    down.post(tap: .cghidEventTap)
+    var stopped: Int32?
+    for (index, event) in dragged.enumerated() {
+        let deadline = began + UInt64(Double(durationMs) * 1_000_000 * Double(index + 1) / Double(steps))
+        sleepUntil(deadline)
+        if getppid() == 1 { stopped = 7; break }
+        if isCancelled() { stopped = 8; break }
+        event.post(tap: .cghidEventTap)
+    }
+    up.post(tap: .cghidEventTap)
+    if let code = stopped { fail(code, code == 7 ? "orphaned" : "cancelled") }
+}
 
 // The Hook is our parent: if it dies we are reparented to launchd (pid 1) and
 // must stop before the next press rather than send input into whatever is in
@@ -234,23 +311,28 @@ case "tap":
     guard args.count >= 5, let fx = fraction(args[3]), let fy = fraction(args[4]) else { fail(2, "tap needs fx fy in 0 to 1") }
     raise()
     guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
-    let bounds = raised.bounds
-    // The -1 keeps a tap at fraction 1.0 inside the frame.
-    let point = CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
-    checkAlive()
-    checkCancel()
-    ensureFocus()
-    post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
-    // The element under the point must belong to this window, not an alert
-    // panel or another window of the same app floating above it.
-    guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
-    ensureFocus()
-    // The hit test and focus check take time: a Stop or a dead Hook in that
-    // window must not start the click.
-    checkAlive()
-    checkCancel()
+    let point = mappedPoint(raised.bounds, fx, fy)
+    startGesture(at: point, source: nil)
+    verifyStart(point)
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
+case "scroll":
+    guard args.count == 7, let fx = fraction(args[3]), let fy = fraction(args[4]),
+          let dx = Int32(args[5]), let dy = Int32(args[6]),
+          dx >= -240, dx <= 240, dy >= -240, dy <= 240, dx != 0 || dy != 0
+    else { fail(2, "scroll needs fx fy in 0 to 1 and dx dy in -240 to 240, not both zero") }
+    raise()
+    guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
+    scrollGesture(at: mappedPoint(raised.bounds, fx, fy), dx: dx, dy: dy)
+case "drag":
+    guard args.count == 8, let fx1 = fraction(args[3]), let fy1 = fraction(args[4]),
+          let fx2 = fraction(args[5]), let fy2 = fraction(args[6]),
+          let durationMs = Int(args[7]), durationMs >= 80, durationMs <= 800
+    else { fail(2, "drag needs fx1 fy1 fx2 fy2 in 0 to 1 and durationMs in 80 to 800") }
+    raise()
+    guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
+    let bounds = raised.bounds
+    dragGesture(from: mappedPoint(bounds, fx1, fy1), to: mappedPoint(bounds, fx2, fy2), durationMs: durationMs)
 case "type":
     guard let stdinText = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else { fail(2, "type needs UTF-8 on stdin") }
     // The limit is user-perceived characters, without a single submit newline.
