@@ -1,11 +1,9 @@
-import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomicInPrivateDir, bridgeRoot } from "./protocol.js";
 import type { InboxItem } from "./owner-inbox.js";
-import { isLocalComputer } from "./dispatch-hosts.js";
-import { ownerInboxKey } from "./owner-inbox-key.js";
+import { isOwnerInboxPushSource } from "./owner-inbox-sources.js";
 import type { OwnerInboxPush } from "./push.js";
 
 /** What the sweep needs from `ApprovalPushService`, injected so tests never
@@ -59,14 +57,10 @@ export interface OwnerInboxPushOptions {
   /** The open manual row that takes the first backfill slot; defaults to
    * `PHREN_OWNER_INBOX_BACKFILL_ID` read on each sweep. */
   backfillId?: string;
-  /** First name is the hostname, followed by local aliases. */
-  computerNames: readonly [string, ...string[]];
-  /** Read linked computer names locally. Undefined means the configuration could not be read. */
-  peerNames: () => Promise<readonly string[] | undefined>;
 }
 
 /**
- * Alerts the owner's registered phones about genuinely new open Inbox rows.
+ * Alerts the owner's registered phones about new open rows this Hook owns.
  * Fed from the Hook's successful local reconciliation. It checks the local
  * store under its lock and releases it before calling the provider.
  */
@@ -76,9 +70,6 @@ export class OwnerInboxPushSweep {
   private readonly log: (message: string) => void;
   private readonly backfillId: () => string | undefined;
   private readonly isOpenForPush: OwnerInboxPushOptions["isOpenForPush"];
-  private readonly computerNames: readonly string[];
-  private readonly computer: string;
-  private readonly peerNames: OwnerInboxPushOptions["peerNames"];
   private chain: Promise<void> = Promise.resolve();
   private active = false;
   private queued?: ObservedItem[];
@@ -94,9 +85,6 @@ export class OwnerInboxPushSweep {
 
   constructor(private readonly sender: OwnerInboxPushSender, options: OwnerInboxPushOptions) {
     this.file = options.file ?? path.join(bridgeRoot(), "owner-inbox-push.json");
-    this.computerNames = options.computerNames;
-    this.computer = options.computerNames[0];
-    this.peerNames = options.peerNames;
     this.isOpenForPush = options.isOpenForPush;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (message => console.error(message));
@@ -128,20 +116,6 @@ export class OwnerInboxPushSweep {
     return this.chain;
   }
 
-  private async ownership(items: ObservedItem[]): Promise<(item: ObservedItem) => boolean> {
-    // Targeted rows follow the worker, and a stale task follows its claim.
-    // For unclaimed tasks use the first configured computer, regardless of
-    // reachability, so a transient outage cannot elect a second sender.
-    const needsElection = items.some(item => !item.target && !item.computer && ownerInboxKey(item, this.computer) !== undefined);
-    const peers = needsElection ? await this.peerNames() : undefined;
-    const first = peers?.every(peer => isLocalComputer(peer, this.computerNames) || this.computer.toLowerCase() < peer.toLowerCase()) ?? false;
-    return item => {
-      if (ownerInboxKey(item, this.computer) === undefined) return true;
-      if (item.computer) return isLocalComputer(item.computer, this.computerNames);
-      return !!item.target || first;
-    };
-  }
-
   private async load(): Promise<Ledger | "corrupt" | undefined> {
     let info;
     try { info = await lstat(this.file); } catch (error) {
@@ -165,8 +139,7 @@ export class OwnerInboxPushSweep {
       }
       return;
     }
-    const owns = await this.ownership(openItems);
-    const owned = openItems.filter(owns);
+    const owned = openItems.filter(isOwnerInboxPushSource);
     const ledger = loaded ?? { version: 1 as const, initializedAt: at, entries: this.seed(owned, now) };
     if (!loaded) {
       // The candidate must be durable before any provider sees it.
@@ -191,7 +164,7 @@ export class OwnerInboxPushSweep {
         catch (error) { this.log(`Phren Inbox push: could not save accepted receipts: ${error instanceof Error ? error.message : String(error)}`); }
       }
     }
-    await this.deliver(ledger, owns);
+    await this.deliver(ledger);
   }
 
   /** Merge acceptances whose receipt write failed into a freshly loaded ledger. */
@@ -254,7 +227,7 @@ export class OwnerInboxPushSweep {
    * initialization deadline). Each selected row is offered to all of its
    * eligible phones. Recheck persisted state, the newest snapshot and the
    * deadline before each call. A row consumes a slot on its first attempt. */
-  private async deliver(ledger: Ledger, owns: (item: ObservedItem) => boolean): Promise<void> {
+  private async deliver(ledger: Ledger): Promise<void> {
     const devices = [...new Set(this.sender.ownerInboxPushDevices())].filter(device => deviceIDSchema.safeParse(device).success).sort();
     if (!devices.length) return;
     const initializedAt = Date.parse(ledger.initializedAt);
@@ -263,7 +236,7 @@ export class OwnerInboxPushSweep {
       return created === initializedAt ? Date.parse(entry.updatedAt) : created;
     };
     const candidates = [...ledger.entries].sort((a, b) => age(a) - age(b) || a.id.localeCompare(b.id));
-    const openItem = (id: string) => this.latest.find(item => item.id === id && item.state === "open" && item.firstOpen !== false && owns(item));
+    const openItem = (id: string) => this.latest.find(item => item.id === id && item.state === "open" && item.firstOpen !== false && isOwnerInboxPushSource(item));
     let selected = 0;
     for (const entry of candidates) {
       if (selected >= MAX_CANDIDATES) break;
@@ -285,10 +258,7 @@ export class OwnerInboxPushSweep {
         }
         let accepted = false;
         try {
-          const sharedKey = ownerInboxKey(live, this.computer);
-          const collapseId = sharedKey === undefined ? undefined : `inbox-${createHash("sha256").update(sharedKey).digest("base64url")}`;
-          accepted = await this.sender.notifyOwnerInbox(
-            { id: entry.id, title: live.title, expiresAt: entry.expiresAt, ...(collapseId ? { collapseId } : {}) }, deviceID);
+          accepted = await this.sender.notifyOwnerInbox({ id: entry.id, title: live.title, expiresAt: entry.expiresAt }, deviceID);
         } catch { accepted = false; }
         if (accepted) {
           this.accepted.add(key);

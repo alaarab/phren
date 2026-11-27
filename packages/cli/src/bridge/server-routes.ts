@@ -218,9 +218,9 @@ export const capabilities = { browsers: true, turnCheckpoints: true, transcript:
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
-  // Inbox support travels with the conductor module, as the routes do. A
-  // linked-only computer answers the aggregate but needs phone pairing for
-  // these two: close requires a signature, and pushes need a registration.
+  // Inbox support travels with the conductor module. Close requires a paired
+  // phone's signature. Pushes cover this Hook's own rows and require a phone
+  // registration. Synced-store sources appear only in Inbox reads.
   if (result.ownerInbox === true) {
     result.ownerInboxActions = true;
     result.ownerInboxClose = true;

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage, RequestListener, ServerOptions, ServerResponse } from "node:http";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -12,6 +12,7 @@ import * as peerReads from "./peer-reads.js";
 import * as peers from "./peers.js";
 import { ApprovalPushService } from "./push.js";
 import { serve } from "./server.js";
+import { StaleTaskSources } from "./task-stale.js";
 
 // Use serve's actual request handler and intervals without a listening socket.
 const http = vi.hoisted(() => ({ handler: undefined as RequestListener | undefined }));
@@ -53,24 +54,33 @@ function inboxRead(query: string, peer = false): Promise<unknown> {
   });
 }
 
-it("sends a persisted CLI add from the real activity timer and keeps peer reads quiet", async () => {
+it("sends a persisted CLI add from the activity timer with an origin/main peer", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "inbox-"));
   const ledgerFile = path.join(root, "owner-inbox-push.json");
   const previousUmask = process.umask();
   const previousSignals = process.listeners("SIGTERM");
   const stop = () => process.listeners("SIGTERM").find(listener => !previousSignals.includes(listener));
   vi.stubEnv("PHREN_BRIDGE_HOME", root);
-  vi.stubEnv("PHREN_PATH", path.join(root, "store"));
+  const store = path.join(root, "store");
+  const config = path.join(store, ".config");
+  await mkdir(config, { recursive: true });
+  await writeFile(path.join(config, "modules.yaml"), "version: 1\nenabled: { hook: true, conductor: true, tasks: true }\n");
+  vi.stubEnv("PHREN_PATH", store);
   vi.stubEnv("PHREN_OWNER_INBOX_BACKFILL_ID", undefined);
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   vi.setSystemTime(AT);
   vi.spyOn(herdr, "recentServers").mockResolvedValue([]);
   vi.spyOn(AgentHooks.prototype, "start").mockResolvedValue(undefined);
   vi.spyOn(BrowserRegistry.prototype, "start").mockResolvedValue(undefined);
-  vi.spyOn(peers, "hookPeers").mockResolvedValue([{
-    name: "Desk", address: "desk.invalid", username: "owner", port: 22, hostKey: "fixture", server: "default",
-  }]);
+  const legacyPeer = {
+    name: "000-legacy", address: "legacy.invalid", username: "owner", port: 22, hostKey: "fixture", server: "default",
+  };
+  vi.spyOn(peers, "hookPeers").mockResolvedValue([legacyPeer]);
+  const readPeerConfig = vi.spyOn(peers, "optionalHookPeers").mockResolvedValue({ peers: [legacyPeer] });
+  // origin/main serves Inbox reads and has no Inbox push capability.
   vi.spyOn(peerReads, "peerRead").mockResolvedValue({ ok: true, items: [REMOTE] });
+  const staleTask = { kind: "needs-you", title: "Stale shared task", source: "task-stale:phren:1234abcd" } as const;
+  const staleSources = vi.spyOn(StaleTaskSources.prototype, "sources").mockReturnValue([]);
   const devices = vi.spyOn(ApprovalPushService.prototype, "ownerInboxPushDevices").mockReturnValue([]);
   const sent = vi.spyOn(ApprovalPushService.prototype, "notifyOwnerInbox").mockResolvedValue(true);
   const serving = serve("test");
@@ -91,12 +101,19 @@ it("sends a persisted CLI add from the real activity timer and keeps peer reads 
     const { item } = await cliInbox.run({ action: "add", title: "OVH US VPS-2 is in stock" });
     const { id, title } = item as { id: string; title: string };
     devices.mockReturnValue([DEVICE]);
+    staleSources.mockReturnValue([staleTask]);
 
     // Both a peer fetching this Hook's list and a phone's aggregate read see
     // open rows before the next tick. Neither read may enqueue or send.
-    expect(await inboxRead("local=1&compact=1&reconcile=1", true)).toMatchObject({ items: [{ id, title }] });
+    expect(await inboxRead("local=1&compact=1&reconcile=1", true)).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id, title })]),
+    });
     expect(await inboxRead("compact=1")).toMatchObject({
-      items: [{ id, inboxComputer: "local" }, { id: REMOTE.id, inboxComputer: "Desk" }],
+      items: expect.arrayContaining([
+        expect.objectContaining({ id, inboxComputer: "local" }),
+        expect.objectContaining({ title: staleTask.title, inboxComputer: "local" }),
+        expect.objectContaining({ id: REMOTE.id, inboxComputer: legacyPeer.name }),
+      ]),
     });
     expect(sent).not.toHaveBeenCalled();
     expect(await readLedger()).toMatchObject({ entries: [] });
@@ -105,6 +122,7 @@ it("sends a persisted CLI add from the real activity timer and keeps peer reads 
     await vi.waitFor(async () => expect(await readLedger()).toMatchObject({
       entries: [{ id, sentDeviceIDs: [DEVICE] }],
     }));
+    expect(readPeerConfig).not.toHaveBeenCalled();
     expect(sent).toHaveBeenCalledExactlyOnceWith({ id, title, expiresAt: expect.any(String) }, DEVICE);
   } finally {
     const shutdown = stop();

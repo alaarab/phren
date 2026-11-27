@@ -17,7 +17,7 @@ import { dockerUsage, listSimulators, sessionRowsFromOverview, xcodebuildRunning
 import { closeFinishedWorker } from "./worker-close.js";
 import { cleanupIdempotencyLocks, markHookServerProcess } from "./dispatch-idempotency.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
-import { hookPeers, optionalHookPeers, peerRequest } from "./peers.js";
+import { hookPeers, peerRequest } from "./peers.js";
 import { handOff } from "./hand-off.js";
 import { sessionStalls } from "./stalls.js";
 import { TurnQueue } from "./turn-queue.js";
@@ -107,7 +107,6 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook")) throw new BridgeError(404, disabledHint("hook"));
   const activeCapabilities = capabilitiesForModules(modules);
-  const computerAliases = localNames();
   const root = bridgeRoot();
   await mkdir(root, { recursive: true, mode: 0o700 }); await chmod(root, 0o700);
   let computerID: string;
@@ -171,12 +170,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // Inbox alerts ride the inbox's own reconciliation: the sweep sees the same
   // open snapshot regardless of whether the phone ever reads the list.
   const inboxPush = inbox ? new OwnerInboxPushSweep(agentHooks.push,
-    { file: path.join(root, "owner-inbox-push.json"), isOpenForPush: id => inbox.isOpenForPush(id),
-      computerNames: [hostname(), ...computerAliases],
-      peerNames: async () => {
-        const { peers, peerError } = await optionalHookPeers(root);
-        return peerError ? undefined : peers.map(peer => peer.name);
-      } }) : undefined;
+    { file: path.join(root, "owner-inbox-push.json"), isOpenForPush: id => inbox.isOpenForPush(id) }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
@@ -296,7 +290,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     } catch { /* the node gateway has not answered yet */ }
     return undefined;
   }
-  const info: HookInfo = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname(), aliases: computerAliases }, capabilities: activeCapabilities,
+  const info: HookInfo = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname(), aliases: localNames() }, capabilities: activeCapabilities,
     modules: Object.fromEntries(modules.modules.map(module => [module.name, module.version])),
     store: modules.store, profile: modules.profile, generation: modules.generation,
     get load() { return { average: Number(loadavg()[0].toFixed(2)), cpus: cpus().length }; },

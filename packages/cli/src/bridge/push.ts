@@ -1,4 +1,4 @@
-import { createCipheriv, createHash, createHmac, createPrivateKey, randomBytes, sign } from "node:crypto";
+import { createCipheriv, createHmac, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { connect } from "node:http2";
 import path from "node:path";
@@ -65,9 +65,9 @@ export interface SchedulePush {
   route?: string;
 }
 export interface SchedulePushResult { notified: boolean; reason?: string }
-/** One open owner-inbox row worth alerting: the ledger freezes `expiresAt` as
- * the candidate deadline, which is also the APNs expiration. */
-export interface OwnerInboxPush { id: string; title: string; expiresAt: string; collapseId?: string }
+/** One open owner-inbox row owned by this Hook. The ledger freezes `expiresAt`
+ * as the APNs expiration, and retries reuse collapse ID `inbox-<id>`. */
+export interface OwnerInboxPush { id: string; title: string; expiresAt: string }
 
 export function scheduleCollapseId(kind: SchedulePushKind, runId: string): string {
   return `${runId.slice(0, 63 - kind.length)}-${kind}`;
@@ -417,7 +417,7 @@ export class ApprovalPushService {
     const deadline = Date.parse(value.expiresAt);
     return this.send(device, ownerInboxPushPayload(value, device.hostID), {
       expiration: Number.isFinite(deadline) ? String(Math.floor(deadline / 1000)) : "0",
-      collapseId: value.collapseId ?? `inbox-${createHash("sha256").update(`${device.hostID}:${value.id}`).digest("base64url")}`,
+      collapseId: `inbox-${value.id}`,
     });
   }
   async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
