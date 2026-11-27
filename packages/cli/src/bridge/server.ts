@@ -34,6 +34,7 @@ import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { relayLiveSpeech } from "./speech-live.js";
 import { streamSimulator } from "./simulator-stream.js";
+import { stopMacWindows } from "./mac-windows.js";
 import { failRelay, relayTranscription } from "./speech-transcribe.js";
 import { ActivityJournal } from "./activity.js";
 import { countTick } from "./metrics.js";
@@ -463,6 +464,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   await new Promise<void>(resolve => {
     const stop = () => {
       process.off("SIGTERM", stop); process.off("SIGINT", stop);
+      void stopMacWindows();
       browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention();
       for (const timer of [scheduleTimer, dreamTimer, taskAuditTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
       scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close();

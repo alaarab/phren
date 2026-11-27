@@ -2,12 +2,12 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS,
-  type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult, macWindowsAct, macWindowsEnabled, macWindowsList, macWindowsOwnerOnly,
-  macWindowsRequestPermission, macWindowsSnapshot, resetMacWindowsState, setMacWindowsDeps, setMacWindowsEnabled,
-} from "./mac-windows.js";
 import type { Json } from "./protocol.js";
+import {
+  MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, graphemeCount, macWindowAction, macWindowsAct, macWindowsEnabled, macWindowsList,
+  macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSnapshot, macWindowsSupported, resetMacWindowsState,
+  setMacWindowsDeps, setMacWindowsEnabled, type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult,
+} from "./mac-windows.js";
 
 /** Phone control of Mac windows, with the helpers faked (no Mac, no swiftc). */
 
@@ -18,15 +18,28 @@ const WINDOW = {
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 
 class FakeBadge implements MacWindowsBadge {
+  ready: Promise<void>;
   kills: string[] = [];
   exits: ((code: number | null) => void)[] = [];
+  private resolveReady!: () => void;
+  private rejectReady!: (error: Error) => void;
+  constructor(autoReady = true) {
+    this.ready = new Promise<void>((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject; });
+    this.ready.catch(() => undefined);
+    if (autoReady) this.resolveReady();
+  }
   kill(signal: NodeJS.Signals) { this.kills.push(signal); }
   onExit(listener: (code: number | null) => void) { this.exits.push(listener); }
-  exit(code: number) { for (const listener of this.exits) listener(code); }
+  exit(code: number) { for (const listener of [...this.exits]) listener(code); }
+  becomeReady() { this.resolveReady(); }
+  failReady(error = new Error("no ready line")) { this.rejectReady(error); }
 }
 
-let root: string, calls: MacWindowsHelperCall[], spawns: number, badge: FakeBadge;
+type Call = { helper: string; args: string[]; input?: string };
+
+let root: string, calls: Call[], spawns: number, badge: FakeBadge, releaseValue: string;
 let behaviour: (call: MacWindowsHelperCall) => Partial<MacWindowsHelperResult> | undefined;
+let custom: ((call: MacWindowsHelperCall, signal: AbortSignal) => Promise<MacWindowsHelperResult> | undefined) | undefined;
 let restore: (() => void) | undefined;
 
 function answer(call: MacWindowsHelperCall): MacWindowsHelperResult {
@@ -43,16 +56,30 @@ const logRows = async (): Promise<Json[]> => {
   return text.split("\n").filter(Boolean).map(line => JSON.parse(line) as Json);
 };
 
+/** Polls a condition on real timers, for lifecycle tests that need actual events. */
+async function until(condition: () => boolean, label = "condition"): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "phren-mac-windows-"));
   vi.stubEnv("PHREN_BRIDGE_HOME", root);
   vi.useFakeTimers();
-  calls = []; spawns = 0; badge = new FakeBadge(); behaviour = () => undefined;
+  calls = []; spawns = 0; badge = new FakeBadge(); releaseValue = "23.6.0";
+  behaviour = () => undefined; custom = undefined;
   resetMacWindowsState();
   restore = setMacWindowsDeps({
     platform: () => "darwin",
+    release: () => releaseValue,
     now: () => Date.now(),
-    run: async call => { calls.push(call); return answer(call); },
+    run: async (call, signal) => {
+      calls.push({ helper: call.helper, args: call.args, ...(call.input !== undefined ? { input: call.input } : {}) });
+      return custom?.(call, signal) ?? answer(call);
+    },
     spawnBadge: async () => { spawns++; return badge; },
   });
 });
@@ -104,11 +131,27 @@ describe("mac windows: off, validation and the setting file", () => {
     expect(spawns).toBe(0);
   });
 
+  it("counts user-perceived characters, so emoji fit and submit adds Return after the limit", () => {
+    expect(graphemeCount("👨‍👩‍👧‍👦")).toBe(1);
+    expect(graphemeCount("a".repeat(2_000))).toBe(2_000);
+    expect(macWindowAction.safeParse({ action: "type", id: 5, text: "😀".repeat(1_001), submit: true }).success).toBe(true);
+    expect(macWindowAction.safeParse({ action: "type", id: 5, text: "😀".repeat(2_001) }).success).toBe(false);
+  });
+
   it("is owner-only", () => {
     let refusal: unknown;
     try { macWindowsOwnerOnly(false); } catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ status: 403, details: { code: "mac-windows-owner-only" } });
     expect(() => macWindowsOwnerOnly(true)).not.toThrow();
+  });
+
+  it("is offered on macOS 14 or later only", async () => {
+    expect(macWindowsSupported("darwin", "23.0.0")).toBe(true);
+    expect(macWindowsSupported("darwin", "22.6.0")).toBe(false);
+    expect(macWindowsSupported("linux", "23.0.0")).toBe(false);
+    releaseValue = "22.6.0";
+    await expect(macWindowsList()).rejects.toMatchObject({ status: 404, message: "Mac windows need macOS 14 or later." });
+    expect(calls).toEqual([]);
   });
 });
 
@@ -140,15 +183,42 @@ describe("mac windows: requests", () => {
     ]);
   });
 
-  it("logs characters, never the text, and starts no second session", async () => {
+  it("logs admission and completion with characters, never the text, in one session", async () => {
     await macWindowsAct({ action: "type", id: 7, text: "top secret" });
     await macWindowsAct({ action: "raise", id: 7 });
     const rows = await logRows();
-    const typed = rows.find(row => row.action === "type");
-    expect(typed).toMatchObject({ action: "type", windowId: 7, ok: true, chars: 10, session: expect.any(String) });
+    const typed = rows.filter(row => row.action === "type");
+    expect(typed).toHaveLength(2);
+    expect(typed[0]).toMatchObject({ windowId: 7, ok: true, chars: 10, admitted: true, session: expect.any(String) });
+    expect(typed[1]).toMatchObject({ windowId: 7, ok: true, chars: 10 });
     expect(JSON.stringify(rows)).not.toContain("top secret");
     expect(new Set(rows.map(row => row.session)).size).toBe(1);
     expect(spawns).toBe(1);
+  });
+
+  it("shares one indicator startup between concurrent first requests", async () => {
+    // The indicator build/spawn and its ready line happen on real timers here.
+    vi.useRealTimers();
+    badge = new FakeBadge(false);
+    const first = macWindowsAct({ action: "tap", id: 7, x: 0.1, y: 0.1 });
+    const second = macWindowsAct({ action: "tap", id: 7, x: 0.9, y: 0.9 });
+    await until(() => spawns === 1, "one badge spawn");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(spawns).toBe(1);
+    expect(calls.filter(call => call.helper === "wininput" && call.args[0] === "tap")).toHaveLength(0);
+    badge.becomeReady();
+    await Promise.all([first, second]);
+    expect(calls.filter(call => call.helper === "wininput" && call.args[0] === "tap")).toHaveLength(2);
+  });
+
+  it("refuses when the indicator never reports ready", async () => {
+    vi.useRealTimers();
+    badge = new FakeBadge(false);
+    const pending = macWindowsList();
+    await until(() => spawns === 1, "the badge spawn");
+    badge.failReady();
+    await expect(pending).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-indicator" } });
+    expect(calls).toEqual([]);
   });
 
   it("spawns one badge, SIGTERMs it after 120 s idle and writes session-end", async () => {
@@ -177,6 +247,22 @@ describe("mac windows: requests", () => {
     await vi.advanceTimersByTimeAsync(MAC_WINDOWS_STOP_MS + 1);
     await expect(macWindowsAct({ action: "raise", id: 7 })).resolves.toEqual({ ok: true });
     expect(spawns).toBe(2);
+  });
+
+  it("kills a running input helper when Stop is pressed", async () => {
+    vi.useRealTimers();
+    let killed = false;
+    custom = (call, signal) => call.helper === "wininput" && call.args[0] === "type"
+      ? new Promise(resolve => signal.addEventListener("abort", () => {
+        killed = true;
+        resolve({ stdout: Buffer.alloc(0), stderr: "killed", code: 137 });
+      }, { once: true }))
+      : undefined;
+    const typing = macWindowsAct({ action: "type", id: 7, text: "secret" });
+    await until(() => calls.some(call => call.helper === "wininput" && call.args[0] === "type"), "the typing child");
+    badge.exit(10);
+    await expect(typing).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-cancelled" } });
+    expect(killed).toBe(true);
   });
 
   it("maps helper exit codes to permission and missing-window errors, prompting once", async () => {
@@ -209,9 +295,16 @@ describe("mac windows: permissions", () => {
   });
 
   it("asks for one grant and answers both permissions", async () => {
+    await setMacWindowsEnabled(true);
     const permissions = await macWindowsRequestPermission("screen-recording");
     expect(permissions).toEqual({ screenRecording: true, accessibility: true });
     expect(calls.map(call => [call.helper, call.args[0]])).toEqual([["wincap", "prompt"], ["wincap", "check"], ["wininput", "check"]]);
     await expect(macWindowsRequestPermission("microphone")).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("refuses the permission prompt while the feature is off", async () => {
+    await expect(macWindowsRequestPermission("screen-recording")).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
+    expect(calls).toEqual([]);
+    expect(spawns).toBe(0);
   });
 });
