@@ -1837,7 +1837,9 @@ This option adds no CLI flag or store format change.
 
 With the conductor module enabled, health capabilities `queuedHandOff`,
 `workerReports` and `ownerInbox` are true. Older Hooks omit them. The phone must
-check the relevant capability before offering the new surface.
+check the relevant capability before offering the new surface. The same module
+gate adds `ownerInboxClose` (the signed close route) and `ownerInboxPush` (the
+`ownerInbox` push kind) when `ownerInbox` is true.
 
 - `GET /v1/dispatch`: `{dispatches,total,truncated}`. `dispatches` holds the
   receipts with the newest activity (the later of a return and the last
@@ -1917,6 +1919,28 @@ are idempotent. To send `command`, `task`, `pr`, `key` or `ifUpdatedAt` to
 another Hook, its `/v1/health` must advertise `capabilities.ownerInboxActions`.
 An older Hook still accepts legacy adds and resolves. Requests with new fields
 return 409 with `code: "owner-inbox-actions-unsupported"`.
+
+`compact=1` on either read form (the aggregate or `?local=1`) answers each item
+with only `{id,title,kind,state,createdAt,updatedAt,inboxComputer?,project?,
+computer?,target?}`. The aggregate always carries `inboxComputer`. The flag is
+forwarded to peer reads and the aggregate is projected again here, so older
+peers that ignore it still answer safely. Full reads and history keep their
+current shapes.
+
+`POST /v1/owner-inbox/close` takes the strict body
+`{"id":"<uuid>","ifUpdatedAt":"<exact wire string>","decision":"resolve|dismiss"}`
+and answers `{ok:true,item}` with the stored item and `inboxComputer:"local"`.
+Send it to the Hook that owns the row. An unknown id is 404; a changed revision
+or an already closed row is 409. Resolve means handled, dismiss removes the row
+from the shared list for everyone reading that Hook; both set `state:"resolved"`,
+bump `updatedAt`, and record `resolvedAt` and `resolution:"done"|"dismissed"`.
+Neither action answers a question, changes an approval, closes a Phren task or
+runs housekeeping, and a dismissed live wait stays suppressed until that wait
+ends. The route requires a valid paired-phone signature from its first request
+(`capabilities.ownerInboxClose`), accepts no terminal confirmation, and refuses
+a peer origin; a linked-only computer is listed through the aggregate but needs
+phone pairing for actions and pushes. It is gated by the conductor module like
+the rest of this contract.
 
 The follow-up phone screen should show one open list with source, project,
 computer, question and a link to `target`; show unreachable computers as
