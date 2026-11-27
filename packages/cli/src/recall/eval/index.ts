@@ -101,11 +101,11 @@ export async function runRecallEval(options: { runner: RecallRunner; cases?: Rec
     const rank = rankingFixture
       ? await runCases(options.runner, ranking, rankingFixture.phrenPath, rankingFixture.retiredTexts, judgments, path.join(root, "ranking"), FIXTURE_PROFILE)
       : null;
-    // One score over both stores, in the caller's case order. Keyed by the case object, so duplicate
-    // ids passed directly in options.cases still produce one row per input position.
-    const byCase = new Map<RecallEvalCase, RecallEvalRow>();
-    for (const row of [...main.rows, ...(rank?.rows ?? [])]) byCase.set(row.case, row);
-    const rows = cases.flatMap((c) => byCase.get(c) ?? []);
+    // Reassemble by input position: a caller may pass the same case object twice, so neither the id
+    // nor object identity can select the right row.
+    let mainIndex = 0;
+    let rankingIndex = 0;
+    const rows = cases.map((c) => c.fixture === "ranking" ? rank!.rows[rankingIndex++] : main.rows[mainIndex++]);
     const retiredTexts = [...fixture.retiredTexts, ...(rankingFixture?.retiredTexts ?? [])];
     return { score: scoreRecall(rows, { retiredTexts, judgments }), rows, judgments };
   } finally {

@@ -1123,7 +1123,7 @@ export function rankResults(
     date: string;
     queryOverlap: number;
   };
-  let scored: ScoredDoc[] = ranked.map((doc) => {
+  const scored: ScoredDoc[] = ranked.map((doc) => {
     const globBoost = getProjectGlobBoost(phrenPathLocal, doc.project, cwd, gitCtx?.changedFiles);
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
     const entity = entityBoostPaths.has(doc.path) ? 1.3 : 1;
@@ -1189,18 +1189,28 @@ export function rankResults(
     if (gitDelta !== 0) return gitDelta;
     const findingsDelta = Number(a.doc.type !== "findings") - Number(b.doc.type !== "findings");
     if (findingsDelta !== 0) return findingsDelta;
+    // The 0.3.97 comparator's findings date-before-score branch, kept so the mixed sort places every
+    // row where 0.3.97 placed it; findings are re-grouped afterwards.
+    if (a.doc.type === "findings" && b.doc.type === "findings") {
+      const byDate = b.date.localeCompare(a.date);
+      if (byDate !== 0) return byDate;
+    }
     const scoreDelta = b.score - a.score;
     if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
     return withinGroup(a, b);
   };
-  const ordered: ScoredDoc[] = [];
+  // One mixed sort, exactly the 0.3.97 order for every row. Then findings alone are re-grouped by
+  // score within each git-priority group, in the slots that sort gave them; non-findings do not move.
+  scored.sort(legacyOrder);
   for (const priority of [0, 1]) {
-    const findings = scored.filter((entry) => gitPriority(entry) === priority && entry.doc.type === "findings");
-    const others = scored.filter((entry) => gitPriority(entry) === priority && entry.doc.type !== "findings");
-    for (const entry of sortScoreGroups(findings, (item) => item.score, withinGroup)) ordered.push(entry);
-    for (const entry of others.sort(legacyOrder)) ordered.push(entry);
+    const slots: number[] = [];
+    for (let i = 0; i < scored.length; i++) {
+      if (scored[i].doc.type === "findings" && gitPriority(scored[i]) === priority) slots.push(i);
+    }
+    const findings = slots.map((i) => scored[i]);
+    const reordered = sortScoreGroups(findings, (item) => item.score, withinGroup);
+    for (const [n, i] of slots.entries()) scored[i] = reordered[n];
   }
-  scored = ordered;
 
   const shouldFilterTask = intent !== "build" && !opts?.skipTaskFilter && opts?.filterType !== "task";
   const rescuedTaskPaths = new Set<string>();
@@ -1310,16 +1320,16 @@ export type RelevanceFloorVerdict = Omit<RecallFloorDecision, keyof RecallDocRef
  * feedback history), so a doc can rank well with zero query overlap. That's the
  * right call for *ordering*, but the wrong thing to *inject*. This stage keeps a
  * doc only when it has a real connection to the prompt:
- *   - a structural signal: it's a changed file, or matches the branch name, or
- *   - it's a canonical doc for the project you're actually in, or
+ *   - it is one of the changed files (a branch-name match only orders; canonical
+ *     docs are held to the same bar as any other), or
  *   - its text clears a query-overlap floor (higher for cross-project docs, and
  *     for every doc when no project is detected: a conductor session has no
  *     same-project rows to be lenient with)
  *     and keeps a share of the strongest row's matched rarity (no side matches).
  *
- * When there's no usable query signal (no tokens) it is a no-op. Setting the
- * floor to 0 (env PHREN_MIN_QUERY_RELEVANCE=0) disables it and restores the
- * previous always-fill behavior.
+ * A prompt with fewer than MIN_CHUNK_MATCHES usable keywords admits nothing
+ * except changed files. Setting the floor to 0 (env PHREN_MIN_QUERY_RELEVANCE=0)
+ * disables the floor and restores the previous always-fill behavior.
  */
 export function applyRelevanceFloor(
   rows: DocRow[],
