@@ -116,6 +116,9 @@ func ensureFocus() {
           let focused = ref, CFEqual(focused, window) else { fail(6, "focus") }
 }
 func raise() {
+    // A Stop or a dead Hook must not bring another app forward either.
+    checkAlive()
+    checkCancel()
     guard app.activate(options: []) else { fail(6, "focus") }
     guard AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success else { fail(6, "focus") }
     usleep(120_000)
@@ -236,6 +239,10 @@ case "tap":
     // panel or another window of the same app floating above it.
     guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
     ensureFocus()
+    // The hit test and focus check take time: a Stop or a dead Hook in that
+    // window must not start the click.
+    checkAlive()
+    checkCancel()
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
 case "type":
