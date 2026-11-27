@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -46,6 +46,7 @@ describe("rankResults", () => {
     // A better match wins even when the other findings doc is newer.
     expect(ranked.map((row) => row.project)).toEqual(["other", "myapp"]);
 
+    vi.useFakeTimers({ now: new Date("2026-11-27T12:00:00Z") });
     const now = Date.now();
     const today = new Date(now).toISOString().slice(0, 10);
     const yesterday = new Date(now - 86_400_000).toISOString().slice(0, 10);
@@ -70,7 +71,23 @@ describe("rankResults", () => {
     } finally {
       if (decay === undefined) delete process.env.PHREN_CROSS_PROJECT_DECAY_DAYS;
       else process.env.PHREN_CROSS_PROJECT_DECAY_DAYS = decay;
+      vi.useRealTimers();
     }
+  });
+
+  it("keeps non-findings in the 0.3.97 order while findings alone are re-grouped", () => {
+    // One finding and three summaries: the finding scores below charlie, so findings-first and the
+    // summaries' own order are what the assertion pins, not a score sort.
+    const finding = makeDocRow("notes", "FINDINGS.md", "findings",
+      `## ${new Date().toISOString().slice(0, 10)}\n- Unrelated memory note for this project.`);
+    const alpha = makeDocRow("alpha", "overview.md", "summary", "- Slack alerts go through the webhook.");
+    const beta = makeDocRow("beta", "notes.md", "summary", "- Slack alerts go through the webhook.");
+    const charlie = makeDocRow("charlie", "runbook.md", "summary", "- The webhook monitor notes slack alerts here.");
+    const ranked = rankResults([beta, charlie, finding, alpha], "general", null, null, tmpPhren, null as any,
+      undefined, "webhook slack alerts monitor");
+    // The 0.3.97 comparator puts the finding first, then charlie (all four words), alpha and beta
+    // (three words each, tie broken by path). Re-grouping findings must not move any summary.
+    expect(ranked.map((row) => row.project)).toEqual(["notes", "charlie", "alpha", "beta"]);
   });
 
   it("dates settle each score group within 0.01, whatever the input order", () => {
