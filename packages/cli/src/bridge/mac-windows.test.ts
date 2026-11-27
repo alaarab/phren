@@ -5,16 +5,21 @@ import type { EventEmitter as Emitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The real helper runner is exercised by the pre-spawn and CLI probe tests.
-const runner = vi.hoisted(() => ({ spawns: [] as string[][], code: 0 }));
+const runner = vi.hoisted(() => ({ spawns: [] as string[][], signals: [] as string[], code: 0, hold: false }));
 vi.mock("./native-helpers.js", () => ({ verifiedHelper: async () => "/fake/phren-helper" }));
 vi.mock("node:child_process", async () => {
   const { EventEmitter } = await import("node:events");
   return {
     spawn: (file: string, args: string[]) => {
       runner.spawns.push([file, ...args]);
-      const child = new EventEmitter() as Emitter & { stdout: Emitter; stderr: Emitter; stdin: { on(): void; end(): void }; kill(): void };
-      Object.assign(child, { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { on() {}, end() {} }, kill() {} });
-      queueMicrotask(() => child.emit("close", runner.code));
+      const child = new EventEmitter() as Emitter & { stdout: Emitter; stderr: Emitter; stdin: { on(): void; end(): void }; kill(signal: string): void };
+      Object.assign(child, { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { on() {}, end() {} },
+        kill(signal: string) {
+          runner.signals.push(signal);
+          if (signal === "SIGKILL") child.emit("close", null);
+        },
+      });
+      if (!runner.hold) queueMicrotask(() => child.emit("close", runner.code));
       return child;
     },
   };
@@ -97,7 +102,7 @@ beforeEach(async () => {
   vi.useFakeTimers();
   calls = []; spawns = 0; badge = new FakeBadge(); releaseValue = "23.6.0";
   behaviour = () => undefined; custom = undefined; spawnDelay = undefined;
-  runner.spawns = []; runner.code = 0;
+  runner.spawns = []; runner.signals = []; runner.code = 0; runner.hold = false;
   ranBeforeReady = false; callWaiters = []; spawnWaiters = [];
   resetMacWindowsState();
   restore = setMacWindowsDeps({
@@ -620,6 +625,20 @@ describe("mac windows: live stream admission", () => {
 
 describe("mac windows: scroll and drag", () => {
   beforeEach(async () => { await setMacWindowsEnabled(true); });
+
+  it.each([["drag", 1_500], ["tap", 500]])("gives an aborted %s %i ms to release input before SIGKILL", async (action, grace) => {
+    runner.hold = true;
+    const controller = new AbortController();
+    const running = runMacWindowsHelper({ helper: "wininput", args: [action, "7"] }, controller.signal);
+    await vi.waitFor(() => expect(runner.spawns).toHaveLength(1));
+    controller.abort();
+    expect(runner.signals).toEqual(["SIGTERM"]);
+    await vi.advanceTimersByTimeAsync(grace - 1);
+    expect(runner.signals).toEqual(["SIGTERM"]);
+    await vi.advanceTimersByTimeAsync(1);
+    await running;
+    expect(runner.signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
 
   it("forwards scroll and drag as wininput argv", async () => {
     await macWindowsAct({ action: "scroll", id: 42, x: 0.25, y: 0.75, dx: -240, dy: 240 });

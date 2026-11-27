@@ -28,6 +28,8 @@ export const MAC_WINDOWS_READY_MS = 10_000;
 export const MAC_WINDOWS_ENABLE_POLL_MS = 500;
 /** How long wininput gets to finish its event pair after SIGTERM. */
 export const MAC_WINDOWS_TERM_GRACE_MS = 500;
+/** A drag can take up to 800 ms and must finish by posting mouse-up. */
+const MAC_WINDOWS_DRAG_TERM_GRACE_MS = 1_500;
 /** A live stream gets this long to see the badge's `ready` line, counted from its spawn. */
 export const MAC_WINDOWS_STREAM_READY_MS = 5_000;
 /** macOS 14 is Darwin 23; ScreenCaptureKit's single-window capture needs it. */
@@ -146,9 +148,11 @@ export async function runMacWindowsHelper(call: MacWindowsHelperCall, signal: Ab
     // wininput stops at the next event-pair boundary and exits 8; anything else is killed now.
     const kill = () => {
       if (call.helper !== "wininput") { child.kill("SIGKILL"); return; }
-      child.kill("SIGTERM");
-      escalate = setTimeout(() => child.kill("SIGKILL"), MAC_WINDOWS_TERM_GRACE_MS);
+      if (timer) clearTimeout(timer);
+      const grace = call.args[0] === "drag" ? MAC_WINDOWS_DRAG_TERM_GRACE_MS : MAC_WINDOWS_TERM_GRACE_MS;
+      escalate = setTimeout(() => child.kill("SIGKILL"), grace);
       escalate.unref?.();
+      child.kill("SIGTERM");
     };
     signal.addEventListener("abort", kill, { once: true });
     timer = setTimeout(() => {
