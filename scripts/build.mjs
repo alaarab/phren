@@ -56,6 +56,16 @@ function copySupplementalAssets(targetDir) {
   const shimDir = path.join(targetDir, "bridge/browser-shim");
   fs.mkdirSync(shimDir, { recursive: true });
   fs.copyFileSync(path.join(srcRoot, "bridge/browser-shim/phren-playwright.cjs"), path.join(shimDir, "phren-playwright.cjs"));
+  // The CLI's own `mac-windows` command builds the Swift helpers too, and it
+  // reads them from the compiled tree rather than the Hook bundle.
+  const nativeSource = path.join(srcRoot, "bridge/native");
+  if (fs.existsSync(nativeSource)) {
+    const nativeTarget = path.join(targetDir, "bridge/native");
+    fs.mkdirSync(nativeTarget, { recursive: true });
+    for (const entry of fs.readdirSync(nativeSource)) {
+      if (entry.endsWith(".swift")) fs.copyFileSync(path.join(nativeSource, entry), path.join(nativeTarget, entry));
+    }
+  }
   for (const entry of fs.readdirSync(srcRoot)) {
     if (!/^synonyms.*\.json$/u.test(entry)) continue;
     fs.copyFileSync(path.join(srcRoot, entry), path.join(targetDir, entry));
