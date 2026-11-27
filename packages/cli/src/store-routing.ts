@@ -63,7 +63,11 @@ export function resolveProject(
   input: string,
   profile?: string,
 ): ResolvedProject {
-  const { storeName, projectName } = parseStoreQualified(input);
+  const ref = input.trim();
+  if (/^\.{1,2}[\\/]/.test(ref)) {
+    throw new Error(`${PhrenError.VALIDATION_ERROR}: Invalid project name: "${ref}"`);
+  }
+  const { storeName, projectName } = parseStoreQualified(ref);
 
   if (!isValidProjectName(projectName)) {
     throw new Error(`${PhrenError.VALIDATION_ERROR}: Invalid project name: "${projectName}"`);

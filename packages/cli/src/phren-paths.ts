@@ -778,15 +778,16 @@ export function computePhrenLiveStateToken(phrenPath: string): string {
   return parts.sort().join("|");
 }
 
-// Lazy singleton for getPhrenPath — shared across all CLI modules.
-let lazyPhrenPath: string | undefined;
+let lazyPhrenPath: { path: string; override: string | undefined } | undefined;
+
 export function getPhrenPath(): string {
-  if (!lazyPhrenPath) {
+  const override = process.env.PHREN_PATH;
+  if (!lazyPhrenPath || lazyPhrenPath.override !== override) {
     const existing = findPhrenPath();
     if (!existing) throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'phren init'.`);
-    lazyPhrenPath = existing;
+    lazyPhrenPath = { path: existing, override };
   }
-  return lazyPhrenPath;
+  return lazyPhrenPath.path;
 }
 
 export function qualityMarkers(phrenPathLocal: string): { done: string; lock: string } {

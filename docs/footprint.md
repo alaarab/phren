@@ -89,6 +89,9 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
 - `~/.phren/`, the store: projects, `global/`, `profiles/`, `.config/`,
   `.runtime/`, `.sessions/`, `.env` (feature flags), `machines.yaml`,
   `phren.root.yaml`, `phren.SKILL.md`.
+- `phren import vault` reads the vault and writes copies and a `.phren-import.json`
+  inventory under `<project>/reference/obsidian/<vault-name>-<id>/`. It holds a
+  temporary `vault-import-<id>.lock` in the store's `.runtime/` during the import.
 - Dreaming, only once enabled or run by hand: `.config/dreaming.json` (global
   settings; a project's live under `config.dreaming` in its `phren.project.yaml`)
   and `<project>/dreams/` (`last-run.json`, one `<runId>.json` per dream,

@@ -76,6 +76,7 @@ export {
   queryCrossProjectFragments,
   logFragmentMiss,
   extractFragmentNames,
+  extractWikilinks,
 } from "./fragment-graph.js";
 export {
   buildSourceDocKey,
@@ -839,10 +840,9 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     // Single read feeds the insert, fragment extraction and the content hash.
     const raw = readFileOrNull(resolvedPath);
     if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
-      // Re-extract fragments for finding files
-      if (type === "findings") {
+      if (type === "findings" || type === "reference") {
         try {
-          extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+          extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath, type === "reference");
         } catch (err: unknown) {
           logger.debug("updateFileInIndex entityExtraction", errorMessage(err));
         }
@@ -1590,9 +1590,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               const raw = carried ?? readFileOrNull(entry.fullPath);
               if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
                 updatedCount++;
-                if (entry.type === "findings") {
+                if (entry.type === "findings" || entry.type === "reference") {
                   try {
-                    extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+                    extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath, entry.type === "reference");
                   } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
                 }
               }
@@ -1667,12 +1667,13 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   const newMeta: Record<string, FileStatMeta> = {};
   let fileCount = 0;
 
-  // Try loading cached fragment graph
+  // A new file may carry a timestamp older than the cached graph.
   const graphPath = runtimeFile(phrenPath, 'entity-graph.json');
-  const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
+  const entityGraphLoaded = allFiles.every(entry => Object.hasOwn(savedHashes, entry.fullPath))
+    && loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
 
-  // One read per file: the bytes feed the content hash, the FTS insert and (for
-  // findings) fragment extraction. Every insert is batched into a single
+  // One read per file: the bytes feed the content hash, the FTS insert and
+  // fragment extraction. Every insert is batched into a single
   // transaction so sql.js does not open and commit one per statement.
   db.run("BEGIN");
   let fullRebuildCommitted = false;
@@ -1689,10 +1690,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
       }
       if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
         fileCount++;
-        // Extract fragments from finding files (if not loaded from cache)
-        if (!entityGraphLoaded && entry.type === "findings") {
+        if (!entityGraphLoaded && (entry.type === "findings" || entry.type === "reference")) {
           try {
-            extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+            extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath, entry.type === "reference");
           } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
         }
       }

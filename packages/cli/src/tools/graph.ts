@@ -23,8 +23,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · search fragments",
       description:
-        "Search named fragments in the knowledge graph (libraries, tools, concepts mentioned in findings). " +
-        "Returns matching fragment names and how many findings reference each.",
+        "Search named fragments in the knowledge graph, including wikilink targets in findings and reference docs. " +
+        "Returns matching fragment names and how many documents reference each.",
       inputSchema: z.object({
         query: z.string().describe("Fragment name to search for (partial match); the compatible parameter key remains entity."),
         project: z.string().optional().describe("Filter to a specific project."),
@@ -85,8 +85,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "phren : related docs",
       description:
-        "Find all findings and docs that mention a specific fragment (library, tool, concept). " +
-        "Use this to see how a technology is used across projects.",
+        "Find findings and reference docs linked to a named fragment, including by an Obsidian-style wikilink. " +
+        "Look up wikilinks using the note name.",
       inputSchema: z.object({
         entity: z.string().describe("Fragment name to look up; the compatible parameter key remains entity."),
         project: z.string().optional().describe("Filter to a specific project."),
