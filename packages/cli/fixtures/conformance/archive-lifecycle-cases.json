@@ -34,6 +34,24 @@
       "reason": "Fixed upstream in the driver",
       "file": "reference/topics/database.older.md",
       "after": "topic-older-after-retract.md"
+    },
+    {
+      "op": "resolve",
+      "finding": "fid:0000e001",
+      "finding_b": "fid:0000e002",
+      "resolution": "keep_a",
+      "file": "reference/topics/database.md",
+      "before": "topic-archive-before-resolve.md",
+      "after": "topic-archive-after-resolve.md"
+    },
+    {
+      "op": "resolve",
+      "finding": "fid:0000e003",
+      "finding_b": "fid:0000e004",
+      "resolution": "keep_b",
+      "file": "reference/topics/database.older.md",
+      "before": "topic-older-before-resolve.md",
+      "after": "topic-older-after-resolve.md"
     }
   ]
 }

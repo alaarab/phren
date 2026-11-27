@@ -335,8 +335,9 @@ that finding, asserted on the TypeScript side in
 
 Lifecycle writes on archive bullets (§4.6) have their own cases:
 `archive-lifecycle-cases.json` names the store to set up, each operation
-(supersede or retract, on a topic file and on an `.older.md` file), the date
-and the expected file, and
+(supersede, retract or a contradiction resolution on both bullets, on a topic
+file and on an `.older.md` file), the date, the expected file and, for a
+resolve, the contradicted `before` fixture it starts from, and
 `packages/cli/src/__tests__/conformance-archive-lifecycle.test.ts` holds the
 CLI to those bytes.
 
