@@ -1,10 +1,11 @@
 import { createDecipheriv, generateKeyPairSync, randomBytes } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approvalPushCapability, approvalPushPayload, ApprovalPushService, RELAY_MAX_CIPHERTEXT, relayCiphertext, relaySignature, scheduleCollapseId,
-  schedulePushPayload, sendThroughRelay, upsertPushDevice } from "./push.js";
+import { z } from "zod";
+import { approvalPushCapability, approvalPushPayload, ApprovalPushService, ownerInboxPushBody, ownerInboxPushPayload,
+  RELAY_MAX_CIPHERTEXT, relayCiphertext, relaySignature, scheduleCollapseId, schedulePushPayload, sendThroughRelay, upsertPushDevice } from "./push.js";
 import { PushBindingStore } from "./agent-hooks.js";
 import { approvalPushCheck } from "./command.js";
 
@@ -186,6 +187,166 @@ describe("push honesty", () => {
     const gone = (async () => new Response("{}", { status: 410 })) as unknown as typeof fetch;
     expect(await sendThroughRelay(relay, payload, { expiration: "0", collapseId: "c" }, gone)).toBe("gone");
     expect(relayCiphertext(key, { aps: { alert: { title: "t", body: "b" } } })).not.toBe(relayCiphertext(key, { aps: { alert: { title: "t", body: "b" } } }));
+  });
+});
+
+describe("owner inbox push", () => {
+  const id = "9f1d2c3b-4a5e-4f60-8b71-c2d3e4f5a6b7";
+  const hostID = "73d445d1-4b31-43fc-9185-65b60c6f7125";
+  const item = { id, title: "OVH US VPS-2 is in stock", expiresAt: "2026-11-28T11:06:00.000Z" };
+
+  it("shows the item title with the inbox category and only the host and item ids", () => {
+    expect(ownerInboxPushPayload(item, hostID)).toEqual({
+      aps: { alert: { title: "Phren Inbox", body: "OVH US VPS-2 is in stock" },
+        category: "PHREN_OWNER_INBOX", "interruption-level": "active" },
+      phren: { version: 1, kind: "ownerInbox", host: hostID, id },
+    });
+    const encoded = JSON.stringify(ownerInboxPushPayload(item, hostID));
+    for (const part of ["sound", "badge", "command", "workspace", "session", "route"]) expect(encoded).not.toContain(part);
+  });
+
+  it("bounds the body to 500 UTF-8 bytes without splitting a character", () => {
+    expect(ownerInboxPushBody("short")).toBe("short");
+    expect(ownerInboxPushBody("x".repeat(600))).toBe("x".repeat(500));
+    expect(ownerInboxPushBody("é".repeat(400))).toBe("é".repeat(250));
+    expect(ownerInboxPushBody("a" + "😀".repeat(200))).toBe("a" + "😀".repeat(124));
+    for (const value of ["x".repeat(600), "é".repeat(400), "a" + "😀".repeat(200)]) {
+      const body = ownerInboxPushBody(value);
+      expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(500);
+      expect(body).not.toContain("\uFFFD");
+    }
+  });
+});
+
+describe("owner inbox push delivery", () => {
+  const roots: string[] = [];
+  afterEach(async () => {
+    vi.unstubAllEnvs(); vi.unstubAllGlobals();
+    await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+  });
+  async function bridgeHome() {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-inbox-push-"));
+    roots.push(root);
+    vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    vi.stubEnv("PHREN_APNS_CONFIG", "");
+    return root;
+  }
+  const id = "9f1d2c3b-4a5e-4f60-8b71-c2d3e4f5a6b7";
+  const hostID = "73d445d1-4b31-43fc-9185-65b60c6f7125";
+  const deviceID = "6fd8c056-032d-4219-97d7-a506d672ccf2";
+  const otherDeviceID = "11111111-1111-4111-8111-111111111111";
+  const approvalDeviceID = "22222222-2222-4222-8222-222222222222";
+  const item = { id, title: "OVH US VPS-2 is in stock", expiresAt: "2026-11-28T11:06:00.000Z" };
+  const relay = (suffix: string) => ({ url: "https://push.example.com", relayId: "r".repeat(47) + suffix,
+    secret: "s".repeat(43), key: randomBytes(32).toString("base64url") });
+
+  it("persists Inbox opt-in while the previous Hook can still load every registration", async () => {
+    const root = await bridgeHome();
+    const push = new ApprovalPushService();
+    await push.start();
+    const legacy = ["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"];
+    await push.register({ deviceID, hostID, token: "a".repeat(64), environment: "production", kinds: legacy });
+    await push.register({ deviceID: otherDeviceID, hostID, relay: relay("b"), environment: "production", kinds: [...legacy, "ownerInbox"] });
+    expect(upsertPushDevice([], { deviceID: approvalDeviceID, hostID, token: "c".repeat(64), environment: "production" })[0].kinds)
+      .toEqual(["approval"]);
+    await expect(push.register({ deviceID, hostID, token: "a".repeat(64), environment: "production",
+      kinds: [...legacy, "ownerInbox", "approval"] })).rejects.toThrow();
+    await expect(push.register({ deviceID, hostID, token: "a".repeat(64), environment: "production", kinds: ["nope"] }))
+      .rejects.toThrow();
+
+    // Frozen rollback reader from origin/main. Zod strips unknown device fields.
+    const oldRelaySchema = z.object({
+      url: z.string().url().refine(value => /^https:\/\//.test(value) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(`${value}/`)),
+      relayId: z.string().regex(/^[A-Za-z0-9_-]{40,400}$/),
+      secret: z.string().regex(/^[A-Za-z0-9_-]{20,100}$/),
+      key: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    });
+    const oldDeviceSchema = z.object({
+      deviceID: z.string().uuid(),
+      hostID: z.string().uuid(),
+      token: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+      relay: oldRelaySchema.optional(),
+      environment: z.enum(["development", "production"]),
+      kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"])).max(5).default(["approval"]),
+    }).refine(device => device.token !== undefined || device.relay !== undefined);
+    const file = path.join(root, "push-devices.json");
+    const oldRead = async () => z.array(oldDeviceSchema).max(16).parse(JSON.parse(await readFile(file, "utf8")));
+    const loaded = await oldRead();
+    expect(loaded.map(device => [device.deviceID, device.kinds])).toEqual([[deviceID, legacy], [otherDeviceID, legacy]]);
+
+    // The existing device-file loader requires POSIX permissions.
+    if (process.platform !== "win32") {
+      const restarted = new ApprovalPushService();
+      await restarted.start();
+      expect(restarted.ownerInboxPushDevices()).toEqual([otherDeviceID]);
+
+      await writeFile(file, JSON.stringify([loaded[0], { ...loaded[1], kinds: [...legacy, "ownerInbox"] }]));
+      const upgraded = new ApprovalPushService();
+      await upgraded.start();
+      expect(upgraded.ownerInboxPushDevices()).toEqual([otherDeviceID]);
+      expect(await oldRead()).toEqual(loaded);
+
+      await upgraded.register({ ...loaded[1], kinds: legacy });
+      expect(upgraded.ownerInboxPushDevices()).toEqual([]);
+    }
+  });
+
+  it("offers inbox alerts only to reachable phones that registered the kind", async () => {
+    await bridgeHome();
+    const push = new ApprovalPushService();
+    await push.start();
+    await push.register({ deviceID, hostID, relay: relay("a"), environment: "production", kinds: ["approval", "ownerInbox"] });
+    // A token without an APNs key is registered but not reachable from this Hook.
+    await push.register({ deviceID: otherDeviceID, hostID, token: "b".repeat(64), environment: "production", kinds: ["ownerInbox"] });
+    await push.register({ deviceID: approvalDeviceID, hostID, relay: relay("b"), environment: "production", kinds: ["approval"] });
+    expect(push.ownerInboxPushDevices()).toEqual([deviceID]);
+  });
+
+  it("sends one phone the encrypted alert with its category, collapse id and deadline", async () => {
+    await bridgeHome();
+    const registration = relay("a");
+    const push = new ApprovalPushService();
+    await push.start();
+    await push.register({ deviceID, hostID, relay: registration, environment: "production", kinds: ["approval", "ownerInbox"] });
+    let sent: { url: string; headers: Record<string, string>; body: string } | undefined;
+    vi.stubGlobal("fetch", (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      sent = { url, headers: init.headers, body: init.body };
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch);
+
+    expect(await push.notifyOwnerInbox(item, deviceID)).toBe(true);
+    expect(sent!.url).toBe("https://push.example.com/v1/send");
+    expect(sent!.headers["x-phren-signature"]).toBe(relaySignature(registration.secret, sent!.headers["x-phren-timestamp"], sent!.body));
+    const request = JSON.parse(sent!.body) as { ciphertext: string; category: string; collapseId: string; expiration: number };
+    expect(request.category).toBe("PHREN_OWNER_INBOX");
+    expect(request.collapseId).toBe(`inbox-${id}`);
+    expect(request.expiration).toBe(Math.floor(Date.parse(item.expiresAt) / 1000));
+
+    const sealed = Buffer.from(request.ciphertext, "base64url");
+    const decipher = createDecipheriv("chacha20-poly1305", Buffer.from(registration.key, "base64url"), sealed.subarray(0, 12), { authTagLength: 16 });
+    decipher.setAuthTag(sealed.subarray(sealed.length - 16));
+    const content = JSON.parse(Buffer.concat([decipher.update(sealed.subarray(12, sealed.length - 16)), decipher.final()]).toString("utf8"));
+    expect(content).toEqual({ t: "Phren Inbox", b: item.title, c: "PHREN_OWNER_INBOX", i: "active",
+      p: { version: 1, kind: "ownerInbox", host: hostID, id } });
+  });
+
+  it("re-checks the device at send time and never reaches another phone", async () => {
+    await bridgeHome();
+    const push = new ApprovalPushService();
+    await push.start();
+    await push.register({ deviceID, hostID, relay: relay("a"), environment: "production", kinds: ["ownerInbox"] });
+    await push.register({ deviceID: otherDeviceID, hostID, relay: relay("b"), environment: "production", kinds: ["ownerInbox"] });
+    await push.register({ deviceID: approvalDeviceID, hostID, relay: relay("c"), environment: "production", kinds: ["approval"] });
+    let hits = 0;
+    vi.stubGlobal("fetch", (async () => { hits++; return new Response("{}", { status: 200 }); }) as unknown as typeof fetch);
+
+    expect(await push.notifyOwnerInbox(item, otherDeviceID)).toBe(true);
+    expect(hits).toBe(1);
+    expect(await push.notifyOwnerInbox(item, approvalDeviceID)).toBe(false);
+    expect(await push.notifyOwnerInbox(item, "33333333-3333-4333-8333-333333333333")).toBe(false);
+    await push.forgetAll();
+    expect(await push.notifyOwnerInbox(item, deviceID)).toBe(false);
+    expect(hits).toBe(1);
   });
 });
 

@@ -8,6 +8,7 @@ import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
+import { OwnerInboxPushSweep } from "./owner-inbox-push.js";
 import { StaleTaskSources } from "./task-stale.js";
 import { ownerInboxDone } from "./owner-inbox-done.js";
 import { boundedBadge, Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
@@ -166,6 +167,10 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     const observed = await ownerInboxSources(agentHooks);
     return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? [], ...staleTasks?.sources() ?? []] };
   }, path.join(root, "owner-inbox.json"), items => ownerInboxDone(items)) : undefined;
+  // Inbox alerts ride the inbox's own reconciliation: the sweep sees the same
+  // open snapshot regardless of whether the phone ever reads the list.
+  const inboxPush = inbox ? new OwnerInboxPushSweep(agentHooks.push,
+    { file: path.join(root, "owner-inbox-push.json"), isOpenForPush: id => inbox.isOpenForPush(id) }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
@@ -488,7 +493,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       void mover.reconcile().catch(() => {});
       void succession?.reconcile().catch(() => {});
       void returns?.tick();
-      void inbox?.tick().catch(() => {});
+      void inbox?.tick().then(items => inboxPush?.observe(items)).catch(() => {});
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {

@@ -3,12 +3,30 @@ import { dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { DRAFT_REASON, WATCH_MS, workerReaders, workerStates } from "./dispatch-returns.js";
 import { paneChatState, recentServers, snapshot } from "./herdr.js";
-import { inboxTargetSchema, type InboxSnapshot, type InboxSource } from "./owner-inbox.js";
+import { inboxTargetSchema, type InboxItem, type InboxSnapshot, type InboxSource } from "./owner-inbox.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { ownerQuestion } from "./schedule-watch.js";
 import { objects, object, type Json } from "./protocol.js";
 
 const clean = (text: unknown) => String(text).replace(/[\x00-\x1f\x7f]+/g, " ").trim().slice(0, 500);
+
+/** Push eligibility for rows from this Hook's reconciliation. Classify each
+ * source prefix here. Peer aggregation is only used to list rows. */
+export function isOwnerInboxPushSource(item: Pick<InboxItem, "kind" | "source" | "computer">): boolean {
+  if (item.kind === "manual") return true; // Persisted by the Hook that accepted the add.
+  switch (item.source?.split(":", 1)[0]) {
+    case "dispatch":
+      // The worker's Hook owns the ask. A dispatch row with a remote subject
+      // is a list-only mirror. Local returns omit the subject computer.
+      return item.computer === undefined;
+    case "prompt": // This Hook's own panes and sessions.
+    case "housekeeping": // This Hook's housekeeping and machine-health warnings.
+      return true;
+    case "task-stale": // Materialized from the synced task store, even with a claim.
+    default: // Unclassified sources are list-only.
+      return false;
+  }
+}
 
 /** Read the actual panes and pending asks, never a stored inbox's live flag.
  * Called on reads and on the Hook's five-second activity tick. */

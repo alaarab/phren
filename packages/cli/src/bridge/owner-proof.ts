@@ -11,8 +11,9 @@ import { ownerRequest } from "./request-origin.js";
 /**
  * Owner proof for the actions an agent must not take for itself: release
  * authority, raising a pane's permission mode, making or stopping the
- * conductor, registering for this computer's alerts, linking computers and
- * controlling the Mac's windows (GET and POST).
+ * conductor, registering for this computer's alerts, linking computers,
+ * controlling the Mac's windows (GET and POST), and closing an owner inbox
+ * row.
  *
  * Agents run as the same Unix user as the Hook, so no header or local file can
  * tell the owner's phone from an agent's `nc -U hook.sock`. The phone holds its
@@ -34,14 +35,19 @@ const ROUTES = new Set([
   "POST /v1/sets/link",
   "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
   "POST /v1/owner-confirms/answer",
+  "POST /v1/owner-inbox/close",
   "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot", "GET /v1/mac/windows/stream",
   "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
 ]);
-/** The Mac window routes are new, so no older phone depends on unsigned access: they require proof from the first request. */
+/** New owner routes no older phone depends on: they require proof from the first request. */
 const STRICT_ROUTES = new Set([
+  "POST /v1/owner-inbox/close",
   "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot", "GET /v1/mac/windows/stream",
   "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
 ]);
+/** New routes a terminal command must never hold for the phone: a close comes
+ * from the phone in the hand that just read the row, not from a waiting shell. */
+const NO_CONFIRM_ROUTES = new Set(["POST /v1/owner-inbox/close"]);
 
 const payloadSchema = z.object({
   domain: z.literal(DOMAIN), nonce: z.string().uuid(), at: z.string().datetime({ offset: true }),
@@ -104,7 +110,7 @@ export class OwnerProof {
       if (!strict && !(await this.isRequired())) return;
       // A terminal command asked to wait for the phone (owner-confirm.ts). The
       // phone's answer is itself a signed owner action, so it never waits.
-      if (confirm && request.headers?.[OWNER_CONFIRM_HEADER] === "wait" && pathname !== "/v1/owner-confirms/answer") return confirm();
+      if (confirm && !NO_CONFIRM_ROUTES.has(`${request.method} ${pathname}`) && request.headers?.[OWNER_CONFIRM_HEADER] === "wait" && pathname !== "/v1/owner-confirms/answer") return confirm();
       throw new BridgeError(403, "Confirm this on your paired phone: this action needs its signature.", { code: "owner-proof-required" });
     }
     const refused = () => new BridgeError(403, "The phone's signature for this action did not verify.", { code: "owner-proof-invalid" });

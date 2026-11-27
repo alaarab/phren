@@ -18,16 +18,27 @@ const relaySchema = z.object({
   key: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 });
 
-const deviceSchema = z.object({
+const deviceFields = z.object({
   deviceID: z.string().uuid(),
   hostID: z.string().uuid(),
   /** The APNs token, for a Hook with its own key (apns.json). */
   token: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   relay: relaySchema.optional(),
   environment: z.enum(["development", "production"]),
-  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"])).max(5).default(["approval"]),
-}).refine(device => device.token !== undefined || device.relay !== undefined, "A phone needs an APNs token or a relay registration.");
-export type PushDevice = z.infer<typeof deviceSchema>;
+  kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked", "ownerInbox"])).max(6).default(["approval"]),
+});
+const hasTransport = (device: z.infer<typeof deviceFields>) => device.token !== undefined || device.relay !== undefined;
+const transportError = "A phone needs an APNs token or a relay registration.";
+const registrationSchema = deviceFields.refine(hasTransport, transportError);
+const storedDeviceSchema = deviceFields.extend({ ownerInbox: z.boolean().optional() }).refine(hasTransport, transportError);
+
+function normalizeDevice(device: z.infer<typeof storedDeviceSchema>) {
+  const kinds = [...new Set(device.kinds)].filter(kind => kind !== "ownerInbox");
+  const ownerInbox = device.kinds.includes("ownerInbox") || device.ownerInbox;
+  // The previous Hook strips unknown fields and validates every kind.
+  return { ...device, kinds, ownerInbox: ownerInbox || undefined };
+}
+export type PushDevice = ReturnType<typeof normalizeDevice>;
 
 const configSchema = z.object({
   keyId: z.string().regex(/^[A-Z0-9]{10}$/),
@@ -54,6 +65,9 @@ export interface SchedulePush {
   route?: string;
 }
 export interface SchedulePushResult { notified: boolean; reason?: string }
+/** One open owner-inbox row owned by this Hook. The ledger freezes `expiresAt`
+ * as the APNs expiration, and retries reuse collapse ID `inbox-<id>`. */
+export interface OwnerInboxPush { id: string; title: string; expiresAt: string }
 
 export function scheduleCollapseId(kind: SchedulePushKind, runId: string): string {
   return `${runId.slice(0, 63 - kind.length)}-${kind}`;
@@ -117,6 +131,26 @@ export function schedulePushPayload(value: SchedulePush): Record<string, unknown
   };
 }
 
+/** The alert body is the item title, at most 500 UTF-8 bytes, cut between
+ * characters so a phone never shows a replacement glyph. */
+export function ownerInboxPushBody(value: string): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= 500) return value;
+  let end = 500;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+/** A new open owner-inbox row. The phone-local host and the item id are the
+ * only routing data: the alert opens Inbox, it never carries commands. */
+export function ownerInboxPushPayload(value: OwnerInboxPush, host: string): Record<string, unknown> {
+  return {
+    aps: { alert: { title: "Phren Inbox", body: ownerInboxPushBody(value.title) }, category: "PHREN_OWNER_INBOX",
+      "interruption-level": "active" },
+    phren: { version: 1, kind: "ownerInbox", host, id: value.id },
+  };
+}
+
 async function secureJSON<T>(file: string, schema: z.ZodType<T>): Promise<T | undefined> {
   try {
     const metadata = await stat(file);
@@ -152,7 +186,7 @@ export function approvalPushCapability(status: { configured: boolean; direct?: b
 }
 
 export function upsertPushDevice(devices: PushDevice[], value: unknown): PushDevice[] {
-  const device = deviceSchema.parse(value);
+  const device = normalizeDevice(registrationSchema.parse(value));
   return [...devices.filter(item => item.deviceID !== device.deviceID), device].slice(-16);
 }
 
@@ -250,7 +284,14 @@ export class ApprovalPushService {
     return next;
   }
   async start() {
-    await this.change(async () => { this.devices = await secureJSON(this.devicesFile, z.array(deviceSchema).max(16)) ?? []; });
+    await this.change(async () => {
+      const stored = await secureJSON(this.devicesFile, z.array(storedDeviceSchema).max(16)) ?? [];
+      const devices = stored.map(normalizeDevice);
+      if (stored.some(device => device.kinds.includes("ownerInbox"))) {
+        await atomic(this.devicesFile, JSON.stringify(devices));
+      }
+      this.devices = devices;
+    });
     const configFile = process.env.PHREN_APNS_CONFIG || path.join(bridgeRoot(), "apns.json");
     const config = await secureJSON(configFile, configSchema);
     if (!config) return;
@@ -268,8 +309,9 @@ export class ApprovalPushService {
   }
   async register(value: unknown) {
     await this.change(async () => {
-      this.devices = upsertPushDevice(this.devices, value);
-      await atomic(this.devicesFile, JSON.stringify(this.devices));
+      const devices = upsertPushDevice(this.devices, value);
+      await atomic(this.devicesFile, JSON.stringify(devices));
+      this.devices = devices;
     });
   }
   /** Drop every registration; returns how many went. Registrations carry no
@@ -360,6 +402,23 @@ export class ApprovalPushService {
     return (await Promise.all(devices.map(device => this.send(device, machineHealthPushPayload(value, device.hostID), {
       expiration: "0", collapseId: `health-${value.id}`.slice(0, 64),
     })))).some(Boolean);
+  }
+  /** Phones that asked for Inbox alerts and can be reached now. The sweep
+   *  asks again for every send, so a forgotten phone never gets one. */
+  ownerInboxPushDevices(): string[] {
+    return this.reachable.filter(device => !!device.hostID && device.ownerInbox)
+      .map(device => device.deviceID);
+  }
+  /** One phone only: each inbox row is offered per device, so retrying one
+   *  phone never repeats an alert another phone already accepted. */
+  async notifyOwnerInbox(value: OwnerInboxPush, deviceID: string): Promise<boolean> {
+    const device = this.reachable.find(item => item.deviceID === deviceID);
+    if (!device || !device.hostID || !device.ownerInbox) return false;
+    const deadline = Date.parse(value.expiresAt);
+    return this.send(device, ownerInboxPushPayload(value, device.hostID), {
+      expiration: Number.isFinite(deadline) ? String(Math.floor(deadline / 1000)) : "0",
+      collapseId: `inbox-${value.id}`,
+    });
   }
   async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
     const reachable = this.reachable;

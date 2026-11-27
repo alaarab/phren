@@ -200,15 +200,32 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
   return rows.filter((row): row is StatusRow => row !== undefined);
 }
 
-export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
+/**
+ * `POST /v1/owner-inbox/close`: a signed phone decision on one row, guarded by
+ * the exact revision the phone read (`ifUpdatedAt` is compared as the wire
+ * string). Resolve means handled; dismiss removes the row from the shared list.
+ */
+export const ownerInboxCloseSchema = z.object({
+  id: z.string().uuid(),
+  ifUpdatedAt: z.string().min(1).max(64),
+  decision: z.enum(["resolve", "dismiss"]),
+}).strict();
+
+export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true, terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, macWindowStream: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
-  if (result.ownerInbox === true) result.ownerInboxActions = true;
+  // Inbox support travels with the conductor module. Close requires a paired
+  // phone's signature. Pushes cover this Hook's own rows and require a phone
+  // registration. Synced-store sources appear only in Inbox reads.
+  if (result.ownerInbox === true) {
+    result.ownerInboxActions = true;
+    result.ownerInboxClose = true;
+    result.ownerInboxPush = true;
+  }
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; result.scheduleEvents = true; }
@@ -569,7 +586,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               .parse({ name: url.searchParams.get("name") ?? undefined, hostKey: url.searchParams.get("hostKey") ?? undefined });
             result = { computer: info.computer, version, ...await listsCaller(caller) }; break;
           }
-          case "/v1/owner-inbox": result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" }, url.searchParams.get("local") === "1"); break;
+          case "/v1/owner-inbox": {
+            const local = url.searchParams.get("local") === "1";
+            // `reconcile=1` only means anything to a peer reading this Hook: it
+            // keeps the keys the aggregate filters and dedupes on.
+            result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" },
+              local, url.searchParams.get("compact") === "1", local && url.searchParams.get("reconcile") === "1"); break;
+          }
           // A terminal reference from chat text (alaarab/phren-apps#676): this computer's pane or tab, or a linked peer's.
           case "/v1/terminals/resolve": result = await resolveTerminalReference(url.searchParams.get("ref"),
             { computer: info.computer, from: url.searchParams.get("from") }); break;
@@ -1138,7 +1161,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           await streamSpeech(data, response);
           return;
         } else if (url.pathname === "/v1/owner-inbox") {
-          result = await ownerInboxView(ctx.inbox!, data);
+          result = await ownerInboxView(ctx.inbox!, data, false, url.searchParams.get("compact") === "1");
+        } else if (url.pathname === "/v1/owner-inbox/close") {
+          // A signed decision from the paired phone, sent straight to the Hook
+          // that owns the row. The peer gateway stamps peer origin and strips
+          // client proof, so a peer can never carry the signature this needs.
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner's phone closes inbox items.");
+          const input = ownerInboxCloseSchema.parse(data);
+          if (!ctx.inbox) throw new BridgeError(503, "The owner inbox is unavailable on this Hook.");
+          const item = await ctx.inbox.close(input.id, input.ifUpdatedAt, input.decision);
+          result = { ok: true, item: { ...item, inboxComputer: "local" } };
         } else if (url.pathname === "/v1/conductor/integrator") {
           result = await setIntegrator(data.integrator);
         } else if (url.pathname === "/v1/dispatch/report") {
