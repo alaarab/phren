@@ -12,6 +12,7 @@
 // PULL/STOP lines on stdin and forwards each encoded access unit to the phone.
 import AppKit
 import CoreGraphics
+import CoreImage
 import CoreMedia
 import CoreVideo
 import Darwin
@@ -58,16 +59,21 @@ func displayScale(for frame: CGRect) -> CGFloat {
     return scale
 }
 
+func eligibleApplication(for window: SCWindow) -> SCRunningApplication? {
+    let frame = window.frame
+    guard window.windowLayer == 0, frame.width >= 60, frame.height >= 60,
+          let app = window.owningApplication, !app.applicationName.isEmpty,
+          app.processID != getpid(), window.title != "Phren phone control" else { return nil }
+    return app
+}
+
 func list() async throws {
     guard CGPreflightScreenCaptureAccess() else { fail(3, "screen-recording") }
-    let mine = getpid()
     let windows = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true).windows
     var rows: [Window] = []
     for window in windows {
         let frame = window.frame
-        guard window.windowLayer == 0, frame.width >= 60, frame.height >= 60,
-              let app = window.owningApplication, !app.applicationName.isEmpty,
-              app.processID != mine, window.title != "Phren phone control" else { continue }
+        guard let app = eligibleApplication(for: window) else { continue }
         rows.append(Window(id: window.windowID, app: app.applicationName,
                            bundleId: app.bundleIdentifier.isEmpty ? nil : app.bundleIdentifier,
                            pid: app.processID, title: window.title ?? "",
@@ -130,7 +136,7 @@ let streamTiers: [TierSpec] = [
     TierSpec(size: 960, fps: 12, bitrate: 384_000),
 ]
 
-func tierSpec(_ tier: Int) -> TierSpec { streamTiers[min(max(tier, 0), 3)] }
+func tierSpec(_ tier: Int) -> TierSpec { streamTiers[tier] }
 
 /// The coded size the wire carries. Always even and at most the tier size.
 struct Dimensions: Equatable {
@@ -154,7 +160,7 @@ enum StreamCodec: String {
 func codedDimensions(native: CGSize, tier: Int) -> Dimensions? {
     let nativeWidth = Double(native.width)
     let nativeHeight = Double(native.height)
-    guard nativeWidth >= 2, nativeHeight >= 2 else { return nil }
+    guard nativeWidth.isFinite, nativeHeight.isFinite, nativeWidth >= 2, nativeHeight >= 2 else { return nil }
     let cap = Double(tierSpec(tier).size)
     let longest = max(nativeWidth, nativeHeight)
     let factor = min(1.0, cap / longest)
@@ -191,738 +197,783 @@ func appendBE64(_ data: inout Data, _ value: UInt64) {
 
 func monotonicMicros() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1000 }
 
-/// The most recent complete SCK frame. One slot only: a newer complete frame
-/// replaces it (dropping is cheaper than queueing), and it doubles as the
-/// cached image a forced-sync PULL may re-encode.
-struct RawFrame {
-    let image: CVImageBuffer
-    let pts: UInt64
-    let generation: UInt64
+/// stdin owns cancellation. The lock covers only credit bookkeeping and
+/// nonblocking writes, so no capture, encoder or pipe wait can delay STOP.
+private final class StreamPipe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pullOutstanding = false
+    private var outputConfigured = false // Only the state queue writes.
+
+    func finish(_ code: Int32, _ message: String = "") -> Never {
+        // Keep the output gate closed through _exit. In particular, avoid
+        // teardown calls and Swift/Foundation shutdown on the input thread.
+        lock.lock()
+        if code != 0 {
+            let flags = fcntl(STDERR_FILENO, F_GETFL)
+            if flags >= 0, fcntl(STDERR_FILENO, F_SETFL, flags | O_NONBLOCK) == 0 {
+                _ = (message + "\n").withCString { write(STDERR_FILENO, $0, strlen($0)) }
+            }
+        }
+        _exit(code)
+    }
+
+    func claimPull() {
+        let accepted = lock.withLock {
+            if pullOutstanding { return false }
+            pullOutstanding = true
+            return true
+        }
+        guard accepted else { finish(2, "pipelined pull") }
+    }
+
+    func send(tag: UInt8, body: Data?) {
+        if !outputConfigured {
+            let flags = fcntl(STDOUT_FILENO, F_GETFL)
+            guard flags >= 0, fcntl(STDOUT_FILENO, F_SETFL, flags | O_NONBLOCK) == 0
+            else { finish(4, "stdout-pipe") }
+            outputConfigured = true
+        }
+        var record = Data()
+        appendBE32(&record, UInt32(1 + (body?.count ?? 0)))
+        record.append(tag)
+        if let body { record.append(body) }
+        record.withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                lock.lock()
+                let written = write(STDOUT_FILENO, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
+                let error = errno
+                if written > 0 { offset += written }
+                if offset == bytes.count { pullOutstanding = false }
+                lock.unlock()
+
+                if written > 0 || (written < 0 && error == EINTR) { continue }
+                guard written < 0, error == EAGAIN else { finish(4, "stdout-pipe") }
+                var fd = pollfd(fd: STDOUT_FILENO, events: Int16(POLLOUT), revents: 0)
+                if poll(&fd, 1, 50) < 0, errno != EINTR { finish(4, "stdout-pipe") }
+            }
+        }
+    }
 }
 
-struct PullRequest {
-    let tier: Int
+private struct CaptureGeometry: Equatable {
+    let native: CGSize
+    let scale: CGFloat
+
+    init(window: SCWindow) {
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let rect = filter.contentRect.isEmpty ? window.frame : filter.contentRect
+        scale = filter.pointPixelScale > 0 ? CGFloat(filter.pointPixelScale) : displayScale(for: window.frame)
+        native = CGSize(width: rect.width * scale, height: rect.height * scale)
+    }
+}
+
+private struct RawFrame {
+    let image: CVPixelBuffer
+    let crop: CGRect
+    let serial: UInt64
+
+    init?(sample: CMSampleBuffer, attachments: [SCStreamFrameInfo: Any],
+          geometry: CaptureGeometry, dims: Dimensions, serial: UInt64) {
+        guard let image = CMSampleBufferGetImageBuffer(sample),
+              CVPixelBufferGetWidth(image) == dims.width, CVPixelBufferGetHeight(image) == dims.height,
+              let dictionary = attachments[.contentRect] as? NSDictionary,
+              let rect = CGRect(dictionaryRepresentation: dictionary),
+              let scale = attachments[.scaleFactor] as? CGFloat, scale.isFinite, scale > 0,
+              let contentScale = attachments[.contentScale] as? CGFloat, contentScale.isFinite, contentScale > 0
+        else { return nil }
+
+        // SCK reports the visible rectangle in points. Convert it to surface
+        // pixels, then undo SCK's content scaling to check the source geometry.
+        let pixels = rect.applying(CGAffineTransform(scaleX: scale, y: scale))
+        let bounds = CGRect(x: 0, y: 0, width: dims.width, height: dims.height)
+        let visible = bounds.intersection(pixels)
+        // The content rectangle can round by a pixel at the capture scale.
+        guard abs(scale - geometry.scale) < 0.01,
+              abs(pixels.width - geometry.native.width * contentScale) <= 1.5,
+              abs(pixels.height - geometry.native.height * contentScale) <= 1.5,
+              visible.width >= 1, visible.height >= 1 else { return nil }
+
+        self.image = image
+        self.crop = CGRect(x: visible.minX, y: bounds.height - visible.maxY,
+                           width: visible.width, height: visible.height)
+        self.serial = serial
+    }
+
+    func scaled(to dims: Dimensions, pool: CVPixelBufferPool?, context: CIContext) -> CVPixelBuffer? {
+        if crop == CGRect(x: 0, y: 0, width: dims.width, height: dims.height) { return image }
+        guard let pool else { return nil }
+        var output: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &output) == kCVReturnSuccess,
+              let output else { return nil }
+        let content = CIImage(cvPixelBuffer: image).cropped(to: crop)
+            .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            .transformed(by: CGAffineTransform(scaleX: CGFloat(dims.width) / crop.width,
+                                               y: CGFloat(dims.height) / crop.height))
+        context.render(content, to: output, bounds: CGRect(x: 0, y: 0, width: dims.width, height: dims.height),
+                       colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        return output
+    }
+}
+
+private struct PullRequest {
+    let token: UInt
     let reset: Bool
-    let token: UInt64
 }
 
-/// VideoToolbox's output callback must be a non-capturing C function. The
-/// refcon is the WindowStreamer that created the session.
-let vtOutputStreamCallback: VTCompressionOutputCallback = { refcon, _, status, _, sampleBuffer in
-    guard let refcon else { return }
+private struct Submission {
+    let token: UInt
+    let pts: UInt64
+    let wantsSync: Bool
+}
+
+private let vtOutputStreamCallback: VTCompressionOutputCallback = { refcon, frameRefcon, status, flags, sample in
+    guard let refcon, let frameRefcon else { return }
     let streamer = Unmanaged<WindowStreamer>.fromOpaque(refcon).takeUnretainedValue()
-    streamer.receiveEncoded(status: status, sampleBuffer: sampleBuffer)
+    streamer.receiveEncoded(token: UInt(bitPattern: frameRefcon), status: status, flags: flags, sample: sample)
 }
 
-/// Live capture of one window, driven by `wincap stream <id> <h264|hevc>`.
-///
-/// Record format on stdout: `u32 BE payload length`, then one tag byte and
-/// its body. Length counts the tag byte too.
-///   tag 0  idle, or VT dropped the input (no body).
-///   tag 1  one encoded access unit (body = MWV1 binary WS layout, seq 0).
-///   tag 2  the encoded unit exceeded the phone's 24576-byte wire cap; the
-///          encoder is invalidated before this is written (no body).
-/// The body of tag 1 is the 24-byte MWV1 header (flags bit 0 sync, parameter
-/// set count, u16 width/height, reserved, u32 seq = 0, u64 monotonic PTS in
-/// microseconds), then `u16 length + raw NAL` parameter sets on sync frames
-/// only, then `u32 length + raw NAL` access-unit entries.
-///
-/// Pacing contract with the Hook: stdin carries one `PULL <tier> <reset>` at a
-/// time (tier 0…3, reset 0|1) and exactly one record answers each PULL; `STOP`
-/// or EOF ends the process with 0 and needs no answer. A PULL waits at most
-/// 500 ms for a usable image (longer while an SCK configuration update is in
-/// flight) and then answers idle; idle is valid indefinitely, so static or
-/// minimized windows simply cost tag-0 records. The Hook owns seq numbering,
-/// epochs, the token bucket and frame rate; this process only refuses to
-/// overrun the 24576-byte unit cap (tag 2) and paces SCK via the tier's frame
-/// interval. Resize, tier change and reset all force a sync frame.
-final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let windowID: CGWindowID
-    let codec: StreamCodec
-    let stateQueue = DispatchQueue(label: "phren.wincap.stream")
+// SCWindow is a read-only snapshot. Transfer the selected window only.
+private enum WindowLookup: @unchecked Sendable {
+    case found(SCWindow)
+    case missing
+    case failed
+}
 
-    private var captureStream: SCStream?
-    /// Set once at startup and never changed: a window that hands its id to a
-    /// different owner is gone for our purposes (exit 5).
-    private var originalPID: pid_t = 0
+/// One capture, one cached image, and one PULL from admission through its
+/// response. Capture and VT state live on stateQueue. The independent monitor
+/// owns permission/identity checks, even during a blocked encode or write.
+private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private let windowID: CGWindowID
+    private let codec: StreamCodec
+    private let pipe = StreamPipe()
+    private let stateQueue = DispatchQueue(label: "phren.wincap.stream")
+    private let monitorQueue = DispatchQueue(label: "phren.wincap.monitor")
+
+    // monitorQueue
+    private var originalPID: pid_t?
+    private var monitor: DispatchSourceTimer?
+    private var lookup: UInt64 = 0
+    private var lookupInFlight = false
+    private var classifyingFailure = false
+
+    // stateQueue
+    private var window: SCWindow?
+    private var geometry: CaptureGeometry?
     private var tier = 1
-    private var nativeSize: CGSize?
-    private var declared: Dimensions?
-    private var encoder: VTCompressionSession?
-    private var rawFrame: RawFrame?
-    private var pending: PullRequest?
-    private var encoding: PullRequest?
-    private var encodingGeneration: UInt64 = 0
-    private var encodingWantsSync = false
-    private var encodingPts: UInt64 = 0
-    private var geometryGeneration: UInt64 = 0
-    private var tokenCounter: UInt64 = 0
-    private var forceSync = true
-    private var needsReset = true
-    private var sentFirstFrame = false
-    private var lastGeneratedPts: UInt64 = 0
-    private var lastSentPts: UInt64 = 0
-    private var lastCompleteAt: UInt64 = 0
-    private var offScreen = false
+    private var stream: SCStream?
+    private var appliedGeometry: CaptureGeometry?
+    private var appliedTier: Int?
+    private var dimensions: Dimensions?
+    private var transitioning = false
+    private var transitionID: UInt64 = 0
+    private var captureFailed = false
+    private var rebuildForResume = false
     private var resumeNeedsSync = true
-    private var configuring = false
-    private var configInFlight = false
-    private var deferredConfiguration: (Dimensions, Int)?
-    private var started = false
-    private var stopped = false
-    private var recheckTask: Task<Void, Never>?
+
+    private var rawFrame: RawFrame?
+    private var rawSerial: UInt64 = 0
+    private var lastSubmittedSerial: UInt64 = 0
+    private var lastPTS: UInt64 = 0
+    private var nextPullToken: UInt = 0
+    private var nextSubmissionToken: UInt = 0
+    private var pending: PullRequest?
+    private var idleDeadline: DispatchTime?
+    private var encoding: Submission?
+    private var encoder: VTCompressionSession?
+    private lazy var renderContext = CIContext()
 
     init(windowID: CGWindowID, codec: StreamCodec) {
         self.windowID = windowID
         self.codec = codec
-        super.init()
     }
-
-    // MARK: lifecycle
 
     func begin() {
-        startInput()
-        Task { await self.startCapture() }
+        Thread { self.readInput() }.start()
     }
 
-    private func startCapture() async {
-        guard CGPreflightScreenCaptureAccess() else { fail(3, "screen-recording") }
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-            guard let window = content.windows.first(where: { $0.windowID == self.windowID }),
-                  window.frame.width >= 1, window.frame.height >= 1,
-                  let app = window.owningApplication else { fail(5, "no window") }
-            let filter = SCContentFilter(desktopIndependentWindow: window)
-            let native = nativePixels(filter: filter, window: window)
-            let stream: SCStream = try stateQueue.sync {
-                try self.install(filter: filter, native: native, pid: app.processID)
-            }
-            try await stream.startCapture()
-            stateQueue.async {
-                guard !self.stopped else { return }
-                self.started = true
-                self.attemptEncode()
-                self.startRecheck()
-            }
-        } catch {
-            if !CGPreflightScreenCaptureAccess() { fail(3, "screen-recording") }
-            fail(4, "capture-failed: \(error.localizedDescription)")
-        }
-    }
-
-    private func nativePixels(filter: SCContentFilter, window: SCWindow) -> CGSize {
-        let rect = filter.contentRect.width >= 2 && filter.contentRect.height >= 2 ? filter.contentRect : window.frame
-        let scale = filter.pointPixelScale > 0 ? CGFloat(filter.pointPixelScale) : displayScale(for: window.frame)
-        return CGSize(width: rect.width * scale, height: rect.height * scale)
-    }
-
-    private func install(filter: SCContentFilter, native: CGSize, pid: pid_t) throws -> SCStream {
-        originalPID = pid
-        nativeSize = native
-        guard let dims = codedDimensions(native: native, tier: tier) else { fail(5, "no window") }
-        declared = dims
-        buildEncoder(dims: dims, tier: tier)
-        let config = makeConfiguration(dims: dims, tier: tier)
-        let created = SCStream(filter: filter, configuration: config, delegate: self)
-        try created.addStreamOutput(self, type: .screen, sampleHandlerQueue: stateQueue)
-        captureStream = created
-        return created
-    }
-
-    private func stopProcess() -> Never {
-        if stopped { exit(0) }
-        stopped = true
-        pending = nil
-        encoding = nil
-        recheckTask?.cancel()
-        teardownEncoder()
-        if let captureStream { captureStream.stopCapture(completionHandler: { _ in }) }
-        exit(0)
-    }
-
-    // MARK: stdin
-
-    private func startInput() {
-        let thread = Thread { [weak self] in self?.readInput() }
-        thread.name = "wincap-stream-stdin"
-        thread.start()
-    }
+    // MARK: Input and lifecycle
 
     private func readInput() {
-        var pendingBytes = Data()
+        var line: [UInt8] = []
         var buffer = [UInt8](repeating: 0, count: 4096)
+        var launched = false
         while true {
+            // Consume already available cancellation before launching capture
+            // (including an immediate STOP or EOF on an ungranted helper).
+            if !launched {
+                var fd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+                let ready = poll(&fd, 1, 0)
+                if ready < 0, errno == EINTR { continue }
+                if ready == 0 {
+                    launched = true
+                    monitorQueue.async { self.startMonitor() }
+                }
+            }
+
             let count = buffer.withUnsafeMutableBytes { read(STDIN_FILENO, $0.baseAddress, $0.count) }
+            if count == 0 { pipe.finish(0) }
             if count < 0 {
                 if errno == EINTR { continue }
-                fail(2, "stdin")
+                pipe.finish(2, "stdin")
             }
-            if count == 0 {
-                stateQueue.async { self.stopProcess() }
-                return
+            for byte in buffer.prefix(count) {
+                if byte == 10 {
+                    handleCommand(line)
+                    line.removeAll(keepingCapacity: true)
+                } else {
+                    guard line.count < 8 else { pipe.finish(2, "command too long") }
+                    line.append(byte)
+                }
             }
-            pendingBytes.append(contentsOf: buffer[0..<count])
-            while let newline = pendingBytes.firstIndex(of: 0x0a) {
-                let lineBytes = pendingBytes[pendingBytes.startIndex..<newline]
-                pendingBytes.removeSubrange(pendingBytes.startIndex...newline)
-                var line = String(decoding: lineBytes, as: UTF8.self)
-                if line.hasSuffix("\r") { line.removeLast() }
-                handle(line)
-            }
-            if pendingBytes.count > 64 { fail(2, "command too long") }
         }
     }
 
-    private func handle(_ line: String) {
-        if line == "STOP" {
-            stateQueue.async { self.stopProcess() }
+    private func handleCommand(_ line: [UInt8]) {
+        if line == Array("STOP".utf8) { pipe.finish(0) }
+        guard line.count == 8, line.prefix(5).elementsEqual("PULL ".utf8),
+              (48...51).contains(line[5]), line[6] == 32, (48...49).contains(line[7])
+        else { pipe.finish(2, "bad command") }
+        pipe.claimPull()
+        stateQueue.async { self.pull(tier: Int(line[5] - 48), reset: line[7] == 49) }
+    }
+
+    private func startMonitor() {
+        let timer = DispatchSource.makeTimerSource(queue: monitorQueue)
+        timer.schedule(deadline: .now(), repeating: .seconds(1), leeway: .nanoseconds(0))
+        timer.setEventHandler { [weak self] in
+            guard let self, !self.classifyingFailure, !self.lookupInFlight else { return }
+            self.inspectWindow(failure: nil)
+        }
+        monitor = timer
+        timer.resume()
+    }
+
+    /// A lookup has its own deadline on the monotonic monitor queue. A
+    /// capture failure supersedes a regular lookup and gets a fresh check.
+    private func inspectWindow(failure: String?) {
+        guard CGPreflightScreenCaptureAccess() else { pipe.finish(3, "screen-recording") }
+        lookup += 1
+        lookupInFlight = true
+        let ticket = lookup
+        monitorQueue.asyncAfter(deadline: .now() + .milliseconds(950)) {
+            guard self.lookup == ticket else { return }
+            self.finishCaptureFailure(failure ?? "window lookup timed out")
+        }
+        // Submit outside monitorQueue so the deadline also covers submission.
+        Task {
+            let result: WindowLookup
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+                if let window = content.windows.first(where: { $0.windowID == self.windowID }) {
+                    result = .found(window)
+                } else {
+                    result = .missing
+                }
+            } catch {
+                result = .failed
+            }
+            monitorQueue.async { self.applyLookup(result, ticket: ticket, failure: failure) }
+        }
+    }
+
+    private func applyLookup(_ result: WindowLookup, ticket: UInt64, failure: String?) {
+        guard lookup == ticket else { return }
+        lookup += 1
+        lookupInFlight = false
+        guard CGPreflightScreenCaptureAccess() else { pipe.finish(3, "screen-recording") }
+        switch result {
+        case .failed:
+            finishCaptureFailure(failure ?? "window lookup failed")
+        case .missing:
+            pipe.finish(5, "window-gone")
+        case .found(let window):
+            guard let app = window.owningApplication,
+                  originalPID.map({ $0 == app.processID }) ?? (eligibleApplication(for: window) != nil)
+            else { pipe.finish(5, "window-gone") }
+            if let failure { finishCaptureFailure(failure) }
+            originalPID = app.processID
+            stateQueue.async { self.applyWindow(window) }
+        }
+    }
+
+    private func finishCaptureFailure(_ message: String) -> Never {
+        if !CGPreflightScreenCaptureAccess() { pipe.finish(3, "screen-recording") }
+        pipe.finish(4, "capture-failed: \(message)")
+    }
+
+    private func captureFailure(_ message: String) {
+        guard !captureFailed else { return }
+        captureFailed = true
+        monitorQueue.async {
+            self.classifyingFailure = true
+            self.inspectWindow(failure: message)
+        }
+    }
+
+    // MARK: Capture configuration
+
+    private func applyWindow(_ next: SCWindow) {
+        guard !captureFailed else { return }
+        let wasOffScreen = window?.isOnScreen == false
+        window = next
+        geometry = CaptureGeometry(window: next)
+        if !next.isOnScreen {
+            suspendFrames()
+        } else if wasOffScreen {
+            // A restore frame can have arrived before the visibility lookup.
+            // Restart capture to obtain a fresh complete frame even if static.
+            appliedGeometry = nil
+        }
+        configureCapture()
+    }
+
+    private func configureCapture() {
+        guard !captureFailed, !transitioning, let window, let geometry,
+              stream == nil || geometry != appliedGeometry || tier != appliedTier else { return }
+        guard let dims = codedDimensions(native: geometry.native, tier: tier) else {
+            captureFailure("invalid window geometry")
             return
         }
-        let parts = line.split(separator: " ", omittingEmptySubsequences: false)
-        guard parts.count == 3, parts[0] == "PULL",
-              let nextTier = Int(parts[1]), (0...3).contains(nextTier),
-              parts[2] == "0" || parts[2] == "1" else { fail(2, "bad command") }
-        let reset = parts[2] == "1"
-        stateQueue.async { self.pull(tier: nextTier, reset: reset) }
+        transitioning = true
+        transitionID += 1
+        let transition = transitionID
+        stateQueue.asyncAfter(deadline: .now() + .seconds(5)) {
+            if self.transitioning, self.transitionID == transition {
+                self.captureFailure("capture configuration timed out")
+            }
+        }
+        idleDeadline = nil
+        suspendFrames()
+        let previous = stream
+        stream = nil
+        if let previous {
+            // Use a new stream for each configuration. Its identity fences
+            // pending callbacks, including same-size changes and late stops.
+            previous.stopCapture { error in
+                self.stateQueue.async {
+                    // Keep the retired stream alive until stop completes.
+                    defer { withExtendedLifetime(previous) {} }
+                    if let error {
+                        self.captureFailure(error.localizedDescription)
+                    } else {
+                        self.transitioning = false
+                        self.configureCapture()
+                    }
+                }
+            }
+        } else {
+            startCapture(window: window, geometry: geometry, dims: dims)
+        }
     }
 
-    // MARK: configuration
-
-    private func makeConfiguration(dims: Dimensions, tier: Int) -> SCStreamConfiguration {
-        let spec = tierSpec(tier)
+    private func startCapture(window: SCWindow, geometry: CaptureGeometry, dims: Dimensions) {
         let config = SCStreamConfiguration()
         config.width = dims.width
         config.height = dims.height
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(spec.fps))
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(tierSpec(tier).fps))
         config.queueDepth = 3
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = false
         config.ignoreShadowsSingleWindow = true
         config.capturesAudio = false
         config.scalesToFit = true
+        config.preservesAspectRatio = true
         config.colorSpaceName = CGColorSpace.sRGB
-        return config
-    }
 
-    /// Recompute coded size after a tier or window-geometry change. Cached
-    /// pre-change content is discarded, the encoder is rebuilt and the next
-    /// encode is forced to a keyframe, so no delta ever crosses a resize.
-    private func retune(native: CGSize, nextTier: Int, configChanged: Bool) {
-        // An in-flight encode belongs to the old configuration: abandon it and
-        // answer its PULL rather than let it write a stale sample.
-        if encoding != nil {
-            encoding = nil
-            respond(tag: 0, body: nil)
-        }
-        let tierChanged = nextTier != tier
-        tier = nextTier
-        nativeSize = native
-        guard let dims = codedDimensions(native: native, tier: nextTier) else { return }
-        let dimsChanged = declared != dims
-        declared = dims
-        geometryGeneration &+= 1
-        rawFrame = nil
-        buildEncoder(dims: dims, tier: nextTier)
-        forceSync = true
-        needsReset = true
-        if configChanged || dimsChanged || tierChanged {
-            pushConfiguration(dims: dims, tier: nextTier)
-        }
-    }
-
-    private func retuneForTier(_ nextTier: Int) {
-        guard nextTier != tier else { return }
-        guard let native = nativeSize else {
-            tier = nextTier
-            return
-        }
-        retune(native: native, nextTier: nextTier, configChanged: true)
-    }
-
-    /// SCK allows one configuration update at a time, so later requests wait
-    /// for the one in flight; only the newest queued update is kept. While any
-    /// update is outstanding `configuring` stays set, which keeps a PULL
-    /// outstanding instead of answering it idle.
-    private func pushConfiguration(dims: Dimensions, tier: Int) {
-        guard captureStream != nil else { return }
-        if configInFlight {
-            deferredConfiguration = (dims, tier)
-            return
-        }
-        configuring = true
-        configInFlight = true
-        let config = makeConfiguration(dims: dims, tier: tier)
-        captureStream?.updateConfiguration(config) { [weak self] error in
-            guard let self else { return }
-            self.stateQueue.async {
-                self.configInFlight = false
-                if let error { fail(4, "capture-failed: \(error.localizedDescription)") }
-                if let deferred = self.deferredConfiguration {
-                    self.deferredConfiguration = nil
-                    self.pushConfiguration(dims: deferred.0, tier: deferred.1)
-                } else {
-                    self.configuring = false
-                }
-                self.attemptEncode()
-            }
-        }
-    }
-
-    // MARK: encoder
-
-    private func buildEncoder(dims: Dimensions, tier: Int) {
-        teardownEncoder()
-        let spec = tierSpec(tier)
-        let specification: [String: Any] = [
-            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: true,
-        ]
-        let attributes: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
-        ]
-        var session: VTCompressionSession?
-        let status = VTCompressionSessionCreate(allocator: kCFAllocatorDefault,
-                                                width: Int32(dims.width),
-                                                height: Int32(dims.height),
-                                                codecType: codec.cmCodecType,
-                                                encoderSpecification: specification as CFDictionary,
-                                                imageBufferAttributes: attributes as CFDictionary,
-                                                compressedDataAllocator: nil,
-                                                outputCallback: vtOutputStreamCallback,
-                                                refcon: Unmanaged.passUnretained(self).toOpaque(),
-                                                compressionSessionOut: &session)
-        guard status == noErr, let created = session else { fail(6, "codec-unavailable") }
-
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_RealTime, value: NSNumber(value: true))
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_AllowFrameReordering, value: NSNumber(value: false))
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_AllowOpenGOP, value: NSNumber(value: false))
-        if VTSessionSetProperty(created, key: kVTCompressionPropertyKey_ProfileLevel, value: codec.profileLevel) != noErr {
-            VTCompressionSessionInvalidate(created)
-            fail(6, "codec-unavailable")
-        }
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_AllowTemporalCompression, value: NSNumber(value: true))
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: spec.fps))
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: spec.bitrate))
-        let limits = [NSNumber(value: spec.bitrate / 8), NSNumber(value: 1.0)] as NSArray
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_DataRateLimits, value: limits as CFArray)
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: NSNumber(value: spec.fps * 2))
-        VTSessionSetProperty(created, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: NSNumber(value: 2))
-        VTCompressionSessionPrepareToEncodeFrames(created)
-
-        encoder = created
-        sentFirstFrame = false
-    }
-
-    private func teardownEncoder() {
-        guard let session = encoder else { return }
-        encoder = nil
-        VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
-        VTCompressionSessionInvalidate(session)
-    }
-
-    // MARK: PULL handling
-
-    private func pull(tier nextTier: Int, reset: Bool) {
-        guard !stopped else { return }
-        // The Hook never pipelines: one PULL at a time, answered before the next.
-        if pending != nil || encoding != nil { fail(2, "pipelined pull") }
-        if nextTier != tier { retuneForTier(nextTier) }
-        if reset {
-            forceSync = true
-            needsReset = true
-            // Reset also means a fresh session: rate control and GOP state
-            // start clean, and the first unit is an independent keyframe.
-            if let dims = declared { buildEncoder(dims: dims, tier: tier) }
-        }
-        let request = PullRequest(tier: tier, reset: reset, token: nextToken())
-        pending = request
-        attemptEncode()
-        guard let outstanding = pending, outstanding.token == request.token else { return }
-        scheduleIdle(for: request.token)
-    }
-
-    private func nextToken() -> UInt64 {
-        tokenCounter &+= 1
-        return tokenCounter
-    }
-
-    /// The 500 ms idle answer. A PULL stays outstanding through an SCK
-    /// configuration update, so the timer simply re-arms while one runs.
-    private func scheduleIdle(for token: UInt64) {
-        stateQueue.asyncAfter(deadline: .now() + .milliseconds(500)) {
-            guard let request = self.pending, request.token == token, self.encoding == nil else { return }
-            if self.configuring {
-                self.scheduleIdle(for: token)
-                return
-            }
-            self.pending = nil
-            self.respond(tag: 0, body: nil)
-        }
-    }
-
-    private func usableFrame(for request: PullRequest) -> RawFrame? {
-        guard let frame = rawFrame, frame.generation == geometryGeneration else { return nil }
-        if request.reset { return frame }
-        return frame.pts > lastSentPts ? frame : nil
-    }
-
-    private func attemptEncode() {
-        guard !stopped, encoding == nil,
-              let request = pending,
-              let session = encoder,
-              declared != nil,
-              let frame = usableFrame(for: request) else { return }
-        pending = nil
-        encoding = request
-        encodingGeneration = geometryGeneration
-        let wantsSync = forceSync || request.reset || needsReset || !sentFirstFrame
-        encodingWantsSync = wantsSync
-        var pts = monotonicMicros()
-        if pts <= lastGeneratedPts { pts = lastGeneratedPts + 1 }
-        lastGeneratedPts = pts
-        encodingPts = pts
-        let duration = CMTime(value: 1, timescale: CMTimeScale(tierSpec(tier).fps))
-        let properties: CFDictionary? = wantsSync
-            ? (NSDictionary(object: NSNumber(value: true),
-                            forKey: kVTEncodeFrameOptionKey_ForceKeyFrame as NSString) as CFDictionary)
-            : nil
-        var flags = VTEncodeInfoFlags()
-        let status = VTCompressionSessionEncodeFrame(session,
-                                                     imageBuffer: frame.image,
-                                                     presentationTimeStamp: CMTime(value: CMTimeValue(pts), timescale: 1_000_000),
-                                                     duration: duration,
-                                                     frameProperties: properties,
-                                                     sourceFrameRefcon: nil,
-                                                     infoFlagsOut: &flags)
-        if status != noErr || flags.contains(.frameDropped) {
-            // Tag 0 after an encoder-reported drop still needs the next actual
-            // encode to start a fresh GOP, even if the Hook sends reset=0.
-            encoding = nil
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-        }
-    }
-
-    func receiveEncoded(status: OSStatus, sampleBuffer: CMSampleBuffer?) {
-        stateQueue.async { self.processEncoded(status: status, sampleBuffer: sampleBuffer) }
-    }
-
-    private func processEncoded(status: OSStatus, sampleBuffer: CMSampleBuffer?) {
-        guard encoding != nil else { return }
-        encoding = nil
-        let generation = encodingGeneration
-        let wantsSync = encodingWantsSync
-        let pts = encodingPts
-
-        guard status == noErr, let sample = sampleBuffer else {
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-        guard generation == geometryGeneration, let dims = declared else {
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-
-        // A keyframe is confirmed from the sample's own metadata, not merely
-        // from having asked for one.
-        var isSync = false
-        var sawAttachments = false
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[String: Any]] {
-            sawAttachments = true
-            let notSync = (attachments.first?[kCMSampleAttachmentKey_NotSync as String] as? NSNumber)?.boolValue ?? false
-            isSync = !notSync
-        }
-        if !sawAttachments { isSync = wantsSync }
-        guard !wantsSync || isSync else {
-            // The phone expects a sync frame; never let an unexpected delta
-            // stand in for it.
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-
-        guard let format = CMSampleBufferGetFormatDescription(sample),
-              let block = CMSampleBufferGetDataBuffer(sample) else {
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-        let (parameterSets, nalLengthSize) = parameterSetData(format: format, codec: codec)
-        if isSync && parameterSets.isEmpty {
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-        let rawLength = CMBlockBufferGetDataLength(block)
-        guard rawLength > 0 else {
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-        let memory = UnsafeMutablePointer<UInt8>.allocate(capacity: rawLength)
-        guard CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: rawLength, destination: memory) == noErr else {
-            memory.deallocate()
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-        let raw = Data(bytesNoCopy: memory, count: rawLength, deallocator: .free)
-        guard let accessUnit = normalizeNALUnits(raw, nalLengthSize: nalLengthSize) else {
-            forceSync = true
-            needsReset = true
-            respond(tag: 0, body: nil)
-            return
-        }
-
-        let wireSets = isSync ? parameterSets : []
-        let bodySize = 24 + wireSets.reduce(0) { $0 + 2 + $1.count } + accessUnit.count
-        if bodySize > 24576 {
-            teardownEncoder()
-            sentFirstFrame = false
-            forceSync = true
-            needsReset = true
-            respond(tag: 2, body: nil)
-            return
-        }
-
-        let body = frameBody(dims: dims, pts: pts, sync: isSync, parameterSets: wireSets, accessUnit: accessUnit)
-        respond(tag: 1, body: body)
-        sentFirstFrame = true
-        lastSentPts = pts
-        forceSync = false
-        needsReset = false
-    }
-
-    // MARK: sample conversion
-
-    private func parameterSetData(format: CMFormatDescription, codec: StreamCodec) -> ([Data], Int) {
-        var count = 0
-        var headerLength: Int32 = 4
-        var pointer: UnsafePointer<UInt8>?
-        var size = 0
-        let status: OSStatus
-        if codec == .h264 {
-            status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                format, parameterSetIndex: 0, parameterSetPointerOut: &pointer,
-                parameterSetSizeOut: &size, parameterSetCountOut: &count,
-                nalUnitHeaderLengthOut: &headerLength)
-        } else {
-            status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                format, parameterSetIndex: 0, parameterSetPointerOut: &pointer,
-                parameterSetSizeOut: &size, parameterSetCountOut: &count,
-                nalUnitHeaderLengthOut: &headerLength)
-        }
-        guard status == noErr, count > 0, count < 256 else { return ([], 4) }
-
-        var sets: [Data] = []
-        for index in 0..<count {
-            var setPointer: UnsafePointer<UInt8>?
-            var setSize = 0
-            let result: OSStatus
-            if codec == .h264 {
-                result = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                    format, parameterSetIndex: index, parameterSetPointerOut: &setPointer,
-                    parameterSetSizeOut: &setSize, parameterSetCountOut: nil,
-                    nalUnitHeaderLengthOut: nil)
-            } else {
-                result = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                    format, parameterSetIndex: index, parameterSetPointerOut: &setPointer,
-                    parameterSetSizeOut: &setSize, parameterSetCountOut: nil,
-                    nalUnitHeaderLengthOut: nil)
-            }
-            guard result == noErr, let bytes = setPointer, setSize > 0, setSize <= 65535 else { return ([], 4) }
-            sets.append(Data(bytes: bytes, count: setSize))
-        }
-        let header = Int(headerLength)
-        return (sets, (1...4).contains(header) ? header : 4)
-    }
-
-    /// Rewrite AVCC/HVCC length prefixes as four-byte big-endian lengths and
-    /// validate that the entries consume the buffer exactly. Parameter sets
-    /// are already out of band in the MWV1 body.
-    private func normalizeNALUnits(_ data: Data, nalLengthSize: Int) -> Data? {
-        guard (1...4).contains(nalLengthSize) else { return nil }
-        var output = Data(capacity: data.count)
-        var index = data.startIndex
-        let end = data.endIndex
-        while index < end {
-            guard index + nalLengthSize <= end else { return nil }
-            var length = 0
-            for offset in 0..<nalLengthSize {
-                length = (length << 8) | Int(data[index + offset])
-            }
-            index += nalLengthSize
-            guard length > 0, index + length <= end else { return nil }
-            appendBE32(&output, UInt32(length))
-            output.append(contentsOf: data[index..<(index + length)])
-            index += length
-        }
-        return output.isEmpty ? nil : output
-    }
-
-    private func frameBody(dims: Dimensions, pts: UInt64, sync: Bool, parameterSets: [Data], accessUnit: Data) -> Data {
-        var body = Data(capacity: 24 + accessUnit.count)
-        body.append(contentsOf: Array("MWV1".utf8))
-        body.append(sync ? 1 : 0)
-        body.append(UInt8(parameterSets.count))
-        appendBE16(&body, UInt16(dims.width))
-        appendBE16(&body, UInt16(dims.height))
-        appendBE16(&body, 0)
-        appendBE32(&body, 0)
-        appendBE64(&body, pts)
-        for set in parameterSets {
-            appendBE16(&body, UInt16(set.count))
-            body.append(set)
-        }
-        body.append(accessUnit)
-        return body
-    }
-
-    /// The only stdout writer. Called on `stateQueue` only, so records never
-    /// interleave.
-    private func respond(tag: UInt8, body: Data?) {
-        var record = Data(capacity: 5 + (body?.count ?? 0))
-        appendBE32(&record, UInt32(1 + (body?.count ?? 0)))
-        record.append(tag)
-        if let body { record.append(body) }
+        let created = SCStream(filter: SCContentFilter(desktopIndependentWindow: window),
+                               configuration: config, delegate: self)
         do {
-            try FileHandle.standardOutput.write(contentsOf: record)
+            try created.addStreamOutput(self, type: .screen, sampleHandlerQueue: stateQueue)
         } catch {
-            fail(4, "stdout-pipe")
+            captureFailure(error.localizedDescription)
+            return
+        }
+        stream = created
+        appliedGeometry = geometry
+        appliedTier = tier
+        dimensions = dims
+        created.startCapture { error in
+            self.stateQueue.async {
+                if let error {
+                    self.captureFailure(error.localizedDescription)
+                    return
+                }
+                guard !self.captureFailed else { return }
+                self.transitioning = false
+                self.configureCapture()
+                self.attemptEncode()
+                self.armIdle()
+            }
         }
     }
 
-    // MARK: SCK callbacks
+    private func suspendFrames() {
+        rawFrame = nil
+        resumeNeedsSync = true
+        rebuildForResume = false
+        // Keep any outstanding PULL across a resize or suspension.
+        encoding = nil
+        invalidateEncoder()
+        armIdle()
+    }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
-        guard outputType == .screen, !stopped else { return }
-        var status = SCFrameStatus.complete
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-           let raw = attachments.first?[.status] as? NSNumber,
-           let parsed = SCFrameStatus(rawValue: raw.intValue) {
-            status = parsed
-        }
+    func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, stream === self.stream, !captureFailed,
+              let attachments = (CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false)
+                                  as? [[SCStreamFrameInfo: Any]])?.first,
+              let value = attachments[.status] as? Int, let status = SCFrameStatus(rawValue: value) else { return }
         switch status {
         case .complete:
-            guard let dims = declared, let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            // A frame from an old configuration must never reach the encoder.
-            guard CVPixelBufferGetWidth(image) == dims.width,
-                  CVPixelBufferGetHeight(image) == dims.height else { return }
-            let now = monotonicMicros()
-            // Coming back from minimized/blank, or from a pause longer than a
-            // couple of seconds, starts a fresh GOP so the phone can recover
-            // even if it missed the last reference frame. Shorter idle gaps
-            // stay deltas: the phone still holds the last image.
-            if resumeNeedsSync || (lastCompleteAt != 0 && now &- lastCompleteAt > 2_000_000) {
-                forceSync = true
-                needsReset = true
+            guard window?.isOnScreen == true, let geometry = appliedGeometry, let dims = dimensions else { return }
+            rawSerial += 1
+            guard let frame = RawFrame(sample: sample, attachments: attachments, geometry: geometry,
+                                       dims: dims, serial: rawSerial) else {
+                suspendFrames()
+                return
+            }
+            if resumeNeedsSync {
+                // A prior submission may still finish when SCK goes idle.
+                // Let its response complete, then rebuild for this fresh frame.
+                rebuildForResume = true
                 resumeNeedsSync = false
             }
-            lastCompleteAt = now
-            rawFrame = RawFrame(image: image, pts: now, generation: geometryGeneration)
+            rawFrame = frame
             attemptEncode()
-        case .blank:
-            // The window is minimized or its content is unavailable. Keep the
-            // last complete image so a forced sync can reuse it, and resume
-            // with a sync frame on the first new complete image.
-            resumeNeedsSync = true
         case .idle:
-            break
+            resumeNeedsSync = true
+        case .blank, .suspended:
+            suspendFrames()
         case .stopped:
-            classifyCaptureEnd()
+            captureFailure("capture stopped")
         default:
             break
         }
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        stateQueue.async { self.classifyCaptureEnd() }
+        stateQueue.async {
+            guard stream === self.stream else { return }
+            self.captureFailure(error.localizedDescription)
+        }
     }
 
-    /// Recheck window existence and permission before mapping a generic
-    /// capture termination, so the Hook can close with 4404 or the Screen
-    /// Recording refusal instead of capture-failed.
-    private func classifyCaptureEnd() {
-        guard !stopped else { return }
-        stopped = true
+    // MARK: Pull and encoder
+
+    private func pull(tier: Int, reset: Bool) {
+        guard !captureFailed else { return }
+        nextPullToken += 1
+        pending = PullRequest(token: nextPullToken, reset: reset)
+        self.tier = tier
+        configureCapture()
+        attemptEncode()
+        armIdle()
+    }
+
+    private func armIdle() {
+        guard !transitioning, !captureFailed, idleDeadline == nil, let request = pending,
+              encoding == nil else { return }
+        let deadline = DispatchTime.now() + .milliseconds(500)
+        idleDeadline = deadline
+        stateQueue.asyncAfter(deadline: deadline) {
+            guard !self.captureFailed, self.pending?.token == request.token,
+                  self.idleDeadline == deadline else { return }
+            self.answer(tag: 0)
+        }
+    }
+
+    private func answer(tag: UInt8, body: Data? = nil) {
         pending = nil
+        idleDeadline = nil
+        pipe.send(tag: tag, body: body)
+    }
+
+    private func attemptEncode() {
+        guard !transitioning, !captureFailed, window?.isOnScreen == true, encoding == nil,
+              let request = pending, let raw = rawFrame, let dims = dimensions,
+              request.reset || raw.serial > lastSubmittedSerial else { return }
+        // While idle the phone holds its current image. Allow cached recovery
+        // on explicit reset and allow the initial or already-latched sync.
+        if resumeNeedsSync && encoder != nil && !rebuildForResume && !request.reset { return }
+
+        if request.reset || rebuildForResume { invalidateEncoder() }
+        let wantsSync = encoder == nil
+        if wantsSync { buildEncoder(dims: dims) }
+        guard let encoder,
+              let image = raw.scaled(to: dims, pool: VTCompressionSessionGetPixelBufferPool(encoder),
+                                     context: renderContext) else { pipe.finish(4, "pixel conversion failed") }
+
+        let pts = max(monotonicMicros(), lastPTS + 1)
+        lastPTS = pts
+        lastSubmittedSerial = raw.serial
+        rebuildForResume = false
+        idleDeadline = nil
+        nextSubmissionToken += 1
+        let token = nextSubmissionToken
+        encoding = Submission(token: token, pts: pts, wantsSync: wantsSync)
+        let duration = CMTime(value: 1, timescale: CMTimeScale(tierSpec(tier).fps))
+        let properties = wantsSync ? [kVTEncodeFrameOptionKey_ForceKeyFrame as String: true] as CFDictionary : nil
+        var flags = VTEncodeInfoFlags()
+        let status = VTCompressionSessionEncodeFrame(
+            encoder, imageBuffer: image, presentationTimeStamp: CMTime(value: Int64(pts), timescale: 1_000_000),
+            duration: duration, frameProperties: properties, sourceFrameRefcon: UnsafeMutableRawPointer(bitPattern: token),
+            infoFlagsOut: &flags)
+        requireEncoderSuccess(status, operation: "submit encode")
+        if flags.contains(.frameDropped) { encoderDroppedFrame() }
+    }
+
+    private func invalidateEncoder() {
+        guard let session = encoder else { return }
+        encoder = nil
+        VTCompressionSessionInvalidate(session)
+    }
+
+    private func encoderDroppedFrame() {
         encoding = nil
-        recheckTask?.cancel()
-        teardownEncoder()
-        Task {
-            if !CGPreflightScreenCaptureAccess() { fail(3, "screen-recording") }
+        invalidateEncoder()
+        answer(tag: 0)
+    }
+
+    func receiveEncoded(token: UInt, status: OSStatus, flags: VTEncodeInfoFlags, sample: CMSampleBuffer?) {
+        stateQueue.async {
+            guard !self.captureFailed, let submission = self.encoding, submission.token == token,
+                  let dims = self.dimensions else { return }
+            self.encoding = nil
+            self.requireEncoderSuccess(status, operation: "encode callback")
+            if flags.contains(.frameDropped) {
+                self.encoderDroppedFrame()
+                return
+            }
+            guard let sample else { self.pipe.finish(4, "encoder returned no sample") }
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-                guard let window = content.windows.first(where: { $0.windowID == self.windowID }),
-                      let app = window.owningApplication,
-                      app.processID == self.originalPID else { fail(5, "no window") }
+                let body = try makeFrameBody(sample, codec: self.codec, dims: dims, submission: submission)
+                self.answer(tag: 1, body: body)
+            } catch WireFrameError.oversize {
+                self.invalidateEncoder()
+                self.answer(tag: 2)
             } catch {
-                fail(4, "capture-failed")
-            }
-            fail(4, "capture-failed")
-        }
-    }
-
-    // MARK: recheck
-
-    private func startRecheck() {
-        guard recheckTask == nil else { return }
-        recheckTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard let self else { return }
-                if self.stopped { return }
-                await self.recheck()
+                self.pipe.finish(4, "invalid encoded access unit")
             }
         }
     }
 
-    /// At least once per second, even with no complete samples: verify the
-    /// grant, the window id and its original owner, and notice a resize.
-    private func recheck() async {
-        if !CGPreflightScreenCaptureAccess() { fail(3, "screen-recording") }
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-            guard let window = content.windows.first(where: { $0.windowID == self.windowID }),
-                  let app = window.owningApplication else { fail(5, "no window") }
-            if originalPID != 0 && app.processID != originalPID { fail(5, "window-gone") }
-            let filter = SCContentFilter(desktopIndependentWindow: window)
-            let native = nativePixels(filter: filter, window: window)
-            let onScreen = window.isOnScreen
-            stateQueue.async { self.applyRecheck(native, onScreen: onScreen) }
-        } catch {
-            // A transient shareable-content failure is retried on the next tick.
+    private func requireEncoderSuccess(_ status: OSStatus, operation: String) {
+        switch status {
+        case noErr: return
+        case kVTCouldNotFindVideoEncoderErr, kVTVideoEncoderNotAvailableNowErr, kVTVideoEncoderAuthorizationErr:
+            pipe.finish(6, "codec-unavailable: \(operation) (\(status))")
+        default:
+            pipe.finish(4, "\(operation) failed (\(status))")
         }
     }
 
-    private func applyRecheck(_ native: CGSize, onScreen: Bool) {
-        guard !stopped, let current = nativeSize else { return }
-        if !onScreen {
-            offScreen = true
-        } else if offScreen {
-            // Restored from minimized/occluded: the next complete image must
-            // start a fresh GOP.
-            offScreen = false
-            resumeNeedsSync = true
+    private func buildEncoder(dims: Dimensions) {
+        let spec = tierSpec(tier)
+        let specification = [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: true]
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+        ]
+        var session: VTCompressionSession?
+        let status = VTCompressionSessionCreate(
+            allocator: nil, width: Int32(dims.width), height: Int32(dims.height), codecType: codec.cmCodecType,
+            encoderSpecification: specification as CFDictionary, imageBufferAttributes: attributes as CFDictionary,
+            compressedDataAllocator: nil, outputCallback: vtOutputStreamCallback,
+            refcon: Unmanaged.passUnretained(self).toOpaque(), compressionSessionOut: &session)
+        requireEncoderSuccess(status, operation: "create encoder")
+        guard let session else { pipe.finish(4, "encoder returned no session") }
+
+        let profile = VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: codec.profileLevel)
+        if [kVTPropertyNotSupportedErr, kVTPropertyReadOnlyErr, kVTParameterErr, OSStatus(paramErr)].contains(profile) {
+            pipe.finish(6, "codec-unavailable: profile (\(profile))")
         }
-        if abs(current.width - native.width) < 0.75, abs(current.height - native.height) < 0.75 { return }
-        retune(native: native, nextTier: tier, configChanged: true)
+        requireEncoderSuccess(profile, operation: "set profile")
+        let required: [(CFString, NSNumber)] = [
+            (kVTCompressionPropertyKey_RealTime, NSNumber(value: true)),
+            (kVTCompressionPropertyKey_AllowFrameReordering, NSNumber(value: false)),
+            (kVTCompressionPropertyKey_AllowTemporalCompression, NSNumber(value: true)),
+            (kVTCompressionPropertyKey_ExpectedFrameRate, NSNumber(value: spec.fps)),
+            (kVTCompressionPropertyKey_AverageBitRate, NSNumber(value: spec.bitrate)),
+            (kVTCompressionPropertyKey_MaxKeyFrameInterval, NSNumber(value: spec.fps * 2)),
+            (kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, NSNumber(value: 2)),
+        ]
+        for (key, value) in required {
+            requireEncoderSuccess(VTSessionSetProperty(session, key: key, value: value), operation: "set \(key)")
+        }
+        let optional: [(CFString, CFTypeRef)] = [
+            (kVTCompressionPropertyKey_AllowOpenGOP, kCFBooleanFalse),
+            (kVTCompressionPropertyKey_DataRateLimits, [NSNumber(value: spec.bitrate / 8), NSNumber(value: 1.0)] as CFArray),
+        ]
+        for (key, value) in optional {
+            let status = VTSessionSetProperty(session, key: key, value: value)
+            if status != kVTPropertyNotSupportedErr { requireEncoderSuccess(status, operation: "set \(key)") }
+        }
+        requireEncoderSuccess(VTCompressionSessionPrepareToEncodeFrames(session), operation: "prepare encoder")
+        encoder = session
     }
 }
 
-var activeStreamer: WindowStreamer?
+// MARK: - MWV1 sample conversion
 
-func startStream(id: CGWindowID, codec: StreamCodec) {
+private enum WireFrameError: Error {
+    case invalid
+    case oversize
+}
+
+private let wireBodyLimit = 24_576
+
+private extension StreamCodec {
+    var parameterTypes: [UInt8] { self == .h264 ? [7, 8] : [32, 33, 34] }
+    var nalHeaderSize: Int { self == .h264 ? 1 : 2 }
+
+    func nalType(_ bytes: UnsafePointer<UInt8>, length: Int) throws -> UInt8 {
+        guard length >= nalHeaderSize, bytes[0] & 0x80 == 0 else { throw WireFrameError.invalid }
+        if self == .h264 { return bytes[0] & 0x1f }
+        // A single HEVC Main layer and a nonzero temporal_id_plus1.
+        guard bytes[0] & 1 == 0, bytes[1] >> 3 == 0, bytes[1] & 7 != 0 else { throw WireFrameError.invalid }
+        return (bytes[0] >> 1) & 0x3f
+    }
+
+    func sliceType(_ type: UInt8) throws -> Bool? {
+        // true = independently decodable IDR, false = other VCL, nil = non-VCL.
+        if self == .h264 {
+            switch type {
+            case 5: return true
+            case 1: return false
+            case 6, 9...12: return nil
+            default: throw WireFrameError.invalid
+            }
+        }
+        switch type {
+        case 19, 20: return true
+        case 0...9, 16...18, 21: return false
+        case 35...40: return nil
+        default: throw WireFrameError.invalid
+        }
+    }
+}
+
+private func parameterSet(_ format: CMFormatDescription, codec: StreamCodec, index: Int,
+                          count: UnsafeMutablePointer<Int>? = nil,
+                          lengthWidth: UnsafeMutablePointer<Int32>? = nil) throws -> UnsafeBufferPointer<UInt8> {
+    var bytes: UnsafePointer<UInt8>?
+    var size = 0
+    let status: OSStatus
+    switch codec {
+    case .h264:
+        status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            format, parameterSetIndex: index, parameterSetPointerOut: &bytes, parameterSetSizeOut: &size,
+            parameterSetCountOut: count, nalUnitHeaderLengthOut: lengthWidth)
+    case .hevc:
+        status = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+            format, parameterSetIndex: index, parameterSetPointerOut: &bytes, parameterSetSizeOut: &size,
+            parameterSetCountOut: count, nalUnitHeaderLengthOut: lengthWidth)
+    }
+    guard status == noErr, let bytes, size > 0 else { throw WireFrameError.invalid }
+    return UnsafeBufferPointer(start: bytes, count: size)
+}
+
+private func sampleIsSync(_ sample: CMSampleBuffer) throws -> Bool {
+    // CoreMedia defines an absent NotSync key (including no attachments)
+    // as false. A malformed attachment is an invalid sample.
+    guard let array = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) else { return true }
+    guard let attachments = array as? [[String: Any]], attachments.count == 1,
+          let first = attachments.first else { throw WireFrameError.invalid }
+    guard let value = first[kCMSampleAttachmentKey_NotSync as String] else { return true }
+    guard let flag = value as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID()
+    else { throw WireFrameError.invalid }
+    return !flag.boolValue
+}
+
+private func makeFrameBody(_ sample: CMSampleBuffer, codec: StreamCodec, dims: Dimensions,
+                           submission: Submission) throws -> Data {
+    guard CMSampleBufferIsValid(sample), CMSampleBufferDataIsReady(sample),
+          CMSampleBufferGetNumSamples(sample) == 1,
+          let format = CMSampleBufferGetFormatDescription(sample),
+          CMFormatDescriptionGetMediaType(format) == kCMMediaType_Video,
+          CMFormatDescriptionGetMediaSubType(format) == codec.cmCodecType,
+          let block = CMSampleBufferGetDataBuffer(sample) else { throw WireFrameError.invalid }
+    let size = CMVideoFormatDescriptionGetDimensions(format)
+    guard size.width == dims.width, size.height == dims.height else { throw WireFrameError.invalid }
+    let sync = try sampleIsSync(sample)
+    guard sync || !submission.wantsSync else { throw WireFrameError.invalid }
+
+    var setCount = 0
+    var nativeLengthWidth: Int32 = 0
+    let first = try parameterSet(format, codec: codec, index: 0, count: &setCount, lengthWidth: &nativeLengthWidth)
+    let types = codec.parameterTypes
+    guard setCount == types.count, [1, 2, 4].contains(nativeLengthWidth) else { throw WireFrameError.invalid }
+    var sets: [UInt8: UnsafeBufferPointer<UInt8>] = [:]
+    for index in 0..<setCount {
+        let set = index == 0 ? first : try parameterSet(format, codec: codec, index: index)
+        let type = try codec.nalType(set.baseAddress!, length: set.count)
+        guard types.contains(type), sets[type] == nil else { throw WireFrameError.invalid }
+        sets[type] = set
+    }
+
+    var body = Data("MWV1".utf8)
+    body.append(sync ? 1 : 0)
+    body.append(sync ? UInt8(setCount) : 0)
+    appendBE16(&body, UInt16(dims.width))
+    appendBE16(&body, UInt16(dims.height))
+    appendBE16(&body, 0)
+    appendBE32(&body, 0)
+    appendBE64(&body, submission.pts)
+    if sync {
+        for type in types {
+            let set = sets[type]!
+            guard set.count <= wireBodyLimit - body.count - 2 else { throw WireFrameError.oversize }
+            appendBE16(&body, UInt16(set.count))
+            body.append(contentsOf: set)
+        }
+    }
+
+    // The parameter buffers above belong to the format description. Keep it
+    // alive through the final use of those buffers.
+    withExtendedLifetime(format) {}
+    try appendAccessUnit(block, lengthWidth: Int(nativeLengthWidth), codec: codec, sync: sync, to: &body)
+    return body
+}
+
+private func appendAccessUnit(_ block: CMBlockBuffer, lengthWidth: Int, codec: StreamCodec,
+                              sync: Bool, to body: inout Data) throws {
+    let size = CMBlockBufferGetDataLength(block)
+    var offset = 0
+    var hasSlice = false
+    var header = [UInt8](repeating: 0, count: lengthWidth + codec.nalHeaderSize)
+    while offset < size {
+        guard size - offset >= header.count,
+              CMBlockBufferCopyDataBytes(block, atOffset: offset, dataLength: header.count,
+                                         destination: &header) == noErr else { throw WireFrameError.invalid }
+        let length = header.prefix(lengthWidth).reduce(0) { ($0 << 8) | Int($1) }
+        offset += lengthWidth
+        guard length >= codec.nalHeaderSize, length <= size - offset else { throw WireFrameError.invalid }
+        let type = try header.withUnsafeBufferPointer {
+            try codec.nalType($0.baseAddress!.advanced(by: lengthWidth), length: length)
+        }
+        if let idr = try codec.sliceType(type) {
+            // An IDR has no leading pictures or cross-GOP references, even
+            // when this encoder does not implement AllowOpenGOP.
+            guard !sync || idr else { throw WireFrameError.invalid }
+            hasSlice = true
+        }
+        guard length <= wireBodyLimit - body.count - 4 else { throw WireFrameError.oversize }
+        appendBE32(&body, UInt32(length))
+        let start = body.count
+        body.count += length
+        let status = body.withUnsafeMutableBytes {
+            CMBlockBufferCopyDataBytes(block, atOffset: offset, dataLength: length,
+                                       destination: $0.baseAddress!.advanced(by: start))
+        }
+        guard status == noErr else { throw WireFrameError.invalid }
+        offset += length
+    }
+    guard hasSlice else { throw WireFrameError.invalid }
+}
+
+private var activeStreamer: WindowStreamer?
+
+private func startStream(id: CGWindowID, codec: StreamCodec) {
     _ = signal(SIGPIPE, SIG_IGN)
     let streamer = WindowStreamer(windowID: id, codec: codec)
     activeStreamer = streamer
@@ -945,7 +996,8 @@ func run(_ args: [String]) async {
                   let quality = Double(args[4]), (0.1...1).contains(quality) else { fail(2, usage) }
             try await snapshot(id: rawId, maxSide: maxSide, quality: quality)
         case "stream":
-            guard args.count == 4, let rawId = UInt32(args[2]), rawId >= 1,
+            guard args.count == 4, args[2].utf8.allSatisfy({ (48...57).contains($0) }),
+                  let rawId = UInt32(args[2]), rawId >= 1,
                   let chosen = StreamCodec(rawValue: args[3]) else { fail(2, usage) }
             startStream(id: rawId, codec: chosen)
             return
