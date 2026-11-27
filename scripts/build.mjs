@@ -46,6 +46,12 @@ function tscExec() {
   return process.platform === "win32" ? "tsc.cmd" : "tsc";
 }
 
+/** A bundled Swift source, or the JS literal `undefined` before it lands. */
+function swiftSource(name) {
+  const file = path.join(srcRoot, "bridge/native", `${name}.swift`);
+  return fs.existsSync(file) ? JSON.stringify(fs.readFileSync(file, "utf8")) : "undefined";
+}
+
 function copySupplementalAssets(targetDir) {
   const shimDir = path.join(targetDir, "bridge/browser-shim");
   fs.mkdirSync(shimDir, { recursive: true });
@@ -130,6 +136,11 @@ try {
       BROWSER_SHIM_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/browser-shim/phren-playwright.cjs"), "utf8")),
       SIMTAP_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simtap.swift"), "utf8")),
       SIMCAST_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simcast.swift"), "utf8")),
+      // The Mac window helpers are optional in a build that predates their
+      // Swift files; undefined then means "no bundled source".
+      WINCAP_SOURCE: swiftSource("wincap"),
+      WININPUT_SOURCE: swiftSource("wininput"),
+      WINBADGE_SOURCE: swiftSource("winbadge"),
       // The OpenCode transcript plugin rides inside the bundle too, so a copied
       // or relocated bundle still installs and updates it.
       OPENCODE_PLUGIN_SOURCE: JSON.stringify(fs.readFileSync(path.join(cliRoot, "plugins/opencode/phren-transcript.js"), "utf8")),
