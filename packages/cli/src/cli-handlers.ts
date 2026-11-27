@@ -10,6 +10,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { parseArgs } from "node:util";
+import type { CliContext } from "./cli-registry.js";
 import {
   defaultPhrenPath,
   findPhrenPath,
@@ -90,6 +92,29 @@ export async function runAddCommand(args: string[]): Promise<number> {
     console.error(`Could not add project: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
+  return 0;
+}
+
+export async function runImportCommand(args: string[], ctx: CliContext): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: args.slice(1), allowPositionals: true,
+    options: { project: { type: "string" }, "dry-run": { type: "boolean" }, prune: { type: "boolean" } },
+  });
+  if (args[0] !== "vault" || positionals.length !== 1 || !values.project) {
+    throw new Error("Usage: phren import vault <dir> --project <name> [--dry-run] [--prune]");
+  }
+  const { resolveProject } = await import("./store-routing.js");
+  const { projectDir, store } = resolveProject(ctx.phrenPath(), values.project, ctx.profile());
+  const dryRun = values["dry-run"] ?? false;
+  if (!dryRun && store.role === "readonly") throw new Error(`Store "${store.name}" is read-only.`);
+  const { importVault } = await import("./import/vault.js");
+  const report = importVault(positionals[0], projectDir, { dryRun, prune: values.prune ?? false });
+  console.log(`${dryRun ? "Dry run for" : "Imported to"} ${report.root}`);
+  console.log(`${report.added} added, ${report.updated} updated, ${report.unchanged} unchanged, ${report.missing.length} missing, ${report.pruned} pruned, ${report.generated} generated and ${report.oversized.length} oversized skipped`);
+  if (dryRun) for (const note of report.addedPaths) console.log(`  Would add: ${JSON.stringify(note)}`);
+  for (const note of report.missing) console.log(`  Missing from vault: ${JSON.stringify(note)}`);
+  for (const note of report.oversized) console.log(`  Over 1 MiB: ${JSON.stringify(note)}`);
+  for (const note of report.conflicts) console.log(`  Kept modified copy: ${JSON.stringify(note)}`);
   return 0;
 }
 

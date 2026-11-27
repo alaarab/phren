@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
-import { buildIndex, queryRows } from "../shared/index.js";
+import { buildIndex, extractWikilinks, getFragmentBoostDocs, queryFragmentLinks, queryRows, updateFileInIndex } from "../shared/index.js";
 
 function runtimeFile(phrenPath: string, name: string) {
   return path.join(phrenPath, ".runtime", name);
@@ -81,6 +81,87 @@ describe("manual-links.json persistence", () => {
       { entity: "edge-router", entityType: "library", sourceDoc: "beta/FINDINGS.md", relType: "mentions" },
     ]);
   });
+});
+
+it("links finding wikilinks and refreshes reference wikilinks on a single-file edit", async () => {
+  const tmp = makeTempDir("mcp-graph-wikilinks-");
+  const reference = path.join(tmp.path, "demo", "reference", "Observations.md");
+  seedFindings(tmp.path, "demo", "# Findings\n\n- See [[Lowwater|baseline]] for the old survey.\n");
+  writeFile(reference, "See [[Highwater#survey]] for the new readings.\n");
+  const db = await buildIndex(tmp.path);
+  try {
+    expect(queryFragmentLinks(db, "lowwater").related).toEqual(["demo/FINDINGS.md"]);
+    expect(queryFragmentLinks(db, "highwater").related).toEqual(["demo/reference/Observations.md"]);
+    writeFile(reference, "See [[Floodmark]] for the new readings.\n");
+    updateFileInIndex(db, reference, tmp.path);
+    expect(queryFragmentLinks(db, "highwater").related).toEqual([]);
+    expect(queryFragmentLinks(db, "floodmark").related).toEqual(["demo/reference/Observations.md"]);
+  } finally {
+    db.close();
+    tmp.cleanup();
+  }
+});
+
+it("only boosts links in Markdown prose and treats their names literally in recall", async () => {
+  const tmp = makeTempDir("mcp-graph-literal-");
+  const markdown = [
+    "See [[phase%stage]] and [[swap_point|display]].",
+    "Examples `[[Inline Example]]` and `` literal ` [[Inline Double]] ``.",
+    "<!-- [[Comment Example]]",
+    "```sh",
+    "-->",
+    "````sh",
+    "[[ -n $value ]] [[Shell Example]]",
+    "```",
+    "[[Nested Fence]]",
+    "````",
+    "> ~~~sh",
+    "> [[Quoted Fence]]",
+    "> ~~~",
+    "Then [[phase%stage#details]] and \\[[Escaped Example]].",
+    "",
+    "    [[ -n $indented ]]",
+    "\t[[Tab Example]]",
+    "",
+    "> ```sh",
+    "> [[Unclosed Quoted Fence]]",
+    "Back in prose, [[waypoint]].",
+  ].join("\n");
+  expect(extractWikilinks(markdown)).toEqual(["phase%stage", "swap_point", "waypoint"]);
+  seedFindings(tmp.path, "demo", markdown);
+  writeFile(path.join(tmp.path, "demo", "reference", "Procedure.md"), markdown);
+  const db = await buildIndex(tmp.path);
+  try {
+    const expected = new Set(["demo/FINDINGS.md", "demo/reference/Procedure.md"]);
+    for (const query of ["explain phase%stage", "about swap_point", "waypoint"]) expect(getFragmentBoostDocs(db, query)).toEqual(expected);
+    for (const query of ["phase middle stage", "swapXpoint", "inline example", "comment example", "nested fence", "-n $value", "-n $indented", "tab example", "unclosed quoted fence"]) {
+      expect(getFragmentBoostDocs(db, query)).toEqual(new Set());
+    }
+  } finally {
+    db.close();
+    tmp.cleanup();
+  }
+});
+
+it("caps wikilinks per document and keeps legacy finding edges and the indexed text", async () => {
+  const tmp = makeTempDir("mcp-graph-bounded-");
+  const note = path.join(tmp.path, "demo", "reference", "Large.md");
+  const markdown = `${Array.from({ length: 256 }, (_, index) => `[[target-${index}]] [[target-${index}|duplicate]]`).join(" ")}\n`;
+  writeFile(note, markdown);
+  const annotations = Array.from({ length: 150 }, (_, index) => `legacy${index}`);
+  seedFindings(tmp.path, "demo", `${markdown}\n<!-- fragment: ${annotations.join(", ")} -->\n`);
+  const db = await buildIndex(tmp.path);
+  try {
+    expect(queryRows(db, "SELECT COUNT(*) FROM entity_links WHERE source_doc = ?", ["demo/reference/Large.md"])).toEqual([[128]]);
+    expect(queryRows(db, "SELECT COUNT(*) FROM entity_links WHERE source_doc = ?", ["demo/FINDINGS.md"])).toEqual([[128 + annotations.length]]);
+    expect(getFragmentBoostDocs(db, "legacy149")).toEqual(new Set(["demo/FINDINGS.md"]));
+    const content = queryRows(db, "SELECT content FROM docs WHERE filename = ?", ["Large.md"])?.[0]?.[0];
+    expect(content).toContain("[[target-255|duplicate]]");
+    expect(fs.readFileSync(note, "utf8")).toBe(markdown);
+  } finally {
+    db.close();
+    tmp.cleanup();
+  }
 });
 
 describe("read_graph pagination", () => {

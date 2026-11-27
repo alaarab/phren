@@ -1426,9 +1426,11 @@ In the core profile use `phren_admin(action: "manage_project", project, operatio
 
 ## Fragment Graph
 
+Phren indexes Obsidian-style wikilinks in findings and reference docs as mentions of the target note name. For example, `[[Guides/Deployment.md#Rollout|Release guide]]` links to the `deployment` fragment. Wikilinks inside fenced code, indented code, inline code, or HTML comments are ignored. Use the CLI to add a vault's notes as reference docs. [Obsidian vault import](obsidian.md#import-a-vault)
+
 ### `search_fragments`
 
-Find fragments and related docs by name.
+Find fragments by name and count the linked documents.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

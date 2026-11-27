@@ -61,6 +61,7 @@ export function logFragmentMiss(phrenPath: string, name: string, context: string
 // Use the shared universal starter set. Framework/tool specifics are learned
 // dynamically per project via extractDynamicFragments() in content-dedup.ts.
 const PROSE_FRAGMENT_PATTERN = UNIVERSAL_TECH_TERMS_RE;
+const MAX_WIKILINK_FRAGMENTS_PER_DOC = 128;
 
 const FRAGMENT_PATTERNS = [
   // import/require patterns: import X from 'pkg' or require('pkg')
@@ -105,7 +106,15 @@ function isAllowedFragmentName(name: string): boolean {
  * updateFileInIndex -> extractAndLinkFragments.
  */
 export function extractFragmentNames(content: string): string[] {
-  const found = new Set<string>();
+  return fragmentNamesFromText(content, withoutWikilinks(content));
+}
+
+function withoutWikilinks(content: string): string {
+  return content.replace(/\[\[[^\[\]\r\n]+\]\]/g, " ");
+}
+
+function fragmentNamesFromText(markdown: string, content: string): string[] {
+  const found = new Set(extractWikilinks(markdown, MAX_WIKILINK_FRAGMENTS_PER_DOC));
   for (const pattern of FRAGMENT_PATTERNS) {
     const regex = new RegExp(pattern.source, pattern.flags);
     let match: RegExpExecArray | null;
@@ -119,7 +128,7 @@ export function extractFragmentNames(content: string): string[] {
   // Extract explicit fragment annotations: <!-- fragment: Foo,Bar --> (also supports legacy <!-- entity: ... -->)
   const annotationRe = /<!--\s*(?:fragment|entity):\s*([^-]+)-->/gi;
   let m: RegExpExecArray | null;
-  while ((m = annotationRe.exec(content)) !== null) {
+  while ((m = annotationRe.exec(markdown)) !== null) {
     for (const part of m[1].split(",")) {
       const name = part.trim();
       if (isAllowedFragmentName(name)) {
@@ -129,6 +138,85 @@ export function extractFragmentNames(content: string): string[] {
   }
 
   return [...found];
+}
+
+const INDENTED_CODE = /^(?: {4}| {0,3}\t)/;
+
+function quoteLine(line: string): { depth: number; text: string } {
+  const prefix = /^(?: {0,3}>[ \t]?)+/.exec(line)?.[0] ?? "";
+  return { depth: prefix.split(">").length - 1, text: line.slice(prefix.length).replace(/\r$/, "") };
+}
+
+function openingFence(line: string): { marker: string; indent: number } | undefined {
+  const match = /^( {0,3}(?:[-+*]|\d+[.)])[ \t]+)? {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match || (match[2][0] === "`" && match[3].includes("`"))) return undefined;
+  return { marker: match[2], indent: match[1]?.length ?? 0 };
+}
+
+/** Distinct, normalized note names in Markdown reading order. */
+export function extractWikilinks(markdown: string, limit = Infinity): string[] {
+  if (limit <= 0 || !markdown.includes("[[")) return [];
+  const names = new Set<string>();
+  const tokens = /<!--|`+|\[\[/g;
+  const link = /([^\[\]#|\r\n]{1,500})(?:[#|][^\[\]\r\n]*)?\]\]/y;
+  const codeEnds = /(`+)|\n/g;
+  let fence: { marker: string; indent: number; depth: number } | undefined;
+  let offset = 0;
+  let skipUntil = 0;
+  for (const line of markdown.split("\n")) {
+    const start = offset;
+    offset += line.length + 1;
+    if (skipUntil >= offset) continue;
+    const { depth, text } = quoteLine(line);
+    if (skipUntil <= start) {
+      if (fence && (depth < fence.depth || (text.trim() && /^ */.exec(text)![0].length < fence.indent))) fence = undefined;
+      if (fence) {
+        const close = /^( *)(`{3,}|~{3,})[ \t]*$/.exec(text);
+        if (depth === fence.depth && close && close[1].length <= fence.indent + 3
+          && close[2].startsWith(fence.marker)) fence = undefined;
+        continue;
+      }
+      if (INDENTED_CODE.test(text)) continue;
+      const open = openingFence(text);
+      if (open) { fence = { ...open, depth }; continue; }
+    }
+
+    tokens.lastIndex = Math.max(0, skipUntil - start);
+    let token: RegExpExecArray | null;
+    while ((token = tokens.exec(line)) !== null) {
+      let left = token.index;
+      while (left > 0 && line[left - 1] === "\\") left--;
+      if ((token.index - left) % 2) continue;
+      if (token[0] === "<!--") {
+        const end = markdown.indexOf("-->", start + tokens.lastIndex);
+        skipUntil = end < 0 ? markdown.length : end + 3;
+        tokens.lastIndex = skipUntil - start;
+      } else if (token[0][0] === "`") {
+        codeEnds.lastIndex = start + tokens.lastIndex;
+        let end: RegExpExecArray | null;
+        while ((end = codeEnds.exec(markdown)) !== null) {
+          if (!end[1]) {
+            const lineEnd = markdown.indexOf("\n", codeEnds.lastIndex);
+            const next = quoteLine(markdown.slice(codeEnds.lastIndex, lineEnd < 0 ? undefined : lineEnd));
+            if (next.depth !== depth || !next.text.trim() || INDENTED_CODE.test(next.text) || openingFence(next.text)) break;
+          } else if (end[1].length === token[0].length) {
+            skipUntil = codeEnds.lastIndex;
+            tokens.lastIndex = skipUntil - start;
+            break;
+          }
+        }
+      } else if (line[token.index - 1] !== "!" && line[token.index - 1] !== "[") {
+        link.lastIndex = tokens.lastIndex;
+        const match = link.exec(line);
+        if (!match) continue;
+        const name = match[1].split("/").at(-1)!.trim().replace(/\.md$/i, "").toLowerCase();
+        tokens.lastIndex = link.lastIndex;
+        if (name && name !== "." && name !== "..") names.add(name);
+        if (names.size >= limit) return [...names];
+      }
+    }
+  }
+  return [...names];
 }
 
 function getOrCreateFragment(db: SqlJsDatabase, name: string, type: string): number {
@@ -328,17 +416,18 @@ function extractCapitalizedPhrases(content: string): string[] {
   return [...found];
 }
 
-export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sourceDoc: string, phrenPath?: string): void {
-  const fragmentNames = extractFragmentNames(content);
+export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sourceDoc: string, phrenPath?: string, wikilinksOnly = false): void {
+  const prose = wikilinksOnly ? "" : withoutWikilinks(content);
+  const fragmentNames = wikilinksOnly ? extractWikilinks(content, MAX_WIKILINK_FRAGMENTS_PER_DOC) : fragmentNamesFromText(content, prose);
 
   // Extract capitalized noun phrases as candidate fragments
-  const capitalizedPhrases = extractCapitalizedPhrases(content);
+  const capitalizedPhrases = wikilinksOnly ? [] : extractCapitalizedPhrases(prose);
   for (const phrase of capitalizedPhrases) {
     fragmentNames.push(phrase);
   }
 
   // Add user-defined fragments from AGENTS.md frontmatter
-  if (phrenPath) {
+  if (phrenPath && !wikilinksOnly) {
     const projectMatch = sourceDoc.match(/^([^/]+)\//);
     if (projectMatch) {
       const project = projectMatch[1];
@@ -347,7 +436,7 @@ export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sour
         const lower = uf.toLowerCase();
         // Check if user-defined fragment appears in content (use escaped regex for safe matching)
         const safePattern = new RegExp(`\\b${escapeRegex(lower)}\\b`, "i");
-        if (safePattern.test(content)) {
+        if (safePattern.test(prose)) {
           fragmentNames.push(lower);
         }
       }
@@ -355,8 +444,8 @@ export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sour
   }
 
   // Deduplicate
-  const uniqueNames = [...new Set(fragmentNames)];
-  if (uniqueNames.length === 0) return;
+  const uniqueNames = new Set(fragmentNames);
+  if (uniqueNames.size === 0) return;
 
   const docFragmentId = getOrCreateFragment(db, sourceDoc, "document");
   if (docFragmentId === -1) return;
@@ -468,7 +557,7 @@ export function getFragmentBoostDocs(db: SqlJsDatabase, query: string): Set<stri
        FROM entity_links el
        JOIN entities e ON el.target_id = e.id
        WHERE length(e.name) > 2
-         AND ? LIKE '%' || lower(e.name) || '%'`,
+         AND instr(?, lower(e.name)) > 0`,
       [normalizedQuery]
     )[0]?.values ?? [];
 

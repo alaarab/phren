@@ -34,6 +34,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "search-fragments", "related-docs", "truths", "promote", "skills", "detect-skills", "hooks", "config",
       "maintain", "dream", "consolidation-status", "quality-feedback", "mcp-mode", "hooks-mode", "preset", "snippet",
       "verify", "uninstall", "update", "profile", "store", "team", "modules list", "modules enable", "modules disable",
+      "import",
       "hook-prompt", "hook-session-start", "hook-stop", "hook-context", "hook-tool", "background-sync",
       "background-maintenance", "background-reindex", "debug-injection", "inspect-index", "skill-list",
       "policy", "workflow", "index-policy", "govern-memories", "prune-memories", "consolidate-memories", "link",

@@ -398,6 +398,16 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "import",
+    topic: "projects",
+    usage: "phren import vault <dir> --project <name> [--dry-run] [--prune]",
+    summary: "Import Obsidian notes as project reference docs",
+    run: async (args, ctx) => {
+      const { runImportCommand } = await import("./cli-handlers.js");
+      return runImportCommand(args, ctx);
+    },
+  },
+  {
     name: "schedule",
     topic: "projects",
     usage: "phren schedule <subcommand>",
