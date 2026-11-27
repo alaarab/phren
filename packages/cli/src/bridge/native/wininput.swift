@@ -282,9 +282,10 @@ func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
         sleepUntil(deadline)
         if getppid() == 1 { failure = (7, "orphaned"); break }
         if isCancelled() { failure = (8, "cancelled"); break }
-        // About every fourth step, and always before the final point, the
-        // window under the next point must still be the target.
-        if index % 4 == 0 || index == dragged.count - 1, !isTarget(points[index]) {
+        // The window under the next point must still be the target: a panel can
+        // cover any step, so every one is hit-tested (bounded) before it is
+        // posted, and the first failure ends the drag through the release.
+        if !isTarget(points[index]) {
             failure = (6, "focus")
             break
         }
