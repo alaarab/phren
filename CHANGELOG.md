@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.96] - 2026-11-27
+
 ### Added
 
 - Agents now settle the tasks they take on (#934). A session that claims a task or moves one to Active has it recorded, and when its turn ends with such a task still open, the Claude Code and Codex Stop hook asks it once to complete the task with evidence, park it (`Blocker: …; Next: …` in its context) or return it to the Queue. `PHREN_TASK_STOP_CHECK=off` turns this off.
