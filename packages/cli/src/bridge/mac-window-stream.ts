@@ -341,7 +341,8 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   const tryPull = () => {
     if (inChunk) { pullWanted = true; return; }
-    if (ended || !spawned || pullOutstanding || staged || outstanding || sending) return;
+    // A child that exited is only draining whatever stdout already holds.
+    if (ended || !spawned || childExited || pullOutstanding || staged || outstanding || sending) return;
     // Pace off the tier the latest clamped request would use, so an upshift
     // shortens a pending wait and a superseded downshift never commits.
     const due = lastPullAt + 1000 / MAC_WINDOW_TIERS[requestedTier].fps;

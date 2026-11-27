@@ -116,12 +116,13 @@ class FakeChild extends EventEmitter {
   }
   /** The child process started, as Node's `spawn` event reports. */
   spawned() { this.emit("spawn"); }
-  exit(code: number | null = 0) {
+  exit(code: number | null = 0, endStdout = true) {
     if (this.exited) return;
     this.exited = true;
     this.emit("exit", code, null);
-    // A real pipe reaches EOF once the process is gone.
-    this.stdout.end();
+    // A real pipe reaches EOF once the process is gone, unless a test wants
+    // to hand over buffered output first.
+    if (endStdout) this.stdout.end();
   }
 }
 
@@ -421,6 +422,20 @@ describe("frames", () => {
     child.exit(5);
     await flush();
     expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+  });
+  it("keeps the helper's exit code when an idle record is still buffered", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    const child = children[0];
+    // Pacing is due by the time the buffered idle arrives.
+    vi.advanceTimersByTime(125);
+    child.exit(5, false);
+    await flush();
+    child.stdout.write(idle());
+    await flush();
+    child.stdout.end();
+    await flush();
+    expect(client.closed).toEqual({ code: 4404, reason: "window-gone" });
   });
   it("maps the exit code once stdout ended with a complete record", async () => {
     const { deps, children } = harness();
