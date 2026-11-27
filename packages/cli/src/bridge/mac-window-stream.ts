@@ -187,6 +187,9 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   let child: ChildProcess | undefined;
   /** The child announced it started; an 'error' after this is not a spawn failure. */
   let childStarted = false;
+  /** Its exit status, and whether stdout has finished, in either order. */
+  let childStatus: number | null | undefined;
+  let stdoutEnded = false;
   let lease: MacWindowStreamLease | undefined;
   let finishedLease = false;
   const finishLease = (outcome?: string) => {
@@ -295,6 +298,21 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   live.add(shutdown);
   client.once("close", () => end());
   client.once("error", () => end());
+
+  /** The exit code decides the close, but only after stdout was judged. */
+  const settleExit = () => {
+    if (ended || childStatus === undefined || !stdoutEnded) return;
+    const close = exitClose(childStatus);
+    end(close.code, close.reason);
+  };
+  /** stdout EOF first: a partial record is bad-helper-frame, whatever the exit. */
+  const stdoutDone = () => {
+    if (stdoutEnded) return;
+    stdoutEnded = true;
+    if (ended) return;
+    try { reader.finish(); } catch { end(1011, "bad-helper-frame"); return; }
+    settleExit();
+  };
 
   /** Rotate the epoch before the next frame; several queued reasons collapse. */
   const restartEpoch = () => {
@@ -485,8 +503,10 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     spawnedChild.once("spawn", () => { childStarted = true; });
     spawnedChild.once("exit", (code: number | null) => {
       childExited = true;
+      childStatus = code;
       releaseIfDone();
-      if (!ended) { const close = exitClose(code); end(close.code, close.reason); }
+      // stdout can end after this event; settleExit waits for it.
+      settleExit();
     });
     spawnedChild.once("error", () => {
       // Only a failure before 'spawn' is a failed start; a later error (a
@@ -499,6 +519,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     // A helper that exits mid-write makes Node emit EPIPE here, asynchronously.
     spawnedChild.stdin?.on("error", () => { if (!ended) end(1011, "capture-failed"); });
     const stdout = spawnedChild.stdout;
+    if (!stdout) stdoutEnded = true;
     stdout?.on("data", (chunk: Buffer) => {
       if (ended) return;
       // The buffer is empty after every chunk (trailing bytes are rejected
@@ -518,10 +539,10 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
       if (records.length > 0 && reader.pending() > 0) { end(1011, "bad-helper-frame"); return; }
       if (pullWanted) { pullWanted = false; tryPull(); }
     });
-    stdout?.on("end", () => {
-      if (ended) return;
-      try { reader.finish(); } catch { end(1011, "bad-helper-frame"); }
-    });
+    stdout?.on("end", stdoutDone);
+    // Node may close the child before the readable's own close; both mean EOF.
+    stdout?.on("close", stdoutDone);
+    spawnedChild.once("close", stdoutDone);
     // Bounded, never quoted: the helper's own words never reach a close reason.
     spawnedChild.stderr?.on("data", () => { /* drained */ });
     spawned = true;

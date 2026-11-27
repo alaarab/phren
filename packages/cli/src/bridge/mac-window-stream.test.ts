@@ -91,7 +91,13 @@ class FakeChild extends EventEmitter {
   }
   /** The child process started, as Node's `spawn` event reports. */
   spawned() { this.emit("spawn"); }
-  exit(code: number | null = 0) { if (this.exited) return; this.exited = true; this.emit("exit", code, null); }
+  exit(code: number | null = 0) {
+    if (this.exited) return;
+    this.exited = true;
+    this.emit("exit", code, null);
+    // A real pipe reaches EOF once the process is gone.
+    this.stdout.end();
+  }
 }
 
 function harness() {
@@ -371,6 +377,28 @@ describe("frames", () => {
     child.stdout.write(idle());
     await flush();
     expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+  });
+  it("reports a truncated record even when the child exits before stdout ends", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    const child = children[0];
+    const bytes = record(1, wire({ sync: true }));
+    child.stdout.write(bytes.subarray(0, 5));
+    await flush();
+    // Exit (mapped to window-gone when complete) arrives before EOF.
+    child.exit(5);
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "bad-helper-frame" });
+  });
+  it("maps the exit code once stdout ended with a complete record", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    const child = children[0];
+    child.stdout.write(record(1, wire({ sync: true })));
+    await flush();
+    child.exit(5);
+    await flush();
+    expect(client.closed).toEqual({ code: 4404, reason: "window-gone" });
   });
   it("treats stdout ending mid-record as bad-helper-frame", async () => {
     const { deps, children } = harness();
