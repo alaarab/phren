@@ -1174,6 +1174,16 @@ is never written, only `chars: <length>`. The `winbadge` helper shows a red
 session; its "Stop phone control" item ends the session and refuses requests
 for 60 seconds with 409 `mac-windows-stopped`.
 
+**Trust boundary.** Every Mac window route requires the paired phone's
+signature (owner proof); the first request already needs one, and a signed Mac
+request does not change the signing requirement of any other route. The
+snapshot's `id`, `size` and `quality` query is not covered by the signature: it
+travels inside the SSH channel the phone already authenticates, and each proof
+nonce is single-use. The helpers live under the Hook user's bridge folder, so
+code running as that user could replace them. Screen Recording and Accessibility
+are granted by macOS to each helper binary, and a rebuilt helper is a new
+binary, so macOS asks again.
+
 Screen Recording is for `wincap` (listing and snapshots); Accessibility is for
 `wininput` (taps, keys, typing). A rebuilt helper is a new binary, so macOS asks
 for its grant once more. `phren mac-windows status` reports a helper that cannot
