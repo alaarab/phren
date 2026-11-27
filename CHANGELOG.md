@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.99] - 2026-11-27
+
+### Added
+
+- `phren export vault <dir>` writes the store's findings, fragments and projects as a linked Obsidian vault (MQ 4.2). Every tier of findings is included, with lifecycle status in frontmatter; supersedes, contradicts and fragment links become wikilinks, and citations are text. The vault must be outside every Phren store and the source checkout. Running it again refreshes the generated notes in place and never touches your own files. `--project` narrows it, `--dry-run` prints counts, and `--force-unlock` clears a lock left by an interrupted export. See [Obsidian](docs/obsidian.md).
+- `phren import vault <dir> --project <name>` copies an Obsidian vault's Markdown notes into the project's reference docs, where they are searchable and synced with the store (MQ 4.3). Re-importing updates changed notes and leaves the rest alone; `--prune` removes copies whose source notes are gone; notes the exporter generated are skipped. Wikilinks in reference docs and findings now link to fragments, ignoring code and comments.
+- Dream proposals record accept and reject decisions: `phren dream apply --reject` and `--resolve`, alongside `--only`, write append-only decision files, and `phren dream status` shows proposed, applied, rejected, pending and conflicted counts per operation (MQ 3.13). Additions approved through the review queue are not counted.
+
+### Fixed
+
+- A process that changes `PHREN_PATH` now resolves the new store; changing directory alone still keeps the store it started with.
+
 ## [0.3.98] - 2026-11-27
 
 ### Changed
