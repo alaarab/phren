@@ -1174,6 +1174,10 @@ is never written, only `chars: <length>`. The `winbadge` helper shows a red
 session; its "Stop phone control" item ends the session and refuses requests
 for 60 seconds with 409 `mac-windows-stopped`.
 
+`phren mac-windows off` does not wait for the Hook: it writes the file, and an
+open session re-reads it every half second and again before every input, so
+control stops within half a second. Stop in the menu-bar indicator is immediate.
+
 **Trust boundary.** Every Mac window route requires the paired phone's
 signature (owner proof); the first request already needs one, and a signed Mac
 request does not change the signing requirement of any other route. The
