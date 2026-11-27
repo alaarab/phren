@@ -179,10 +179,12 @@ func typeText(_ text: String) {
     checkCancel()
     var chunk: [UniChar] = []
     func flush() {
-        checkAlive()
         guard !chunk.isEmpty else { return }
-        checkCancel()
         ensureFocus()
+        // The focus lookup blocks: a Stop or a dead Hook in that window must
+        // not start the chunk.
+        checkAlive()
+        checkCancel()
         let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
         let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
         down?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
@@ -193,9 +195,11 @@ func typeText(_ text: String) {
     for scalar in text.unicodeScalars {
         if scalar.value == 10 {
             flush()
+            ensureFocus()
+            // The focus lookup blocks: a Stop or a dead Hook in that window
+            // must not start the Return.
             checkAlive()
             checkCancel()
-            ensureFocus()
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: true), pause: 0)
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: false), pause: 8_000)
             continue
@@ -208,9 +212,11 @@ func typeText(_ text: String) {
 }
 
 func press(_ code: CGKeyCode, modifiers: [String]) {
+    ensureFocus()
+    // The focus lookup blocks: a Stop or a dead Hook in that window must not
+    // start the press.
     checkAlive()
     checkCancel()
-    ensureFocus()
     var flags: CGEventFlags = []
     if modifiers.contains("cmd") { flags.insert(.maskCommand) }
     if modifiers.contains("shift") { flags.insert(.maskShift) }
