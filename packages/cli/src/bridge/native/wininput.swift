@@ -109,14 +109,29 @@ func raise() {
     usleep(120_000)
     ensureFocus()
 }
-// Whether the element under a screen point belongs to the window's app,
-// rather than another window, menu or app on top of it.
-func ownsPoint(_ point: CGPoint) -> Bool {
-    var hit: AXUIElement?
-    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit) == .success,
-          let hit else { return false }
-    var hitPid: pid_t = 0
-    return AXUIElementGetPid(hit, &hitPid) == .success && hitPid == pid
+// The window under a screen point, found from the hit element itself or by
+// walking up to the first ancestor with a window or the AXWindow role.
+func pointWindow(_ point: CGPoint) -> AXUIElement? {
+    var hitRef: AXUIElement?
+    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hitRef) == .success,
+          var element = hitRef else { return nil }
+    for _ in 0..<64 {
+        var windowRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &windowRef) == .success,
+           let value = windowRef, CFGetTypeID(value) == AXUIElementGetTypeID() {
+            return value as! AXUIElement
+        }
+        var roleRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
+           let role = roleRef as? String, role == kAXWindowRole as String {
+            return element
+        }
+        var parentRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentRef) == .success,
+              let value = parentRef, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        element = value as! AXUIElement
+    }
+    return nil
 }
 func post(_ event: CGEvent?, pause: useconds_t = 20_000) { event?.post(tap: .cghidEventTap); usleep(pause) }
 func fraction(_ value: String) -> Double? {
@@ -184,9 +199,12 @@ case "tap":
     let bounds = raised.bounds
     // The -1 keeps a tap at fraction 1.0 inside the frame.
     let point = CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
-    guard ownsPoint(point) else { fail(6, "focus") }
     ensureFocus()
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
+    // The element under the point must belong to this window, not an alert
+    // panel or another window of the same app floating above it.
+    guard let hitWindow = pointWindow(point), CFEqual(hitWindow, window) else { fail(6, "focus") }
+    ensureFocus()
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
 case "type":
