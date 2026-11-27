@@ -740,7 +740,7 @@ final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                     parameterSetSizeOut: &setSize, parameterSetCountOut: nil,
                     nalUnitHeaderLengthOut: nil)
             }
-            guard result == noErr, let bytes = setPointer, setSize > 0 else { return ([], 4) }
+            guard result == noErr, let bytes = setPointer, setSize > 0, setSize <= 65535 else { return ([], 4) }
             sets.append(Data(bytes: bytes, count: setSize))
         }
         let header = Int(headerLength)
