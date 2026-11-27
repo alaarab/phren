@@ -20,6 +20,7 @@ let store: string;
 let vault: string;
 
 beforeEach(() => {
+  vi.stubEnv("PHREN_FEDERATION_PATHS", "");
   tmp = makeTempDir("phren-vault-");
   store = path.join(tmp.path, "store");
   vault = path.join(tmp.path, "vault");
@@ -303,7 +304,7 @@ it("prefers exact lifecycle references and links only unique truncated reference
 it("uses generated note targets for source wikilinks and renders unresolved targets literally", async () => {
   writeFile(path.join(store, "atlas", "FINDINGS.md"), [
     "- Use `lattice` for fanout <!-- fid:aaaa0001 -->",
-    "- See [[project-atlas|our project]], [[project-atlas#findings|list]], [[project-atlas#Missing]], ![[fragment-lattice.md]], [[#Fragments|here]], [[Research/Roadmap]] and ![[Diagram]] <!-- fid:aaaa0002 --> <!-- fragment: lattice -->", "",
+    "- See [[project-atlas|our project]], [[project-atlas#findings|list]], [[project-atlas#Missing]], ![[fragment-lattice.md]], [[#Fragments|here]], [[Deployment.md]], [[Guides/Deployment.md|Guide]], [[fragment-deployment.md|exact]] and ![[Diagram]] <!-- fid:aaaa0002 --> <!-- fragment: lattice -->", "",
   ].join("\n"));
   await exportVault(store, vault, [], false);
   const exported = notes();
@@ -314,7 +315,9 @@ it("uses generated note targets for source wikilinks and renders unresolved targ
   expect(body).toContain(`[[${file.slice(0, -3)}#Fragments|here]]`);
   expect(body).toContain("\\[\\[project-atlas#Missing\\]\\]");
   expect(body).toContain("![[fragment-lattice|lattice]]");
-  expect(body).toContain("\\[\\[Research/Roadmap\\]\\]");
+  expect(body).toContain("[[fragment-deployment|deployment]]");
+  expect(body).toContain("[[fragment-deployment|Guide]]");
+  expect(body).toContain("[[fragment-deployment|exact]]");
   expect(body).toContain("!\\[\\[Diagram\\]\\]");
   for (const note of exported) for (const [, target, heading] of note.body.matchAll(/\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|[^\]]*)?\]\]/g)) {
     const linked = documents.get(`${target}.md`);

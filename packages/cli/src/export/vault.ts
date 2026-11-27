@@ -13,7 +13,7 @@ import { iterateProjectFindings, type ProjectFinding } from "../finding/locate.j
 import { resolveRepoRootForPath } from "../git-worktree.js";
 import { isRecord } from "../phren-core.js";
 import { atomicWriteText, getProjectDirs, tryUnlink } from "../phren-paths.js";
-import { escapeRegex, extractFragmentNames } from "../shared/fragment-graph.js";
+import { escapeRegex, extractFragmentNames, normalizeWikilinkTarget } from "../shared/fragment-graph.js";
 import { readStoreFragmentGraph } from "../shared/index.js";
 import { getStoreProjectDirs, resolveAllStores } from "../store-registry.js";
 import { parseStoreQualified } from "../store-routing.js";
@@ -229,7 +229,7 @@ async function linkFragments(phrenPath: string, projects: VaultProject[]): Promi
   return fragments;
 }
 
-function sourceWikilinks(notes: Note[], documents: ReadonlyMap<string, string>) {
+function sourceWikilinks(notes: Note[], documents: ReadonlyMap<string, string>, fragments: ReadonlyMap<string, Note>) {
   const files = new Map(notes.map(note => [note.file.slice(0, -3), note]));
   const titles = new Map<string, Note | null>();
   const headings = new Map<string, Map<string, string>>();
@@ -245,7 +245,9 @@ function sourceWikilinks(notes: Note[], documents: ReadonlyMap<string, string>) 
     const [target, label] = inner.split("|", 2);
     const anchor = target.indexOf("#");
     const key = (anchor < 0 ? target : target.slice(0, anchor)).trim().toLowerCase();
-    const note = !key && anchor === 0 ? files.get(file.slice(0, -3)) : files.get(key.replace(/\.md$/, "")) ?? titles.get(key);
+    const direct = files.get(key.replace(/\.md$/, "")) ?? titles.get(key);
+    const note = !key && anchor === 0 ? files.get(file.slice(0, -3))
+      : direct === undefined ? fragments.get(normalizeWikilinkTarget(key)) : direct;
     const heading = note && anchor >= 0 ? headings.get(note.file)?.get(target.slice(anchor + 1).trim().toLowerCase()) : undefined;
     if (!note || (anchor >= 0 && !heading)) return original.replace(/[\[\]]/g, "\\$&");
     return `${embed}${wikilink({ ...note, title: label ?? heading ?? note.title }, heading)}`;
@@ -459,7 +461,7 @@ export async function exportVault(phrenPath: string, target: string, names: stri
       notes.set(fragment.file, markdown({ kind: "fragment", fragment: fragment.title, types: [...fragment.types].sort() },
         `# ${fragment.title}\n${noteList("Projects", fragment.projects)}${noteList("Findings", fragment.findings)}`));
     }
-    const rewriteLinks = sourceWikilinks([...projects, ...projects.flatMap(project => project.findings), ...fragments.values()], notes);
+    const rewriteLinks = sourceWikilinks([...projects, ...projects.flatMap(project => project.findings), ...fragments.values()], notes, fragments);
     for (const [file, content] of notes) {
       const start = FRONTMATTER.exec(content)![0].length;
       notes.set(file, content.slice(0, start) + rewriteLinks(content.slice(start), file));

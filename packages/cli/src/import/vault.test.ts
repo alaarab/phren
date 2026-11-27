@@ -30,6 +30,7 @@ describe("phren import vault", () => {
   let reference: string;
 
   beforeEach(() => {
+    vi.stubEnv("PHREN_FEDERATION_PATHS", "");
     tmp = makeTempDir("phren-vault-import-");
     vault = path.join(tmp.path, "Field Notes");
     store = path.join(tmp.path, "store");

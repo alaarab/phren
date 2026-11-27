@@ -31,10 +31,11 @@ reference docs, including imported Obsidian notes, contribute fragments linked
 from their project note. Fragment links are scoped to indexed documents in
 selected projects. A legacy manual link is exported when exactly one selected
 store owns the document key. A finding also links to a fragment when it names
-or explicitly annotates that fragment. Exact
-lifecycle references take precedence over text prefixes. Unresolved lifecycle
-references and source wikilinks appear as literal text. Source wikilinks keep
-their heading target when that heading exists in the generated note.
+or explicitly annotates that fragment. Exact lifecycle references take precedence
+over text prefixes. Source wikilinks can resolve to fragments by the last part
+of the note path, with or without `.md`, and keep their aliases. They keep their
+heading target when it exists in the generated note. Unresolved links and
+lifecycle references appear as literal text.
 Repository, file, line, commit, and symbol citations appear as text when available.
 
 Run the command again to refresh the generated notes in place. The vault's
